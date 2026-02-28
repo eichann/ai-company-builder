@@ -1,0 +1,60 @@
+{
+  "departments": [
+    {
+      "id": "common",
+      "name": "全社共通",
+      "folder": "shared",
+      "icon": "Globe",
+      "color": "#f59e0b",
+      "description": "会社理念、ビジョン、共通ルール"
+    },
+    {
+      "id": "sales",
+      "name": "営業部",
+      "folder": "sales",
+      "icon": "Storefront",
+      "color": "#3b82f6",
+      "description": "顧客対応、提案書作成、売上管理"
+    },
+    {
+      "id": "accounting",
+      "name": "経理部",
+      "folder": "accounting",
+      "icon": "ChartPie",
+      "color": "#10b981",
+      "description": "経費処理、月次決算、予算管理"
+    },
+    {
+      "id": "hr",
+      "name": "人事部",
+      "folder": "hr",
+      "icon": "Users",
+      "color": "#ec4899",
+      "description": "採用、労務管理、研修企画"
+    },
+    {
+      "id": "contents",
+      "name": "コンテンツ",
+      "folder": "contents",
+      "icon": "Article",
+      "color": "#8b5cf6",
+      "description": "ブログ、SNS、マーケティング資料"
+    },
+    {
+      "id": "development",
+      "name": "開発部",
+      "folder": "development",
+      "icon": "Code",
+      "color": "#6366f1",
+      "description": "プロダクト開発、技術調査"
+    },
+    {
+      "id": "general",
+      "name": "総務",
+      "folder": "general",
+      "icon": "Buildings",
+      "color": "#f59e0b",
+      "description": "社内調整、備品管理、総合窓口"
+    }
+  ]
+}

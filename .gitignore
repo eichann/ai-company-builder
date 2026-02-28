@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+
+# Build outputs
+dist/
+dist-electron/
+out/
+*.tsbuildinfo
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Database
+*.db
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+
+# Curl cookies
+cookies.txt
+
+# Data (user repos, workdirs)
+data/
+server/data/
+
+# Claude Code MCP config (personal)
+.mcp.json
+
+# Package manager (pnpm only)
+package-lock.json
+
+# Test coverage
+coverage/
+
+# Temporary files
+tmp/
+temp/
