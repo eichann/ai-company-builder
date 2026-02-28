@@ -1,0 +1,173 @@
+{
+  "common": {
+    "save": "Save",
+    "saving": "Saving...",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "close": "Close",
+    "create": "Create",
+    "edit": "Edit",
+    "loading": "Loading...",
+    "error": "Error",
+    "confirm": "Confirm",
+    "yes": "Yes",
+    "no": "No",
+    "back": "Back",
+    "next": "Next"
+  },
+  "header": {
+    "settings": "Settings",
+    "logout": "Logout",
+    "lightMode": "Light Mode",
+    "darkMode": "Dark Mode"
+  },
+  "tabs": {
+    "skills": "Skills",
+    "files": "Files"
+  },
+  "departments": {
+    "noDepartments": "No departments",
+    "loading": "Loading departments..."
+  },
+  "fileTree": {
+    "title": "Files",
+    "newFile": "New File",
+    "newFolder": "New Folder",
+    "rename": "Rename",
+    "copyPath": "Copy Path",
+    "refresh": "Refresh",
+    "showHidden": "Show Hidden Files",
+    "hideHidden": "Hide Hidden Files",
+    "emptyFolder": "Empty folder",
+    "noFiles": "No files",
+    "deleteConfirm": "Confirm Delete",
+    "deleteMessage": "Delete \"{{name}}\"?",
+    "deleteFolderMessage": "All files in this folder will also be deleted.",
+    "deleteWarning": "This action cannot be undone."
+  },
+  "editor": {
+    "selectFile": "Select a file",
+    "loadError": "Error loading file",
+    "saveError": "Failed to save",
+    "saveShortcut": "⌘+S to save",
+    "unsavedChanges": "You have unsaved changes. Close anyway?"
+  },
+  "skills": {
+    "title": "Skills",
+    "loading": "Loading skills...",
+    "empty": "No skills",
+    "emptyDescription": "No skills registered for this department yet.",
+    "createNew": "Create new skill",
+    "addNew": "Add new SKILL",
+    "addDescription": "Define what AI can do",
+    "execute": "Run",
+    "settings": "Settings",
+    "count": "{{count}} items"
+  },
+  "skillDetail": {
+    "title": "SKILL Settings",
+    "executeButton": "Run this SKILL",
+    "overview": "Overview",
+    "rules": "Rules",
+    "references": "References",
+    "scripts": "Scripts",
+    "description": "Description",
+    "definitionFile": "SKILL Definition File",
+    "noRules": "No rule files",
+    "noReferences": "No reference files",
+    "noScripts": "No scripts"
+  },
+  "skillWizard": {
+    "title": "Create New SKILL",
+    "subtitle": "Add a new skill to {{department}} department",
+    "nameLabel": "Skill Name",
+    "namePlaceholder": "e.g. Create Proposal",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Briefly describe what this skill does",
+    "createButton": "Create SKILL",
+    "editHint": "After creation, you can edit SKILL.md to define AI behavior in detail."
+  },
+  "chat": {
+    "assistant": "Assistant",
+    "newChat": "New Chat",
+    "history": "History",
+    "recentChats": "Recent Chats",
+    "noHistory": "No history",
+    "thinking": "Thinking...",
+    "thought": "Thought",
+    "thinkingInProgress": "Thinking...",
+    "inputPlaceholder": "Type a message... (⌘+Enter to send)",
+    "inputHint": "Enter for newline • ⌘+Enter to send",
+    "skillExecuting": "executing",
+    "endSkill": "End skill execution",
+    "greeting": "Hello. I'm the AI assistant for {{company}}.\n\nHow can I help you?",
+    "skillGreeting": "Running \"{{skill}}\" skill.\n\n{{description}}\n\nHow can I help you?",
+    "errorOccurred": "An error occurred: {{error}}",
+    "retryError": "An error occurred. Please try again.",
+    "regenerate": "Regenerate",
+    "edit": "Edit",
+    "cancelEdit": "Cancel",
+    "resend": "Send",
+    "statusSubmitted": "Sending...",
+    "statusStreaming": "Responding...",
+    "statusError": "Error",
+    "stop": "Stop",
+    "toolApprovalTitle": "Tool Execution Approval",
+    "toolApprovalAllow": "Allow",
+    "toolApprovalDeny": "Deny"
+  },
+  "chatSettings": {
+    "title": "Authentication Settings",
+    "selectMethod": "Select authentication method",
+    "claudeMax": "Claude Max / Pro",
+    "claudeMaxDesc": "Use CLI authentication (recommended)",
+    "cliNotFound": "CLI not found",
+    "apiKey": "API Key",
+    "apiKeyDesc": "Use Anthropic API key",
+    "apiKeyPlaceholder": "sk-ant-...",
+    "showKey": "Show",
+    "hideKey": "Hide",
+    "howToGetKey": "How to get an API key",
+    "step1": "Visit console.anthropic.com",
+    "step2": "Create an account or log in",
+    "step3": "Generate a key in API Keys section",
+    "setupRequired": "Setup required",
+    "setupStep1": "Open terminal",
+    "setupStep2": "npm install -g @anthropic-ai/claude-code",
+    "setupStep3": "claude login",
+    "setupStep4": "Restart this app",
+    "permissionMode": "Permission Mode",
+    "permissionBypass": "Auto (Recommended)",
+    "permissionBypassDesc": "Auto-block dangerous operations only",
+    "permissionDefault": "Confirm",
+    "permissionDefaultDesc": "Ask before write/execute"
+  },
+  "auth": {
+    "checkingAuth": "Checking authentication...",
+    "setupAssistant": "Set up AI Assistant",
+    "connectOptions": "Connect with Claude Max or API key",
+    "apiKeyRequired": "Please set up your Anthropic API key",
+    "openSettings": "Open Settings"
+  },
+  "login": {
+    "title": "AI Company Builder",
+    "subtitle": "Log in to get started",
+    "withGoogle": "Log in with Google",
+    "loggingIn": "Logging in..."
+  },
+  "companySelector": {
+    "title": "Select Company",
+    "subtitle": "Choose a company to work with",
+    "createNew": "Create New Company",
+    "openExisting": "Open Existing Folder",
+    "lastOpened": "Last opened"
+  },
+  "settings": {
+    "title": "Settings",
+    "general": "General",
+    "theme": "Theme",
+    "language": "Language",
+    "languageJa": "Japanese",
+    "languageEn": "English"
+  }
+}

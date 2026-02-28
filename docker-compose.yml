@@ -1,0 +1,44 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - PORT=3001
+      - AUTH_SECRET=${AUTH_SECRET:?Set AUTH_SECRET in .env file}
+      - PUBLIC_URL=${PUBLIC_URL:-http://localhost:3001}
+      - SERVER_HOST=${SERVER_HOST:-localhost}
+      - SERVER_USER=${SERVER_USER:-deploy}
+      - HOST_REPOS_DIR=${HOST_REPOS_DIR:-/app/data/repos}
+    volumes:
+      # Mount source for hot reload in development
+      - ./server/src:/app/src
+      # Shared types for monorepo
+      - ./shared:/app/shared
+      # Data directory for SQLite databases
+      - ./data:/app/data
+    command: >
+      sh -c "git config --global user.email 'system@ai-company-builder' &&
+             git config --global user.name 'AI Company Builder' &&
+             git config --global safe.directory '*' &&
+             npx tsx watch src/index.ts"
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    ports:
+      - "3100:3100"
+    environment:
+      - NODE_ENV=${NODE_ENV:-development}
+      - NEXT_PUBLIC_API_URL=${PUBLIC_URL:-http://localhost:3001}
+    volumes:
+      # Mount source for hot reload
+      - ./admin/src:/app/admin/src
+    depends_on:
+      - api
+    restart: unless-stopped

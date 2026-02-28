@@ -1,0 +1,45 @@
+# =============================================================================
+# AI Company Builder - Production Docker Compose
+# =============================================================================
+# Usage:
+#   1. Copy .env.example to .env and fill in values
+#   2. docker compose -f docker-compose.production.yml up -d --build
+#
+# IMPORTANT: Ports bind to 127.0.0.1 only.
+# Use a reverse proxy (Caddy recommended) for external access.
+# =============================================================================
+
+services:
+  api:
+    build:
+      context: .
+      dockerfile: server/Dockerfile
+    ports:
+      - "127.0.0.1:3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - AUTH_SECRET=${AUTH_SECRET}
+      - SERVER_HOST=${SERVER_HOST}
+      - SERVER_USER=${SERVER_USER}
+      - HOST_REPOS_DIR=${HOST_REPOS_DIR}
+    volumes:
+      - ./server/src:/app/src
+      - ./shared:/app/shared
+      - ./data:/app/data
+    restart: unless-stopped
+
+  admin:
+    build:
+      context: .
+      dockerfile: admin/Dockerfile
+    ports:
+      - "127.0.0.1:3100:3100"
+    environment:
+      - NODE_ENV=development
+      - NEXT_PUBLIC_API_URL=${PUBLIC_URL}
+    volumes:
+      - ./admin/src:/app/admin/src
+    depends_on:
+      - api
+    restart: unless-stopped

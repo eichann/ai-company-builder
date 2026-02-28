@@ -1,0 +1,20 @@
+{
+  "name": "ai-company-builder",
+  "version": "0.0.1",
+  "private": true,
+  "description": "AI Agent-driven workflow platform for companies",
+  "scripts": {
+    "dev": "pnpm --filter client dev",
+    "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 pnpm --filter client dev",
+    "dev:server": "pnpm --filter server dev",
+    "build": "pnpm -r build",
+    "lint": "pnpm -r lint"
+  },
+  "keywords": ["ai", "agent", "electron", "workflow"],
+  "author": "",
+  "license": "AGPL-3.0",
+  "engines": {
+    "node": ">=20.0.0",
+    "pnpm": ">=9.0.0"
+  }
+}

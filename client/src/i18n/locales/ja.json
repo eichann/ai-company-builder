@@ -1,0 +1,173 @@
+{
+  "common": {
+    "save": "保存",
+    "saving": "保存中...",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "close": "閉じる",
+    "create": "作成",
+    "edit": "編集",
+    "loading": "読み込み中...",
+    "error": "エラー",
+    "confirm": "確認",
+    "yes": "はい",
+    "no": "いいえ",
+    "back": "戻る",
+    "next": "次へ"
+  },
+  "header": {
+    "settings": "設定",
+    "logout": "ログアウト",
+    "lightMode": "ライトモード",
+    "darkMode": "ダークモード"
+  },
+  "tabs": {
+    "skills": "スキル",
+    "files": "ファイル"
+  },
+  "departments": {
+    "noDepartments": "部署がありません",
+    "loading": "部署を読み込み中..."
+  },
+  "fileTree": {
+    "title": "ファイル",
+    "newFile": "新規ファイル",
+    "newFolder": "新規フォルダ",
+    "rename": "名前を変更",
+    "copyPath": "パスをコピー",
+    "refresh": "更新",
+    "showHidden": "隠しファイルを表示",
+    "hideHidden": "隠しファイルを非表示",
+    "emptyFolder": "空のフォルダ",
+    "noFiles": "ファイルがありません",
+    "deleteConfirm": "削除の確認",
+    "deleteMessage": "「{{name}}」を削除しますか？",
+    "deleteFolderMessage": "フォルダ内のすべてのファイルも削除されます。",
+    "deleteWarning": "この操作は取り消せません。"
+  },
+  "editor": {
+    "selectFile": "ファイルを選択してください",
+    "loadError": "ファイルの読み込み中にエラーが発生しました",
+    "saveError": "保存に失敗しました",
+    "saveShortcut": "⌘+S で保存",
+    "unsavedChanges": "保存されていない変更があります。閉じますか？"
+  },
+  "skills": {
+    "title": "スキル",
+    "loading": "スキルを読み込み中...",
+    "empty": "スキルがありません",
+    "emptyDescription": "この部署にはまだスキルが登録されていません。",
+    "createNew": "新しいスキルを作成",
+    "addNew": "新しいSKILLを追加",
+    "addDescription": "AIができることを定義する",
+    "execute": "実行",
+    "settings": "設定",
+    "count": "{{count}}件"
+  },
+  "skillDetail": {
+    "title": "SKILL設定",
+    "executeButton": "このSKILLを実行",
+    "overview": "概要",
+    "rules": "ルール",
+    "references": "参照",
+    "scripts": "スクリプト",
+    "description": "説明",
+    "definitionFile": "SKILL定義ファイル",
+    "noRules": "ルールファイルがありません",
+    "noReferences": "参照ファイルがありません",
+    "noScripts": "スクリプトがありません"
+  },
+  "skillWizard": {
+    "title": "新しいSKILLを作成",
+    "subtitle": "{{department}}部署に新しいスキルを追加",
+    "nameLabel": "スキル名",
+    "namePlaceholder": "例: 提案書作成",
+    "descriptionLabel": "説明",
+    "descriptionPlaceholder": "このスキルが何をするか簡潔に説明してください",
+    "createButton": "SKILLを作成",
+    "editHint": "作成後、SKILL.mdファイルを編集してAIの振る舞いを詳細に定義できます。"
+  },
+  "chat": {
+    "assistant": "アシスタント",
+    "newChat": "新しい会話",
+    "history": "履歴",
+    "recentChats": "最近の会話",
+    "noHistory": "履歴がありません",
+    "thinking": "考え中...",
+    "thought": "思考",
+    "thinkingInProgress": "思考中...",
+    "inputPlaceholder": "メッセージを入力... (⌘+Enter で送信)",
+    "inputHint": "Enter で改行 • ⌘+Enter で送信",
+    "skillExecuting": "を実行中",
+    "endSkill": "スキル実行を終了",
+    "greeting": "こんにちは。{{company}}のAIアシスタントです。\n\nどのようなお手伝いができますか？",
+    "skillGreeting": "「{{skill}}」スキルを実行します。\n\n{{description}}\n\n何をお手伝いしましょうか？",
+    "errorOccurred": "エラーが発生しました: {{error}}",
+    "retryError": "エラーが発生しました。もう一度お試しください。",
+    "regenerate": "再生成",
+    "edit": "編集",
+    "cancelEdit": "キャンセル",
+    "resend": "送信",
+    "statusSubmitted": "送信中...",
+    "statusStreaming": "応答中...",
+    "statusError": "エラー",
+    "stop": "停止",
+    "toolApprovalTitle": "ツール実行の確認",
+    "toolApprovalAllow": "許可",
+    "toolApprovalDeny": "拒否"
+  },
+  "chatSettings": {
+    "title": "認証設定",
+    "selectMethod": "認証方法を選択",
+    "claudeMax": "Claude Max / Pro",
+    "claudeMaxDesc": "CLI認証を使用（推奨）",
+    "cliNotFound": "CLI未検出",
+    "apiKey": "API キー",
+    "apiKeyDesc": "Anthropic APIキーを使用",
+    "apiKeyPlaceholder": "sk-ant-...",
+    "showKey": "表示",
+    "hideKey": "隠す",
+    "howToGetKey": "APIキーの取得方法",
+    "step1": "console.anthropic.com にアクセス",
+    "step2": "アカウントを作成またはログイン",
+    "step3": "API Keys セクションでキーを生成",
+    "setupRequired": "セットアップが必要です",
+    "setupStep1": "ターミナルを開く",
+    "setupStep2": "npm install -g @anthropic-ai/claude-code",
+    "setupStep3": "claude login",
+    "setupStep4": "このアプリを再起動",
+    "permissionMode": "権限モード",
+    "permissionBypass": "自動（推奨）",
+    "permissionBypassDesc": "危険な操作のみ自動ブロック",
+    "permissionDefault": "確認あり",
+    "permissionDefaultDesc": "書込・実行前にユーザー確認"
+  },
+  "auth": {
+    "checkingAuth": "認証を確認中...",
+    "setupAssistant": "AIアシスタントを設定",
+    "connectOptions": "Claude Max または APIキーで接続できます",
+    "apiKeyRequired": "Anthropic APIキーを設定してください",
+    "openSettings": "設定を開く"
+  },
+  "login": {
+    "title": "AI Company Builder",
+    "subtitle": "ログインして始めましょう",
+    "withGoogle": "Googleでログイン",
+    "loggingIn": "ログイン中..."
+  },
+  "companySelector": {
+    "title": "会社を選択",
+    "subtitle": "作業する会社を選んでください",
+    "createNew": "新しい会社を作成",
+    "openExisting": "既存のフォルダを開く",
+    "lastOpened": "最終アクセス"
+  },
+  "settings": {
+    "title": "設定",
+    "general": "一般",
+    "theme": "テーマ",
+    "language": "言語",
+    "languageJa": "日本語",
+    "languageEn": "English"
+  }
+}
