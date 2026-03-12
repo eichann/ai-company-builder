@@ -65,6 +65,15 @@ body {
   display: none;
 }
 
+/* CodeMirror cursor/caret color for dark mode */
+.dark .cm-editor .cm-content {
+  caret-color: #fafafa;
+}
+.dark .cm-cursor,
+.dark .cm-dropCursor {
+  border-left-color: #fafafa !important;
+}
+
 /* Line clamp utility */
 .line-clamp-2 {
   display: -webkit-box;
