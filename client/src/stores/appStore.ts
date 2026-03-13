@@ -76,6 +76,9 @@ interface AppState {
   // Skill execution state
   activeSkill: ActiveSkill | null
 
+  // Pending text to insert into chat input
+  pendingChatInput: string | null
+
   // Actions
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
@@ -103,6 +106,9 @@ interface AppState {
   // Skill execution actions
   setActiveSkill: (skill: Skill, skillMdContent: string) => void
   clearActiveSkill: () => void
+
+  // Chat input actions
+  setPendingChatInput: (text: string | null) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -122,6 +128,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   sidebarWidth: 260,
   chatPanelWidth: 360,
   activeSkill: null,
+  pendingChatInput: null,
 
   setTheme: (theme) => {
     localStorage.setItem('theme', theme)
@@ -292,4 +299,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   }),
 
   clearActiveSkill: () => set({ activeSkill: null }),
+
+  setPendingChatInput: (text) => set({ pendingChatInput: text }),
 }))

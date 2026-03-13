@@ -591,6 +591,8 @@ interface ChatInputProps {
   hint: string
   onCompositionStateChange?: (isComposing: boolean) => void
   onInputActivity?: () => void
+  pendingText?: string | null
+  onPendingTextConsumed?: () => void
 }
 
 const chatInputCodeMirrorTheme = EditorView.theme({
@@ -639,6 +641,8 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   hint,
   onCompositionStateChange,
   onInputActivity,
+  pendingText,
+  onPendingTextConsumed,
 }: ChatInputProps) {
   const editorHostRef = useRef<HTMLDivElement>(null)
   const editorViewRef = useRef<EditorView | null>(null)
@@ -809,6 +813,19 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
     }
   }, [handleSend, markDispatchDelay])
 
+  // Insert pending text into the editor
+  useEffect(() => {
+    const view = editorViewRef.current
+    if (!view || !pendingText) return
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: pendingText },
+    })
+    view.focus()
+    // Move cursor to end
+    view.dispatch({ selection: { anchor: pendingText.length } })
+    onPendingTextConsumed?.()
+  }, [pendingText, onPendingTextConsumed])
+
   useEffect(() => {
     const view = editorViewRef.current
     if (!view) return
@@ -950,6 +967,8 @@ const ChatInput = memo(function ChatInput({
   hint,
   onCompositionStateChange,
   onInputActivity,
+  pendingText,
+  onPendingTextConsumed,
 }: ChatInputProps) {
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const [attachedImages, setAttachedImages] = useState<File[]>([])
@@ -1018,6 +1037,8 @@ const ChatInput = memo(function ChatInput({
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
       onInputActivity={onInputActivity}
+      pendingText={pendingText}
+      onPendingTextConsumed={onPendingTextConsumed}
     />
   )
 
@@ -1159,8 +1180,12 @@ interface ChatPanelChatProps {
 function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
-  const activeSkill = useAppStore((state) => state.activeSkill)
-  const clearActiveSkill = useAppStore((state) => state.clearActiveSkill)
+  const pendingChatInput = useAppStore((state) => state.pendingChatInput)
+  const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
+
+  const handlePendingTextConsumed = useCallback(() => {
+    setPendingChatInput(null)
+  }, [setPendingChatInput])
 
   // Tool approval state
   const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null)
@@ -1178,66 +1203,12 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   }, [])
 
   // Refs for dynamic body params
-  const systemPromptRef = useRef<string | undefined>(undefined)
   const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
-  const skillInfoRef = useRef<{ skillFolderPath: string } | undefined>(undefined)
 
   useEffect(() => {
     workingDirRef.current = departmentPath || currentCompany?.rootPath
   }, [departmentPath, currentCompany?.rootPath])
 
-  // Update system prompt and skillInfo when activeSkill changes
-  useEffect(() => {
-    if (activeSkill) {
-      const skillMdPath = activeSkill.skill.files.skillMd || ''
-      const skillFolderPath = skillMdPath.replace(/\/SKILL\.md$/, '')
-      skillInfoRef.current = { skillFolderPath }
-
-      // Build file listing sections from actual file arrays
-      const { rules, references, scripts } = activeSkill.skill.files
-      const ruleFiles = rules?.map(f => f.split('/').pop()).filter(Boolean) || []
-      const refFiles = references?.map(f => f.split('/').pop()).filter(Boolean) || []
-      const scriptFiles = scripts?.map(f => f.split('/').pop()).filter(Boolean) || []
-
-      let filesSection = '\n## スキルフォルダ内のファイル\n'
-      if (ruleFiles.length > 0) {
-        filesSection += `\n### rules/\n${ruleFiles.map(f => `- ${f}`).join('\n')}\n`
-      }
-      if (refFiles.length > 0) {
-        filesSection += `\n### references/\n${refFiles.map(f => `- ${f}`).join('\n')}\n`
-      }
-      if (scriptFiles.length > 0) {
-        filesSection += `\n### scripts/\n${scriptFiles.map(f => `- ${f}`).join('\n')}\n`
-      }
-      if (ruleFiles.length === 0 && refFiles.length === 0 && scriptFiles.length === 0) {
-        filesSection += '\n（現在ファイルはありません）\n'
-      }
-
-      systemPromptRef.current = `あなたは「${activeSkill.skill.name}」スキルを実行するAIアシスタントです。
-
-## スキル定義（SKILL.md）
-
-${activeSkill.skillMdContent}
-${filesSection}
-## readSkillFile ツール
-
-スキルフォルダ内のファイルを読むには \`readSkillFile\` ツールを使用してください。
-パスはスキルフォルダからの相対パスで指定します。
-
-例:
-- rules/ のファイルを読む: \`readSkillFile({ path: "rules/ファイル名" })\`
-- references/ のファイルを読む: \`readSkillFile({ path: "references/ファイル名" })\`
-
-SKILL.md の内容を踏まえて、必要に応じて rules/ や references/ のファイルを参照してください。
-
----
-
-上記のスキル定義に従って、ユーザーの要求に応えてください。`
-    } else {
-      systemPromptRef.current = undefined
-      skillInfoRef.current = undefined
-    }
-  }, [activeSkill])
 
   // Pending images to send with next message
   const pendingImagesRef = useRef<Array<{ mediaType: string; data: string }>>([])
@@ -1249,9 +1220,7 @@ SKILL.md の内容を踏まえて、必要に応じて rules/ や references/ �
       headers: { Authorization: `Bearer ${serverInfo.authToken}` },
       body: () => {
         const body: Record<string, unknown> = {
-          systemPrompt: systemPromptRef.current,
           workingDirectory: workingDirRef.current,
-          skillInfo: skillInfoRef.current,
         }
         if (pendingImagesRef.current.length > 0) {
           body.images = pendingImagesRef.current
@@ -1327,19 +1296,6 @@ SKILL.md の内容を踏まえて、必要に応じて rules/ や references/ �
     }
   }
 
-  // Track active skill changes to start new chat with skill context
-  const prevActiveSkillRef = useRef(activeSkill)
-  if (activeSkill !== prevActiveSkillRef.current) {
-    prevActiveSkillRef.current = activeSkill
-    if (activeSkill) {
-      setMessages([{
-        id: Date.now().toString(),
-        role: 'assistant' as const,
-        parts: [{ type: 'text' as const, text: t('chat.skillGreeting', { skill: activeSkill.skill.name, description: activeSkill.skill.description }) }],
-      }])
-      setCurrentSessionId(null)
-    }
-  }
 
   // Auto-save session when messages change (only when idle)
   useEffect(() => {
@@ -1702,32 +1658,6 @@ SKILL.md の内容を踏まえて、必要に応じて rules/ や references/ �
         </div>
       </header>
 
-      {/* Active Skill Banner */}
-      {activeSkill && (
-        <div className="flex-shrink-0 px-4 py-2 bg-accent/10 border-b border-accent/20">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Lightning size={14} weight="fill" className="text-accent" />
-              <span className="text-sm font-medium text-accent">
-                {activeSkill.skill.name}
-              </span>
-              <span className="text-xs text-ink-muted">
-                {t('chat.skillExecuting')}
-              </span>
-            </div>
-            <button
-              onClick={() => {
-                clearActiveSkill()
-                startNewChat()
-              }}
-              className="p-1 rounded-md hover:bg-white/10 text-ink-muted hover:text-ink transition-colors"
-              title={t('chat.endSkill')}
-            >
-              <X size={14} />
-            </button>
-          </div>
-        </div>
-      )}
 
       {/* Error Banner */}
       {status === 'error' && error && (
@@ -1766,6 +1696,8 @@ SKILL.md の内容を踏まえて、必要に応じて rules/ や references/ �
           hint={t('chat.inputHint')}
           onCompositionStateChange={handleInputCompositionStateChange}
           onInputActivity={handleInputActivity}
+          pendingText={pendingChatInput}
+          onPendingTextConsumed={handlePendingTextConsumed}
         />
       </div>
     </div>

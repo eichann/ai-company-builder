@@ -30,7 +30,7 @@ export function SkillCentricLayout() {
   const { t } = useTranslation()
   // Use individual selectors to prevent unnecessary re-renders
   const currentCompany = useAppStore((s) => s.currentCompany)
-  const setActiveSkill = useAppStore((s) => s.setActiveSkill)
+  const setPendingChatInput = useAppStore((s) => s.setPendingChatInput)
   const setCurrentCompany = useAppStore((s) => s.setCurrentCompany)
   const theme = useAppStore((s) => s.theme)
   const toggleTheme = useAppStore((s) => s.toggleTheme)
@@ -179,20 +179,16 @@ export function SkillCentricLayout() {
     setSelectedSkillId(id)
   }
 
-  const handleExecuteSkill = useCallback(async (id: string) => {
+  const handleExecuteSkill = useCallback((id: string) => {
     const skill = skills.find((s) => s.id === id)
-    if (!skill || !skill.files.skillMd) return
+    if (!skill || !skill.skillPath) return
 
-    try {
-      // Read the SKILL.md content
-      const skillMdContent = await window.electronAPI.readFile(skill.files.skillMd)
-      if (skillMdContent) {
-        setActiveSkill(skill, skillMdContent)
-      }
-    } catch (error) {
-      console.error('Failed to read SKILL.md:', error)
+    // Extract folder name from skill path to use as slash command
+    const folderName = skill.skillPath.split('/').pop()
+    if (folderName) {
+      setPendingChatInput(`/${folderName} `)
     }
-  }, [skills, setActiveSkill])
+  }, [skills, setPendingChatInput])
 
   const handleOpenFile = useCallback((filePath: string) => {
     setOpenFiles(prev => {
