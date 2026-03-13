@@ -141,13 +141,17 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authMode = config.getAuthMode()
 
-    // Claude Code CLI mode: don't override system prompt — Claude Code has its own
-    // comprehensive system prompt with tool usage guidelines, behavior rules, etc.
-    // Injecting our own prompt conflicts with it and degrades quality.
-    // API key mode: build our own system prompt as before.
-    const finalSystemPrompt = authMode === 'claude-code'
-      ? undefined
-      : (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
+    // Claude Code CLI mode: minimal context only (working directory + language)
+    // Claude Code has its own comprehensive system prompt; heavy injection degrades quality.
+    // API key mode: build full system prompt as before.
+    let finalSystemPrompt: string | undefined
+    if (authMode === 'claude-code') {
+      if (workingDirectory) {
+        finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
+      }
+    } else {
+      finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
+    }
 
     let model
     if (authMode === 'claude-code') {
