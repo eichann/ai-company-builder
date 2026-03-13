@@ -1233,12 +1233,78 @@ ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, 
   }
 })
 
+// Sync lock per repository to prevent concurrent syncs
+const syncLocks = new Map<string, Promise<unknown>>()
+
 ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
+  // Prevent concurrent syncs for the same repository
+  const existing = syncLocks.get(repoPath)
+  if (existing) {
+    console.log('Git sync: Already syncing, waiting for previous sync to complete...')
+    try { await existing } catch { /* ignore previous sync errors */ }
+  }
+
+  const syncPromise = (async () => {
   try {
     const git: SimpleGit = createGit(repoPath)
     const backupsDir = path.join(repoPath, '.backups')
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)
+    const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
     const backupPath = path.join(backupsDir, timestamp)
+
+    // Recover from stale rebase/merge state (e.g., app crashed mid-sync)
+    const gitDir = path.join(repoPath, '.git')
+    const staleStates = ['REBASE_HEAD', 'MERGE_HEAD', 'CHERRY_PICK_HEAD']
+    for (const stateFile of staleStates) {
+      if (fs.existsSync(path.join(gitDir, stateFile))) {
+        console.log(`Git sync: Detected stale ${stateFile}, aborting...`)
+        try {
+          if (stateFile === 'REBASE_HEAD') {
+            await git.rebase(['--abort'])
+          } else if (stateFile === 'MERGE_HEAD') {
+            await git.merge(['--abort'])
+          } else if (stateFile === 'CHERRY_PICK_HEAD') {
+            await git.raw(['cherry-pick', '--abort'])
+          }
+        } catch (abortError) {
+          console.warn(`Git sync: Failed to abort ${stateFile}:`, abortError)
+        }
+      }
+    }
+
+    // Clean up old backups (older than 30 days)
+    if (fs.existsSync(backupsDir)) {
+      const RETENTION_DAYS = 30
+      const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000
+      try {
+        const backupFolders = fs.readdirSync(backupsDir)
+        for (const folder of backupFolders) {
+          const folderPath = path.join(backupsDir, folder)
+          try {
+            const stat = fs.statSync(folderPath)
+            if (stat.isDirectory() && stat.mtimeMs < cutoff) {
+              fs.rmSync(folderPath, { recursive: true, force: true })
+              console.log(`Git sync: Deleted old backup: ${folder}`)
+            }
+          } catch { /* skip inaccessible folders */ }
+        }
+      } catch (cleanupError) {
+        console.warn('Git sync: Backup cleanup failed:', cleanupError)
+      }
+    }
+
+    // Retry pending push from previous failed sync
+    const pendingPushFile = path.join(gitDir, 'PENDING_PUSH')
+    if (fs.existsSync(pendingPushFile)) {
+      console.log('Git sync: Found pending push, retrying...')
+      try {
+        await git.push('origin', 'main', ['--set-upstream'])
+        fs.unlinkSync(pendingPushFile)
+        console.log('Git sync: Pending push succeeded')
+      } catch (retryError) {
+        console.warn('Git sync: Pending push retry failed, will try again later:', retryError)
+        // Continue with normal sync flow — push will be attempted again at the end
+      }
+    }
 
     // Auto-migrate remote URL from SSH to HTTPS if needed
     try {
@@ -1373,6 +1439,11 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           const departments = result.data || []
 
           for (const dept of departments) {
+            // Validate department folder name to prevent path traversal
+            if (!dept.folder || dept.folder.includes('..') || path.isAbsolute(dept.folder)) {
+              console.warn(`Git sync: Skipping invalid department folder: ${dept.folder}`)
+              continue
+            }
             const deptPath = path.join(repoPath, dept.folder)
             if (!fs.existsSync(deptPath)) {
               // Department folder was deleted locally - try to restore from origin
@@ -1427,14 +1498,30 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 
         console.log(`Git sync: Conflict detected in ${conflictFiles.length} files`)
 
-        // a. Backup conflicting files (get clean local version from localHash)
+        // a. Backup conflicting files (clean local version from localHash)
         fs.mkdirSync(backupPath, { recursive: true })
 
         for (const file of conflictFiles) {
           try {
-            const content = await git.show([`${localHash}:${file}`])
             const destPath = path.join(backupPath, file)
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
+            // Use git cat-file to extract as binary-safe Buffer
+            // (git.show returns string, which corrupts binary files)
+            const gitBinary = resolveGitBinary()
+            const content = await new Promise<Buffer>((resolve, reject) => {
+              const chunks: Buffer[] = []
+              const proc = require('child_process').spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
+                cwd: repoPath,
+                stdio: ['ignore', 'pipe', 'ignore'],
+                ...(process.getuid ? { uid: process.getuid() } : {}),
+              })
+              proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
+              proc.on('close', (code: number) => {
+                if (code === 0) resolve(Buffer.concat(chunks))
+                else reject(new Error(`git cat-file exited with ${code}`))
+              })
+              proc.on('error', reject)
+            })
             fs.writeFileSync(destPath, content)
           } catch {
             // File might not exist in localHash (e.g., new file on server side only)
@@ -1541,9 +1628,13 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           }
         }
         console.error('Git sync: Push to master also failed:', masterErrorMsg)
+        // Record pending push for retry on next sync
+        const pendingPushFile = path.join(repoPath, '.git', 'PENDING_PUSH')
+        fs.writeFileSync(pendingPushFile, new Date().toISOString())
         return {
-          success: true,
-          message: 'ローカルにコミットしました。プッシュに失敗しました。',
+          success: false,
+          error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+          errorType: 'push_failed' as const,
           pushFailed: true,
           hadConflicts,
           conflictFiles,
@@ -1552,6 +1643,11 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           ignoredLargeFiles
         }
       }
+    }
+
+    // Push succeeded — clean up pending push marker if exists
+    if (fs.existsSync(pendingPushFile)) {
+      fs.unlinkSync(pendingPushFile)
     }
 
     // Success
@@ -1580,7 +1676,29 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     }
   } catch (error) {
     console.error('Git sync error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    const errorMsg = error instanceof Error ? error.message : 'Unknown error'
+    // Classify error type for UI
+    let errorType = 'unknown'
+    if (errorMsg.includes('Could not resolve host') || errorMsg.includes('unable to access') || errorMsg.includes('network')) {
+      errorType = 'network'
+    } else if (errorMsg.includes('Authentication') || errorMsg.includes('401') || errorMsg.includes('403') || errorMsg.includes('credential')) {
+      errorType = 'auth'
+    } else if (errorMsg.includes('CONFLICT') || errorMsg.includes('conflict') || errorMsg.includes('rebase')) {
+      errorType = 'conflict'
+    } else if (errorMsg.includes('lock') || errorMsg.includes('index.lock')) {
+      errorType = 'locked'
+    }
+    return { success: false, error: errorMsg, errorType }
+  }
+  })()
+
+  syncLocks.set(repoPath, syncPromise)
+  try {
+    return await syncPromise
+  } finally {
+    if (syncLocks.get(repoPath) === syncPromise) {
+      syncLocks.delete(repoPath)
+    }
   }
 })
 
