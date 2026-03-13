@@ -93,6 +93,10 @@ export function FileTreePanel({
     targetPath: '',
   })
 
+  // Drag & drop state
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
+  const [dragSourcePath, setDragSourcePath] = useState<string | null>(null)
+
   const departmentPath = `${rootPath}/${departmentFolder}`
 
   // Load single directory (non-recursive)
@@ -531,7 +535,57 @@ export function FileTreePanel({
 
     return (
       <div key={entry.path}>
-        <button
+        <div
+          role="button"
+          tabIndex={0}
+          draggable
+          onDragStart={(e) => {
+            setDragSourcePath(entry.path)
+            e.dataTransfer.setData('application/x-file-path', entry.path)
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onDragEnd={() => {
+            setDragSourcePath(null)
+            setDragOverPath(null)
+          }}
+          onDragOver={(e) => {
+            if (!entry.isDirectory) return
+            if (dragSourcePath === entry.path) return
+            if (entry.path.startsWith(dragSourcePath + '/')) return
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverPath(entry.path)
+          }}
+          onDragLeave={(e) => {
+            if (dragOverPath === entry.path) {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const { clientX, clientY } = e
+              if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+                setDragOverPath(null)
+              }
+            }
+          }}
+          onDrop={async (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setDragOverPath(null)
+
+            if (!entry.isDirectory) return
+            const sourcePath = e.dataTransfer.getData('application/x-file-path')
+            if (!sourcePath) return
+            if (entry.path === sourcePath || entry.path.startsWith(sourcePath + '/')) return
+
+            const fileName = sourcePath.split('/').pop()
+            if (!fileName) return
+            const destPath = `${entry.path}/${fileName}`
+            if (sourcePath === destPath) return
+
+            const result = await window.electronAPI.moveItem(sourcePath, destPath)
+            if (result.success) {
+              loadFiles(true)
+            }
+          }}
           onClick={() => {
             if (entry.isDirectory) {
               toggleDir(entry.path)
@@ -542,12 +596,14 @@ export function FileTreePanel({
           onContextMenu={(e) => handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))}
           onKeyDown={handleKeyDown}
           className={`
-            w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm
+            w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
             rounded-md transition-colors outline-none focus:ring-1 focus:ring-accent/50
             ${isSelected
               ? 'bg-accent/20 text-gray-900 dark:text-zinc-100'
               : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-white/[0.04] hover:text-gray-900 dark:hover:text-zinc-200'
             }
+            ${dragOverPath === entry.path && entry.isDirectory ? 'ring-2 ring-accent bg-accent/10' : ''}
+            ${dragSourcePath === entry.path ? 'opacity-50' : ''}
           `}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
         >
@@ -564,7 +620,7 @@ export function FileTreePanel({
           {!entry.isDirectory && <span className="w-3" />}
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
           <span className="truncate">{entry.name}</span>
-        </button>
+        </div>
 
         {entry.isDirectory && isExpanded && (
           <div>
@@ -630,6 +686,24 @@ export function FileTreePanel({
       <div
         className="flex-1 overflow-auto py-2 px-1"
         onContextMenu={handleBackgroundContextMenu}
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          setDragOverPath(null)
+          const sourcePath = e.dataTransfer.getData('application/x-file-path')
+          if (!sourcePath) return
+          const fileName = sourcePath.split('/').pop()
+          if (!fileName) return
+          const destPath = `${departmentPath}/${fileName}`
+          if (sourcePath === destPath) return
+          const result = await window.electronAPI.moveItem(sourcePath, destPath)
+          if (result.success) {
+            loadFiles(true)
+          }
+        }}
       >
         {files.length === 0 && !isLoading ? (
           <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-zinc-600">
