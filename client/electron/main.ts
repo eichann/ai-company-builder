@@ -1179,6 +1179,9 @@ function createGit(repoPath: string): SimpleGit {
     binary: gitBinary,
     unsafe: { allowUnsafeCustomBinary: true },
     config: ['core.hooksPath=/dev/null', 'credential.helper='],
+    // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
+    // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
+    ...(process.getuid ? { spawnOptions: { uid: process.getuid() } } : {}),
   })
     .env({
       ...process.env,
