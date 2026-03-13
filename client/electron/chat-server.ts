@@ -129,12 +129,14 @@ export async function startChatServer(config: ChatServerConfig) {
       workingDirectory,
       skillInfo,
       images,
+      modelId,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
       workingDirectory?: string
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
+      modelId?: string
     } = body
 
     const authMode = config.getAuthMode()
@@ -235,7 +237,7 @@ export async function startChatServer(config: ChatServerConfig) {
           }
         : undefined
 
-      model = claudeCode('sonnet', {
+      model = claudeCode(modelId || 'sonnet', {
         pathToClaudeCodeExecutable: claudePath,
         permissionMode,
         cwd: workingDirectory,

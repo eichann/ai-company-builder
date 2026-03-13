@@ -1182,6 +1182,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
   const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
+  const aiModel = useAppStore((state) => state.aiModel)
+  const setAIModel = useAppStore((state) => state.setAIModel)
 
   const handlePendingTextConsumed = useCallback(() => {
     setPendingChatInput(null)
@@ -1204,10 +1206,15 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
 
   // Refs for dynamic body params
   const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
+  const aiModelRef = useRef(aiModel)
 
   useEffect(() => {
     workingDirRef.current = departmentPath || currentCompany?.rootPath
   }, [departmentPath, currentCompany?.rootPath])
+
+  useEffect(() => {
+    aiModelRef.current = aiModel
+  }, [aiModel])
 
 
   // Pending images to send with next message
@@ -1221,6 +1228,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       body: () => {
         const body: Record<string, unknown> = {
           workingDirectory: workingDirRef.current,
+          modelId: aiModelRef.current,
         }
         if (pendingImagesRef.current.length > 0) {
           body.images = pendingImagesRef.current
@@ -1567,6 +1575,20 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         </div>
 
         <div className="flex items-center gap-1">
+          {/* Model Selector (Claude Code mode only) */}
+          {authMode === 'claude-code' && (
+            <select
+              value={aiModel}
+              onChange={(e) => setAIModel(e.target.value as 'sonnet' | 'opus' | 'haiku')}
+              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
+            >
+              <option value="haiku">Haiku</option>
+              <option value="sonnet">Sonnet</option>
+              <option value="opus">Opus</option>
+            </select>
+          )}
+
           {/* Stop Button (visible during streaming) */}
           {(status === 'submitted' || status === 'streaming') && (
             <button

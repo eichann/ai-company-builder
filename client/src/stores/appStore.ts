@@ -8,6 +8,20 @@ export type Theme = 'light' | 'dark'
 // Language type
 export type Language = 'en' | 'ja'
 
+// AI Model type
+export type AIModel = 'sonnet' | 'opus' | 'haiku'
+
+// Get initial model from localStorage
+const getInitialModel = (): AIModel => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('aiModel') as AIModel | null
+    if (saved === 'sonnet' || saved === 'opus' || saved === 'haiku') {
+      return saved
+    }
+  }
+  return 'sonnet'
+}
+
 // Active skill with loaded content
 interface ActiveSkill {
   skill: Skill
@@ -68,6 +82,9 @@ interface AppState {
   activeFile: FileEntry | null
   fileContents: Map<string, string>
 
+  // AI model state
+  aiModel: AIModel
+
   // UI state
   showWizard: boolean
   sidebarWidth: number
@@ -83,6 +100,7 @@ interface AppState {
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
   setLanguage: (language: Language) => void
+  setAIModel: (model: AIModel) => void
   setCurrentCompany: (company: Company | null) => void
   addCompany: (company: Company) => void
   setFileTree: (tree: FileEntry[]) => void
@@ -114,6 +132,7 @@ interface AppState {
 export const useAppStore = create<AppState>((set, get) => ({
   theme: getInitialTheme(),
   language: getInitialLanguage(),
+  aiModel: getInitialModel(),
   currentCompany: null,
   companies: [],
   fileTree: [],
@@ -156,6 +175,11 @@ export const useAppStore = create<AppState>((set, get) => ({
     localStorage.setItem('language', language)
     i18n.changeLanguage(language)
     set({ language })
+  },
+
+  setAIModel: (model) => {
+    localStorage.setItem('aiModel', model)
+    set({ aiModel: model })
   },
 
   setCurrentCompany: (company) => {
