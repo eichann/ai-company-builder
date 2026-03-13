@@ -138,10 +138,14 @@ export async function startChatServer(config: ChatServerConfig) {
     } = body
 
     const authMode = config.getAuthMode()
-    const basePrompt = systemPrompt || config.buildSystemPrompt(workingDirectory)
 
-    // Append security policy to all system prompts
-    const finalSystemPrompt = basePrompt + SECURITY_POLICY
+    // Claude Code CLI mode: don't override system prompt — Claude Code has its own
+    // comprehensive system prompt with tool usage guidelines, behavior rules, etc.
+    // Injecting our own prompt conflicts with it and degrades quality.
+    // API key mode: build our own system prompt as before.
+    const finalSystemPrompt = authMode === 'claude-code'
+      ? undefined
+      : (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
 
     let model
     if (authMode === 'claude-code') {
@@ -236,6 +240,7 @@ export async function startChatServer(config: ChatServerConfig) {
         permissionMode,
         cwd: workingDirectory,
         env: config.getShellEnv(),
+        settingSources: ['user', 'project'],
         streamingInput: 'auto',
         // Custom spawn to avoid EBADF in Electron's main process.
         //
@@ -329,29 +334,33 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const modelMessages = await convertToModelMessages(messages)
 
-    // Prune old messages to manage context window
-    // Conservative strategy: keep reasoning, remove old tool results only
-    const prunedMessages = pruneMessages({
-      messages: modelMessages,
-      reasoning: 'none',
-      toolCalls: 'before-last-5-messages',
-      emptyMessages: 'remove',
-    })
+    // Claude Code CLI mode: skip client-side pruning — Claude Code manages its own context
+    // API key mode: prune old messages to manage context window
+    let finalMessages = modelMessages
+    if (authMode !== 'claude-code') {
+      const prunedMessages = pruneMessages({
+        messages: modelMessages,
+        reasoning: 'none',
+        toolCalls: 'before-last-5-messages',
+        emptyMessages: 'remove',
+      })
 
-    // Sliding window: keep last 80 messages (≈40 turns) to prevent context overflow
-    const MAX_CONTEXT_MESSAGES = 80
-    const windowedMessages = prunedMessages.length > MAX_CONTEXT_MESSAGES
-      ? prunedMessages.slice(-MAX_CONTEXT_MESSAGES)
-      : prunedMessages
+      const MAX_CONTEXT_MESSAGES = 80
+      finalMessages = prunedMessages.length > MAX_CONTEXT_MESSAGES
+        ? prunedMessages.slice(-MAX_CONTEXT_MESSAGES)
+        : prunedMessages
 
-    console.log(`[chat-server] Messages: ${modelMessages.length} → ${prunedMessages.length} (pruned) → ${windowedMessages.length} (windowed)`)
+      console.log(`[chat-server] Messages: ${modelMessages.length} → ${prunedMessages.length} (pruned) → ${finalMessages.length} (windowed)`)
+    } else {
+      console.log(`[chat-server] Messages: ${modelMessages.length} (no pruning in CLI mode)`)
+    }
 
     // Inject images into the last user message (sent via transport body)
     if (images && images.length > 0) {
       console.log(`[chat-server] Injecting ${images.length} image(s) into model messages`)
-      for (let i = windowedMessages.length - 1; i >= 0; i--) {
-        if (windowedMessages[i].role === 'user') {
-          const userContent = windowedMessages[i].content
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        if (finalMessages[i].role === 'user') {
+          const userContent = finalMessages[i].content
           if (Array.isArray(userContent)) {
             for (const img of images) {
               // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -369,8 +378,8 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const result = streamText({
       model,
-      system: finalSystemPrompt,
-      messages: windowedMessages,
+      ...(finalSystemPrompt ? { system: finalSystemPrompt } : {}),
+      messages: finalMessages,
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
       onStepFinish: ({ finishReason, usage, toolCalls }) => {
         console.log(`[chat-server] Step finished: reason=${finishReason}, tokens=${usage.totalTokens}, tools=${toolCalls.length}`)
