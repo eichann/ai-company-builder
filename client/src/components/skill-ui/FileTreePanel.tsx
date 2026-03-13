@@ -93,6 +93,14 @@ export function FileTreePanel({
     targetPath: '',
   })
 
+  // Multi-select state
+  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  const [lastClickedPath, setLastClickedPath] = useState<string | null>(null)
+
+  // Drag & drop state
+  const [dragOverPath, setDragOverPath] = useState<string | null>(null)
+  const [dragSourcePaths, setDragSourcePaths] = useState<Set<string>>(new Set())
+
   const departmentPath = `${rootPath}/${departmentFolder}`
 
   // Load single directory (non-recursive)
@@ -274,6 +282,19 @@ export function FileTreePanel({
       perfMark('file_tree_panel.watch.stop')
     }
   }, [departmentPath, requestDeferredReload])
+
+  // Flatten visible entries for shift+click range selection
+  const flattenVisibleEntries = useCallback((entries: FileEntry[]): string[] => {
+    const result: string[] = []
+    for (const entry of entries) {
+      result.push(entry.path)
+      if (entry.isDirectory && expandedDirs.has(entry.path)) {
+        const children = childrenCache.current.get(entry.path) || []
+        result.push(...flattenVisibleEntries(children))
+      }
+    }
+    return result
+  }, [expandedDirs])
 
   // Toggle directory expansion with lazy loading
   const toggleDir = useCallback(async (path: string) => {
@@ -515,7 +536,9 @@ export function FileTreePanel({
 
   const renderEntry = (entry: FileEntry, depth: number = 0) => {
     const isExpanded = expandedDirs.has(entry.path)
-    const isSelected = selectedFilePath === entry.path
+    const isFileActive = selectedFilePath === entry.path
+    const isMultiSelected = selectedPaths.has(entry.path)
+    const isHighlighted = isMultiSelected || isFileActive
     const isLoadingChildren = loadingDirs.has(entry.path)
     const children = childrenCache.current.get(entry.path) || []
 
@@ -531,23 +554,110 @@ export function FileTreePanel({
 
     return (
       <div key={entry.path}>
-        <button
-          onClick={() => {
-            if (entry.isDirectory) {
-              toggleDir(entry.path)
+        <div
+          role="button"
+          tabIndex={0}
+          draggable
+          onDragStart={(e) => {
+            // If dragging a selected item, drag all selected; otherwise drag just this one
+            const paths = isMultiSelected && selectedPaths.size > 1
+              ? [...selectedPaths]
+              : [entry.path]
+            setDragSourcePaths(new Set(paths))
+            e.dataTransfer.setData('application/x-file-paths', JSON.stringify(paths))
+            e.dataTransfer.effectAllowed = 'move'
+          }}
+          onDragEnd={() => {
+            setDragSourcePaths(new Set())
+            setDragOverPath(null)
+          }}
+          onDragOver={(e) => {
+            if (!entry.isDirectory) return
+            if (dragSourcePaths.has(entry.path)) return
+            // Prevent drop into child of any dragged item
+            for (const src of dragSourcePaths) {
+              if (entry.path.startsWith(src + '/')) return
+            }
+            e.preventDefault()
+            e.stopPropagation()
+            e.dataTransfer.dropEffect = 'move'
+            setDragOverPath(entry.path)
+          }}
+          onDragLeave={(e) => {
+            if (dragOverPath === entry.path) {
+              const rect = e.currentTarget.getBoundingClientRect()
+              const { clientX, clientY } = e
+              if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+                setDragOverPath(null)
+              }
+            }
+          }}
+          onDrop={async (e) => {
+            e.preventDefault()
+            e.stopPropagation()
+            setDragOverPath(null)
+
+            if (!entry.isDirectory) return
+            const raw = e.dataTransfer.getData('application/x-file-paths')
+            if (!raw) return
+            const sourcePaths: string[] = JSON.parse(raw)
+
+            for (const sourcePath of sourcePaths) {
+              if (entry.path === sourcePath || entry.path.startsWith(sourcePath + '/')) continue
+              const fileName = sourcePath.split('/').pop()
+              if (!fileName) continue
+              const destPath = `${entry.path}/${fileName}`
+              if (sourcePath === destPath) continue
+              await window.electronAPI.moveItem(sourcePath, destPath)
+            }
+            setSelectedPaths(new Set())
+            loadFiles(true)
+          }}
+          onClick={(e) => {
+            if (e.shiftKey && lastClickedPath) {
+              // Shift+click: range selection
+              const flat = flattenVisibleEntries(files)
+              const startIdx = flat.indexOf(lastClickedPath)
+              const endIdx = flat.indexOf(entry.path)
+              if (startIdx !== -1 && endIdx !== -1) {
+                const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+                const rangePaths = flat.slice(from, to + 1)
+                setSelectedPaths(new Set(rangePaths))
+              }
+            } else if (e.metaKey || e.ctrlKey) {
+              // Cmd/Ctrl+click: toggle individual selection
+              setSelectedPaths(prev => {
+                const next = new Set(prev)
+                if (next.has(entry.path)) {
+                  next.delete(entry.path)
+                } else {
+                  next.add(entry.path)
+                }
+                return next
+              })
+              setLastClickedPath(entry.path)
             } else {
-              onSelectFile(entry.path)
+              // Normal click: reset selection
+              setSelectedPaths(new Set())
+              setLastClickedPath(entry.path)
+              if (entry.isDirectory) {
+                toggleDir(entry.path)
+              } else {
+                onSelectFile(entry.path)
+              }
             }
           }}
           onContextMenu={(e) => handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))}
           onKeyDown={handleKeyDown}
           className={`
-            w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm
+            w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
             rounded-md transition-colors outline-none focus:ring-1 focus:ring-accent/50
-            ${isSelected
+            ${isHighlighted
               ? 'bg-accent/20 text-gray-900 dark:text-zinc-100'
               : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-white/[0.04] hover:text-gray-900 dark:hover:text-zinc-200'
             }
+            ${dragOverPath === entry.path && entry.isDirectory ? 'ring-2 ring-accent bg-accent/10' : ''}
+            ${dragSourcePaths.has(entry.path) ? 'opacity-50' : ''}
           `}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
         >
@@ -564,7 +674,7 @@ export function FileTreePanel({
           {!entry.isDirectory && <span className="w-3" />}
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
           <span className="truncate">{entry.name}</span>
-        </button>
+        </div>
 
         {entry.isDirectory && isExpanded && (
           <div>
@@ -630,6 +740,26 @@ export function FileTreePanel({
       <div
         className="flex-1 overflow-auto py-2 px-1"
         onContextMenu={handleBackgroundContextMenu}
+        onDragOver={(e) => {
+          e.preventDefault()
+          e.dataTransfer.dropEffect = 'move'
+        }}
+        onDrop={async (e) => {
+          e.preventDefault()
+          setDragOverPath(null)
+          const raw = e.dataTransfer.getData('application/x-file-paths')
+          if (!raw) return
+          const sourcePaths: string[] = JSON.parse(raw)
+          for (const sourcePath of sourcePaths) {
+            const fileName = sourcePath.split('/').pop()
+            if (!fileName) continue
+            const destPath = `${departmentPath}/${fileName}`
+            if (sourcePath === destPath) continue
+            await window.electronAPI.moveItem(sourcePath, destPath)
+          }
+          setSelectedPaths(new Set())
+          loadFiles(true)
+        }}
       >
         {files.length === 0 && !isLoading ? (
           <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-zinc-600">
