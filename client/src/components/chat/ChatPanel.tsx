@@ -285,7 +285,11 @@ function ThinkingBlock({ content, isStreaming = false }: { content: string; isSt
 // Context Usage Gauge
 // ============================================================================
 
-const MAX_CONTEXT_TOKENS = 200_000
+const CONTEXT_LIMITS: Record<string, number> = {
+  haiku: 200_000,
+  sonnet: 1_000_000,
+  opus: 1_000_000,
+}
 
 interface ContextGaugeProps {
   usage: {
@@ -296,11 +300,13 @@ interface ContextGaugeProps {
     cacheWriteTokens: number
     noCacheTokens: number
   }
+  model: string
 }
 
-function ContextGauge({ usage }: ContextGaugeProps) {
+function ContextGauge({ usage, model }: ContextGaugeProps) {
   const [showTooltip, setShowTooltip] = useState(false)
-  const percentage = Math.min(100, Math.round((usage.inputTokens / MAX_CONTEXT_TOKENS) * 100))
+  const maxTokens = CONTEXT_LIMITS[model] ?? 1_000_000
+  const percentage = Math.min(100, Math.round((usage.inputTokens / maxTokens) * 100))
   const cacheHitRate = usage.inputTokens > 0
     ? Math.round((usage.cacheReadTokens / usage.inputTokens) * 100)
     : 0
@@ -339,7 +345,7 @@ function ContextGauge({ usage }: ContextGaugeProps) {
       {/* Label */}
       <div className={`mt-1 flex items-center justify-between text-[10px] ${textColor}`}>
         <span>
-          {formatTokens(usage.inputTokens)} / {formatTokens(MAX_CONTEXT_TOKENS)} tokens ({percentage}%)
+          {formatTokens(usage.inputTokens)} / {formatTokens(maxTokens)} tokens ({percentage}%)
         </span>
         {cacheHitRate > 0 && (
           <span className="text-gray-400 dark:text-zinc-500">
@@ -1852,7 +1858,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           />
         </div>
         {/* Context Usage Gauge */}
-        {tokenUsage && <ContextGauge usage={tokenUsage} />}
+        {tokenUsage && <ContextGauge usage={tokenUsage} model={aiModel} />}
       </div>
     </div>
   )
