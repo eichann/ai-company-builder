@@ -104,11 +104,21 @@ export async function startChatServer(config: ChatServerConfig) {
   const authToken = crypto.randomUUID()
   const app = new Hono()
 
+  // Latest usage info from the most recent chat completion
+  let latestUsage: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    noCacheTokens: number
+  } | null = null
+
   // CORS for Electron renderer (Vite dev server or file:// protocol)
   app.use('/*', cors({
     origin: (origin) => origin || '*',
     allowHeaders: ['Content-Type', 'Authorization'],
-    allowMethods: ['POST', 'OPTIONS'],
+    allowMethods: ['POST', 'GET', 'OPTIONS'],
   }))
 
   // Auth middleware
@@ -389,6 +399,17 @@ export async function startChatServer(config: ChatServerConfig) {
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
       onStepFinish: ({ finishReason, usage, toolCalls }) => {
         console.log(`[chat-server] Step finished: reason=${finishReason}, tokens=${usage.totalTokens}, tools=${toolCalls.length}`)
+        // Update latest usage for the /api/usage endpoint
+        if (usage.totalTokens != null) {
+          latestUsage = {
+            inputTokens: usage.inputTokens ?? 0,
+            outputTokens: usage.outputTokens ?? 0,
+            totalTokens: usage.totalTokens ?? 0,
+            cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
+            cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? 0,
+            noCacheTokens: usage.inputTokenDetails?.noCacheTokens ?? 0,
+          }
+        }
       },
       onError: ({ error }) => {
         console.error('[chat-server] Stream error:', error)
@@ -398,6 +419,11 @@ export async function startChatServer(config: ChatServerConfig) {
     return result.toUIMessageStreamResponse({
       sendReasoning: true,
     })
+  })
+
+  // GET /api/usage — returns latest token usage from the most recent completion
+  app.get('/api/usage', (c) => {
+    return c.json({ usage: latestUsage })
   })
 
   // Find port in 3300-3400 range (distinct from tool ports 3100-3200)

@@ -282,6 +282,110 @@ function ThinkingBlock({ content, isStreaming = false }: { content: string; isSt
 }
 
 // ============================================================================
+// Context Usage Gauge
+// ============================================================================
+
+const MAX_CONTEXT_TOKENS = 200_000
+
+interface ContextGaugeProps {
+  usage: {
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    noCacheTokens: number
+  }
+}
+
+function ContextGauge({ usage }: ContextGaugeProps) {
+  const [showTooltip, setShowTooltip] = useState(false)
+  const percentage = Math.min(100, Math.round((usage.inputTokens / MAX_CONTEXT_TOKENS) * 100))
+  const cacheHitRate = usage.inputTokens > 0
+    ? Math.round((usage.cacheReadTokens / usage.inputTokens) * 100)
+    : 0
+
+  const formatTokens = (n: number) => {
+    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
+    return String(n)
+  }
+
+  // Color based on context fill level
+  const barColor = percentage >= 80
+    ? 'bg-red-500 dark:bg-red-400'
+    : percentage >= 50
+      ? 'bg-amber-500 dark:bg-amber-400'
+      : 'bg-emerald-500 dark:bg-emerald-400'
+
+  const textColor = percentage >= 80
+    ? 'text-red-600 dark:text-red-400'
+    : percentage >= 50
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-gray-400 dark:text-zinc-500'
+
+  return (
+    <div
+      className="px-4 pb-3 relative"
+      onMouseEnter={() => setShowTooltip(true)}
+      onMouseLeave={() => setShowTooltip(false)}
+    >
+      {/* Progress bar */}
+      <div className="h-1 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
+        <div
+          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
+          style={{ width: `${percentage}%` }}
+        />
+      </div>
+      {/* Label */}
+      <div className={`mt-1 flex items-center justify-between text-[10px] ${textColor}`}>
+        <span>
+          {formatTokens(usage.inputTokens)} / {formatTokens(MAX_CONTEXT_TOKENS)} tokens ({percentage}%)
+        </span>
+        {cacheHitRate > 0 && (
+          <span className="text-gray-400 dark:text-zinc-500">
+            cache {cacheHitRate}%
+          </span>
+        )}
+      </div>
+
+      {/* Tooltip */}
+      {showTooltip && (
+        <div className="absolute bottom-full left-4 mb-1 w-48 p-2 rounded-md bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-lg text-[10px] z-50">
+          <div className="space-y-0.5">
+            <div className="flex justify-between text-gray-600 dark:text-zinc-300">
+              <span>Input</span>
+              <span className="font-mono">{formatTokens(usage.inputTokens)}</span>
+            </div>
+            <div className="pl-2 space-y-0.5 text-gray-400 dark:text-zinc-500">
+              <div className="flex justify-between">
+                <span>Cache Read</span>
+                <span className="font-mono">{formatTokens(usage.cacheReadTokens)} ({cacheHitRate}%)</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Cache Write</span>
+                <span className="font-mono">{formatTokens(usage.cacheWriteTokens)}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>No Cache</span>
+                <span className="font-mono">{formatTokens(usage.noCacheTokens)}</span>
+              </div>
+            </div>
+            <div className="border-t border-gray-100 dark:border-zinc-700 pt-0.5 flex justify-between text-gray-600 dark:text-zinc-300">
+              <span>Output</span>
+              <span className="font-mono">{formatTokens(usage.outputTokens)}</span>
+            </div>
+            <div className="border-t border-gray-100 dark:border-zinc-700 pt-0.5 flex justify-between font-medium text-gray-700 dark:text-zinc-200">
+              <span>Total</span>
+              <span className="font-mono">{formatTokens(usage.totalTokens)}</span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ============================================================================
 // Tool Approval Banner
 // ============================================================================
 
@@ -1239,6 +1343,28 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
     })
   }, [serverInfo.port, serverInfo.authToken])
 
+  // Token usage state for context gauge
+  const [tokenUsage, setTokenUsage] = useState<{
+    inputTokens: number
+    outputTokens: number
+    totalTokens: number
+    cacheReadTokens: number
+    cacheWriteTokens: number
+    noCacheTokens: number
+  } | null>(null)
+
+  const fetchUsage = useCallback(async () => {
+    try {
+      const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/usage`, {
+        headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+      })
+      const data = await res.json()
+      if (data.usage) setTokenUsage(data.usage)
+    } catch {
+      // Silently ignore usage fetch errors
+    }
+  }, [serverInfo.port, serverInfo.authToken])
+
   // useChat hook
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport,
@@ -1246,6 +1372,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
     onFinish: () => {
       // Refresh file tree in case AI created/modified files
       window.dispatchEvent(new Event('refresh-file-tree'))
+      // Fetch latest token usage
+      fetchUsage()
     },
     onError: (err) => {
       console.error('[useChat] Error:', err)
@@ -1710,17 +1838,21 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       )}
 
       {/* Input Area */}
-      <div className="flex-shrink-0 p-4 pb-8 border-t border-gray-200 dark:border-zinc-800">
-        <ChatInput
-          onSend={handleSend}
-          disabled={false}
-          placeholder={t('chat.inputPlaceholder')}
-          hint={t('chat.inputHint')}
-          onCompositionStateChange={handleInputCompositionStateChange}
-          onInputActivity={handleInputActivity}
-          pendingText={pendingChatInput}
-          onPendingTextConsumed={handlePendingTextConsumed}
-        />
+      <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
+        <div className="p-4 pb-7">
+          <ChatInput
+            onSend={handleSend}
+            disabled={false}
+            placeholder={t('chat.inputPlaceholder')}
+            hint={t('chat.inputHint')}
+            onCompositionStateChange={handleInputCompositionStateChange}
+            onInputActivity={handleInputActivity}
+            pendingText={pendingChatInput}
+            onPendingTextConsumed={handlePendingTextConsumed}
+          />
+        </div>
+        {/* Context Usage Gauge */}
+        {tokenUsage && <ContextGauge usage={tokenUsage} />}
       </div>
     </div>
   )
