@@ -460,6 +460,36 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
   }
 })
 
+ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
+  try {
+    const safePath = validatePath(dirPath)
+    const readLevel = async (dir: string, depth: number): Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>> => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      const results = await Promise.all(entries.map(async (entry) => {
+        const entryPath = path.join(dir, entry.name)
+        const isDir = entry.isDirectory()
+        const node: { name: string; isDirectory: boolean; path: string; children?: Array<unknown> } = {
+          name: entry.name,
+          isDirectory: isDir,
+          path: entryPath,
+        }
+        if (isDir && depth < maxDepth) {
+          try {
+            node.children = await readLevel(entryPath, depth + 1)
+          } catch {
+            node.children = []
+          }
+        }
+        return node
+      }))
+      return results
+    }
+    return await readLevel(safePath, 0)
+  } catch {
+    return []
+  }
+})
+
 ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   try {
     const safePath = validatePath(filePath)
@@ -1521,7 +1551,40 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       }
     }
 
-    // 3. Add all files and commit
+    // 3. Check for deleted files before staging
+    const preAddStatus = await git.status()
+    const deletedFiles = preAddStatus.deleted
+    const notAdded = preAddStatus.not_added || []
+
+    // If files were deleted locally, warn the user before syncing
+    if (deletedFiles.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
+      const fileList = deletedFiles.length <= 10
+        ? deletedFiles.join('\n')
+        : deletedFiles.slice(0, 10).join('\n') + `\n... 他 ${deletedFiles.length - 10} ファイル`
+
+      const { response } = await dialog.showMessageBox(mainWindow, {
+        type: 'warning',
+        buttons: ['削除を含めて同期', '削除を取り消して同期', 'キャンセル'],
+        defaultId: 1,
+        cancelId: 2,
+        title: 'ファイルの削除を検出',
+        message: `${deletedFiles.length}個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。`,
+        detail: fileList,
+      })
+
+      if (response === 2) {
+        // Cancel sync
+        return { success: false, error: '同期がキャンセルされました' }
+      }
+
+      if (response === 1) {
+        // Restore deleted files from HEAD
+        console.log(`Git sync: Restoring ${deletedFiles.length} deleted files`)
+        await git.checkout(['HEAD', '--', ...deletedFiles])
+      }
+    }
+
+    // Add all files and commit
     await git.add('.')
     const status = await git.status()
 
