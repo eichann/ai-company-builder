@@ -1168,10 +1168,51 @@ function extractSessionToken(cookies: string[]): string {
   return ''
 }
 
-// Create a simpleGit instance with bundled git binary and HTTPS token authentication
+// Resolve git binary: try dugite's bundled git first, fall back to system git.
+// dugite bundles git for the build machine's architecture, which may not match
+// the runtime architecture (e.g. arm64 build running on Intel Mac).
+function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<string, string> } {
+  const dugiteBinary = resolveGitBinary()
+  try {
+    // Quick check: can the bundled binary actually execute?
+    require('child_process').execFileSync(dugiteBinary, ['--version'], {
+      timeout: 3000,
+      stdio: 'ignore',
+    })
+    const gitDir = resolveGitDir()
+    return {
+      binary: dugiteBinary,
+      envOverrides: {
+        GIT_EXEC_PATH: path.join(gitDir, 'libexec', 'git-core'),
+        GIT_TEMPLATE_DIR: path.join(gitDir, 'share', 'git-core', 'templates'),
+      },
+    }
+  } catch {
+    // Bundled git failed (likely arch mismatch) — fall back to system git
+    console.warn('[git] Bundled git binary failed, falling back to system git')
+    const systemPaths = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git']
+    for (const p of systemPaths) {
+      if (fs.existsSync(p)) {
+        console.log(`[git] Using system git: ${p}`)
+        return { binary: p, envOverrides: {} }
+      }
+    }
+    // Last resort: hope 'git' is in PATH
+    console.warn('[git] No system git found, using PATH lookup')
+    return { binary: 'git', envOverrides: {} }
+  }
+}
+
+// Cache the resolved git binary (checked once at startup)
+let _resolvedGit: ReturnType<typeof resolveGitBinaryWithFallback> | null = null
+function getResolvedGit() {
+  if (!_resolvedGit) _resolvedGit = resolveGitBinaryWithFallback()
+  return _resolvedGit
+}
+
+// Create a simpleGit instance with HTTPS token authentication
 function createGit(repoPath: string): SimpleGit {
-  const gitBinary = resolveGitBinary()
-  const gitDir = resolveGitDir()
+  const { binary: gitBinary, envOverrides } = getResolvedGit()
   const askPassPath = getGitAskPassPath()
   const sessionToken = extractSessionToken(authCookies)
 
@@ -1188,8 +1229,7 @@ function createGit(repoPath: string): SimpleGit {
       GIT_ASKPASS: askPassPath,
       GIT_TOKEN: sessionToken,
       GIT_TERMINAL_PROMPT: '0',
-      GIT_EXEC_PATH: path.join(gitDir, 'libexec', 'git-core'),
-      GIT_TEMPLATE_DIR: path.join(gitDir, 'share', 'git-core', 'templates'),
+      ...envOverrides,
     })
 }
 
@@ -1507,7 +1547,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
             fs.mkdirSync(path.dirname(destPath), { recursive: true })
             // Use git cat-file to extract as binary-safe Buffer
             // (git.show returns string, which corrupts binary files)
-            const gitBinary = resolveGitBinary()
+            const { binary: gitBinary } = getResolvedGit()
             const content = await new Promise<Buffer>((resolve, reject) => {
               const chunks: Buffer[] = []
               const proc = require('child_process').spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
