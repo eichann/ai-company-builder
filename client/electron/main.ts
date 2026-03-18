@@ -1323,18 +1323,18 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       }
     }
 
-    // Clean up old backups (older than 30 days)
+    // Clean up old backups (older than 30 days) — async to avoid blocking UI
     if (fs.existsSync(backupsDir)) {
       const RETENTION_DAYS = 30
       const cutoff = Date.now() - RETENTION_DAYS * 24 * 60 * 60 * 1000
       try {
-        const backupFolders = fs.readdirSync(backupsDir)
+        const backupFolders = await fs.promises.readdir(backupsDir)
         for (const folder of backupFolders) {
           const folderPath = path.join(backupsDir, folder)
           try {
-            const stat = fs.statSync(folderPath)
+            const stat = await fs.promises.stat(folderPath)
             if (stat.isDirectory() && stat.mtimeMs < cutoff) {
-              fs.rmSync(folderPath, { recursive: true, force: true })
+              await fs.promises.rm(folderPath, { recursive: true, force: true })
               console.log(`Git sync: Deleted old backup: ${folder}`)
             }
           } catch { /* skip inaccessible folders */ }
@@ -1431,43 +1431,46 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       gitignoreContent = '.backups/\nnode_modules/\n'
     }
 
-    // Detect large files (>100MB) and add to .gitignore
+    // Detect large files (>100MB) and add to .gitignore — async to avoid blocking UI
     const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
     const ignoredLargeFiles: string[] = []
 
-    function scanForLargeFiles(dir: string, baseDir: string): void {
-      if (!fs.existsSync(dir)) return
-      const items = fs.readdirSync(dir)
+    async function scanForLargeFiles(dir: string, baseDir: string): Promise<void> {
+      try {
+        const items = await fs.promises.readdir(dir)
 
-      for (const item of items) {
-        const fullPath = path.join(dir, item)
-        const relativePath = path.relative(baseDir, fullPath)
+        for (const item of items) {
+          const fullPath = path.join(dir, item)
+          const relativePath = path.relative(baseDir, fullPath)
 
-        // Skip directories that are always ignored
-        if (item === '.git' || item === '.backups' || item === 'node_modules') continue
-        // Skip if already in .gitignore
-        if (gitignoreContent.includes(relativePath)) continue
+          // Skip directories that are always ignored
+          if (item === '.git' || item === '.backups' || item === 'node_modules') continue
+          // Skip if already in .gitignore
+          if (gitignoreContent.includes(relativePath)) continue
 
-        try {
-          const stat = fs.statSync(fullPath)
-          if (stat.isDirectory()) {
-            scanForLargeFiles(fullPath, baseDir)
-          } else if (stat.isFile() && stat.size > LARGE_FILE_THRESHOLD) {
-            ignoredLargeFiles.push(relativePath)
+          try {
+            const stat = await fs.promises.stat(fullPath)
+            if (stat.isDirectory()) {
+              await scanForLargeFiles(fullPath, baseDir)
+            } else if (stat.isFile() && stat.size > LARGE_FILE_THRESHOLD) {
+              ignoredLargeFiles.push(relativePath)
+            }
+          } catch {
+            // Skip files we can't access
           }
-        } catch {
-          // Skip files we can't access
         }
+      } catch {
+        // Directory doesn't exist or can't be read
       }
     }
 
-    scanForLargeFiles(repoPath, repoPath)
+    await scanForLargeFiles(repoPath, repoPath)
 
     // Add large files to .gitignore
     if (ignoredLargeFiles.length > 0) {
       const largeFilesSection = '\n# Auto-ignored: Large files (>100MB)\n' +
         ignoredLargeFiles.map(f => f).join('\n') + '\n'
-      fs.appendFileSync(gitignorePath, largeFilesSection)
+      await fs.promises.appendFile(gitignorePath, largeFilesSection)
       console.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
     }
 
@@ -2308,136 +2311,149 @@ function invalidateGitignoreCache(rootPath: string): void {
   gitignoreCache.delete(rootPath)
 }
 
+// Skills cache per skillsDir to avoid rescanning on every tab switch
+const skillsCache = new Map<string, { skills: SkillInfo[]; timestamp: number }>()
+const SKILLS_CACHE_TTL = 5000 // 5 seconds
+
+function invalidateSkillsCache(rootPath: string, departmentFolder?: string): void {
+  if (departmentFolder) {
+    const key = path.join(rootPath, departmentFolder, '.claude', 'skills')
+    skillsCache.delete(key)
+  } else {
+    // Invalidate all caches for this rootPath
+    for (const key of skillsCache.keys()) {
+      if (key.startsWith(rootPath)) skillsCache.delete(key)
+    }
+  }
+}
+
+async function scanSkills(rootPath: string, departmentFolder: string, departmentId: string): Promise<SkillInfo[]> {
+  const skillsDir = path.join(rootPath, departmentFolder, '.claude', 'skills')
+
+  if (!fs.existsSync(skillsDir)) return []
+
+  const gitignoreLines = getGitignoreLines(rootPath)
+  const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
+  const skills: SkillInfo[] = []
+
+  for (const entry of entries) {
+    if (!entry.isDirectory()) continue
+    if (entry.name.startsWith('.')) continue
+
+    const skillPath = path.join(skillsDir, entry.name)
+    const skillMdPath = path.join(skillPath, 'SKILL.md')
+
+    if (!fs.existsSync(skillMdPath)) continue
+
+    try {
+      const skillMdContent = await fs.promises.readFile(skillMdPath, 'utf-8')
+      const frontmatter = parseSkillFrontmatter(skillMdContent)
+
+      const rulesDir = path.join(skillPath, 'rules')
+      const scriptsDir = path.join(skillPath, 'scripts')
+      const referencesDir = path.join(skillPath, 'references')
+
+      const files: SkillInfo['files'] = { skillMd: skillMdPath }
+
+      if (fs.existsSync(rulesDir)) {
+        const rulesEntries = await fs.promises.readdir(rulesDir)
+        files.rules = rulesEntries.filter(f => f.endsWith('.md')).map(f => path.join(rulesDir, f))
+      }
+
+      if (fs.existsSync(scriptsDir)) {
+        const scriptsEntries = await fs.promises.readdir(scriptsDir)
+        files.scripts = scriptsEntries.filter(f => !f.startsWith('.')).map(f => path.join(scriptsDir, f))
+      }
+
+      if (fs.existsSync(referencesDir)) {
+        const refsEntries = await fs.promises.readdir(referencesDir)
+        files.references = refsEntries.filter(f => !f.startsWith('.')).map(f => path.join(referencesDir, f))
+      }
+
+      const toolsDir = path.join(skillPath, 'tools')
+      if (fs.existsSync(toolsDir)) {
+        const toolsEntries = await fs.promises.readdir(toolsDir, { withFileTypes: true })
+        const tools: ToolInfo[] = []
+
+        for (const toolEntry of toolsEntries) {
+          if (!toolEntry.isDirectory()) continue
+          if (toolEntry.name.startsWith('.')) continue
+          if (toolEntry.name === 'node_modules') continue
+
+          const toolEntryPath = path.join(toolsDir, toolEntry.name)
+          const packageJsonPath = path.join(toolEntryPath, 'package.json')
+          const hasPackageJson = fs.existsSync(packageJsonPath)
+
+          let displayName = toolEntry.name
+          let startCommand: string | undefined
+
+          if (hasPackageJson) {
+            try {
+              const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8')
+              const pkg = JSON.parse(pkgContent)
+              displayName = pkg.name || toolEntry.name
+              if (pkg.scripts?.dev) {
+                startCommand = 'dev'
+              } else if (pkg.scripts?.start) {
+                startCommand = 'start'
+              }
+            } catch {
+              // Ignore package.json parse errors
+            }
+          }
+
+          tools.push({
+            name: toolEntry.name,
+            displayName,
+            path: toolEntryPath,
+            hasPackageJson,
+            startCommand,
+          })
+        }
+
+        if (tools.length > 0) files.tools = tools
+      }
+
+      const skillRelativePath = `${departmentFolder}/.claude/skills/${entry.name}/`
+      const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
+
+      skills.push({
+        id: `${departmentId}-${entry.name}`,
+        name: frontmatter.name || entry.name,
+        description: frontmatter.description || '',
+        departmentId,
+        skillPath,
+        isPrivate,
+        isNurturing: frontmatter.status === 'nurturing',
+        files,
+      })
+    } catch (err) {
+      console.error(`Failed to parse skill ${entry.name}:`, err)
+    }
+  }
+
+  return skills
+}
+
 // List skills for a department
 ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string) => {
   try {
     const skillsDir = path.join(rootPath, departmentFolder, '.claude', 'skills')
 
-    // Check if skills directory exists
-    if (!fs.existsSync(skillsDir)) {
-      return { success: true, skills: [] }
+    // Return cached result if fresh
+    const cached = skillsCache.get(skillsDir)
+    if (cached && Date.now() - cached.timestamp < SKILLS_CACHE_TTL) {
+      // Update departmentId in cached skills (same files, different tab context)
+      const skills = cached.skills.map(s => ({
+        ...s,
+        id: `${departmentId}-${s.skillPath?.split('/').pop() || s.name}`,
+        departmentId,
+      }))
+      return { success: true, skills }
     }
 
-    // Read .gitignore to detect draft skills (cached)
-    const gitignoreLines = getGitignoreLines(rootPath)
-
-    const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
-    const skills: SkillInfo[] = []
-
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue
-      if (entry.name.startsWith('.')) continue // Skip hidden folders
-
-      const skillPath = path.join(skillsDir, entry.name)
-      const skillMdPath = path.join(skillPath, 'SKILL.md')
-
-      // Check if SKILL.md exists
-      if (!fs.existsSync(skillMdPath)) continue
-
-      try {
-        const skillMdContent = await fs.promises.readFile(skillMdPath, 'utf-8')
-        const frontmatter = parseSkillFrontmatter(skillMdContent)
-
-        // Scan for additional files
-        const rulesDir = path.join(skillPath, 'rules')
-        const scriptsDir = path.join(skillPath, 'scripts')
-        const referencesDir = path.join(skillPath, 'references')
-
-        const files: SkillInfo['files'] = {
-          skillMd: skillMdPath,
-        }
-
-        // Collect rules files
-        if (fs.existsSync(rulesDir)) {
-          const rulesEntries = await fs.promises.readdir(rulesDir)
-          files.rules = rulesEntries
-            .filter(f => f.endsWith('.md'))
-            .map(f => path.join(rulesDir, f))
-        }
-
-        // Collect scripts files
-        if (fs.existsSync(scriptsDir)) {
-          const scriptsEntries = await fs.promises.readdir(scriptsDir)
-          files.scripts = scriptsEntries
-            .filter(f => !f.startsWith('.'))
-            .map(f => path.join(scriptsDir, f))
-        }
-
-        // Collect references files
-        if (fs.existsSync(referencesDir)) {
-          const refsEntries = await fs.promises.readdir(referencesDir)
-          files.references = refsEntries
-            .filter(f => !f.startsWith('.'))
-            .map(f => path.join(referencesDir, f))
-        }
-
-        // Collect tools (Web apps)
-        const toolsDir = path.join(skillPath, 'tools')
-        if (fs.existsSync(toolsDir)) {
-          const toolsEntries = await fs.promises.readdir(toolsDir, { withFileTypes: true })
-          const tools: ToolInfo[] = []
-
-          for (const toolEntry of toolsEntries) {
-            if (!toolEntry.isDirectory()) continue
-            if (toolEntry.name.startsWith('.')) continue
-            if (toolEntry.name === 'node_modules') continue
-
-            const toolPath = path.join(toolsDir, toolEntry.name)
-            const packageJsonPath = path.join(toolPath, 'package.json')
-            const hasPackageJson = fs.existsSync(packageJsonPath)
-
-            let displayName = toolEntry.name
-            let startCommand: string | undefined
-
-            if (hasPackageJson) {
-              try {
-                const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8')
-                const pkg = JSON.parse(pkgContent)
-                displayName = pkg.name || toolEntry.name
-                // Determine start command (prefer "dev" for development)
-                if (pkg.scripts?.dev) {
-                  startCommand = 'dev'
-                } else if (pkg.scripts?.start) {
-                  startCommand = 'start'
-                }
-              } catch {
-                // Ignore package.json parse errors
-              }
-            }
-
-            tools.push({
-              name: toolEntry.name,
-              displayName,
-              path: toolPath,
-              hasPackageJson,
-              startCommand,
-            })
-          }
-
-          if (tools.length > 0) {
-            files.tools = tools
-          }
-        }
-
-        // Check if this skill is in .gitignore (private/not shared)
-        const skillRelativePath = `${departmentFolder}/.claude/skills/${entry.name}/`
-        const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
-
-        skills.push({
-          id: `${departmentId}-${entry.name}`,
-          name: frontmatter.name || entry.name,
-          description: frontmatter.description || '',
-          departmentId,
-          skillPath,
-          isPrivate,
-          isNurturing: frontmatter.status === 'nurturing',
-          files,
-        })
-      } catch (err) {
-        console.error(`Failed to parse skill ${entry.name}:`, err)
-        // Skip this skill if parsing fails
-      }
-    }
+    const skills = await scanSkills(rootPath, departmentFolder, departmentId)
+    skillsCache.set(skillsDir, { skills, timestamp: Date.now() })
 
     return { success: true, skills }
   } catch (error) {
@@ -2469,6 +2485,7 @@ ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: 
     }
     fs.writeFileSync(gitignorePath, cleanedLines.join('\n'))
     invalidateGitignoreCache(rootPath)
+    invalidateSkillsCache(rootPath)
     return { success: true }
   } catch (error) {
     console.error('Publish skill error:', error)
@@ -2493,6 +2510,7 @@ ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePa
       }
       fs.writeFileSync(gitignorePath, lines.join('\n'))
       invalidateGitignoreCache(rootPath)
+      invalidateSkillsCache(rootPath)
     }
     return { success: true }
   } catch (error) {

@@ -103,6 +103,18 @@ export function FileTreePanel({
 
   const departmentPath = `${rootPath}/${departmentFolder}`
 
+  // Determine the target directory for new file/folder creation based on current selection
+  const activeParentPath = (() => {
+    if (!selectedFilePath) return departmentPath
+    // Find if the selected path is a directory (check in expanded dirs or files)
+    const isDir = expandedDirs.has(selectedFilePath) ||
+      files.some(f => f.path === selectedFilePath && f.isDirectory) ||
+      Array.from(childrenCache.current.values()).flat().some(f => f.path === selectedFilePath && f.isDirectory)
+    if (isDir) return selectedFilePath
+    // It's a file — use its parent directory
+    return selectedFilePath.substring(0, selectedFilePath.lastIndexOf('/'))
+  })()
+
   // Load single directory (non-recursive)
   const loadSingleDirectory = useCallback(async (dirPath: string, includeDotFiles: boolean): Promise<FileEntry[]> => {
     try {
@@ -317,11 +329,14 @@ export function FileTreePanel({
   }, [expandedDirs, loadedDirs, loadChildren])
 
   const renderFileIcon = (name: string, isDirectory: boolean, isExpanded: boolean) => {
-    if (isDirectory) {
-      return <FolderIcon size={16} isOpen={isExpanded} className="flex-shrink-0" />
-    }
-    const IconComponent = getFileIcon(name, false)
-    return <IconComponent size={16} className="flex-shrink-0" />
+    const icon = isDirectory
+      ? <FolderIcon size={14} isOpen={isExpanded} />
+      : (() => { const IC = getFileIcon(name, false); return <IC size={14} /> })()
+    return (
+      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+        {icon}
+      </span>
+    )
   }
 
   // Context menu handlers
@@ -442,10 +457,15 @@ export function FileTreePanel({
       return next
     })
 
+    // Ensure the parent directory is expanded so the new item is visible
+    if (parentPath !== departmentPath && !expandedDirs.has(parentPath)) {
+      setExpandedDirs(prev => new Set(prev).add(parentPath))
+    }
+
     if (parentPath === departmentPath) {
-      loadFiles()
-    } else if (expandedDirs.has(parentPath)) {
-      loadChildren(parentPath)
+      loadFiles(true)
+    } else {
+      await loadChildren(parentPath)
     }
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
@@ -661,19 +681,20 @@ export function FileTreePanel({
           `}
           style={{ paddingLeft: `${8 + depth * 12}px` }}
         >
-          {entry.isDirectory && (
-            isLoadingChildren ? (
-              <SpinnerGap size={12} className="flex-shrink-0 text-gray-400 dark:text-zinc-500 animate-spin" />
-            ) : (
-              <CaretRight
-                size={12}
-                className={`flex-shrink-0 text-gray-400 dark:text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-              />
-            )
-          )}
-          {!entry.isDirectory && <span className="w-3" />}
+          <span className="flex-shrink-0 w-3 h-4 flex items-center justify-center">
+            {entry.isDirectory && (
+              isLoadingChildren ? (
+                <SpinnerGap size={10} className="text-gray-400 dark:text-zinc-500 animate-spin" />
+              ) : (
+                <CaretRight
+                  size={10}
+                  className={`text-gray-400 dark:text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+                />
+              )
+            )}
+          </span>
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
-          <span className="truncate">{entry.name}</span>
+          <span className="truncate" title={entry.name}>{entry.name}</span>
         </div>
 
         {entry.isDirectory && isExpanded && (
@@ -720,14 +741,14 @@ export function FileTreePanel({
             <ArrowClockwise size={14} className={isLoading ? 'animate-spin' : ''} />
           </button>
           <button
-            onClick={() => handleNewFile(departmentPath)}
+            onClick={() => handleNewFile(activeParentPath)}
             className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             title={t('fileTree.newFile')}
           >
             <FilePlus size={14} />
           </button>
           <button
-            onClick={() => handleNewFolder(departmentPath)}
+            onClick={() => handleNewFolder(activeParentPath)}
             className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
             title={t('fileTree.newFolder')}
           >
