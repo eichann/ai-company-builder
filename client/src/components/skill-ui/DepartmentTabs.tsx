@@ -15,6 +15,7 @@ import {
   Gear,
   IconProps
 } from '@phosphor-icons/react'
+import { memo } from 'react'
 import type { DepartmentConfig } from '../../types'
 
 // Icon mapping - must match Admin UI's ICON_OPTIONS
@@ -41,7 +42,7 @@ interface DepartmentTabsProps {
   onSelect: (id: string) => void
 }
 
-export function DepartmentTabs({ departments, selectedId, onSelect }: DepartmentTabsProps) {
+export const DepartmentTabs = memo(function DepartmentTabs({ departments, selectedId, onSelect }: DepartmentTabsProps) {
   return (
     <div className="flex items-center gap-2 px-6 py-4 overflow-x-auto scrollbar-hide">
       {departments.map((dept) => {
@@ -85,4 +86,4 @@ export function DepartmentTabs({ departments, selectedId, onSelect }: Department
       })}
     </div>
   )
-}
+})

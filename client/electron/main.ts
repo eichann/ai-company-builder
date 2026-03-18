@@ -270,21 +270,27 @@ function getClaudeCodeCliPath(): string {
   return status?.cliPath || (process.platform === 'win32' ? 'claude.cmd' : 'claude')
 }
 
+let cachedConfig: AppConfig | null = null
+
 function loadConfig(): AppConfig {
+  if (cachedConfig) return cachedConfig
   try {
     const configPath = getConfigPath()
     if (fs.existsSync(configPath)) {
-      return JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+      cachedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
+      return cachedConfig!
     }
   } catch {
     // ignore
   }
-  return {}
+  cachedConfig = {}
+  return cachedConfig
 }
 
 function saveConfig(config: AppConfig): void {
   const configPath = getConfigPath()
   fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
+  cachedConfig = config
 }
 
 function createWindow() {
@@ -586,21 +592,27 @@ ipcMain.handle('fs:watch', async (_, rootPath: string) => {
       depth: 10,
     })
 
-    watcher.on('add', (filePath) => {
-      mainWindow?.webContents.send('fs:change', { type: 'add', path: filePath })
-    })
-    watcher.on('addDir', (dirPath) => {
-      mainWindow?.webContents.send('fs:change', { type: 'addDir', path: dirPath })
-    })
-    watcher.on('unlink', (filePath) => {
-      mainWindow?.webContents.send('fs:change', { type: 'unlink', path: filePath })
-    })
-    watcher.on('unlinkDir', (dirPath) => {
-      mainWindow?.webContents.send('fs:change', { type: 'unlinkDir', path: dirPath })
-    })
-    watcher.on('change', (filePath) => {
-      mainWindow?.webContents.send('fs:change', { type: 'change', path: filePath })
-    })
+    // Debounce file change events to avoid flooding IPC during bulk operations
+    let pendingChanges: Array<{ type: string; path: string }> = []
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null
+
+    const queueChange = (type: string, changePath: string) => {
+      pendingChanges.push({ type, path: changePath })
+      if (debounceTimer) clearTimeout(debounceTimer)
+      debounceTimer = setTimeout(() => {
+        if (pendingChanges.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('fs:changes', pendingChanges)
+        }
+        pendingChanges = []
+        debounceTimer = null
+      }, 200)
+    }
+
+    watcher.on('add', (filePath) => queueChange('add', filePath))
+    watcher.on('addDir', (dirPath) => queueChange('addDir', dirPath))
+    watcher.on('unlink', (filePath) => queueChange('unlink', filePath))
+    watcher.on('unlinkDir', (dirPath) => queueChange('unlinkDir', dirPath))
+    watcher.on('change', (filePath) => queueChange('change', filePath))
 
     fileWatchers.set(safePath, watcher)
     return { success: true }
@@ -2273,6 +2285,29 @@ function parseSkillFrontmatter(content: string): { name?: string; description?: 
   return result
 }
 
+// Gitignore cache per rootPath to avoid repeated file reads
+const gitignoreCache = new Map<string, { lines: string[]; mtime: number }>()
+
+function getGitignoreLines(rootPath: string): string[] {
+  const gitignorePath = path.join(rootPath, '.gitignore')
+  try {
+    if (!fs.existsSync(gitignorePath)) return []
+    const stat = fs.statSync(gitignorePath)
+    const cached = gitignoreCache.get(rootPath)
+    if (cached && cached.mtime === stat.mtimeMs) return cached.lines
+    const content = fs.readFileSync(gitignorePath, 'utf-8')
+    const lines = content.split('\n').map(l => l.trim())
+    gitignoreCache.set(rootPath, { lines, mtime: stat.mtimeMs })
+    return lines
+  } catch {
+    return []
+  }
+}
+
+function invalidateGitignoreCache(rootPath: string): void {
+  gitignoreCache.delete(rootPath)
+}
+
 // List skills for a department
 ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string) => {
   try {
@@ -2283,13 +2318,8 @@ ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: stri
       return { success: true, skills: [] }
     }
 
-    // Read .gitignore to detect draft skills
-    const gitignorePath = path.join(rootPath, '.gitignore')
-    const gitignoreLines: string[] = []
-    if (fs.existsSync(gitignorePath)) {
-      const content = fs.readFileSync(gitignorePath, 'utf-8')
-      gitignoreLines.push(...content.split('\n').map(l => l.trim()))
-    }
+    // Read .gitignore to detect draft skills (cached)
+    const gitignoreLines = getGitignoreLines(rootPath)
 
     const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
     const skills: SkillInfo[] = []
@@ -2438,6 +2468,7 @@ ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: 
       cleanedLines.push(filtered[i])
     }
     fs.writeFileSync(gitignorePath, cleanedLines.join('\n'))
+    invalidateGitignoreCache(rootPath)
     return { success: true }
   } catch (error) {
     console.error('Publish skill error:', error)
@@ -2461,6 +2492,7 @@ ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePa
         lines.push('', header, skillRelativePath)
       }
       fs.writeFileSync(gitignorePath, lines.join('\n'))
+      invalidateGitignoreCache(rootPath)
     }
     return { success: true }
   } catch (error) {
@@ -2550,10 +2582,32 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
         const server = net.createServer()
         server.once('error', () => resolve(true))
         server.once('listening', () => {
-          server.close()
-          resolve(false)
+          server.close(() => resolve(false))
         })
         server.listen(p)
+      })
+    }
+
+    const waitForPort = (p: number, timeoutMs: number): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const start = Date.now()
+        const check = () => {
+          const socket = new net.Socket()
+          socket.once('connect', () => {
+            socket.destroy()
+            resolve(true)
+          })
+          socket.once('error', () => {
+            socket.destroy()
+            if (Date.now() - start > timeoutMs) {
+              resolve(false)
+            } else {
+              setTimeout(check, 200)
+            }
+          })
+          socket.connect(p, '127.0.0.1')
+        }
+        check()
       })
     }
 
@@ -2602,8 +2656,11 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
       runningTools.delete(toolPath)
     })
 
-    // Wait a bit for the server to start
-    await new Promise((resolve) => setTimeout(resolve, 2000))
+    // Wait for the server to be ready (port listening), with timeout
+    const isReady = await waitForPort(port, 5000)
+    if (!isReady) {
+      console.warn(`[tools:start] Port ${port} not ready after timeout, proceeding anyway`)
+    }
 
     return { success: true, port, pid: childProcess.pid }
   } catch (error) {

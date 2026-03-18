@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, CircleNotch, Lightning, CaretRight, Flask } from '@phosphor-icons/react'
 import { SkillCard } from './SkillCard'
@@ -26,8 +26,8 @@ export function SkillGrid({
   const { t } = useTranslation()
   const [isPrivateExpanded, setIsPrivateExpanded] = useState(false)
 
-  const publicSkills = skills.filter(s => !s.isPrivate)
-  const privateSkills = skills.filter(s => s.isPrivate)
+  const publicSkills = useMemo(() => skills.filter(s => !s.isPrivate), [skills])
+  const privateSkills = useMemo(() => skills.filter(s => s.isPrivate), [skills])
 
   if (isLoading) {
     return (

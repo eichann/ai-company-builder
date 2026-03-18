@@ -1,3 +1,4 @@
+import { memo } from 'react'
 import { Lightning, FileText, Gear } from '@phosphor-icons/react'
 import type { Skill } from '../../types'
 
@@ -9,7 +10,7 @@ interface SkillCardProps {
   onExecute: () => void
 }
 
-export function SkillCard({ skill, color, isSelected, onSelect, onExecute }: SkillCardProps) {
+export const SkillCard = memo(function SkillCard({ skill, color, isSelected, onSelect, onExecute }: SkillCardProps) {
   return (
     <div
       onClick={onSelect}
@@ -98,4 +99,4 @@ export function SkillCard({ skill, color, isSelected, onSelect, onExecute }: Ski
       />
     </div>
   )
-}
+})
