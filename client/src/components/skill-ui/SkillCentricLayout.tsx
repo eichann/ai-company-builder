@@ -64,6 +64,7 @@ export function SkillCentricLayout() {
 
   // Panel width state (resizable)
   const [leftPanelWidth, setLeftPanelWidth] = useState(550)
+  const [fileTreeWidth, setFileTreeWidth] = useState(200)
 
   // Modals
   const [showNewSkillWizard, setShowNewSkillWizard] = useState(false)
@@ -311,6 +312,10 @@ ${promptContent}
     refreshSkills()
   }, [refreshSkills])
 
+  const handleFileTreeResize = useCallback((delta: number) => {
+    setFileTreeWidth(prev => Math.min(400, Math.max(120, prev + delta)))
+  }, [])
+
   const handleLeftPanelResize = useCallback((delta: number) => {
     setLeftPanelWidth(prev => {
       const newWidth = prev + delta
@@ -557,7 +562,7 @@ ${promptContent}
             ) : (
               /* Files Tab */
               <div className="h-full flex min-w-0">
-                <div className="w-[200px] flex-shrink-0">
+                <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
                   <FileTreePanel
                     rootPath={currentCompany?.rootPath || ''}
                     departmentFolder={selectedDept?.folder || ''}
@@ -565,6 +570,7 @@ ${promptContent}
                     onSelectFile={handleOpenFile}
                   />
                 </div>
+                <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />
                 <div className="flex-1 min-w-0">
                   <TabbedEditorPanel
                     openFiles={openFiles}
