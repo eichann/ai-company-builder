@@ -56,9 +56,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   watchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:watch', rootPath),
   unwatchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:unwatch', rootPath),
   onFileChange: (callback: (data: { type: string; path: string }) => void) => {
-    const handler = (_: unknown, data: { type: string; path: string }) => callback(data)
-    ipcRenderer.on('fs:change', handler)
-    return () => ipcRenderer.removeListener('fs:change', handler)
+    const batchHandler = (_: unknown, changes: Array<{ type: string; path: string }>) => {
+      for (const change of changes) callback(change)
+    }
+    ipcRenderer.on('fs:changes', batchHandler)
+    return () => ipcRenderer.removeListener('fs:changes', batchHandler)
   },
 
   // Git operations

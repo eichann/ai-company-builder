@@ -19,7 +19,7 @@ const getInitialModel = (): AIModel => {
       return saved
     }
   }
-  return 'sonnet'
+  return 'opus'
 }
 
 // Active skill with loaded content
