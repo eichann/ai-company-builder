@@ -57,6 +57,14 @@ export function FileTreePanel({
   const pendingReloadRef = useRef(false)
   const deferredReloadTimerRef = useRef<number | null>(null)
 
+  // Per-department tree cache to avoid re-reading on tab switch
+  const departmentTreeCache = useRef<Map<string, {
+    files: FileEntry[]
+    children: Map<string, FileEntry[]>
+    expandedDirs: Set<string>
+    loadedDirs: Set<string>
+  }>>(new Map())
+
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
     position: { x: number; y: number }
@@ -115,51 +123,72 @@ export function FileTreePanel({
     return selectedFilePath.substring(0, selectedFilePath.lastIndexOf('/'))
   })()
 
-  // Load single directory (non-recursive)
-  const loadSingleDirectory = useCallback(async (dirPath: string, includeDotFiles: boolean): Promise<FileEntry[]> => {
-    try {
-      const entries = await window.electronAPI.readDirectory(dirPath)
+  // Sort entries: directories first, then files, alphabetically
+  const sortEntries = (entries: FileEntry[]): FileEntry[] =>
+    entries.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1
+      if (!a.isDirectory && b.isDirectory) return 1
+      return a.name.localeCompare(b.name)
+    })
+
+  // Filter and convert raw tree data from IPC into FileEntry[], populating childrenCache
+  const processTree = useCallback((
+    rawEntries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>,
+    includeDotFiles: boolean,
+  ): { topLevel: FileEntry[]; expandedDirs: Set<string>; loadedDirs: Set<string> } => {
+    const newExpanded = new Set<string>()
+    const newLoaded = new Set<string>()
+
+    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>): FileEntry[] => {
       const result: FileEntry[] = []
-
       for (const entry of entries) {
-        // Skip node_modules and .DS_Store always
         if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
-
-        // Skip hidden files unless showDotFiles is enabled
         if (entry.name.startsWith('.') && !includeDotFiles) continue
 
         const fileEntry: FileEntry = {
           name: entry.name,
           path: entry.path,
           isDirectory: entry.isDirectory,
-          // Don't load children yet - lazy loading
-          children: entry.isDirectory ? undefined : undefined,
         }
-
         result.push(fileEntry)
-      }
 
-      // Sort: directories first, then files, alphabetically
-      return result.sort((a, b) => {
-        if (a.isDirectory && !b.isDirectory) return -1
-        if (!a.isDirectory && b.isDirectory) return 1
-        return a.name.localeCompare(b.name)
-      })
+        // If the IPC returned children, process and cache them
+        if (entry.isDirectory && entry.children) {
+          const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>))
+          childrenCache.current.set(entry.path, children)
+          newExpanded.add(entry.path)
+          newLoaded.add(entry.path)
+        }
+      }
+      return result
+    }
+
+    const topLevel = sortEntries(process(rawEntries))
+    return { topLevel, expandedDirs: newExpanded, loadedDirs: newLoaded }
+  }, [])
+
+  // Load single directory (for lazy-loading deeper levels and refresh)
+  const loadSingleDirectory = useCallback(async (dirPath: string, includeDotFiles: boolean): Promise<FileEntry[]> => {
+    try {
+      const entries = await window.electronAPI.readDirectory(dirPath)
+      const result: FileEntry[] = []
+      for (const entry of entries) {
+        if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
+        if (entry.name.startsWith('.') && !includeDotFiles) continue
+        result.push({ name: entry.name, path: entry.path, isDirectory: entry.isDirectory })
+      }
+      return sortEntries(result)
     } catch {
       return []
     }
   }, [])
 
-  // Load children for a specific directory (lazy loading)
+  // Load children for a specific directory (lazy loading for depth > 2)
   const loadChildren = useCallback(async (dirPath: string): Promise<FileEntry[]> => {
-    // Check cache first
     const cached = childrenCache.current.get(dirPath)
-    if (cached && loadedDirs.has(dirPath)) {
-      return cached
-    }
+    if (cached && loadedDirs.has(dirPath)) return cached
 
     setLoadingDirs(prev => new Set(prev).add(dirPath))
-
     try {
       const children = await loadSingleDirectory(dirPath, showDotFiles)
       childrenCache.current.set(dirPath, children)
@@ -174,57 +203,68 @@ export function FileTreePanel({
     }
   }, [loadSingleDirectory, showDotFiles, loadedDirs])
 
-  // Initial load - just the first level
+  // Save cache when department changes (before new load)
+  const prevDepartmentRef = useRef(departmentPath)
+  if (prevDepartmentRef.current !== departmentPath) {
+    departmentTreeCache.current.set(prevDepartmentRef.current, {
+      files,
+      children: new Map(childrenCache.current),
+      expandedDirs: new Set(expandedDirsRef.current),
+      loadedDirs: new Set(loadedDirs),
+    })
+    prevDepartmentRef.current = departmentPath
+  }
+
+  // Load entire tree with single IPC call
   const loadFiles = useCallback(async (preserveExpandedState = false) => {
     perfMark('file_tree_panel.load_files.start')
     const startedAt = performance.now()
+
+    // Check department cache for instant restore on tab switch
+    if (!preserveExpandedState) {
+      const cached = departmentTreeCache.current.get(departmentPath)
+      if (cached) {
+        setFiles(cached.files)
+        childrenCache.current = new Map(cached.children)
+        setExpandedDirs(cached.expandedDirs)
+        setLoadedDirs(cached.loadedDirs)
+        perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
+        // Background refresh with single IPC call (don't touch expandedDirs — preserve user's state)
+        window.electronAPI.readDirectoryTree(departmentPath, 2).then(rawEntries => {
+          const { topLevel, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
+          setFiles(topLevel)
+          // Only update loadedDirs (which dirs have cached children), NOT expandedDirs
+          setLoadedDirs(prev => {
+            const merged = new Set(prev)
+            for (const d of newLoaded) merged.add(d)
+            return merged
+          })
+        })
+        return
+      }
+    }
+
     setIsLoading(true)
-
-    // Save current expanded dirs before clearing cache
-    const previousExpandedDirs = preserveExpandedState ? new Set(expandedDirsRef.current) : null
-
-    // Clear caches when reloading
     childrenCache.current.clear()
     setLoadedDirs(new Set())
 
     try {
-      const entries = await loadSingleDirectory(departmentPath, showDotFiles)
-      setFiles(entries)
+      // Single IPC call fetches 2 levels of directory tree
+      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 2)
+      const { topLevel, expandedDirs: newExpanded, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
+      setFiles(topLevel)
 
-      if (previousExpandedDirs && previousExpandedDirs.size > 0) {
-        // Refresh mode: preserve expanded state and reload expanded directories
-        setExpandedDirs(previousExpandedDirs)
-        for (const dirPath of previousExpandedDirs) {
-          try {
-            const children = await loadSingleDirectory(dirPath, showDotFiles)
-            childrenCache.current.set(dirPath, children)
-            setLoadedDirs(prev => new Set(prev).add(dirPath))
-          } catch {
-            // Directory may have been deleted; remove from expanded
-            setExpandedDirs(prev => {
-              const next = new Set(prev)
-              next.delete(dirPath)
-              return next
-            })
-          }
-        }
+      if (preserveExpandedState) {
+        // Don't change expandedDirs — preserve user's state as-is
       } else {
-        // Initial load: auto-expand first level directories
-        const firstLevelDirs = entries.filter(e => e.isDirectory).map(e => e.path)
-        setExpandedDirs(new Set(firstLevelDirs))
-
-        // Pre-load children of first level directories
-        for (const dirPath of firstLevelDirs) {
-          const children = await loadSingleDirectory(dirPath, showDotFiles)
-          childrenCache.current.set(dirPath, children)
-          setLoadedDirs(prev => new Set(prev).add(dirPath))
-        }
+        setExpandedDirs(newExpanded)
       }
+      setLoadedDirs(newLoaded)
     } finally {
       perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
       setIsLoading(false)
     }
-  }, [departmentPath, loadSingleDirectory, showDotFiles])
+  }, [departmentPath, showDotFiles, processTree])
 
   const requestDeferredReload = useCallback(() => {
     pendingReloadRef.current = true

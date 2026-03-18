@@ -39,6 +39,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   selectDirectory: () => ipcRenderer.invoke('dialog:selectDirectory'),
   registerAllowedRoot: (path: string) => ipcRenderer.invoke('fs:registerAllowedRoot', path),
   readDirectory: (path: string) => ipcRenderer.invoke('fs:readDirectory', path),
+  readDirectoryTree: (path: string, maxDepth?: number) => ipcRenderer.invoke('fs:readDirectoryTree', path, maxDepth ?? 2),
   readFile: (path: string) => ipcRenderer.invoke('fs:readFile', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('fs:writeFile', path, content),
   createDirectory: (path: string) => ipcRenderer.invoke('fs:createDirectory', path),
@@ -380,6 +381,7 @@ declare global {
       selectDirectory: () => Promise<string | null>
       registerAllowedRoot: (path: string) => Promise<{ success: boolean }>
       readDirectory: (path: string) => Promise<Array<{ name: string; isDirectory: boolean; path: string }>>
+      readDirectoryTree: (path: string, maxDepth?: number) => Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<{ name: string; isDirectory: boolean; path: string; children?: unknown[] }> }>>
       readFile: (path: string) => Promise<string | null>
       writeFile: (path: string, content: string) => Promise<boolean>
       createDirectory: (path: string) => Promise<boolean>

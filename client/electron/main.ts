@@ -460,6 +460,36 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
   }
 })
 
+ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
+  try {
+    const safePath = validatePath(dirPath)
+    const readLevel = async (dir: string, depth: number): Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>> => {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      const results = await Promise.all(entries.map(async (entry) => {
+        const entryPath = path.join(dir, entry.name)
+        const isDir = entry.isDirectory()
+        const node: { name: string; isDirectory: boolean; path: string; children?: Array<unknown> } = {
+          name: entry.name,
+          isDirectory: isDir,
+          path: entryPath,
+        }
+        if (isDir && depth < maxDepth) {
+          try {
+            node.children = await readLevel(entryPath, depth + 1)
+          } catch {
+            node.children = []
+          }
+        }
+        return node
+      }))
+      return results
+    }
+    return await readLevel(safePath, 0)
+  } catch {
+    return []
+  }
+})
+
 ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   try {
     const safePath = validatePath(filePath)
