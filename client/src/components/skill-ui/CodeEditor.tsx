@@ -117,11 +117,14 @@ const customDarkTheme = EditorView.theme({
   '.cm-activeLine': {
     backgroundColor: 'rgba(255,255,255,0.03)',
   },
+  '.cm-selectionLayer': {
+    zIndex: '10 !important',
+  },
   '.cm-selectionBackground': {
-    backgroundColor: 'rgba(59, 130, 246, 0.3) !important',
+    backgroundColor: 'rgba(59, 130, 246, 0.4) !important',
   },
   '&.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'rgba(59, 130, 246, 0.4) !important',
+    backgroundColor: 'rgba(59, 130, 246, 0.5) !important',
   },
   '.cm-cursor': {
     borderLeftColor: '#fff',
@@ -198,11 +201,14 @@ const customLightTheme = EditorView.theme({
   '.cm-activeLine': {
     backgroundColor: '#f9fafb',
   },
+  '.cm-selectionLayer': {
+    zIndex: '10 !important',
+  },
   '.cm-selectionBackground': {
-    backgroundColor: 'rgba(59, 130, 246, 0.2) !important',
+    backgroundColor: 'rgba(59, 130, 246, 0.3) !important',
   },
   '&.cm-focused .cm-selectionBackground': {
-    backgroundColor: 'rgba(59, 130, 246, 0.3) !important',
+    backgroundColor: 'rgba(59, 130, 246, 0.4) !important',
   },
   '.cm-cursor': {
     borderLeftColor: '#000',

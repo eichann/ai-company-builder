@@ -244,9 +244,12 @@ export function FileTreePanel({
       }
     }
 
-    setIsLoading(true)
-    childrenCache.current.clear()
-    setLoadedDirs(new Set())
+    if (!preserveExpandedState) {
+      // Only clear cache on full reload (tab switch), not on refresh
+      setIsLoading(true)
+      childrenCache.current.clear()
+      setLoadedDirs(new Set())
+    }
 
     try {
       // Single IPC call fetches 2 levels of directory tree
@@ -262,7 +265,9 @@ export function FileTreePanel({
       setLoadedDirs(newLoaded)
     } finally {
       perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
-      setIsLoading(false)
+      if (!preserveExpandedState) {
+        setIsLoading(false)
+      }
     }
   }, [departmentPath, showDotFiles, processTree])
 
@@ -360,8 +365,8 @@ export function FileTreePanel({
         return next
       })
     } else {
-      // Expand - load children if not loaded
-      if (!loadedDirs.has(path)) {
+      // Expand - use cache if available, otherwise load
+      if (!childrenCache.current.has(path) && !loadedDirs.has(path)) {
         await loadChildren(path)
       }
       setExpandedDirs(prev => new Set(prev).add(path))

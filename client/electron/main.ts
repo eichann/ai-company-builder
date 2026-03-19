@@ -1899,10 +1899,22 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
         const status = await git.status()
         const localBranch = status.current || 'main'
         try {
+          // Stash any uncommitted changes before pull --rebase
+          const hasChanges = status.modified.length > 0 || status.not_added.length > 0 || status.deleted.length > 0
+          if (hasChanges) {
+            await git.stash(['push', '-u', '-m', 'auto-stash before setup pull'])
+            console.log('Git setup: Stashed uncommitted changes')
+          }
           await git.pull('origin', remoteBranch, ['--rebase'])
           console.log(`Git setup: Pulled origin/${remoteBranch} into ${localBranch}`)
+          if (hasChanges) {
+            await git.stash(['pop'])
+            console.log('Git setup: Restored stashed changes')
+          }
         } catch (pullError) {
           console.warn('Git setup: Pull failed, will resolve on next sync:', pullError)
+          // Try to restore stash if it was created
+          try { await git.stash(['pop']) } catch { /* no stash to pop */ }
         }
       }
 
