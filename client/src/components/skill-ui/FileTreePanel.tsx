@@ -70,6 +70,7 @@ export function FileTreePanel({
     position: { x: number; y: number }
     entry: FileEntry | null
     parentPath: string
+    selectedSnapshot: Set<string>
   } | null>(null)
 
   // Dialog state
@@ -94,6 +95,7 @@ export function FileTreePanel({
     title: string
     message: string
     targetPath: string
+    targetPaths?: string[]
   }>({
     isOpen: false,
     title: '',
@@ -101,8 +103,14 @@ export function FileTreePanel({
     targetPath: '',
   })
 
-  // Multi-select state
-  const [selectedPaths, setSelectedPaths] = useState<Set<string>>(new Set())
+  // Multi-select state — ref is updated synchronously so right-click snapshots are always accurate
+  const [selectedPaths, _setSelectedPaths] = useState<Set<string>>(new Set())
+  const selectedPathsRef = useRef<Set<string>>(selectedPaths)
+  const setSelectedPaths = useCallback((update: Set<string> | ((prev: Set<string>) => Set<string>)) => {
+    const next = typeof update === 'function' ? update(selectedPathsRef.current) : update
+    selectedPathsRef.current = next
+    _setSelectedPaths(next)
+  }, [])
   const [lastClickedPath, setLastClickedPath] = useState<string | null>(null)
 
   // Drag & drop state
@@ -398,10 +406,14 @@ export function FileTreePanel({
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry | null, parentPath: string) => {
     e.preventDefault()
     e.stopPropagation()
+    // Use ref to always get the latest selectedPaths (state may be stale in closure)
+    const snapshot = new Set(selectedPathsRef.current)
+    if (entry) snapshot.add(entry.path)
     setContextMenu({
       position: { x: e.clientX, y: e.clientY },
       entry,
       parentPath,
+      selectedSnapshot: snapshot,
     })
   }, [])
 
@@ -415,8 +427,9 @@ export function FileTreePanel({
       position: { x: e.clientX, y: e.clientY },
       entry: null,
       parentPath: departmentPath,
+      selectedSnapshot: new Set(selectedPaths),
     })
-  }, [departmentPath])
+  }, [departmentPath, selectedPaths])
 
   // File operations
   const handleNewFile = useCallback((parentPath: string) => {
@@ -527,30 +540,85 @@ export function FileTreePanel({
   }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren])
 
   const handleDeleteConfirm = useCallback(async () => {
-    const { targetPath } = confirmDialog
-    const parentPath = targetPath.substring(0, targetPath.lastIndexOf('/'))
+    const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
+    const affectedParents = new Set<string>()
 
-    await window.electronAPI.deleteItem(targetPath)
-
-    // Invalidate cache and reload
-    childrenCache.current.delete(parentPath)
-    setLoadedDirs(prev => {
-      const next = new Set(prev)
-      next.delete(parentPath)
-      return next
-    })
-
-    if (parentPath === departmentPath) {
-      loadFiles()
-    } else if (expandedDirs.has(parentPath)) {
-      loadChildren(parentPath)
+    for (const p of paths) {
+      await window.electronAPI.deleteItem(p)
+      affectedParents.add(p.substring(0, p.lastIndexOf('/')))
     }
 
+    // Invalidate cache for all affected parent directories
+    for (const parentPath of affectedParents) {
+      childrenCache.current.delete(parentPath)
+      setLoadedDirs(prev => {
+        const next = new Set(prev)
+        next.delete(parentPath)
+        return next
+      })
+    }
+
+    setSelectedPaths(new Set())
+    loadFiles(true)
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-  }, [confirmDialog, departmentPath, expandedDirs, loadFiles, loadChildren])
+  }, [confirmDialog, loadFiles])
+
+  // Handle multi-delete
+  const handleDeleteSelected = useCallback(() => {
+    const paths = [...selectedPaths]
+    const count = paths.length
+    const hasFolders = paths.some(p =>
+      files.some(f => f.path === p && f.isDirectory) ||
+      Array.from(childrenCache.current.values()).flat().some(f => f.path === p && f.isDirectory)
+    )
+    const message = `${count}件のアイテムを削除しますか？` +
+      (hasFolders ? ' フォルダを含む場合、中身もすべて削除されます。' : '') +
+      ' この操作は取り消せません。'
+    setConfirmDialog({
+      isOpen: true,
+      title: `${count}件を削除`,
+      message,
+      targetPath: '',
+      targetPaths: paths,
+    })
+    closeContextMenu()
+  }, [selectedPaths, files, closeContextMenu])
 
   // Build context menu items
-  const getContextMenuItems = useCallback((entry: FileEntry | null, parentPath: string): ContextMenuItem[] => {
+  const getContextMenuItems = useCallback((entry: FileEntry | null, parentPath: string, snapshot?: Set<string>): ContextMenuItem[] => {
+    // Multi-select context menu using snapshot from right-click moment
+    const effectiveSelection = snapshot || new Set<string>()
+    if (effectiveSelection.size > 1) {
+      return [
+        {
+          label: `${effectiveSelection.size}件を削除`,
+          icon: <Trash size={16} />,
+          danger: true,
+          onClick: () => {
+            // Ensure selection includes the right-clicked item
+            setSelectedPaths(effectiveSelection)
+            const paths = [...effectiveSelection]
+            const count = paths.length
+            const hasFolders = paths.some(p =>
+              files.some(f => f.path === p && f.isDirectory) ||
+              Array.from(childrenCache.current.values()).flat().some(f => f.path === p && f.isDirectory)
+            )
+            const message = `${count}件のアイテムを削除しますか？` +
+              (hasFolders ? ' フォルダを含む場合、中身もすべて削除されます。' : '') +
+              ' この操作は取り消せません。'
+            setConfirmDialog({
+              isOpen: true,
+              title: `${count}件を削除`,
+              message,
+              targetPath: '',
+              targetPaths: paths,
+            })
+            closeContextMenu()
+          },
+        },
+      ]
+    }
+
     if (!entry) {
       return [
         {
@@ -607,7 +675,7 @@ export function FileTreePanel({
     )
 
     return items
-  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, t])
+  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, closeContextMenu, files, t])
 
   const renderEntry = (entry: FileEntry, depth: number = 0) => {
     const isExpanded = expandedDirs.has(entry.path)
@@ -722,7 +790,13 @@ export function FileTreePanel({
               }
             }
           }}
-          onContextMenu={(e) => handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))}
+          onContextMenu={(e) => {
+            // If right-clicking on an unselected item while multi-selecting, add it to selection
+            if (selectedPaths.size > 0 && !selectedPaths.has(entry.path)) {
+              setSelectedPaths(prev => new Set(prev).add(entry.path))
+            }
+            handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))
+          }}
           onKeyDown={handleKeyDown}
           className={`
             w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
@@ -849,7 +923,7 @@ export function FileTreePanel({
       {/* Context Menu */}
       {contextMenu && (
         <ContextMenu
-          items={getContextMenuItems(contextMenu.entry, contextMenu.entry?.isDirectory ? contextMenu.entry.path : contextMenu.parentPath)}
+          items={getContextMenuItems(contextMenu.entry, contextMenu.entry?.isDirectory ? contextMenu.entry.path : contextMenu.parentPath, contextMenu.selectedSnapshot)}
           position={contextMenu.position}
           onClose={closeContextMenu}
         />
