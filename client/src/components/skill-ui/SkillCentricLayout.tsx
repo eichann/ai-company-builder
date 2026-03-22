@@ -96,9 +96,13 @@ export function SkillCentricLayout() {
   const pendingSkillsRefreshRef = useRef(false)
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)
 
+  const skillsDeferCountRef = useRef(0)
+  const SKILLS_MAX_DEFER_COUNT = 4
+
   const requestDeferredSkillsRefresh = useCallback(() => {
     pendingSkillsRefreshRef.current = true
     if (deferredSkillsRefreshTimerRef.current != null) return
+    skillsDeferCountRef.current = 0
 
     const run = () => {
       if (!pendingSkillsRefreshRef.current) {
@@ -106,7 +110,8 @@ export function SkillCentricLayout() {
         return
       }
 
-      if (isChatInputRecentlyActive()) {
+      if (isChatInputRecentlyActive() && skillsDeferCountRef.current < SKILLS_MAX_DEFER_COUNT) {
+        skillsDeferCountRef.current++
         perfMark('skill_layout.refresh_skills.deferred_for_chat_input')
         deferredSkillsRefreshTimerRef.current = window.setTimeout(run, 250)
         return
@@ -114,6 +119,7 @@ export function SkillCentricLayout() {
 
       pendingSkillsRefreshRef.current = false
       deferredSkillsRefreshTimerRef.current = null
+      skillsDeferCountRef.current = 0
       void refreshSkills()
     }
 

@@ -132,14 +132,15 @@ export function FileTreePanel({
     })
 
   // Filter and convert raw tree data from IPC into FileEntry[], populating childrenCache
+  // Only populates cache (loadedDirs) — does NOT set expandedDirs (that's UI state)
   const processTree = useCallback((
     rawEntries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>,
     includeDotFiles: boolean,
-  ): { topLevel: FileEntry[]; expandedDirs: Set<string>; loadedDirs: Set<string> } => {
-    const newExpanded = new Set<string>()
+  ): { topLevel: FileEntry[]; firstLevelDirs: Set<string>; loadedDirs: Set<string> } => {
     const newLoaded = new Set<string>()
+    const firstLevelDirs = new Set<string>()
 
-    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>): FileEntry[] => {
+    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, depth: number): FileEntry[] => {
       const result: FileEntry[] = []
       for (const entry of entries) {
         if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
@@ -152,19 +153,21 @@ export function FileTreePanel({
         }
         result.push(fileEntry)
 
-        // If the IPC returned children, process and cache them
-        if (entry.isDirectory && entry.children) {
-          const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>))
-          childrenCache.current.set(entry.path, children)
-          newExpanded.add(entry.path)
-          newLoaded.add(entry.path)
+        if (entry.isDirectory) {
+          if (depth === 0) firstLevelDirs.add(entry.path)
+          // Cache children data if available, but don't auto-expand
+          if (entry.children) {
+            const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, depth + 1))
+            childrenCache.current.set(entry.path, children)
+            newLoaded.add(entry.path)
+          }
         }
       }
       return result
     }
 
-    const topLevel = sortEntries(process(rawEntries))
-    return { topLevel, expandedDirs: newExpanded, loadedDirs: newLoaded }
+    const topLevel = sortEntries(process(rawEntries, 0))
+    return { topLevel, firstLevelDirs, loadedDirs: newLoaded }
   }, [])
 
   // Load single directory (for lazy-loading deeper levels and refresh)
@@ -230,7 +233,7 @@ export function FileTreePanel({
         setLoadedDirs(cached.loadedDirs)
         perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
         // Background refresh with single IPC call (don't touch expandedDirs — preserve user's state)
-        window.electronAPI.readDirectoryTree(departmentPath, 2).then(rawEntries => {
+        window.electronAPI.readDirectoryTree(departmentPath, 10).then(rawEntries => {
           const { topLevel, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
           setFiles(topLevel)
           // Only update loadedDirs (which dirs have cached children), NOT expandedDirs
@@ -253,14 +256,15 @@ export function FileTreePanel({
 
     try {
       // Single IPC call fetches 2 levels of directory tree
-      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 2)
-      const { topLevel, expandedDirs: newExpanded, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
+      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 10)
+      const { topLevel, firstLevelDirs, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
       setFiles(topLevel)
 
       if (preserveExpandedState) {
         // Don't change expandedDirs — preserve user's state as-is
       } else {
-        setExpandedDirs(newExpanded)
+        // Initial load: auto-expand only first-level directories
+        setExpandedDirs(firstLevelDirs)
       }
       setLoadedDirs(newLoaded)
     } finally {
@@ -271,9 +275,13 @@ export function FileTreePanel({
     }
   }, [departmentPath, showDotFiles, processTree])
 
+  const deferCountRef = useRef(0)
+  const MAX_DEFER_COUNT = 4 // max ~1 second of deferral (4 × 250ms)
+
   const requestDeferredReload = useCallback(() => {
     pendingReloadRef.current = true
     if (deferredReloadTimerRef.current != null) return
+    deferCountRef.current = 0
 
     const run = () => {
       if (!pendingReloadRef.current) {
@@ -281,7 +289,8 @@ export function FileTreePanel({
         return
       }
 
-      if (isChatInputRecentlyActive()) {
+      if (isChatInputRecentlyActive() && deferCountRef.current < MAX_DEFER_COUNT) {
+        deferCountRef.current++
         perfMark('file_tree_panel.load_files.deferred_for_chat_input')
         deferredReloadTimerRef.current = window.setTimeout(run, 250)
         return
@@ -289,6 +298,7 @@ export function FileTreePanel({
 
       pendingReloadRef.current = false
       deferredReloadTimerRef.current = null
+      deferCountRef.current = 0
       void loadFiles(true)
     }
 
