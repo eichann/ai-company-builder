@@ -285,33 +285,20 @@ function ThinkingBlock({ content, isStreaming = false }: { content: string; isSt
 // Context Usage Gauge
 // ============================================================================
 
-const CONTEXT_LIMITS: Record<string, number> = {
-  haiku: 200_000,
-  sonnet: 1_000_000,
-  opus: 1_000_000,
-}
-
 interface ContextGaugeProps {
-  usage: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    cacheReadTokens: number
-    cacheWriteTokens: number
-    noCacheTokens: number
+  context: {
+    usedTokens: number
+    maxTokens: number
+    percentage: number
   }
-  model: string
 }
 
-function ContextGauge({ usage, model }: ContextGaugeProps) {
-  const [showTooltip, setShowTooltip] = useState(false)
-  const maxTokens = CONTEXT_LIMITS[model] ?? 1_000_000
-  const percentage = Math.min(100, Math.round((usage.inputTokens / maxTokens) * 100))
-  const cacheHitRate = usage.inputTokens > 0
-    ? Math.round((usage.cacheReadTokens / usage.inputTokens) * 100)
-    : 0
+function ContextGauge({ context }: ContextGaugeProps) {
+  const { usedTokens, maxTokens, percentage } = context
+  const displayPct = Math.min(100, percentage)
 
   const formatTokens = (n: number) => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
     if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
     return String(n)
   }
@@ -330,63 +317,21 @@ function ContextGauge({ usage, model }: ContextGaugeProps) {
       : 'text-gray-400 dark:text-zinc-500'
 
   return (
-    <div
-      className="px-4 pb-3 relative"
-      onMouseEnter={() => setShowTooltip(true)}
-      onMouseLeave={() => setShowTooltip(false)}
-    >
+    <div className="px-4 pb-3">
       {/* Progress bar */}
       <div className="h-1 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
         <div
           className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${percentage}%` }}
+          style={{ width: `${displayPct}%` }}
         />
       </div>
       {/* Label */}
-      <div className={`mt-1 flex items-center justify-between text-[10px] ${textColor}`}>
+      <div className={`mt-1 text-[10px] ${textColor}`}>
         <span>
-          {formatTokens(usage.inputTokens)} / {formatTokens(maxTokens)} tokens ({percentage}%)
+          {formatTokens(usedTokens)} / {formatTokens(maxTokens)} tokens
+          {percentage > 100 ? ' (compacting)' : ` (${percentage}%)`}
         </span>
-        {cacheHitRate > 0 && (
-          <span className="text-gray-400 dark:text-zinc-500">
-            cache {cacheHitRate}%
-          </span>
-        )}
       </div>
-
-      {/* Tooltip */}
-      {showTooltip && (
-        <div className="absolute bottom-full left-4 mb-1 w-48 p-2 rounded-md bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-lg text-[10px] z-50">
-          <div className="space-y-0.5">
-            <div className="flex justify-between text-gray-600 dark:text-zinc-300">
-              <span>Input</span>
-              <span className="font-mono">{formatTokens(usage.inputTokens)}</span>
-            </div>
-            <div className="pl-2 space-y-0.5 text-gray-400 dark:text-zinc-500">
-              <div className="flex justify-between">
-                <span>Cache Read</span>
-                <span className="font-mono">{formatTokens(usage.cacheReadTokens)} ({cacheHitRate}%)</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Cache Write</span>
-                <span className="font-mono">{formatTokens(usage.cacheWriteTokens)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>No Cache</span>
-                <span className="font-mono">{formatTokens(usage.noCacheTokens)}</span>
-              </div>
-            </div>
-            <div className="border-t border-gray-100 dark:border-zinc-700 pt-0.5 flex justify-between text-gray-600 dark:text-zinc-300">
-              <span>Output</span>
-              <span className="font-mono">{formatTokens(usage.outputTokens)}</span>
-            </div>
-            <div className="border-t border-gray-100 dark:border-zinc-700 pt-0.5 flex justify-between font-medium text-gray-700 dark:text-zinc-200">
-              <span>Total</span>
-              <span className="font-mono">{formatTokens(usage.totalTokens)}</span>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }
@@ -1069,6 +1014,37 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
 })
 
 const IMAGE_MIME_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp']
+const MAX_IMAGES = 4
+const MAX_IMAGE_SIZE = 2 * 1024 * 1024 // 2MB
+
+// Stable blob URL management for image previews
+function ImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) {
+  const [url, setUrl] = useState<string>('')
+
+  useEffect(() => {
+    const objectUrl = URL.createObjectURL(file)
+    setUrl(objectUrl)
+    return () => URL.revokeObjectURL(objectUrl)
+  }, [file])
+
+  if (!url) return null
+
+  return (
+    <div className="relative group">
+      <img
+        src={url}
+        alt={file.name}
+        className="w-16 h-16 object-cover rounded-lg border border-border overflow-hidden"
+      />
+      <button
+        onClick={onRemove}
+        className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
+      >
+        ×
+      </button>
+    </div>
+  )
+}
 
 const ChatInput = memo(function ChatInput({
   onSend,
@@ -1082,14 +1058,16 @@ const ChatInput = memo(function ChatInput({
 }: ChatInputProps) {
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const [attachedImages, setAttachedImages] = useState<File[]>([])
+  const [attachedFilePaths, setAttachedFilePaths] = useState<string[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  const [imageWarning, setImageWarning] = useState('')
   const dragCounterRef = useRef(0)
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
     dragCounterRef.current++
-    if (e.dataTransfer.types.includes('Files')) {
+    if (e.dataTransfer.types.includes('Files') || e.dataTransfer.types.includes('application/x-file-paths')) {
       setIsDragOver(true)
     }
   }, [])
@@ -1114,9 +1092,41 @@ const ChatInput = memo(function ChatInput({
     setIsDragOver(false)
     dragCounterRef.current = 0
 
-    const files = Array.from(e.dataTransfer.files).filter(f => IMAGE_MIME_TYPES.includes(f.type))
+    // Handle file paths from file tree D&D
+    const rawPaths = e.dataTransfer.getData('application/x-file-paths')
+    if (rawPaths) {
+      try {
+        const paths: string[] = JSON.parse(rawPaths)
+        setAttachedFilePaths(prev => {
+          const existing = new Set(prev)
+          const newPaths = paths.filter(p => !existing.has(p))
+          return newPaths.length > 0 ? [...prev, ...newPaths] : prev
+        })
+        return
+      } catch { /* fall through to image handling */ }
+    }
+
+    // Handle image files (max 4, max 2MB each)
+    const validFiles = Array.from(e.dataTransfer.files).filter(f => IMAGE_MIME_TYPES.includes(f.type))
+    const oversized = validFiles.filter(f => f.size > MAX_IMAGE_SIZE)
+    const files = validFiles.filter(f => f.size <= MAX_IMAGE_SIZE)
+    const warnings: string[] = []
+    if (oversized.length > 0) {
+      warnings.push(`${oversized.length}件の画像が2MBを超えています`)
+    }
     if (files.length > 0) {
-      setAttachedImages(prev => [...prev, ...files])
+      setAttachedImages(prev => {
+        const combined = [...prev, ...files]
+        const sliced = combined.slice(0, MAX_IMAGES)
+        if (combined.length > MAX_IMAGES) {
+          warnings.push(`画像は最大${MAX_IMAGES}枚までです`)
+        }
+        return sliced
+      })
+    }
+    if (warnings.length > 0) {
+      setImageWarning(warnings.join('、'))
+      setTimeout(() => setImageWarning(''), 4000)
     }
   }, [])
 
@@ -1124,11 +1134,22 @@ const ChatInput = memo(function ChatInput({
     setAttachedImages(prev => prev.filter((_, i) => i !== index))
   }, [])
 
+  const removeFilePath = useCallback((index: number) => {
+    setAttachedFilePaths(prev => prev.filter((_, i) => i !== index))
+  }, [])
+
   const handleSendWithImages = useCallback((text: string) => {
+    // Append file references to the message
+    let finalText = text
+    if (attachedFilePaths.length > 0) {
+      const refs = attachedFilePaths.map(p => `- ${p}`).join('\n')
+      finalText = `${text}\n\n参照ファイル:\n${refs}`
+    }
     const images = attachedImages.length > 0 ? [...attachedImages] : undefined
-    onSend(text, images)
+    onSend(finalText, images)
     setAttachedImages([])
-  }, [onSend, attachedImages])
+    setAttachedFilePaths([])
+  }, [onSend, attachedImages, attachedFilePaths])
 
   const inputComponent = isLegacyTextareaMode ? (
     <LegacyTextareaChatInput
@@ -1167,7 +1188,36 @@ const ChatInput = memo(function ChatInput({
       {/* Drag overlay */}
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-accent/10 border-2 border-dashed border-accent pointer-events-none">
-          <span className="text-sm font-medium text-accent">画像をドロップ</span>
+          <span className="text-sm font-medium text-accent">ファイルをドロップして参照</span>
+        </div>
+      )}
+
+      {/* Image warning */}
+      {imageWarning && (
+        <div className="px-3 pt-2 text-xs text-amber-500">{imageWarning}</div>
+      )}
+
+      {/* File path chips */}
+      {attachedFilePaths.length > 0 && (
+        <div className="flex gap-1.5 px-3 pt-2 pb-1 flex-wrap">
+          {attachedFilePaths.map((filePath, i) => {
+            const fileName = filePath.split('/').pop() || filePath
+            return (
+              <div
+                key={filePath}
+                className="flex items-center gap-1 px-2 py-0.5 rounded-md bg-accent/10 text-accent text-xs group"
+                title={filePath}
+              >
+                <span className="max-w-[200px] truncate">{fileName}</span>
+                <button
+                  onClick={() => removeFilePath(i)}
+                  className="w-4 h-4 flex items-center justify-center rounded-full hover:bg-accent/20 opacity-60 group-hover:opacity-100 transition-opacity text-[10px]"
+                >
+                  ×
+                </button>
+              </div>
+            )
+          })}
         </div>
       )}
 
@@ -1175,19 +1225,7 @@ const ChatInput = memo(function ChatInput({
       {attachedImages.length > 0 && (
         <div className="flex gap-2 px-3 pt-2 pb-1 flex-wrap">
           {attachedImages.map((file, i) => (
-            <div key={i} className="relative group">
-              <img
-                src={URL.createObjectURL(file)}
-                alt={file.name}
-                className="w-16 h-16 object-cover rounded-lg border border-gray-200 dark:border-zinc-700"
-              />
-              <button
-                onClick={() => removeImage(i)}
-                className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-gray-600 text-white flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity text-xs"
-              >
-                ×
-              </button>
-            </div>
+            <ImagePreview key={`${file.name}-${file.size}-${i}`} file={file} onRemove={() => removeImage(i)} />
           ))}
         </div>
       )}
@@ -1349,25 +1387,42 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
     })
   }, [serverInfo.port, serverInfo.authToken])
 
-  // Token usage state for context gauge
-  const [tokenUsage, setTokenUsage] = useState<{
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    cacheReadTokens: number
-    cacheWriteTokens: number
-    noCacheTokens: number
+  // Context usage state for gauge (from /context command, with /api/usage fallback)
+  const [contextInfo, setContextInfo] = useState<{
+    usedTokens: number
+    maxTokens: number
+    percentage: number
   } | null>(null)
 
-  const fetchUsage = useCallback(async () => {
+  const fetchContext = useCallback(async () => {
+    const headers = { Authorization: `Bearer ${serverInfo.authToken}` }
+    const base = `http://127.0.0.1:${serverInfo.port}`
     try {
-      const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/usage`, {
-        headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-      })
+      // Try /context first (accurate, from Claude Code's /context command)
+      const res = await fetch(`${base}/api/context`, { headers })
       const data = await res.json()
-      if (data.usage) setTokenUsage(data.usage)
+      if (data.context) {
+        setContextInfo(data.context)
+        return
+      }
     } catch {
-      // Silently ignore usage fetch errors
+      // /context failed, try fallback
+    }
+    try {
+      // Fallback to /usage (step-level usage, less accurate but always available)
+      const res = await fetch(`${base}/api/usage`, { headers })
+      const data = await res.json()
+      if (data.usage) {
+        const maxTokens = aiModelRef.current === 'haiku' ? 200_000 : 1_000_000
+        const pct = Math.min(100, Math.round((data.usage.inputTokens / maxTokens) * 100))
+        setContextInfo({
+          usedTokens: data.usage.inputTokens,
+          maxTokens,
+          percentage: pct,
+        })
+      }
+    } catch {
+      // Silently ignore
     }
   }, [serverInfo.port, serverInfo.authToken])
 
@@ -1378,8 +1433,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
     onFinish: () => {
       // Refresh file tree in case AI created/modified files
       window.dispatchEvent(new Event('refresh-file-tree'))
-      // Fetch latest token usage
-      fetchUsage()
+      // Fetch context window usage
+      fetchContext()
     },
     onError: (err) => {
       console.error('[useChat] Error:', err)
@@ -1858,7 +1913,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           />
         </div>
         {/* Context Usage Gauge */}
-        {tokenUsage && <ContextGauge usage={tokenUsage} model={aiModel} />}
+        {contextInfo && <ContextGauge context={contextInfo} />}
       </div>
     </div>
   )
