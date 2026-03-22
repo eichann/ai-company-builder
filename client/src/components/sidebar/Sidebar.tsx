@@ -71,9 +71,13 @@ export function Sidebar() {
     [loadDirectoryRecursive, setFileTree]
   )
 
+  const sidebarDeferCountRef = useRef(0)
+  const SIDEBAR_MAX_DEFER_COUNT = 4
+
   const requestDeferredTreeRefresh = useCallback(() => {
     pendingTreeRefreshRef.current = true
     if (deferredRefreshTimerRef.current != null) return
+    sidebarDeferCountRef.current = 0
 
     const run = () => {
       if (!pendingTreeRefreshRef.current || !currentCompany?.rootPath) {
@@ -81,7 +85,8 @@ export function Sidebar() {
         return
       }
 
-      if (isChatInputRecentlyActive()) {
+      if (isChatInputRecentlyActive() && sidebarDeferCountRef.current < SIDEBAR_MAX_DEFER_COUNT) {
+        sidebarDeferCountRef.current++
         perfMark('sidebar.load_file_tree.deferred_for_chat_input')
         deferredRefreshTimerRef.current = window.setTimeout(run, 250)
         return
@@ -89,6 +94,7 @@ export function Sidebar() {
 
       pendingTreeRefreshRef.current = false
       deferredRefreshTimerRef.current = null
+      sidebarDeferCountRef.current = 0
       void loadFileTree(currentCompany.rootPath)
     }
 

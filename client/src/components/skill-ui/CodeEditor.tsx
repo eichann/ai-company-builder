@@ -119,6 +119,7 @@ const customDarkTheme = EditorView.theme({
   },
   '.cm-selectionLayer': {
     zIndex: '10 !important',
+    pointerEvents: 'none',
   },
   '.cm-selectionBackground': {
     backgroundColor: 'rgba(59, 130, 246, 0.4) !important',
@@ -203,6 +204,7 @@ const customLightTheme = EditorView.theme({
   },
   '.cm-selectionLayer': {
     zIndex: '10 !important',
+    pointerEvents: 'none',
   },
   '.cm-selectionBackground': {
     backgroundColor: 'rgba(59, 130, 246, 0.3) !important',
