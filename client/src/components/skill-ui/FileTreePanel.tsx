@@ -294,6 +294,28 @@ export function FileTreePanel({
     }
   }, [departmentPath, showDotFiles, processTree])
 
+  // Resolve a unique destination path (appends " (1)", " (2)" etc. if name already exists)
+  const resolveUniquePath = useCallback(async (destDir: string, fileName: string): Promise<string> => {
+    let destPath = `${destDir}/${fileName}`
+    try {
+      await window.electronAPI.getStats(destPath)
+      const dotIdx = fileName.lastIndexOf('.')
+      const base = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName
+      const ext = dotIdx > 0 ? fileName.substring(dotIdx) : ''
+      for (let i = 1; i < 100; i++) {
+        const candidate = `${destDir}/${base} (${i})${ext}`
+        try {
+          await window.electronAPI.getStats(candidate)
+        } catch {
+          return candidate
+        }
+      }
+    } catch {
+      // Doesn't exist — use as-is
+    }
+    return destPath
+  }, [])
+
   // Handle external file drop (from Finder etc.)
   const handleExternalFileDrop = useCallback(async (fileList: FileList, destDir: string) => {
     const warnings: string[] = []
@@ -316,25 +338,7 @@ export function FileTreePanel({
       }
 
       // Unique destination path
-      let destPath = `${destDir}/${file.name}`
-      try {
-        await window.electronAPI.getStats(destPath)
-        // Already exists — find unique name
-        const dotIdx = file.name.lastIndexOf('.')
-        const base = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name
-        const ext = dotIdx > 0 ? file.name.substring(dotIdx) : ''
-        for (let i = 1; i < 100; i++) {
-          const candidate = `${destDir}/${base} (${i})${ext}`
-          try {
-            await window.electronAPI.getStats(candidate)
-          } catch {
-            destPath = candidate
-            break
-          }
-        }
-      } catch {
-        // Doesn't exist — use as-is
-      }
+      const destPath = await resolveUniquePath(destDir, file.name)
 
       const result = await window.electronAPI.moveFromExternal(file.path, destPath)
       if (result.success) {
@@ -809,7 +813,7 @@ export function FileTreePanel({
               if (entry.path === sourcePath || entry.path.startsWith(sourcePath + '/')) continue
               const fileName = sourcePath.split('/').pop()
               if (!fileName) continue
-              const destPath = `${entry.path}/${fileName}`
+              const destPath = await resolveUniquePath(entry.path, fileName)
               if (sourcePath === destPath) continue
               await window.electronAPI.moveItem(sourcePath, destPath)
             }
@@ -976,7 +980,7 @@ export function FileTreePanel({
           for (const sourcePath of sourcePaths) {
             const fileName = sourcePath.split('/').pop()
             if (!fileName) continue
-            const destPath = `${departmentPath}/${fileName}`
+            const destPath = await resolveUniquePath(departmentPath, fileName)
             if (sourcePath === destPath) continue
             await window.electronAPI.moveItem(sourcePath, destPath)
           }
