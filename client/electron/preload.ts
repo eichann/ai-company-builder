@@ -41,6 +41,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readDirectory: (path: string) => ipcRenderer.invoke('fs:readDirectory', path),
   readDirectoryTree: (path: string, maxDepth?: number) => ipcRenderer.invoke('fs:readDirectoryTree', path, maxDepth ?? 2),
   readFile: (path: string) => ipcRenderer.invoke('fs:readFile', path),
+  readFileBinary: (path: string) => ipcRenderer.invoke('fs:readFileBinary', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('fs:writeFile', path, content),
   createDirectory: (path: string) => ipcRenderer.invoke('fs:createDirectory', path),
   exists: (path: string) => ipcRenderer.invoke('fs:exists', path),
@@ -388,6 +389,7 @@ declare global {
       readDirectory: (path: string) => Promise<Array<{ name: string; isDirectory: boolean; path: string }>>
       readDirectoryTree: (path: string, maxDepth?: number) => Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<{ name: string; isDirectory: boolean; path: string; children?: unknown[] }> }>>
       readFile: (path: string) => Promise<string | null>
+      readFileBinary: (path: string) => Promise<ArrayBuffer | null>
       writeFile: (path: string, content: string) => Promise<boolean>
       createDirectory: (path: string) => Promise<boolean>
       exists: (path: string) => Promise<boolean>

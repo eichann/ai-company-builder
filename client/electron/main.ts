@@ -499,6 +499,16 @@ ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   }
 })
 
+ipcMain.handle('fs:readFileBinary', async (_, filePath: string) => {
+  try {
+    const safePath = validatePath(filePath)
+    const buffer = await fs.promises.readFile(safePath)
+    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   try {
     const safePath = validatePath(filePath)
