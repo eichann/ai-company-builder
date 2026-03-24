@@ -125,17 +125,18 @@ export function TabbedEditorPanel({
   const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
   const hasChanges = activeFile ? activeFile.content !== activeFile.originalContent : false
 
-  // Markdown view mode: preview tab defaults to 'preview', pinned defaults to 'editor'
-  const [mdViewMode, setMdViewMode] = useState<'preview' | 'editor'>('preview')
+  // Markdown view mode: persisted across files and app restarts
+  const [mdViewMode, setMdViewMode] = useState<'preview' | 'editor'>(() => {
+    const saved = localStorage.getItem('mdViewMode')
+    return saved === 'preview' || saved === 'editor' ? saved : 'editor'
+  })
   const isActiveMd = activeFilePath ? isMarkdownFile(activeFilePath) : false
   const isActivePreviewTab = activeFilePath === previewFilePath
 
-  // When active file changes, reset md view mode based on preview/pinned state
-  useEffect(() => {
-    if (isActiveMd) {
-      setMdViewMode(isActivePreviewTab ? 'preview' : 'editor')
-    }
-  }, [activeFilePath, isActiveMd, isActivePreviewTab])
+  const setMdViewModePersisted = (mode: 'preview' | 'editor') => {
+    setMdViewMode(mode)
+    localStorage.setItem('mdViewMode', mode)
+  }
 
   // Ref to access latest fileContents inside onFileChange callback
   const fileContentsRef = useRef<Map<string, OpenFile>>(fileContents)
@@ -399,7 +400,7 @@ export function TabbedEditorPanel({
           <div className="ml-auto px-2 flex items-center">
             <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 overflow-hidden">
               <button
-                onClick={() => setMdViewMode('editor')}
+                onClick={() => setMdViewModePersisted('editor')}
                 className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
                   mdViewMode === 'editor'
                     ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
@@ -410,7 +411,7 @@ export function TabbedEditorPanel({
                 <Code size={12} />
               </button>
               <button
-                onClick={() => setMdViewMode('preview')}
+                onClick={() => setMdViewModePersisted('preview')}
                 className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
                   mdViewMode === 'preview'
                     ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
@@ -464,7 +465,7 @@ export function TabbedEditorPanel({
             {/* Floating edit button in preview mode */}
             <button
               onClick={() => {
-                setMdViewMode('editor')
+                setMdViewModePersisted('editor')
                 if (isActivePreviewTab && onPinFile && activeFilePath) {
                   onPinFile(activeFilePath)
                 }

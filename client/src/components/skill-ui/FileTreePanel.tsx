@@ -252,7 +252,7 @@ export function FileTreePanel({
         setLoadedDirs(cached.loadedDirs)
         perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
         // Background refresh with single IPC call (don't touch expandedDirs — preserve user's state)
-        window.electronAPI.readDirectoryTree(departmentPath, 10).then(rawEntries => {
+        window.electronAPI.readDirectoryTree(departmentPath, 5).then(rawEntries => {
           const { topLevel, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
           setFiles(topLevel)
           // Only update loadedDirs (which dirs have cached children), NOT expandedDirs
@@ -275,7 +275,7 @@ export function FileTreePanel({
 
     try {
       // Single IPC call fetches 2 levels of directory tree
-      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 10)
+      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 5)
       const { topLevel, firstLevelDirs, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
       setFiles(topLevel)
 
