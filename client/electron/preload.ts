@@ -71,6 +71,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:addRemote', repoPath, remoteName, remoteUrl),
   gitSync: (repoPath: string, companyId: string, commitMessage: string) =>
     ipcRenderer.invoke('git:sync', repoPath, companyId, commitMessage),
+  gitPreview: (repoPath: string) =>
+    ipcRenderer.invoke('git:preview', repoPath),
+  gitGenerateSummary: (repoPath: string) =>
+    ipcRenderer.invoke('git:generateSummary', repoPath),
   gitSetupCompanyRemote: (repoPath: string, companyId: string) =>
     ipcRenderer.invoke('git:setupCompanyRemote', repoPath, companyId),
   gitPushToServer: (repoPath: string) =>
@@ -454,6 +458,17 @@ declare global {
       gitIsRepo: (repoPath: string) => Promise<GitRepoResult>
       gitAddRemote: (repoPath: string, remoteName: string, remoteUrl: string) => Promise<GitResult>
       gitSync: (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
+      gitPreview: (repoPath: string) => Promise<{
+        success: boolean
+        hasChanges: boolean
+        changes: { added: string[]; modified: string[]; deleted: string[] }
+        totalCount: number
+        error?: string
+      }>
+      gitGenerateSummary: (repoPath: string) => Promise<{
+        success: boolean
+        summary: string | null
+      }>
       gitSetupCompanyRemote: (repoPath: string, companyId: string) => Promise<GitResult>
       gitPushToServer: (repoPath: string) => Promise<GitResult>
       serverCreateRepo: (companyId: string) => Promise<ServerRepoResult>
