@@ -12,7 +12,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
-import { CommitHistoryPanel } from './CommitHistoryPanel'
+import { CommitHistoryPanel, invalidateCommitCache, prefetchCommits } from './CommitHistoryPanel'
 import { SyncPreviewDialog } from '../common/SyncPreviewDialog'
 import type { Skill, SkillTool } from '../../types'
 import { useAppStore } from '../../stores/appStore'
@@ -193,6 +193,11 @@ export function SkillCentricLayout() {
     setSelectedSkillId(null)
     setOpenFiles([])
     setActiveFilePath(null)
+    // Prefetch commit history for this department
+    const dept = departments.find(d => d.id === id)
+    if (dept && currentCompany?.rootPath) {
+      prefetchCommits(currentCompany.rootPath, dept.folder)
+    }
   }
 
   const handleSelectSkill = (id: string) => {
@@ -399,7 +404,7 @@ ${promptContent}
     }
   }, [currentCompany?.rootPath])
 
-  const handleSync = useCallback(async () => {
+  const handleSync = useCallback(async (customCommitMessage?: string) => {
     if (!currentCompany?.rootPath || !currentCompany?.id) return
 
     setIsSyncing(true)
@@ -409,13 +414,14 @@ ${promptContent}
       const result = await window.electronAPI.gitSync(
         currentCompany.rootPath,
         currentCompany.id,
-        'Sync from AI Company Builder'
+        customCommitMessage || 'Sync from AI Company Builder'
       )
 
       if (result.success) {
-        // Refresh departments and skills after successful sync
+        // Refresh departments, skills, and commit history after successful sync
         await refreshDepartments()
         refreshSkills()
+        invalidateCommitCache()
 
         if (result.hadConflicts) {
           setSyncNotification({
@@ -463,6 +469,21 @@ ${promptContent}
       setIsSyncing(false)
     }
   }, [currentCompany, refreshDepartments, refreshSkills])
+
+  const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+    if (!currentCompany?.rootPath) return
+    await window.electronAPI.gitRevertFile(currentCompany.rootPath, filePath, fileStatus)
+    // Refresh preview data
+    const result = await window.electronAPI.gitPreview(currentCompany.rootPath)
+    if (result.success) {
+      if (result.totalCount === 0) {
+        setShowPreview(false)
+        setPreviewData(null)
+      } else {
+        setPreviewData(result)
+      }
+    }
+  }, [currentCompany?.rootPath])
 
   const handleOpenBackup = useCallback((backupPath: string) => {
     // Use shell.openPath equivalent - for now just copy path
@@ -629,14 +650,16 @@ ${promptContent}
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden min-w-0">
-            {leftTab === 'history' ? (
-              /* History Tab */
+            {/* History Tab */}
+            {leftTab === 'history' && (
               <CommitHistoryPanel
                 rootPath={currentCompany?.rootPath || ''}
                 departmentFolder={selectedDept?.folder || ''}
               />
-            ) : leftTab === 'skills' ? (
-              /* Skills Tab */
+            )}
+
+            {/* Skills Tab */}
+            {leftTab === 'skills' && (
               <div className="h-full flex">
                 <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden`}>
                   <SkillGrid
@@ -664,31 +687,31 @@ ${promptContent}
                   </div>
                 )}
               </div>
-            ) : (
-              /* Files Tab */
-              <div className="h-full flex min-w-0">
-                <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
-                  <FileTreePanel
-                    rootPath={currentCompany?.rootPath || ''}
-                    departmentFolder={selectedDept?.folder || ''}
-                    selectedFilePath={activeFilePath}
-                    onSelectFile={handleOpenFile}
-                    onDoubleClickFile={handlePinFile}
-                  />
-                </div>
-                <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />
-                <div className="flex-1 min-w-0">
-                  <TabbedEditorPanel
-                    openFiles={openFiles}
-                    activeFilePath={activeFilePath}
-                    previewFilePath={previewFilePath}
-                    onSelectFile={handleSelectOpenFile}
-                    onCloseFile={handleCloseFile}
-                    onPinFile={handlePinFile}
-                  />
-                </div>
-              </div>
             )}
+
+            {/* Files Tab - always mounted, hidden via CSS to preserve state */}
+            <div className={`h-full flex min-w-0 ${leftTab !== 'files' ? 'hidden' : ''}`}>
+              <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
+                <FileTreePanel
+                  rootPath={currentCompany?.rootPath || ''}
+                  departmentFolder={selectedDept?.folder || ''}
+                  selectedFilePath={activeFilePath}
+                  onSelectFile={handleOpenFile}
+                  onDoubleClickFile={handlePinFile}
+                />
+              </div>
+              <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />
+              <div className="flex-1 min-w-0">
+                <TabbedEditorPanel
+                  openFiles={openFiles}
+                  activeFilePath={activeFilePath}
+                  previewFilePath={previewFilePath}
+                  onSelectFile={handleSelectOpenFile}
+                  onCloseFile={handleCloseFile}
+                  onPinFile={handlePinFile}
+                />
+              </div>
+            </div>
           </div>
         </div>
 
@@ -753,6 +776,9 @@ ${promptContent}
           isLoadingSummary={isLoadingSummary}
           onRequestSummary={handleRequestSummary}
           rootPath={currentCompany?.rootPath || ''}
+          onSync={(commitMessage) => { setShowPreview(false); handleSync(commitMessage) }}
+          isSyncing={isSyncing}
+          onRevertFile={handleRevertFile}
         />
       )}
 
