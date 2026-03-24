@@ -300,21 +300,13 @@ export function FileTreePanel({
     for (const file of Array.from(fileList)) {
       if (!file.path) continue
 
-      // Folders: skip extension/size checks (rename is instant on same volume)
-      const isFolder = file.type === '' && file.size === 0
-      // For files dropped from Finder, file.size may be 0 for folders
-      // Double-check via a more reliable method isn't available in browser File API,
-      // so we also check if there's no extension as a heuristic
-
-      if (!isFolder) {
-        // Extension check
-        const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
-        if (!ext || !ALLOWED_DROP_EXTENSIONS.has(ext)) {
+      // Extension and size validation (skip for entries without extension — likely folders)
+      const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
+      if (ext) {
+        if (!ALLOWED_DROP_EXTENSIONS.has(ext)) {
           warnings.push(`${file.name}: 非対応の形式`)
           continue
         }
-
-        // Size check
         if (file.size > MAX_DROP_FILE_SIZE) {
           warnings.push(`${file.name}: 20MBを超えています`)
           continue

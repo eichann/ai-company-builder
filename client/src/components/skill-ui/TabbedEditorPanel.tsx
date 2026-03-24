@@ -22,6 +22,49 @@ function isImageFile(filePath: string): boolean {
   return IMAGE_EXTENSIONS.has(ext)
 }
 
+function isPdfFile(filePath: string): boolean {
+  return filePath.split('.').pop()?.toLowerCase() === 'pdf'
+}
+
+function isBinaryFile(filePath: string): boolean {
+  return isImageFile(filePath) || isPdfFile(filePath)
+}
+
+function PdfPreview({ filePath }: { filePath: string }) {
+  const [url, setUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let blobUrl: string | null = null
+
+    window.electronAPI.readFileBinary(filePath).then(buffer => {
+      if (buffer) {
+        const blob = new Blob([buffer], { type: 'application/pdf' })
+        blobUrl = URL.createObjectURL(blob)
+        setUrl(blobUrl)
+      }
+    })
+
+    return () => {
+      if (blobUrl) URL.revokeObjectURL(blobUrl)
+    }
+  }, [filePath])
+
+  if (!url) {
+    return (
+      <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500 text-sm">
+        読み込み中...
+      </div>
+    )
+  }
+
+  return (
+    <iframe
+      src={`${url}#toolbar=1`}
+      className="w-full h-full border-0"
+    />
+  )
+}
+
 interface TabbedEditorPanelProps {
   openFiles: string[]
   activeFilePath: string | null
@@ -55,7 +98,7 @@ export function TabbedEditorPanel({
       const file = fileContentsRef.current.get(changedPath)
 
       // Only reload if the file is open, not loading, and not an image
-      if (!file || file.isLoading || isImageFile(changedPath)) return
+      if (!file || file.isLoading || isBinaryFile(changedPath)) return
       // Don't overwrite unsaved local edits
       if (file.content !== file.originalContent) return
 
@@ -85,8 +128,8 @@ export function TabbedEditorPanel({
   useEffect(() => {
     for (const filePath of openFiles) {
       if (!fileContents.has(filePath) && !loadingRef.current.has(filePath)) {
-        // Skip loading for image files (displayed via file:// URL)
-        if (isImageFile(filePath)) {
+        // Skip loading for binary files (displayed via local-file:// URL)
+        if (isBinaryFile(filePath)) {
           setFileContents(prev => {
             const newMap = new Map(prev)
             newMap.set(filePath, { path: filePath, content: '', originalContent: '', isLoading: false })
@@ -295,7 +338,7 @@ export function TabbedEditorPanel({
         </div>
 
         {/* Save button in tab bar (hidden for image files) */}
-        {activeFilePath && !isImageFile(activeFilePath) && (
+        {activeFilePath && !isBinaryFile(activeFilePath) && (
           <div className="ml-auto px-2 flex items-center gap-1">
             <button
               onClick={handleSave}
@@ -344,6 +387,8 @@ export function TabbedEditorPanel({
               className="max-w-full max-h-full object-contain"
             />
           </div>
+        ) : activeFile && activeFilePath && isPdfFile(activeFilePath) ? (
+          <PdfPreview filePath={activeFilePath} />
         ) : activeFile ? (
           <CodeEditor
             key={activeFilePath} // Force remount on file change
