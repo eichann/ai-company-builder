@@ -272,7 +272,7 @@ export async function startChatServer(config: ChatServerConfig) {
         // 2. Set uid to force fork+exec instead of posix_spawn for THIS spawn
         // 3. Spawn via shell wrapper that closes all inherited FDs > 2
         //    before exec'ing claude, so claude starts with a clean FD table
-        spawnClaudeCodeProcess: (opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string>; signal?: AbortSignal }) => {
+        spawnClaudeCodeProcess: (opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) => {
           // Defense 1: Ensure FDs 0-2 are valid
           for (const fd of [0, 1, 2]) {
             try { fs.fstatSync(fd) }
@@ -390,7 +390,8 @@ export async function startChatServer(config: ChatServerConfig) {
               mimeType: img.mediaType,
             })
           }
-          finalMessages[i] = { ...finalMessages[i], content: parts }
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          finalMessages[i] = { ...finalMessages[i], content: parts as any }
           break
         }
       }

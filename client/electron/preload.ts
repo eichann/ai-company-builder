@@ -50,6 +50,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   deleteItem: (path: string) => ipcRenderer.invoke('fs:delete', path),
   renameItem: (oldPath: string, newPath: string) => ipcRenderer.invoke('fs:rename', oldPath, newPath),
   moveItem: (sourcePath: string, destPath: string) => ipcRenderer.invoke('fs:move', sourcePath, destPath),
+  moveFromExternal: (sourcePath: string, destPath: string) => ipcRenderer.invoke('fs:moveFromExternal', sourcePath, destPath),
   copyItem: (sourcePath: string, destPath: string) => ipcRenderer.invoke('fs:copy', sourcePath, destPath),
   getStats: (path: string) => ipcRenderer.invoke('fs:stat', path),
 
@@ -396,6 +397,7 @@ declare global {
       deleteItem: (path: string) => Promise<{ success: boolean; error?: string }>
       renameItem: (oldPath: string, newPath: string) => Promise<{ success: boolean; newPath?: string; error?: string }>
       moveItem: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
+      moveFromExternal: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
       copyItem: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
       getStats: (path: string) => Promise<{ success: boolean; data?: { isDirectory: boolean; isFile: boolean; size: number; mtime: string; ctime: string } }>
 

@@ -26,6 +26,14 @@ interface FileEntry {
   children?: FileEntry[]
 }
 
+// Allowed file extensions for external drop
+const ALLOWED_DROP_EXTENSIONS = new Set([
+  'png', 'jpg', 'jpeg', 'gif', 'webp', 'svg',
+  'md', 'txt', 'csv', 'pdf', 'docx', 'xlsx', 'pptx',
+  'json', 'yaml', 'yml',
+])
+const MAX_DROP_FILE_SIZE = 20 * 1024 * 1024 // 20MB
+
 interface FileTreePanelProps {
   rootPath: string
   departmentFolder: string
@@ -116,6 +124,7 @@ export function FileTreePanel({
   // Drag & drop state
   const [dragOverPath, setDragOverPath] = useState<string | null>(null)
   const [dragSourcePaths, setDragSourcePaths] = useState<Set<string>>(new Set())
+  const [dropWarning, setDropWarning] = useState<string | null>(null)
 
   const departmentPath = `${rootPath}/${departmentFolder}`
 
@@ -282,6 +291,74 @@ export function FileTreePanel({
       }
     }
   }, [departmentPath, showDotFiles, processTree])
+
+  // Handle external file drop (from Finder etc.)
+  const handleExternalFileDrop = useCallback(async (fileList: FileList, destDir: string) => {
+    const warnings: string[] = []
+    let moved = 0
+
+    for (const file of Array.from(fileList)) {
+      if (!file.path) continue
+
+      // Folders: skip extension/size checks (rename is instant on same volume)
+      const isFolder = file.type === '' && file.size === 0
+      // For files dropped from Finder, file.size may be 0 for folders
+      // Double-check via a more reliable method isn't available in browser File API,
+      // so we also check if there's no extension as a heuristic
+
+      if (!isFolder) {
+        // Extension check
+        const ext = file.name.includes('.') ? file.name.split('.').pop()?.toLowerCase() : ''
+        if (!ext || !ALLOWED_DROP_EXTENSIONS.has(ext)) {
+          warnings.push(`${file.name}: 非対応の形式`)
+          continue
+        }
+
+        // Size check
+        if (file.size > MAX_DROP_FILE_SIZE) {
+          warnings.push(`${file.name}: 20MBを超えています`)
+          continue
+        }
+      }
+
+      // Unique destination path
+      let destPath = `${destDir}/${file.name}`
+      try {
+        await window.electronAPI.getStats(destPath)
+        // Already exists — find unique name
+        const dotIdx = file.name.lastIndexOf('.')
+        const base = dotIdx > 0 ? file.name.substring(0, dotIdx) : file.name
+        const ext = dotIdx > 0 ? file.name.substring(dotIdx) : ''
+        for (let i = 1; i < 100; i++) {
+          const candidate = `${destDir}/${base} (${i})${ext}`
+          try {
+            await window.electronAPI.getStats(candidate)
+          } catch {
+            destPath = candidate
+            break
+          }
+        }
+      } catch {
+        // Doesn't exist — use as-is
+      }
+
+      const result = await window.electronAPI.moveFromExternal(file.path, destPath)
+      if (result.success) {
+        moved++
+      } else {
+        warnings.push(`${file.name}: ${result.error || '移動に失敗'}`)
+      }
+    }
+
+    if (warnings.length > 0) {
+      setDropWarning(warnings.join('\n'))
+      setTimeout(() => setDropWarning(null), 5000)
+    }
+
+    if (moved > 0) {
+      loadFiles(true)
+    }
+  }, [loadFiles])
 
   const deferCountRef = useRef(0)
   const MAX_DEFER_COUNT = 4 // max ~1 second of deferral (4 × 250ms)
@@ -563,27 +640,6 @@ export function FileTreePanel({
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
   }, [confirmDialog, loadFiles])
 
-  // Handle multi-delete
-  const handleDeleteSelected = useCallback(() => {
-    const paths = [...selectedPaths]
-    const count = paths.length
-    const hasFolders = paths.some(p =>
-      files.some(f => f.path === p && f.isDirectory) ||
-      Array.from(childrenCache.current.values()).flat().some(f => f.path === p && f.isDirectory)
-    )
-    const message = `${count}件のアイテムを削除しますか？` +
-      (hasFolders ? ' フォルダを含む場合、中身もすべて削除されます。' : '') +
-      ' この操作は取り消せません。'
-    setConfirmDialog({
-      isOpen: true,
-      title: `${count}件を削除`,
-      message,
-      targetPath: '',
-      targetPaths: paths,
-    })
-    closeContextMenu()
-  }, [selectedPaths, files, closeContextMenu])
-
   // Build context menu items
   const getContextMenuItems = useCallback((entry: FileEntry | null, parentPath: string, snapshot?: Set<string>): ContextMenuItem[] => {
     // Multi-select context menu using snapshot from right-click moment
@@ -716,10 +772,12 @@ export function FileTreePanel({
           }}
           onDragOver={(e) => {
             if (!entry.isDirectory) return
-            if (dragSourcePaths.has(entry.path)) return
-            // Prevent drop into child of any dragged item
-            for (const src of dragSourcePaths) {
-              if (entry.path.startsWith(src + '/')) return
+            // Internal D&D checks
+            if (dragSourcePaths.size > 0) {
+              if (dragSourcePaths.has(entry.path)) return
+              for (const src of dragSourcePaths) {
+                if (entry.path.startsWith(src + '/')) return
+              }
             }
             e.preventDefault()
             e.stopPropagation()
@@ -741,6 +799,14 @@ export function FileTreePanel({
             setDragOverPath(null)
 
             if (!entry.isDirectory) return
+
+            // External file drop (from Finder etc.)
+            if (e.dataTransfer.files.length > 0 && !e.dataTransfer.getData('application/x-file-paths')) {
+              await handleExternalFileDrop(e.dataTransfer.files, entry.path)
+              return
+            }
+
+            // Internal move
             const raw = e.dataTransfer.getData('application/x-file-paths')
             if (!raw) return
             const sourcePaths: string[] = JSON.parse(raw)
@@ -845,7 +911,7 @@ export function FileTreePanel({
   }
 
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/50 border-r border-gray-200 dark:border-zinc-800/50">
+    <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/50 border-r border-gray-200 dark:border-zinc-800/50 relative">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800/50">
         <span className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider">
@@ -897,6 +963,14 @@ export function FileTreePanel({
         onDrop={async (e) => {
           e.preventDefault()
           setDragOverPath(null)
+
+          // External file drop (from Finder etc.)
+          if (e.dataTransfer.files.length > 0 && !e.dataTransfer.getData('application/x-file-paths')) {
+            await handleExternalFileDrop(e.dataTransfer.files, departmentPath)
+            return
+          }
+
+          // Internal move
           const raw = e.dataTransfer.getData('application/x-file-paths')
           if (!raw) return
           const sourcePaths: string[] = JSON.parse(raw)
@@ -949,6 +1023,13 @@ export function FileTreePanel({
         onConfirm={handleDeleteConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
+
+      {/* Drop warning toast */}
+      {dropWarning && (
+        <div className="absolute bottom-2 left-2 right-2 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/30 text-xs text-red-400 whitespace-pre-wrap">
+          {dropWarning}
+        </div>
+      )}
     </div>
   )
 }
