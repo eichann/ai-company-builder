@@ -81,3 +81,182 @@ body {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
+
+/* ============================================================================
+   Markdown Preview Styles
+   ============================================================================ */
+.markdown-body {
+  font-size: 14px;
+  line-height: 1.8;
+  color: #374151;
+  word-wrap: break-word;
+}
+
+.dark .markdown-body {
+  color: #d4d4d8;
+}
+
+/* Headings */
+.markdown-body h1,
+.markdown-body h2,
+.markdown-body h3,
+.markdown-body h4,
+.markdown-body h5,
+.markdown-body h6 {
+  font-weight: 700;
+  line-height: 1.4;
+  color: #111827;
+}
+
+.dark .markdown-body h1,
+.dark .markdown-body h2,
+.dark .markdown-body h3,
+.dark .markdown-body h4,
+.dark .markdown-body h5,
+.dark .markdown-body h6 {
+  color: #f4f4f5;
+}
+
+.markdown-body h1 { font-size: 1.75em; margin: 1.5em 0 0.75em; padding-bottom: 0.3em; border-bottom: 1px solid #e5e7eb; }
+.markdown-body h2 { font-size: 1.4em; margin: 1.25em 0 0.6em; padding-bottom: 0.25em; border-bottom: 1px solid #e5e7eb; }
+.markdown-body h3 { font-size: 1.15em; margin: 1em 0 0.5em; }
+.markdown-body h4 { font-size: 1em; margin: 0.8em 0 0.4em; }
+
+.dark .markdown-body h1,
+.dark .markdown-body h2 {
+  border-bottom-color: #3f3f46;
+}
+
+/* Paragraphs */
+.markdown-body p {
+  margin: 0.6em 0;
+}
+
+/* Links */
+.markdown-body a {
+  color: #1264a3;
+  text-decoration: none;
+}
+.markdown-body a:hover {
+  text-decoration: underline;
+}
+
+/* Lists */
+.markdown-body ul,
+.markdown-body ol {
+  margin: 0.6em 0;
+  padding-left: 1.8em;
+}
+
+.markdown-body ul { list-style-type: disc; }
+.markdown-body ol { list-style-type: decimal; }
+.markdown-body li { margin: 0.25em 0; }
+.markdown-body li > ul,
+.markdown-body li > ol { margin: 0.2em 0; }
+
+/* Task list (GFM checkboxes) */
+.markdown-body li input[type="checkbox"] {
+  margin-right: 0.4em;
+}
+
+/* Blockquote */
+.markdown-body blockquote {
+  margin: 0.8em 0;
+  padding: 0.4em 1em;
+  border-left: 3px solid #1264a3;
+  color: #6b7280;
+  background: #f9fafb;
+  border-radius: 0 4px 4px 0;
+}
+
+.dark .markdown-body blockquote {
+  color: #a1a1aa;
+  background: #27272a;
+  border-left-color: #1264a3;
+}
+
+/* Code inline */
+.markdown-body code {
+  font-family: 'SF Mono', 'JetBrains Mono', Menlo, monospace;
+  font-size: 0.85em;
+  padding: 0.15em 0.4em;
+  background: #f3f4f6;
+  border-radius: 4px;
+  color: #dc2626;
+}
+
+.dark .markdown-body code {
+  background: #3f3f46;
+  color: #fca5a5;
+}
+
+/* Code block */
+.markdown-body pre {
+  margin: 0.8em 0;
+  padding: 0.8em 1em;
+  background: #f3f4f6;
+  border-radius: 8px;
+  overflow-x: auto;
+}
+
+.dark .markdown-body pre {
+  background: #27272a;
+}
+
+.markdown-body pre code {
+  padding: 0;
+  background: none;
+  color: inherit;
+  font-size: 0.85em;
+}
+
+/* Table */
+.markdown-body table {
+  width: 100%;
+  margin: 0.8em 0;
+  border-collapse: collapse;
+  font-size: 0.9em;
+}
+
+.markdown-body th,
+.markdown-body td {
+  padding: 0.5em 0.75em;
+  border: 1px solid #e5e7eb;
+  text-align: left;
+}
+
+.markdown-body th {
+  font-weight: 600;
+  background: #f9fafb;
+}
+
+.dark .markdown-body th,
+.dark .markdown-body td {
+  border-color: #3f3f46;
+}
+
+.dark .markdown-body th {
+  background: #27272a;
+}
+
+/* Horizontal rule */
+.markdown-body hr {
+  margin: 1.5em 0;
+  border: none;
+  border-top: 1px solid #e5e7eb;
+}
+
+.dark .markdown-body hr {
+  border-top-color: #3f3f46;
+}
+
+/* Images */
+.markdown-body img {
+  max-width: 100%;
+  border-radius: 8px;
+  margin: 0.6em 0;
+}
+
+/* Strong / Emphasis */
+.markdown-body strong { font-weight: 700; }
+.markdown-body em { font-style: italic; }

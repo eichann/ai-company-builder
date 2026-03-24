@@ -1,9 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   X,
   FileText,
-  Warning
+  Warning,
+  Code,
+  Eye,
+  PencilSimple,
 } from '@phosphor-icons/react'
+import Markdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { CodeEditor } from './CodeEditor'
 import { getFileIcon } from './FileIcons'
 
@@ -27,6 +32,11 @@ function isPdfFile(filePath: string): boolean {
 
 function isBinaryFile(filePath: string): boolean {
   return isImageFile(filePath) || isPdfFile(filePath)
+}
+
+function isMarkdownFile(filePath: string): boolean {
+  const ext = filePath.split('.').pop()?.toLowerCase() || ''
+  return ext === 'md' || ext === 'mdx'
 }
 
 function PdfPreview({ filePath }: { filePath: string }) {
@@ -64,6 +74,32 @@ function PdfPreview({ filePath }: { filePath: string }) {
   )
 }
 
+function MarkdownPreview({ content, basePath }: { content: string; basePath: string }) {
+  const components = useMemo(() => ({
+    img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+      let resolvedSrc = src || ''
+      // Resolve relative paths to local-file:// protocol
+      if (resolvedSrc && !resolvedSrc.startsWith('http') && !resolvedSrc.startsWith('data:')) {
+        resolvedSrc = `local-file://${basePath}/${resolvedSrc.replace(/^\.\//, '')}`
+      }
+      return <img src={resolvedSrc} alt={alt} {...props} className="max-w-full rounded" />
+    },
+    a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+      <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
+    ),
+  }), [basePath])
+
+  return (
+    <div className="h-full overflow-auto px-8 py-6">
+      <div className="max-w-3xl mx-auto markdown-body">
+        <Markdown remarkPlugins={[remarkGfm]} components={components}>
+          {content}
+        </Markdown>
+      </div>
+    </div>
+  )
+}
+
 interface TabbedEditorPanelProps {
   openFiles: string[]
   activeFilePath: string | null
@@ -88,6 +124,18 @@ export function TabbedEditorPanel({
 
   const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
   const hasChanges = activeFile ? activeFile.content !== activeFile.originalContent : false
+
+  // Markdown view mode: preview tab defaults to 'preview', pinned defaults to 'editor'
+  const [mdViewMode, setMdViewMode] = useState<'preview' | 'editor'>('preview')
+  const isActiveMd = activeFilePath ? isMarkdownFile(activeFilePath) : false
+  const isActivePreviewTab = activeFilePath === previewFilePath
+
+  // When active file changes, reset md view mode based on preview/pinned state
+  useEffect(() => {
+    if (isActiveMd) {
+      setMdViewMode(isActivePreviewTab ? 'preview' : 'editor')
+    }
+  }, [activeFilePath, isActiveMd, isActivePreviewTab])
 
   // Ref to access latest fileContents inside onFileChange callback
   const fileContentsRef = useRef<Map<string, OpenFile>>(fileContents)
@@ -346,6 +394,35 @@ export function TabbedEditorPanel({
           })}
         </div>
 
+        {/* Markdown view mode toggle */}
+        {isActiveMd && (
+          <div className="ml-auto px-2 flex items-center">
+            <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 overflow-hidden">
+              <button
+                onClick={() => setMdViewMode('editor')}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                  mdViewMode === 'editor'
+                    ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
+                    : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
+                }`}
+                title="エディタ"
+              >
+                <Code size={12} />
+              </button>
+              <button
+                onClick={() => setMdViewMode('preview')}
+                className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
+                  mdViewMode === 'preview'
+                    ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
+                    : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
+                }`}
+                title="プレビュー"
+              >
+                <Eye size={12} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error message */}
@@ -378,6 +455,26 @@ export function TabbedEditorPanel({
           </div>
         ) : activeFile && activeFilePath && isPdfFile(activeFilePath) ? (
           <PdfPreview filePath={activeFilePath} />
+        ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
+          <div className="h-full relative">
+            <MarkdownPreview
+              content={activeFile.content}
+              basePath={activeFilePath.substring(0, activeFilePath.lastIndexOf('/'))}
+            />
+            {/* Floating edit button in preview mode */}
+            <button
+              onClick={() => {
+                setMdViewMode('editor')
+                if (isActivePreviewTab && onPinFile && activeFilePath) {
+                  onPinFile(activeFilePath)
+                }
+              }}
+              className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white shadow-lg hover:bg-accent/90 transition-colors"
+            >
+              <PencilSimple size={12} />
+              編集
+            </button>
+          </div>
         ) : activeFile ? (
           <CodeEditor
             key={activeFilePath} // Force remount on file change
