@@ -62,6 +62,7 @@ export function SkillCentricLayout() {
   // Multi-file editor state
   const [openFiles, setOpenFiles] = useState<string[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
 
   // Panel width state (resizable)
   const [leftPanelWidth, setLeftPanelWidth] = useState(550)
@@ -208,14 +209,27 @@ export function SkillCentricLayout() {
     }
   }, [skills, setPendingChatInput])
 
+  // Open file as preview (single-click from file tree)
+  // Replaces existing preview tab; already-pinned files just get activated
   const handleOpenFile = useCallback((filePath: string) => {
     setOpenFiles(prev => {
-      if (prev.includes(filePath)) {
-        return prev // Already open
-      }
-      return [...prev, filePath]
+      const alreadyOpen = prev.includes(filePath)
+      if (alreadyOpen) return prev // Already open — just activate
+      // Replace existing preview tab with new preview
+      const filtered = previewFilePath ? prev.filter(f => f !== previewFilePath) : prev
+      return [...filtered, filePath]
+    })
+    setPreviewFilePath(prev => {
+      // Don't overwrite if file is already pinned (open and not the current preview)
+      if (openFiles.includes(filePath) && prev !== filePath) return prev
+      return filePath
     })
     setActiveFilePath(filePath)
+  }, [previewFilePath, openFiles])
+
+  // Pin a file as preview → pinned (double-click or edit)
+  const handlePinFile = useCallback((filePath: string) => {
+    setPreviewFilePath(prev => prev === filePath ? null : prev)
   }, [])
 
   const handleSelectOpenFile = useCallback((filePath: string) => {
@@ -223,6 +237,7 @@ export function SkillCentricLayout() {
   }, [])
 
   const handleCloseFile = useCallback((filePath: string) => {
+    setPreviewFilePath(prev => prev === filePath ? null : prev)
     setOpenFiles(prev => {
       const newFiles = prev.filter(f => f !== filePath)
       // If closing the active file, switch to another
@@ -637,6 +652,7 @@ ${promptContent}
                     departmentFolder={selectedDept?.folder || ''}
                     selectedFilePath={activeFilePath}
                     onSelectFile={handleOpenFile}
+                    onDoubleClickFile={handlePinFile}
                   />
                 </div>
                 <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />
@@ -644,8 +660,10 @@ ${promptContent}
                   <TabbedEditorPanel
                     openFiles={openFiles}
                     activeFilePath={activeFilePath}
+                    previewFilePath={previewFilePath}
                     onSelectFile={handleSelectOpenFile}
                     onCloseFile={handleCloseFile}
+                    onPinFile={handlePinFile}
                   />
                 </div>
               </div>

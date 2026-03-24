@@ -1,6 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import {
-  FloppyDisk,
   X,
   FileText,
   Warning
@@ -68,18 +67,22 @@ function PdfPreview({ filePath }: { filePath: string }) {
 interface TabbedEditorPanelProps {
   openFiles: string[]
   activeFilePath: string | null
+  previewFilePath?: string | null
   onSelectFile: (path: string) => void
   onCloseFile: (path: string) => void
+  onPinFile?: (path: string) => void
 }
 
 export function TabbedEditorPanel({
   openFiles,
   activeFilePath,
+  previewFilePath,
   onSelectFile,
   onCloseFile,
+  onPinFile,
 }: TabbedEditorPanelProps) {
   const [fileContents, setFileContents] = useState<Map<string, OpenFile>>(new Map())
-  const [isSaving, setIsSaving] = useState(false)
+  const [, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const loadingRef = useRef<Set<string>>(new Set())
 
@@ -188,6 +191,10 @@ export function TabbedEditorPanel({
 
   const handleContentChange = useCallback((newContent: string) => {
     if (!activeFilePath) return
+    // Pin the file on first edit
+    if (activeFilePath === previewFilePath && onPinFile) {
+      onPinFile(activeFilePath)
+    }
     setFileContents(prev => {
       const newMap = new Map(prev)
       const file = newMap.get(activeFilePath)
@@ -199,7 +206,7 @@ export function TabbedEditorPanel({
       }
       return newMap
     })
-  }, [activeFilePath])
+  }, [activeFilePath, previewFilePath, onPinFile])
 
   const saveFile = useCallback(async (filePath: string, content: string) => {
     setIsSaving(true)
@@ -303,12 +310,14 @@ export function TabbedEditorPanel({
             const file = fileContents.get(filePath)
             const isActive = filePath === activeFilePath
             const isModified = file && file.content !== file.originalContent
+            const isPreview = filePath === previewFilePath
             const FileIcon = getFileIcon(fileName, false)
 
             return (
               <div
                 key={filePath}
                 onClick={() => onSelectFile(filePath)}
+                onDoubleClick={() => { if (isPreview && onPinFile) onPinFile(filePath) }}
                 className={`
                   group flex items-center gap-2 px-3 py-2 cursor-pointer
                   border-r border-gray-200 dark:border-zinc-800/50 min-w-0 max-w-[200px]
@@ -319,7 +328,7 @@ export function TabbedEditorPanel({
                 `}
               >
                 <FileIcon size={14} className="flex-shrink-0" />
-                <span className="text-xs truncate">{fileName}</span>
+                <span className={`text-xs truncate ${isPreview ? 'italic' : ''}`}>{fileName}</span>
                 {isModified && (
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
                 )}
@@ -337,26 +346,6 @@ export function TabbedEditorPanel({
           })}
         </div>
 
-        {/* Save button in tab bar (hidden for image files) */}
-        {activeFilePath && !isBinaryFile(activeFilePath) && (
-          <div className="ml-auto px-2 flex items-center gap-1">
-            <button
-              onClick={handleSave}
-              disabled={!hasChanges || isSaving}
-              className={`
-                flex items-center gap-1.5 px-2.5 py-1 rounded-md text-xs font-medium
-                transition-colors
-                ${hasChanges
-                  ? 'bg-accent text-white hover:bg-accent/90'
-                  : 'bg-gray-200 dark:bg-zinc-800 text-gray-400 dark:text-zinc-500 cursor-not-allowed'
-                }
-              `}
-            >
-              <FloppyDisk size={12} />
-              {isSaving ? '保存中...' : '保存'}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Error message */}

@@ -1418,15 +1418,26 @@ ipcMain.handle('git:preview', async (_, repoPath: string) => {
     await git.add('.')
     const status = await git.status()
 
+    const added: string[] = []
+    const modified: string[] = []
+    const deleted: string[] = []
+    for (const f of status.files) {
+      if (f.index === 'A' || f.index === '?') {
+        added.push(f.path)
+      } else if (f.index === 'D' || f.working_dir === 'D') {
+        deleted.push(f.path)
+      } else {
+        modified.push(f.path)
+      }
+    }
+
+    const totalCount = added.length + modified.length + deleted.length
+
     return {
       success: true,
-      hasChanges: status.files.length > 0,
-      changes: {
-        added: [...status.not_added, ...status.created],
-        modified: status.modified,
-        deleted: status.deleted,
-      },
-      totalCount: status.files.length,
+      hasChanges: totalCount > 0,
+      changes: { added, modified, deleted },
+      totalCount,
     }
   } catch (err) {
     console.error('Git preview error:', err)
