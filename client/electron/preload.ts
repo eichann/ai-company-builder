@@ -77,6 +77,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>
     ipcRenderer.invoke('git:generateSummary', repoPath),
+  gitRevertFile: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') =>
+    ipcRenderer.invoke('git:revertFile', repoPath, filePath, fileStatus),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>
     ipcRenderer.invoke('git:log', repoPath, folderPath, limit),
   gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
@@ -476,6 +478,10 @@ declare global {
       gitGenerateSummary: (repoPath: string) => Promise<{
         success: boolean
         summary: string | null
+      }>
+      gitRevertFile: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<{
+        success: boolean
+        error?: string
       }>
       gitLog: (repoPath: string, folderPath: string, limit?: number) => Promise<{
         success: boolean
