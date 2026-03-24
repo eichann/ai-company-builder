@@ -141,6 +141,7 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo,
       images,
       modelId,
+      referenceFiles,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
@@ -148,6 +149,7 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
+      referenceFiles?: string[]
     } = body
 
     const authMode = config.getAuthMode()
@@ -159,6 +161,11 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authMode === 'claude-code') {
       if (workingDirectory) {
         finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
+      }
+      if (referenceFiles && referenceFiles.length > 0) {
+        const fileList = referenceFiles.map(p => `- ${p}`).join('\n')
+        const refInstruction = `\n\n重要: ユーザーが以下のファイルを参照として添付しました。回答する前に、必ずこれらのファイルをReadツールで読み込み、内容を踏まえて回答してください:\n${fileList}`
+        finalSystemPrompt = (finalSystemPrompt || '') + refInstruction
       }
     } else {
       finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
@@ -350,6 +357,14 @@ export async function startChatServer(config: ChatServerConfig) {
     })()
 
     const modelMessages = await convertToModelMessages(messages)
+
+    // Debug: log reference files and system prompt
+    if (referenceFiles && referenceFiles.length > 0) {
+      console.log('[chat-server] Reference files:', referenceFiles)
+    }
+    if (finalSystemPrompt) {
+      console.log('[chat-server] System prompt (last 300 chars):', finalSystemPrompt.slice(-300))
+    }
 
     // Claude Code CLI mode: skip client-side pruning — Claude Code manages its own context
     // API key mode: prune old messages to manage context window
