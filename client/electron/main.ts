@@ -460,6 +460,8 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
   }
 })
 
+const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
+
 ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
   try {
     const safePath = validatePath(dirPath)
@@ -473,7 +475,7 @@ ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: numb
           isDirectory: isDir,
           path: entryPath,
         }
-        if (isDir && depth < maxDepth) {
+        if (isDir && depth < maxDepth && !TREE_SKIP_DIRS.has(entry.name)) {
           try {
             node.children = await readLevel(entryPath, depth + 1)
           } catch {
