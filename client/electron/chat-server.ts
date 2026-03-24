@@ -114,6 +114,7 @@ export async function startChatServer(config: ChatServerConfig) {
     noCacheTokens: number
   } | null = null
 
+
   // CORS for Electron renderer (Vite dev server or file:// protocol)
   app.use('/*', cors({
     origin: (origin) => origin || '*',
@@ -257,7 +258,7 @@ export async function startChatServer(config: ChatServerConfig) {
         cwd: workingDirectory,
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],
-        streamingInput: 'auto',
+        streamingInput: 'always',
         // Custom spawn to avoid EBADF in Electron's main process.
         //
         // Problem: Electron's main process has many open FDs from Chromium
@@ -377,16 +378,19 @@ export async function startChatServer(config: ChatServerConfig) {
       for (let i = finalMessages.length - 1; i >= 0; i--) {
         if (finalMessages[i].role === 'user') {
           const userContent = finalMessages[i].content
-          if (Array.isArray(userContent)) {
-            for (const img of images) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              ;(userContent as any[]).push({
-                type: 'image',
-                image: img.data,
-                mimeType: img.mediaType,
-              })
-            }
+          // Convert string content to multipart array format
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const parts: any[] = Array.isArray(userContent)
+            ? [...userContent]
+            : [{ type: 'text', text: userContent }]
+          for (const img of images) {
+            parts.push({
+              type: 'image',
+              image: img.data,
+              mimeType: img.mediaType,
+            })
           }
+          finalMessages[i] = { ...finalMessages[i], content: parts }
           break
         }
       }
@@ -426,6 +430,11 @@ export async function startChatServer(config: ChatServerConfig) {
     return c.json({ usage: latestUsage })
   })
 
+  // GET /api/context — returns context usage estimate based on latest step usage
+  app.get('/api/context', (c) => {
+    return c.json({ context: null })
+  })
+
   // Find port in 3300-3400 range (distinct from tool ports 3100-3200)
   const port = await findAvailablePort(3300, 3400)
 
@@ -439,3 +448,4 @@ export async function startChatServer(config: ChatServerConfig) {
 
   return { port, authToken, server }
 }
+

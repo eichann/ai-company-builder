@@ -404,10 +404,12 @@ function ToolApprovalBanner({
 
 function UserMessageBubble({
   message,
+  images,
   canEdit,
   onEditSubmit,
 }: {
   message: UIMessage
+  images?: string[]
   canEdit: boolean
   onEditSubmit?: (messageId: string, newText: string) => void
 }) {
@@ -484,6 +486,18 @@ function UserMessageBubble({
   return (
     <div className="group relative">
       <div className="relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed bg-accent text-white rounded-br-md">
+        {images && images.length > 0 && (
+          <div className="flex gap-1.5 mb-2 flex-wrap">
+            {images.map((url, i) => (
+              <img
+                key={i}
+                src={url}
+                alt=""
+                className="w-20 h-20 object-cover rounded-lg border border-white/20"
+              />
+            ))}
+          </div>
+        )}
         <div className="relative whitespace-pre-wrap break-words">
           {originalText}
         </div>
@@ -509,6 +523,7 @@ interface MessageItemProps {
   message: UIMessage
   isStreaming: boolean
   timestamp?: Date
+  images?: string[]
   isLastAssistant?: boolean
   canRegenerate?: boolean
   onRegenerate?: () => void
@@ -516,7 +531,7 @@ interface MessageItemProps {
   onEditSubmit?: (messageId: string, newText: string) => void
 }
 
-const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
+const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
 
@@ -610,6 +625,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
         {isUser && (
           <UserMessageBubble
             message={message}
+            images={images}
             canEdit={!!canEdit}
             onEditSubmit={onEditSubmit}
           />
@@ -1245,6 +1261,7 @@ interface MessageListProps {
   messagesEndRef: React.RefObject<HTMLDivElement>
   containerRef: React.RefObject<HTMLDivElement>
   timestamps: Map<string, Date>
+  messageImages: Map<string, string[]>
   onRegenerate?: () => void
   onEditSubmit?: (messageId: string, newText: string) => void
 }
@@ -1255,6 +1272,7 @@ const MessageList = memo(function MessageList({
   messagesEndRef,
   containerRef,
   timestamps,
+  messageImages,
   onRegenerate,
   onEditSubmit,
 }: MessageListProps) {
@@ -1283,6 +1301,7 @@ const MessageList = memo(function MessageList({
             message.role === 'assistant'
           }
           timestamp={timestamps.get(message.id)}
+          images={messageImages.get(message.id)}
           isLastAssistant={index === lastAssistantIndex}
           canRegenerate={canRegenerate}
           onRegenerate={onRegenerate}
@@ -1367,6 +1386,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
 
   // Pending images to send with next message
   const pendingImagesRef = useRef<Array<{ mediaType: string; data: string }>>([])
+  // Pending data URLs to associate with the next user message
+  const pendingImageDataUrlsRef = useRef<string[]>([])
+  // Store sent images keyed by message ID for display in chat
+  const [messageImages, setMessageImages] = useState<Map<string, string[]>>(new Map())
 
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
@@ -1440,6 +1463,18 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       console.error('[useChat] Error:', err)
     },
   })
+
+  // Associate pending images with new user messages
+  useEffect(() => {
+    if (pendingImageDataUrlsRef.current.length === 0) return
+    const userMsgs = messages.filter(m => m.role === 'user')
+    const lastUserMsg = userMsgs[userMsgs.length - 1]
+    if (lastUserMsg && !messageImages.has(lastUserMsg.id)) {
+      const urls = pendingImageDataUrlsRef.current
+      pendingImageDataUrlsRef.current = []
+      setMessageImages(prev => new Map(prev).set(lastUserMsg.id, urls))
+    }
+  }, [messages, messageImages])
 
   // Timestamp tracking (sync during render for immediate availability)
   const timestampsRef = useRef(new Map<string, Date>())
@@ -1699,18 +1734,18 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
     // Convert images to base64 and store in ref for transport body
     if (files && files.length > 0) {
       const imageParts: Array<{ mediaType: string; data: string }> = []
+      const dataUrls: string[] = []
       for (const file of files) {
-        const base64 = await new Promise<string>((resolve) => {
+        const dataUrl = await new Promise<string>((resolve) => {
           const reader = new FileReader()
-          reader.onload = () => {
-            const result = reader.result as string
-            resolve(result.split(',')[1])
-          }
+          reader.onload = () => resolve(reader.result as string)
           reader.readAsDataURL(file)
         })
-        imageParts.push({ mediaType: file.type, data: base64 })
+        dataUrls.push(dataUrl)
+        imageParts.push({ mediaType: file.type, data: dataUrl.split(',')[1] })
       }
       pendingImagesRef.current = imageParts
+      pendingImageDataUrlsRef.current = dataUrls
     }
 
     await sendMessage({ text: text || '画像を確認してください' })
@@ -1886,6 +1921,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         messagesEndRef={messagesEndRef}
         containerRef={messagesContainerRef}
         timestamps={timestampsRef.current}
+        messageImages={messageImages}
         onRegenerate={regenerate}
         onEditSubmit={handleEditMessage}
       />
