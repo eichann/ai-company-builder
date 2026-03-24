@@ -343,12 +343,21 @@ export function CodeEditor({ value, onChange, fileName, readOnly = false }: Code
 
     const currentContent = view.state.doc.toString()
     if (currentContent !== value) {
+      // Preserve scroll position across external content updates (e.g. LLM edits)
+      const scrollTop = view.scrollDOM.scrollTop
+      const scrollLeft = view.scrollDOM.scrollLeft
+
       view.dispatch({
         changes: {
           from: 0,
           to: currentContent.length,
           insert: value,
         },
+      })
+
+      requestAnimationFrame(() => {
+        view.scrollDOM.scrollTop = scrollTop
+        view.scrollDOM.scrollLeft = scrollLeft
       })
     }
   }, [value])

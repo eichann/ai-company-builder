@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import {
   ClockCounterClockwise,
   CaretRight,
@@ -26,6 +26,28 @@ interface CommitFile {
 interface CommitHistoryPanelProps {
   rootPath: string
   departmentFolder: string
+}
+
+// Module-level cache: keyed by "rootPath::departmentFolder"
+const commitCache = new Map<string, { commits: Commit[]; timestamp: number }>()
+const CACHE_TTL = 60_000 // 1 minute
+
+/** Clear all commit caches (call after git sync) */
+export function invalidateCommitCache() {
+  commitCache.clear()
+}
+
+/** Prefetch commits for a department in the background */
+export function prefetchCommits(rootPath: string, departmentFolder: string) {
+  if (!rootPath || !departmentFolder) return
+  const key = `${rootPath}::${departmentFolder}`
+  const cached = commitCache.get(key)
+  if (cached && Date.now() - cached.timestamp < CACHE_TTL) return // still fresh
+  window.electronAPI.gitLog(rootPath, `${departmentFolder}/`, 50).then(result => {
+    if (result.success) {
+      commitCache.set(key, { commits: result.commits, timestamp: Date.now() })
+    }
+  }).catch(() => {})
 }
 
 function formatDate(dateStr: string): string {
@@ -60,30 +82,51 @@ function FileStatusIcon({ status }: { status: string }) {
 }
 
 export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistoryPanelProps) {
-  const [commits, setCommits] = useState<Commit[]>([])
-  const [isLoading, setIsLoading] = useState(false)
+  const cacheKey = `${rootPath}::${departmentFolder}`
+  const cached = commitCache.get(cacheKey)
+
+  const [commits, setCommits] = useState<Commit[]>(cached?.commits || [])
+  const [isLoading, setIsLoading] = useState(!cached)
   const [expandedCommit, setExpandedCommit] = useState<string | null>(null)
   const [commitFiles, setCommitFiles] = useState<Map<string, CommitFile[]>>(new Map())
   const [loadingFiles, setLoadingFiles] = useState<string | null>(null)
+  const mountedRef = useRef(true)
 
-  const loadCommits = useCallback(async () => {
+  useEffect(() => {
+    mountedRef.current = true
+    return () => { mountedRef.current = false }
+  }, [])
+
+  const loadCommits = useCallback(async (showSpinner: boolean) => {
     if (!rootPath || !departmentFolder) return
-    setIsLoading(true)
+    if (showSpinner) setIsLoading(true)
     try {
       const result = await window.electronAPI.gitLog(rootPath, `${departmentFolder}/`, 50)
-      if (result.success) {
+      if (result.success && mountedRef.current) {
         setCommits(result.commits)
+        commitCache.set(cacheKey, { commits: result.commits, timestamp: Date.now() })
       }
     } catch (err) {
       console.error('Failed to load commits:', err)
     } finally {
-      setIsLoading(false)
+      if (mountedRef.current) setIsLoading(false)
     }
-  }, [rootPath, departmentFolder])
+  }, [rootPath, departmentFolder, cacheKey])
 
   useEffect(() => {
-    loadCommits()
-  }, [loadCommits])
+    const cached = commitCache.get(cacheKey)
+    if (cached) {
+      // Show cached data immediately
+      setCommits(cached.commits)
+      setIsLoading(false)
+      // Revalidate in background if stale
+      if (Date.now() - cached.timestamp > CACHE_TTL) {
+        loadCommits(false)
+      }
+    } else {
+      loadCommits(true)
+    }
+  }, [cacheKey, loadCommits])
 
   const toggleCommit = useCallback(async (hash: string) => {
     if (expandedCommit === hash) {
@@ -145,7 +188,7 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
                     {isExpanded ? <CaretDown size={12} /> : <CaretRight size={12} />}
                   </span>
                   <div className="flex-1 min-w-0">
-                    <p className="text-[13px] text-gray-800 dark:text-zinc-200 leading-snug truncate">
+                    <p className={`text-[13px] text-gray-800 dark:text-zinc-200 leading-snug ${isExpanded ? 'whitespace-pre-wrap' : 'truncate'}`}>
                       {commit.message}
                     </p>
                     <div className="flex items-center gap-3 mt-1">

@@ -9,7 +9,7 @@ import { promisify } from 'util'
 const execAsync = promisify(exec)
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
-import { streamText } from 'ai'
+import { streamText, generateText } from 'ai'
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import simpleGit, { SimpleGit } from 'simple-git'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
@@ -1360,7 +1360,12 @@ ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, 
 // Generate a commit message from staged changes using Claude Code CLI (Haiku)
 async function generateCommitMessage(repoPath: string): Promise<string | null> {
   try {
-    const claudePath = getClaudeCodeCliPath()
+    const appConfig = loadConfig()
+    if (!appConfig.anthropicApiKey) {
+      console.warn('Git sync: No API key configured, skipping commit message generation')
+      return null
+    }
+
     const git: SimpleGit = createGit(repoPath)
     const diffStat = await git.diff(['--cached', '--stat'])
     const diffSummary = await git.diff(['--cached', '--name-status'])
@@ -1373,39 +1378,19 @@ async function generateCommitMessage(repoPath: string): Promise<string | null> {
 
 ${diffSummary}\n\n${diffStat}`
 
-    return new Promise<string | null>((resolve) => {
-      // Use shell wrapper to close inherited Electron FDs (prevents EBADF)
-      const child = spawn('/bin/sh', [
-        '-c',
-        'for f in /dev/fd/*; do n="${f##*/}"; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-" 2>/dev/null || true; done; exec "$0" "$@"',
-        claudePath,
-        '--print', '--model', 'haiku', prompt,
-      ], {
-        cwd: repoPath,
-        stdio: ['ignore', 'pipe', 'pipe'],
-        timeout: 30000,
-        ...(process.getuid ? { uid: process.getuid() } : {}),
-      })
-
-      let output = ''
-      let stderr = ''
-      child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
-      if (child.stderr) child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
-      child.on('close', (code) => {
-        console.log(`Git sync: claude --print exited with code=${code}, output=${output.trim().slice(0, 200)}, stderr=${stderr.trim().slice(0, 200)}`)
-        if (code === 0 && output.trim()) {
-          console.log(`Git sync: Generated commit message: ${output.trim()}`)
-          resolve(output.trim())
-        } else {
-          console.warn(`Git sync: Commit message generation failed: code=${code}`)
-          resolve(null)
-        }
-      })
-      child.on('error', (err) => {
-        console.warn('Git sync: spawn error:', err)
-        resolve(null)
-      })
+    const anthropic = createAnthropic({ apiKey: appConfig.anthropicApiKey })
+    const result = await generateText({
+      model: anthropic('claude-haiku-4-5-20251001'),
+      prompt,
+      maxTokens: 300,
     })
+
+    const message = result.text.trim()
+    if (message) {
+      console.log(`Git sync: Generated commit message: ${message.slice(0, 200)}`)
+      return message
+    }
+    return null
   } catch (err) {
     console.warn('Git sync: Commit message generation failed:', err)
     return null
@@ -1453,6 +1438,31 @@ ipcMain.handle('git:preview', async (_, repoPath: string) => {
   }
 })
 
+// Revert a file's changes (git checkout HEAD -- <file> or git rm for new files)
+ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+
+    if (fileStatus === 'added') {
+      // New file: remove from staging and delete
+      await git.raw(['rm', '--cached', filePath])
+      const fullPath = path.join(safePath, filePath)
+      if (fs.existsSync(fullPath)) {
+        fs.unlinkSync(fullPath)
+      }
+    } else {
+      // Modified or deleted: restore from HEAD
+      await git.raw(['checkout', 'HEAD', '--', filePath])
+    }
+
+    return { success: true }
+  } catch (err) {
+    console.error('Git revert file error:', err)
+    return { success: false, error: err instanceof Error ? err.message : 'Revert failed' }
+  }
+})
+
 // Generate change summary (async, called separately from preview)
 ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
   try {
@@ -1477,7 +1487,7 @@ ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit:
       commits: logResult.all.map(c => ({
         hash: c.hash,
         hashShort: c.hash.substring(0, 7),
-        message: c.message,
+        message: c.body ? `${c.message}\n${c.body}`.trim() : c.message,
         author: c.author_name,
         date: c.date,
       })),
@@ -1785,8 +1795,12 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     const hasLocalChanges = status.staged.length > 0 || status.files.length > 0
 
     if (hasLocalChanges) {
-      const generatedMessage = await generateCommitMessage(repoPath)
-      await git.commit(generatedMessage || commitMessage || 'Sync from AI Company Builder')
+      // Use custom message if provided (not the default fallback), otherwise generate with AI
+      const isCustomMessage = commitMessage && commitMessage !== 'Sync from AI Company Builder'
+      const finalMessage = isCustomMessage
+        ? commitMessage
+        : (await generateCommitMessage(repoPath)) || commitMessage || 'Sync from AI Company Builder'
+      await git.commit(finalMessage)
     }
 
     // Record local commit hash before rebase attempt
