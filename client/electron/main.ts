@@ -569,6 +569,36 @@ ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string)
   }
 })
 
+// Move file from external location (e.g. Finder drop)
+// Source path is NOT validated (external), only destination is validated
+ipcMain.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationPath: string) => {
+  try {
+    const safeDest = validatePath(destinationPath)
+    const resolved = path.resolve(sourcePath)
+
+    try {
+      await fs.promises.rename(resolved, safeDest)
+    } catch (err: unknown) {
+      if (err && typeof err === 'object' && 'code' in err && err.code === 'EXDEV') {
+        // Cross-volume: copy then delete original
+        const stat = await fs.promises.stat(resolved)
+        if (stat.isDirectory()) {
+          await fs.promises.cp(resolved, safeDest, { recursive: true })
+          await fs.promises.rm(resolved, { recursive: true, force: true })
+        } else {
+          await fs.promises.copyFile(resolved, safeDest)
+          await fs.promises.unlink(resolved)
+        }
+      } else {
+        throw err
+      }
+    }
+    return { success: true }
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
 // Copy file or folder
 ipcMain.handle('fs:copy', async (_, sourcePath: string, destinationPath: string) => {
   try {
@@ -1650,7 +1680,6 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     // 3. Check for deleted files before staging
     const preAddStatus = await git.status()
     const deletedFiles = preAddStatus.deleted
-    const notAdded = preAddStatus.not_added || []
 
     // If files were deleted locally, warn the user before syncing
     if (deletedFiles.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
