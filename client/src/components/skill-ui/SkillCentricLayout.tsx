@@ -524,7 +524,7 @@ ${promptContent}
             )}
           </button>
           <button
-            onClick={handleSync}
+            onClick={() => handleSync()}
             disabled={isSyncing || !currentCompany}
             className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors disabled:opacity-50"
             title="サーバーと同期"

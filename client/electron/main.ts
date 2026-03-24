@@ -1382,7 +1382,7 @@ ${diffSummary}\n\n${diffStat}`
     const result = await generateText({
       model: anthropic('claude-haiku-4-5-20251001'),
       prompt,
-      maxTokens: 300,
+      maxOutputTokens: 300,
     })
 
     const message = result.text.trim()
@@ -2932,7 +2932,7 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
     const childProcess = spawn(npmCmd, ['run', startCommand, '--', '--port', port.toString()], {
       cwd: toolPath,
       stdio: ['ignore', logFd, logFd],
-      detached: false,
+      detached: true,
       env: { ...process.env, PORT: port.toString(), PATH: getShellPath() },
     })
     console.log('[tools:start] Spawn succeeded, pid:', childProcess.pid)
