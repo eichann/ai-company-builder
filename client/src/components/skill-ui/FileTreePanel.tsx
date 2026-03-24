@@ -39,6 +39,7 @@ interface FileTreePanelProps {
   departmentFolder: string
   selectedFilePath: string | null
   onSelectFile: (path: string) => void
+  onDoubleClickFile?: (path: string) => void
   onCreateFile?: () => void
 }
 
@@ -47,6 +48,7 @@ export function FileTreePanel({
   departmentFolder,
   selectedFilePath,
   onSelectFile,
+  onDoubleClickFile,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const [files, setFiles] = useState<FileEntry[]>([])
@@ -846,6 +848,11 @@ export function FileTreePanel({
               } else {
                 onSelectFile(entry.path)
               }
+            }
+          }}
+          onDoubleClick={() => {
+            if (!entry.isDirectory && onDoubleClickFile) {
+              onDoubleClickFile(entry.path)
             }
           }}
           onContextMenu={(e) => {
