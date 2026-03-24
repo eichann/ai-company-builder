@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -12,6 +12,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
+import { CommitHistoryPanel } from './CommitHistoryPanel'
 import { SyncPreviewDialog } from '../common/SyncPreviewDialog'
 import type { Skill, SkillTool } from '../../types'
 import { useAppStore } from '../../stores/appStore'
@@ -25,7 +26,7 @@ const MIN_LEFT_PANEL_WIDTH = 300
 const MAX_LEFT_PANEL_WIDTH = 1200
 const MIN_CHAT_WIDTH = 280
 
-type LeftPanelTab = 'skills' | 'files'
+type LeftPanelTab = 'skills' | 'files' | 'history'
 
 export function SkillCentricLayout() {
   const { t } = useTranslation()
@@ -610,11 +611,31 @@ ${promptContent}
               <FolderSimple size={16} weight={leftTab === 'files' ? 'fill' : 'regular'} />
               {t('tabs.files')}
             </button>
+            <button
+              onClick={() => setLeftTab('history')}
+              className={`
+                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                border-b-2 transition-colors
+                ${leftTab === 'history'
+                  ? 'border-accent text-gray-900 dark:text-zinc-100'
+                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                }
+              `}
+            >
+              <GitCommit size={16} weight={leftTab === 'history' ? 'fill' : 'regular'} />
+              履歴
+            </button>
           </div>
 
           {/* Tab Content */}
           <div className="flex-1 overflow-hidden min-w-0">
-            {leftTab === 'skills' ? (
+            {leftTab === 'history' ? (
+              /* History Tab */
+              <CommitHistoryPanel
+                rootPath={currentCompany?.rootPath || ''}
+                departmentFolder={selectedDept?.folder || ''}
+              />
+            ) : leftTab === 'skills' ? (
               /* Skills Tab */
               <div className="h-full flex">
                 <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden`}>

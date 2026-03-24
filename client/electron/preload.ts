@@ -77,6 +77,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>
     ipcRenderer.invoke('git:generateSummary', repoPath),
+  gitLog: (repoPath: string, folderPath: string, limit?: number) =>
+    ipcRenderer.invoke('git:log', repoPath, folderPath, limit),
+  gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
+    ipcRenderer.invoke('git:showCommit', repoPath, commitHash, folderPath),
   gitSetupCompanyRemote: (repoPath: string, companyId: string) =>
     ipcRenderer.invoke('git:setupCompanyRemote', repoPath, companyId),
   gitPushToServer: (repoPath: string) =>
@@ -472,6 +476,22 @@ declare global {
       gitGenerateSummary: (repoPath: string) => Promise<{
         success: boolean
         summary: string | null
+      }>
+      gitLog: (repoPath: string, folderPath: string, limit?: number) => Promise<{
+        success: boolean
+        commits: Array<{
+          hash: string
+          hashShort: string
+          message: string
+          author: string
+          date: string
+        }>
+        error?: string
+      }>
+      gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) => Promise<{
+        success: boolean
+        files: Array<{ status: string; path: string }>
+        error?: string
       }>
       gitSetupCompanyRemote: (repoPath: string, companyId: string) => Promise<GitResult>
       gitPushToServer: (repoPath: string) => Promise<GitResult>

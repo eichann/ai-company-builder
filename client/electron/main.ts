@@ -1464,6 +1464,52 @@ ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
   }
 })
 
+// Git log filtered by folder path
+ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
+  try {
+    const git: SimpleGit = createGit(repoPath)
+    const logResult = await git.log({
+      maxCount: limit,
+      file: folderPath,
+    })
+    return {
+      success: true,
+      commits: logResult.all.map(c => ({
+        hash: c.hash,
+        hashShort: c.hash.substring(0, 7),
+        message: c.message,
+        author: c.author_name,
+        date: c.date,
+      })),
+    }
+  } catch (err) {
+    console.error('Git log error:', err)
+    return { success: false, commits: [], error: err instanceof Error ? err.message : 'Failed' }
+  }
+})
+
+// Show files changed in a specific commit, filtered by folder
+ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
+  try {
+    const git: SimpleGit = createGit(repoPath)
+    const args = ['show', '--name-status', '--pretty=format:', commitHash]
+    if (folderPath) args.push('--', folderPath)
+    const result = await git.raw(args)
+    const files: Array<{ status: string; path: string }> = []
+    for (const line of result.trim().split('\n')) {
+      if (!line) continue
+      const [status, ...pathParts] = line.split('\t')
+      if (status && pathParts.length > 0) {
+        files.push({ status: status.charAt(0), path: pathParts.join('\t') })
+      }
+    }
+    return { success: true, files }
+  } catch (err) {
+    console.error('Git show error:', err)
+    return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
+  }
+})
+
 // Sync lock per repository to prevent concurrent syncs
 const syncLocks = new Map<string, Promise<unknown>>()
 
