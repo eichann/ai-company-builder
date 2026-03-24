@@ -1315,6 +1315,102 @@ ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, 
   }
 })
 
+// Generate a commit message from staged changes using Claude Code CLI (Haiku)
+async function generateCommitMessage(repoPath: string): Promise<string | null> {
+  try {
+    const claudePath = getClaudeCodeCliPath()
+    const git: SimpleGit = createGit(repoPath)
+    const diffStat = await git.diff(['--cached', '--stat'])
+    const diffSummary = await git.diff(['--cached', '--name-status'])
+    if (!diffStat.trim()) return null
+
+    const prompt = `以下のgit diffから、日本語のコミットメッセージを生成してください。
+- 1行目: 変更の要約
+- 変更が多い場合は空行の後に箇条書きで各変更を列挙
+- メッセージのみ出力し、他は何も出力しないでください
+
+${diffSummary}\n\n${diffStat}`
+
+    return new Promise<string | null>((resolve) => {
+      // Use shell wrapper to close inherited Electron FDs (prevents EBADF)
+      const child = spawn('/bin/sh', [
+        '-c',
+        'for f in /dev/fd/*; do n="${f##*/}"; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-" 2>/dev/null || true; done; exec "$0" "$@"',
+        claudePath,
+        '--print', '--model', 'haiku', prompt,
+      ], {
+        cwd: repoPath,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        timeout: 30000,
+        ...(process.getuid ? { uid: process.getuid() } : {}),
+      })
+
+      let output = ''
+      let stderr = ''
+      child.stdout.on('data', (chunk: Buffer) => { output += chunk.toString() })
+      if (child.stderr) child.stderr.on('data', (chunk: Buffer) => { stderr += chunk.toString() })
+      child.on('close', (code) => {
+        console.log(`Git sync: claude --print exited with code=${code}, output=${output.trim().slice(0, 200)}, stderr=${stderr.trim().slice(0, 200)}`)
+        if (code === 0 && output.trim()) {
+          console.log(`Git sync: Generated commit message: ${output.trim()}`)
+          resolve(output.trim())
+        } else {
+          console.warn(`Git sync: Commit message generation failed: code=${code}`)
+          resolve(null)
+        }
+      })
+      child.on('error', (err) => {
+        console.warn('Git sync: spawn error:', err)
+        resolve(null)
+      })
+    })
+  } catch (err) {
+    console.warn('Git sync: Commit message generation failed:', err)
+    return null
+  }
+}
+
+// Preview changes before sync (read-only, no commit/push)
+ipcMain.handle('git:preview', async (_, repoPath: string) => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+    await git.add('.')
+    const status = await git.status()
+
+    return {
+      success: true,
+      hasChanges: status.files.length > 0,
+      changes: {
+        added: [...status.not_added, ...status.created],
+        modified: status.modified,
+        deleted: status.deleted,
+      },
+      totalCount: status.files.length,
+    }
+  } catch (err) {
+    console.error('Git preview error:', err)
+    return {
+      success: false,
+      hasChanges: false,
+      changes: { added: [], modified: [], deleted: [] },
+      totalCount: 0,
+      error: err instanceof Error ? err.message : 'Preview failed',
+    }
+  }
+})
+
+// Generate change summary (async, called separately from preview)
+ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
+  try {
+    const safePath = validatePath(repoPath)
+    const summary = await generateCommitMessage(safePath)
+    return { success: true, summary: summary || null }
+  } catch {
+    return { success: false, summary: null }
+  }
+})
+
 // Sync lock per repository to prevent concurrent syncs
 const syncLocks = new Map<string, Promise<unknown>>()
 
@@ -1591,7 +1687,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     const hasLocalChanges = status.staged.length > 0 || status.files.length > 0
 
     if (hasLocalChanges) {
-      await git.commit(commitMessage || 'Sync from AI Company Builder')
+      const generatedMessage = await generateCommitMessage(repoPath)
+      await git.commit(generatedMessage || commitMessage || 'Sync from AI Company Builder')
     }
 
     // Record local commit hash before rebase attempt

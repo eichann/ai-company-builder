@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -12,6 +12,7 @@ import { ResizeHandle } from './ResizeHandle'
 import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
+import { SyncPreviewDialog } from '../common/SyncPreviewDialog'
 import type { Skill, SkillTool } from '../../types'
 import { useAppStore } from '../../stores/appStore'
 import { useSkills } from '../../hooks/useSkills'
@@ -80,6 +81,16 @@ export function SkillCentricLayout() {
     type: 'success' | 'warning' | 'error'
     message: string
     backupPath?: string
+  } | null>(null)
+
+  // Preview state
+  const [showPreview, setShowPreview] = useState(false)
+  const [isLoadingPreview, setIsLoadingPreview] = useState(false)
+  const [isLoadingSummary, setIsLoadingSummary] = useState(false)
+  const [previewData, setPreviewData] = useState<{
+    changes: { added: string[]; modified: string[]; deleted: string[] }
+    totalCount: number
+    summary?: string | null
   } | null>(null)
 
   const selectedDept = useMemo(
@@ -333,6 +344,45 @@ ${promptContent}
     })
   }, [])
 
+  const handlePreview = useCallback(async () => {
+    if (!currentCompany?.rootPath) return
+    setIsLoadingPreview(true)
+    try {
+      const result = await window.electronAPI.gitPreview(currentCompany.rootPath)
+      if (!result.success) {
+        setSyncNotification({ type: 'error', message: result.error || 'プレビューに失敗しました' })
+        return
+      }
+      if (!result.hasChanges) {
+        setSyncNotification({ type: 'success', message: '変更はありません' })
+        setTimeout(() => setSyncNotification(null), 3000)
+        return
+      }
+      setPreviewData({ changes: result.changes, totalCount: result.totalCount, summary: null })
+      setShowPreview(true)
+    } catch (error) {
+      console.error('Preview failed:', error)
+      setSyncNotification({ type: 'error', message: 'プレビューに失敗しました' })
+    } finally {
+      setIsLoadingPreview(false)
+    }
+  }, [currentCompany?.rootPath])
+
+  const handleRequestSummary = useCallback(async () => {
+    if (!currentCompany?.rootPath) return
+    setIsLoadingSummary(true)
+    try {
+      const result = await window.electronAPI.gitGenerateSummary(currentCompany.rootPath)
+      if (result.success && result.summary) {
+        setPreviewData(prev => prev ? { ...prev, summary: result.summary } : prev)
+      }
+    } catch {
+      // Summary generation failed — not critical
+    } finally {
+      setIsLoadingSummary(false)
+    }
+  }, [currentCompany?.rootPath])
+
   const handleSync = useCallback(async () => {
     if (!currentCompany?.rootPath || !currentCompany?.id) return
 
@@ -425,6 +475,18 @@ ${promptContent}
         </div>
         <div className="flex items-center gap-2 app-no-drag">
           <button
+            onClick={handlePreview}
+            disabled={isLoadingPreview || !currentCompany}
+            className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors disabled:opacity-50"
+            title="変更を確認"
+          >
+            {isLoadingPreview ? (
+              <SpinnerGap size={18} className="animate-spin" />
+            ) : (
+              <ListChecks size={18} />
+            )}
+          </button>
+          <button
             onClick={handleSync}
             disabled={isSyncing || !currentCompany}
             className="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors disabled:opacity-50"
@@ -436,6 +498,7 @@ ${promptContent}
               <CloudArrowUp size={18} />
             )}
           </button>
+          <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
           <button
             onClick={() => setShowBackupHistory(true)}
             disabled={!currentCompany}
@@ -638,6 +701,20 @@ ${promptContent}
             />
           </div>
         </div>
+      )}
+
+      {/* Sync Preview Dialog */}
+      {previewData && (
+        <SyncPreviewDialog
+          isOpen={showPreview}
+          onClose={() => setShowPreview(false)}
+          changes={previewData.changes}
+          totalCount={previewData.totalCount}
+          summary={previewData.summary}
+          isLoadingSummary={isLoadingSummary}
+          onRequestSummary={handleRequestSummary}
+          rootPath={currentCompany?.rootPath || ''}
+        />
       )}
 
       {/* Sync Notification */}
