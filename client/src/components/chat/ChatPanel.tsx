@@ -405,11 +405,13 @@ function ToolApprovalBanner({
 function UserMessageBubble({
   message,
   images,
+  referenceFiles,
   canEdit,
   onEditSubmit,
 }: {
   message: UIMessage
   images?: string[]
+  referenceFiles?: string[]
   canEdit: boolean
   onEditSubmit?: (messageId: string, newText: string) => void
 }) {
@@ -483,8 +485,44 @@ function UserMessageBubble({
     )
   }
 
+  const [showAllFiles, setShowAllFiles] = useState(false)
+  const VISIBLE_FILE_COUNT = 3
+
   return (
     <div className="group relative">
+      {/* Reference files indicator */}
+      {referenceFiles && referenceFiles.length > 0 && (
+        <div className="mb-1.5 flex justify-end">
+          <div className="flex flex-wrap justify-end gap-1 max-w-[85%]">
+            {(showAllFiles ? referenceFiles : referenceFiles.slice(0, VISIBLE_FILE_COUNT)).map((filePath, i) => (
+              <span
+                key={i}
+                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] bg-accent/15 text-accent dark:bg-accent/20 dark:text-accent/90 border border-accent/20"
+                title={filePath}
+              >
+                <File size={10} className="flex-shrink-0" />
+                <span className="truncate max-w-[150px]">{filePath.split('/').pop()}</span>
+              </span>
+            ))}
+            {referenceFiles.length > VISIBLE_FILE_COUNT && !showAllFiles && (
+              <button
+                onClick={() => setShowAllFiles(true)}
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-accent/10 text-accent/70 hover:bg-accent/20 transition-colors"
+              >
+                +{referenceFiles.length - VISIBLE_FILE_COUNT}
+              </button>
+            )}
+            {showAllFiles && referenceFiles.length > VISIBLE_FILE_COUNT && (
+              <button
+                onClick={() => setShowAllFiles(false)}
+                className="inline-flex items-center px-2 py-0.5 rounded-md text-[11px] bg-accent/10 text-accent/70 hover:bg-accent/20 transition-colors"
+              >
+                <CaretUp size={10} />
+              </button>
+            )}
+          </div>
+        </div>
+      )}
       <div className="relative rounded-2xl px-4 py-3 text-[14px] leading-relaxed bg-accent text-white rounded-br-md">
         {images && images.length > 0 && (
           <div className="flex gap-1.5 mb-2 flex-wrap">
@@ -524,6 +562,7 @@ interface MessageItemProps {
   isStreaming: boolean
   timestamp?: Date
   images?: string[]
+  referenceFiles?: string[]
   isLastAssistant?: boolean
   canRegenerate?: boolean
   onRegenerate?: () => void
@@ -531,7 +570,7 @@ interface MessageItemProps {
   onEditSubmit?: (messageId: string, newText: string) => void
 }
 
-const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
+const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
 
@@ -626,6 +665,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
           <UserMessageBubble
             message={message}
             images={images}
+            referenceFiles={referenceFiles}
             canEdit={!!canEdit}
             onEditSubmit={onEditSubmit}
           />
@@ -656,7 +696,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 // ============================================================================
 
 interface ChatInputProps {
-  onSend: (text: string, files?: File[]) => void
+  onSend: (text: string, files?: File[], filePaths?: string[]) => void
   disabled: boolean
   placeholder: string
   hint: string
@@ -1155,14 +1195,9 @@ const ChatInput = memo(function ChatInput({
   }, [])
 
   const handleSendWithImages = useCallback((text: string) => {
-    // Append file references to the message
-    let finalText = text
-    if (attachedFilePaths.length > 0) {
-      const refs = attachedFilePaths.map(p => `- ${p}`).join('\n')
-      finalText = `${text}\n\n参照ファイル:\n${refs}`
-    }
     const images = attachedImages.length > 0 ? [...attachedImages] : undefined
-    onSend(finalText, images)
+    const paths = attachedFilePaths.length > 0 ? [...attachedFilePaths] : undefined
+    onSend(text, images, paths)
     setAttachedImages([])
     setAttachedFilePaths([])
   }, [onSend, attachedImages, attachedFilePaths])
@@ -1262,6 +1297,7 @@ interface MessageListProps {
   containerRef: React.RefObject<HTMLDivElement>
   timestamps: Map<string, Date>
   messageImages: Map<string, string[]>
+  messageReferenceFiles: Map<string, string[]>
   onRegenerate?: () => void
   onEditSubmit?: (messageId: string, newText: string) => void
 }
@@ -1273,6 +1309,7 @@ const MessageList = memo(function MessageList({
   containerRef,
   timestamps,
   messageImages,
+  messageReferenceFiles,
   onRegenerate,
   onEditSubmit,
 }: MessageListProps) {
@@ -1302,6 +1339,7 @@ const MessageList = memo(function MessageList({
           }
           timestamp={timestamps.get(message.id)}
           images={messageImages.get(message.id)}
+          referenceFiles={messageReferenceFiles.get(message.id)}
           isLastAssistant={index === lastAssistantIndex}
           canRegenerate={canRegenerate}
           onRegenerate={onRegenerate}
@@ -1390,6 +1428,12 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   const pendingImageDataUrlsRef = useRef<string[]>([])
   // Store sent images keyed by message ID for display in chat
   const [messageImages, setMessageImages] = useState<Map<string, string[]>>(new Map())
+  // Store reference file paths keyed by message ID for display in chat
+  const [messageReferenceFiles, setMessageReferenceFiles] = useState<Map<string, string[]>>(new Map())
+  // Pending file paths to send as reference context
+  const pendingFilePathsRef = useRef<string[]>([])
+  // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
+  const pendingDisplayFilePathsRef = useRef<string[]>([])
 
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
@@ -1404,6 +1448,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         if (pendingImagesRef.current.length > 0) {
           body.images = pendingImagesRef.current
           pendingImagesRef.current = []
+        }
+        if (pendingFilePathsRef.current.length > 0) {
+          body.referenceFiles = pendingFilePathsRef.current
+          pendingFilePathsRef.current = []
         }
         return body
       },
@@ -1475,6 +1523,18 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       setMessageImages(prev => new Map(prev).set(lastUserMsg.id, urls))
     }
   }, [messages, messageImages])
+
+  // Associate pending reference files with new user messages
+  useEffect(() => {
+    if (pendingDisplayFilePathsRef.current.length === 0) return
+    const userMsgs = messages.filter(m => m.role === 'user')
+    const lastUserMsg = userMsgs[userMsgs.length - 1]
+    if (lastUserMsg && !messageReferenceFiles.has(lastUserMsg.id)) {
+      const paths = pendingDisplayFilePathsRef.current
+      pendingDisplayFilePathsRef.current = []
+      setMessageReferenceFiles(prev => new Map(prev).set(lastUserMsg.id, paths))
+    }
+  }, [messages, messageReferenceFiles])
 
   // Timestamp tracking (sync during render for immediate availability)
   const timestampsRef = useRef(new Map<string, Date>())
@@ -1721,7 +1781,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   }, [])
 
   // Send handler (supports interrupt: stop current stream + send new message)
-  const handleSend = useCallback(async (text: string, files?: File[]) => {
+  const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
     if (!text.trim() && (!files || files.length === 0)) return
     perfMark('chat.send.start')
 
@@ -1746,6 +1806,12 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       }
       pendingImagesRef.current = imageParts
       pendingImageDataUrlsRef.current = dataUrls
+    }
+
+    // Store file paths in ref for transport body (sent as referenceFiles in system prompt)
+    if (filePaths && filePaths.length > 0) {
+      pendingFilePathsRef.current = [...filePaths]
+      pendingDisplayFilePathsRef.current = [...filePaths]
     }
 
     await sendMessage({ text: text || '画像を確認してください' })
@@ -1922,6 +1988,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         containerRef={messagesContainerRef}
         timestamps={timestampsRef.current}
         messageImages={messageImages}
+        messageReferenceFiles={messageReferenceFiles}
         onRegenerate={regenerate}
         onEditSubmit={handleEditMessage}
       />
