@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -13,6 +13,8 @@ import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
 import { CommitHistoryPanel, invalidateCommitCache, prefetchCommits } from './CommitHistoryPanel'
+import { SearchPanel } from './SearchPanel'
+import { FileSearchModal } from './FileSearchModal'
 import { SyncPreviewDialog } from '../common/SyncPreviewDialog'
 import type { Skill, SkillTool } from '../../types'
 import { useAppStore } from '../../stores/appStore'
@@ -26,7 +28,7 @@ const MIN_LEFT_PANEL_WIDTH = 300
 const MAX_LEFT_PANEL_WIDTH = 1200
 const MIN_CHAT_WIDTH = 280
 
-type LeftPanelTab = 'skills' | 'files' | 'history'
+type LeftPanelTab = 'skills' | 'files' | 'search' | 'history'
 
 export function SkillCentricLayout() {
   const { t } = useTranslation()
@@ -64,6 +66,9 @@ export function SkillCentricLayout() {
   const [openFiles, setOpenFiles] = useState<string[]>([])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
+  // Search
+  const searchInputRef = useRef<HTMLInputElement>(null)
+  const [showFileSearch, setShowFileSearch] = useState(false)
 
   // Panel width state (resizable)
   const [leftPanelWidth, setLeftPanelWidth] = useState(550)
@@ -145,6 +150,23 @@ export function SkillCentricLayout() {
         window.clearTimeout(deferredSkillsRefreshTimerRef.current)
       }
     }
+  }, [])
+
+  // Keyboard shortcuts: Cmd+Shift+F → search tab, Cmd+P → file search modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
+        e.preventDefault()
+        setLeftTab('search')
+        requestAnimationFrame(() => searchInputRef.current?.focus())
+      }
+      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'p') {
+        e.preventDefault()
+        setShowFileSearch(true)
+      }
+    }
+    document.addEventListener('keydown', handleKeyDown)
+    return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
   // Watch skills directory for changes
@@ -260,6 +282,13 @@ export function SkillCentricLayout() {
     setLeftTab('files')
     handleOpenFile(filePath)
   }
+
+  const handleFileSearchSelect = useCallback((filePath: string) => {
+    setLeftTab('files')
+    handleOpenFile(filePath)
+    handlePinFile(filePath)
+  }, [handleOpenFile, handlePinFile])
+
 
   const handleAddSkill = () => {
     setShowNewSkillWizard(true)
@@ -633,6 +662,20 @@ ${promptContent}
               {t('tabs.files')}
             </button>
             <button
+              onClick={() => { setLeftTab('search'); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
+              className={`
+                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                border-b-2 transition-colors
+                ${leftTab === 'search'
+                  ? 'border-accent text-gray-900 dark:text-zinc-100'
+                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                }
+              `}
+            >
+              <MagnifyingGlass size={16} weight={leftTab === 'search' ? 'fill' : 'regular'} />
+              検索
+            </button>
+            <button
               onClick={() => setLeftTab('history')}
               className={`
                 flex items-center gap-2 px-4 py-2.5 text-sm font-medium
@@ -655,6 +698,15 @@ ${promptContent}
               <CommitHistoryPanel
                 rootPath={currentCompany?.rootPath || ''}
                 departmentFolder={selectedDept?.folder || ''}
+              />
+            )}
+
+            {/* Search Tab */}
+            {leftTab === 'search' && (
+              <SearchPanel
+                rootPath={currentCompany?.rootPath || ''}
+                departmentFolder={selectedDept?.folder || ''}
+                inputRef={searchInputRef}
               />
             )}
 
@@ -738,6 +790,15 @@ ${promptContent}
           onComplete={handleCreateSkill}
         />
       )}
+
+      {/* File Search Modal (Cmd+P) */}
+      <FileSearchModal
+        isOpen={showFileSearch}
+        onClose={() => setShowFileSearch(false)}
+        rootPath={currentCompany?.rootPath || ''}
+        departmentFolder={selectedDept?.folder || ''}
+        onSelectFile={handleFileSearchSelect}
+      />
 
       {/* Settings Panel Modal */}
       {showSettings && (
