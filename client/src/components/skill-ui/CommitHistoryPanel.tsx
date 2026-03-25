@@ -9,6 +9,7 @@ import {
   Trash,
   CircleNotch,
 } from '@phosphor-icons/react'
+import { DiffModal } from '../common/DiffViewer'
 
 interface Commit {
   hash: string
@@ -79,6 +80,36 @@ function FileStatusIcon({ status }: { status: string }) {
     default:
       return <PencilSimple size={12} className="text-gray-400 flex-shrink-0" />
   }
+}
+
+function CommitFileList({ files, commitHash, rootPath }: { files: CommitFile[]; commitHash: string; rootPath: string }) {
+  const [diffFile, setDiffFile] = useState<string | null>(null)
+
+  return (
+    <div className="space-y-0.5">
+      {files.map((file, i) => (
+        <div
+          key={i}
+          className="flex items-center gap-1.5 text-[11px] py-0.5 cursor-pointer rounded hover:bg-gray-50 dark:hover:bg-zinc-800/30 px-1"
+          onClick={() => setDiffFile(file.path)}
+        >
+          <FileStatusIcon status={file.status} />
+          <span className="text-gray-600 dark:text-zinc-400 truncate">
+            {file.path}
+          </span>
+        </div>
+      ))}
+
+      {diffFile && (
+        <DiffModal
+          isOpen={true}
+          onClose={() => setDiffFile(null)}
+          title={diffFile}
+          diffProps={{ mode: 'commit', rootPath, filePath: diffFile, commitHash }}
+        />
+      )}
+    </div>
+  )
 }
 
 export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistoryPanelProps) {
@@ -216,19 +247,11 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
                       読み込み中...
                     </div>
                   ) : files && files.length > 0 ? (
-                    <div className="space-y-0.5">
-                      {files.map((file, i) => (
-                        <div
-                          key={i}
-                          className="flex items-center gap-1.5 text-[11px] py-0.5"
-                        >
-                          <FileStatusIcon status={file.status} />
-                          <span className="text-gray-600 dark:text-zinc-400 truncate">
-                            {file.path}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
+                    <CommitFileList
+                      files={files}
+                      commitHash={commit.hash}
+                      rootPath={rootPath}
+                    />
                   ) : (
                     <p className="text-[11px] text-gray-400 dark:text-zinc-500 py-1">
                       変更ファイルなし
