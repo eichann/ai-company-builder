@@ -1439,6 +1439,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   // App session ID ref (for Claude CLI session resume)
   // Eagerly assigned on first message send so the server can track the CLI session from the start
   const appSessionIdRef = useRef<string | null>(null)
+  // Claude CLI session ID (persisted across app restarts via ChatSession)
+  const claudeSessionIdRef = useRef<string | null>(null)
 
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
@@ -1455,6 +1457,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           appSessionIdRef.current = `session-${Date.now()}`
         }
         body.appSessionId = appSessionIdRef.current
+        // Include persisted Claude CLI session ID for resume after restart
+        if (claudeSessionIdRef.current) {
+          body.claudeSessionId = claudeSessionIdRef.current
+        }
         if (pendingImagesRef.current.length > 0) {
           body.images = pendingImagesRef.current
           pendingImagesRef.current = []
@@ -1516,6 +1522,19 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       window.dispatchEvent(new Event('refresh-file-tree'))
       // Fetch context window usage
       fetchContext()
+      // Fetch and store Claude CLI session ID for resume persistence
+      if (appSessionIdRef.current) {
+        fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
+          headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+        })
+          .then(res => res.json())
+          .then(data => {
+            if (data.claudeSessionId) {
+              claudeSessionIdRef.current = data.claudeSessionId
+            }
+          })
+          .catch(() => {})
+      }
     },
     onError: (err) => {
       console.error('[useChat] Error:', err)
@@ -1652,6 +1671,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         ? sessions.find(s => s.id === sessionId)?.createdAt || new Date().toISOString()
         : new Date().toISOString(),
       updatedAt: new Date().toISOString(),
+      ...(claudeSessionIdRef.current ? { claudeSessionId: claudeSessionIdRef.current } : {}),
     }
 
     try {
@@ -1674,8 +1694,9 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           timestampsRef.current.set(msg.id, new Date(msg.timestamp))
         }
         setCurrentSessionId(session.id)
-        // Restore app session ID for Claude CLI resume
+        // Restore app session ID and Claude CLI session ID for resume
         appSessionIdRef.current = session.id
+        claudeSessionIdRef.current = session.claudeSessionId || null
         setShowHistory(false)
       }
     } catch (e) {
@@ -1705,6 +1726,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
       }).catch(() => {})
     }
     appSessionIdRef.current = null
+    claudeSessionIdRef.current = null
     timestampsRef.current.clear()
     setMessages([{
       id: '1',
