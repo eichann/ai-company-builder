@@ -47,6 +47,7 @@ interface ChatSession {
   }>
   createdAt: string
   updatedAt: string
+  claudeSessionId?: string
 }
 
 type AuthMode = 'claude-code' | 'api-key'
@@ -1435,6 +1436,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
   const pendingDisplayFilePathsRef = useRef<string[]>([])
 
+  // App session ID ref (for Claude CLI session resume)
+  // Eagerly assigned on first message send so the server can track the CLI session from the start
+  const appSessionIdRef = useRef<string | null>(null)
+
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
     return new DefaultChatTransport({
@@ -1445,6 +1450,11 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           workingDirectory: workingDirRef.current,
           modelId: aiModelRef.current,
         }
+        // Ensure app session ID exists (eagerly create on first request)
+        if (!appSessionIdRef.current) {
+          appSessionIdRef.current = `session-${Date.now()}`
+        }
+        body.appSessionId = appSessionIdRef.current
         if (pendingImagesRef.current.length > 0) {
           body.images = pendingImagesRef.current
           pendingImagesRef.current = []
@@ -1612,9 +1622,11 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   async function saveCurrentSession() {
     if (!currentCompany?.id || messages.length <= 1) return
 
-    const sessionId = currentSessionId || `session-${Date.now()}`
+    // Use the appSessionIdRef (already set eagerly by transport) or create one
+    const sessionId = currentSessionId || appSessionIdRef.current || `session-${Date.now()}`
     if (!currentSessionId) {
       setCurrentSessionId(sessionId)
+      appSessionIdRef.current = sessionId
     }
 
     // Generate title from first user message
@@ -1662,6 +1674,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
           timestampsRef.current.set(msg.id, new Date(msg.timestamp))
         }
         setCurrentSessionId(session.id)
+        // Restore app session ID for Claude CLI resume
+        appSessionIdRef.current = session.id
         setShowHistory(false)
       }
     } catch (e) {
@@ -1683,6 +1697,14 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   }
 
   function startNewChat() {
+    // Clear Claude CLI session mapping on the server
+    if (appSessionIdRef.current) {
+      fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+      }).catch(() => {})
+    }
+    appSessionIdRef.current = null
     timestampsRef.current.clear()
     setMessages([{
       id: '1',

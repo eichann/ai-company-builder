@@ -133,7 +133,10 @@ function getShellPath(): string {
 
 /** Get env object with resolved PATH for spawn calls */
 function getShellEnv(): Record<string, string> {
-  return { ...process.env as Record<string, string>, PATH: getShellPath() }
+  const env = { ...process.env as Record<string, string>, PATH: getShellPath() }
+  // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
+  delete env.CLAUDECODE
+  return env
 }
 
 // ============================================================================

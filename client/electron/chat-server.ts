@@ -64,7 +64,7 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   /\bchmod\s+777\b/,                 // chmod 777
   /\bmkfs\b/,                        // mkfs
   /\bdd\s+if=/,                      // dd if=
-  />\s*\//,                          // > / (redirect to root)
+  /(?<!\d)>\s*\//,                    // > / (redirect to root, but not 2>/dev/null)
 ]
 
 // ============================================================================
@@ -114,12 +114,15 @@ export async function startChatServer(config: ChatServerConfig) {
     noCacheTokens: number
   } | null = null
 
+  // Claude Code CLI session ID tracking (appSessionId → claudeCliSessionId)
+  const claudeSessionMap = new Map<string, string>()
+
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
   app.use('/*', cors({
     origin: (origin) => origin || '*',
     allowHeaders: ['Content-Type', 'Authorization'],
-    allowMethods: ['POST', 'GET', 'OPTIONS'],
+    allowMethods: ['POST', 'GET', 'DELETE', 'OPTIONS'],
   }))
 
   // Auth middleware
@@ -142,6 +145,7 @@ export async function startChatServer(config: ChatServerConfig) {
       images,
       modelId,
       referenceFiles,
+      appSessionId,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
@@ -150,6 +154,7 @@ export async function startChatServer(config: ChatServerConfig) {
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
       referenceFiles?: string[]
+      appSessionId?: string
     } = body
 
     const authMode = config.getAuthMode()
@@ -170,6 +175,11 @@ export async function startChatServer(config: ChatServerConfig) {
     } else {
       finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
     }
+
+    // Look up existing Claude CLI session for resume (before model creation)
+    const existingCliSessionId = (authMode === 'claude-code' && appSessionId)
+      ? claudeSessionMap.get(appSessionId)
+      : undefined
 
     let model
     if (authMode === 'claude-code') {
@@ -259,6 +269,10 @@ export async function startChatServer(config: ChatServerConfig) {
           }
         : undefined
 
+      if (existingCliSessionId) {
+        console.log(`[chat-server] Resuming Claude CLI session: ${existingCliSessionId} (app session: ${appSessionId})`)
+      }
+
       model = claudeCode(modelId || 'sonnet', {
         pathToClaudeCodeExecutable: claudePath,
         permissionMode,
@@ -266,6 +280,7 @@ export async function startChatServer(config: ChatServerConfig) {
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],
         streamingInput: 'always',
+        ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
         // Custom spawn to avoid EBADF in Electron's main process.
         //
         // Problem: Electron's main process has many open FDs from Chromium
@@ -313,7 +328,7 @@ export async function startChatServer(config: ChatServerConfig) {
             ], {
               cwd: opts.cwd,
               env: opts.env,
-              stdio: ['pipe', 'pipe', 'ignore'],
+              stdio: ['pipe', 'pipe', 'pipe'],
               signal: opts.signal,
               windowsHide: true,
               // Defense 2: Force fork+exec on macOS (skip posix_spawn)
@@ -321,6 +336,7 @@ export async function startChatServer(config: ChatServerConfig) {
             })
             console.log('[chat-server] spawn succeeded, pid:', child.pid)
             child.on('error', (err) => console.error('[chat-server] child process error:', err))
+            child.stderr?.on('data', (data: Buffer) => console.error('[chat-server] claude stderr:', data.toString()))
             return child
           } catch (err) {
             console.error('[chat-server] spawn THREW:', err)
@@ -366,10 +382,22 @@ export async function startChatServer(config: ChatServerConfig) {
       console.log('[chat-server] System prompt (last 300 chars):', finalSystemPrompt.slice(-300))
     }
 
-    // Claude Code CLI mode: skip client-side pruning — Claude Code manages its own context
+    // Claude Code CLI mode with resume: send only the latest user message
+    // (CLI already has the full conversation context from its session)
+    // Without resume: send all messages (first request in session)
     // API key mode: prune old messages to manage context window
     let finalMessages = modelMessages
-    if (authMode !== 'claude-code') {
+    if (authMode === 'claude-code' && existingCliSessionId) {
+      // Resume mode: only send the latest user message
+      let lastUserIdx = -1
+      for (let i = finalMessages.length - 1; i >= 0; i--) {
+        if (finalMessages[i].role === 'user') { lastUserIdx = i; break }
+      }
+      if (lastUserIdx >= 0) {
+        finalMessages = [finalMessages[lastUserIdx]]
+        console.log(`[chat-server] Resume mode: sending only latest user message (trimmed ${modelMessages.length} → 1)`)
+      }
+    } else if (authMode !== 'claude-code') {
       const prunedMessages = pruneMessages({
         messages: modelMessages,
         reasoning: 'none',
@@ -417,7 +445,7 @@ export async function startChatServer(config: ChatServerConfig) {
       ...(finalSystemPrompt ? { system: finalSystemPrompt } : {}),
       messages: finalMessages,
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
-      onStepFinish: ({ finishReason, usage, toolCalls }) => {
+      onStepFinish: ({ finishReason, usage, toolCalls, providerMetadata }) => {
         console.log(`[chat-server] Step finished: reason=${finishReason}, tokens=${usage.totalTokens}, tools=${toolCalls.length}`)
         // Update latest usage for the /api/usage endpoint
         if (usage.totalTokens != null) {
@@ -430,6 +458,14 @@ export async function startChatServer(config: ChatServerConfig) {
             noCacheTokens: usage.inputTokenDetails?.noCacheTokens ?? 0,
           }
         }
+        // Capture Claude Code CLI session ID for resume
+        if (authMode === 'claude-code' && appSessionId && providerMetadata) {
+          const claudeMeta = providerMetadata['claude-code'] as { sessionId?: string } | undefined
+          if (claudeMeta?.sessionId) {
+            claudeSessionMap.set(appSessionId, claudeMeta.sessionId)
+            console.log(`[chat-server] Captured CLI session: ${claudeMeta.sessionId} for app session: ${appSessionId}`)
+          }
+        }
       },
       onError: ({ error }) => {
         console.error('[chat-server] Stream error:', error)
@@ -439,6 +475,14 @@ export async function startChatServer(config: ChatServerConfig) {
     return result.toUIMessageStreamResponse({
       sendReasoning: true,
     })
+  })
+
+  // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat)
+  app.delete('/api/session/:appSessionId', (c) => {
+    const id = c.req.param('appSessionId')
+    const deleted = claudeSessionMap.delete(id)
+    console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)
+    return c.json({ success: true })
   })
 
   // GET /api/usage — returns latest token usage from the most recent completion
