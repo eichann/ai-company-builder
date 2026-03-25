@@ -79,6 +79,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:generateSummary', repoPath),
   gitRevertFile: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') =>
     ipcRenderer.invoke('git:revertFile', repoPath, filePath, fileStatus),
+  gitFileDiff: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') =>
+    ipcRenderer.invoke('git:fileDiff', repoPath, filePath, fileStatus),
+  gitCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) =>
+    ipcRenderer.invoke('git:commitFileDiff', repoPath, commitHash, filePath),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>
     ipcRenderer.invoke('git:log', repoPath, folderPath, limit),
   gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
@@ -481,6 +485,18 @@ declare global {
       }>
       gitRevertFile: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<{
         success: boolean
+        error?: string
+      }>
+      gitFileDiff: (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<{
+        success: boolean
+        diff: string
+        isNewFile?: boolean
+        isDeletedFile?: boolean
+        error?: string
+      }>
+      gitCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{
+        success: boolean
+        diff: string
         error?: string
       }>
       gitLog: (repoPath: string, folderPath: string, limit?: number) => Promise<{

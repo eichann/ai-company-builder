@@ -1463,6 +1463,44 @@ ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, f
   }
 })
 
+// Get diff for a specific file (staged changes)
+ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+
+    if (fileStatus === 'added') {
+      // New file: show entire content as addition
+      const content = await git.show([`:${filePath}`])
+      return { success: true, diff: content, isNewFile: true }
+    } else if (fileStatus === 'deleted') {
+      // Deleted file: show entire content as deletion
+      const content = await git.show([`HEAD:${filePath}`])
+      return { success: true, diff: content, isDeletedFile: true }
+    } else {
+      // Modified: show unified diff
+      const diff = await git.diff(['--cached', '-U3', '--', filePath])
+      return { success: true, diff }
+    }
+  } catch (err) {
+    console.error('Git file diff error:', err)
+    return { success: false, error: err instanceof Error ? err.message : 'Diff failed', diff: '' }
+  }
+})
+
+// Get diff for a specific file in a specific commit
+ipcMain.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: string, filePath: string) => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+    const diff = await git.show([commitHash, '--', filePath])
+    return { success: true, diff }
+  } catch (err) {
+    console.error('Git commit file diff error:', err)
+    return { success: false, error: err instanceof Error ? err.message : 'Diff failed', diff: '' }
+  }
+})
+
 // Generate change summary (async, called separately from preview)
 ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
   try {

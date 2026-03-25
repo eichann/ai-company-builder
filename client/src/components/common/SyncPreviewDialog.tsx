@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { CaretDown, CaretRight, Plus, PencilSimple, Minus, X, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
+import { DiffModal } from './DiffViewer'
 
 interface SyncPreviewDialogProps {
   isOpen: boolean
@@ -37,6 +38,7 @@ function FileSection({
   revertingFiles: Set<string>
 }) {
   const [expanded, setExpanded] = useState(files.length <= COLLAPSE_THRESHOLD)
+  const [diffFile, setDiffFile] = useState<string | null>(null)
 
   if (files.length === 0) return null
 
@@ -58,35 +60,46 @@ function FileSection({
             const displayPath = file.startsWith(prefix) ? file.slice(prefix.length) : file
             const isReverting = revertingFiles.has(file)
             return (
-              <div
-                key={file}
-                className="flex items-center gap-1.5 py-0.5 px-2 text-xs text-text-secondary hover:bg-activitybar-bg/50 rounded"
-              >
-                <Icon size={10} weight="bold" className={colorClass} />
-                <span className="truncate flex-1" title={file}>
-                  {displayPath}
-                </span>
-                {onRevert && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onRevert(file, fileStatus)
-                    }}
-                    disabled={isReverting}
-                    className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-text-secondary/50 hover:text-red-500 transition-colors flex-shrink-0"
-                    title="変更を元に戻す"
-                  >
-                    {isReverting ? (
-                      <SpinnerGap size={12} className="animate-spin" />
-                    ) : (
-                      <ArrowCounterClockwise size={12} />
-                    )}
-                  </button>
-                )}
+              <div key={file}>
+                <div
+                  className="flex items-center gap-1.5 py-0.5 px-2 text-xs text-text-secondary hover:bg-activitybar-bg/50 rounded cursor-pointer"
+                  onClick={() => setDiffFile(file)}
+                >
+                  <Icon size={10} weight="bold" className={colorClass} />
+                  <span className="truncate flex-1" title={file}>
+                    {displayPath}
+                  </span>
+                  {onRevert && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onRevert(file, fileStatus)
+                      }}
+                      disabled={isReverting}
+                      className="p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-text-secondary/50 hover:text-red-500 transition-colors flex-shrink-0"
+                      title="変更を元に戻す"
+                    >
+                      {isReverting ? (
+                        <SpinnerGap size={12} className="animate-spin" />
+                      ) : (
+                        <ArrowCounterClockwise size={12} />
+                      )}
+                    </button>
+                  )}
+                </div>
               </div>
             )
           })}
         </div>
+      )}
+
+      {diffFile && (
+        <DiffModal
+          isOpen={true}
+          onClose={() => setDiffFile(null)}
+          title={diffFile.startsWith(prefix) ? diffFile.slice(prefix.length) : diffFile}
+          diffProps={{ mode: 'staged', rootPath, filePath: diffFile, fileStatus }}
+        />
       )}
     </div>
   )

@@ -225,6 +225,9 @@ export function FileTreePanel({
     }
   }, [loadSingleDirectory, showDotFiles, loadedDirs])
 
+  // Track current load request to discard stale results
+  const loadRequestRef = useRef(0)
+
   // Save cache when department changes (before new load)
   const prevDepartmentRef = useRef(departmentPath)
   if (prevDepartmentRef.current !== departmentPath) {
@@ -241,6 +244,7 @@ export function FileTreePanel({
   const loadFiles = useCallback(async (preserveExpandedState = false) => {
     perfMark('file_tree_panel.load_files.start')
     const startedAt = performance.now()
+    const requestId = ++loadRequestRef.current
 
     // Check department cache for instant restore on tab switch
     if (!preserveExpandedState) {
@@ -253,6 +257,8 @@ export function FileTreePanel({
         perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
         // Background refresh with single IPC call (don't touch expandedDirs — preserve user's state)
         window.electronAPI.readDirectoryTree(departmentPath, 5).then(rawEntries => {
+          // Discard stale result if department changed since this request
+          if (loadRequestRef.current !== requestId) return
           const { topLevel, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
           setFiles(topLevel)
           // Only update loadedDirs (which dirs have cached children), NOT expandedDirs
@@ -276,6 +282,8 @@ export function FileTreePanel({
     try {
       // Single IPC call fetches 2 levels of directory tree
       const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 5)
+      // Discard stale result if department changed since this request
+      if (loadRequestRef.current !== requestId) return
       const { topLevel, firstLevelDirs, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
       setFiles(topLevel)
 
@@ -288,7 +296,7 @@ export function FileTreePanel({
       setLoadedDirs(newLoaded)
     } finally {
       perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
-      if (!preserveExpandedState) {
+      if (!preserveExpandedState && loadRequestRef.current === requestId) {
         setIsLoading(false)
       }
     }
