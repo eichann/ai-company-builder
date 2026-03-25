@@ -1303,7 +1303,7 @@ function createGit(repoPath: string): SimpleGit {
   return simpleGit(repoPath, {
     binary: gitBinary,
     unsafe: { allowUnsafeCustomBinary: true },
-    config: ['core.hooksPath=/dev/null', 'credential.helper='],
+    config: ['core.hooksPath=/dev/null', 'credential.helper=', 'core.quotePath=false'],
     // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
     // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
     ...(process.getuid ? { spawnOptions: { uid: process.getuid() } } : {}),
@@ -1513,6 +1513,20 @@ ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
 })
 
 // Git log filtered by folder path
+// List tracked files in a folder (for file name search)
+ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+    const raw = await git.raw(['ls-files', '--', folderPath])
+    const files = raw.split('\n').filter(f => f.length > 0)
+    return { success: true, files }
+  } catch (err) {
+    console.error('Git ls-files error:', err)
+    return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
+  }
+})
+
 ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
   try {
     const git: SimpleGit = createGit(repoPath)
@@ -1555,6 +1569,42 @@ ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string,
   } catch (err) {
     console.error('Git show error:', err)
     return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
+  }
+})
+
+// Git grep - content search within a department folder
+ipcMain.handle('git:grep', async (_, repoPath: string, query: string, folderPath: string) => {
+  try {
+    const safePath = validatePath(repoPath)
+    const git: SimpleGit = createGit(safePath)
+    // -n: line numbers, -I: skip binary, --max-count=200: limit results
+    // Search working tree (not HEAD) so uncommitted files are included
+    // Use -e to safely pass pattern (avoids issues if query starts with -)
+    const raw = await git.raw(['grep', '-n', '-I', '--max-count=200', '-e', query, '--', folderPath])
+    // Format: path/to/file:lineNo:matchedLine
+    const results: { file: string; line: number; text: string }[] = []
+    for (const line of raw.split('\n')) {
+      if (!line) continue
+      const firstColon = line.indexOf(':')
+      if (firstColon < 0) continue
+      const filePart = line.slice(0, firstColon)
+      const rest = line.slice(firstColon + 1)
+      const secondColon = rest.indexOf(':')
+      if (secondColon < 0) continue
+      const lineNo = parseInt(rest.slice(0, secondColon), 10)
+      const text = rest.slice(secondColon + 1)
+      if (!isNaN(lineNo)) {
+        results.push({ file: filePart, line: lineNo, text })
+      }
+    }
+    return { success: true, results }
+  } catch (err: unknown) {
+    // git grep exits with code 1 when no matches found
+    if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: string }).message === 'string' && (err as { message: string }).message.includes('exit code 1')) {
+      return { success: true, results: [] }
+    }
+    console.error('Git grep error:', err)
+    return { success: false, results: [], error: err instanceof Error ? err.message : 'Failed' }
   }
 })
 

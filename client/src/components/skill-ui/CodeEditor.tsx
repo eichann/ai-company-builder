@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
-import { EditorState } from '@codemirror/state'
-import { EditorView, ViewPlugin, ViewUpdate, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection } from '@codemirror/view'
+import { EditorState, StateEffect, StateField } from '@codemirror/state'
+import { EditorView, ViewPlugin, ViewUpdate, keymap, lineNumbers, highlightActiveLine, highlightActiveLineGutter, drawSelection, rectangularSelection, Decoration, type DecorationSet } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { syntaxHighlighting, defaultHighlightStyle, indentOnInput, bracketMatching, foldGutter, foldKeymap } from '@codemirror/language'
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search'
@@ -22,7 +22,38 @@ interface CodeEditorProps {
   onChange: (value: string) => void
   fileName: string
   readOnly?: boolean
+  initialLine?: number
 }
+
+// --- Highlight flash for line jump (CSS animation: hold → fade out) ---
+const highlightLineEffect = StateEffect.define<number>()
+
+const highlightLineDeco = Decoration.line({ class: 'cm-highlight-flash' })
+
+const highlightLineField = StateField.define<DecorationSet>({
+  create() { return Decoration.none },
+  update(decos, tr) {
+    for (const e of tr.effects) {
+      if (e.is(highlightLineEffect)) {
+        const line = tr.state.doc.line(Math.min(e.value, tr.state.doc.lines))
+        return Decoration.set([highlightLineDeco.range(line.from)])
+      }
+    }
+    return decos
+  },
+  provide: f => EditorView.decorations.from(f),
+})
+
+const highlightFlashTheme = EditorView.baseTheme({
+  '@keyframes cm-flash': {
+    '0%':   { backgroundColor: 'rgba(250, 204, 21, 0.45)' },
+    '65%':  { backgroundColor: 'rgba(250, 204, 21, 0.45)' },
+    '100%': { backgroundColor: 'transparent' },
+  },
+  '&dark .cm-highlight-flash, &light .cm-highlight-flash': {
+    animation: 'cm-flash 2.5s ease-out forwards !important',
+  },
+})
 
 // Get language extension based on file extension
 function getLanguageExtension(fileName: string) {
@@ -255,7 +286,7 @@ const customLightTheme = EditorView.theme({
   },
 }, { dark: false })
 
-export function CodeEditor({ value, onChange, fileName, readOnly = false }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, fileName, readOnly = false, initialLine }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const theme = useAppStore((state) => state.theme)
@@ -311,6 +342,10 @@ export function CodeEditor({ value, onChange, fileName, readOnly = false }: Code
 
       // Gutter width measurement for scrollbar alignment
       gutterWidthPlugin,
+
+      // Highlight flash for line jump
+      highlightLineField,
+      highlightFlashTheme,
     ]
 
     // Add language extension if available
@@ -329,6 +364,20 @@ export function CodeEditor({ value, onChange, fileName, readOnly = false }: Code
     })
 
     viewRef.current = view
+
+    // Jump to initial line if specified, with yellow flash highlight
+    if (initialLine && initialLine > 0) {
+      requestAnimationFrame(() => {
+        const lineInfo = view.state.doc.line(Math.min(initialLine, view.state.doc.lines))
+        view.dispatch({
+          selection: { anchor: lineInfo.from },
+          effects: [
+            EditorView.scrollIntoView(lineInfo.from, { y: 'center' }),
+            highlightLineEffect.of(initialLine),
+          ],
+        })
+      })
+    }
 
     return () => {
       view.destroy()

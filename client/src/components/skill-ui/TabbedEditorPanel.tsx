@@ -107,6 +107,7 @@ interface TabbedEditorPanelProps {
   onSelectFile: (path: string) => void
   onCloseFile: (path: string) => void
   onPinFile?: (path: string) => void
+  gotoLine?: number | null
 }
 
 export function TabbedEditorPanel({
@@ -116,6 +117,7 @@ export function TabbedEditorPanel({
   onSelectFile,
   onCloseFile,
   onPinFile,
+  gotoLine,
 }: TabbedEditorPanelProps) {
   const [fileContents, setFileContents] = useState<Map<string, OpenFile>>(new Map())
   const [, setIsSaving] = useState(false)
@@ -377,7 +379,7 @@ export function TabbedEditorPanel({
                 `}
               >
                 <FileIcon size={14} className="flex-shrink-0" />
-                <span className={`text-xs truncate ${isPreview ? 'italic' : ''}`}>{fileName}</span>
+                <span className={`text-xs truncate ${isPreview ? 'italic' : ''}`} title={filePath}>{fileName}</span>
                 {isModified && (
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
                 )}
@@ -478,10 +480,11 @@ export function TabbedEditorPanel({
           </div>
         ) : activeFile ? (
           <CodeEditor
-            key={activeFilePath} // Force remount on file change
+            key={`${activeFilePath}:${gotoLine || 0}`} // Force remount on file or line change
             value={activeFile.content}
             onChange={handleContentChange}
             fileName={getFileName(activeFilePath || '')}
+            initialLine={gotoLine || undefined}
           />
         ) : null}
       </div>

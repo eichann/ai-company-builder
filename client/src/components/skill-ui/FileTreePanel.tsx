@@ -57,7 +57,6 @@ export function FileTreePanel({
   const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
   const [isLoading, setIsLoading] = useState(false)
   const [showDotFiles, setShowDotFiles] = useState(true)
-
   // Ref to track current expanded dirs without triggering re-renders of loadFiles
   const expandedDirsRef = useRef<Set<string>>(expandedDirs)
   expandedDirsRef.current = expandedDirs

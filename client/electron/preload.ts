@@ -83,6 +83,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:fileDiff', repoPath, filePath, fileStatus),
   gitCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) =>
     ipcRenderer.invoke('git:commitFileDiff', repoPath, commitHash, filePath),
+  gitListFiles: (repoPath: string, folderPath: string) =>
+    ipcRenderer.invoke('git:listFiles', repoPath, folderPath),
+  gitGrep: (repoPath: string, query: string, folderPath: string) =>
+    ipcRenderer.invoke('git:grep', repoPath, query, folderPath),
   gitLog: (repoPath: string, folderPath: string, limit?: number) =>
     ipcRenderer.invoke('git:log', repoPath, folderPath, limit),
   gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
@@ -497,6 +501,16 @@ declare global {
       gitCommitFileDiff: (repoPath: string, commitHash: string, filePath: string) => Promise<{
         success: boolean
         diff: string
+        error?: string
+      }>
+      gitListFiles: (repoPath: string, folderPath: string) => Promise<{
+        success: boolean
+        files: string[]
+        error?: string
+      }>
+      gitGrep: (repoPath: string, query: string, folderPath: string) => Promise<{
+        success: boolean
+        results: Array<{ file: string; line: number; text: string }>
         error?: string
       }>
       gitLog: (repoPath: string, folderPath: string, limit?: number) => Promise<{
