@@ -220,6 +220,7 @@ interface ChatSession {
   }>
   createdAt: string
   updatedAt: string
+  claudeSessionId?: string
 }
 
 interface GitResult {

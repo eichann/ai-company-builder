@@ -146,6 +146,7 @@ export async function startChatServer(config: ChatServerConfig) {
       modelId,
       referenceFiles,
       appSessionId,
+      claudeSessionId: bodyClaudeSessionId,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
@@ -155,6 +156,7 @@ export async function startChatServer(config: ChatServerConfig) {
       modelId?: string
       referenceFiles?: string[]
       appSessionId?: string
+      claudeSessionId?: string
     } = body
 
     const authMode = config.getAuthMode()
@@ -177,8 +179,9 @@ export async function startChatServer(config: ChatServerConfig) {
     }
 
     // Look up existing Claude CLI session for resume (before model creation)
-    const existingCliSessionId = (authMode === 'claude-code' && appSessionId)
-      ? claudeSessionMap.get(appSessionId)
+    // Priority: 1) frontend-persisted claudeSessionId  2) in-memory map  3) none
+    const existingCliSessionId = authMode === 'claude-code'
+      ? (bodyClaudeSessionId || (appSessionId ? claudeSessionMap.get(appSessionId) : undefined))
       : undefined
 
     let model
@@ -475,6 +478,13 @@ export async function startChatServer(config: ChatServerConfig) {
     return result.toUIMessageStreamResponse({
       sendReasoning: true,
     })
+  })
+
+  // GET /api/session/:appSessionId — return CLI session ID for persistence
+  app.get('/api/session/:appSessionId', (c) => {
+    const id = c.req.param('appSessionId')
+    const claudeSessionId = claudeSessionMap.get(id) || null
+    return c.json({ claudeSessionId })
   })
 
   // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat)
