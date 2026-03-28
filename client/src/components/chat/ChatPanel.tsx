@@ -2093,8 +2093,8 @@ export function ChatPanel({ departmentPath }: ChatPanelProps) {
     checkAuth()
   }
 
-  async function checkAuth() {
-    setIsChecking(true)
+  async function checkAuth(background = false) {
+    if (!background) setIsChecking(true)
     try {
       const [ccStatus, savedAuthMode, hasApiKey] = await Promise.all([
         window.electronAPI.getClaudeCodeStatus(),
@@ -2117,27 +2117,13 @@ export function ChatPanel({ departmentPath }: ChatPanelProps) {
         setIsReady(true)
       }
     } finally {
-      setIsChecking(false)
+      if (!background) setIsChecking(false)
     }
   }
 
   // ============================================================================
   // Render States
   // ============================================================================
-
-  if (showSettings) {
-    return (
-      <AuthSettings
-        authMode={authMode}
-        claudeCodeAvailable={claudeCodeAvailable}
-        claudeCodeError={claudeCodeError}
-        onClose={() => {
-          setShowSettings(false)
-          checkAuth()
-        }}
-      />
-    )
-  }
 
   if (isChecking || !serverInfo) {
     return (
@@ -2191,12 +2177,30 @@ export function ChatPanel({ departmentPath }: ChatPanelProps) {
   }
 
   return (
-    <ChatPanelChat
-      departmentPath={departmentPath}
-      serverInfo={serverInfo}
-      authMode={authMode}
-      onShowSettings={() => setShowSettings(true)}
-    />
+    <div className="h-full relative">
+      {/* Chat stays mounted even when settings overlay is open */}
+      <div className={showSettings ? 'h-full invisible' : 'h-full'}>
+        <ChatPanelChat
+          departmentPath={departmentPath}
+          serverInfo={serverInfo}
+          authMode={authMode}
+          onShowSettings={() => setShowSettings(true)}
+        />
+      </div>
+      {showSettings && (
+        <div className="absolute inset-0 z-10">
+          <AuthSettings
+            authMode={authMode}
+            claudeCodeAvailable={claudeCodeAvailable}
+            claudeCodeError={claudeCodeError}
+            onClose={() => {
+              setShowSettings(false)
+              checkAuth(true)
+            }}
+          />
+        </div>
+      )}
+    </div>
   )
 }
 
