@@ -114,6 +114,11 @@ export async function startChatServer(config: ChatServerConfig) {
     noCacheTokens: number
   } | null = null
 
+  // Accumulated context usage across the session (for context gauge)
+  let accumulatedInputTokens = 0
+  let accumulatedOutputTokens = 0
+  let contextWindowSize = 0  // Populated from modelUsage
+
   // Claude Code CLI session ID tracking (appSessionId → claudeCliSessionId)
   const claudeSessionMap = new Map<string, string>()
 
@@ -144,6 +149,7 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo,
       images,
       modelId,
+      effort,
       referenceFiles,
       appSessionId,
       claudeSessionId: bodyClaudeSessionId,
@@ -154,6 +160,7 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
+      effort?: 'low' | 'medium' | 'high' | 'max'
       referenceFiles?: string[]
       appSessionId?: string
       claudeSessionId?: string
@@ -284,6 +291,7 @@ export async function startChatServer(config: ChatServerConfig) {
         settingSources: ['user', 'project'],
         streamingInput: 'always',
         ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
+        ...(effort ? { sdkOptions: { effort } } : {}),
         // Custom spawn to avoid EBADF in Electron's main process.
         //
         // Problem: Electron's main process has many open FDs from Chromium
@@ -461,12 +469,37 @@ export async function startChatServer(config: ChatServerConfig) {
             noCacheTokens: usage.inputTokenDetails?.noCacheTokens ?? 0,
           }
         }
-        // Capture Claude Code CLI session ID for resume
-        if (authMode === 'claude-code' && appSessionId && providerMetadata) {
-          const claudeMeta = providerMetadata['claude-code'] as { sessionId?: string } | undefined
-          if (claudeMeta?.sessionId) {
+        // Capture Claude Code CLI session ID and modelUsage for context tracking
+        if (authMode === 'claude-code' && providerMetadata) {
+          const claudeMeta = providerMetadata['claude-code'] as {
+            sessionId?: string
+            modelUsage?: Record<string, {
+              inputTokens?: number
+              outputTokens?: number
+              contextWindow?: number
+              costUSD?: number
+            }>
+          } | undefined
+
+          if (claudeMeta?.sessionId && appSessionId) {
             claudeSessionMap.set(appSessionId, claudeMeta.sessionId)
             console.log(`[chat-server] Captured CLI session: ${claudeMeta.sessionId} for app session: ${appSessionId}`)
+          }
+
+          // Extract context usage from modelUsage
+          if (claudeMeta?.modelUsage) {
+            let totalInput = 0
+            let totalOutput = 0
+            for (const [modelName, mu] of Object.entries(claudeMeta.modelUsage)) {
+              totalInput += mu.inputTokens ?? 0
+              totalOutput += mu.outputTokens ?? 0
+              if (mu.contextWindow && mu.contextWindow > 0) {
+                contextWindowSize = mu.contextWindow
+              }
+              console.log(`[chat-server] modelUsage[${modelName}]: in=${mu.inputTokens} out=${mu.outputTokens} ctx=${mu.contextWindow}`)
+            }
+            accumulatedInputTokens = totalInput
+            accumulatedOutputTokens = totalOutput
           }
         }
       },
@@ -491,6 +524,11 @@ export async function startChatServer(config: ChatServerConfig) {
   app.delete('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const deleted = claudeSessionMap.delete(id)
+    // Reset accumulated context tracking for new session
+    accumulatedInputTokens = 0
+    accumulatedOutputTokens = 0
+    contextWindowSize = 0
+    latestUsage = null
     console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)
     return c.json({ success: true })
   })
@@ -500,9 +538,18 @@ export async function startChatServer(config: ChatServerConfig) {
     return c.json({ usage: latestUsage })
   })
 
-  // GET /api/context — returns context usage estimate based on latest step usage
+  // GET /api/context — returns context usage from accumulated modelUsage data
   app.get('/api/context', (c) => {
-    return c.json({ context: null })
+    if (accumulatedInputTokens === 0 && contextWindowSize === 0) {
+      return c.json({ context: null })
+    }
+    // Use modelUsage contextWindow if available, otherwise fall back to known limits
+    const maxTokens = contextWindowSize > 0 ? contextWindowSize : 200_000
+    const usedTokens = accumulatedInputTokens + accumulatedOutputTokens
+    const percentage = Math.min(100, Math.round((usedTokens / maxTokens) * 100))
+    return c.json({
+      context: { usedTokens, maxTokens, percentage },
+    })
   })
 
   // Find port in 3300-3400 range (distinct from tool ports 3100-3200)
