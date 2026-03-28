@@ -23,6 +23,8 @@ interface CodeEditorProps {
   fileName: string
   readOnly?: boolean
   initialLine?: number
+  initialScrollRatio?: number
+  onViewReady?: (view: EditorView) => void
 }
 
 // --- Highlight flash for line jump (CSS animation: hold → fade out) ---
@@ -286,7 +288,7 @@ const customLightTheme = EditorView.theme({
   },
 }, { dark: false })
 
-export function CodeEditor({ value, onChange, fileName, readOnly = false, initialLine }: CodeEditorProps) {
+export function CodeEditor({ value, onChange, fileName, readOnly = false, initialLine, initialScrollRatio, onViewReady }: CodeEditorProps) {
   const editorRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const theme = useAppStore((state) => state.theme)
@@ -364,6 +366,7 @@ export function CodeEditor({ value, onChange, fileName, readOnly = false, initia
     })
 
     viewRef.current = view
+    onViewReady?.(view)
 
     // Jump to initial line if specified, with yellow flash highlight
     if (initialLine && initialLine > 0) {
@@ -376,6 +379,12 @@ export function CodeEditor({ value, onChange, fileName, readOnly = false, initia
             highlightLineEffect.of(initialLine),
           ],
         })
+      })
+    } else if (initialScrollRatio != null && initialScrollRatio > 0) {
+      // Restore scroll by ratio (works for both file switch and mode switch)
+      requestAnimationFrame(() => {
+        const maxScroll = view.scrollDOM.scrollHeight - view.scrollDOM.clientHeight
+        view.scrollDOM.scrollTop = maxScroll * initialScrollRatio
       })
     }
 

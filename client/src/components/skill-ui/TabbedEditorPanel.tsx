@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import {
   X,
   FileText,
@@ -9,6 +9,7 @@ import {
 } from '@phosphor-icons/react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import type { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'
 import { getFileIcon } from './FileIcons'
 
@@ -74,31 +75,49 @@ function PdfPreview({ filePath }: { filePath: string }) {
   )
 }
 
-function MarkdownPreview({ content, basePath }: { content: string; basePath: string }) {
-  const components = useMemo(() => ({
-    img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
-      let resolvedSrc = src || ''
-      // Resolve relative paths to local-file:// protocol
-      if (resolvedSrc && !resolvedSrc.startsWith('http') && !resolvedSrc.startsWith('data:')) {
-        resolvedSrc = `local-file://${basePath}/${resolvedSrc.replace(/^\.\//, '')}`
-      }
-      return <img src={resolvedSrc} alt={alt} {...props} className="max-w-full rounded" />
-    },
-    a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
-      <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
-    ),
-  }), [basePath])
+const MarkdownPreview = React.forwardRef<HTMLDivElement, { content: string; basePath: string; initialScrollRatio?: number }>(
+  function MarkdownPreview({ content, basePath, initialScrollRatio }, ref) {
+    const innerRef = useRef<HTMLDivElement | null>(null)
+    const components = useMemo(() => ({
+      img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
+        let resolvedSrc = src || ''
+        if (resolvedSrc && !resolvedSrc.startsWith('http') && !resolvedSrc.startsWith('data:')) {
+          resolvedSrc = `local-file://${basePath}/${resolvedSrc.replace(/^\.\//, '')}`
+        }
+        return <img src={resolvedSrc} alt={alt} {...props} className="max-w-full rounded" />
+      },
+      a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
+        <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
+      ),
+    }), [basePath])
 
-  return (
-    <div className="h-full overflow-auto px-8 py-6">
-      <div className="max-w-3xl mx-auto markdown-body">
-        <Markdown remarkPlugins={[remarkGfm]} components={components}>
-          {content}
-        </Markdown>
+    // Restore scroll position by ratio after mount
+    useEffect(() => {
+      if (!innerRef.current || initialScrollRatio == null || initialScrollRatio <= 0) return
+      const el = innerRef.current
+      requestAnimationFrame(() => {
+        const maxScroll = el.scrollHeight - el.clientHeight
+        el.scrollTop = maxScroll * initialScrollRatio
+      })
+    }, []) // Only on mount
+
+    const setRefs = useCallback((el: HTMLDivElement | null) => {
+      innerRef.current = el
+      if (typeof ref === 'function') ref(el)
+      else if (ref) (ref as React.MutableRefObject<HTMLDivElement | null>).current = el
+    }, [ref])
+
+    return (
+      <div ref={setRefs} className="h-full overflow-auto px-8 py-6">
+        <div className="max-w-3xl mx-auto markdown-body">
+          <Markdown remarkPlugins={[remarkGfm]} components={components}>
+            {content}
+          </Markdown>
+        </div>
       </div>
-    </div>
-  )
-}
+    )
+  }
+)
 
 interface TabbedEditorPanelProps {
   openFiles: string[]
@@ -124,6 +143,10 @@ export function TabbedEditorPanel({
   const [error, setError] = useState<string | null>(null)
   const loadingRef = useRef<Set<string>>(new Set())
 
+  // Scroll ratio per file (0-1). Shared between editor and preview modes.
+  const scrollRatioRef = useRef<Map<string, number>>(new Map())
+  const editorViewRef = useRef<EditorView | null>(null)
+  const mdPreviewRef = useRef<HTMLDivElement | null>(null)
   const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
   const hasChanges = activeFile ? activeFile.content !== activeFile.originalContent : false
 
@@ -139,6 +162,43 @@ export function TabbedEditorPanel({
     setMdViewMode(mode)
     localStorage.setItem('mdViewMode', mode)
   }
+
+  // Save current scroll ratio (call BEFORE switching away)
+  const saveCurrentScrollPosition = useCallback(() => {
+    if (!activeFilePath) return
+    const isMdPreview = isMarkdownFile(activeFilePath) && mdViewMode === 'preview'
+    if (isMdPreview && mdPreviewRef.current) {
+      const el = mdPreviewRef.current
+      const maxScroll = el.scrollHeight - el.clientHeight
+      scrollRatioRef.current.set(activeFilePath, maxScroll > 0 ? el.scrollTop / maxScroll : 0)
+    } else if (editorViewRef.current) {
+      const dom = editorViewRef.current.scrollDOM
+      const maxScroll = dom.scrollHeight - dom.clientHeight
+      scrollRatioRef.current.set(activeFilePath, maxScroll > 0 ? dom.scrollTop / maxScroll : 0)
+    }
+  }, [activeFilePath, mdViewMode])
+
+  // Wrap onSelectFile to save scroll before switching
+  const handleSelectFile = useCallback((path: string) => {
+    saveCurrentScrollPosition()
+    onSelectFile(path)
+  }, [saveCurrentScrollPosition, onSelectFile])
+
+  // Wrap mdViewMode toggle to save scroll before switching
+  const handleSetMdViewMode = useCallback((mode: 'preview' | 'editor') => {
+    saveCurrentScrollPosition()
+    setMdViewModePersisted(mode)
+  }, [saveCurrentScrollPosition])
+
+  // Clean up scroll ratios when files are closed
+  useEffect(() => {
+    const openFilesSet = new Set(openFiles)
+    for (const key of scrollRatioRef.current.keys()) {
+      if (!openFilesSet.has(key)) {
+        scrollRatioRef.current.delete(key)
+      }
+    }
+  }, [openFiles])
 
   // Ref to access latest fileContents inside onFileChange callback
   const fileContentsRef = useRef<Map<string, OpenFile>>(fileContents)
@@ -367,7 +427,7 @@ export function TabbedEditorPanel({
             return (
               <div
                 key={filePath}
-                onClick={() => onSelectFile(filePath)}
+                onClick={() => handleSelectFile(filePath)}
                 onDoubleClick={() => { if (isPreview && onPinFile) onPinFile(filePath) }}
                 className={`
                   group flex items-center gap-2 px-3 py-2 cursor-pointer
@@ -402,7 +462,7 @@ export function TabbedEditorPanel({
           <div className="ml-auto px-2 flex items-center">
             <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 overflow-hidden">
               <button
-                onClick={() => setMdViewModePersisted('editor')}
+                onClick={() => handleSetMdViewMode('editor')}
                 className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
                   mdViewMode === 'editor'
                     ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
@@ -413,7 +473,7 @@ export function TabbedEditorPanel({
                 <Code size={12} />
               </button>
               <button
-                onClick={() => setMdViewModePersisted('preview')}
+                onClick={() => handleSetMdViewMode('preview')}
                 className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
                   mdViewMode === 'preview'
                     ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
@@ -461,13 +521,15 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <div className="h-full relative">
             <MarkdownPreview
+              ref={mdPreviewRef}
               content={activeFile.content}
               basePath={activeFilePath.substring(0, activeFilePath.lastIndexOf('/'))}
+              initialScrollRatio={scrollRatioRef.current.get(activeFilePath)}
             />
             {/* Floating edit button in preview mode */}
             <button
               onClick={() => {
-                setMdViewModePersisted('editor')
+                handleSetMdViewMode('editor')
                 if (isActivePreviewTab && onPinFile && activeFilePath) {
                   onPinFile(activeFilePath)
                 }
@@ -485,6 +547,8 @@ export function TabbedEditorPanel({
             onChange={handleContentChange}
             fileName={getFileName(activeFilePath || '')}
             initialLine={gotoLine || undefined}
+            initialScrollRatio={activeFilePath ? scrollRatioRef.current.get(activeFilePath) : undefined}
+            onViewReady={(view) => { editorViewRef.current = view }}
           />
         ) : null}
       </div>
