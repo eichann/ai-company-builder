@@ -1390,6 +1390,8 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
   const aiModel = useAppStore((state) => state.aiModel)
   const setAIModel = useAppStore((state) => state.setAIModel)
+  const aiEffort = useAppStore((state) => state.aiEffort)
+  const setAIEffort = useAppStore((state) => state.setAIEffort)
 
   const handlePendingTextConsumed = useCallback(() => {
     setPendingChatInput(null)
@@ -1413,6 +1415,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   // Refs for dynamic body params
   const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
   const aiModelRef = useRef(aiModel)
+  const aiEffortRef = useRef(aiEffort)
 
   useEffect(() => {
     workingDirRef.current = departmentPath || currentCompany?.rootPath
@@ -1421,6 +1424,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
   useEffect(() => {
     aiModelRef.current = aiModel
   }, [aiModel])
+
+  useEffect(() => {
+    aiEffortRef.current = aiEffort
+  }, [aiEffort])
 
 
   // Pending images to send with next message
@@ -1451,6 +1458,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
         const body: Record<string, unknown> = {
           workingDirectory: workingDirRef.current,
           modelId: aiModelRef.current,
+          effort: aiEffortRef.current,
         }
         // Ensure app session ID exists (eagerly create on first request)
         if (!appSessionIdRef.current) {
@@ -1920,6 +1928,21 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
               <option value="haiku">Haiku</option>
               <option value="sonnet">Sonnet</option>
               <option value="opus">Opus</option>
+            </select>
+          )}
+
+          {/* Effort Level Selector (Claude Code mode only) */}
+          {authMode === 'claude-code' && (
+            <select
+              value={aiEffort}
+              onChange={(e) => setAIEffort(e.target.value as 'low' | 'medium' | 'high' | 'max')}
+              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
+              style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="max">Max</option>
             </select>
           )}
 

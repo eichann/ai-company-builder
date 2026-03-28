@@ -11,6 +11,9 @@ export type Language = 'en' | 'ja'
 // AI Model type
 export type AIModel = 'sonnet' | 'opus' | 'haiku'
 
+// AI Effort level type
+export type AIEffort = 'low' | 'medium' | 'high' | 'max'
+
 // Get initial model from localStorage
 const getInitialModel = (): AIModel => {
   if (typeof window !== 'undefined') {
@@ -20,6 +23,17 @@ const getInitialModel = (): AIModel => {
     }
   }
   return 'opus'
+}
+
+// Get initial effort from localStorage
+const getInitialEffort = (): AIEffort => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('aiEffort') as AIEffort | null
+    if (saved === 'low' || saved === 'medium' || saved === 'high' || saved === 'max') {
+      return saved
+    }
+  }
+  return 'medium'
 }
 
 // Active skill with loaded content
@@ -84,6 +98,7 @@ interface AppState {
 
   // AI model state
   aiModel: AIModel
+  aiEffort: AIEffort
 
   // UI state
   showWizard: boolean
@@ -101,6 +116,7 @@ interface AppState {
   toggleTheme: () => void
   setLanguage: (language: Language) => void
   setAIModel: (model: AIModel) => void
+  setAIEffort: (effort: AIEffort) => void
   setCurrentCompany: (company: Company | null) => void
   addCompany: (company: Company) => void
   setFileTree: (tree: FileEntry[]) => void
@@ -133,6 +149,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   theme: getInitialTheme(),
   language: getInitialLanguage(),
   aiModel: getInitialModel(),
+  aiEffort: getInitialEffort(),
   currentCompany: null,
   companies: [],
   fileTree: [],
@@ -180,6 +197,11 @@ export const useAppStore = create<AppState>((set, get) => ({
   setAIModel: (model) => {
     localStorage.setItem('aiModel', model)
     set({ aiModel: model })
+  },
+
+  setAIEffort: (effort) => {
+    localStorage.setItem('aiEffort', effort)
+    set({ aiEffort: effort })
   },
 
   setCurrentCompany: (company) => {
