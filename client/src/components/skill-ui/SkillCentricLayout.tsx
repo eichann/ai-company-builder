@@ -110,6 +110,7 @@ export function SkillCentricLayout() {
     rootPath: currentCompany?.rootPath || '',
     departmentFolder: selectedDept?.folder || '',
     departmentId: selectedDeptId,
+    departmentName: selectedDept?.name,
   })
   const pendingSkillsRefreshRef = useRef(false)
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)

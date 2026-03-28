@@ -1,6 +1,6 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, CircleNotch, Lightning, CaretRight, Flask } from '@phosphor-icons/react'
+import { Plus, CircleNotch, Lightning, CaretRight, Flask, Globe } from '@phosphor-icons/react'
 import { SkillCard } from './SkillCard'
 import type { Skill } from '../../types'
 
@@ -14,6 +14,21 @@ interface SkillGridProps {
   isLoading?: boolean
 }
 
+/** Group skills by their `group` field, preserving order of first appearance */
+function groupSkills(skills: Skill[]): Map<string, Skill[]> {
+  const groups = new Map<string, Skill[]>()
+  for (const skill of skills) {
+    const key = skill.group || ''
+    const arr = groups.get(key)
+    if (arr) {
+      arr.push(skill)
+    } else {
+      groups.set(key, [skill])
+    }
+  }
+  return groups
+}
+
 export function SkillGrid({
   skills,
   color,
@@ -25,9 +40,25 @@ export function SkillGrid({
 }: SkillGridProps) {
   const { t } = useTranslation()
   const [isPrivateExpanded, setIsPrivateExpanded] = useState(false)
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
+
+  const toggleGroup = useCallback((groupName: string) => {
+    setCollapsedGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(groupName)) {
+        next.delete(groupName)
+      } else {
+        next.add(groupName)
+      }
+      return next
+    })
+  }, [])
 
   const publicSkills = useMemo(() => skills.filter(s => !s.isPrivate), [skills])
   const privateSkills = useMemo(() => skills.filter(s => s.isPrivate), [skills])
+  const groupedPublic = useMemo(() => groupSkills(publicSkills), [publicSkills])
+  const groupedPrivate = useMemo(() => groupSkills(privateSkills), [privateSkills])
+  const hasMultipleGroups = groupedPublic.size > 1 || (groupedPublic.size === 1 && !groupedPublic.has(''))
 
   if (isLoading) {
     return (
@@ -77,20 +108,65 @@ export function SkillGrid({
         </h2>
       </div>
 
-      {/* Published Skills */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {publicSkills.map((skill) => (
-          <SkillCard
-            key={skill.id}
-            skill={skill}
-            color={color}
-            isSelected={selectedSkillId === skill.id}
-            onSelect={() => onSelectSkill(skill.id)}
-            onExecute={() => onExecuteSkill(skill.id)}
-          />
-        ))}
+      {/* Published Skills — grouped by hierarchy */}
+      {hasMultipleGroups ? (
+        // Multiple groups: render with section headers
+        Array.from(groupedPublic.entries()).map(([groupName, groupSkills]) => {
+          const isCollapsed = collapsedGroups.has(groupName)
+          return (
+            <div key={groupName} className="mb-6">
+              <button
+                onClick={() => toggleGroup(groupName)}
+                className="flex items-center gap-2 mb-3 w-full text-left hover:opacity-80 transition-opacity"
+              >
+                <CaretRight
+                  size={14}
+                  className={`text-gray-400 dark:text-zinc-500 flex-shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`}
+                />
+                {groupName === '全社' && (
+                  <Globe size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
+                )}
+                <span className="text-xs font-semibold tracking-wide uppercase text-gray-500 dark:text-zinc-500">
+                  {groupName}
+                </span>
+                <span className="text-xs text-gray-400 dark:text-zinc-600">({groupSkills.length})</span>
+                <div className="flex-1 border-t border-gray-200 dark:border-zinc-800" />
+              </button>
+              {!isCollapsed && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  {groupSkills.map((skill) => (
+                    <SkillCard
+                      key={skill.id}
+                      skill={skill}
+                      color={color}
+                      isSelected={selectedSkillId === skill.id}
+                      onSelect={() => onSelectSkill(skill.id)}
+                      onExecute={() => onExecuteSkill(skill.id)}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )
+        })
+      ) : (
+        // Single group or no groups: flat grid (backward compatible)
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {publicSkills.map((skill) => (
+            <SkillCard
+              key={skill.id}
+              skill={skill}
+              color={color}
+              isSelected={selectedSkillId === skill.id}
+              onSelect={() => onSelectSkill(skill.id)}
+              onExecute={() => onExecuteSkill(skill.id)}
+            />
+          ))}
+        </div>
+      )}
 
-        {/* Add New Skill Card */}
+      {/* Add New Skill Card */}
+      <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${hasMultipleGroups ? '' : 'mt-4'}`}>
         <button
           onClick={onAddSkill}
           className="
@@ -116,7 +192,7 @@ export function SkillGrid({
         </button>
       </div>
 
-      {/* Private Skills (collapsible) */}
+      {/* Private Skills (collapsible, grouped) */}
       {privateSkills.length > 0 && (
         <div className="mt-8">
           <button
@@ -139,18 +215,60 @@ export function SkillGrid({
           </button>
 
           {isPrivateExpanded && (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
-              {privateSkills.map((skill) => (
-                <SkillCard
-                  key={skill.id}
-                  skill={skill}
-                  color={color}
-                  isSelected={selectedSkillId === skill.id}
-                  onSelect={() => onSelectSkill(skill.id)}
-                  onExecute={() => onExecuteSkill(skill.id)}
-                />
-              ))}
-            </div>
+            groupedPrivate.size > 1 ? (
+              Array.from(groupedPrivate.entries()).map(([groupName, groupSkills]) => {
+                const privateKey = `private:${groupName}`
+                const isCollapsed = collapsedGroups.has(privateKey)
+                return (
+                  <div key={groupName} className="mt-4">
+                    <button
+                      onClick={() => toggleGroup(privateKey)}
+                      className="flex items-center gap-2 mb-3 w-full text-left hover:opacity-80 transition-opacity"
+                    >
+                      <CaretRight
+                        size={14}
+                        className={`text-gray-400 dark:text-zinc-500 flex-shrink-0 transition-transform duration-200 ${isCollapsed ? '' : 'rotate-90'}`}
+                      />
+                      {groupName === '全社' && (
+                        <Globe size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
+                      )}
+                      <span className="text-xs font-semibold tracking-wide uppercase text-gray-500 dark:text-zinc-500">
+                        {groupName}
+                      </span>
+                      <span className="text-xs text-gray-400 dark:text-zinc-600">({groupSkills.length})</span>
+                      <div className="flex-1 border-t border-gray-200 dark:border-zinc-800" />
+                    </button>
+                    {!isCollapsed && (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        {groupSkills.map((skill) => (
+                          <SkillCard
+                            key={skill.id}
+                            skill={skill}
+                            color={color}
+                            isSelected={selectedSkillId === skill.id}
+                            onSelect={() => onSelectSkill(skill.id)}
+                            onExecute={() => onExecuteSkill(skill.id)}
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )
+              })
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-4">
+                {privateSkills.map((skill) => (
+                  <SkillCard
+                    key={skill.id}
+                    skill={skill}
+                    color={color}
+                    isSelected={selectedSkillId === skill.id}
+                    onSelect={() => onSelectSkill(skill.id)}
+                    onExecute={() => onExecuteSkill(skill.id)}
+                  />
+                ))}
+              </div>
+            )
           )}
         </div>
       )}

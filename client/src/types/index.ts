@@ -62,6 +62,7 @@ export interface Skill {
   description: string
   icon?: string
   departmentId: string
+  group?: string          // Hierarchy group label (e.g., "全社", "営業部", "営業部 / 顧客A案件")
   isPrivate?: boolean     // true = .gitignore に含まれ同期されない（不可逆: 公開したら戻せない）
   isNurturing?: boolean   // true = 育て中（SKILL.md frontmatter status: nurturing）
   skillPath?: string      // Absolute path to skill directory

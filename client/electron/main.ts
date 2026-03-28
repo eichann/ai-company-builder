@@ -133,9 +133,9 @@ function getShellPath(): string {
 
 /** Get env object with resolved PATH for spawn calls */
 function getShellEnv(): Record<string, string> {
-  const env = { ...process.env as Record<string, string>, PATH: getShellPath() }
+  const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: getShellPath() }
   // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
-  delete env.CLAUDECODE
+  delete env['CLAUDECODE']
   return env
 }
 
@@ -2623,6 +2623,7 @@ interface SkillInfo {
   description: string
   departmentId: string
   skillPath: string
+  group: string
   isPrivate?: boolean
   isNurturing?: boolean
   files: {
@@ -2702,9 +2703,14 @@ function invalidateSkillsCache(rootPath: string, departmentFolder?: string): voi
   }
 }
 
-async function scanSkills(rootPath: string, departmentFolder: string, departmentId: string): Promise<SkillInfo[]> {
-  const skillsDir = path.join(rootPath, departmentFolder, '.claude', 'skills')
-
+/** Scan a single .claude/skills/ directory and return SkillInfo[] */
+async function scanSkillsInDir(
+  skillsDir: string,
+  rootPath: string,
+  departmentId: string,
+  group: string,
+  gitignoreRelativePrefix: string,
+): Promise<SkillInfo[]> {
   if (!fs.existsSync(skillsDir)) return []
 
   const gitignoreLines = getGitignoreLines(rootPath)
@@ -2789,15 +2795,16 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
         if (tools.length > 0) files.tools = tools
       }
 
-      const skillRelativePath = `${departmentFolder}/.claude/skills/${entry.name}/`
+      const skillRelativePath = `${gitignoreRelativePrefix}.claude/skills/${entry.name}/`
       const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
 
       skills.push({
-        id: `${departmentId}-${entry.name}`,
+        id: `${departmentId}-${group.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '-').toLowerCase()}-${entry.name}`,
         name: frontmatter.name || entry.name,
         description: frontmatter.description || '',
         departmentId,
         skillPath,
+        group,
         isPrivate,
         isNurturing: frontmatter.status === 'nurturing',
         files,
@@ -2810,25 +2817,87 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
   return skills
 }
 
-// List skills for a department
-ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string) => {
-  try {
-    const skillsDir = path.join(rootPath, departmentFolder, '.claude', 'skills')
+/**
+ * Recursively find all directories containing `.claude/skills/` under a base directory.
+ * Returns array of { skillsDir, relativePath } where relativePath is relative to baseDir.
+ */
+async function findSkillsDirs(baseDir: string, maxDepth = 5): Promise<{ skillsDir: string; relativePath: string }[]> {
+  const results: { skillsDir: string; relativePath: string }[] = []
+  const SKIP_DIRS = new Set(['.git', '.claude', '.backups', 'node_modules', '.next', 'dist', 'build', '__pycache__'])
 
-    // Return cached result if fresh
-    const cached = skillsCache.get(skillsDir)
-    if (cached && Date.now() - cached.timestamp < SKILLS_CACHE_TTL) {
-      // Update departmentId in cached skills (same files, different tab context)
-      const skills = cached.skills.map(s => ({
-        ...s,
-        id: `${departmentId}-${s.skillPath?.split('/').pop() || s.name}`,
-        departmentId,
-      }))
-      return { success: true, skills }
+  async function walk(dir: string, relPath: string, depth: number) {
+    if (depth > maxDepth) return
+
+    // Check if this directory has .claude/skills/
+    const skillsDir = path.join(dir, '.claude', 'skills')
+    if (fs.existsSync(skillsDir)) {
+      results.push({ skillsDir, relativePath: relPath })
     }
 
-    const skills = await scanSkills(rootPath, departmentFolder, departmentId)
-    skillsCache.set(skillsDir, { skills, timestamp: Date.now() })
+    // Recurse into subdirectories
+    try {
+      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
+      for (const entry of entries) {
+        if (!entry.isDirectory()) continue
+        if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
+        await walk(path.join(dir, entry.name), relPath ? `${relPath}/${entry.name}` : entry.name, depth + 1)
+      }
+    } catch {
+      // Ignore permission/readdir errors
+    }
+  }
+
+  await walk(baseDir, '', 0)
+  return results
+}
+
+/**
+ * Scan skills across hierarchy:
+ * 1. Company root: {rootPath}/.claude/skills/ → group "全社"
+ * 2. Department + nested: {rootPath}/{dept}/**\/.claude/skills/ → group "{deptName}" or "{deptName} / {path}"
+ */
+async function scanSkills(rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string): Promise<SkillInfo[]> {
+  const deptDisplayName = departmentName || departmentFolder
+  const allSkills: SkillInfo[] = []
+
+  // Level 1: Company root (.claude/skills/)
+  const rootSkillsDir = path.join(rootPath, '.claude', 'skills')
+  const rootSkills = await scanSkillsInDir(rootSkillsDir, rootPath, departmentId, '全社', '')
+  allSkills.push(...rootSkills)
+
+  // Level 2+: Department and all nested subdirectories
+  const deptDir = path.join(rootPath, departmentFolder)
+  if (fs.existsSync(deptDir)) {
+    const found = await findSkillsDirs(deptDir)
+    for (const { skillsDir, relativePath } of found) {
+      const groupName = relativePath
+        ? `${deptDisplayName} / ${relativePath.split('/').pop()}`
+        : deptDisplayName
+      const gitignorePrefix = relativePath
+        ? `${departmentFolder}/${relativePath}/`
+        : `${departmentFolder}/`
+      const skills = await scanSkillsInDir(skillsDir, rootPath, departmentId, groupName, gitignorePrefix)
+      allSkills.push(...skills)
+    }
+  }
+
+  return allSkills
+}
+
+// List skills for a department (scans 3 hierarchy levels)
+ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) => {
+  try {
+    // Cache key includes rootPath + departmentFolder to cover all 3 levels
+    const cacheKey = `${rootPath}::${departmentFolder}::hierarchical`
+
+    // Return cached result if fresh
+    const cached = skillsCache.get(cacheKey)
+    if (cached && Date.now() - cached.timestamp < SKILLS_CACHE_TTL) {
+      return { success: true, skills: cached.skills }
+    }
+
+    const skills = await scanSkills(rootPath, departmentFolder, departmentId, departmentName)
+    skillsCache.set(cacheKey, { skills, timestamp: Date.now() })
 
     return { success: true, skills }
   } catch (error) {
