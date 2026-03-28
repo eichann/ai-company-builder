@@ -111,8 +111,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeEnv: (rootPath: string, vars: Record<string, string>) => ipcRenderer.invoke('env:write', rootPath, vars),
 
   // Skills
-  listSkills: (rootPath: string, departmentFolder: string, departmentId: string) =>
-    ipcRenderer.invoke('skills:list', rootPath, departmentFolder, departmentId),
+  listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) =>
+    ipcRenderer.invoke('skills:list', rootPath, departmentFolder, departmentId, departmentName),
   publishSkill: (rootPath: string, skillRelativePath: string) =>
     ipcRenderer.invoke('skills:publish', rootPath, skillRelativePath),
   makeSkillPrivate: (rootPath: string, skillRelativePath: string) =>
@@ -344,6 +344,7 @@ interface SkillInfo {
   description: string
   departmentId: string
   skillPath: string
+  group?: string
   isPrivate?: boolean
   isNurturing?: boolean
   files: {
@@ -428,7 +429,7 @@ declare global {
       writeEnv: (rootPath: string, vars: Record<string, string>) => Promise<{ success: boolean; error?: string }>
 
       // Skills
-      listSkills: (rootPath: string, departmentFolder: string, departmentId: string) => Promise<SkillsResult>
+      listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) => Promise<SkillsResult>
       publishSkill: (rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>
       makeSkillPrivate: (rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>
       toggleSkillNurturing: (skillMdPath: string, makeNurturing: boolean) => Promise<{ success: boolean; error?: string }>

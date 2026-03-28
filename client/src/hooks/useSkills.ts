@@ -5,6 +5,7 @@ interface UseSkillsOptions {
   rootPath: string
   departmentFolder: string
   departmentId: string
+  departmentName?: string
 }
 
 interface UseSkillsResult {
@@ -14,7 +15,7 @@ interface UseSkillsResult {
   refresh: () => void
 }
 
-export function useSkills({ rootPath, departmentFolder, departmentId }: UseSkillsOptions): UseSkillsResult {
+export function useSkills({ rootPath, departmentFolder, departmentId, departmentName }: UseSkillsOptions): UseSkillsResult {
   const [skills, setSkills] = useState<Skill[]>([])
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -29,7 +30,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId }: UseSkill
     setError(null)
 
     try {
-      const result = await window.electronAPI.listSkills(rootPath, departmentFolder, departmentId)
+      const result = await window.electronAPI.listSkills(rootPath, departmentFolder, departmentId, departmentName)
 
       if (result.success) {
         // Map the API response to Skill type
@@ -38,6 +39,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId }: UseSkill
           name: skill.name,
           description: skill.description,
           departmentId: skill.departmentId,
+          group: skill.group,
           isPrivate: skill.isPrivate,
           isNurturing: skill.isNurturing,
           skillPath: skill.skillPath,
@@ -54,7 +56,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId }: UseSkill
     } finally {
       setIsLoading(false)
     }
-  }, [rootPath, departmentFolder, departmentId])
+  }, [rootPath, departmentFolder, departmentId, departmentName])
 
   useEffect(() => {
     loadSkills()
