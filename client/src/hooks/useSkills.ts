@@ -21,7 +21,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId, department
   const [error, setError] = useState<string | null>(null)
 
   const loadSkills = useCallback(async () => {
-    if (!rootPath) {
+    if (!rootPath || (!departmentFolder && !departmentId)) {
       setSkills([])
       return
     }

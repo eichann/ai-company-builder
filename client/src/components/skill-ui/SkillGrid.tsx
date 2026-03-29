@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Plus, CircleNotch, Lightning, CaretRight, Flask, Globe } from '@phosphor-icons/react'
+import { Plus, CircleNotch, Lightning, CaretRight, Flask, Globe, Copy } from '@phosphor-icons/react'
 import { SkillCard } from './SkillCard'
 import type { Skill } from '../../types'
 
@@ -11,6 +11,7 @@ interface SkillGridProps {
   onSelectSkill: (id: string) => void
   onExecuteSkill: (id: string) => void
   onAddSkill: () => void
+  onCopySkill?: () => void
   isLoading?: boolean
 }
 
@@ -36,6 +37,7 @@ export function SkillGrid({
   onSelectSkill,
   onExecuteSkill,
   onAddSkill,
+  onCopySkill,
   isLoading = false,
 }: SkillGridProps) {
   const { t } = useTranslation()
@@ -81,18 +83,34 @@ export function SkillGrid({
             {t('skills.emptyDescription')}
           </p>
         </div>
-        <button
-          onClick={onAddSkill}
-          className="
-            flex items-center gap-2 px-4 py-2 rounded-lg
-            bg-gray-200 dark:bg-zinc-800 hover:bg-gray-300 dark:hover:bg-zinc-700
-            text-gray-700 dark:text-zinc-300 text-sm font-medium
-            transition-colors
-          "
-        >
-          <Plus size={16} />
-          {t('skills.createNew')}
-        </button>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={onAddSkill}
+            className="
+              flex items-center gap-2 px-4 py-2 rounded-lg
+              bg-gray-200 dark:bg-zinc-800 hover:bg-gray-300 dark:hover:bg-zinc-700
+              text-gray-700 dark:text-zinc-300 text-sm font-medium
+              transition-colors
+            "
+          >
+            <Plus size={16} />
+            {t('skills.createNew')}
+          </button>
+          {onCopySkill && (
+            <button
+              onClick={onCopySkill}
+              className="
+                flex items-center gap-2 px-4 py-2 rounded-lg
+                bg-gray-200 dark:bg-zinc-800 hover:bg-gray-300 dark:hover:bg-zinc-700
+                text-gray-700 dark:text-zinc-300 text-sm font-medium
+                transition-colors
+              "
+            >
+              <Copy size={16} />
+              {t('skills.copyFromOther', '他からコピー')}
+            </button>
+          )}
+        </div>
       </div>
     )
   }
@@ -165,7 +183,7 @@ export function SkillGrid({
         </div>
       )}
 
-      {/* Add New Skill Card */}
+      {/* Add New Skill Cards */}
       <div className={`grid grid-cols-1 sm:grid-cols-2 gap-4 ${hasMultipleGroups ? '' : 'mt-4'}`}>
         <button
           onClick={onAddSkill}
@@ -190,6 +208,32 @@ export function SkillGrid({
             </p>
           </div>
         </button>
+
+        {onCopySkill && (
+          <button
+            onClick={onCopySkill}
+            className="
+              group p-5 rounded-2xl
+              border-2 border-dashed border-gray-300 dark:border-zinc-700 hover:border-gray-400 dark:hover:border-zinc-500
+              flex flex-col items-center justify-center gap-3
+              min-h-[180px]
+              transition-all duration-200
+              hover:bg-gray-50 dark:hover:bg-white/[0.02]
+            "
+          >
+            <div className="w-12 h-12 rounded-xl bg-gray-100 dark:bg-zinc-800 group-hover:bg-gray-200 dark:group-hover:bg-zinc-700 flex items-center justify-center transition-colors">
+              <Copy size={24} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300" />
+            </div>
+            <div className="text-center">
+              <p className="text-sm font-medium text-gray-500 dark:text-zinc-400 group-hover:text-gray-700 dark:group-hover:text-zinc-300">
+                {t('skills.copyFromOther', '他からコピー')}
+              </p>
+              <p className="text-xs text-gray-400 dark:text-zinc-600 mt-1">
+                {t('skills.copyDescription', '他の部署や全社のスキルをコピー')}
+              </p>
+            </div>
+          </button>
+        )}
       </div>
 
       {/* Private Skills (collapsible, grouped) */}
