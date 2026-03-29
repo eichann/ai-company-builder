@@ -2860,24 +2860,28 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
   const deptDisplayName = departmentName || departmentFolder
   const allSkills: SkillInfo[] = []
 
-  // Level 1: Company root (.claude/skills/)
-  const rootSkillsDir = path.join(rootPath, '.claude', 'skills')
-  const rootSkills = await scanSkillsInDir(rootSkillsDir, rootPath, departmentId, '全社', '')
-  allSkills.push(...rootSkills)
+  // Level 1: Company root (.claude/skills/) — only when company-wide tab
+  if (!departmentFolder) {
+    const rootSkillsDir = path.join(rootPath, '.claude', 'skills')
+    const rootSkills = await scanSkillsInDir(rootSkillsDir, rootPath, departmentId, '全社', '')
+    allSkills.push(...rootSkills)
+  }
 
-  // Level 2+: Department and all nested subdirectories
-  const deptDir = path.join(rootPath, departmentFolder)
-  if (fs.existsSync(deptDir)) {
-    const found = await findSkillsDirs(deptDir)
-    for (const { skillsDir, relativePath } of found) {
-      const groupName = relativePath
-        ? `${deptDisplayName} / ${relativePath.split('/').pop()}`
-        : deptDisplayName
-      const gitignorePrefix = relativePath
-        ? `${departmentFolder}/${relativePath}/`
-        : `${departmentFolder}/`
-      const skills = await scanSkillsInDir(skillsDir, rootPath, departmentId, groupName, gitignorePrefix)
-      allSkills.push(...skills)
+  // Level 2+: Department and all nested subdirectories (skip when company-wide)
+  if (departmentFolder) {
+    const deptDir = path.join(rootPath, departmentFolder)
+    if (fs.existsSync(deptDir)) {
+      const found = await findSkillsDirs(deptDir)
+      for (const { skillsDir, relativePath } of found) {
+        const groupName = relativePath
+          ? `${deptDisplayName} / ${relativePath.split('/').pop()}`
+          : deptDisplayName
+        const gitignorePrefix = relativePath
+          ? `${departmentFolder}/${relativePath}/`
+          : `${departmentFolder}/`
+        const skills = await scanSkillsInDir(skillsDir, rootPath, departmentId, groupName, gitignorePrefix)
+        allSkills.push(...skills)
+      }
     }
   }
 

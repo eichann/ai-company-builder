@@ -127,7 +127,7 @@ export function FileTreePanel({
   const [dragSourcePaths, setDragSourcePaths] = useState<Set<string>>(new Set())
   const [dropWarning, setDropWarning] = useState<string | null>(null)
 
-  const departmentPath = `${rootPath}/${departmentFolder}`
+  const departmentPath = departmentFolder ? `${rootPath}/${departmentFolder}` : rootPath
 
   // Determine the target directory for new file/folder creation based on current selection
   const activeParentPath = (() => {
