@@ -28,6 +28,7 @@ import {
 } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
+import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
 
 // ============================================================================
@@ -705,6 +706,7 @@ interface ChatInputProps {
   onInputActivity?: () => void
   pendingText?: string | null
   onPendingTextConsumed?: () => void
+  slashCommands?: SlashCommandItem[]
 }
 
 const chatInputCodeMirrorTheme = EditorView.theme({
@@ -755,6 +757,7 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   onInputActivity,
   pendingText,
   onPendingTextConsumed,
+  slashCommands,
 }: ChatInputProps) {
   const editorHostRef = useRef<HTMLDivElement>(null)
   const editorViewRef = useRef<EditorView | null>(null)
@@ -765,6 +768,53 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   const isComposingRef = useRef(false)
   const editableCompartmentRef = useRef(new Compartment())
   const placeholderCompartmentRef = useRef(new Compartment())
+
+  // Slash command autocomplete state
+  const [slashQuery, setSlashQuery] = useState<string | null>(null)
+  const [slashSelectedIndex, setSlashSelectedIndex] = useState(0)
+  const slashCommandsRef = useRef(slashCommands)
+  useEffect(() => { slashCommandsRef.current = slashCommands }, [slashCommands])
+
+  const filteredSlashCommands = useMemo(() => {
+    if (slashQuery === null || !slashCommands?.length) return []
+    if (slashQuery === '') return slashCommands
+    const q = slashQuery.toLowerCase()
+    return slashCommands.filter(item =>
+      item.command.toLowerCase().includes(q) ||
+      item.name.toLowerCase().includes(q)
+    )
+  }, [slashQuery, slashCommands])
+
+  // Reset selection when filtered list changes
+  useEffect(() => {
+    setSlashSelectedIndex(0)
+  }, [filteredSlashCommands.length])
+
+  const handleSlashSelect = useCallback((item: SlashCommandItem) => {
+    const view = editorViewRef.current
+    if (!view) return
+    const replacement = `/${item.command} `
+    view.dispatch({
+      changes: { from: 0, to: view.state.doc.length, insert: replacement },
+    })
+    view.dispatch({ selection: { anchor: replacement.length } })
+    view.focus()
+    setSlashQuery(null)
+  }, [])
+
+  const handleSlashClose = useCallback(() => {
+    setSlashQuery(null)
+  }, [])
+
+  // Refs for slash state accessible inside CodeMirror handlers
+  const slashQueryRef = useRef<string | null>(null)
+  const filteredSlashCommandsRef = useRef(filteredSlashCommands)
+  const slashSelectedIndexRef = useRef(0)
+  const handleSlashSelectRef = useRef(handleSlashSelect)
+  useEffect(() => { slashQueryRef.current = slashQuery }, [slashQuery])
+  useEffect(() => { filteredSlashCommandsRef.current = filteredSlashCommands }, [filteredSlashCommands])
+  useEffect(() => { slashSelectedIndexRef.current = slashSelectedIndex }, [slashSelectedIndex])
+  useEffect(() => { handleSlashSelectRef.current = handleSlashSelect }, [handleSlashSelect])
 
   const markDispatchDelay = useCallback((metricName: string, eventTimestamp: number) => {
     if (!isPerfDiagnosticsEnabled()) return
@@ -837,6 +887,33 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
             onInputActivityRef.current?.()
             perfMark('chat.input.keydown')
             markDispatchDelay('chat.input.keydown.dispatch_delay.ms', event.timeStamp)
+
+            // Intercept keys when slash command dropdown is open
+            if (slashQueryRef.current !== null && filteredSlashCommandsRef.current.length > 0) {
+              const items = filteredSlashCommandsRef.current
+              if (event.key === 'ArrowDown') {
+                event.preventDefault()
+                setSlashSelectedIndex(i => (i + 1) % items.length)
+                return true
+              }
+              if (event.key === 'ArrowUp') {
+                event.preventDefault()
+                setSlashSelectedIndex(i => (i - 1 + items.length) % items.length)
+                return true
+              }
+              if (event.key === 'Tab' || event.key === 'Enter') {
+                event.preventDefault()
+                const selected = items[slashSelectedIndexRef.current]
+                if (selected) handleSlashSelectRef.current(selected)
+                return true
+              }
+              if (event.key === 'Escape') {
+                event.preventDefault()
+                setSlashQuery(null)
+                return true
+              }
+            }
+
             if (isPerfDiagnosticsEnabled()) {
               const start = performance.now()
               window.requestAnimationFrame(() => {
@@ -907,6 +984,22 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
             markDispatchDelay('chat.input.mouse.dispatch_delay.ms', event.timeStamp)
             return false
           },
+          blur: () => {
+            setSlashQuery(null)
+            return false
+          },
+        }),
+        // Slash command detection
+        EditorView.updateListener.of((update) => {
+          if (!update.docChanged) return
+          if (!slashCommandsRef.current?.length) return
+          const text = update.state.doc.toString()
+          const match = text.match(/^\/([a-zA-Z0-9_-]*)/)
+          if (match) {
+            setSlashQuery(match[1])
+          } else {
+            setSlashQuery(null)
+          }
         }),
       ],
     })
@@ -961,6 +1054,17 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
 
   return (
     <div className="relative">
+      {/* Slash command autocomplete dropdown */}
+      {slashQuery !== null && filteredSlashCommands.length > 0 && (
+        <SlashCommandDropdown
+          items={filteredSlashCommands}
+          query={slashQuery}
+          selectedIndex={slashSelectedIndex}
+          onSelect={handleSlashSelect}
+          onClose={handleSlashClose}
+        />
+      )}
+
       <div className="absolute -inset-px rounded-xl bg-gradient-to-r from-accent/20 via-transparent to-accent/20 opacity-0 group-focus-within:opacity-100 transition-opacity blur-sm" />
 
       <div className="relative flex items-end gap-2 p-2 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-glass group focus-within:border-accent/50 transition-colors">
@@ -1112,6 +1216,7 @@ const ChatInput = memo(function ChatInput({
   onInputActivity,
   pendingText,
   onPendingTextConsumed,
+  slashCommands,
 }: ChatInputProps) {
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const [attachedImages, setAttachedImages] = useState<File[]>([])
@@ -1222,6 +1327,7 @@ const ChatInput = memo(function ChatInput({
       onInputActivity={onInputActivity}
       pendingText={pendingText}
       onPendingTextConsumed={onPendingTextConsumed}
+      slashCommands={slashCommands}
     />
   )
 
@@ -1380,10 +1486,11 @@ interface ChatPanelChatProps {
   departmentPath?: string
   serverInfo: { port: number; authToken: string }
   authMode: AuthMode
+  slashCommands?: SlashCommandItem[]
   onShowSettings: () => void
 }
 
-function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }: ChatPanelChatProps) {
+function ChatPanelChat({ departmentPath, serverInfo, authMode, slashCommands, onShowSettings }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -2080,6 +2187,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
             onInputActivity={handleInputActivity}
             pendingText={pendingChatInput}
             onPendingTextConsumed={handlePendingTextConsumed}
+            slashCommands={slashCommands}
           />
         </div>
         {/* Context Usage Gauge */}
@@ -2095,9 +2203,10 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, onShowSettings }:
 
 interface ChatPanelProps {
   departmentPath?: string  // Working directory for AI (department folder path)
+  slashCommands?: SlashCommandItem[]
 }
 
-export function ChatPanel({ departmentPath }: ChatPanelProps) {
+export function ChatPanel({ departmentPath, slashCommands }: ChatPanelProps) {
   const { t } = useTranslation()
   const serverInfo = useChatServerInfo()
 
@@ -2207,6 +2316,7 @@ export function ChatPanel({ departmentPath }: ChatPanelProps) {
           departmentPath={departmentPath}
           serverInfo={serverInfo}
           authMode={authMode}
+          slashCommands={slashCommands}
           onShowSettings={() => setShowSettings(true)}
         />
       </div>
