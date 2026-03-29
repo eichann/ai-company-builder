@@ -5,6 +5,7 @@ import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
 import { NewSkillWizard } from './NewSkillWizard'
+import { CopySkillModal } from './CopySkillModal'
 import { FileTreePanel } from './FileTreePanel'
 import { COMPANY_TAB_ID } from './DepartmentTabs'
 import { TabbedEditorPanel } from './TabbedEditorPanel'
@@ -77,6 +78,7 @@ export function SkillCentricLayout() {
 
   // Modals
   const [showNewSkillWizard, setShowNewSkillWizard] = useState(false)
+  const [showCopySkillModal, setShowCopySkillModal] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
@@ -368,6 +370,44 @@ ${promptContent}
       // TODO: Show error message to user
     }
   }, [currentCompany?.rootPath, selectedDept?.folder, selectedDeptId, refreshSkills])
+
+  const handleCopySkill = useCallback(async (sourceSkillPath: string, name: string, folderName: string) => {
+    if (!currentCompany?.rootPath || !effectiveDeptFolder) return
+
+    const skillsBasePath = `${currentCompany.rootPath}/${effectiveDeptFolder}/.claude/skills`
+    const destPath = `${skillsBasePath}/${folderName}`
+
+    try {
+      // Ensure .claude/skills directory exists
+      await window.electronAPI.createDirectory(skillsBasePath)
+
+      // Copy entire skill directory
+      const copyResult = await window.electronAPI.copyItem(sourceSkillPath, destPath)
+      if (!copyResult.success) {
+        console.error('Failed to copy skill:', copyResult.error)
+        return
+      }
+
+      // Update SKILL.md frontmatter with new name
+      const skillMdPath = `${destPath}/SKILL.md`
+      const content = await window.electronAPI.readFile(skillMdPath)
+      if (content) {
+        const updated = content.replace(
+          /^(---\n[\s\S]*?name:\s*).+$/m,
+          `$1${name}`,
+        )
+        await window.electronAPI.writeFile(skillMdPath, updated)
+      }
+
+      // Copied skills are public by default (user intentionally copied them)
+
+      refreshSkills()
+      setShowCopySkillModal(false)
+      setSelectedSkillId(`${selectedDeptId}-${folderName}`)
+    } catch (error) {
+      console.error('Failed to copy skill:', error)
+    }
+  }, [currentCompany?.rootPath, effectiveDeptFolder, selectedDeptId, refreshSkills])
 
   const handlePublishSkill = useCallback(async (skill: Skill) => {
     if (!currentCompany?.rootPath) return
@@ -729,6 +769,7 @@ ${promptContent}
                     onSelectSkill={handleSelectSkill}
                     onExecuteSkill={handleExecuteSkill}
                     onAddSkill={handleAddSkill}
+                    onCopySkill={!isCompanyWide ? () => setShowCopySkillModal(true) : undefined}
                     isLoading={isLoadingSkills}
                   />
                 </div>
@@ -800,6 +841,18 @@ ${promptContent}
           color={selectedDept.color}
           onClose={() => setShowNewSkillWizard(false)}
           onComplete={handleCreateSkill}
+        />
+      )}
+
+      {/* Copy Skill Modal */}
+      {showCopySkillModal && currentCompany && (
+        <CopySkillModal
+          rootPath={currentCompany.rootPath}
+          currentDepartmentId={selectedDeptId}
+          departments={departments}
+          color={selectedDept?.color || '#6366f1'}
+          onClose={() => setShowCopySkillModal(false)}
+          onCopy={handleCopySkill}
         />
       )}
 
