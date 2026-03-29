@@ -6,6 +6,7 @@ import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
 import { NewSkillWizard } from './NewSkillWizard'
 import { FileTreePanel } from './FileTreePanel'
+import { COMPANY_TAB_ID } from './DepartmentTabs'
 import { TabbedEditorPanel } from './TabbedEditorPanel'
 import { ToolViewer } from './ToolViewer'
 import { ResizeHandle } from './ResizeHandle'
@@ -100,17 +101,22 @@ export function SkillCentricLayout() {
     summary?: string | null
   } | null>(null)
 
+  const isCompanyWide = selectedDeptId === COMPANY_TAB_ID
+
   const selectedDept = useMemo(
     () => departments.find((d) => d.id === selectedDeptId),
     [departments, selectedDeptId]
   )
 
+  // The effective path for file tree and chat
+  const effectiveDeptFolder = isCompanyWide ? '' : (selectedDept?.folder || '')
+
   // Load skills from file system
   const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
     rootPath: currentCompany?.rootPath || '',
-    departmentFolder: selectedDept?.folder || '',
-    departmentId: selectedDeptId,
-    departmentName: selectedDept?.name,
+    departmentFolder: effectiveDeptFolder,
+    departmentId: isCompanyWide ? COMPANY_TAB_ID : selectedDeptId,
+    departmentName: isCompanyWide ? '全社' : selectedDept?.name,
   })
   const pendingSkillsRefreshRef = useRef(false)
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)
@@ -172,9 +178,10 @@ export function SkillCentricLayout() {
 
   // Watch skills directory for changes
   useEffect(() => {
-    if (!currentCompany?.rootPath || !selectedDept?.folder) return
+    if (!currentCompany?.rootPath || (!selectedDept?.folder && !isCompanyWide)) return
 
-    const skillsPath = `${currentCompany.rootPath}/${selectedDept.folder}/.claude/skills`
+    const basePath = isCompanyWide ? currentCompany.rootPath : `${currentCompany.rootPath}/${selectedDept!.folder}`
+    const skillsPath = `${basePath}/.claude/skills`
 
     if (isPerfCutEnabled('disableWatchers')) {
       perfMark('skill_layout.watch.disabled')
@@ -204,7 +211,7 @@ export function SkillCentricLayout() {
       window.electronAPI.unwatchDirectory(skillsPath)
       perfMark('skill_layout.watch.stop')
     }
-  }, [currentCompany?.rootPath, selectedDept?.folder, requestDeferredSkillsRefresh])
+  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, requestDeferredSkillsRefresh])
 
   const selectedSkill = useMemo(
     () => skills.find((s) => s.id === selectedSkillId),
@@ -698,7 +705,7 @@ ${promptContent}
             {leftTab === 'history' && (
               <CommitHistoryPanel
                 rootPath={currentCompany?.rootPath || ''}
-                departmentFolder={selectedDept?.folder || ''}
+                departmentFolder={effectiveDeptFolder}
               />
             )}
 
@@ -706,7 +713,7 @@ ${promptContent}
             {leftTab === 'search' && (
               <SearchPanel
                 rootPath={currentCompany?.rootPath || ''}
-                departmentFolder={selectedDept?.folder || ''}
+                departmentFolder={effectiveDeptFolder}
                 inputRef={searchInputRef}
               />
             )}
@@ -747,7 +754,7 @@ ${promptContent}
               <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
                 <FileTreePanel
                   rootPath={currentCompany?.rootPath || ''}
-                  departmentFolder={selectedDept?.folder || ''}
+                  departmentFolder={effectiveDeptFolder}
                   selectedFilePath={activeFilePath}
                   onSelectFile={handleOpenFile}
                   onDoubleClickFile={handlePinFile}
@@ -774,8 +781,12 @@ ${promptContent}
         {/* Right Panel (Chat - Always Visible) */}
         <div className="flex-1" style={{ minWidth: MIN_CHAT_WIDTH }}>
           <ChatPanel
-            departmentPath={selectedDept && currentCompany
-              ? `${currentCompany.rootPath}/${selectedDept.folder}`
+            departmentPath={currentCompany
+              ? (isCompanyWide
+                  ? currentCompany.rootPath
+                  : selectedDept
+                    ? `${currentCompany.rootPath}/${selectedDept.folder}`
+                    : undefined)
               : undefined
             }
           />
@@ -797,7 +808,7 @@ ${promptContent}
         isOpen={showFileSearch}
         onClose={() => setShowFileSearch(false)}
         rootPath={currentCompany?.rootPath || ''}
-        departmentFolder={selectedDept?.folder || ''}
+        departmentFolder={effectiveDeptFolder}
         onSelectFile={handleFileSearchSelect}
       />
 
