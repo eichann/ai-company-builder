@@ -23,6 +23,7 @@ import { useAppStore } from '../../stores/appStore'
 import { useSkills } from '../../hooks/useSkills'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import { useDepartments } from '../../hooks/useDepartments'
+import type { SlashCommandItem } from '../chat/SlashCommandDropdown'
 import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 
@@ -161,6 +162,14 @@ export function SkillCentricLayout() {
     departmentFolder: isSelectedDeptUnsynced ? '' : effectiveDeptFolder,
     departmentId: isSelectedDeptUnsynced ? '' : (isCompanyWide ? COMPANY_TAB_ID : selectedDeptId),
     departmentName: isCompanyWide ? '全社' : selectedDept?.name,
+  })
+
+  // Always load company-wide skills for slash command autocomplete
+  const { skills: companySkills } = useSkills({
+    rootPath: currentCompany?.rootPath || '',
+    departmentFolder: '',
+    departmentId: isCompanyWide ? '' : COMPANY_TAB_ID, // Skip when already viewing company tab (avoid duplicate)
+    departmentName: '全社',
   })
   const handleDownloadDepartment = useCallback(async () => {
     if (!selectedDept?.folder) return
@@ -302,6 +311,32 @@ export function SkillCentricLayout() {
       setPendingChatInput(`/${folderName} `)
     }
   }, [skills, setPendingChatInput])
+
+  // Build slash command items for chat autocomplete (current dept + company-wide)
+  const slashCommands = useMemo<SlashCommandItem[]>(() => {
+    const allSkills = isCompanyWide
+      ? skills // Already showing company-wide
+      : [...skills, ...companySkills]
+    // Deduplicate by command (folder name)
+    const seen = new Set<string>()
+    return allSkills
+      .filter(s => s.skillPath)
+      .map(s => {
+        const command = s.skillPath!.split('/').pop() || ''
+        const dept = departments.find(d => d.id === s.departmentId)
+        return {
+          command,
+          name: s.name,
+          description: s.description,
+          color: dept?.color || '#6366f1',
+        }
+      })
+      .filter(item => {
+        if (!item.command || seen.has(item.command)) return false
+        seen.add(item.command)
+        return true
+      })
+  }, [skills, companySkills, departments, isCompanyWide])
 
   // Open file as preview (single-click from file tree)
   // Replaces existing preview tab; already-pinned files just get activated
@@ -938,6 +973,7 @@ ${promptContent}
                     : undefined)
               : undefined
             }
+            slashCommands={slashCommands}
           />
         </div>
       </div>
