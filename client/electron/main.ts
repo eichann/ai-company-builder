@@ -1809,9 +1809,25 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     }
 
     // 2. Protect department folders (restore if deleted locally)
+    //    When sparse checkout is active, only protect checked-out departments.
+    //    Excluded departments are safe in the git index (git add/push won't remove them).
     let restoredFolders: string[] = []
     if (companyId) {
       try {
+        // Check sparse checkout state
+        let sparseEnabled = false
+        let sparseCheckedOut: string[] = []
+        try {
+          const sparseConfig = await git.raw(['config', '--get', 'core.sparseCheckout'])
+          sparseEnabled = sparseConfig.trim() === 'true'
+          if (sparseEnabled) {
+            const sparseList = await git.raw(['sparse-checkout', 'list'])
+            sparseCheckedOut = sparseList.split('\n').filter(Boolean)
+          }
+        } catch {
+          // Not a sparse checkout repo — protect all departments
+        }
+
         const response = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
           headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
         })
@@ -1825,6 +1841,12 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
               console.warn(`Git sync: Skipping invalid department folder: ${dept.folder}`)
               continue
             }
+
+            // Skip departments excluded by sparse checkout
+            if (sparseEnabled && !sparseCheckedOut.includes(dept.folder)) {
+              continue
+            }
+
             const deptPath = path.join(repoPath, dept.folder)
             if (!fs.existsSync(deptPath)) {
               // Department folder was deleted locally - try to restore from origin
@@ -2121,7 +2143,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 })
 
 // Setup Git remote for a company
-ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: string) => {
+ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: string, selectedPaths?: string[]) => {
   try {
     // Fetch HTTPS URL from server API
     const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${companyId}`, {
@@ -2218,6 +2240,17 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
         }
       }
 
+      // Apply sparse checkout if user selected specific departments
+      if (selectedPaths && selectedPaths.length > 0) {
+        try {
+          await git.raw(['sparse-checkout', 'init', '--cone'])
+          await git.raw(['sparse-checkout', 'set', ...selectedPaths])
+          console.log(`Git setup: Sparse checkout enabled for: ${selectedPaths.join(', ')}`)
+        } catch (sparseError) {
+          console.warn('Git setup: Sparse checkout failed, keeping full checkout:', sparseError)
+        }
+      }
+
       return {
         success: true,
         remoteUrl,
@@ -2260,6 +2293,94 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
   } catch (error) {
     console.error('Git setup error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// --- Sparse Checkout ---
+
+// Initialize sparse checkout (cone mode)
+ipcMain.handle('git:sparseCheckoutInit', async (_, repoPath: string) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    await git.raw(['sparse-checkout', 'init', '--cone'])
+    return { success: true }
+  } catch (error) {
+    console.error('Sparse checkout init error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Set sparse checkout paths (replaces current selection)
+ipcMain.handle('git:sparseCheckoutSet', async (_, repoPath: string, paths: string[]) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    await git.raw(['sparse-checkout', 'set', ...paths])
+    return { success: true }
+  } catch (error) {
+    console.error('Sparse checkout set error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Add paths to sparse checkout (keeps existing selection)
+ipcMain.handle('git:sparseCheckoutAdd', async (_, repoPath: string, paths: string[]) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    await git.raw(['sparse-checkout', 'add', ...paths])
+    return { success: true }
+  } catch (error) {
+    console.error('Sparse checkout add error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Get current sparse checkout paths
+ipcMain.handle('git:sparseCheckoutList', async (_, repoPath: string) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    const result = await git.raw(['sparse-checkout', 'list'])
+    return { success: true, paths: result.split('\n').filter(Boolean) }
+  } catch (error) {
+    console.error('Sparse checkout list error:', error)
+    return { success: false, paths: [], error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Disable sparse checkout (restore all files)
+ipcMain.handle('git:sparseCheckoutDisable', async (_, repoPath: string) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    await git.raw(['sparse-checkout', 'disable'])
+    return { success: true }
+  } catch (error) {
+    console.error('Sparse checkout disable error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Check if sparse checkout is enabled
+ipcMain.handle('git:isSparseCheckout', async (_, repoPath: string) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    const config = await git.raw(['config', '--get', 'core.sparseCheckout'])
+    return { enabled: config.trim() === 'true' }
+  } catch {
+    return { enabled: false }
+  }
+})
+
+// List top-level directories from remote (includes sparse-excluded ones)
+ipcMain.handle('git:listRemoteDirectories', async (_, repoPath: string) => {
+  try {
+    const git = createGit(validatePath(repoPath))
+    const result = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
+    return {
+      success: true,
+      directories: result.split('\n').filter(d => d && !d.startsWith('.'))
+    }
+  } catch (error) {
+    console.error('List remote directories error:', error)
+    return { success: false, directories: [], error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 

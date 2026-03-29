@@ -91,10 +91,26 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:log', repoPath, folderPath, limit),
   gitShowCommit: (repoPath: string, commitHash: string, folderPath?: string) =>
     ipcRenderer.invoke('git:showCommit', repoPath, commitHash, folderPath),
-  gitSetupCompanyRemote: (repoPath: string, companyId: string) =>
-    ipcRenderer.invoke('git:setupCompanyRemote', repoPath, companyId),
+  gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) =>
+    ipcRenderer.invoke('git:setupCompanyRemote', repoPath, companyId, selectedPaths),
   gitPushToServer: (repoPath: string) =>
     ipcRenderer.invoke('git:pushToServer', repoPath),
+
+  // Sparse checkout
+  sparseCheckoutInit: (repoPath: string) =>
+    ipcRenderer.invoke('git:sparseCheckoutInit', repoPath),
+  sparseCheckoutSet: (repoPath: string, paths: string[]) =>
+    ipcRenderer.invoke('git:sparseCheckoutSet', repoPath, paths),
+  sparseCheckoutAdd: (repoPath: string, paths: string[]) =>
+    ipcRenderer.invoke('git:sparseCheckoutAdd', repoPath, paths),
+  sparseCheckoutList: (repoPath: string) =>
+    ipcRenderer.invoke('git:sparseCheckoutList', repoPath),
+  sparseCheckoutDisable: (repoPath: string) =>
+    ipcRenderer.invoke('git:sparseCheckoutDisable', repoPath),
+  isSparseCheckout: (repoPath: string) =>
+    ipcRenderer.invoke('git:isSparseCheckout', repoPath),
+  listRemoteDirectories: (repoPath: string) =>
+    ipcRenderer.invoke('git:listRemoteDirectories', repoPath),
 
   // Backup operations
   backupList: (repoPath: string) =>
@@ -531,9 +547,18 @@ declare global {
         files: Array<{ status: string; path: string }>
         error?: string
       }>
-      gitSetupCompanyRemote: (repoPath: string, companyId: string) => Promise<GitResult>
+      gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) => Promise<GitResult>
       gitPushToServer: (repoPath: string) => Promise<GitResult>
       serverCreateRepo: (companyId: string) => Promise<ServerRepoResult>
+
+      // Sparse checkout
+      sparseCheckoutInit: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+      sparseCheckoutSet: (repoPath: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+      sparseCheckoutAdd: (repoPath: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
+      sparseCheckoutList: (repoPath: string) => Promise<{ success: boolean; paths: string[]; error?: string }>
+      sparseCheckoutDisable: (repoPath: string) => Promise<{ success: boolean; error?: string }>
+      isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
+      listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
 
       // Backup
       backupList: (repoPath: string) => Promise<BackupListResult>

@@ -18,6 +18,8 @@ interface CopySkillModalProps {
   color: string
   onClose: () => void
   onCopy: (sourceSkillPath: string, name: string, folderName: string) => void
+  /** Folders excluded by sparse checkout (not available locally) */
+  unsyncedFolders?: Set<string>
 }
 
 // Generate folder name from display name
@@ -41,14 +43,16 @@ export function CopySkillModal({
   color,
   onClose,
   onCopy,
+  unsyncedFolders,
 }: CopySkillModalProps) {
   useTranslation() // keep hook for future i18n
 
-  // Available sources: other departments + company-wide
+  // Available sources: other departments + company-wide (exclude unsynced departments)
   const sources = [
     { id: COMPANY_TAB_ID, name: '全社', folder: '' },
     ...departments
       .filter(d => d.id !== currentDepartmentId)
+      .filter(d => !unsyncedFolders?.has(d.folder))
       .map(d => ({ id: d.id, name: d.name, folder: d.folder })),
   ]
 

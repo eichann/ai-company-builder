@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, FloppyDisk, Check, FileText } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, Code, Key, FloppyDisk, Check, FileText, Cloud, CloudArrowDown, ArrowCounterClockwise, SpinnerGap, FolderSimple } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
+import { useSparseCheckout } from '../../hooks/useSparseCheckout'
+import { useDepartments } from '../../hooks/useDepartments'
 
 // Common API key definitions
 const COMMON_API_KEYS = [
@@ -14,10 +16,13 @@ interface SettingsPanelProps {
   onClose: () => void
 }
 
-type TabType = 'apikeys' | 'gitignore' | 'advanced'
+type TabType = 'apikeys' | 'sync' | 'gitignore' | 'advanced'
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
+  const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
+  const { departments } = useDepartments(currentCompany?.id)
+  const [syncActionInProgress, setSyncActionInProgress] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('apikeys')
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
@@ -241,6 +246,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             APIキー
           </button>
           <button
+            onClick={() => setActiveTab('sync')}
+            className={`
+              flex items-center gap-2 px-6 py-3 text-sm font-medium
+              border-b-2 transition-colors
+              ${activeTab === 'sync'
+                ? 'border-amber-500 text-zinc-100'
+                : 'border-transparent text-zinc-500 hover:text-zinc-300'
+              }
+            `}
+          >
+            <FolderSimple size={16} />
+            同期フォルダ
+          </button>
+          <button
             onClick={() => setActiveTab('gitignore')}
             className={`
               flex items-center gap-2 px-6 py-3 text-sm font-medium
@@ -370,6 +389,120 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p className="mt-1">スクリプトから <code className="px-1 py-0.5 bg-zinc-700 rounded">process.env.OPENAI_API_KEY</code> などで参照できます。</p>
               </div>
             </div>
+          ) : activeTab === 'sync' ? (
+            /* Sync Folders Tab */
+            <div className="space-y-6">
+              {sparseCheckout.isLoading ? (
+                <div className="flex items-center justify-center py-12">
+                  <SpinnerGap size={20} className="animate-spin text-zinc-500" />
+                </div>
+              ) : (
+                /* Show synced/unsynced departments */
+                <div className="space-y-6">
+                  {/* Synced departments */}
+                  <div>
+                    <h3 className="text-sm font-medium text-zinc-400 mb-3">ダウンロード済み</h3>
+                    <div className="space-y-2">
+                      {departments
+                        .filter(d => sparseCheckout.isCheckedOut(d.folder))
+                        .map(dept => (
+                          <div key={dept.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 rounded-lg">
+                            <Check size={16} className="text-emerald-500 flex-shrink-0" />
+                            <span className="text-sm text-zinc-200 flex-1">{dept.name}</span>
+                            <span className="text-xs text-zinc-500 font-mono">{dept.folder}/</span>
+                            <button
+                              onClick={async () => {
+                                setSyncActionInProgress(dept.folder)
+                                try {
+                                  if (!sparseCheckout.enabled) {
+                                    // First time: enable sparse checkout with all departments except this one
+                                    const remaining = departments.map(d => d.folder).filter(f => f !== dept.folder)
+                                    await sparseCheckout.enable(remaining)
+                                  } else {
+                                    await sparseCheckout.removePath(dept.folder)
+                                  }
+                                } finally {
+                                  setSyncActionInProgress(null)
+                                }
+                              }}
+                              disabled={syncActionInProgress !== null}
+                              className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                            >
+                              {syncActionInProgress === dept.folder ? (
+                                <SpinnerGap size={14} className="animate-spin" />
+                              ) : '除外する'}
+                            </button>
+                          </div>
+                        ))}
+                      {departments.filter(d => sparseCheckout.isCheckedOut(d.folder)).length === 0 && (
+                        <div className="text-sm text-zinc-500 py-2">なし</div>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Unsynced departments */}
+                  {departments.filter(d => !sparseCheckout.isCheckedOut(d.folder)).length > 0 && (
+                    <div>
+                      <h3 className="text-sm font-medium text-zinc-400 mb-3">未ダウンロード</h3>
+                      <div className="space-y-2">
+                        {departments
+                          .filter(d => !sparseCheckout.isCheckedOut(d.folder))
+                          .map(dept => (
+                            <div key={dept.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-800/30 rounded-lg">
+                              <Cloud size={16} className="text-zinc-600 flex-shrink-0" />
+                              <span className="text-sm text-zinc-400 flex-1">{dept.name}</span>
+                              <span className="text-xs text-zinc-600 font-mono">{dept.folder}/</span>
+                              <button
+                                onClick={async () => {
+                                  setSyncActionInProgress(dept.folder)
+                                  try {
+                                    await sparseCheckout.addPath(dept.folder)
+                                  } finally {
+                                    setSyncActionInProgress(null)
+                                  }
+                                }}
+                                disabled={syncActionInProgress !== null}
+                                className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
+                              >
+                                {syncActionInProgress === dept.folder ? (
+                                  <SpinnerGap size={14} className="animate-spin" />
+                                ) : (
+                                  <>
+                                    <CloudArrowDown size={14} />
+                                    追加する
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                          ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Restore all */}
+                  <button
+                    onClick={async () => {
+                      setSyncActionInProgress('__all__')
+                      try {
+                        await sparseCheckout.disable()
+                      } finally {
+                        setSyncActionInProgress(null)
+                      }
+                    }}
+                    disabled={syncActionInProgress !== null}
+                    className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
+                  >
+                    <ArrowCounterClockwise size={16} />
+                    すべて同期に戻す
+                  </button>
+
+                  <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3">
+                    部署を除外すると、そのフォルダのファイルがローカルから削除されます。
+                    サーバーには残るので、いつでも再追加できます。
+                  </div>
+                </div>
+              )}
+            </div>
           ) : activeTab === 'gitignore' ? (
             /* Gitignore Tab */
             <div className="space-y-4">
@@ -424,7 +557,8 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           )}
         </div>
 
-        {/* Footer */}
+        {/* Footer (hidden for sync tab — actions are inline) */}
+        {activeTab !== 'sync' && (
         <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
           {error ? (
             <div className="text-sm text-red-400">{error}</div>
@@ -463,6 +597,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             )}
           </button>
         </div>
+        )}
       </div>
     </div>
   )

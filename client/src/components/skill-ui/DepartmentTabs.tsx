@@ -14,6 +14,7 @@ import {
   Shield,
   Gear,
   House,
+  Cloud,
   IconProps
 } from '@phosphor-icons/react'
 import { memo } from 'react'
@@ -45,11 +46,13 @@ interface DepartmentTabsProps {
   departments: DepartmentConfig[]
   selectedId: string | null
   onSelect: (id: string) => void
+  /** Folders not checked out via sparse checkout (shown as unsynced) */
+  unsyncedFolders?: Set<string>
 }
 
 const COMPANY_COLOR = '#6366f1' // indigo
 
-export const DepartmentTabs = memo(function DepartmentTabs({ departments, selectedId, onSelect }: DepartmentTabsProps) {
+export const DepartmentTabs = memo(function DepartmentTabs({ departments, selectedId, onSelect, unsyncedFolders }: DepartmentTabsProps) {
   const { t } = useTranslation()
   const isCompanySelected = selectedId === COMPANY_TAB_ID
 
@@ -92,6 +95,7 @@ export const DepartmentTabs = memo(function DepartmentTabs({ departments, select
       {departments.map((dept) => {
         const Icon = iconMap[dept.icon] || Buildings
         const isSelected = selectedId === dept.id
+        const isUnsynced = unsyncedFolders?.has(dept.folder) ?? false
 
         return (
           <button
@@ -101,22 +105,29 @@ export const DepartmentTabs = memo(function DepartmentTabs({ departments, select
               group relative flex items-center gap-2.5 px-4 py-2.5 rounded-xl
               font-medium text-sm whitespace-nowrap
               transition-all duration-200 ease-out
-              ${isSelected
-                ? 'text-white shadow-lg'
-                : 'text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
+              ${isUnsynced
+                ? isSelected
+                  ? 'text-white/80 shadow-lg'
+                  : 'text-gray-400 dark:text-zinc-500 hover:text-gray-500 dark:hover:text-zinc-400 hover:bg-gray-50 dark:hover:bg-white/[0.02]'
+                : isSelected
+                  ? 'text-white shadow-lg'
+                  : 'text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 hover:bg-gray-100 dark:hover:bg-white/[0.04]'
               }
             `}
             style={{
-              backgroundColor: isSelected ? dept.color : undefined,
+              backgroundColor: isSelected ? (isUnsynced ? `${dept.color}99` : dept.color) : undefined,
               boxShadow: isSelected ? `0 4px 20px ${dept.color}40` : undefined,
             }}
           >
             <Icon
               size={18}
               weight={isSelected ? 'fill' : 'regular'}
-              className="transition-transform group-hover:scale-110"
+              className={`transition-transform group-hover:scale-110 ${isUnsynced && !isSelected ? 'opacity-50' : ''}`}
             />
             <span>{dept.name}</span>
+            {isUnsynced && (
+              <Cloud size={12} className={isSelected ? 'text-white/60' : 'text-gray-400 dark:text-zinc-600'} />
+            )}
 
             {/* Active indicator line */}
             {isSelected && (
