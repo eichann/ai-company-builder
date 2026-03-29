@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -21,6 +21,7 @@ import { SyncPreviewDialog } from '../common/SyncPreviewDialog'
 import type { Skill, SkillTool } from '../../types'
 import { useAppStore } from '../../stores/appStore'
 import { useSkills } from '../../hooks/useSkills'
+import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import { useDepartments } from '../../hooks/useDepartments'
 import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
@@ -45,6 +46,11 @@ export function SkillCentricLayout() {
 
   // Fetch departments from API
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
+
+  // Sparse checkout state
+  const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
+
+  const [isDownloading, setIsDownloading] = useState(false)
 
   const toggleLanguage = useCallback(() => {
     setLanguage(language === 'ja' ? 'en' : 'ja')
@@ -105,21 +111,71 @@ export function SkillCentricLayout() {
 
   const isCompanyWide = selectedDeptId === COMPANY_TAB_ID
 
+  // Compute which department folders are not checked out (sparse checkout)
+  const unsyncedFolders = useMemo(() => {
+    if (!sparseCheckout.enabled) return undefined
+    const set = new Set<string>()
+    for (const dept of departments) {
+      if (!sparseCheckout.isCheckedOut(dept.folder)) {
+        set.add(dept.folder)
+      }
+    }
+    return set.size > 0 ? set : undefined
+  }, [sparseCheckout.enabled, sparseCheckout.checkedOutPaths, departments])
+
   const selectedDept = useMemo(
     () => departments.find((d) => d.id === selectedDeptId),
     [departments, selectedDeptId]
   )
 
+  // Check if the currently selected department folder exists on disk
+  const [deptFolderExists, setDeptFolderExists] = useState(true)
+  useEffect(() => {
+    if (!currentCompany?.rootPath || !selectedDept?.folder || isCompanyWide) {
+      setDeptFolderExists(true)
+      return
+    }
+    const deptPath = `${currentCompany.rootPath}/${selectedDept.folder}`
+    window.electronAPI.exists(deptPath)
+      .then((exists: boolean) => setDeptFolderExists(exists))
+      .catch(() => setDeptFolderExists(false))
+  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, sparseCheckout.checkedOutPaths])
+
+  // Department is unsynced if sparse checkout says so OR if the folder doesn't exist
+  const isSelectedDeptUnsynced = useMemo(() => {
+    if (!selectedDeptId || isCompanyWide) return false
+    // If folder doesn't exist on disk, it's unsynced regardless of sparse checkout state
+    if (!deptFolderExists) return true
+    // Also check sparse checkout state
+    if (!unsyncedFolders) return false
+    const dept = departments.find(d => d.id === selectedDeptId)
+    return dept ? unsyncedFolders.has(dept.folder) : false
+  }, [selectedDeptId, isCompanyWide, deptFolderExists, unsyncedFolders, departments])
+
   // The effective path for file tree and chat
   const effectiveDeptFolder = isCompanyWide ? '' : (selectedDept?.folder || '')
 
-  // Load skills from file system
+  // Load skills from file system — skip if department is unsynced
   const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
     rootPath: currentCompany?.rootPath || '',
-    departmentFolder: effectiveDeptFolder,
-    departmentId: isCompanyWide ? COMPANY_TAB_ID : selectedDeptId,
+    departmentFolder: isSelectedDeptUnsynced ? '' : effectiveDeptFolder,
+    departmentId: isSelectedDeptUnsynced ? '' : (isCompanyWide ? COMPANY_TAB_ID : selectedDeptId),
     departmentName: isCompanyWide ? '全社' : selectedDept?.name,
   })
+  const handleDownloadDepartment = useCallback(async () => {
+    if (!selectedDept?.folder) return
+    setIsDownloading(true)
+    try {
+      const success = await sparseCheckout.addPath(selectedDept.folder)
+      if (success) {
+        setDeptFolderExists(true)
+        refreshSkills()
+      }
+    } finally {
+      setIsDownloading(false)
+    }
+  }, [selectedDept?.folder, sparseCheckout, refreshSkills])
+
   const pendingSkillsRefreshRef = useRef(false)
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)
 
@@ -668,11 +724,63 @@ ${promptContent}
             departments={departments}
             selectedId={selectedDeptId}
             onSelect={handleSelectDept}
+            unsyncedFolders={unsyncedFolders}
           />
         )}
       </div>
 
+      {/* Sparse checkout banner for company-wide tab */}
+      {isCompanyWide && sparseCheckout.enabled && unsyncedFolders && unsyncedFolders.size > 0 && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-6 py-2 bg-indigo-50 dark:bg-indigo-950/30 border-b border-indigo-100 dark:border-indigo-900/50 text-sm text-indigo-700 dark:text-indigo-300">
+          <Info size={16} className="flex-shrink-0" />
+          <span>
+            一部の部署がダウンロードされていません。ファイルツリーとAIチャットの対象はダウンロード済みの部署に限られます。
+          </span>
+          <button
+            onClick={() => setShowSettings(true)}
+            className="ml-auto text-indigo-600 dark:text-indigo-400 hover:underline whitespace-nowrap"
+          >
+            設定で変更
+          </button>
+        </div>
+      )}
+
       {/* Main Content */}
+      {isSelectedDeptUnsynced ? (
+        /* Unsynced department — download prompt */
+        <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
+          <div className="text-center max-w-md px-6">
+            <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
+              <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
+            </div>
+            <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
+              {selectedDept?.name}
+            </h2>
+            <p className="text-gray-500 dark:text-zinc-400 mb-8">
+              この部署のファイルはまだダウンロードされていません。
+              ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
+            </p>
+            <button
+              onClick={handleDownloadDepartment}
+              disabled={isDownloading}
+              className="
+                inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
+                text-white font-medium text-sm
+                transition-all hover:brightness-110 active:scale-[0.98]
+                disabled:opacity-50 disabled:cursor-not-allowed
+              "
+              style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
+            >
+              {isDownloading ? (
+                <SpinnerGap size={18} className="animate-spin" />
+              ) : (
+                <DownloadSimple size={18} weight="bold" />
+              )}
+              {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
+            </button>
+          </div>
+        </div>
+      ) : (
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel (Skills or Files) */}
         <div
@@ -833,6 +941,7 @@ ${promptContent}
           />
         </div>
       </div>
+      )}
 
       {/* New Skill Wizard Modal */}
       {showNewSkillWizard && selectedDept && (
@@ -853,6 +962,7 @@ ${promptContent}
           color={selectedDept?.color || '#6366f1'}
           onClose={() => setShowCopySkillModal(false)}
           onCopy={handleCopySkill}
+          unsyncedFolders={unsyncedFolders}
         />
       )}
 
@@ -867,7 +977,10 @@ ${promptContent}
 
       {/* Settings Panel Modal */}
       {showSettings && (
-        <SettingsPanel onClose={() => setShowSettings(false)} />
+        <SettingsPanel onClose={() => {
+          setShowSettings(false)
+          sparseCheckout.refresh()
+        }} />
       )}
 
       {/* Backup History Slide Over */}
