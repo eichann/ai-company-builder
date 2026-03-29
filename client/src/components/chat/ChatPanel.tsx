@@ -1484,13 +1484,14 @@ const MessageList = memo(function MessageList({
 
 interface ChatPanelChatProps {
   departmentPath?: string
+  activeDepartment?: { name: string; folder: string }
   serverInfo: { port: number; authToken: string }
   authMode: AuthMode
   slashCommands?: SlashCommandItem[]
   onShowSettings: () => void
 }
 
-function ChatPanelChat({ departmentPath, serverInfo, authMode, slashCommands, onShowSettings }: ChatPanelChatProps) {
+function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1521,12 +1522,17 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, slashCommands, on
 
   // Refs for dynamic body params
   const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
+  const activeDepartmentRef = useRef(activeDepartment)
   const aiModelRef = useRef(aiModel)
   const aiEffortRef = useRef(aiEffort)
 
   useEffect(() => {
     workingDirRef.current = departmentPath || currentCompany?.rootPath
   }, [departmentPath, currentCompany?.rootPath])
+
+  useEffect(() => {
+    activeDepartmentRef.current = activeDepartment
+  }, [activeDepartment])
 
   useEffect(() => {
     aiModelRef.current = aiModel
@@ -1564,6 +1570,7 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, slashCommands, on
       body: () => {
         const body: Record<string, unknown> = {
           workingDirectory: workingDirRef.current,
+          activeDepartment: activeDepartmentRef.current || undefined,
           modelId: aiModelRef.current,
           effort: aiEffortRef.current,
         }
@@ -2202,11 +2209,12 @@ function ChatPanelChat({ departmentPath, serverInfo, authMode, slashCommands, on
 // ============================================================================
 
 interface ChatPanelProps {
-  departmentPath?: string  // Working directory for AI (department folder path)
+  departmentPath?: string  // Working directory for AI (company root path)
+  activeDepartment?: { name: string; folder: string }  // Currently selected department (undefined = company-wide)
   slashCommands?: SlashCommandItem[]
 }
 
-export function ChatPanel({ departmentPath, slashCommands }: ChatPanelProps) {
+export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: ChatPanelProps) {
   const { t } = useTranslation()
   const serverInfo = useChatServerInfo()
 
@@ -2314,6 +2322,7 @@ export function ChatPanel({ departmentPath, slashCommands }: ChatPanelProps) {
       <div className={showSettings ? 'h-full invisible' : 'h-full'}>
         <ChatPanelChat
           departmentPath={departmentPath}
+          activeDepartment={activeDepartment}
           serverInfo={serverInfo}
           authMode={authMode}
           slashCommands={slashCommands}

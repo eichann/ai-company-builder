@@ -146,6 +146,7 @@ export async function startChatServer(config: ChatServerConfig) {
       messages,
       systemPrompt,
       workingDirectory,
+      activeDepartment,
       skillInfo,
       images,
       modelId,
@@ -157,6 +158,7 @@ export async function startChatServer(config: ChatServerConfig) {
       messages: UIMessage[]
       systemPrompt?: string
       workingDirectory?: string
+      activeDepartment?: { name: string; folder: string }
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
@@ -175,6 +177,11 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authMode === 'claude-code') {
       if (workingDirectory) {
         finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
+        if (activeDepartment) {
+          finalSystemPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
+        } else {
+          finalSystemPrompt += `\n\n現在ユーザーは全社共通の画面を閲覧しています。`
+        }
       }
       if (referenceFiles && referenceFiles.length > 0) {
         const fileList = referenceFiles.map(p => `- ${p}`).join('\n')
