@@ -781,43 +781,44 @@ ${promptContent}
       )}
 
       {/* Main Content */}
-      {isSelectedDeptUnsynced ? (
-        /* Unsynced department — download prompt */
-        <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
-          <div className="text-center max-w-md px-6">
-            <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
-              <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
-            </div>
-            <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
-              {selectedDept?.name}
-            </h2>
-            <p className="text-gray-500 dark:text-zinc-400 mb-8">
-              この部署のファイルはまだダウンロードされていません。
-              ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
-            </p>
-            <button
-              onClick={handleDownloadDepartment}
-              disabled={isDownloading}
-              className="
-                inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
-                text-white font-medium text-sm
-                transition-all hover:brightness-110 active:scale-[0.98]
-                disabled:opacity-50 disabled:cursor-not-allowed
-              "
-              style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
-            >
-              {isDownloading ? (
-                <SpinnerGap size={18} className="animate-spin" />
-              ) : (
-                <DownloadSimple size={18} weight="bold" />
-              )}
-              {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
-            </button>
-          </div>
-        </div>
-      ) : (
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Panel (Skills or Files) */}
+        {isSelectedDeptUnsynced ? (
+          /* Unsynced department — download prompt (left side) */
+          <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
+            <div className="text-center max-w-md px-6">
+              <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
+                <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
+              </div>
+              <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
+                {selectedDept?.name}
+              </h2>
+              <p className="text-gray-500 dark:text-zinc-400 mb-8">
+                この部署のファイルはまだダウンロードされていません。
+                ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
+              </p>
+              <button
+                onClick={handleDownloadDepartment}
+                disabled={isDownloading}
+                className="
+                  inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
+                  text-white font-medium text-sm
+                  transition-all hover:brightness-110 active:scale-[0.98]
+                  disabled:opacity-50 disabled:cursor-not-allowed
+                "
+                style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
+              >
+                {isDownloading ? (
+                  <SpinnerGap size={18} className="animate-spin" />
+                ) : (
+                  <DownloadSimple size={18} weight="bold" />
+                )}
+                {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* Normal layout (left side) */
+          <>
         <div
           className="flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex-shrink-0"
           style={{ width: leftPanelWidth }}
@@ -961,23 +962,18 @@ ${promptContent}
 
         {/* Resize Handle */}
         <ResizeHandle onResize={handleLeftPanelResize} direction="horizontal" />
+          </>
+        )}
 
         {/* Right Panel (Chat - Always Visible) */}
         <div className="flex-1" style={{ minWidth: MIN_CHAT_WIDTH }}>
           <ChatPanel
-            departmentPath={currentCompany
-              ? (isCompanyWide
-                  ? currentCompany.rootPath
-                  : selectedDept
-                    ? `${currentCompany.rootPath}/${selectedDept.folder}`
-                    : undefined)
-              : undefined
-            }
+            departmentPath={currentCompany?.rootPath}
+            activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
           />
         </div>
       </div>
-      )}
 
       {/* New Skill Wizard Modal */}
       {showNewSkillWizard && selectedDept && (
