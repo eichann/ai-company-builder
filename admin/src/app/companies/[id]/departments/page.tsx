@@ -365,7 +365,7 @@ export default function DepartmentsPage({ params }: { params: Promise<{ id: stri
                           )}
                         </div>
                         <div className="flex items-center gap-3 text-sm text-zinc-500">
-                          {dept.nameEn && <span>{dept.nameEn}</span>}
+                          {dept.nameEn && dept.nameEn !== dept.folder && <span>{dept.nameEn}</span>}
                           <span className="font-mono">{dept.folder}</span>
                         </div>
                       </div>
