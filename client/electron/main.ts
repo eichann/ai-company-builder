@@ -1549,10 +1549,9 @@ ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) 
 ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
   try {
     const git: SimpleGit = createGit(repoPath)
-    const logResult = await git.log({
-      maxCount: limit,
-      file: folderPath,
-    })
+    const logOptions: Record<string, unknown> = { maxCount: limit }
+    if (folderPath) logOptions.file = folderPath
+    const logResult = await git.log(logOptions)
     return {
       success: true,
       commits: logResult.all.map(c => ({

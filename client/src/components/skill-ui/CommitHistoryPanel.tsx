@@ -40,11 +40,12 @@ export function invalidateCommitCache() {
 
 /** Prefetch commits for a department in the background */
 export function prefetchCommits(rootPath: string, departmentFolder: string) {
-  if (!rootPath || !departmentFolder) return
+  if (!rootPath) return
   const key = `${rootPath}::${departmentFolder}`
   const cached = commitCache.get(key)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) return // still fresh
-  window.electronAPI.gitLog(rootPath, `${departmentFolder}/`, 50).then(result => {
+  const pathFilter = departmentFolder ? `${departmentFolder}/` : ''
+  window.electronAPI.gitLog(rootPath, pathFilter, 50).then(result => {
     if (result.success) {
       commitCache.set(key, { commits: result.commits, timestamp: Date.now() })
     }
@@ -129,10 +130,11 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
   }, [])
 
   const loadCommits = useCallback(async (showSpinner: boolean) => {
-    if (!rootPath || !departmentFolder) return
+    if (!rootPath) return
     if (showSpinner) setIsLoading(true)
     try {
-      const result = await window.electronAPI.gitLog(rootPath, `${departmentFolder}/`, 50)
+      const pathFilter = departmentFolder ? `${departmentFolder}/` : ''
+      const result = await window.electronAPI.gitLog(rootPath, pathFilter, 50)
       if (result.success && mountedRef.current) {
         setCommits(result.commits)
         commitCache.set(cacheKey, { commits: result.commits, timestamp: Date.now() })
