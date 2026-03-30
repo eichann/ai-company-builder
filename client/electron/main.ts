@@ -1421,7 +1421,7 @@ ipcMain.handle('git:preview', async (_, repoPath: string) => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
-    await git.add('.')
+    await git.raw(['add', '--sparse', '.'])
     const status = await git.status()
 
     const added: string[] = []
@@ -1919,7 +1919,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     }
 
     // Add all files and commit
-    await git.add('.')
+    await git.raw(['add', '--sparse', '.'])
     const status = await git.status()
 
     const hasLocalChanges = status.staged.length > 0 || status.files.length > 0
@@ -2279,7 +2279,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
           fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n')
         }
 
-        await git.add('.')
+        await git.raw(['add', '--sparse', '.'])
         await git.commit('Initial commit')
       }
 
@@ -2514,7 +2514,7 @@ ipcMain.handle('git:pushToServer', async (_, repoPath: string) => {
     const git: SimpleGit = createGit(repoPath)
 
     // Add all changes
-    await git.add('.')
+    await git.raw(['add', '--sparse', '.'])
 
     // Check status
     const status = await git.status()
