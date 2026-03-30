@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   copyItem: (sourcePath: string, destPath: string) => ipcRenderer.invoke('fs:copy', sourcePath, destPath),
   getStats: (path: string) => ipcRenderer.invoke('fs:stat', path),
 
+  // Native drag to external apps
+  startDrag: (filePath: string) => ipcRenderer.send('fs:startDrag', filePath),
+
   // File watching
   watchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:watch', rootPath),
   unwatchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:unwatch', rootPath),
@@ -434,6 +437,9 @@ declare global {
       moveFromExternal: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
       copyItem: (sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>
       getStats: (path: string) => Promise<{ success: boolean; data?: { isDirectory: boolean; isFile: boolean; size: number; mtime: string; ctime: string } }>
+
+      // Native drag to external apps
+      startDrag: (filePath: string) => void
 
       // File watching
       watchDirectory: (rootPath: string) => Promise<{ success: boolean; error?: string }>

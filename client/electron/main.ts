@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -649,6 +649,17 @@ ipcMain.handle('fs:stat', async (_, targetPath: string) => {
   } catch {
     return { success: false }
   }
+})
+
+// Native drag to external apps (browser, Finder, Slack, etc.)
+ipcMain.on('fs:startDrag', (event, filePath: string) => {
+  const safePath = validatePath(filePath)
+  event.sender.startDrag({
+    file: safePath,
+    icon: nativeImage.createFromDataURL(
+      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='
+    ),
+  })
 })
 
 // Start watching a directory
@@ -1737,6 +1748,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     // Essential patterns that should always be ignored
     const essentialPatterns = [
       { pattern: '.backups/', comment: '' },
+      { pattern: '.workspace/', comment: '# AI-generated temp files' },
       { pattern: 'node_modules/', comment: '# Dependencies' },
     ]
 
@@ -2259,7 +2271,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
         // Create .gitignore if it doesn't exist
         const gitignorePath = path.join(repoPath, '.gitignore')
         if (!fs.existsSync(gitignorePath)) {
-          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n')
+          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n')
         }
 
         await git.add('.')
