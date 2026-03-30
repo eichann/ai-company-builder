@@ -1861,6 +1861,62 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.warn('Git sync: Fetch failed (may be offline):', fetchError)
     }
 
+    // 1.5. Auto-add non-department root folders to sparse checkout
+    //       Department folders are managed by user selection; everything else should be visible to all.
+    try {
+      const sparseConfigCheck = await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')
+      if (sparseConfigCheck.trim() === 'true') {
+        // Get all root-level directories from remote
+        const remoteTreeRaw = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
+        const remoteFolders = remoteTreeRaw.split('\n').filter(d => d && !d.startsWith('.'))
+
+        // Get department folders from API
+        let departmentFolders: string[] = []
+        if (companyId) {
+          try {
+            const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
+              headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+            })
+            if (deptResponse.ok) {
+              const deptResult = await deptResponse.json()
+              departmentFolders = (deptResult.data || []).map((d: { folder: string }) => d.folder)
+            }
+          } catch (e) {
+            console.warn('Git sync: Could not fetch departments for sparse checkout update:', e)
+          }
+        }
+
+        // Non-department folders = shared folders that everyone should have
+        const departmentSet = new Set(departmentFolders)
+        const sharedFolders = remoteFolders.filter(f => !departmentSet.has(f))
+
+        if (sharedFolders.length > 0) {
+          // Get current sparse checkout list
+          const currentSparseRaw = await git.raw(['sparse-checkout', 'list'])
+          const currentSparse = new Set(currentSparseRaw.split('\n').filter(Boolean))
+
+          const toAdd = sharedFolders.filter(f => !currentSparse.has(f))
+          if (toAdd.length > 0) {
+            await git.raw(['sparse-checkout', 'add', ...toAdd])
+            console.log(`Git sync: Auto-added shared folders to sparse checkout: ${toAdd.join(', ')}`)
+          }
+        }
+
+        // Also ensure all department folders from DB are checked out
+        if (departmentFolders.length > 0) {
+          const currentSparseRaw2 = await git.raw(['sparse-checkout', 'list'])
+          const currentSparse2 = new Set(currentSparseRaw2.split('\n').filter(Boolean))
+          const deptToAdd = departmentFolders.filter(f => !currentSparse2.has(f))
+          if (deptToAdd.length > 0) {
+            await git.raw(['sparse-checkout', 'add', ...deptToAdd])
+            console.log(`Git sync: Auto-added department folders to sparse checkout: ${deptToAdd.join(', ')}`)
+          }
+        }
+      }
+    } catch (sparseUpdateError) {
+      console.warn('Git sync: Sparse checkout auto-update failed:', sparseUpdateError)
+    }
+
     // 2. Protect department folders (restore if deleted locally)
     //    When sparse checkout is active, only protect checked-out departments.
     //    Excluded departments are safe in the git index (git add/push won't remove them).
