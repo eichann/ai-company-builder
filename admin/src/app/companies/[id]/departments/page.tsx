@@ -251,8 +251,8 @@ export default function DepartmentsPage({ params }: { params: Promise<{ id: stri
     }
   }
 
-  // Validate folder name (ASCII only)
-  const isValidFolder = (folder: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(folder)
+  // Validate folder name (ASCII + Japanese allowed)
+  const isValidFolder = (folder: string) => /^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/.test(folder)
 
   if (authLoading || !user) {
     return (
@@ -426,20 +426,20 @@ export default function DepartmentsPage({ params }: { params: Promise<{ id: stri
                 </div>
 
                 <div>
-                  <label className="block text-sm text-zinc-400 mb-1">フォルダ名 * (ASCII英数字のみ)</label>
+                  <label className="block text-sm text-zinc-400 mb-1">フォルダ名 * (日本語・英数字)</label>
                   <input
                     type="text"
                     value={formData.folder}
                     onChange={(e) => setFormData({ ...formData, folder: e.target.value })}
                     required
-                    pattern="[a-zA-Z0-9][a-zA-Z0-9._-]*"
+                    pattern="[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*"
                     className={`w-full px-3 py-2 bg-zinc-800 border rounded-lg text-white font-mono focus:outline-none focus:ring-2 focus:ring-blue-500 ${
                       formData.folder && !isValidFolder(formData.folder) ? 'border-red-500' : 'border-zinc-700'
                     }`}
-                    placeholder="sales"
+                    placeholder="営業部"
                   />
                   {formData.folder && !isValidFolder(formData.folder) && (
-                    <p className="text-red-400 text-xs mt-1">英数字で始まり、英数字・ドット・アンダースコア・ハイフンのみ使用可能</p>
+                    <p className="text-red-400 text-xs mt-1">日本語・英数字で始まり、日本語・英数字・ドット・アンダースコア・ハイフンのみ使用可能</p>
                   )}
                 </div>
 

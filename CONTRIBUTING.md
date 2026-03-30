@@ -95,8 +95,8 @@ Update self-hosting guide with DNS configuration
 
 ## File Naming
 
-- ASCII only — no CJK characters in file/folder names
-- Pattern: `/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/`
+- Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
+- Skill folder/file names remain ASCII only: `/^[a-z0-9][a-z0-9_-]*$/`
 
 ---
 

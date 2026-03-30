@@ -50,9 +50,9 @@ function canEditDepartments(role: string): boolean {
   return role === 'owner' || role === 'admin'
 }
 
-// Helper: Validate folder name (ASCII only)
+// Helper: Validate folder name (ASCII + Japanese allowed)
 function isValidFolderName(folder: string): boolean {
-  return /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(folder)
+  return /^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/.test(folder)
 }
 
 // Helper: Get bare repo path for a company
@@ -289,7 +289,7 @@ departmentsRoute.post('/', async (c) => {
 
   if (!isValidFolderName(body.folder)) {
     return c.json({
-      error: 'Invalid folder name. Use only ASCII letters, numbers, dots, hyphens, and underscores.',
+      error: 'Invalid folder name. Use letters, numbers, Japanese characters, dots, hyphens, and underscores.',
     }, 400)
   }
 
@@ -401,7 +401,7 @@ departmentsRoute.put('/:id', async (c) => {
     if (body.folder !== undefined && body.folder !== oldFolder) {
       if (!isValidFolderName(body.folder)) {
         return c.json({
-          error: 'Invalid folder name. Use only ASCII letters, numbers, dots, hyphens, and underscores.',
+          error: 'Invalid folder name. Use letters, numbers, Japanese characters, dots, hyphens, and underscores.',
         }, 400)
       }
 
