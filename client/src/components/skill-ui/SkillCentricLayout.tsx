@@ -57,13 +57,28 @@ export function SkillCentricLayout() {
     setLanguage(language === 'ja' ? 'en' : 'ja')
   }, [language, setLanguage])
 
-  // Department selection
-  const [selectedDeptId, setSelectedDeptId] = useState<string>('')
+  // Department selection — restore last tab from localStorage, default to company-wide
+  const savedTabKey = currentCompany?.id ? `selectedDeptTab:${currentCompany.id}` : null
+  const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
+    if (savedTabKey) {
+      const saved = localStorage.getItem(savedTabKey)
+      if (saved) return saved
+    }
+    return COMPANY_TAB_ID
+  })
 
-  // Auto-select first department when departments load (no useEffect needed)
+  // Persist selected tab to localStorage
+  const setSelectedDeptIdWithSave = (id: string) => {
+    setSelectedDeptId(id)
+    if (savedTabKey) localStorage.setItem(savedTabKey, id)
+  }
+
+  // If restored tab is a department ID that doesn't exist (yet), fallback to company-wide
   const prevDeptCountRef = useRef(0)
-  if (departments.length > 0 && !selectedDeptId && prevDeptCountRef.current === 0) {
-    setSelectedDeptId(departments[0].id)
+  if (departments.length > 0 && prevDeptCountRef.current === 0) {
+    if (selectedDeptId !== COMPANY_TAB_ID && !departments.find(d => d.id === selectedDeptId)) {
+      setSelectedDeptIdWithSave(COMPANY_TAB_ID)
+    }
   }
   prevDeptCountRef.current = departments.length
 
@@ -286,7 +301,7 @@ export function SkillCentricLayout() {
   )
 
   const handleSelectDept = (id: string) => {
-    setSelectedDeptId(id)
+    setSelectedDeptIdWithSave(id)
     setSelectedSkillId(null)
     setOpenFiles([])
     setActiveFilePath(null)
