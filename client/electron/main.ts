@@ -1917,68 +1917,9 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.warn('Git sync: Sparse checkout auto-update failed:', sparseUpdateError)
     }
 
-    // 2. Protect department folders (restore if deleted locally)
-    //    When sparse checkout is active, only protect checked-out departments.
-    //    Excluded departments are safe in the git index (git add/push won't remove them).
     let restoredFolders: string[] = []
-    if (companyId) {
-      try {
-        // Check sparse checkout state
-        let sparseEnabled = false
-        let sparseCheckedOut: string[] = []
-        try {
-          const sparseConfig = await git.raw(['config', '--get', 'core.sparseCheckout'])
-          sparseEnabled = sparseConfig.trim() === 'true'
-          if (sparseEnabled) {
-            const sparseList = await git.raw(['sparse-checkout', 'list'])
-            sparseCheckedOut = sparseList.split('\n').filter(Boolean)
-          }
-        } catch {
-          // Not a sparse checkout repo — protect all departments
-        }
 
-        const response = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
-          headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
-        })
-        if (response.ok) {
-          const result = await response.json()
-          const departments = result.data || []
-
-          for (const dept of departments) {
-            // Validate department folder name to prevent path traversal
-            if (!dept.folder || dept.folder.includes('..') || path.isAbsolute(dept.folder)) {
-              console.warn(`Git sync: Skipping invalid department folder: ${dept.folder}`)
-              continue
-            }
-
-            // Skip departments excluded by sparse checkout
-            if (sparseEnabled && !sparseCheckedOut.includes(dept.folder)) {
-              continue
-            }
-
-            const deptPath = path.join(repoPath, dept.folder)
-            if (!fs.existsSync(deptPath)) {
-              // Department folder was deleted locally - try to restore from origin
-              console.log(`Git sync: Restoring deleted department folder: ${dept.folder}`)
-              try {
-                await git.checkout(['origin/main', '--', dept.folder])
-                restoredFolders.push(dept.folder)
-              } catch (restoreError) {
-                // Folder might not exist on origin either, create empty
-                console.warn(`Git sync: Could not restore ${dept.folder}, creating empty:`, restoreError)
-                fs.mkdirSync(deptPath, { recursive: true })
-                fs.writeFileSync(path.join(deptPath, '.gitkeep'), '')
-                restoredFolders.push(dept.folder)
-              }
-            }
-          }
-        }
-      } catch (apiError) {
-        console.warn('Git sync: Could not fetch departments from API:', apiError)
-      }
-    }
-
-    // 3. Check for deleted files before staging
+    // 2. Check for deleted files before staging
     const preAddStatus = await git.status()
     const deletedFiles = preAddStatus.deleted
 
@@ -2112,6 +2053,68 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       } else {
         // Not a conflict, maybe network error or no remote tracking
         console.warn('Git sync: Pull failed but no conflicts:', pullError)
+      }
+    }
+
+    // 4.5. Protect department folders (restore if deleted locally)
+    //       Runs AFTER pull so that renames from the server are already applied.
+    if (companyId) {
+      try {
+        let sparseEnabled = false
+        let sparseCheckedOut: string[] = []
+        try {
+          const sparseConfig = await git.raw(['config', '--get', 'core.sparseCheckout'])
+          sparseEnabled = sparseConfig.trim() === 'true'
+          if (sparseEnabled) {
+            const sparseList = await git.raw(['sparse-checkout', 'list'])
+            sparseCheckedOut = sparseList.split('\n').filter(Boolean)
+          }
+        } catch {
+          // Not a sparse checkout repo — protect all departments
+        }
+
+        const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
+          headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+        })
+        if (deptResponse.ok) {
+          const deptResult = await deptResponse.json()
+          const departments = deptResult.data || []
+
+          for (const dept of departments) {
+            if (!dept.folder || dept.folder.includes('..') || path.isAbsolute(dept.folder)) {
+              console.warn(`Git sync: Skipping invalid department folder: ${dept.folder}`)
+              continue
+            }
+            if (sparseEnabled && !sparseCheckedOut.includes(dept.folder)) {
+              continue
+            }
+
+            const deptPath = path.join(repoPath, dept.folder)
+            if (!fs.existsSync(deptPath)) {
+              console.log(`Git sync: Restoring deleted department folder: ${dept.folder}`)
+              try {
+                await git.checkout(['origin/main', '--', dept.folder])
+                restoredFolders.push(dept.folder)
+              } catch (restoreError) {
+                console.warn(`Git sync: Could not restore ${dept.folder}, creating empty:`, restoreError)
+                fs.mkdirSync(deptPath, { recursive: true })
+                fs.writeFileSync(path.join(deptPath, '.gitkeep'), '')
+                restoredFolders.push(dept.folder)
+              }
+            }
+          }
+
+          // If any folders were restored, stage and commit them
+          if (restoredFolders.length > 0) {
+            await git.raw(['add', '--sparse', '.'])
+            const restoreStatus = await git.status()
+            if (restoreStatus.staged.length > 0) {
+              await git.commit(`Restore department folders: ${restoredFolders.join(', ')}`)
+            }
+          }
+        }
+      } catch (apiError) {
+        console.warn('Git sync: Could not fetch departments for folder protection:', apiError)
       }
     }
 
