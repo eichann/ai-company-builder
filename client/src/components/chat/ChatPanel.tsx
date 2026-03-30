@@ -1500,6 +1500,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
+  const pendingChatNewSession = useAppStore((state) => state.pendingChatNewSession)
   const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
   const aiModel = useAppStore((state) => state.aiModel)
   const setAIModel = useAppStore((state) => state.setAIModel)
@@ -1507,7 +1508,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
   const setAIEffort = useAppStore((state) => state.setAIEffort)
 
   const handlePendingTextConsumed = useCallback(() => {
-    setPendingChatInput(null)
+    setPendingChatInput(null, false)
   }, [setPendingChatInput])
 
   // Tool approval state
@@ -1811,7 +1812,14 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
 
   async function loadSession(sessionId: string) {
     if (!currentCompany?.id) return
+    // Don't reload the already-active session
+    if (sessionId === currentSessionId) {
+      setShowHistory(false)
+      return
+    }
     try {
+      // Save current session immediately before switching
+      await saveCurrentSession()
       const session = await window.electronAPI.getChatSession(currentCompany.id, sessionId)
       if (session) {
         const uiMessages = session.messages.map(sessionMessageToUIMessage)
@@ -1844,7 +1852,9 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     }
   }
 
-  function startNewChat() {
+  async function startNewChat() {
+    // Save current session before starting a new one
+    await saveCurrentSession()
     // Clear Claude CLI session mapping on the server
     if (appSessionIdRef.current) {
       fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
@@ -1863,6 +1873,18 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     setCurrentSessionId(null)
     setShowHistory(false)
   }
+
+  // Start new chat and auto-send when skill execution is triggered
+  useEffect(() => {
+    if (pendingChatNewSession && pendingChatInput) {
+      const text = pendingChatInput
+      setPendingChatInput(null, false)
+      startNewChat().then(() => {
+        // Send the slash command after new chat is ready
+        handleSend(text)
+      })
+    }
+  }, [pendingChatNewSession, pendingChatInput])
 
   // Close history dropdown when clicking outside
   useEffect(() => {
@@ -1956,6 +1978,13 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     if (!text.trim() && (!files || files.length === 0)) return
     perfMark('chat.send.start')
 
+    // Ensure session ID exists before first message (don't wait for auto-save debounce)
+    if (!currentSessionId && !appSessionIdRef.current) {
+      const newId = `session-${Date.now()}`
+      setCurrentSessionId(newId)
+      appSessionIdRef.current = newId
+    }
+
     if (status === 'streaming' || status === 'submitted') {
       stop()
       // Small delay for stream to settle before sending new message
@@ -1986,7 +2015,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     }
 
     await sendMessage({ text: text || '画像を確認してください' })
-  }, [status, sendMessage, stop])
+  }, [status, sendMessage, stop, currentSessionId])
 
   // Edit message handler: trim messages after edit point, resend
   const handleEditMessage = useCallback((messageId: string, newText: string) => {
@@ -2099,47 +2128,70 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
 
             {/* History Dropdown */}
             {showHistory && (
-              <div className="absolute right-0 top-10 w-64 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-xl z-50 overflow-hidden">
-                <div className="p-2 border-b border-gray-200 dark:border-zinc-700">
-                  <span className="text-xs text-gray-500 dark:text-zinc-400 px-2">{t('chat.recentChats')}</span>
-                </div>
-                <div className="max-h-64 overflow-auto">
+              <div className="absolute right-0 top-10 w-72 bg-white dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 rounded-xl shadow-xl z-50 overflow-hidden">
+                <div className="max-h-80 overflow-auto">
                   {sessions.length === 0 ? (
                     <div className="p-4 text-center text-sm text-gray-500 dark:text-zinc-400">
                       {t('chat.noHistory')}
                     </div>
                   ) : (
-                    sessions.map((session) => (
-                      <div
-                        key={session.id}
-                        className={`group flex items-center justify-between px-3 py-2 hover:bg-gray-100 dark:hover:bg-zinc-700 cursor-pointer ${
-                          currentSessionId === session.id ? 'bg-accent/10' : ''
-                        }`}
-                        onClick={() => loadSession(session.id)}
-                      >
-                        <div className="flex-1 min-w-0">
-                          <div className="text-sm text-gray-900 dark:text-zinc-100 truncate">{session.title}</div>
-                          <div className="text-[10px] text-gray-400 dark:text-zinc-500">
-                            {new Date(session.updatedAt).toLocaleDateString('ja-JP', {
-                              month: 'short',
-                              day: 'numeric',
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })}
+                    (() => {
+                      const now = new Date()
+                      const todayStr = now.toDateString()
+                      const yesterday = new Date(now)
+                      yesterday.setDate(yesterday.getDate() - 1)
+                      const yesterdayStr = yesterday.toDateString()
+                      let lastGroup = ''
+                      return sessions.map((session) => {
+                        const dateStr = new Date(session.updatedAt).toDateString()
+                        const group = dateStr === todayStr ? '今日' : dateStr === yesterdayStr ? '昨日' : 'それ以前'
+                        const showGroupHeader = group !== lastGroup
+                        lastGroup = group
+                        const isActive = currentSessionId === session.id
+                        return (
+                          <div key={session.id}>
+                            {showGroupHeader && (
+                              <div className="px-3 py-1.5 text-[10px] font-medium text-gray-400 dark:text-zinc-500 uppercase tracking-wider bg-gray-50 dark:bg-zinc-850 sticky top-0">
+                                {group}
+                              </div>
+                            )}
+                            <div
+                              className={`group flex items-center justify-between px-3 py-2 cursor-pointer transition-colors ${
+                                isActive
+                                  ? 'bg-accent/10 border-l-2 border-accent'
+                                  : 'hover:bg-gray-100 dark:hover:bg-zinc-700 border-l-2 border-transparent'
+                              }`}
+                              onClick={() => loadSession(session.id)}
+                            >
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-center gap-1.5">
+                                  <span className={`text-sm truncate ${isActive ? 'font-medium text-accent' : 'text-gray-900 dark:text-zinc-100'}`}>
+                                    {session.title}
+                                  </span>
+                                </div>
+                                <div className="text-[10px] text-gray-400 dark:text-zinc-500">
+                                  {new Date(session.updatedAt).toLocaleTimeString('ja-JP', {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}
+                                  {session.messages && ` · ${session.messages.length}件`}
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => {
+                                  e.stopPropagation()
+                                  deleteSession(session.id)
+                                }}
+                                className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded transition-all"
+                                title="削除"
+                              >
+                                <Trash size={12} className="text-red-400" />
+                              </button>
+                            </div>
                           </div>
-                        </div>
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation()
-                            deleteSession(session.id)
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-1 hover:bg-red-500/20 rounded transition-all"
-                          title="削除"
-                        >
-                          <Trash size={12} className="text-red-400" />
-                        </button>
-                      </div>
-                    ))
+                        )
+                      })
+                    })()
                   )}
                 </div>
               </div>
@@ -2197,7 +2249,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
             hint={t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
-            pendingText={pendingChatInput}
+            pendingText={pendingChatNewSession ? null : pendingChatInput}
             onPendingTextConsumed={handlePendingTextConsumed}
             slashCommands={slashCommands}
           />

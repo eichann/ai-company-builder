@@ -937,13 +937,18 @@ function saveChatHistory(companyId: string, history: ChatHistoryFile): void {
   fs.writeFileSync(filePath, JSON.stringify(history, null, 2))
 }
 
-// Get all sessions for a company (returns last 5)
+// Get all sessions for a company (returns last 50, auto-cleans sessions older than 30 days)
 ipcMain.handle('chatHistory:getSessions', (_, companyId: string) => {
   const history = loadChatHistory(companyId)
-  // Return last 5 sessions, sorted by updatedAt descending
+  const thirtyDaysAgo = Date.now() - 30 * 24 * 60 * 60 * 1000
+  const before = history.sessions.length
+  history.sessions = history.sessions.filter(s => new Date(s.updatedAt).getTime() > thirtyDaysAgo)
+  if (history.sessions.length < before) {
+    saveChatHistory(companyId, history)
+  }
   return history.sessions
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 5)
+    .slice(0, 50)
 })
 
 // Get a specific session
@@ -963,10 +968,10 @@ ipcMain.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSe
     history.sessions.push(session)
   }
 
-  // Keep only last 5 sessions
+  // Keep only last 50 sessions
   history.sessions = history.sessions
     .sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime())
-    .slice(0, 5)
+    .slice(0, 50)
 
   saveChatHistory(companyId, history)
   return true

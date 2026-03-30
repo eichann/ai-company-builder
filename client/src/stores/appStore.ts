@@ -110,6 +110,8 @@ interface AppState {
 
   // Pending text to insert into chat input
   pendingChatInput: string | null
+  // When true, start a new chat session before inserting pendingChatInput
+  pendingChatNewSession: boolean
 
   // Actions
   setTheme: (theme: Theme) => void
@@ -142,7 +144,7 @@ interface AppState {
   clearActiveSkill: () => void
 
   // Chat input actions
-  setPendingChatInput: (text: string | null) => void
+  setPendingChatInput: (text: string | null, newSession?: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -165,6 +167,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   chatPanelWidth: 360,
   activeSkill: null,
   pendingChatInput: null,
+  pendingChatNewSession: false,
 
   setTheme: (theme) => {
     localStorage.setItem('theme', theme)
@@ -346,5 +349,5 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   clearActiveSkill: () => set({ activeSkill: null }),
 
-  setPendingChatInput: (text) => set({ pendingChatInput: text }),
+  setPendingChatInput: (text, newSession = false) => set({ pendingChatInput: text, pendingChatNewSession: newSession }),
 }))
