@@ -73,6 +73,7 @@ interface AppConfig {
   authMode?: 'claude-code' | 'api-key'
   permissionMode?: 'bypassPermissions' | 'default'
   serverUrl?: string
+  docbaseCookie?: string
 }
 
 // ============================================================================
@@ -318,6 +319,19 @@ function createWindow() {
 
   // Fully disable spell checker to prevent dictionary loading overhead (especially for Japanese IME)
   mainWindow.webContents.session.setSpellCheckerLanguages([])
+
+  // Inject DocBase cookie for image.docbase.io requests (fixes 403 on DocBase images)
+  const appConfig = loadConfig()
+  if (appConfig.docbaseCookie) {
+    const docbaseCookie = appConfig.docbaseCookie
+    mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+      { urls: ['https://image.docbase.io/*'] },
+      (details, callback) => {
+        details.requestHeaders['Cookie'] = docbaseCookie
+        callback({ requestHeaders: details.requestHeaders })
+      }
+    )
+  }
 
   if (process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -876,6 +890,29 @@ ipcMain.handle('config:validateServerUrl', async (_, url: string) => {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return { valid: false, error: `Could not connect: ${message}` }
   }
+})
+
+// DocBase cookie for image proxy
+ipcMain.handle('config:getDocbaseCookie', () => {
+  const config = loadConfig()
+  return config.docbaseCookie || null
+})
+
+ipcMain.handle('config:setDocbaseCookie', (_, cookie: string) => {
+  const config = loadConfig()
+  config.docbaseCookie = cookie
+  saveConfig(config)
+  // Apply immediately to current session
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
+      { urls: ['https://image.docbase.io/*'] },
+      (details, callback) => {
+        details.requestHeaders['Cookie'] = cookie
+        callback({ requestHeaders: details.requestHeaders })
+      }
+    )
+  }
+  return true
 })
 
 // Tool approval IPC (chat-server → renderer → response)
