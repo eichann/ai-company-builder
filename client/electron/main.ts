@@ -388,11 +388,11 @@ app.whenReady().then(async () => {
       getClaudeCodeCliPath,
       getShellEnv,
       buildSystemPrompt,
-      requestToolApproval: (toolName, toolInput, toolUseId) => {
+      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId) => {
         return new Promise((resolve) => {
           pendingApprovals.set(toolUseId, { resolve })
           mainWindow?.webContents.send('tool-approval-request', {
-            toolUseId, toolName, toolInput,
+            toolUseId, toolName, toolInput, appSessionId,
           })
           // 60s timeout → auto-deny
           setTimeout(() => {

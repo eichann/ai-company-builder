@@ -1488,15 +1488,18 @@ const MessageList = memo(function MessageList({
 // ============================================================================
 
 interface ChatPanelChatProps {
+  isActive: boolean
   departmentPath?: string
   activeDepartment?: { name: string; folder: string }
   serverInfo: { port: number; authToken: string }
   authMode: AuthMode
   slashCommands?: SlashCommandItem[]
   onShowSettings: () => void
+  onTitleChange?: (title: string) => void
+  onNewTab?: () => void
 }
 
-function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings }: ChatPanelChatProps) {
+function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings, onTitleChange, onNewTab }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1516,6 +1519,10 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
 
   useEffect(() => {
     const unsub = window.electronAPI.onToolApprovalRequest((data) => {
+      // Only accept approval requests for this tab's session
+      if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) {
+        return // Not for this tab
+      }
       setPendingApproval(data)
     })
     return unsub
@@ -1565,6 +1572,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
   // App session ID ref (for Claude CLI session resume)
   // Eagerly assigned on first message send so the server can track the CLI session from the start
   const appSessionIdRef = useRef<string | null>(null)
+  const lastNotifiedTitleRef = useRef<string | null>(null)
   // Claude CLI session ID (persisted across app restarts via ChatSession)
   const claudeSessionIdRef = useRef<string | null>(null)
 
@@ -1612,9 +1620,9 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
   const fetchContext = useCallback(async () => {
     const headers = { Authorization: `Bearer ${serverInfo.authToken}` }
     const base = `http://127.0.0.1:${serverInfo.port}`
+    const sid = appSessionIdRef.current || ''
     try {
-      // Try /context first (accurate, from Claude Code's /context command)
-      const res = await fetch(`${base}/api/context`, { headers })
+      const res = await fetch(`${base}/api/context?sessionId=${encodeURIComponent(sid)}`, { headers })
       const data = await res.json()
       if (data.context) {
         setContextInfo(data.context)
@@ -1624,8 +1632,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
       // /context failed, try fallback
     }
     try {
-      // Fallback to /usage (step-level usage, less accurate but always available)
-      const res = await fetch(`${base}/api/usage`, { headers })
+      const res = await fetch(`${base}/api/usage?sessionId=${encodeURIComponent(sid)}`, { headers })
       const data = await res.json()
       if (data.usage) {
         const maxTokens = aiModelRef.current === 'haiku' ? 200_000 : 1_000_000
@@ -1788,6 +1795,12 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
       ? firstUserText.slice(0, 30) + (firstUserText.length > 30 ? '...' : '')
       : t('chat.newChat')
 
+    // Notify parent tab of title change (only when it actually changes)
+    if (title !== lastNotifiedTitleRef.current) {
+      lastNotifiedTitleRef.current = title
+      onTitleChange?.(title)
+    }
+
     const session: ChatSession = {
       id: sessionId,
       companyId: currentCompany.id,
@@ -1874,8 +1887,9 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     setShowHistory(false)
   }
 
-  // Start new chat and auto-send when skill execution is triggered
+  // Start new chat and auto-send when skill execution is triggered (only active tab)
   useEffect(() => {
+    if (!isActive) return
     if (pendingChatNewSession && pendingChatInput) {
       const text = pendingChatInput
       setPendingChatInput(null, false)
@@ -1964,11 +1978,18 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
     markChatInputActivity()
   }, [])
 
-  // Cleanup
+  // Cleanup (tab close / unmount)
   useEffect(() => {
     return () => {
       if (compositionEndTimerRef.current != null) {
         window.clearTimeout(compositionEndTimerRef.current)
+      }
+      // Clean up Claude CLI session on the server when tab is closed
+      if (appSessionIdRef.current) {
+        fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
+          method: 'DELETE',
+          headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+        }).catch(() => {})
       }
     }
   }, [])
@@ -2105,9 +2126,9 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
             </button>
           )}
 
-          {/* New Chat Button */}
+          {/* New Chat/Tab Button */}
           <button
-            onClick={startNewChat}
+            onClick={onNewTab || startNewChat}
             className="w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
             title={t('chat.newChat')}
           >
@@ -2249,7 +2270,7 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
             hint={t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
-            pendingText={pendingChatNewSession ? null : pendingChatInput}
+            pendingText={pendingChatNewSession ? null : (isActive ? pendingChatInput : null)}
             onPendingTextConsumed={handlePendingTextConsumed}
             slashCommands={slashCommands}
           />
@@ -2263,6 +2284,78 @@ function ChatPanelChat({ departmentPath, activeDepartment, serverInfo, authMode,
 
 // ============================================================================
 // Main ChatPanel Component (Auth & Server wrapper)
+// ============================================================================
+
+// ============================================================================
+// Chat Tab Bar
+// ============================================================================
+
+interface ChatTab {
+  id: string
+  title: string
+}
+
+function ChatTabBar({
+  tabs,
+  activeTabId,
+  onSelectTab,
+  onCloseTab,
+  onNewTab,
+}: {
+  tabs: ChatTab[]
+  activeTabId: string
+  onSelectTab: (id: string) => void
+  onCloseTab: (id: string) => void
+  onNewTab: () => void
+}) {
+  if (tabs.length <= 1) return null
+
+  return (
+    <div className="flex-shrink-0 flex items-center gap-0.5 px-1 py-1 border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900/50 overflow-x-auto">
+      {tabs.map((tab) => {
+        const isActive = tab.id === activeTabId
+        return (
+          <div
+            key={tab.id}
+            className={`group flex items-center gap-1 px-2.5 py-1 rounded-md text-[11px] cursor-pointer transition-colors min-w-0 max-w-[140px] ${
+              isActive
+                ? 'bg-white dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 shadow-sm'
+                : 'text-gray-500 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800/50'
+            }`}
+            onClick={() => onSelectTab(tab.id)}
+          >
+            <span className="truncate flex-1">{tab.title}</span>
+            {tabs.length > 1 && (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation()
+                  onCloseTab(tab.id)
+                }}
+                className={`flex-shrink-0 w-4 h-4 rounded flex items-center justify-center transition-opacity ${
+                  isActive
+                    ? 'opacity-60 hover:opacity-100 hover:bg-gray-200 dark:hover:bg-zinc-700'
+                    : 'opacity-0 group-hover:opacity-60 hover:!opacity-100 hover:bg-gray-200 dark:hover:bg-zinc-700'
+                }`}
+              >
+                <X size={10} />
+              </button>
+            )}
+          </div>
+        )
+      })}
+      <button
+        onClick={onNewTab}
+        className="flex-shrink-0 w-6 h-6 rounded-md flex items-center justify-center text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-zinc-800 transition-colors"
+        title="新規タブ"
+      >
+        <Plus size={12} />
+      </button>
+    </div>
+  )
+}
+
+// ============================================================================
+// Main ChatPanel Component (Auth & Server wrapper + Tab management)
 // ============================================================================
 
 interface ChatPanelProps {
@@ -2282,6 +2375,38 @@ export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   const [claudeCodeError, setClaudeCodeError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
   const [isChecking, setIsChecking] = useState(true)
+
+  // Tab management state
+  const [tabs, setTabs] = useState<ChatTab[]>(() => [
+    { id: crypto.randomUUID(), title: t('chat.newChat') },
+  ])
+  const [activeTabId, setActiveTabId] = useState(() => tabs[0].id)
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+
+  const createNewTab = useCallback(() => {
+    const newTab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat') }
+    setTabs(prev => [...prev, newTab])
+    setActiveTabId(newTab.id)
+  }, [t])
+
+  const closeTab = useCallback((closingTabId: string) => {
+    const prev = tabsRef.current
+    if (prev.length <= 1) return
+    const closedIndex = prev.findIndex(tab => tab.id === closingTabId)
+    const newTabs = prev.filter(tab => tab.id !== closingTabId)
+    setTabs(newTabs)
+    setActiveTabId(current => {
+      if (closingTabId !== current) return current
+      const newActive = newTabs[Math.min(closedIndex, newTabs.length - 1)]
+      return newActive.id
+    })
+  }, [])
+
+  const updateTabTitle = useCallback((targetTabId: string, title: string) => {
+    setTabs(prev => prev.map(tab => tab.id === targetTabId ? { ...tab, title } : tab))
+  }, [])
+
 
   // Auth check on mount
   const initializedRef = useRef(false)
@@ -2374,18 +2499,41 @@ export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   }
 
   return (
-    <div className="h-full relative">
-      {/* Chat stays mounted even when settings overlay is open */}
-      <div className={showSettings ? 'h-full invisible' : 'h-full'}>
-        <ChatPanelChat
-          departmentPath={departmentPath}
-          activeDepartment={activeDepartment}
-          serverInfo={serverInfo}
-          authMode={authMode}
-          slashCommands={slashCommands}
-          onShowSettings={() => setShowSettings(true)}
-        />
+    <div className="h-full relative flex flex-col">
+      {/* Tab bar (only shown when 2+ tabs) */}
+      <ChatTabBar
+        tabs={tabs}
+        activeTabId={activeTabId}
+        onSelectTab={setActiveTabId}
+        onCloseTab={closeTab}
+        onNewTab={createNewTab}
+      />
+
+      {/* Chat instances (all mounted, only active visible) */}
+      <div className="flex-1 min-h-0 relative">
+        {tabs.map((tab) => (
+          <div
+            key={tab.id}
+            className={`absolute inset-0 ${tab.id === activeTabId ? '' : 'invisible pointer-events-none'}`}
+          >
+            <div className={showSettings && tab.id === activeTabId ? 'h-full invisible' : 'h-full'}>
+              <ChatPanelChat
+                isActive={tab.id === activeTabId}
+                departmentPath={departmentPath}
+                activeDepartment={activeDepartment}
+                serverInfo={serverInfo}
+                authMode={authMode}
+                slashCommands={slashCommands}
+                onShowSettings={() => setShowSettings(true)}
+                onTitleChange={(title) => updateTabTitle(tab.id, title)}
+                onNewTab={createNewTab}
+              />
+            </div>
+          </div>
+        ))}
       </div>
+
+      {/* Settings overlay */}
       {showSettings && (
         <div className="absolute inset-0 z-10">
           <AuthSettings

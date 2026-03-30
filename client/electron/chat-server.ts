@@ -30,6 +30,7 @@ export interface ChatServerConfig {
     toolName: string,
     toolInput: Record<string, unknown>,
     toolUseId: string,
+    appSessionId?: string,
   ) => Promise<{ approved: boolean }>
 }
 
@@ -104,20 +105,30 @@ export async function startChatServer(config: ChatServerConfig) {
   const authToken = crypto.randomUUID()
   const app = new Hono()
 
-  // Latest usage info from the most recent chat completion
-  let latestUsage: {
-    inputTokens: number
-    outputTokens: number
-    totalTokens: number
-    cacheReadTokens: number
-    cacheWriteTokens: number
-    noCacheTokens: number
-  } | null = null
+  // Per-session usage and context tracking
+  interface SessionUsage {
+    latestUsage: {
+      inputTokens: number
+      outputTokens: number
+      totalTokens: number
+      cacheReadTokens: number
+      cacheWriteTokens: number
+      noCacheTokens: number
+    } | null
+    accumulatedInputTokens: number
+    accumulatedOutputTokens: number
+    contextWindowSize: number
+  }
+  const sessionUsageMap = new Map<string, SessionUsage>()
 
-  // Accumulated context usage across the session (for context gauge)
-  let accumulatedInputTokens = 0
-  let accumulatedOutputTokens = 0
-  let contextWindowSize = 0  // Populated from modelUsage
+  function getSessionUsage(sessionId: string): SessionUsage {
+    let usage = sessionUsageMap.get(sessionId)
+    if (!usage) {
+      usage = { latestUsage: null, accumulatedInputTokens: 0, accumulatedOutputTokens: 0, contextWindowSize: 0 }
+      sessionUsageMap.set(sessionId, usage)
+    }
+    return usage
+  }
 
   // Claude Code CLI session ID tracking (appSessionId → claudeCliSessionId)
   const claudeSessionMap = new Map<string, string>()
@@ -226,6 +237,7 @@ export async function startChatServer(config: ChatServerConfig) {
                   input.tool_name,
                   { command: cmd },
                   toolUseId,
+                  appSessionId,
                 )
                 if (result.approved) {
                   console.log(`[hooks] User approved dangerous command: ${cmd}`)
@@ -276,6 +288,7 @@ export async function startChatServer(config: ChatServerConfig) {
               toolName,
               toolInput,
               options.toolUseID || crypto.randomUUID(),
+              appSessionId,
             )
             if (result.approved) {
               return { behavior: 'allow' as const }
@@ -466,9 +479,11 @@ export async function startChatServer(config: ChatServerConfig) {
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
       onStepFinish: ({ finishReason, usage, toolCalls, providerMetadata }) => {
         console.log(`[chat-server] Step finished: reason=${finishReason}, tokens=${usage.totalTokens}, tools=${toolCalls.length}`)
-        // Update latest usage for the /api/usage endpoint
+        // Update per-session usage
+        const sid = appSessionId || '__default__'
+        const su = getSessionUsage(sid)
         if (usage.totalTokens != null) {
-          latestUsage = {
+          su.latestUsage = {
             inputTokens: usage.inputTokens ?? 0,
             outputTokens: usage.outputTokens ?? 0,
             totalTokens: usage.totalTokens ?? 0,
@@ -494,7 +509,7 @@ export async function startChatServer(config: ChatServerConfig) {
             console.log(`[chat-server] Captured CLI session: ${claudeMeta.sessionId} for app session: ${appSessionId}`)
           }
 
-          // Extract context usage from modelUsage
+          // Extract context usage from modelUsage (per-session)
           if (claudeMeta?.modelUsage) {
             let totalInput = 0
             let totalOutput = 0
@@ -502,12 +517,12 @@ export async function startChatServer(config: ChatServerConfig) {
               totalInput += mu.inputTokens ?? 0
               totalOutput += mu.outputTokens ?? 0
               if (mu.contextWindow && mu.contextWindow > 0) {
-                contextWindowSize = mu.contextWindow
+                su.contextWindowSize = mu.contextWindow
               }
               console.log(`[chat-server] modelUsage[${modelName}]: in=${mu.inputTokens} out=${mu.outputTokens} ctx=${mu.contextWindow}`)
             }
-            accumulatedInputTokens = totalInput
-            accumulatedOutputTokens = totalOutput
+            su.accumulatedInputTokens = totalInput
+            su.accumulatedOutputTokens = totalOutput
           }
         }
       },
@@ -528,32 +543,32 @@ export async function startChatServer(config: ChatServerConfig) {
     return c.json({ claudeSessionId })
   })
 
-  // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat)
+  // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat / tab close)
   app.delete('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const deleted = claudeSessionMap.delete(id)
-    // Reset accumulated context tracking for new session
-    accumulatedInputTokens = 0
-    accumulatedOutputTokens = 0
-    contextWindowSize = 0
-    latestUsage = null
+    // Clean up per-session usage tracking
+    sessionUsageMap.delete(id)
     console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)
     return c.json({ success: true })
   })
 
-  // GET /api/usage — returns latest token usage from the most recent completion
+  // GET /api/usage?sessionId=xxx — returns latest token usage for a specific session
   app.get('/api/usage', (c) => {
-    return c.json({ usage: latestUsage })
+    const sessionId = c.req.query('sessionId') || '__default__'
+    const su = sessionUsageMap.get(sessionId)
+    return c.json({ usage: su?.latestUsage || null })
   })
 
-  // GET /api/context — returns context usage from accumulated modelUsage data
+  // GET /api/context?sessionId=xxx — returns context usage for a specific session
   app.get('/api/context', (c) => {
-    if (accumulatedInputTokens === 0 && contextWindowSize === 0) {
+    const sessionId = c.req.query('sessionId') || '__default__'
+    const su = sessionUsageMap.get(sessionId)
+    if (!su || (su.accumulatedInputTokens === 0 && su.contextWindowSize === 0)) {
       return c.json({ context: null })
     }
-    // Use modelUsage contextWindow if available, otherwise fall back to known limits
-    const maxTokens = contextWindowSize > 0 ? contextWindowSize : 200_000
-    const usedTokens = accumulatedInputTokens + accumulatedOutputTokens
+    const maxTokens = su.contextWindowSize > 0 ? su.contextWindowSize : 200_000
+    const usedTokens = su.accumulatedInputTokens + su.accumulatedOutputTokens
     const percentage = Math.min(100, Math.round((usedTokens / maxTokens) * 100))
     return c.json({
       context: { usedTokens, maxTokens, percentage },
