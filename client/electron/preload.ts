@@ -167,9 +167,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   validateServerUrl: (url: string) => ipcRenderer.invoke('config:validateServerUrl', url),
 
   // Tool approval
-  onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown> }) => void) => {
+  onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handler = (_: any, data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown> }) => callback(data)
+    const handler = (_: any, data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => callback(data)
     ipcRenderer.on('tool-approval-request', handler)
     return () => { ipcRenderer.removeListener('tool-approval-request', handler) }
   },
@@ -486,7 +486,7 @@ declare global {
       validateServerUrl: (url: string) => Promise<{ valid: boolean; error?: string; serverName?: string; version?: string }>
 
       // Tool approval
-      onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown> }) => void) => () => void
+      onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => () => void
       respondToolApproval: (toolUseId: string, approved: boolean) => Promise<boolean>
 
       // Chat history
