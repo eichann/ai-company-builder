@@ -308,7 +308,7 @@ export function SkillCentricLayout() {
     // Extract folder name from skill path to use as slash command
     const folderName = skill.skillPath.split('/').pop()
     if (folderName) {
-      setPendingChatInput(`/${folderName} `)
+      setPendingChatInput(`/${folderName} `, true)
     }
   }, [skills, setPendingChatInput])
 
