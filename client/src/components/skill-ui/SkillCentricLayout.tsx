@@ -923,7 +923,7 @@ ${promptContent}
                 <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden`}>
                   <SkillGrid
                     skills={skills}
-                    color={selectedDept?.color || '#f59e0b'}
+                    color={selectedDept?.color || '#6366f1'}
                     selectedSkillId={selectedSkillId}
                     onSelectSkill={handleSelectSkill}
                     onExecuteSkill={handleExecuteSkill}
@@ -936,7 +936,7 @@ ${promptContent}
                   <div className="w-1/2 border-l border-gray-200 dark:border-zinc-800 overflow-hidden">
                     <SkillDetailPanel
                       skill={selectedSkill}
-                      color={selectedDept?.color || '#f59e0b'}
+                      color={selectedDept?.color || '#6366f1'}
                       onClose={() => setSelectedSkillId(null)}
                       onExecute={() => handleExecuteSkill(selectedSkillId)}
                       onEditFile={handleEditFile}
@@ -1044,7 +1044,7 @@ ${promptContent}
             <ToolViewer
               tool={activeTool.tool}
               port={activeTool.port}
-              color={selectedDept?.color || '#f59e0b'}
+              color={selectedDept?.color || '#6366f1'}
               onClose={() => setActiveTool(null)}
             />
           </div>
