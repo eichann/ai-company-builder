@@ -92,8 +92,9 @@ import { ... } from '../../shared/types'  // Path inside container
 
 ### File Naming Rules
 
-- Folder/file names must be ASCII only (no CJK characters)
-- Pattern: `/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/`
+- Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
+- Skill folder/file names remain ASCII only: `/^[a-z0-9][a-z0-9_-]*$/`
+- Department folder pattern: `/^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/`
 
 ---
 
