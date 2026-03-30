@@ -158,66 +158,28 @@ function countFilesInDir(dirPath: string): { files: number; folders: number } {
   return { files, folders }
 }
 
-// Helper: Build department data by merging file system and DB
-// Auto-creates DB records for folders that don't have one
-function buildDepartmentList(companyId: string, folders: string[], userId?: string): Department[] {
+// Helper: Build department data from DB records only
+// Only returns departments that are registered in the DB (folders created via admin/API)
+// Filesystem folders that are not in the DB are ignored
+function buildDepartmentList(companyId: string, folders: string[]): Department[] {
   // Get DB settings for this company
   const dbDepts = db.prepare(`
     SELECT * FROM departments WHERE company_id = ? ORDER BY sort_order ASC
   `).all(companyId) as Record<string, unknown>[]
 
-  const dbDeptMap = new Map<string, Record<string, unknown>>()
-  for (const d of dbDepts) {
-    dbDeptMap.set(d.folder as string, d)
-  }
+  const fsFolderSet = new Set(folders)
 
   const result: Department[] = []
-  const timestamp = now()
 
-  for (const folder of folders) {
-    const dbDept = dbDeptMap.get(folder)
-
-    if (dbDept) {
-      // Merge DB settings with folder
+  for (const dbDept of dbDepts) {
+    const folder = dbDept.folder as string
+    // Only include if the folder actually exists on the filesystem
+    if (fsFolderSet.has(folder)) {
       result.push(toCamelCase(dbDept) as unknown as Department)
-    } else {
-      // Folder exists but not in DB - auto-create a DB record
-      const id = generateId()
-      const maxOrder = db.prepare(`
-        SELECT MAX(sort_order) as max FROM departments WHERE company_id = ?
-      `).get(companyId) as { max: number | null }
-      const sortOrder = (maxOrder?.max ?? -1) + 1
-
-      db.prepare(`
-        INSERT INTO departments (
-          id, company_id, parent_id,
-          name, name_en, folder,
-          icon, color, description,
-          sort_order, is_active,
-          created_at, updated_at, created_by
-        ) VALUES (?, ?, NULL, ?, NULL, ?, 'Folder', '#6366f1', NULL, ?, 1, ?, ?, ?)
-      `).run(id, companyId, folder, folder, sortOrder, timestamp, timestamp, userId || null)
-
-      result.push({
-        id,
-        companyId,
-        parentId: null,
-        name: folder,
-        nameEn: null,
-        folder,
-        icon: 'Folder',
-        color: '#6366f1',
-        description: null,
-        sortOrder,
-        isActive: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
-        createdBy: userId || null,
-      })
     }
   }
 
-  // Sort by sortOrder
+  // Already sorted by sort_order from query, but ensure consistency
   result.sort((a, b) => a.sortOrder - b.sortOrder)
 
   return result
@@ -245,8 +207,8 @@ departmentsRoute.get('/', async (c) => {
     const workDir = getWorkingDir(companyId)
     const folders = listFoldersFromFileSystem(workDir)
 
-    // Build department list (auto-creates DB records for new folders)
-    const departments = buildDepartmentList(companyId, folders, user.id)
+    // Build department list (DB-registered departments only)
+    const departments = buildDepartmentList(companyId, folders)
 
     return c.json({
       success: true,

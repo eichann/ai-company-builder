@@ -97,6 +97,7 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_invitations_company_id ON invitations(company_id);
     CREATE INDEX IF NOT EXISTS idx_departments_company_id ON departments(company_id);
     CREATE INDEX IF NOT EXISTS idx_departments_parent_id ON departments(parent_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_company_folder ON departments(company_id, folder);
   `)
 
   console.log('Application database initialized at:', dbPath)

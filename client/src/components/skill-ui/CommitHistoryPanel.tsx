@@ -172,7 +172,7 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
     if (!commitFiles.has(hash)) {
       setLoadingFiles(hash)
       try {
-        const result = await window.electronAPI.gitShowCommit(rootPath, hash, `${departmentFolder}/`)
+        const result = await window.electronAPI.gitShowCommit(rootPath, hash, departmentFolder ? `${departmentFolder}/` : undefined)
         if (result.success) {
           setCommitFiles(prev => new Map(prev).set(hash, result.files))
         }
