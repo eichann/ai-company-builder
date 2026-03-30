@@ -901,11 +901,16 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
                 setSlashSelectedIndex(i => (i - 1 + items.length) % items.length)
                 return true
               }
-              if (event.key === 'Tab' || event.key === 'Enter') {
+              if (event.key === 'Tab') {
                 event.preventDefault()
                 const selected = items[slashSelectedIndexRef.current]
                 if (selected) handleSlashSelectRef.current(selected)
                 return true
+              }
+              // Enter / Cmd+Enter: close dropdown and let normal behavior through (newline / send)
+              if (event.key === 'Enter') {
+                setSlashQuery(null)
+                return false
               }
               if (event.key === 'Escape') {
                 event.preventDefault()
@@ -994,7 +999,7 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
           if (!update.docChanged) return
           if (!slashCommandsRef.current?.length) return
           const text = update.state.doc.toString()
-          const match = text.match(/^\/([a-zA-Z0-9_-]*)/)
+          const match = text.match(/^\/([a-zA-Z0-9_-]*)$/)
           if (match) {
             setSlashQuery(match[1])
           } else {

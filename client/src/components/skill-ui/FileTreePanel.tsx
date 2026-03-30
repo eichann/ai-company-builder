@@ -763,7 +763,13 @@ export function FileTreePanel({
           tabIndex={0}
           draggable
           onDragStart={(e) => {
-            // If dragging a selected item, drag all selected; otherwise drag just this one
+            // Alt/Option + drag: native drag to external apps (browser, Finder, Slack, etc.)
+            if (e.altKey && !entry.isDirectory) {
+              e.preventDefault()
+              window.electronAPI.startDrag(entry.path)
+              return
+            }
+            // Normal drag: internal tree move
             const paths = isMultiSelected && selectedPaths.size > 1
               ? [...selectedPaths]
               : [entry.path]
