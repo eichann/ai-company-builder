@@ -6,12 +6,29 @@ import {
   Code,
   Eye,
   PencilSimple,
+  ChatCircleDots,
+  MagnifyingGlass,
+  CaretUp,
+  CaretDown,
 } from '@phosphor-icons/react'
 import Markdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import type { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'
 import { getFileIcon } from './FileIcons'
+import {
+  useMarkdownReview,
+  useTextSelection,
+  ReviewBanner,
+  CompletedReviewBanner,
+  ReviewHistoryDropdown,
+  ReviewSidePanel,
+  CommentPopover,
+  MarkdownDiffView,
+  markReviewSeen,
+  type MarkdownDiffViewHandle,
+} from './MarkdownReview'
+import { useAuthStore } from '../../stores/authStore'
 
 interface OpenFile {
   path: string
@@ -75,9 +92,21 @@ function PdfPreview({ filePath }: { filePath: string }) {
   )
 }
 
-const MarkdownPreview = React.forwardRef<HTMLDivElement, { content: string; basePath: string; initialScrollRatio?: number }>(
-  function MarkdownPreview({ content, basePath, initialScrollRatio }, ref) {
+interface HighlightRange {
+  text: string
+  resolved: boolean
+  commentId: string
+}
+
+const MarkdownPreview = React.forwardRef<HTMLDivElement, {
+  content: string
+  basePath: string
+  initialScrollRatio?: number
+  highlightRanges?: HighlightRange[]
+}>(
+  function MarkdownPreview({ content, basePath, initialScrollRatio, highlightRanges }, ref) {
     const innerRef = useRef<HTMLDivElement | null>(null)
+    const bodyRef = useRef<HTMLDivElement | null>(null)
     const components = useMemo(() => ({
       img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
         let resolvedSrc = src || ''
@@ -91,6 +120,124 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, { content: string; base
       ),
     }), [basePath])
 
+    // --- Search state ---
+    const [searchOpen, setSearchOpen] = useState(false)
+    const [searchText, setSearchText] = useState('')
+    const [matchCount, setMatchCount] = useState(0)
+    const [currentMatch, setCurrentMatch] = useState(0)
+    const searchInputRef = useRef<HTMLInputElement>(null)
+
+    // Open search with Cmd+F
+    useEffect(() => {
+      const handler = (e: KeyboardEvent) => {
+        if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
+          // Only handle if this preview is visible (check if innerRef is in viewport)
+          if (!innerRef.current || !innerRef.current.offsetParent) return
+          e.preventDefault()
+          e.stopPropagation()
+          setSearchOpen(true)
+          requestAnimationFrame(() => searchInputRef.current?.focus())
+        }
+      }
+      document.addEventListener('keydown', handler, true)
+      return () => document.removeEventListener('keydown', handler, true)
+    }, [])
+
+    // Apply search highlights
+    useEffect(() => {
+      if (!bodyRef.current) return
+
+      // Clear existing search highlights
+      bodyRef.current.querySelectorAll('mark[data-search-highlight]').forEach(el => {
+        const parent = el.parentNode
+        if (parent) {
+          parent.replaceChild(document.createTextNode(el.textContent || ''), el)
+          parent.normalize()
+        }
+      })
+
+      if (!searchText.trim()) {
+        setMatchCount(0)
+        setCurrentMatch(0)
+        return
+      }
+
+      const query = searchText.trim().toLowerCase()
+      let count = 0
+      const walker = document.createTreeWalker(bodyRef.current, NodeFilter.SHOW_TEXT)
+      const matches: { node: Text; idx: number }[] = []
+
+      // Collect all matches first (avoid modifying DOM during walk)
+      let node: Text | null
+      while ((node = walker.nextNode() as Text | null)) {
+        // Skip nodes inside review highlights to avoid conflicts
+        if (node.parentElement?.hasAttribute('data-review-highlight')) continue
+        const text = node.textContent || ''
+        const lower = text.toLowerCase()
+        let searchFrom = 0
+        let idx: number
+        while ((idx = lower.indexOf(query, searchFrom)) !== -1) {
+          matches.push({ node, idx })
+          searchFrom = idx + query.length
+        }
+      }
+
+      // Apply highlights from last to first (to preserve indices)
+      for (let i = matches.length - 1; i >= 0; i--) {
+        const m = matches[i]
+        const textNode = m.node
+        // Re-check since DOM may have been modified by previous iterations on same node
+        if (!textNode.parentNode) continue
+        const text = textNode.textContent || ''
+        const actualIdx = text.toLowerCase().indexOf(query, m.idx)
+        if (actualIdx === -1) continue
+
+        const before = textNode.splitText(actualIdx)
+        const after = before.splitText(query.length)
+        void after
+        const mark = document.createElement('mark')
+        mark.setAttribute('data-search-highlight', 'true')
+        mark.setAttribute('data-search-index', String(i))
+        mark.className = 'bg-yellow-200 dark:bg-yellow-500/40 rounded-sm'
+        mark.textContent = before.textContent
+        before.parentNode?.replaceChild(mark, before)
+        count++
+      }
+
+      setMatchCount(matches.length)
+      setCurrentMatch(prev => matches.length > 0 ? Math.min(prev, matches.length - 1) : 0)
+    }, [searchText, content])
+
+    // Scroll to current match and highlight it
+    useEffect(() => {
+      if (!bodyRef.current || matchCount === 0) return
+      // Reset all to default style
+      bodyRef.current.querySelectorAll('mark[data-search-highlight]').forEach(el => {
+        (el as HTMLElement).className = 'bg-yellow-200 dark:bg-yellow-500/40 rounded-sm'
+      })
+      // Highlight current match
+      const current = bodyRef.current.querySelector(`mark[data-search-index="${currentMatch}"]`)
+      if (current) {
+        (current as HTMLElement).className = 'bg-orange-300 dark:bg-orange-500/60 rounded-sm ring-2 ring-orange-400'
+        current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    }, [currentMatch, matchCount])
+
+    const closeSearch = useCallback(() => {
+      setSearchOpen(false)
+      setSearchText('')
+    }, [])
+
+    const goNextMatch = useCallback(() => {
+      if (matchCount === 0) return
+      setCurrentMatch(prev => (prev + 1) % matchCount)
+    }, [matchCount])
+
+    const goPrevMatch = useCallback(() => {
+      if (matchCount === 0) return
+      setCurrentMatch(prev => (prev - 1 + matchCount) % matchCount)
+    }, [matchCount])
+
     // Restore scroll position by ratio after mount
     useEffect(() => {
       if (!innerRef.current || initialScrollRatio == null || initialScrollRatio <= 0) return
@@ -101,6 +248,47 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, { content: string; base
       })
     }, []) // Only on mount
 
+    // Apply text highlights for review comments
+    useEffect(() => {
+      if (!bodyRef.current) return
+
+      // Remove existing highlights first (always clean up)
+      bodyRef.current.querySelectorAll('mark[data-review-highlight]').forEach(el => {
+        const parent = el.parentNode
+        if (parent) {
+          parent.replaceChild(document.createTextNode(el.textContent || ''), el)
+          parent.normalize()
+        }
+      })
+
+      if (!highlightRanges || highlightRanges.length === 0) return
+
+      // Apply new highlights using TreeWalker (skip nodes inside search highlights)
+      for (const range of highlightRanges) {
+        const walker = document.createTreeWalker(bodyRef.current, NodeFilter.SHOW_TEXT)
+        let node: Text | null
+        while ((node = walker.nextNode() as Text | null)) {
+          if (node.parentElement?.hasAttribute('data-search-highlight')) continue
+          const idx = node.textContent?.indexOf(range.text) ?? -1
+          if (idx === -1) continue
+
+          const before = node.splitText(idx)
+          const highlighted = before.splitText(range.text.length)
+          const mark = document.createElement('mark')
+          mark.setAttribute('data-review-highlight', 'true')
+          mark.setAttribute('data-comment-id', range.commentId)
+          mark.className = range.resolved
+            ? 'bg-green-500/20 rounded px-0.5 transition-all'
+            : 'bg-amber-500/30 rounded px-0.5 transition-all'
+          mark.textContent = before.textContent
+          before.parentNode?.replaceChild(mark, before)
+          // walker continues with `highlighted` node
+          void highlighted
+          break // Only highlight first occurrence per range
+        }
+      }
+    }, [highlightRanges, content])
+
     const setRefs = useCallback((el: HTMLDivElement | null) => {
       innerRef.current = el
       if (typeof ref === 'function') ref(el)
@@ -108,8 +296,42 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, { content: string; base
     }, [ref])
 
     return (
-      <div ref={setRefs} className="h-full overflow-auto px-8 py-6">
-        <div className="max-w-3xl mx-auto markdown-body">
+      <div ref={setRefs} className="h-full overflow-auto px-8 py-6 relative">
+        {/* Search bar */}
+        {searchOpen && (
+          <div className="sticky top-0 z-10 mb-4 flex items-center gap-2 px-3 py-2 rounded-lg border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 shadow-md max-w-md mx-auto">
+            <MagnifyingGlass size={14} className="text-gray-400 dark:text-zinc-500 flex-shrink-0" />
+            <input
+              ref={searchInputRef}
+              type="text"
+              value={searchText}
+              onChange={(e) => { setSearchText(e.target.value); setCurrentMatch(0) }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && e.shiftKey) { e.preventDefault(); goPrevMatch() }
+                else if (e.key === 'Enter') { e.preventDefault(); goNextMatch() }
+                else if (e.key === 'Escape') { e.preventDefault(); closeSearch() }
+              }}
+              placeholder="検索..."
+              className="flex-1 min-w-0 bg-transparent text-sm text-gray-800 dark:text-zinc-200 placeholder-gray-400 dark:placeholder-zinc-500 outline-none"
+              autoFocus
+            />
+            {searchText && (
+              <span className="text-[11px] text-gray-400 dark:text-zinc-500 tabular-nums flex-shrink-0">
+                {matchCount > 0 ? `${currentMatch + 1}/${matchCount}` : '0件'}
+              </span>
+            )}
+            <button onClick={goPrevMatch} className="p-0.5 text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300 disabled:opacity-30" disabled={matchCount === 0}>
+              <CaretUp size={14} />
+            </button>
+            <button onClick={goNextMatch} className="p-0.5 text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300 disabled:opacity-30" disabled={matchCount === 0}>
+              <CaretDown size={14} />
+            </button>
+            <button onClick={closeSearch} className="p-0.5 text-gray-400 dark:text-zinc-500 hover:text-gray-600 dark:hover:text-zinc-300">
+              <X size={14} />
+            </button>
+          </div>
+        )}
+        <div ref={bodyRef} className="max-w-3xl mx-auto markdown-body">
           <Markdown remarkPlugins={[remarkGfm]} components={components}>
             {content}
           </Markdown>
@@ -147,6 +369,7 @@ export function TabbedEditorPanel({
   const scrollRatioRef = useRef<Map<string, number>>(new Map())
   const editorViewRef = useRef<EditorView | null>(null)
   const mdPreviewRef = useRef<HTMLDivElement | null>(null)
+  const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
   const activeFile = activeFilePath ? fileContents.get(activeFilePath) : null
   const hasChanges = activeFile ? activeFile.content !== activeFile.originalContent : false
 
@@ -155,8 +378,32 @@ export function TabbedEditorPanel({
     const saved = localStorage.getItem('mdViewMode')
     return saved === 'preview' || saved === 'editor' ? saved : 'editor'
   })
-  const isActiveMd = activeFilePath ? isMarkdownFile(activeFilePath) : false
+
   const isActivePreviewTab = activeFilePath === previewFilePath
+  const [showDiff, setShowDiff] = useState(false)
+
+  // Markdown review
+  const authUser = useAuthStore(state => state.user)
+  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '')
+  const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
+  const textSelection = useTextSelection(
+    review.isReviewing,
+    activeFile?.content || '',
+    review.addComment,
+  )
+
+  // Mark reviews as seen when user opens a file with reviews
+  useEffect(() => {
+    if (!activeFilePath || !isMarkdownFile(activeFilePath)) return
+    if (review.reviews.length === 0 && !review.loading) return
+    if (review.loading) return
+    // Reconstruct review file names from review IDs
+    const docName = activeFilePath.split('/').pop() || ''
+    const reviewFileNames = review.reviews.map(r => `${docName}.review.${r.id}.json`)
+    if (reviewFileNames.length > 0) {
+      markReviewSeen(activeFilePath, reviewFileNames)
+    }
+  }, [activeFilePath, review.reviews, review.loading])
 
   const setMdViewModePersisted = (mode: 'preview' | 'editor') => {
     setMdViewMode(mode)
@@ -186,9 +433,28 @@ export function TabbedEditorPanel({
 
   // Wrap mdViewMode toggle to save scroll before switching
   const handleSetMdViewMode = useCallback((mode: 'preview' | 'editor') => {
+    // Warn when switching to editor while other users have in-progress reviews
+    if (mode === 'editor' && review.otherInProgressReviews.length > 0) {
+      const names = review.otherInProgressReviews.map(r => r.reviewerName).join('、')
+      const ok = window.confirm(`${names} がレビュー中です。編集するとレビューコメントが無効になる可能性がありますが、続けますか？`)
+      if (!ok) return
+    }
     saveCurrentScrollPosition()
     setMdViewModePersisted(mode)
-  }, [saveCurrentScrollPosition])
+  }, [saveCurrentScrollPosition, review.otherInProgressReviews])
+
+  // Cmd+Shift+M → toggle markdown preview / editor
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'm') {
+        if (!activeFilePath || !isMarkdownFile(activeFilePath)) return
+        e.preventDefault()
+        handleSetMdViewMode(mdViewMode === 'preview' ? 'editor' : 'preview')
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [activeFilePath, mdViewMode, handleSetMdViewMode])
 
   // Clean up scroll ratios when files are closed
   useEffect(() => {
@@ -204,11 +470,28 @@ export function TabbedEditorPanel({
   const fileContentsRef = useRef<Map<string, OpenFile>>(fileContents)
   fileContentsRef.current = fileContents
 
+  // Ref for review reload (used inside file watcher)
+  const reviewReloadRef = useRef(review.reload)
+  reviewReloadRef.current = review.reload
+  const activeFilePathRef = useRef(activeFilePath)
+  activeFilePathRef.current = activeFilePath
+
   // Reload open files when modified externally (e.g., by AI agent)
   useEffect(() => {
     const unsubscribe = window.electronAPI.onFileChange(async (data) => {
       if (data.type !== 'change') return
       const changedPath = data.path
+
+      // Reload review data when a review or reply sidecar file changes
+      const reviewMatch = changedPath.match(/^(.+)\.review\.[^/]+\.json$/) || changedPath.match(/^(.+)\.reply\.[^/]+\.json$/)
+      if (reviewMatch) {
+        const docPath = reviewMatch[1]
+        if (docPath === activeFilePathRef.current) {
+          reviewReloadRef.current()
+        }
+        return
+      }
+
       const file = fileContentsRef.current.get(changedPath)
 
       // Only reload if the file is open, not loading, and not an image
@@ -457,35 +740,6 @@ export function TabbedEditorPanel({
           })}
         </div>
 
-        {/* Markdown view mode toggle */}
-        {isActiveMd && (
-          <div className="ml-auto px-2 flex items-center">
-            <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 overflow-hidden">
-              <button
-                onClick={() => handleSetMdViewMode('editor')}
-                className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
-                  mdViewMode === 'editor'
-                    ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
-                    : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
-                }`}
-                title="エディタ"
-              >
-                <Code size={12} />
-              </button>
-              <button
-                onClick={() => handleSetMdViewMode('preview')}
-                className={`flex items-center gap-1 px-2 py-1 text-[11px] transition-colors ${
-                  mdViewMode === 'preview'
-                    ? 'bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200'
-                    : 'text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300'
-                }`}
-                title="プレビュー"
-              >
-                <Eye size={12} />
-              </button>
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Error message */}
@@ -519,37 +773,170 @@ export function TabbedEditorPanel({
         ) : activeFile && activeFilePath && isPdfFile(activeFilePath) ? (
           <PdfPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
-          <div className="h-full relative">
-            <MarkdownPreview
-              ref={mdPreviewRef}
-              content={activeFile.content}
-              basePath={activeFilePath.substring(0, activeFilePath.lastIndexOf('/'))}
-              initialScrollRatio={scrollRatioRef.current.get(activeFilePath)}
-            />
-            {/* Floating edit button in preview mode */}
-            <button
-              onClick={() => {
-                handleSetMdViewMode('editor')
-                if (isActivePreviewTab && onPinFile && activeFilePath) {
-                  onPinFile(activeFilePath)
-                }
-              }}
-              className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white shadow-lg hover:bg-accent/90 transition-colors"
-            >
-              <PencilSimple size={12} />
-              編集
-            </button>
+          <div className="h-full flex flex-col">
+            {/* Review banner */}
+            {review.isReviewing && review.activeReview && (
+              <ReviewBanner
+                activeReview={review.activeReview}
+                onComplete={review.completeReview}
+                onCancel={review.cancelReview}
+              />
+            )}
+            {review.isViewingCompleted && review.activeReview && (
+              <CompletedReviewBanner
+                activeReview={review.activeReview}
+                onClose={() => { review.closeViewingReview(); setShowDiff(false) }}
+                showDiff={showDiff}
+                onToggleDiff={() => setShowDiff(prev => !prev)}
+              />
+            )}
+            <div className="flex-1 flex overflow-hidden">
+              {/* Markdown content or diff view */}
+              <div
+                ref={mdPreviewContainerRef}
+                className="flex-1 relative"
+                onMouseUp={textSelection.handleMouseUp}
+              >
+                {showDiff && review.activeReview?.snapshot ? (
+                  <MarkdownDiffView
+                    ref={diffViewRef}
+                    snapshot={review.activeReview.snapshot}
+                    current={activeFile.content}
+                  />
+                ) : (
+                <MarkdownPreview
+                  ref={mdPreviewRef}
+                  content={activeFile.content}
+                  basePath={activeFilePath.substring(0, activeFilePath.lastIndexOf('/'))}
+                  initialScrollRatio={scrollRatioRef.current.get(activeFilePath)}
+                  highlightRanges={(review.isReviewing || review.isViewingCompleted)
+                    ? review.activeReview?.comments
+                        .filter(c => !c.orphaned)
+                        .map(c => ({
+                          text: c.selectedText,
+                          resolved: c.resolved,
+                          commentId: c.id,
+                        }))
+                    : undefined}
+                />
+                )}
+                {/* Floating view mode toggle + review button */}
+                <div className="absolute top-3 right-3 flex items-center gap-2 opacity-60 hover:opacity-100 transition-opacity">
+                  {!review.isReviewing && !review.isViewingCompleted && (
+                    <>
+                      <ReviewHistoryDropdown
+                        reviews={review.completedReviews}
+                        onSelectReview={review.viewReview}
+                      />
+                      {/* 依頼ボタンはUI非表示。review-request の仕組み自体は
+                          Slack通知連携で再利用予定のため残してある。 */}
+                      <button
+                        onClick={review.startReview}
+                        className="flex items-center gap-1 px-2 py-1 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm text-amber-500 hover:text-amber-400 transition-colors"
+                        title="新しいレビューを開始する"
+                      >
+                        <ChatCircleDots size={12} />
+                        レビューする
+                      </button>
+                    </>
+                  )}
+                  <div className="flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden">
+                    <button
+                      onClick={() => handleSetMdViewMode('editor')}
+                      className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
+                      title="エディタ"
+                    >
+                      <Code size={12} />
+                    </button>
+                    <button
+                      className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                      title="プレビュー"
+                    >
+                      <Eye size={12} />
+                    </button>
+                  </div>
+                </div>
+                {/* Floating edit button (hide during review) */}
+                {!review.isReviewing && (
+                  <button
+                    onClick={() => {
+                      handleSetMdViewMode('editor')
+                      if (isActivePreviewTab && onPinFile && activeFilePath) {
+                        onPinFile(activeFilePath)
+                      }
+                    }}
+                    className="absolute bottom-4 right-4 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-accent text-white shadow-lg hover:bg-accent/90 transition-colors"
+                  >
+                    <PencilSimple size={12} />
+                    編集
+                  </button>
+                )}
+                {/* Comment popover */}
+                {textSelection.popover && (
+                  <CommentPopover
+                    position={{ x: textSelection.popover.x, y: textSelection.popover.y }}
+                    selectedText={textSelection.popover.text}
+                    onSubmit={textSelection.handleSubmitComment}
+                    onClose={textSelection.closePopover}
+                  />
+                )}
+              </div>
+              {/* Review side panel */}
+              {(review.isReviewing || review.isViewingCompleted) && review.activeReview && (
+                <ReviewSidePanel
+                  review={review.activeReview}
+                  onDeleteComment={review.isReviewing ? review.deleteComment : undefined}
+                  onToggleResolved={review.toggleResolved}
+                  onClickComment={(comment) => {
+                    if (showDiff && diffViewRef.current) {
+                      // Scroll to the text in the diff view
+                      diffViewRef.current.scrollToText(comment.selectedText)
+                    } else {
+                      // Scroll to the highlighted text in the markdown preview
+                      const mark = mdPreviewRef.current?.querySelector(`mark[data-comment-id="${comment.id}"]`)
+                      if (mark) {
+                        mark.scrollIntoView({ behavior: 'smooth', block: 'center' })
+                        mark.classList.add('ring-2', 'ring-amber-400')
+                        setTimeout(() => mark.classList.remove('ring-2', 'ring-amber-400'), 1500)
+                      }
+                    }
+                  }}
+                  onAddReply={review.addReply}
+                  readOnly={review.isViewingCompleted}
+                />
+              )}
+            </div>
           </div>
         ) : activeFile ? (
-          <CodeEditor
-            key={`${activeFilePath}:${gotoLine || 0}`} // Force remount on file or line change
-            value={activeFile.content}
-            onChange={handleContentChange}
-            fileName={getFileName(activeFilePath || '')}
-            initialLine={gotoLine || undefined}
-            initialScrollRatio={activeFilePath ? scrollRatioRef.current.get(activeFilePath) : undefined}
-            onViewReady={(view) => { editorViewRef.current = view }}
-          />
+          <div className="h-full relative">
+            <CodeEditor
+              key={`${activeFilePath}:${gotoLine || 0}`}
+              value={activeFile.content}
+              onChange={handleContentChange}
+              fileName={getFileName(activeFilePath || '')}
+              initialLine={gotoLine || undefined}
+              initialScrollRatio={activeFilePath ? scrollRatioRef.current.get(activeFilePath) : undefined}
+              onViewReady={(view) => { editorViewRef.current = view }}
+            />
+            {/* Floating view mode toggle for markdown files in editor mode */}
+            {activeFilePath && isMarkdownFile(activeFilePath) && (
+              <div className="absolute top-3 right-3 flex rounded-md border border-gray-200 dark:border-zinc-700 bg-white/90 dark:bg-zinc-800/90 backdrop-blur-sm shadow-sm overflow-hidden opacity-60 hover:opacity-100 transition-opacity">
+                <button
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors bg-gray-200 dark:bg-zinc-700 text-gray-800 dark:text-zinc-200"
+                  title="エディタ"
+                >
+                  <Code size={12} />
+                </button>
+                <button
+                  onClick={() => handleSetMdViewMode('preview')}
+                  className="flex items-center gap-1 px-2 py-1 text-[11px] transition-colors text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300"
+                  title="プレビュー"
+                >
+                  <Eye size={12} />
+                </button>
+              </div>
+            )}
+          </div>
         ) : null}
       </div>
 

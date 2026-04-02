@@ -109,7 +109,7 @@ export function SyncPreviewDialog({
   isOpen,
   onClose,
   changes,
-  totalCount,
+  totalCount: _totalCount,
   summary,
   isLoadingSummary,
   onRequestSummary,
@@ -137,6 +137,19 @@ export function SyncPreviewDialog({
 
   if (!isOpen) return null
 
+  // Filter out review sidecar files from the displayed changes
+  const isReviewFile = (f: string) => /\.review\.[^/]+\.json$/.test(f) || /\.review-request\.json$/.test(f) || /\.reply\.[^/]+\.json$/.test(f)
+  const reviewFileCount =
+    changes.added.filter(isReviewFile).length +
+    changes.modified.filter(isReviewFile).length +
+    changes.deleted.filter(isReviewFile).length
+  const filteredChanges = {
+    added: changes.added.filter(f => !isReviewFile(f)),
+    modified: changes.modified.filter(f => !isReviewFile(f)),
+    deleted: changes.deleted.filter(f => !isReviewFile(f)),
+  }
+  const filteredTotalCount = filteredChanges.added.length + filteredChanges.modified.length + filteredChanges.deleted.length
+
   const handleRevert = async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
     if (!onRevertFile) return
     const displayName = filePath.split('/').pop() || filePath
@@ -161,7 +174,7 @@ export function SyncPreviewDialog({
         {/* Header */}
         <div className="flex items-center justify-between mb-3">
           <h3 className="text-sm font-medium text-text-primary">
-            変更されたファイル ({totalCount}件)
+            変更されたファイル ({filteredTotalCount}件)
           </h3>
           <button
             onClick={onClose}
@@ -191,11 +204,18 @@ export function SyncPreviewDialog({
           </button>
         ) : null}
 
+        {/* Review file summary */}
+        {reviewFileCount > 0 && (
+          <div className="mb-2 px-3 py-1.5 rounded-md bg-activitybar-bg/50 text-[11px] text-text-secondary">
+            レビュー関連ファイル: {reviewFileCount}件（自動同期）
+          </div>
+        )}
+
         {/* File list */}
         <div className="max-h-[50vh] overflow-auto space-y-1">
           <FileSection
             label="追加"
-            files={changes.added}
+            files={filteredChanges.added}
             icon={Plus}
             colorClass="text-green-500"
             rootPath={rootPath}
@@ -205,7 +225,7 @@ export function SyncPreviewDialog({
           />
           <FileSection
             label="変更"
-            files={changes.modified}
+            files={filteredChanges.modified}
             icon={PencilSimple}
             colorClass="text-amber-500"
             rootPath={rootPath}
@@ -215,7 +235,7 @@ export function SyncPreviewDialog({
           />
           <FileSection
             label="削除"
-            files={changes.deleted}
+            files={filteredChanges.deleted}
             icon={Minus}
             colorClass="text-red-500"
             rootPath={rootPath}
@@ -226,7 +246,7 @@ export function SyncPreviewDialog({
         </div>
 
         {/* Commit message & Sync */}
-        {onSync && totalCount > 0 && (
+        {onSync && (filteredTotalCount > 0 || reviewFileCount > 0) && (
           <div className="mt-3 space-y-2">
             <textarea
               value={commitMessage}
