@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info, ChatCircle, CaretLeft } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -97,6 +97,9 @@ export function SkillCentricLayout() {
   // Panel width state (resizable)
   const [leftPanelWidth, setLeftPanelWidth] = useState(550)
   const [fileTreeWidth, setFileTreeWidth] = useState(200)
+  const [chatCollapsed, setChatCollapsed] = useState(false)
+  const leftPanelWidthBeforeCollapseRef = useRef(550)
+  const overDragRef = useRef(0)
 
   // Modals
   const [showNewSkillWizard, setShowNewSkillWizard] = useState(false)
@@ -241,7 +244,11 @@ export function SkillCentricLayout() {
     }
   }, [])
 
-  // Keyboard shortcuts: Cmd+Shift+F → search tab, Cmd+P → file search modal
+  // Ref to hold latest leftPanelWidth for keyboard shortcut (avoids re-registering listener)
+  const leftPanelWidthRef = useRef(leftPanelWidth)
+  useEffect(() => { leftPanelWidthRef.current = leftPanelWidth }, [leftPanelWidth])
+
+  // Keyboard shortcuts: Cmd+Shift+F → search tab, Cmd+P → file search modal, Cmd+Shift+C → toggle chat
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
@@ -252,6 +259,19 @@ export function SkillCentricLayout() {
       if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'p') {
         e.preventDefault()
         setShowFileSearch(true)
+      }
+      // Cmd+Shift+C → toggle chat panel
+      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
+        if (isChatInputRecentlyActive()) return
+        e.preventDefault()
+        setChatCollapsed(prev => {
+          if (!prev) {
+            leftPanelWidthBeforeCollapseRef.current = leftPanelWidthRef.current
+          } else {
+            setLeftPanelWidth(leftPanelWidthBeforeCollapseRef.current)
+          }
+          return !prev
+        })
       }
     }
     document.addEventListener('keydown', handleKeyDown)
@@ -537,16 +557,47 @@ ${promptContent}
     setFileTreeWidth(prev => Math.min(400, Math.max(120, prev + delta)))
   }, [])
 
+  const OVER_DRAG_COLLAPSE = 60 // collapse after dragging 60px past max
+
   const handleLeftPanelResize = useCallback((delta: number) => {
     setLeftPanelWidth(prev => {
-      const newWidth = prev + delta
-      // Calculate max width based on window width to ensure chat min width
       const windowWidth = window.innerWidth
       const dynamicMaxWidth = Math.min(MAX_LEFT_PANEL_WIDTH, windowWidth - MIN_CHAT_WIDTH - 10)
-      // Clamp to min/max values
+      const newWidth = prev + delta
+
+      // Track over-drag when at max and still pushing right
+      if (prev >= dynamicMaxWidth - 2 && delta > 0) {
+        overDragRef.current += delta
+        if (overDragRef.current >= OVER_DRAG_COLLAPSE) {
+          overDragRef.current = 0
+          leftPanelWidthBeforeCollapseRef.current = prev
+          setChatCollapsed(true)
+          return prev // keep width as-is, chat panel will hide
+        }
+        return prev // stay clamped while accumulating
+      }
+
+      // Reset over-drag when moving left
+      if (delta < 0) {
+        overDragRef.current = 0
+      }
+
       return Math.min(dynamicMaxWidth, Math.max(MIN_LEFT_PANEL_WIDTH, newWidth))
     })
   }, [])
+
+  const toggleChat = useCallback(() => {
+    setChatCollapsed(prev => {
+      if (!prev) {
+        // Save current width before collapsing
+        leftPanelWidthBeforeCollapseRef.current = leftPanelWidth
+      } else {
+        // Restore previous width
+        setLeftPanelWidth(leftPanelWidthBeforeCollapseRef.current)
+      }
+      return !prev
+    })
+  }, [leftPanelWidth])
 
   const handlePreview = useCallback(async () => {
     if (!currentCompany?.rootPath) return
@@ -835,8 +886,8 @@ ${promptContent}
           /* Normal layout (left side) */
           <>
         <div
-          className="flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex-shrink-0"
-          style={{ width: leftPanelWidth }}
+          className={`flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${chatCollapsed ? 'flex-1' : 'flex-shrink-0'}`}
+          style={chatCollapsed ? undefined : { width: leftPanelWidth }}
         >
           {/* Tab Switcher */}
           <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
@@ -975,19 +1026,31 @@ ${promptContent}
           </div>
         </div>
 
-        {/* Resize Handle */}
-        <ResizeHandle onResize={handleLeftPanelResize} direction="horizontal" />
+        {/* Resize Handle (hidden when chat is collapsed) */}
+        {!chatCollapsed && <ResizeHandle onResize={handleLeftPanelResize} direction="horizontal" />}
           </>
         )}
 
-        {/* Right Panel (Chat - Always Visible) */}
-        <div className="flex-1" style={{ minWidth: MIN_CHAT_WIDTH }}>
-          <ChatPanel
-            departmentPath={currentCompany?.rootPath}
-            activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
-            slashCommands={slashCommands}
-          />
-        </div>
+        {/* Right Panel (Chat) */}
+        {chatCollapsed ? (
+          /* Collapsed: thin tab to restore */
+          <button
+            onClick={toggleChat}
+            className="flex-shrink-0 w-6 flex flex-col items-center justify-center gap-1 bg-gray-100 dark:bg-zinc-800 border-l border-gray-200 dark:border-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer group"
+            title="AIチャットを表示 (⌘⇧C)"
+          >
+            <CaretLeft size={14} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
+            <ChatCircle size={16} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
+          </button>
+        ) : (
+          <div className="flex-1" style={{ minWidth: MIN_CHAT_WIDTH }}>
+            <ChatPanel
+              departmentPath={currentCompany?.rootPath}
+              activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
+              slashCommands={slashCommands}
+            />
+          </div>
+        )}
       </div>
 
       {/* New Skill Wizard Modal */}

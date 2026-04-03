@@ -18,6 +18,7 @@ import { ConfirmDialog } from '../common/ConfirmDialog'
 import { getFileIcon, FolderIcon } from './FileIcons'
 import { isPerfCutEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
+import { isReviewSidecarFile, detectReviewStatus, hasUnseenReviews } from './MarkdownReview'
 
 interface FileEntry {
   name: string
@@ -63,6 +64,8 @@ export function FileTreePanel({
 
   // Cache for loaded children
   const childrenCache = useRef<Map<string, FileEntry[]>>(new Map())
+  // Review status per directory: dirPath → Map<docName → { hasReview, hasRequest, reviewFileNames }>
+  const reviewStatusRef = useRef<Map<string, Map<string, { hasReview: boolean; hasRequest: boolean; reviewFileNames: string[] }>>>(new Map())
   const pendingReloadRef = useRef(false)
   const deferredReloadTimerRef = useRef<number | null>(null)
 
@@ -158,11 +161,20 @@ export function FileTreePanel({
     const newLoaded = new Set<string>()
     const firstLevelDirs = new Set<string>()
 
-    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, depth: number): FileEntry[] => {
+    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, parentPath: string | null, depth: number): FileEntry[] => {
       const result: FileEntry[] = []
+      // Detect review status for all files in this directory
+      if (parentPath) {
+        const allNames = entries.map(e => e.name)
+        const dirReviewStatus = detectReviewStatus(allNames)
+        reviewStatusRef.current.set(parentPath, dirReviewStatus)
+      }
+
       for (const entry of entries) {
         if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
         if (entry.name.startsWith('.') && !includeDotFiles) continue
+        // Hide review sidecar files from the tree
+        if (!entry.isDirectory && isReviewSidecarFile(entry.name)) continue
 
         const fileEntry: FileEntry = {
           name: entry.name,
@@ -175,7 +187,7 @@ export function FileTreePanel({
           if (depth === 0) firstLevelDirs.add(entry.path)
           // Cache children data if available, but don't auto-expand
           if (entry.children) {
-            const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, depth + 1))
+            const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, entry.path, depth + 1))
             childrenCache.current.set(entry.path, children)
             newLoaded.add(entry.path)
           }
@@ -184,7 +196,7 @@ export function FileTreePanel({
       return result
     }
 
-    const topLevel = sortEntries(process(rawEntries, 0))
+    const topLevel = sortEntries(process(rawEntries, null, 0))
     return { topLevel, firstLevelDirs, loadedDirs: newLoaded }
   }, [])
 
@@ -193,9 +205,15 @@ export function FileTreePanel({
     try {
       const entries = await window.electronAPI.readDirectory(dirPath)
       const result: FileEntry[] = []
+      // Detect review status from all files in directory (including hidden review files)
+      const allNames = entries.map(e => e.name)
+      const dirReviewStatus = detectReviewStatus(allNames)
+      reviewStatusRef.current.set(dirPath, dirReviewStatus)
+
       for (const entry of entries) {
         if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
         if (entry.name.startsWith('.') && !includeDotFiles) continue
+        if (!entry.isDirectory && isReviewSidecarFile(entry.name)) continue
         result.push({ name: entry.name, path: entry.path, isDirectory: entry.isDirectory })
       }
       return sortEntries(result)
@@ -906,6 +924,25 @@ export function FileTreePanel({
           </span>
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
           <span className="truncate" title={entry.name}>{entry.name}</span>
+          {(() => {
+            if (entry.isDirectory) return null
+            const dirPath = entry.path.substring(0, entry.path.lastIndexOf('/'))
+            const dirStatus = reviewStatusRef.current.get(dirPath)
+            const fileStatus = dirStatus?.get(entry.name)
+            if (!fileStatus) return null
+            {/* 依頼バッジ: UIからの依頼ボタンは非表示にしたが、
+                Slack通知連携で review-request を再利用予定のため残してある */}
+            if (fileStatus.hasRequest) {
+              return <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
+            }
+            if (fileStatus.hasReview) {
+              const unseen = hasUnseenReviews(entry.path, fileStatus.reviewFileNames)
+              return unseen
+                ? <span className="flex-shrink-0 ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="新しいレビューあり" />
+                : <span className="flex-shrink-0 ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" title="レビューあり" />
+            }
+            return null
+          })()}
         </div>
 
         {entry.isDirectory && isExpanded && (
