@@ -202,7 +202,7 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
-      effort?: 'low' | 'medium' | 'high' | 'max'
+      effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
       referenceFiles?: string[]
       appSessionId?: string
       claudeSessionId?: string
@@ -341,7 +341,10 @@ export async function startChatServer(config: ChatServerConfig) {
         settingSources: ['user', 'project'],
         streamingInput: 'always',
         ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
-        ...(effort ? { sdkOptions: { effort } } : {}),
+        // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
+        // accepts `xhigh` (Opus 4.7 only). The SDK passes the string straight to the
+        // CLI via `--effort`, so we cast to bypass the stale SDK type.
+        ...(effort ? { sdkOptions: { effort: effort as 'low' | 'medium' | 'high' | 'max' } } : {}),
         // Custom spawn to avoid EBADF in Electron's main process.
         //
         // Problem: Electron's main process has many open FDs from Chromium

@@ -11,8 +11,9 @@ export type Language = 'en' | 'ja'
 // AI Model type
 export type AIModel = 'sonnet' | 'opus' | 'haiku'
 
-// AI Effort level type
-export type AIEffort = 'low' | 'medium' | 'high' | 'max'
+// AI Effort level type. `xhigh` is currently only supported on Opus 4.7;
+// the UI shows it conditionally based on the selected model.
+export type AIEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 // Get initial model from localStorage
 const getInitialModel = (): AIModel => {
@@ -29,11 +30,11 @@ const getInitialModel = (): AIModel => {
 const getInitialEffort = (): AIEffort => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('aiEffort') as AIEffort | null
-    if (saved === 'low' || saved === 'medium' || saved === 'high' || saved === 'max') {
+    if (saved === 'low' || saved === 'medium' || saved === 'high' || saved === 'xhigh' || saved === 'max') {
       return saved
     }
   }
-  return 'medium'
+  return 'max'
 }
 
 // Get initial chat markdown render setting from localStorage (default ON)
