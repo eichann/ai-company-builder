@@ -13,6 +13,8 @@ services:
       - SERVER_HOST=${SERVER_HOST:-localhost}
       - SERVER_USER=${SERVER_USER:-deploy}
       - HOST_REPOS_DIR=${HOST_REPOS_DIR:-/app/data/repos}
+      # Cap Node heap so a slow leak triggers a clean OOM-restart instead of dragging the host down
+      - NODE_OPTIONS=--max-old-space-size=2048
     volumes:
       # Mount source for hot reload in development
       - ./server/src:/app/src
@@ -26,6 +28,14 @@ services:
              git config --global safe.directory '*' &&
              npx tsx watch src/index.ts"
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch(\"http://localhost:3001/api/config\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "autoheal=true"
 
   admin:
     build:
@@ -36,9 +46,29 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_API_URL=${PUBLIC_URL:-http://localhost:3001}
+      # Cap Node heap (smaller than api: admin is mostly static rendering)
+      - NODE_OPTIONS=--max-old-space-size=1024
     volumes:
       # Mount source for hot reload
       - ./admin/src:/app/admin/src
     depends_on:
       - api
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch(\"http://localhost:3100/\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    labels:
+      - "autoheal=true"
+
+  autoheal:
+    image: willfarrell/autoheal:latest
+    restart: unless-stopped
+    environment:
+      - AUTOHEAL_CONTAINER_LABEL=autoheal
+      - AUTOHEAL_INTERVAL=30
+      - AUTOHEAL_START_PERIOD=60
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
