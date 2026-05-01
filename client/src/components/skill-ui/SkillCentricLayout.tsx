@@ -1032,8 +1032,8 @@ ${promptContent}
         )}
 
         {/* Right Panel (Chat) */}
-        {chatCollapsed ? (
-          /* Collapsed: thin tab to restore */
+        {/* Collapsed tab to restore (only shown when collapsed) */}
+        {chatCollapsed && (
           <button
             onClick={toggleChat}
             className="flex-shrink-0 w-6 flex flex-col items-center justify-center gap-1 bg-gray-100 dark:bg-zinc-800 border-l border-gray-200 dark:border-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer group"
@@ -1042,15 +1042,18 @@ ${promptContent}
             <CaretLeft size={14} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
             <ChatCircle size={16} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
           </button>
-        ) : (
-          <div className="flex-1" style={{ minWidth: MIN_CHAT_WIDTH }}>
-            <ChatPanel
-              departmentPath={currentCompany?.rootPath}
-              activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
-              slashCommands={slashCommands}
-            />
-          </div>
         )}
+        {/* ChatPanel is always mounted to preserve state across collapse/expand. Hidden via CSS when collapsed. */}
+        <div
+          className={chatCollapsed ? 'hidden' : 'flex-1'}
+          style={chatCollapsed ? undefined : { minWidth: MIN_CHAT_WIDTH }}
+        >
+          <ChatPanel
+            departmentPath={currentCompany?.rootPath}
+            activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
+            slashCommands={slashCommands}
+          />
+        </div>
       </div>
 
       {/* New Skill Wizard Modal */}
