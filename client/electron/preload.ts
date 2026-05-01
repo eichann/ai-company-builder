@@ -185,6 +185,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('chatHistory:saveSession', companyId, session),
   deleteChatSession: (companyId: string, sessionId: string) =>
     ipcRenderer.invoke('chatHistory:deleteSession', companyId, sessionId),
+  // Subscribe to chat history change broadcasts (multi-tab sync). Returns unsubscribe.
+  onChatHistoryChanged: (callback: (data: { companyId: string }) => void) => {
+    const wrapped = (_event: unknown, data: { companyId: string }) => callback(data)
+    ipcRenderer.on('chatHistory:changed', wrapped)
+    return () => ipcRenderer.off('chatHistory:changed', wrapped)
+  },
 
   // AI operations
   chat: (messages: AIMessage[], systemPrompt?: string, workingDirectory?: string) =>
@@ -500,6 +506,7 @@ declare global {
       getChatSession: (companyId: string, sessionId: string) => Promise<ChatSession | null>
       saveChatSession: (companyId: string, session: ChatSession) => Promise<boolean>
       deleteChatSession: (companyId: string, sessionId: string) => Promise<boolean>
+      onChatHistoryChanged: (callback: (data: { companyId: string }) => void) => () => void
 
       // Git
       gitInit: (repoPath: string) => Promise<GitResult>

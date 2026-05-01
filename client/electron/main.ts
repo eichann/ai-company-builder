@@ -1020,6 +1020,14 @@ function loadChatHistory(companyId: string): ChatHistoryFile {
   return { sessions: [] }
 }
 
+// Notify all renderer instances (e.g. multiple chat tabs) that the persisted chat history
+// for a given company has changed, so they can refresh their local sessions cache.
+function broadcastChatHistoryChanged(companyId: string): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('chatHistory:changed', { companyId })
+  }
+}
+
 function saveChatHistory(companyId: string, history: ChatHistoryFile): void {
   const filePath = getChatHistoryPath(companyId)
   fs.writeFileSync(filePath, JSON.stringify(history, null, 2))
@@ -1037,6 +1045,7 @@ ipcMain.handle('chatHistory:getSessions', (_, companyId: string) => {
   )
   if (history.sessions.length < before) {
     saveChatHistory(companyId, history)
+    broadcastChatHistoryChanged(companyId)
   }
   const pinned = history.sessions.filter(s => s.pinned)
   const unpinned = history.sessions
@@ -1052,15 +1061,31 @@ ipcMain.handle('chatHistory:getSession', (_, companyId: string, sessionId: strin
   return history.sessions.find(s => s.id === sessionId) || null
 })
 
-// Save a session (create or update)
+// Save a session (create or update).
+// Pin status is preserved from disk when the incoming payload does not explicitly set it.
+// This protects against multi-tab races where one tab's stale `sessions` cache would
+// otherwise clobber a pin set in another tab.
 ipcMain.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSession) => {
   const history = loadChatHistory(companyId)
   const existingIndex = history.sessions.findIndex(s => s.id === session.id)
+  const existing = existingIndex >= 0 ? history.sessions[existingIndex] : null
+
+  // If the caller did not explicitly set `pinned`, fall back to the on-disk value.
+  // Explicit values (true or false) are always honored — used by the toggle-pin action.
+  const merged: ChatSession = (() => {
+    if (session.pinned === undefined && existing) {
+      return {
+        ...session,
+        ...(existing.pinned ? { pinned: existing.pinned, pinnedAt: existing.pinnedAt } : {}),
+      }
+    }
+    return session
+  })()
 
   if (existingIndex >= 0) {
-    history.sessions[existingIndex] = session
+    history.sessions[existingIndex] = merged
   } else {
-    history.sessions.push(session)
+    history.sessions.push(merged)
   }
 
   // Keep all pinned sessions; cap unpinned at 100 most-recently-updated.
@@ -1072,6 +1097,7 @@ ipcMain.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSe
   history.sessions = [...pinnedAll, ...unpinnedKeep]
 
   saveChatHistory(companyId, history)
+  broadcastChatHistoryChanged(companyId)
   return true
 })
 
@@ -1080,6 +1106,7 @@ ipcMain.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: st
   const history = loadChatHistory(companyId)
   history.sessions = history.sessions.filter(s => s.id !== sessionId)
   saveChatHistory(companyId, history)
+  broadcastChatHistoryChanged(companyId)
   return true
 })
 
