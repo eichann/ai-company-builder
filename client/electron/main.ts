@@ -314,6 +314,10 @@ function createWindow() {
       contextIsolation: true,
       // Reversible A/B test switch for input lag diagnosis.
       spellcheck: !disableElectronSpellcheck,
+      // Required for the in-iframe Chromium PDF Viewer to render `blob:` PDFs in
+      // packaged builds. Without this, dev (HTTP origin) happens to work but the
+      // production file:// origin blocks the embedded PDF viewer.
+      plugins: true,
     },
   })
 
