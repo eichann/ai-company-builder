@@ -479,6 +479,52 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
 
 const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 
+/**
+ * Walk the repo tree and return relative paths of any nested Git repositories
+ * (i.e. directories that contain their own .git/ — either a directory or a "gitdir" file for worktrees).
+ * Excludes the root repo itself, common heavy/irrelevant dirs, and stops descending into a nested repo
+ * once found (so deeply-nested external repos are reported only at their topmost level).
+ */
+async function findNestedGitRepos(rootPath: string): Promise<string[]> {
+  const SKIP_DIRS = new Set(['node_modules', '.backups', '.next', '.nuxt', 'dist', '__pycache__', '.venv', 'venv', '.workspace'])
+  const results: string[] = []
+
+  async function walk(dir: string, relativePath: string): Promise<void> {
+    if (relativePath !== '') {
+      const dotGitPath = path.join(dir, '.git')
+      try {
+        await fs.promises.access(dotGitPath)
+        // Either a .git directory (real repo) or a .git file (worktree/submodule pointer).
+        results.push(relativePath)
+        return
+      } catch {
+        // not a nested repo, continue walking
+      }
+    }
+
+    let entries: fs.Dirent[]
+    try {
+      entries = await fs.promises.readdir(dir, { withFileTypes: true })
+    } catch {
+      return
+    }
+
+    for (const entry of entries) {
+      if (!entry.isDirectory()) continue
+      if (SKIP_DIRS.has(entry.name)) continue
+      // Skip the root repo's own .git
+      if (relativePath === '' && entry.name === '.git') continue
+
+      const childDir = path.join(dir, entry.name)
+      const childRel = relativePath ? `${relativePath}/${entry.name}` : entry.name
+      await walk(childDir, childRel)
+    }
+  }
+
+  await walk(rootPath, '')
+  return results
+}
+
 ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
   try {
     const safePath = validatePath(dirPath)
@@ -1868,6 +1914,47 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
     }
 
+    // Auto-detect nested Git repositories (e.g. user ran `git init` in a subfolder, or cloned an external repo).
+    // Without this, `git add` would record them as gitlinks (160000 mode) and other members pulling
+    // would see empty folders. We add them to .gitignore and unstage any existing gitlink so ACB
+    // ignores them entirely; users who need the contents can clone separately.
+    const newlyExcludedNestedRepos: string[] = []
+    try {
+      const nestedRepos = await findNestedGitRepos(repoPath)
+      if (nestedRepos.length > 0) {
+        const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
+        const lines = currentGitignore.split('\n')
+        const existingPatterns = new Set(lines.map(l => l.trim()))
+        const additions: string[] = []
+
+        for (const repo of nestedRepos) {
+          const pattern = `/${repo}/`
+          if (!existingPatterns.has(pattern)) {
+            additions.push(pattern)
+            newlyExcludedNestedRepos.push(repo)
+          }
+
+          // Unstage any existing gitlink so the next `git add` doesn't re-record it.
+          // `git rm --cached` is a no-op (errors silently) when the path isn't tracked.
+          try {
+            await git.raw(['rm', '--cached', '-rf', repo])
+            console.log(`Git sync: Removed gitlink for nested repo "${repo}"`)
+          } catch {
+            // Not tracked yet — fine.
+          }
+        }
+
+        if (additions.length > 0) {
+          const trailingNewline = currentGitignore.endsWith('\n') || currentGitignore === '' ? '' : '\n'
+          const section = `${trailingNewline}\n# Auto-ignored: nested Git repositories (managed independently)\n${additions.join('\n')}\n`
+          await fs.promises.appendFile(gitignorePath, section)
+          console.log(`Git sync: Added ${additions.length} nested repo(s) to .gitignore:`, additions)
+        }
+      }
+    } catch (nestedRepoError) {
+      console.warn('Git sync: Nested repo detection failed:', nestedRepoError)
+    }
+
     // 1. Fetch from origin
     console.log('Git sync: Fetching from origin...')
     try {
@@ -2146,7 +2233,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
         success: true,
         message: successMessage,
         restoredFolders,
-        ignoredLargeFiles
+        ignoredLargeFiles,
+        excludedNestedRepos: newlyExcludedNestedRepos
       }
     }
 
@@ -2207,7 +2295,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           conflictFiles,
           backupPath: hadConflicts ? backupPath : undefined,
           restoredFolders,
-          ignoredLargeFiles
+          ignoredLargeFiles,
+          excludedNestedRepos: newlyExcludedNestedRepos
         }
       }
     }
@@ -2226,7 +2315,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
         conflictFiles,
         backupPath,
         restoredFolders,
-        ignoredLargeFiles
+        ignoredLargeFiles,
+        excludedNestedRepos: newlyExcludedNestedRepos
       }
     }
 
@@ -2239,7 +2329,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       success: true,
       message: successMessage,
       restoredFolders,
-      ignoredLargeFiles
+      ignoredLargeFiles,
+      excludedNestedRepos: newlyExcludedNestedRepos
     }
   } catch (error) {
     console.error('Git sync error:', error)

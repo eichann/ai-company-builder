@@ -673,6 +673,11 @@ ${promptContent}
             type: 'warning',
             message: `${result.ignoredLargeFiles.length}個の大容量ファイル（100MB以上）を同期対象外にしました: ${result.ignoredLargeFiles.slice(0, 3).join(', ')}${result.ignoredLargeFiles.length > 3 ? '...' : ''}`
           })
+        } else if (result.excludedNestedRepos && result.excludedNestedRepos.length > 0) {
+          setSyncNotification({
+            type: 'warning',
+            message: `外部Gitリポジトリを検出しました。同期対象から除外し、.gitignoreに追加しました（${result.excludedNestedRepos.length}件）: ${result.excludedNestedRepos.slice(0, 3).join(', ')}${result.excludedNestedRepos.length > 3 ? '...' : ''}`
+          })
         } else {
           setSyncNotification({
             type: 'success',
@@ -689,7 +694,8 @@ ${promptContent}
       // Auto-hide success notification after 3 seconds (unless there were warnings)
       const hasWarnings = result.hadConflicts ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
-        (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0)
+        (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
+        (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)
       if (result.success && !hasWarnings) {
         setTimeout(() => setSyncNotification(null), 3000)
       }

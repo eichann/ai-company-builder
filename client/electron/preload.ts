@@ -258,6 +258,8 @@ interface GitResult {
   backupPath?: string
   restoredFolders?: string[]
   ignoredLargeFiles?: string[]
+  // Nested repos auto-detected and added to .gitignore during this sync
+  excludedNestedRepos?: string[]
 }
 
 interface GitRepoResult {
