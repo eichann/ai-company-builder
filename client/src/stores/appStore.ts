@@ -36,6 +36,16 @@ const getInitialEffort = (): AIEffort => {
   return 'medium'
 }
 
+// Get initial chat markdown render setting from localStorage (default ON)
+const getInitialChatMarkdownRender = (): boolean => {
+  if (typeof window !== 'undefined') {
+    const saved = localStorage.getItem('chatMarkdownRender')
+    if (saved === 'false') return false
+    if (saved === 'true') return true
+  }
+  return true
+}
+
 // Active skill with loaded content
 interface ActiveSkill {
   skill: Skill
@@ -113,6 +123,9 @@ interface AppState {
   // When true, start a new chat session before inserting pendingChatInput
   pendingChatNewSession: boolean
 
+  // Chat: render assistant messages as decorated markdown (vs raw text)
+  chatMarkdownRender: boolean
+
   // Actions
   setTheme: (theme: Theme) => void
   toggleTheme: () => void
@@ -145,6 +158,9 @@ interface AppState {
 
   // Chat input actions
   setPendingChatInput: (text: string | null, newSession?: boolean) => void
+
+  // Chat markdown rendering toggle
+  setChatMarkdownRender: (enabled: boolean) => void
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -168,6 +184,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   activeSkill: null,
   pendingChatInput: null,
   pendingChatNewSession: false,
+  chatMarkdownRender: getInitialChatMarkdownRender(),
 
   setTheme: (theme) => {
     localStorage.setItem('theme', theme)
@@ -350,4 +367,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   clearActiveSkill: () => set({ activeSkill: null }),
 
   setPendingChatInput: (text, newSession = false) => set({ pendingChatInput: text, pendingChatNewSession: newSession }),
+
+  setChatMarkdownRender: (enabled) => {
+    localStorage.setItem('chatMarkdownRender', String(enabled))
+    set({ chatMarkdownRender: enabled })
+  },
 }))
