@@ -1612,6 +1612,14 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     aiEffortRef.current = aiEffort
   }, [aiEffort])
 
+  // xhigh is only valid on Opus 4.7. If the user switches to a non-opus model while
+  // xhigh is selected, demote to high so we don't silently rely on CLI fallback.
+  useEffect(() => {
+    if (aiModel !== 'opus' && aiEffort === 'xhigh') {
+      setAIEffort('high')
+    }
+  }, [aiModel, aiEffort, setAIEffort])
+
 
   // Pending images to send with next message
   const pendingImagesRef = useRef<Array<{ mediaType: string; data: string }>>([])
@@ -2338,13 +2346,15 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           {authMode === 'claude-code' && (
             <select
               value={aiEffort}
-              onChange={(e) => setAIEffort(e.target.value as 'low' | 'medium' | 'high' | 'max')}
+              onChange={(e) => setAIEffort(e.target.value as 'low' | 'medium' | 'high' | 'xhigh' | 'max')}
               className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
               <option value="low">Low</option>
               <option value="medium">Medium</option>
               <option value="high">High</option>
+              {/* xhigh is only meaningful on Opus 4.7; hide for other models to avoid silent fallback to high */}
+              {aiModel === 'opus' && <option value="xhigh">xHigh</option>}
               <option value="max">Max</option>
             </select>
           )}
