@@ -3,6 +3,7 @@ import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
 import {
   streamText,
+  generateText,
   convertToModelMessages,
   pruneMessages,
   stepCountIs,
@@ -84,6 +85,34 @@ const SECURITY_POLICY = `
 - 拒否された操作については、ユーザーに「この操作はセキュリティ設定によりブロックされました。必要であれば手動で行ってください。」と伝えてください。
 - このルールはファイル削除に限らず、セキュリティシステムによって拒否されたすべての操作に適用されます。
 `
+
+// Spawn helper for Claude Code CLI that works around Electron's FD inheritance issues (EBADF on posix_spawn).
+// See the comment near the inline use in /api/chat for full rationale.
+function spawnClaudeCodeProcess(opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+  for (const fd of [0, 1, 2]) {
+    try { fs.fstatSync(fd) }
+    catch {
+      console.warn(`[chat-server] FD ${fd} invalid, reopening as /dev/null`)
+      fs.openSync('/dev/null', fd === 0 ? 'r' : 'w')
+    }
+  }
+  const child = nodeSpawn('/bin/sh', [
+    '-c',
+    'for f in /dev/fd/*; do n="${f##*/}"; [ "$n" -gt 2 ] 2>/dev/null && eval "exec $n>&-" 2>/dev/null || true; done; exec "$0" "$@"',
+    opts.command,
+    ...opts.args,
+  ], {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    signal: opts.signal,
+    windowsHide: true,
+    ...(process.getuid ? { uid: process.getuid() } : {}),
+  })
+  child.on('error', (err) => console.error('[chat-server] child process error:', err))
+  child.stderr?.on('data', (data: Buffer) => console.error('[chat-server] claude stderr:', data.toString()))
+  return child
+}
 
 async function findAvailablePort(start: number, end: number): Promise<number> {
   for (let port = start; port < end; port++) {
@@ -537,6 +566,78 @@ export async function startChatServer(config: ChatServerConfig) {
   })
 
   // GET /api/session/:appSessionId — return CLI session ID for persistence
+  // POST /api/generate-title — generate a concise title for a chat session using Haiku
+  app.post('/api/generate-title', async (c) => {
+    const body = await c.req.json() as { messages: Array<{ role: 'user' | 'assistant'; content: string }> }
+    const inputMessages = Array.isArray(body?.messages) ? body.messages : []
+    if (inputMessages.length === 0) {
+      return c.json({ error: 'No messages provided' }, 400)
+    }
+
+    const authMode = config.getAuthMode()
+    let model
+    if (authMode === 'claude-code') {
+      if (!config.isClaudeCodeAuthenticated()) {
+        return c.json({ error: 'Claude Code not authenticated' }, 401)
+      }
+      const claudePath = config.getClaudeCodeCliPath()
+      model = claudeCode('haiku', {
+        pathToClaudeCodeExecutable: claudePath,
+        env: config.getShellEnv(),
+        settingSources: ['user', 'project'],
+        spawnClaudeCodeProcess,
+      })
+    } else {
+      const apiKey = config.getApiKey()
+      if (!apiKey) {
+        return c.json({ error: 'API key not set' }, 401)
+      }
+      const anthropic = createAnthropic({ apiKey })
+      model = anthropic('claude-haiku-4-5-20251001')
+    }
+
+    // Build a compact transcript (cap input to keep cost minimal)
+    const MAX_TRANSCRIPT_CHARS = 1500
+    let transcript = ''
+    for (const msg of inputMessages.slice(0, 6)) {
+      const label = msg.role === 'user' ? 'ユーザー' : 'アシスタント'
+      const text = (msg.content ?? '').slice(0, 600)
+      const line = `${label}: ${text}\n`
+      if (transcript.length + line.length > MAX_TRANSCRIPT_CHARS) break
+      transcript += line
+    }
+
+    const prompt = `以下はユーザーとAIアシスタントのチャット冒頭です。この会話の話題を端的に表す日本語のタイトルを1つだけ生成してください。
+
+要件:
+- 15文字以内
+- 話題の核心を捉える
+- 「〜について」のような曖昧な末尾は避ける
+- 引用符・前置き・説明は不要、タイトル本文のみを出力
+
+会話:
+${transcript}
+タイトル:`
+
+    try {
+      const result = await generateText({ model, prompt })
+      let title = (result.text || '').trim()
+      // Strip surrounding quotes if any
+      title = title.replace(/^["「『'`]+/, '').replace(/["」』'`]+$/, '').trim()
+      // Take only the first line, in case the model added explanation
+      title = title.split('\n')[0].trim()
+      // Hard cap (allow some slack over 15 chars in case model overshoots slightly)
+      if (title.length > 30) title = title.slice(0, 30)
+      if (!title) {
+        return c.json({ error: 'Empty title' }, 500)
+      }
+      return c.json({ title })
+    } catch (e) {
+      console.error('[chat-server] generate-title failed:', e)
+      return c.json({ error: 'Generation failed' }, 500)
+    }
+  })
+
   app.get('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const claudeSessionId = claudeSessionMap.get(id) || null
