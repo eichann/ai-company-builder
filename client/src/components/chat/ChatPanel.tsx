@@ -23,6 +23,7 @@ import {
   FolderOpen,
   PencilSimple,
   PushPin,
+  MarkdownLogo,
   WarningCircle,
   ArrowCounterClockwise,
   ShieldWarning,
@@ -31,6 +32,7 @@ import { useAppStore } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
+import { MarkdownMessage } from './MarkdownMessage'
 
 // ============================================================================
 // Types
@@ -580,6 +582,7 @@ interface MessageItemProps {
 const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
+  const markdownRender = useAppStore((s) => s.chatMarkdownRender)
 
   return (
     <div className={`animate-slide-up ${isUser ? 'flex justify-end' : ''}`}>
@@ -619,8 +622,12 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
                 className="relative rounded-2xl rounded-tl-md px-4 py-3 text-[14px] leading-relaxed bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 border border-gray-200 dark:border-zinc-700 shadow-glass"
               >
                 <div className="absolute inset-0 rounded-2xl rounded-tl-md bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-                <div className="relative whitespace-pre-wrap break-words">
-                  {part.text}
+                <div className="relative break-words">
+                  {markdownRender ? (
+                    <MarkdownMessage content={part.text} />
+                  ) : (
+                    <div className="whitespace-pre-wrap">{part.text}</div>
+                  )}
                   {isStreaming && isLastPart && <StreamingCursor />}
                 </div>
               </div>
@@ -1557,6 +1564,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const setAIModel = useAppStore((state) => state.setAIModel)
   const aiEffort = useAppStore((state) => state.aiEffort)
   const setAIEffort = useAppStore((state) => state.setAIEffort)
+  const chatMarkdownRender = useAppStore((state) => state.chatMarkdownRender)
+  const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
   const handlePendingTextConsumed = useCallback(() => {
     setPendingChatInput(null, false)
@@ -2332,6 +2341,19 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
               <X size={16} className="text-red-500" />
             </button>
           )}
+
+          {/* Markdown Render Toggle: ON = decorated rendering, OFF = raw text */}
+          <button
+            onClick={() => setChatMarkdownRender(!chatMarkdownRender)}
+            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+              chatMarkdownRender
+                ? 'bg-accent/15 text-accent hover:bg-accent/20'
+                : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400'
+            }`}
+            title={chatMarkdownRender ? '装飾表示中（クリックでプレーン表示に切替）' : 'プレーン表示中（クリックで装飾表示に切替）'}
+          >
+            <MarkdownLogo size={16} weight={chatMarkdownRender ? 'fill' : 'regular'} />
+          </button>
 
           {/* New Chat/Tab Button */}
           <button
