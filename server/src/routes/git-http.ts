@@ -98,6 +98,22 @@ async function handleGitCgi(
     cgiEnv.CONTENT_TYPE = contentType
   }
 
+  // Cap memory used by git pack-objects (invoked by upload-pack, receive-pack,
+  // and the auto-gc that runs after pushes). Without these, a single push on
+  // the 2.4 GiB company repo can spike to >2 GiB and approach the host's OOM
+  // threshold. These settings apply only to the spawned process.
+  const gitConfigs: Array<[string, string]> = [
+    ['pack.windowMemory', '256m'],
+    ['pack.threads', '1'],
+    ['pack.deltaCacheSize', '128m'],
+    ['core.bigFileThreshold', '16m'],
+  ]
+  cgiEnv.GIT_CONFIG_COUNT = String(gitConfigs.length)
+  gitConfigs.forEach(([key, value], i) => {
+    cgiEnv[`GIT_CONFIG_KEY_${i}`] = key
+    cgiEnv[`GIT_CONFIG_VALUE_${i}`] = value
+  })
+
   const cgi = spawn('git', ['http-backend'], {
     env: cgiEnv,
     stdio: ['pipe', 'pipe', 'pipe'],
