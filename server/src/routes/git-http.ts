@@ -98,75 +98,139 @@ async function handleGitCgi(
     cgiEnv.CONTENT_TYPE = contentType
   }
 
-  return new Promise<Response>(async (resolve) => {
-    const cgi = spawn('git', ['http-backend'], {
-      env: cgiEnv,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    })
+  const cgi = spawn('git', ['http-backend'], {
+    env: cgiEnv,
+    stdio: ['pipe', 'pipe', 'pipe'],
+  })
 
-    // Pipe request body to CGI stdin for POST requests
-    if (method === 'POST') {
-      const body = await c.req.raw.arrayBuffer()
-      cgi.stdin.write(Buffer.from(body))
-      cgi.stdin.end()
-    } else {
-      cgi.stdin.end()
-    }
-
-    const chunks: Buffer[] = []
-    cgi.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
-
-    let stderrData = ''
-    cgi.stderr.on('data', (data: Buffer) => { stderrData += data.toString() })
-
-    cgi.on('close', (code) => {
-      if (code !== 0) {
-        console.error(`[git-http] git http-backend exited with code ${code}`, stderrData)
-        resolve(new Response('Internal Server Error', { status: 500 }))
-        return
+  // Stream request body into CGI stdin. Buffering the whole body would put
+  // multi-GB push payloads onto the Node heap and trigger OOM on small hosts.
+  if (method === 'POST' && c.req.raw.body) {
+    const reader = c.req.raw.body.getReader()
+    void (async () => {
+      try {
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          if (!cgi.stdin.write(value)) {
+            await new Promise<void>(r => cgi.stdin.once('drain', () => r()))
+          }
+        }
+        cgi.stdin.end()
+      } catch (err) {
+        console.error('[git-http] Error streaming request body:', err)
+        cgi.stdin.destroy()
+        cgi.kill()
       }
+    })()
+  } else {
+    cgi.stdin.end()
+  }
 
-      const output = Buffer.concat(chunks)
+  cgi.stdin.on('error', () => {
+    // CGI may close stdin early (e.g. on protocol errors); avoid crashing the server.
+  })
 
-      // Parse CGI output: headers separated from body by \r\n\r\n
-      const headerEnd = output.indexOf('\r\n\r\n')
-      if (headerEnd === -1) {
-        resolve(new Response(output, { status: 200 }))
-        return
-      }
+  let stderrData = ''
+  cgi.stderr.on('data', (data: Buffer) => { stderrData += data.toString() })
 
-      const headerSection = output.subarray(0, headerEnd).toString()
-      const body = output.subarray(headerEnd + 4)
+  return new Promise<Response>((resolve) => {
+    let headerBuffer = Buffer.alloc(0)
+    let headersResolved = false
+    let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null
+    const pendingBodyChunks: Buffer[] = []
+    let cgiClosed = false
+    let cgiExitCode: number | null = null
+
+    const MAX_HEADER_BYTES = 64 * 1024
+
+    const tryParseHeaders = (): boolean => {
+      const headerEnd = headerBuffer.indexOf('\r\n\r\n')
+      if (headerEnd === -1) return false
+
+      const headerSection = headerBuffer.subarray(0, headerEnd).toString()
+      const remainder = headerBuffer.subarray(headerEnd + 4)
 
       const headers = new Headers()
       let status = 200
-
       for (const line of headerSection.split('\r\n')) {
         const colonIdx = line.indexOf(':')
-        if (colonIdx === -1) {
-          // Check for Status line
-          const statusMatch = line.match(/^Status:\s*(\d+)/)
-          if (statusMatch) {
-            status = parseInt(statusMatch[1], 10)
-          }
-          continue
-        }
+        if (colonIdx === -1) continue
         const key = line.slice(0, colonIdx).trim()
         const value = line.slice(colonIdx + 1).trim()
         if (key.toLowerCase() === 'status') {
-          const statusCode = parseInt(value, 10)
-          if (!isNaN(statusCode)) status = statusCode
+          const code = parseInt(value, 10)
+          if (!isNaN(code)) status = code
         } else {
           headers.set(key, value)
         }
       }
 
-      resolve(new Response(body, { status, headers }))
+      headersResolved = true
+
+      const stream = new ReadableStream<Uint8Array>({
+        start(controller) {
+          bodyController = controller
+          if (remainder.length > 0) controller.enqueue(remainder)
+          for (const chunk of pendingBodyChunks) controller.enqueue(chunk)
+          pendingBodyChunks.length = 0
+          if (cgiClosed) {
+            if (cgiExitCode === 0) controller.close()
+            else controller.error(new Error(`git http-backend exited with code ${cgiExitCode}`))
+          }
+        },
+        cancel() {
+          cgi.kill()
+        },
+      })
+
+      resolve(new Response(stream, { status, headers }))
+      return true
+    }
+
+    cgi.stdout.on('data', (chunk: Buffer) => {
+      if (headersResolved) {
+        if (bodyController) bodyController.enqueue(chunk)
+        else pendingBodyChunks.push(chunk)
+        return
+      }
+      headerBuffer = Buffer.concat([headerBuffer, chunk])
+      if (tryParseHeaders()) return
+      if (headerBuffer.length > MAX_HEADER_BYTES) {
+        headersResolved = true
+        console.error('[git-http] CGI header section exceeded limit', stderrData)
+        cgi.kill()
+        resolve(new Response('Internal Server Error', { status: 500 }))
+      }
+    })
+
+    cgi.on('close', (code) => {
+      cgiClosed = true
+      cgiExitCode = code
+      if (!headersResolved) {
+        if (headerBuffer.length > 0 && tryParseHeaders()) return
+        if (code !== 0) {
+          console.error(`[git-http] git http-backend exited with code ${code}`, stderrData)
+          headersResolved = true
+          resolve(new Response('Internal Server Error', { status: 500 }))
+        } else {
+          headersResolved = true
+          resolve(new Response(headerBuffer, { status: 200 }))
+        }
+      } else if (bodyController) {
+        if (code === 0) bodyController.close()
+        else bodyController.error(new Error(`git http-backend exited with code ${code}`))
+      }
     })
 
     cgi.on('error', (err) => {
-      console.error('[git-http] Failed to spawn git http-backend:', err)
-      resolve(new Response('Internal Server Error', { status: 500 }))
+      if (!headersResolved) {
+        headersResolved = true
+        console.error('[git-http] Failed to spawn git http-backend:', err)
+        resolve(new Response('Internal Server Error', { status: 500 }))
+      } else if (bodyController) {
+        bodyController.error(err)
+      }
     })
   })
 }
