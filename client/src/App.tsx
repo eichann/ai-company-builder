@@ -65,9 +65,13 @@ function App() {
 
   // Persist the current company so it can be restored on the next login.
   // Stored per-user to avoid bleeding selections across accounts on a shared machine.
+  // Skip when currentCompany is null: this effect runs on the same render as
+  // the restore effect below, and writing null here would clobber the stored
+  // entry before restore can read it. The only legitimate clear path — losing
+  // server-side access — is handled explicitly inside the restore effect.
   useEffect(() => {
-    if (!user) return
-    safeWriteLastCompany(user.id, currentCompany ?? null)
+    if (!user || !currentCompany) return
+    safeWriteLastCompany(user.id, currentCompany)
   }, [user, currentCompany])
 
   // Restore the previously selected company after login. Runs once per
