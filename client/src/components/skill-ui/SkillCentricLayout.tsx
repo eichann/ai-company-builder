@@ -34,6 +34,44 @@ const MIN_CHAT_WIDTH = 280
 
 type LeftPanelTab = 'skills' | 'files' | 'search' | 'history'
 
+// ============================================================================
+// Per-company editor state persistence
+// ============================================================================
+
+const EDITOR_STATE_KEY_PREFIX = 'editor:'
+
+type PersistedEditorState = {
+  openFiles: string[]
+  activeFilePath: string | null
+  leftTab: LeftPanelTab
+}
+
+const VALID_LEFT_TABS: ReadonlyArray<LeftPanelTab> = ['skills', 'files', 'search', 'history']
+
+function safeReadEditorState(companyId: string): PersistedEditorState | null {
+  try {
+    const raw = localStorage.getItem(`${EDITOR_STATE_KEY_PREFIX}${companyId}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || !Array.isArray(parsed.openFiles)) return null
+    return {
+      openFiles: parsed.openFiles.filter((p: unknown): p is string => typeof p === 'string'),
+      activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
+      leftTab: VALID_LEFT_TABS.includes(parsed.leftTab) ? parsed.leftTab : 'skills',
+    }
+  } catch {
+    return null
+  }
+}
+
+function safeWriteEditorState(companyId: string, state: PersistedEditorState): void {
+  try {
+    localStorage.setItem(`${EDITOR_STATE_KEY_PREFIX}${companyId}`, JSON.stringify(state))
+  } catch {
+    // Storage may be unavailable; fail silently.
+  }
+}
+
 export function SkillCentricLayout() {
   const { t } = useTranslation()
   // Use individual selectors to prevent unnecessary re-renders
@@ -82,14 +120,85 @@ export function SkillCentricLayout() {
   }
   prevDeptCountRef.current = departments.length
 
+  // Synchronously hydrate editor state from localStorage during the first render
+  // so the persisted tabs/sidebar are visible immediately — no empty→populated
+  // flicker. Background file-existence validation happens in the effect below.
+  const initialEditorState = useState(() =>
+    currentCompany?.id ? safeReadEditorState(currentCompany.id) : null
+  )[0]
+
   // Left panel state
-  const [leftTab, setLeftTab] = useState<LeftPanelTab>('skills')
+  const [leftTab, setLeftTab] = useState<LeftPanelTab>(() => initialEditorState?.leftTab ?? 'skills')
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
 
   // Multi-file editor state
-  const [openFiles, setOpenFiles] = useState<string[]>([])
-  const [activeFilePath, setActiveFilePath] = useState<string | null>(null)
+  const [openFiles, setOpenFiles] = useState<string[]>(() => initialEditorState?.openFiles ?? [])
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(() => initialEditorState?.activeFilePath ?? null)
   const [previewFilePath, setPreviewFilePath] = useState<string | null>(null)
+
+  // editorRestoredForId tracks which company we've finished validating files for.
+  // It gates the persist effect to prevent any transient cross-company state from
+  // clobbering the stored entry while a company switch is mid-flight.
+  const [editorRestoredForId, setEditorRestoredForId] = useState<string | null>(null)
+  const isFirstEditorMountRef = useRef(true)
+  useEffect(() => {
+    if (!currentCompany?.id) {
+      setEditorRestoredForId(null)
+      return
+    }
+    if (editorRestoredForId === currentCompany.id) return
+
+    const targetCompanyId = currentCompany.id
+    const persisted = safeReadEditorState(targetCompanyId)
+    const wasFirstMount = isFirstEditorMountRef.current
+    isFirstEditorMountRef.current = false
+
+    // On a cross-company switch, swap state immediately so the new company's
+    // persisted view appears without showing the old one. On the very first
+    // mount the useState initializers already loaded the right state, so
+    // skipping these setters avoids a redundant re-render.
+    if (!wasFirstMount) {
+      setOpenFiles(persisted?.openFiles ?? [])
+      setActiveFilePath(persisted?.activeFilePath ?? null)
+      setLeftTab(persisted?.leftTab ?? 'skills')
+    }
+
+    if (!persisted || persisted.openFiles.length === 0) {
+      setEditorRestoredForId(targetCompanyId)
+      return
+    }
+    let cancelled = false
+    void (async () => {
+      const checks = await Promise.all(
+        persisted.openFiles.map((p) => window.electronAPI.exists(p).catch(() => false))
+      )
+      if (cancelled) return
+      const allValid = checks.every(Boolean)
+      if (!allValid) {
+        const validFiles = persisted.openFiles.filter((_, i) => checks[i])
+        const active = validFiles.includes(persisted.activeFilePath ?? '')
+          ? persisted.activeFilePath
+          : (validFiles[validFiles.length - 1] ?? null)
+        setOpenFiles(validFiles)
+        setActiveFilePath(active)
+      }
+      setEditorRestoredForId(targetCompanyId)
+    })()
+    return () => { cancelled = true }
+  }, [currentCompany?.id, editorRestoredForId])
+
+  // Persist editor state whenever it changes. Gated on restoration having
+  // completed for this company so the initial empty state can't clobber a
+  // previously stored entry on the same render.
+  useEffect(() => {
+    if (!currentCompany?.id || editorRestoredForId !== currentCompany.id) return
+    safeWriteEditorState(currentCompany.id, {
+      openFiles,
+      activeFilePath,
+      leftTab,
+    })
+  }, [currentCompany?.id, editorRestoredForId, openFiles, activeFilePath, leftTab])
+
   // Search
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [showFileSearch, setShowFileSearch] = useState(false)

@@ -1552,9 +1552,11 @@ interface ChatPanelChatProps {
   onShowSettings: () => void
   onTitleChange?: (title: string) => void
   onNewTab?: () => void
+  initialSessionId?: string | null
+  onSessionIdChange?: (sessionId: string | null) => void
 }
 
-function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings, onTitleChange, onNewTab }: ChatPanelChatProps) {
+function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings, onTitleChange, onNewTab, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1802,12 +1804,18 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef(true)
 
+  // Shows a spinner over the message list while the persisted session for
+  // this tab is being loaded — replaces the brief greeting→messages flicker.
+  const [isRestoringSession, setIsRestoringSession] = useState(!!initialSessionId)
+
   // Initialize with greeting and load sessions
   const initializedRef = useRef(false)
   useEffect(() => {
     if (!initializedRef.current) {
       initializedRef.current = true
-      if (messages.length === 0) {
+      // Skip the greeting when we're about to load a persisted session — it
+      // would just be replaced milliseconds later.
+      if (messages.length === 0 && !initialSessionId) {
         setMessages([{
           id: '1',
           role: 'assistant' as const,
@@ -1817,8 +1825,26 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       if (currentCompany?.id) {
         loadSessions()
       }
+      // Restore the session attached to this tab when the parent passes one.
+      // Each tab owns its own session, so persistence lives at the parent
+      // (outer ChatPanel) level; this is only the per-tab consumer.
+      if (initialSessionId) {
+        void (async () => {
+          try {
+            await loadSession(initialSessionId)
+          } finally {
+            setIsRestoringSession(false)
+          }
+        })()
+      }
     }
   }, [])
+
+  // Notify the parent whenever this tab's active session id changes, so the
+  // parent can persist the tab → session mapping.
+  useEffect(() => {
+    onSessionIdChange?.(currentSessionId)
+  }, [currentSessionId, onSessionIdChange])
 
   // Track company changes to reload sessions
   const prevCompanyIdRef = useRef(currentCompany?.id)
@@ -2591,17 +2617,23 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       )}
 
       {/* Messages Area */}
-      <MessageList
-        messages={messages}
-        status={status}
-        messagesEndRef={messagesEndRef}
-        containerRef={messagesContainerRef}
-        timestamps={timestampsRef.current}
-        messageImages={messageImages}
-        messageReferenceFiles={messageReferenceFiles}
-        onRegenerate={regenerate}
-        onEditSubmit={handleEditMessage}
-      />
+      {isRestoringSession ? (
+        <div className="flex-1 flex items-center justify-center">
+          <CircleNotch size={24} className="text-ink-muted animate-spin" />
+        </div>
+      ) : (
+        <MessageList
+          messages={messages}
+          status={status}
+          messagesEndRef={messagesEndRef}
+          containerRef={messagesContainerRef}
+          timestamps={timestampsRef.current}
+          messageImages={messageImages}
+          messageReferenceFiles={messageReferenceFiles}
+          onRegenerate={regenerate}
+          onEditSubmit={handleEditMessage}
+        />
+      )}
 
       {/* Tool Approval Banner (above input) */}
       {pendingApproval && (
@@ -2643,8 +2675,52 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
 // ============================================================================
 
 interface ChatTab {
-  id: string
+  id: string  // Ephemeral handle (random UUID), regenerated on each app start
   title: string
+  sessionId: string | null  // Persisted chat session id (null until first save)
+}
+
+// ============================================================================
+// Persisted chat tab state (per company)
+// ============================================================================
+
+const CHAT_TABS_KEY_PREFIX = 'chatTabs:'
+
+type PersistedChatTabs = {
+  tabs: Array<{ title: string; sessionId: string | null }>
+  activeIndex: number
+}
+
+function safeReadChatTabs(companyId: string): PersistedChatTabs | null {
+  try {
+    const raw = localStorage.getItem(`${CHAT_TABS_KEY_PREFIX}${companyId}`)
+    if (!raw) return null
+    const parsed = JSON.parse(raw)
+    if (!parsed || !Array.isArray(parsed.tabs)) return null
+    const tabs = parsed.tabs
+      .filter((t: unknown): t is { title: unknown; sessionId: unknown } =>
+        typeof t === 'object' && t !== null)
+      .map((t: { title: unknown; sessionId: unknown }) => ({
+        title: typeof t.title === 'string' ? t.title : '',
+        sessionId: typeof t.sessionId === 'string' ? t.sessionId : null,
+      }))
+    if (tabs.length === 0) return null
+    const activeIndex =
+      typeof parsed.activeIndex === 'number' && parsed.activeIndex >= 0 && parsed.activeIndex < tabs.length
+        ? parsed.activeIndex
+        : 0
+    return { tabs, activeIndex }
+  } catch {
+    return null
+  }
+}
+
+function safeWriteChatTabs(companyId: string, state: PersistedChatTabs): void {
+  try {
+    localStorage.setItem(`${CHAT_TABS_KEY_PREFIX}${companyId}`, JSON.stringify(state))
+  } catch {
+    // Storage may be unavailable; fail silently.
+  }
 }
 
 function ChatTabBar({
@@ -2719,6 +2795,7 @@ interface ChatPanelProps {
 export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: ChatPanelProps) {
   const { t } = useTranslation()
   const serverInfo = useChatServerInfo()
+  const currentCompany = useAppStore((s) => s.currentCompany)
 
   // Auth state
   const [isReady, setIsReady] = useState(false)
@@ -2728,16 +2805,37 @@ export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   const [showSettings, setShowSettings] = useState(false)
   const [isChecking, setIsChecking] = useState(true)
 
+  // Synchronously hydrate the tab list from localStorage during the first
+  // render so multi-tab users see the right tab count immediately — no
+  // 1-tab→N-tab flicker. Uses a ref so tabs and activeTabId share the same
+  // freshly-generated UUIDs (the persisted entry only stores titles + session ids).
+  const initialChatStateRef = useRef<{ tabs: ChatTab[]; activeTabId: string } | null>(null)
+  if (initialChatStateRef.current === null) {
+    const persisted = currentCompany?.id ? safeReadChatTabs(currentCompany.id) : null
+    if (persisted && persisted.tabs.length > 0) {
+      const restored: ChatTab[] = persisted.tabs.map((tab) => ({
+        id: crypto.randomUUID(),
+        title: tab.title || t('chat.newChat'),
+        sessionId: tab.sessionId,
+      }))
+      initialChatStateRef.current = {
+        tabs: restored,
+        activeTabId: restored[persisted.activeIndex]?.id ?? restored[0].id,
+      }
+    } else {
+      const tab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
+      initialChatStateRef.current = { tabs: [tab], activeTabId: tab.id }
+    }
+  }
+
   // Tab management state
-  const [tabs, setTabs] = useState<ChatTab[]>(() => [
-    { id: crypto.randomUUID(), title: t('chat.newChat') },
-  ])
-  const [activeTabId, setActiveTabId] = useState(() => tabs[0].id)
+  const [tabs, setTabs] = useState<ChatTab[]>(initialChatStateRef.current.tabs)
+  const [activeTabId, setActiveTabId] = useState<string>(initialChatStateRef.current.activeTabId)
   const tabsRef = useRef(tabs)
   tabsRef.current = tabs
 
   const createNewTab = useCallback(() => {
-    const newTab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat') }
+    const newTab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
     setTabs(prev => [...prev, newTab])
     setActiveTabId(newTab.id)
   }, [t])
@@ -2758,6 +2856,60 @@ export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   const updateTabTitle = useCallback((targetTabId: string, title: string) => {
     setTabs(prev => prev.map(tab => tab.id === targetTabId ? { ...tab, title } : tab))
   }, [])
+
+  const updateTabSessionId = useCallback((targetTabId: string, sessionId: string | null) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(tab => tab.id === targetTabId)
+      if (idx === -1 || prev[idx].sessionId === sessionId) return prev
+      const next = prev.slice()
+      next[idx] = { ...next[idx], sessionId }
+      return next
+    })
+  }, [])
+
+  // Handle cross-company changes (not the initial mount — that's already
+  // hydrated synchronously above). tabRestoredForId gates the persist effect
+  // so a transient state during a switch can't clobber the stored entry.
+  const [tabRestoredForId, setTabRestoredForId] = useState<string | null>(null)
+  const isFirstTabMountRef = useRef(true)
+  useEffect(() => {
+    if (!currentCompany?.id) {
+      setTabRestoredForId(null)
+      return
+    }
+    if (tabRestoredForId === currentCompany.id) return
+    const targetCompanyId = currentCompany.id
+    const wasFirstMount = isFirstTabMountRef.current
+    isFirstTabMountRef.current = false
+
+    if (!wasFirstMount) {
+      const persisted = safeReadChatTabs(targetCompanyId)
+      if (persisted && persisted.tabs.length > 0) {
+        const restored: ChatTab[] = persisted.tabs.map((tab) => ({
+          id: crypto.randomUUID(),
+          title: tab.title || t('chat.newChat'),
+          sessionId: tab.sessionId,
+        }))
+        setTabs(restored)
+        setActiveTabId(restored[persisted.activeIndex]?.id ?? restored[0].id)
+      } else {
+        const fresh: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
+        setTabs([fresh])
+        setActiveTabId(fresh.id)
+      }
+    }
+    setTabRestoredForId(targetCompanyId)
+  }, [currentCompany?.id, tabRestoredForId, t])
+
+  // Persist the tab list whenever it changes, gated on restoration completion.
+  useEffect(() => {
+    if (!currentCompany?.id || tabRestoredForId !== currentCompany.id) return
+    const activeIndex = Math.max(0, tabs.findIndex(tab => tab.id === activeTabId))
+    safeWriteChatTabs(currentCompany.id, {
+      tabs: tabs.map(tab => ({ title: tab.title, sessionId: tab.sessionId })),
+      activeIndex,
+    })
+  }, [currentCompany?.id, tabRestoredForId, tabs, activeTabId])
 
 
   // Auth check on mount
@@ -2879,6 +3031,8 @@ export function ChatPanel({ departmentPath, activeDepartment, slashCommands }: C
                 onShowSettings={() => setShowSettings(true)}
                 onTitleChange={(title) => updateTabTitle(tab.id, title)}
                 onNewTab={createNewTab}
+                initialSessionId={tab.sessionId}
+                onSessionIdChange={(sessionId) => updateTabSessionId(tab.id, sessionId)}
               />
             </div>
           </div>
