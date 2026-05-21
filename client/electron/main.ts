@@ -3462,11 +3462,14 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
     const logFd = fs.openSync(logPath, 'w')
 
     console.log('[tools:start] About to spawn:', npmCmd, 'run', startCommand)
+    // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
+    // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
     const childProcess = spawn(npmCmd, ['run', startCommand, '--', '--port', port.toString()], {
       cwd: toolPath,
       stdio: ['ignore', logFd, logFd],
       detached: true,
       env: { ...process.env, PORT: port.toString(), PATH: getShellPath() },
+      ...(process.getuid ? { uid: process.getuid(), gid: process.getgid!() } : {}),
     })
     console.log('[tools:start] Spawn succeeded, pid:', childProcess.pid)
 
