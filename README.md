@@ -55,35 +55,56 @@ A desktop app + self-hosted server that lets teams share AI agent skills, files,
 
 ## Quick Start
 
-### Prerequisites
-
-- Node.js 20+
-- pnpm 9+
-
-### Development
-
 ```bash
-# Clone the repository
 git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
+```
 
-# Install dependencies
-pnpm install
+### 1. Run it locally
 
-# Set up environment
+For when you want to see the whole product working — API server, admin panel, and data — before touching any code. Docker is all you need; no other setup required.
+
+```bash
 cp .env.example .env
-# Edit .env and set AUTH_SECRET (generate with: openssl rand -base64 32)
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
+docker compose up -d
+```
 
-# Start the server
+This starts two containers: the API server (http://localhost:3001) and the admin panel (http://localhost:3100). Open http://localhost:3100 in your browser, sign up (this becomes the first account), and create a company — the full server-side experience now runs on your machine.
+
+To also try the desktop client (Electron), keep the server running and run the following from the repository root (requires Node.js 20+ and pnpm 9+):
+
+```bash
+pnpm install   # first time only
+pnpm dev       # launches the client
+```
+
+On first launch the client asks for a server URL — enter `http://localhost:3001`.
+
+### 2. Develop
+
+For when you want to change the code. Each process runs directly with hot reload, so edits are reflected immediately. Requires Node.js 20+ and pnpm 9+.
+
+```bash
+pnpm install
+cp .env.example .env
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
+
+# Terminal 1: API server (http://localhost:3001)
 pnpm dev:server
 
-# In another terminal, start the client
+# Terminal 2: admin panel (http://localhost:3100)
+pnpm dev:admin
+
+# Terminal 3: desktop client (Electron)
 pnpm dev
 ```
 
-### Self-Hosting (Production)
+> **Note**: Use 1 *or* 2, not both at once — they bind the same ports (3001/3100). They also store data in different places (`./data` for Docker, `server/data` for `pnpm dev:server`), so accounts created in one are not visible in the other.
 
-See the full self-hosting guide:
+### 3. Self-host in production
+
+For when you want to run AI Company Builder for your team on a real server, with your own domain and HTTPS. See the self-hosting guide:
 
 - [English](docs/self-hosting/README.md)
 - [日本語](docs/self-hosting/README.ja.md)
