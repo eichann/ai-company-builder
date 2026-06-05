@@ -93,7 +93,7 @@ sed -i "s|AUTH_SECRET=|AUTH_SECRET=$(openssl rand -hex 32)|" .env
 # .env をドメインに合わせて編集
 
 # 3. ビルドと起動
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 
 # 4. Caddy で HTTPS を設定
 sudo apt install -y caddy
@@ -194,6 +194,8 @@ git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
 ```
 
+> **WSL2 をお使いの場合**: 必ず WSL2 側のファイルシステム（例: `~/`）に clone してください。`/mnt/c/...`（Windows ドライブ側）では SQLite のロックやファイル監視（ホットリロード）が壊れ、動作も大幅に遅くなります。
+
 #### 2.2 環境変数の設定
 
 ```bash
@@ -228,7 +230,7 @@ mkdir -p data/repos data/workdirs
 #### 2.4 ビルドと起動
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 ```
 
 初回は 2〜5 分かかります。
@@ -236,7 +238,7 @@ docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
 確認：
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml ps
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml ps
 curl http://127.0.0.1:3001/api/me
 ```
 
@@ -442,11 +444,11 @@ crontab -e
 
 ```bash
 cd ~/ai-company-builder
-docker compose -f docs/self-hosting/docker-compose.production.yml down
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml down
 cp /path/to/backup/app.sqlite data/app.sqlite
 cp /path/to/backup/auth.sqlite data/auth.sqlite
 cp -r /path/to/backup/repos data/repos
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d
 ```
 
 ---
@@ -457,7 +459,7 @@ docker compose -f docs/self-hosting/docker-compose.production.yml up -d
 cd ~/ai-company-builder
 git pull origin main
 ./backup.sh
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 curl -s https://your-domain.com/api/me
 # 期待される出力: {"error":"Unauthorized"}
 ```
@@ -481,7 +483,7 @@ curl -s https://your-domain.com/api/me
 ### Docker コンテナが再起動を繰り返す
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml logs --tail=50 api
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml logs --tail=50 api
 ```
 
 よくある原因:

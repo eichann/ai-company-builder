@@ -93,7 +93,7 @@ sed -i "s|AUTH_SECRET=|AUTH_SECRET=$(openssl rand -hex 32)|" .env
 # Edit .env with your domain
 
 # 3. Build and start
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 
 # 4. Set up Caddy for HTTPS
 sudo apt install -y caddy
@@ -201,6 +201,8 @@ git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
 ```
 
+> **WSL2 users**: Always clone into the WSL2 filesystem (e.g. `~/`), never under `/mnt/c/...`. The Windows-drive mount breaks SQLite locking, file watching (hot reload), and is much slower.
+
 #### 2.2 Configure Environment Variables
 
 ```bash
@@ -238,7 +240,7 @@ mkdir -p data/repos data/workdirs
 #### 2.4 Build and Start
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 ```
 
 This will take 2–5 minutes on first run (downloading base images and installing dependencies).
@@ -246,7 +248,7 @@ This will take 2–5 minutes on first run (downloading base images and installin
 Verify:
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml ps
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml ps
 ```
 
 Test the API internally:
@@ -463,11 +465,11 @@ crontab -e
 
 ```bash
 cd ~/ai-company-builder
-docker compose -f docs/self-hosting/docker-compose.production.yml down
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml down
 cp /path/to/backup/app.sqlite data/app.sqlite
 cp /path/to/backup/auth.sqlite data/auth.sqlite
 cp -r /path/to/backup/repos data/repos
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d
 ```
 
 ---
@@ -478,7 +480,7 @@ docker compose -f docs/self-hosting/docker-compose.production.yml up -d
 cd ~/ai-company-builder
 git pull origin main
 ./backup.sh
-docker compose -f docs/self-hosting/docker-compose.production.yml up -d --build
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml up -d --build
 curl -s https://your-domain.com/api/me
 # Expected: {"error":"Unauthorized"}
 ```
@@ -502,7 +504,7 @@ Make sure `PUBLIC_URL` in your `.env` matches the exact domain you're accessing 
 ### Docker containers keep restarting
 
 ```bash
-docker compose -f docs/self-hosting/docker-compose.production.yml logs --tail=50 api
+docker compose --project-directory . -f docs/self-hosting/docker-compose.production.yml logs --tail=50 api
 ```
 
 Common causes:
