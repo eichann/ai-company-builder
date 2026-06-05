@@ -4,7 +4,13 @@ services:
       context: .
       dockerfile: server/Dockerfile
     ports:
-      - "3001:3001"
+      # Default binds to loopback only: nothing on the LAN/internet can reach
+      # the API directly, regardless of firewall layers. Use a reverse proxy
+      # (Caddy) for external access.
+      # Known issue: OrbStack (<= 2.2.0) fails to forward loopback-bound ports
+      # when host and container ports match — set BIND_ADDR=0.0.0.0 in .env
+      # as a workaround (see https://github.com/orbstack/orbstack/issues/944).
+      - "${BIND_ADDR:-127.0.0.1}:3001:3001"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - PORT=3001
@@ -42,7 +48,8 @@ services:
       context: .
       dockerfile: admin/Dockerfile
     ports:
-      - "3100:3100"
+      # Loopback by default — see the api service note
+      - "${BIND_ADDR:-127.0.0.1}:3100:3100"
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_API_URL=${PUBLIC_URL:-http://localhost:3001}
