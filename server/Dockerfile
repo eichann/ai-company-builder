@@ -8,17 +8,20 @@ RUN apt-get update && apt-get install -y \
     make \
     g++ \
     git \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && git config --global user.email "system@ai-company-builder" \
+    && git config --global user.name "AI Company Builder" \
+    && git config --global safe.directory '*'
 
-# Copy package files
-COPY package.json ./
+# Copy package files (build context is the repo root — see docker-compose.yml)
+COPY server/package.json ./
 
 # Install dependencies using npm (allows build scripts by default)
 RUN npm install
 
 # Copy source code
-COPY src ./src
-COPY tsconfig.json ./
+COPY server/src ./src
+COPY server/tsconfig.json ./
 
 # Create data directory
 RUN mkdir -p data
