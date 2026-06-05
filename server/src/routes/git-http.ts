@@ -220,13 +220,22 @@ async function handleGitCgi(
       }
     })
 
+    const logFailure = (code: number | null, phase: string) => {
+      console.error(
+        `[git-http] git http-backend exited with code ${code} (${phase})\n` +
+        `  request: ${method} ${pathInfo}\n` +
+        `  user: ${user.email}\n` +
+        `  stderr: ${stderrData || '(empty)'}`
+      )
+    }
+
     cgi.on('close', (code) => {
       cgiClosed = true
       cgiExitCode = code
       if (!headersResolved) {
         if (headerBuffer.length > 0 && tryParseHeaders()) return
         if (code !== 0) {
-          console.error(`[git-http] git http-backend exited with code ${code}`, stderrData)
+          logFailure(code, 'before headers')
           headersResolved = true
           resolve(new Response('Internal Server Error', { status: 500 }))
         } else {
@@ -235,16 +244,30 @@ async function handleGitCgi(
         }
       } else if (bodyController) {
         if (code === 0) bodyController.close()
-        else bodyController.error(new Error(`git http-backend exited with code ${code}`))
+        else {
+          logFailure(code, 'mid-body')
+          bodyController.error(new Error(`git http-backend exited with code ${code}`))
+        }
       }
     })
 
     cgi.on('error', (err) => {
       if (!headersResolved) {
         headersResolved = true
-        console.error('[git-http] Failed to spawn git http-backend:', err)
+        console.error(
+          `[git-http] Failed to spawn git http-backend: ${err}\n` +
+          `  request: ${method} ${pathInfo}\n` +
+          `  user: ${user.email}\n` +
+          `  stderr: ${stderrData || '(empty)'}`
+        )
         resolve(new Response('Internal Server Error', { status: 500 }))
       } else if (bodyController) {
+        console.error(
+          `[git-http] git http-backend error after headers: ${err}\n` +
+          `  request: ${method} ${pathInfo}\n` +
+          `  user: ${user.email}\n` +
+          `  stderr: ${stderrData || '(empty)'}`
+        )
         bodyController.error(err)
       }
     })
