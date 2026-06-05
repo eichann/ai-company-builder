@@ -46,6 +46,9 @@ services:
     environment:
       - NODE_ENV=${NODE_ENV:-development}
       - NEXT_PUBLIC_API_URL=${PUBLIC_URL:-http://localhost:3001}
+      # Server-side /api/* proxy target — must reach the api container over the
+      # compose network (localhost inside the admin container is admin itself)
+      - API_PROXY_URL=http://api:3001
       # Cap Node heap (smaller than api: admin is mostly static rendering)
       - NODE_OPTIONS=--max-old-space-size=1024
     volumes:
