@@ -201,6 +201,8 @@ git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
 ```
 
+> **WSL2 users**: Always clone into the WSL2 filesystem (e.g. `~/`), never under `/mnt/c/...`. The Windows-drive mount breaks SQLite locking, file watching (hot reload), and is much slower.
+
 #### 2.2 Configure Environment Variables
 
 ```bash

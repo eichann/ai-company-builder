@@ -194,6 +194,8 @@ git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
 ```
 
+> **WSL2 をお使いの場合**: 必ず WSL2 側のファイルシステム（例: `~/`）に clone してください。`/mnt/c/...`（Windows ドライブ側）では SQLite のロックやファイル監視（ホットリロード）が壊れ、動作も大幅に遅くなります。
+
 #### 2.2 環境変数の設定
 
 ```bash
