@@ -11,7 +11,8 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && git config --global user.email "system@ai-company-builder" \
     && git config --global user.name "AI Company Builder" \
-    && git config --global safe.directory '*'
+    && git config --global safe.directory '*' \
+    && git config --global init.defaultBranch main
 
 # Copy package files (build context is the repo root — see docker-compose.yml)
 COPY server/package.json ./

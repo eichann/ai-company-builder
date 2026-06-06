@@ -106,7 +106,9 @@ gitRoute.post('/repos', async (c) => {
 
     // Create bare repository
     mkdirSync(repoPath, { recursive: true })
-    execFileSync('git', ['init', '--bare', repoPath], { stdio: 'pipe' })
+    // Pin the branch name: the client hardcodes origin/main, so the repo must
+    // never default to the container git's default (master).
+    execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
 
     // Enable HTTP push (required for git-http-backend)
     execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })

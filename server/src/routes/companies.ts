@@ -81,7 +81,9 @@ function createCompanyRepo(companyId: string): string {
   const repoPath = join(REPOS_DIR, `${companyId}.git`)
   if (!existsSync(repoPath)) {
     mkdirSync(repoPath, { recursive: true })
-    execFileSync('git', ['init', '--bare', repoPath], { stdio: 'pipe' })
+    // Pin the branch name: the client hardcodes origin/main, so the repo must
+    // never default to the container git's default (master).
+    execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
   }
   return repoPath
 }
