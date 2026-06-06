@@ -7,6 +7,7 @@
     "dev": "pnpm --filter client dev",
     "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 pnpm --filter client dev",
     "dev:server": "pnpm --filter server dev",
+    "dev:admin": "pnpm --filter admin dev",
     "build": "pnpm -r build",
     "lint": "pnpm -r lint"
   },

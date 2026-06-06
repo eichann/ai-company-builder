@@ -59,38 +59,59 @@ Gitの知識は不要。「同期」ボタンを押すだけです。
 
 ## クイックスタート
 
-### 前提条件
-
-- Node.js 20+
-- pnpm 9+
-
-### 開発環境
-
 ```bash
-# リポジトリをクローン
 git clone https://github.com/eichann/ai-company-builder.git
 cd ai-company-builder
+```
 
-# 依存関係をインストール
-pnpm install
+### 1. まずローカルで動かす
 
-# 環境変数を設定
+コードに触れる前に、プロダクト全体——APIサーバー・管理画面・データ——が動くところを見たい場合はこちら。Docker さえあれば、ほかのセットアップは不要です。
+
+```bash
 cp .env.example .env
-# .env を編集し AUTH_SECRET を設定（生成: openssl rand -base64 32）
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
+docker compose up -d
+```
 
-# サーバーを起動
+これで2つのコンテナが起動します：APIサーバー（http://localhost:3001）と管理画面（http://localhost:3100）。ブラウザで http://localhost:3100 を開き、サインアップ（最初のアカウントになります）→ 会社を作成すれば、サーバー側の動作一式をローカルで確認できます。
+
+デスクトップクライアント（Electron）も試す場合は、サーバーを起動したまま、**リポジトリのルートで**以下を実行します（Node.js 20+ と pnpm 9+ が必要）：
+
+```bash
+pnpm install   # 初回のみ
+pnpm dev       # クライアントが起動する
+```
+
+初回起動時にサーバーURLを聞かれるので `http://localhost:3001` を入力してください。
+
+### 2. 開発する
+
+コードを変更したい場合はこちら。各プロセスを直接起動するため、編集内容がホットリロードで即座に反映されます。Node.js 20+ と pnpm 9+ が必要です。
+
+```bash
+pnpm install
+cp .env.example .env
+echo "AUTH_SECRET=$(openssl rand -base64 32)" >> .env
+
+# ターミナル1: APIサーバー (http://localhost:3001)
 pnpm dev:server
 
-# 別のターミナルでクライアントを起動
+# ターミナル2: 管理画面 (http://localhost:3100)
+pnpm dev:admin
+
+# ターミナル3: デスクトップクライアント (Electron)
 pnpm dev
 ```
 
-### セルフホスティング（本番環境）
+> **注意**: 1 と 2 は同時に起動しないでください（同じポート 3001/3100 を使うため衝突します）。また、データの保存場所も異なります（Docker は `./data`、pnpm 開発時は `server/data`）。片方で作成したアカウントや会社はもう片方には表示されません。
 
-セルフホスティングガイドを参照:
+### 3. 本番環境にセルフホストする
 
-- [English](docs/self-hosting/README.md)
+独自ドメインと HTTPS で、チームのために本物のサーバーで運用したい場合はこちら。セルフホスティングガイドを参照してください:
+
 - [日本語](docs/self-hosting/README.ja.md)
+- [English](docs/self-hosting/README.md)
 
 ## 技術スタック
 
