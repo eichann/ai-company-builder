@@ -114,6 +114,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:isSparseCheckout', repoPath),
   listRemoteDirectories: (repoPath: string) =>
     ipcRenderer.invoke('git:listRemoteDirectories', repoPath),
+  gitBinaryStatus: () =>
+    ipcRenderer.invoke('git:getBinaryStatus'),
 
   // Backup operations
   backupList: (repoPath: string) =>
@@ -578,6 +580,7 @@ declare global {
       sparseCheckoutDisable: (repoPath: string) => Promise<{ success: boolean; error?: string }>
       isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
       listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
+      gitBinaryStatus: () => Promise<{ bundled: boolean; binary: string }>
 
       // Backup
       backupList: (repoPath: string) => Promise<BackupListResult>

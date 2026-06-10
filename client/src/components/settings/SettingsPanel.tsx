@@ -23,6 +23,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
   const { departments } = useDepartments(currentCompany?.id)
   const [syncActionInProgress, setSyncActionInProgress] = useState<string | null>(null)
+  const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>('apikeys')
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
@@ -34,6 +35,11 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+
+  // Check which git binary is in use (warn when on the system git fallback)
+  useEffect(() => {
+    window.electronAPI.gitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
+  }, [])
 
   // Load .env and .gitignore files on mount
   useEffect(() => {
@@ -392,6 +398,16 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
           ) : activeTab === 'sync' ? (
             /* Sync Folders Tab */
             <div className="space-y-6">
+              {gitBinaryStatus && !gitBinaryStatus.bundled && (
+                <div className="text-xs bg-amber-950/40 border border-amber-800/40 rounded-lg p-3 space-y-1">
+                  <p className="text-amber-400 font-medium">
+                    同梱のGitが使用できないため、システムのGitで動作しています（{gitBinaryStatus.binary}）
+                  </p>
+                  <p className="text-amber-400/70">
+                    古いGitでは大きなファイルの同期に失敗することがあるため、保護設定（http.postBuffer）を自動適用しています。
+                  </p>
+                </div>
+              )}
               {sparseCheckout.isLoading ? (
                 <div className="flex items-center justify-center py-12">
                   <SpinnerGap size={20} className="animate-spin text-zinc-500" />
