@@ -1409,7 +1409,7 @@ function extractSessionToken(cookies: string[]): string {
 // Resolve git binary: try dugite's bundled git first, fall back to system git.
 // dugite bundles git for the build machine's architecture, which may not match
 // the runtime architecture (e.g. arm64 build running on Intel Mac).
-function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<string, string> } {
+function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<string, string>; fallback: boolean } {
   const dugiteBinary = resolveGitBinary()
   try {
     // Quick check: can the bundled binary actually execute?
@@ -1424,6 +1424,7 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
         GIT_EXEC_PATH: path.join(gitDir, 'libexec', 'git-core'),
         GIT_TEMPLATE_DIR: path.join(gitDir, 'share', 'git-core', 'templates'),
       },
+      fallback: false,
     }
   } catch {
     // Bundled git failed (likely arch mismatch) — fall back to system git
@@ -1432,12 +1433,12 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
     for (const p of systemPaths) {
       if (fs.existsSync(p)) {
         console.log(`[git] Using system git: ${p}`)
-        return { binary: p, envOverrides: {} }
+        return { binary: p, envOverrides: {}, fallback: true }
       }
     }
     // Last resort: hope 'git' is in PATH
     console.warn('[git] No system git found, using PATH lookup')
-    return { binary: 'git', envOverrides: {} }
+    return { binary: 'git', envOverrides: {}, fallback: true }
   }
 }
 
@@ -1450,14 +1451,23 @@ function getResolvedGit() {
 
 // Create a simpleGit instance with HTTPS token authentication
 function createGit(repoPath: string): SimpleGit {
-  const { binary: gitBinary, envOverrides } = getResolvedGit()
+  const { binary: gitBinary, envOverrides, fallback } = getResolvedGit()
   const askPassPath = getGitAskPassPath()
   const sessionToken = extractSessionToken(authCookies)
 
   return simpleGit(repoPath, {
     binary: gitBinary,
     unsafe: { allowUnsafeCustomBinary: true },
-    config: ['core.hooksPath=/dev/null', 'credential.helper=', 'core.quotePath=false'],
+    config: [
+      'core.hooksPath=/dev/null',
+      'credential.helper=',
+      'core.quotePath=false',
+      // The system git fallback can be old (e.g. Apple Git 2.39, whose
+      // chunked HTTP push is broken — it fails even against github.com over
+      // HTTP/1.1). Buffer pushes up to 500MB so git never switches to
+      // chunked transfer above the 1MiB default.
+      ...(fallback ? ['http.postBuffer=524288000'] : []),
+    ],
     // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
     // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
     ...(process.getuid ? { spawnOptions: { uid: process.getuid() } } : {}),
@@ -1470,6 +1480,13 @@ function createGit(repoPath: string): SimpleGit {
       ...envOverrides,
     })
 }
+
+// Report which git binary is in use (bundled dugite git vs system fallback),
+// so the UI can warn when the bundled binary failed (e.g. arch mismatch).
+ipcMain.handle('git:getBinaryStatus', async () => {
+  const { binary, fallback } = getResolvedGit()
+  return { bundled: !fallback, binary }
+})
 
 // Git operations
 ipcMain.handle('git:init', async (_, repoPath: string) => {
