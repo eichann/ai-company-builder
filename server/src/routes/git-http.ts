@@ -98,6 +98,13 @@ async function handleGitCgi(
     cgiEnv.CONTENT_TYPE = contentType
   }
 
+  // git gzips some request bodies (e.g. upload-pack negotiation); http-backend
+  // only inflates them when this CGI variable is present.
+  const contentEncoding = c.req.header('Content-Encoding')
+  if (contentEncoding) {
+    cgiEnv.HTTP_CONTENT_ENCODING = contentEncoding
+  }
+
   // Cap memory used by git pack-objects (invoked by upload-pack, receive-pack,
   // and the auto-gc that runs after pushes). Without these, a single push on
   // the 2.4 GiB company repo can spike to >2 GiB and approach the host's OOM
@@ -121,7 +128,37 @@ async function handleGitCgi(
 
   // Stream request body into CGI stdin. Buffering the whole body would put
   // multi-GB push payloads onto the Node heap and trigger OOM on small hosts.
-  if (method === 'POST' && c.req.raw.body) {
+  //
+  // Two hard-won constraints (see PR for the forensics):
+  // 1. The response below MUST NOT resolve before this body is consumed.
+  //    @hono/node-server aborts the unread request body once the response
+  //    completes (AbortError / ERR_STREAM_PREMATURE_CLOSE). Loopback tests
+  //    hide this — the body finishes before the CGI emits headers — but on
+  //    real networks the upload is still in flight when receive-pack writes
+  //    its response headers, so every slow/large push died mid-transfer.
+  //    git http-backend is half-duplex (reads the whole request before
+  //    emitting the result), so holding the response is always safe.
+  // 2. Read from the raw Node IncomingMessage instead of c.req.raw.body to
+  //    stay decoupled from the web-Request/AbortController lifecycle.
+  //    pipe() gives us backpressure for free.
+  const incoming = (c as { env?: { incoming?: NodeJS.ReadableStream } }).env?.incoming
+  let requestBodyConsumed = method !== 'POST'
+  let onRequestBodyConsumed: (() => void) | null = null
+  if (!requestBodyConsumed && incoming) {
+    incoming.pipe(cgi.stdin)
+    incoming.on('end', () => {
+      requestBodyConsumed = true
+      onRequestBodyConsumed?.()
+    })
+    incoming.on('error', (err) => {
+      console.error('[git-http] Error streaming request body:', err)
+      cgi.stdin.destroy()
+      cgi.kill()
+      requestBodyConsumed = true
+      onRequestBodyConsumed?.()
+    })
+  } else if (!requestBodyConsumed && c.req.raw.body) {
+    // Fallback for non-node-server runtimes (tests etc.)
     const reader = c.req.raw.body.getReader()
     void (async () => {
       try {
@@ -137,9 +174,15 @@ async function handleGitCgi(
         console.error('[git-http] Error streaming request body:', err)
         cgi.stdin.destroy()
         cgi.kill()
+      } finally {
+        requestBodyConsumed = true
+        // TS narrows the captured variable to null inside this IIFE; it is
+        // assigned in the Promise executor below before any await resolves.
+        ;(onRequestBodyConsumed as (() => void) | null)?.()
       }
     })()
   } else {
+    requestBodyConsumed = true
     cgi.stdin.end()
   }
 
@@ -152,7 +195,9 @@ async function handleGitCgi(
 
   return new Promise<Response>((resolve) => {
     let headerBuffer = Buffer.alloc(0)
-    let headersResolved = false
+    let parsedHead: { status: number; headers: Headers; remainder: Buffer } | null = null
+    let headersDone = false
+    let resolved = false
     let bodyController: ReadableStreamDefaultController<Uint8Array> | null = null
     const pendingBodyChunks: Buffer[] = []
     let cgiClosed = false
@@ -182,7 +227,21 @@ async function handleGitCgi(
         }
       }
 
-      headersResolved = true
+      parsedHead = { status, headers, remainder }
+      headersDone = true
+      return true
+    }
+
+    // Resolve only once headers are parsed AND the request body is fully
+    // handed to the CGI. Resolving earlier aborts the in-flight request
+    // body (see the streaming block above). If the CGI already exited, the
+    // client should get the result without waiting for the rest of the
+    // upload to drain.
+    const resolveResponse = () => {
+      if (resolved || !parsedHead) return
+      if (!requestBodyConsumed && !cgiClosed) return
+      resolved = true
+      const { status, headers, remainder } = parsedHead
 
       const stream = new ReadableStream<Uint8Array>({
         start(controller) {
@@ -201,19 +260,24 @@ async function handleGitCgi(
       })
 
       resolve(new Response(stream, { status, headers }))
-      return true
     }
 
+    onRequestBodyConsumed = resolveResponse
+
     cgi.stdout.on('data', (chunk: Buffer) => {
-      if (headersResolved) {
+      if (headersDone) {
         if (bodyController) bodyController.enqueue(chunk)
         else pendingBodyChunks.push(chunk)
         return
       }
       headerBuffer = Buffer.concat([headerBuffer, chunk])
-      if (tryParseHeaders()) return
+      if (tryParseHeaders()) {
+        resolveResponse()
+        return
+      }
       if (headerBuffer.length > MAX_HEADER_BYTES) {
-        headersResolved = true
+        headersDone = true
+        resolved = true
         console.error('[git-http] CGI header section exceeded limit', stderrData)
         cgi.kill()
         resolve(new Response('Internal Server Error', { status: 500 }))
@@ -232,14 +296,17 @@ async function handleGitCgi(
     cgi.on('close', (code) => {
       cgiClosed = true
       cgiExitCode = code
-      if (!headersResolved) {
-        if (headerBuffer.length > 0 && tryParseHeaders()) return
+      if (!resolved) {
+        if (!headersDone && headerBuffer.length > 0) tryParseHeaders()
+        if (parsedHead) {
+          resolveResponse()
+          return
+        }
+        resolved = true
         if (code !== 0) {
           logFailure(code, 'before headers')
-          headersResolved = true
           resolve(new Response('Internal Server Error', { status: 500 }))
         } else {
-          headersResolved = true
           resolve(new Response(headerBuffer, { status: 200 }))
         }
       } else if (bodyController) {
@@ -252,8 +319,8 @@ async function handleGitCgi(
     })
 
     cgi.on('error', (err) => {
-      if (!headersResolved) {
-        headersResolved = true
+      if (!resolved) {
+        resolved = true
         console.error(
           `[git-http] Failed to spawn git http-backend: ${err}\n` +
           `  request: ${method} ${pathInfo}\n` +

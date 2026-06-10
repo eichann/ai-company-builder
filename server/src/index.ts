@@ -153,9 +153,14 @@ const port = Number(process.env.PORT) || 3001
 
 console.log(`Server starting on port ${port}...`)
 
-serve({
+const server = serve({
   fetch: app.fetch,
   port,
 })
+
+// Git pushes/clones send the whole pack as one long request. Node's default
+// requestTimeout (300s) severs uploads that take longer than 5 minutes on
+// slow links, so raise the cap to 1 hour.
+;(server as import('node:http').Server).requestTimeout = 60 * 60 * 1000
 
 console.log(`Server is running on http://localhost:${port}`)
