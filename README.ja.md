@@ -85,9 +85,15 @@ pnpm dev       # クライアントが起動する
 
 初回起動時にサーバーURLを聞かれるので `http://localhost:3001` を入力してください。
 
+> **AI チャットには Claude Code が必要です。** クライアントは AI チャットを動かす際、お使いのマシン上で [Claude Code](https://docs.anthropic.com/ja/docs/claude-code) CLI を起動します。先にインストールしてログインしてください。クライアント本体は **Windows・macOS・Linux でネイティブに動作します**（クライアントに WSL2 は不要です）。
+> - **Windows**: [Git for Windows](https://git-scm.com/download/win) をインストールし、PowerShell で `irm https://claude.ai/install.ps1 | iex` を実行
+> - **macOS / Linux**: `curl -fsSL https://claude.ai/install.sh | bash` を実行
+>
+> その後 `claude` を一度起動してログインしてください（Claude Pro / Max プランでOK）。従量課金の API を使いたい場合は、アプリの設定で Anthropic API キーを設定してください。
+
 ### 2. 開発する
 
-コードを変更したい場合はこちら。各プロセスを直接起動するため、編集内容がホットリロードで即座に反映されます。Node.js 20+ と pnpm 9+ が必要です。
+コードを変更したい場合はこちら。各プロセスを直接起動するため、編集内容がホットリロードで即座に反映されます。Node.js 20+ と pnpm 9+ が必要です。（デスクトップクライアントの AI チャットには Claude Code CLI も必要です — 上記の注記を参照）
 
 ```bash
 pnpm install
@@ -100,7 +106,7 @@ pnpm dev:server
 # ターミナル2: 管理画面 (http://localhost:3100)
 pnpm dev:admin
 
-# ターミナル3: デスクトップクライアント (Electron)
+# ターミナル3: デスクトップクライアント (Electron) — AI チャットには Claude Code CLI が必要
 pnpm dev
 ```
 

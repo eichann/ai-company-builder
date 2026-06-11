@@ -81,9 +81,15 @@ pnpm dev       # launches the client
 
 On first launch the client asks for a server URL — enter `http://localhost:3001`.
 
+> **AI chat needs Claude Code.** The client runs AI chat by spawning the [Claude Code](https://docs.anthropic.com/en/docs/claude-code) CLI on your machine, so install it and sign in first. The client itself runs natively on **Windows, macOS, and Linux** — WSL2 is not required for the client.
+> - **Windows**: install [Git for Windows](https://git-scm.com/download/win), then in PowerShell run `irm https://claude.ai/install.ps1 | iex`
+> - **macOS / Linux**: run `curl -fsSL https://claude.ai/install.sh | bash`
+>
+> Then run `claude` once and sign in (a Claude Pro or Max plan works). Prefer pay-as-you-go billing? Set an Anthropic API key in the app's settings instead.
+
 ### 2. Develop
 
-For when you want to change the code. Each process runs directly with hot reload, so edits are reflected immediately. Requires Node.js 20+ and pnpm 9+.
+For when you want to change the code. Each process runs directly with hot reload, so edits are reflected immediately. Requires Node.js 20+ and pnpm 9+. (The desktop client's AI chat also needs the Claude Code CLI — see the note above.)
 
 ```bash
 pnpm install
@@ -96,7 +102,7 @@ pnpm dev:server
 # Terminal 2: admin panel (http://localhost:3100)
 pnpm dev:admin
 
-# Terminal 3: desktop client (Electron)
+# Terminal 3: desktop client (Electron) — needs the Claude Code CLI for AI chat
 pnpm dev
 ```
 
