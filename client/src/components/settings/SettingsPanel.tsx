@@ -430,13 +430,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                               onClick={async () => {
                                 setSyncActionInProgress(dept.folder)
                                 try {
-                                  if (!sparseCheckout.enabled) {
-                                    // First time: enable sparse checkout with all departments except this one
-                                    const remaining = departments.map(d => d.folder).filter(f => f !== dept.folder)
-                                    await sparseCheckout.enable(remaining)
-                                  } else {
-                                    await sparseCheckout.removePath(dept.folder)
-                                  }
+                                  await sparseCheckout.removePath(dept.folder)
                                 } finally {
                                   setSyncActionInProgress(null)
                                 }

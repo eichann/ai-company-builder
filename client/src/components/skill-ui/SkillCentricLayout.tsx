@@ -249,7 +249,7 @@ export function SkillCentricLayout() {
       }
     }
     return set.size > 0 ? set : undefined
-  }, [sparseCheckout.enabled, sparseCheckout.checkedOutPaths, departments])
+  }, [sparseCheckout.enabled, sparseCheckout.excludedPaths, departments])
 
   const selectedDept = useMemo(
     () => departments.find((d) => d.id === selectedDeptId),
@@ -267,7 +267,7 @@ export function SkillCentricLayout() {
     window.electronAPI.exists(deptPath)
       .then((exists: boolean) => setDeptFolderExists(exists))
       .catch(() => setDeptFolderExists(false))
-  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, sparseCheckout.checkedOutPaths])
+  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, sparseCheckout.excludedPaths])
 
   // Department is unsynced if sparse checkout says so OR if the folder doesn't exist
   const isSelectedDeptUnsynced = useMemo(() => {
