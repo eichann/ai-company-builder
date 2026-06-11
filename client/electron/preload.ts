@@ -114,6 +114,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:isSparseCheckout', repoPath),
   listRemoteDirectories: (repoPath: string) =>
     ipcRenderer.invoke('git:listRemoteDirectories', repoPath),
+  sparseGetExclusions: (repoPath: string) =>
+    ipcRenderer.invoke('git:sparseGetExclusions', repoPath),
+  sparseSetExclusions: (repoPath: string, excluded: string[]) =>
+    ipcRenderer.invoke('git:sparseSetExclusions', repoPath, excluded),
   gitBinaryStatus: () =>
     ipcRenderer.invoke('git:getBinaryStatus'),
 
@@ -580,6 +584,8 @@ declare global {
       sparseCheckoutDisable: (repoPath: string) => Promise<{ success: boolean; error?: string }>
       isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
       listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
+      sparseGetExclusions: (repoPath: string) => Promise<{ success: boolean; excluded: string[]; error?: string }>
+      sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string }>
       gitBinaryStatus: () => Promise<{ bundled: boolean; binary: string }>
 
       // Backup

@@ -2017,60 +2017,30 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.warn('Git sync: Fetch failed (may be offline):', fetchError)
     }
 
-    // 1.5. Auto-add non-department root folders to sparse checkout
-    //       Department folders are managed by user selection; everything else should be visible to all.
+    // 1.5. Reconcile sparse checkout to the user's persisted exclusions.
+    //       The cone is always (all root dirs − excluded), so newly created
+    //       folders appear automatically while excluded ones stay excluded
+    //       across every sync. (The old code re-added every DB department
+    //       here, which silently undid the user's exclusions.)
     try {
-      const sparseConfigCheck = await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')
-      if (sparseConfigCheck.trim() === 'true') {
-        // Get all root-level directories from remote
-        const remoteTreeRaw = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
-        const remoteFolders = remoteTreeRaw.split('\n').filter(d => d && !d.startsWith('.'))
+      const sparseEnabledNow = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
 
-        // Get department folders from API
-        let departmentFolders: string[] = []
-        if (companyId) {
-          try {
-            const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
-              headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
-            })
-            if (deptResponse.ok) {
-              const deptResult = await deptResponse.json()
-              departmentFolders = (deptResult.data || []).map((d: { folder: string }) => d.folder)
-            }
-          } catch (e) {
-            console.warn('Git sync: Could not fetch departments for sparse checkout update:', e)
-          }
-        }
+      // Recovery: a repo that is sparse but has no config file is in a legacy
+      // or broken state (an earlier bug stored the config in the worktree and
+      // stripped dotfolders like .claude/skills from the cone). Restore a full
+      // checkout so nothing important stays hidden; the user can re-exclude.
+      if (sparseEnabledNow && !fs.existsSync(sparseConfigPath(repoPath))) {
+        await git.raw(['sparse-checkout', 'disable']).catch(() => {})
+        writeSparseConfig(repoPath, { excluded: [] })
+        console.log('Git sync: Reset legacy sparse checkout to full checkout (no config found)')
+      }
 
-        // Non-department folders = shared folders that everyone should have
-        const departmentSet = new Set(departmentFolders)
-        const sharedFolders = remoteFolders.filter(f => !departmentSet.has(f))
-
-        if (sharedFolders.length > 0) {
-          // Get current sparse checkout list
-          const currentSparseRaw = await git.raw(['sparse-checkout', 'list'])
-          const currentSparse = new Set(currentSparseRaw.split('\n').filter(Boolean))
-
-          const toAdd = sharedFolders.filter(f => !currentSparse.has(f))
-          if (toAdd.length > 0) {
-            await git.raw(['sparse-checkout', 'add', ...toAdd])
-            console.log(`Git sync: Auto-added shared folders to sparse checkout: ${toAdd.join(', ')}`)
-          }
-        }
-
-        // Also ensure all department folders from DB are checked out
-        if (departmentFolders.length > 0) {
-          const currentSparseRaw2 = await git.raw(['sparse-checkout', 'list'])
-          const currentSparse2 = new Set(currentSparseRaw2.split('\n').filter(Boolean))
-          const deptToAdd = departmentFolders.filter(f => !currentSparse2.has(f))
-          if (deptToAdd.length > 0) {
-            await git.raw(['sparse-checkout', 'add', ...deptToAdd])
-            console.log(`Git sync: Auto-added department folders to sparse checkout: ${deptToAdd.join(', ')}`)
-          }
-        }
+      const sparseConfig = readSparseConfig(repoPath)
+      if (sparseConfig.excluded.length > 0) {
+        await applySparseSelection(git, repoPath, sparseConfig.excluded)
       }
     } catch (sparseUpdateError) {
-      console.warn('Git sync: Sparse checkout auto-update failed:', sparseUpdateError)
+      console.warn('Git sync: Sparse checkout reconcile failed:', sparseUpdateError)
     }
 
     let restoredFolders: string[] = []
@@ -2562,6 +2532,117 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
 })
 
 // --- Sparse Checkout ---
+//
+// Model: the user's choice is stored as an EXCLUSION list (folders they opted
+// out of), persisted in .git/acb-sparse-config.json (local, never committed).
+// The actual sparse cone is always derived as (all root dirs) minus (excluded).
+// This makes exclusions survive syncs and makes newly-created folders appear
+// automatically — the previous code re-added every DB department on each sync,
+// which silently undid the user's exclusions.
+
+interface SparseConfig {
+  /** Top-level folders the user explicitly opted out of syncing locally. */
+  excluded: string[]
+}
+
+// Persist inside .git/, NOT the worktree. The worktree is exactly what sparse
+// checkout reshapes, so a config stored there (e.g. under .workspace/) gets
+// deleted the moment `sparse-checkout set` runs without that folder in the
+// cone — which silently wiped the config and reset exclusions. .git/ is never
+// touched by sparse checkout and is inherently local (not committed/synced),
+// which is the right scope for a per-machine exclusion list.
+function sparseConfigPath(repoPath: string): string {
+  return path.join(repoPath, '.git', 'acb-sparse-config.json')
+}
+
+function readSparseConfig(repoPath: string): SparseConfig {
+  try {
+    const raw = fs.readFileSync(sparseConfigPath(repoPath), 'utf-8')
+    const parsed = JSON.parse(raw)
+    return { excluded: Array.isArray(parsed.excluded) ? parsed.excluded.filter((x: unknown) => typeof x === 'string') : [] }
+  } catch {
+    return { excluded: [] }
+  }
+}
+
+function writeSparseConfig(repoPath: string, cfg: SparseConfig): void {
+  const p = sparseConfigPath(repoPath)
+  fs.mkdirSync(path.dirname(p), { recursive: true })
+  fs.writeFileSync(p, JSON.stringify(cfg, null, 2))
+}
+
+// List ALL root-level directories in the tree, INCLUDING dotfolders. Cone-mode
+// `sparse-checkout set` removes every top-level directory not in its argument
+// list, so the cone MUST include dotfolders like .claude (skills!), .agents,
+// and .workspace — otherwise enabling sparse checkout would strip them from
+// the worktree and break skills. Only the user's excluded departments are
+// dropped from the cone.
+async function listAllRootDirs(git: SimpleGit): Promise<string[]> {
+  try {
+    const raw = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
+    return raw.split('\n').filter(Boolean)
+  } catch {
+    return []
+  }
+}
+
+// Reconcile the on-disk sparse cone to match the persisted exclusion list.
+// excluded empty → full checkout (sparse disabled). Otherwise the cone is
+// (remote root folders − excluded). Safe: sparse-checkout never deletes data
+// from the index/server, only what is materialised in the worktree.
+async function applySparseSelection(git: SimpleGit, repoPath: string, excluded: string[]): Promise<void> {
+  const cleanExcluded = [...new Set(excluded.filter(Boolean))]
+  writeSparseConfig(repoPath, { excluded: cleanExcluded })
+
+  if (cleanExcluded.length === 0) {
+    // Nothing excluded → make sure we are on a full checkout.
+    const isSparse = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
+    if (isSparse) await git.raw(['sparse-checkout', 'disable'])
+    return
+  }
+
+  const allDirs = await listAllRootDirs(git)
+  // Cone = every root directory (dotfolders included) minus the user's
+  // excluded departments. If enumeration failed (empty), do NOT touch the
+  // worktree — resetting here is what wiped exclusions before.
+  if (allDirs.length === 0) {
+    console.warn('Git sparse: could not enumerate root dirs; leaving worktree untouched')
+    return
+  }
+  const desired = allDirs.filter(f => !cleanExcluded.includes(f))
+  if (desired.length === 0) {
+    // User excluded literally everything → fall back to a full checkout.
+    await git.raw(['sparse-checkout', 'disable']).catch(() => {})
+    writeSparseConfig(repoPath, { excluded: [] })
+    return
+  }
+  await git.raw(['sparse-checkout', 'init', '--cone'])
+  await git.raw(['sparse-checkout', 'set', ...desired])
+}
+
+// Read the persisted exclusion list for a repo.
+ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
+  try {
+    const safe = validatePath(repoPath)
+    return { success: true, excluded: readSparseConfig(safe).excluded }
+  } catch (error) {
+    return { success: false, excluded: [], error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
+// Set the exclusion list and reconcile the worktree to match.
+ipcMain.handle('git:sparseSetExclusions', async (_, repoPath: string, excluded: string[]) => {
+  try {
+    const safe = validatePath(repoPath)
+    const git = createGit(safe)
+    await applySparseSelection(git, safe, Array.isArray(excluded) ? excluded : [])
+    const enabled = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
+    return { success: true, enabled, excluded: readSparseConfig(safe).excluded }
+  } catch (error) {
+    console.error('Sparse set exclusions error:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
 
 // Initialize sparse checkout (cone mode)
 ipcMain.handle('git:sparseCheckoutInit', async (_, repoPath: string) => {

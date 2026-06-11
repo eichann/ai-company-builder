@@ -5,55 +5,43 @@ interface UseSparseCheckoutOptions {
 }
 
 interface UseSparseCheckoutResult {
-  /** Whether sparse checkout is enabled for this repo */
+  /** Whether sparse checkout is active (i.e. at least one folder is excluded) */
   enabled: boolean
-  /** List of checked-out folder paths (empty if not sparse) */
-  checkedOutPaths: string[]
+  /** Folders the user has excluded from local sync */
+  excludedPaths: string[]
   /** Whether the initial check is still loading */
   isLoading: boolean
-  /** Add a folder to sparse checkout */
-  addPath: (folderPath: string) => Promise<boolean>
-  /** Remove a folder from sparse checkout */
+  /** Stop syncing a folder locally (add to exclusion list) */
   removePath: (folderPath: string) => Promise<boolean>
-  /** Enable sparse checkout with selected paths */
-  enable: (paths: string[]) => Promise<boolean>
-  /** Disable sparse checkout (restore all files) */
+  /** Resume syncing a folder locally (remove from exclusion list) */
+  addPath: (folderPath: string) => Promise<boolean>
+  /** Clear all exclusions (full checkout) */
   disable: () => Promise<boolean>
-  /** Check if a specific folder is checked out */
+  /** Whether a folder is currently synced locally (i.e. not excluded) */
   isCheckedOut: (folderPath: string) => boolean
-  /** Refresh the sparse checkout state */
+  /** Refresh state from disk */
   refresh: () => void
 }
 
+// Sparse checkout is modelled as an EXCLUSION list: the user opts folders out,
+// and the main process derives the actual git cone as (all remote folders −
+// excluded). A folder is "checked out" iff it is not excluded.
 export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSparseCheckoutResult {
-  const [enabled, setEnabled] = useState(false)
-  const [checkedOutPaths, setCheckedOutPaths] = useState<string[]>([])
+  const [excludedPaths, setExcludedPaths] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
 
   const loadState = useCallback(async () => {
     if (!rootPath) {
-      setEnabled(false)
-      setCheckedOutPaths([])
+      setExcludedPaths([])
       setIsLoading(false)
       return
     }
-
     try {
-      const { enabled: isSparse } = await window.electronAPI.isSparseCheckout(rootPath)
-      setEnabled(isSparse)
-
-      if (isSparse) {
-        const result = await window.electronAPI.sparseCheckoutList(rootPath)
-        if (result.success) {
-          setCheckedOutPaths(result.paths)
-        }
-      } else {
-        setCheckedOutPaths([])
-      }
+      const result = await window.electronAPI.sparseGetExclusions(rootPath)
+      setExcludedPaths(result.success ? result.excluded : [])
     } catch (err) {
       console.error('Failed to load sparse checkout state:', err)
-      setEnabled(false)
-      setCheckedOutPaths([])
+      setExcludedPaths([])
     } finally {
       setIsLoading(false)
     }
@@ -63,83 +51,58 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     loadState()
   }, [loadState])
 
+  const removePath = useCallback(async (folderPath: string): Promise<boolean> => {
+    if (!rootPath) return false
+    try {
+      const next = [...new Set([...excludedPaths, folderPath])]
+      const result = await window.electronAPI.sparseSetExclusions(rootPath, next)
+      if (!result.success) return false
+      setExcludedPaths(result.excluded ?? next)
+      return true
+    } catch (err) {
+      console.error('Failed to exclude folder:', err)
+      return false
+    }
+  }, [rootPath, excludedPaths])
+
   const addPath = useCallback(async (folderPath: string): Promise<boolean> => {
     if (!rootPath) return false
     try {
-      // If not yet sparse, initialize first
-      if (!enabled) {
-        // Get all current top-level directories + the new one
-        const result = await window.electronAPI.listRemoteDirectories(rootPath)
-        if (!result.success) return false
-        await window.electronAPI.sparseCheckoutInit(rootPath)
-        await window.electronAPI.sparseCheckoutSet(rootPath, [...result.directories, folderPath])
-      } else {
-        await window.electronAPI.sparseCheckoutAdd(rootPath, [folderPath])
-      }
-      await loadState()
+      const next = excludedPaths.filter(p => p !== folderPath)
+      const result = await window.electronAPI.sparseSetExclusions(rootPath, next)
+      if (!result.success) return false
+      setExcludedPaths(result.excluded ?? next)
       return true
     } catch (err) {
-      console.error('Failed to add sparse checkout path:', err)
+      console.error('Failed to re-include folder:', err)
       return false
     }
-  }, [rootPath, enabled, loadState])
+  }, [rootPath, excludedPaths])
 
-  const removePath = useCallback(async (folderPath: string): Promise<boolean> => {
-    if (!rootPath || !enabled) return false
-    try {
-      const remaining = checkedOutPaths.filter(p => p !== folderPath)
-      if (remaining.length === 0) {
-        // Can't have empty sparse checkout — disable instead
-        await window.electronAPI.sparseCheckoutDisable(rootPath)
-      } else {
-        await window.electronAPI.sparseCheckoutSet(rootPath, remaining)
-      }
-      await loadState()
-      return true
-    } catch (err) {
-      console.error('Failed to remove sparse checkout path:', err)
-      return false
-    }
-  }, [rootPath, enabled, checkedOutPaths, loadState])
-
-  const enable = useCallback(async (paths: string[]): Promise<boolean> => {
+  const disable = useCallback(async (): Promise<boolean> => {
     if (!rootPath) return false
     try {
-      await window.electronAPI.sparseCheckoutInit(rootPath)
-      await window.electronAPI.sparseCheckoutSet(rootPath, paths)
-      await loadState()
+      const result = await window.electronAPI.sparseSetExclusions(rootPath, [])
+      if (!result.success) return false
+      setExcludedPaths([])
       return true
     } catch (err) {
-      console.error('Failed to enable sparse checkout:', err)
+      console.error('Failed to clear sparse exclusions:', err)
       return false
     }
-  }, [rootPath, loadState])
-
-  const disableSparse = useCallback(async (): Promise<boolean> => {
-    if (!rootPath) return false
-    try {
-      await window.electronAPI.sparseCheckoutDisable(rootPath)
-      await loadState()
-      return true
-    } catch (err) {
-      console.error('Failed to disable sparse checkout:', err)
-      return false
-    }
-  }, [rootPath, loadState])
+  }, [rootPath])
 
   const isCheckedOut = useCallback((folderPath: string): boolean => {
-    if (!enabled) return true // Not sparse = everything is checked out
-    return checkedOutPaths.includes(folderPath)
-  }, [enabled, checkedOutPaths])
+    return !excludedPaths.includes(folderPath)
+  }, [excludedPaths])
 
   return {
-    enabled,
-    checkedOutPaths,
+    enabled: excludedPaths.length > 0,
+    excludedPaths,
     isLoading,
-    addPath,
     removePath,
-    enable,
-    disable: disableSparse,
+    addPath,
+    disable,
     isCheckedOut,
     refresh: loadState,
   }
