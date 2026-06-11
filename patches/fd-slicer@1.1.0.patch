@@ -1,0 +1,97 @@
+diff --git a/.npmignore b/.npmignore
+deleted file mode 100644
+index ccc29308bb0adbf92dfb3f49bdc090b42a343df9..0000000000000000000000000000000000000000
+diff --git a/index.js b/index.js
+index 65d32a3ecb7d22329f5465cb2ef127f70e54be43..0a6927ceee68715d88c9d8167bb8e464dad191b6 100644
+--- a/index.js
++++ b/index.js
+@@ -87,31 +87,34 @@ function ReadStream(context, options) {
+   this.start = options.start || 0;
+   this.endOffset = options.end;
+   this.pos = this.start;
+-  this.destroyed = false;
++  // Renamed from `destroyed`: on modern Node, assigning `this.destroyed`
++  // invokes the stream's accessor and flips _readableState.destroyed, which
++  // strands buffered chunks and suppresses 'end' under backpressure.
++  this.fdSlicerDestroyed = false;
+ }
+ 
+ ReadStream.prototype._read = function(n) {
+   var self = this;
+-  if (self.destroyed) return;
++  if (self.fdSlicerDestroyed) return;
+ 
+   var toRead = Math.min(self._readableState.highWaterMark, n);
+   if (self.endOffset != null) {
+     toRead = Math.min(toRead, self.endOffset - self.pos);
+   }
+   if (toRead <= 0) {
+-    self.destroyed = true;
++    self.fdSlicerDestroyed = true;
+     self.push(null);
+     self.context.unref();
+     return;
+   }
+   self.context.pend.go(function(cb) {
+-    if (self.destroyed) return cb();
++    if (self.fdSlicerDestroyed) return cb();
+     var buffer = new Buffer(toRead);
+     fs.read(self.context.fd, buffer, 0, toRead, self.pos, function(err, bytesRead) {
+       if (err) {
+         self.destroy(err);
+       } else if (bytesRead === 0) {
+-        self.destroyed = true;
++        self.fdSlicerDestroyed = true;
+         self.push(null);
+         self.context.unref();
+       } else {
+@@ -124,9 +127,9 @@ ReadStream.prototype._read = function(n) {
+ };
+ 
+ ReadStream.prototype.destroy = function(err) {
+-  if (this.destroyed) return;
++  if (this.fdSlicerDestroyed) return;
+   err = err || new Error("stream destroyed");
+-  this.destroyed = true;
++  this.fdSlicerDestroyed = true;
+   this.emit('error', err);
+   this.context.unref();
+ };
+@@ -143,14 +146,15 @@ function WriteStream(context, options) {
+   this.endOffset = (options.end == null) ? Infinity : +options.end;
+   this.bytesWritten = 0;
+   this.pos = this.start;
+-  this.destroyed = false;
++  // Renamed from `destroyed` for the same reason as in ReadStream.
++  this.fdSlicerDestroyed = false;
+ 
+   this.on('finish', this.destroy.bind(this));
+ }
+ 
+ WriteStream.prototype._write = function(buffer, encoding, callback) {
+   var self = this;
+-  if (self.destroyed) return;
++  if (self.fdSlicerDestroyed) return;
+ 
+   if (self.pos + buffer.length > self.endOffset) {
+     var err = new Error("maximum file length exceeded");
+@@ -160,7 +164,7 @@ WriteStream.prototype._write = function(buffer, encoding, callback) {
+     return;
+   }
+   self.context.pend.go(function(cb) {
+-    if (self.destroyed) return cb();
++    if (self.fdSlicerDestroyed) return cb();
+     fs.write(self.context.fd, buffer, 0, buffer.length, self.pos, function(err, bytes) {
+       if (err) {
+         self.destroy();
+@@ -178,8 +182,8 @@ WriteStream.prototype._write = function(buffer, encoding, callback) {
+ };
+ 
+ WriteStream.prototype.destroy = function() {
+-  if (this.destroyed) return;
+-  this.destroyed = true;
++  if (this.fdSlicerDestroyed) return;
++  this.fdSlicerDestroyed = true;
+   this.context.unref();
+ };
+ 

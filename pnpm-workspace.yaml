@@ -3,3 +3,12 @@ packages:
   - 'server'
   - 'shared'
   - 'admin'
+allowBuilds:
+  better-sqlite3: true
+  dugite: true
+  electron: true
+  esbuild: true
+  sharp: true
+  unrs-resolver: true
+patchedDependencies:
+  fd-slicer@1.1.0: patches/fd-slicer@1.1.0.patch
