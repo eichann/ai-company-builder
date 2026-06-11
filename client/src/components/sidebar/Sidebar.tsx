@@ -15,6 +15,7 @@ import {
   EyeSlash,
 } from '@phosphor-icons/react'
 import type { FileEntry } from '../../types'
+import { normalizePathSeparators } from '../../utils/path'
 
 export function Sidebar() {
   // Use individual selectors to prevent unnecessary re-renders
@@ -144,7 +145,7 @@ export function Sidebar() {
         perfMark('sidebar.fs_change.skipped')
         return
       }
-      if (!data.path.startsWith(currentCompany.rootPath)) {
+      if (!normalizePathSeparators(data.path).startsWith(normalizePathSeparators(currentCompany.rootPath))) {
         return
       }
 

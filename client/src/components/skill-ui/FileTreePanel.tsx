@@ -13,6 +13,7 @@ import {
   SpinnerGap,
 } from '@phosphor-icons/react'
 import { ContextMenu, type ContextMenuItem } from '../common/ContextMenu'
+import { normalizePathSeparators } from '../../utils/path'
 import { InputDialog } from '../common/InputDialog'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { getFileIcon, FolderIcon } from './FileIcons'
@@ -443,7 +444,7 @@ export function FileTreePanel({
         perfMark('file_tree_panel.fs_change.skipped')
         return
       }
-      if (!data.path.startsWith(departmentPath)) {
+      if (!normalizePathSeparators(data.path).startsWith(normalizePathSeparators(departmentPath))) {
         return
       }
 

@@ -26,6 +26,7 @@ import { useDepartments } from '../../hooks/useDepartments'
 import type { SlashCommandItem } from '../chat/SlashCommandDropdown'
 import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
+import { normalizePathSeparators } from '../../utils/path'
 
 // Panel width constraints
 const MIN_LEFT_PANEL_WIDTH = 300
@@ -411,7 +412,7 @@ export function SkillCentricLayout() {
       }
 
       // Check if the change is in the skills directory
-      if (data.path.startsWith(skillsPath)) {
+      if (normalizePathSeparators(data.path).startsWith(normalizePathSeparators(skillsPath))) {
         perfMark('skill_layout.skills_change')
         requestDeferredSkillsRefresh()
       }
