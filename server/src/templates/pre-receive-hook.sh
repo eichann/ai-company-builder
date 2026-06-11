@@ -1,10 +1,15 @@
 #!/bin/bash
 #
-# pre-receive hook: シークレット検知
-# 会社データリポジトリへのプッシュ時にAPIキー・秘密鍵等を検知し、ブロックする
+# pre-receive hook: シークレット検知 + gitlink(サブモジュール参照)検知
+# - APIキー・秘密鍵等を検知し、ブロックする
+# - 新規に追加された gitlink (mode 160000) をブロックする。
+#   入れ子の .git をうっかりコミットすると他メンバーが空フォルダを掴むため。
+#   既存の gitlink には触れない（newmode 160000 の「追加/変更」のみ対象）ので、
+#   既に gitlink を含むリポジトリも通常の push は引き続き可能。
 #
 
 ZERO_SHA="0000000000000000000000000000000000000000"
+EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
 # 検知パターン定義
 # 各行: "パターン名|正規表現"
@@ -21,11 +26,36 @@ PATTERNS=(
 
 found_secrets=0
 declare -a detected_files=()
+found_gitlinks=0
+declare -a detected_gitlinks=()
 
 while read old_sha new_sha refname; do
   # ブランチ削除は無視
   if [ "$new_sha" = "$ZERO_SHA" ]; then
     continue
+  fi
+
+  # --- gitlink(サブモジュール参照, mode 160000) 検知 ---
+  # 新規ブランチは空ツリーとの差分 = 全 gitlink が「追加」扱い。
+  # 既存ブランチは old..new の差分で newmode==160000 のものだけ（=新規追加/変更）。
+  gitlink_base="$old_sha"
+  if [ "$old_sha" = "$ZERO_SHA" ]; then
+    gitlink_base="$EMPTY_TREE"
+  fi
+  new_gitlinks=$(git -c core.quotePath=false diff-tree -r "$gitlink_base" "$new_sha" 2>/dev/null \
+    | awk -F'\t' '{ split($1, a, " "); if (a[2] == "160000") print $2 }')
+  if [ -n "$new_gitlinks" ]; then
+    while IFS= read -r gl; do
+      [ -z "$gl" ] && continue
+      already=0
+      for existing in "${detected_gitlinks[@]}"; do
+        if [ "$existing" = "  - $gl" ]; then already=1; break; fi
+      done
+      if [ "$already" -eq 0 ]; then
+        detected_gitlinks+=("  - $gl")
+        found_gitlinks=1
+      fi
+    done <<< "$new_gitlinks"
   fi
 
   # 初回プッシュ（リポジトリが空）の場合は全ファイルを対象
@@ -98,6 +128,8 @@ while read old_sha new_sha refname; do
   fi
 done
 
+rc=0
+
 if [ "$found_secrets" -eq 1 ]; then
   echo "" >&2
   echo "========================================" >&2
@@ -113,7 +145,32 @@ if [ "$found_secrets" -eq 1 ]; then
   echo "該当ファイルからシークレットを削除してから再度同期してください。" >&2
   echo "========================================" >&2
   echo "" >&2
-  exit 1
+  rc=1
 fi
 
-exit 0
+if [ "$found_gitlinks" -eq 1 ]; then
+  echo "" >&2
+  echo "========================================" >&2
+  echo "[GITLINK_DETECTED] 外部リポジトリの参照が検出されました" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  echo "以下のフォルダは、中に .git を持つ外部リポジトリ（サブモジュール扱い）です:" >&2
+  for entry in "${detected_gitlinks[@]}"; do
+    echo "$entry" >&2
+  done
+  echo "" >&2
+  echo "このまま共有すると、他のメンバーには空フォルダとして見えてしまうため、" >&2
+  echo "プッシュをブロックしました。次のどちらかで解消してください:" >&2
+  echo "" >&2
+  echo "  1. このフォルダをACBで配布したい場合:" >&2
+  echo "     フォルダ内の .git を削除（rm -rf <folder>/.git）してから再同期。" >&2
+  echo "     中身が通常ファイルとして取り込まれ、全員に配布されます。" >&2
+  echo "  2. 配布せず手元だけで使う場合:" >&2
+  echo "     そのフォルダを .gitignore に追加してから再同期。" >&2
+  echo "     （ACBクライアントは通常これを自動で行います）" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  rc=1
+fi
+
+exit $rc
