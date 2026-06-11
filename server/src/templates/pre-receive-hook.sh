@@ -28,11 +28,39 @@ found_secrets=0
 declare -a detected_files=()
 found_gitlinks=0
 declare -a detected_gitlinks=()
+found_winpaths=0
+declare -a detected_winpaths=()
 
 while read old_sha new_sha refname; do
   # ブランチ削除は無視
   if [ "$new_sha" = "$ZERO_SHA" ]; then
     continue
+  fi
+
+  # --- Windows非互換パス検知 ---
+  # Windowsで扱えないパスが1つでも入ると、チーム全員のWindows環境で
+  # clone/checkout が失敗するため、新しいツリー全体を検査してブロックする。
+  all_paths=$(git -c core.quotePath=false ls-tree -r --name-only "$new_sha" 2>/dev/null)
+  if [ -n "$all_paths" ]; then
+    bad_chars=$(printf '%s\n' "$all_paths" | LC_ALL=C grep -E '[<>:"\\|?*]|[[:cntrl:]]' | sed 's/$/ （Windowsで使用できない文字を含む）/')
+    bad_trail=$(printf '%s\n' "$all_paths" | grep -E '(\.| )(\/|$)' | sed 's/$/ （フォルダ・ファイル名の末尾がドットまたはスペース）/')
+    bad_reserved=$(printf '%s\n' "$all_paths" | grep -iE '(^|/)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.[^/]*)?(/|$)' | sed 's/$/ （Windows予約デバイス名）/')
+    bad_case=$(printf '%s\n' "$all_paths" | tr '[:upper:]' '[:lower:]' | sort | uniq -d | sed 's/$/ （大文字小文字のみ異なるパスが複数存在）/')
+
+    win_bad=$(printf '%s\n%s\n%s\n%s\n' "$bad_chars" "$bad_trail" "$bad_reserved" "$bad_case" | sed '/^$/d')
+    if [ -n "$win_bad" ]; then
+      while IFS= read -r entry; do
+        [ -z "$entry" ] && continue
+        already=0
+        for existing in "${detected_winpaths[@]}"; do
+          if [ "$existing" = "  - $entry" ]; then already=1; break; fi
+        done
+        if [ "$already" -eq 0 ]; then
+          detected_winpaths+=("  - $entry")
+          found_winpaths=1
+        fi
+      done <<< "$win_bad"
+    fi
   fi
 
   # --- gitlink(サブモジュール参照, mode 160000) 検知 ---
@@ -168,6 +196,29 @@ if [ "$found_gitlinks" -eq 1 ]; then
   echo "  2. 配布せず手元だけで使う場合:" >&2
   echo "     そのフォルダを .gitignore に追加してから再同期。" >&2
   echo "     （ACBクライアントは通常これを自動で行います）" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  rc=1
+fi
+
+if [ "$found_winpaths" -eq 1 ]; then
+  echo "" >&2
+  echo "========================================" >&2
+  echo "[WINPATH_DETECTED] Windowsで扱えないファイル名が検出されました" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  echo "以下のパスはWindowsで作成できないため、このまま共有すると" >&2
+  echo "Windowsを使うメンバー全員の同期が失敗します:" >&2
+  for entry in "${detected_winpaths[@]}"; do
+    echo "$entry" >&2
+  done
+  echo "" >&2
+  echo "プッシュをブロックしました。該当のフォルダ・ファイルの名前を変更して" >&2
+  echo "から再度同期してください。Windowsでは次の名前が使えません:" >&2
+  echo "  ・ < > : \" \\ | ? * を含む名前" >&2
+  echo "  ・ 末尾がドット( . )やスペースの名前" >&2
+  echo "  ・ CON / PRN / AUX / NUL / COM1〜9 / LPT1〜9 （拡張子付きも不可）" >&2
+  echo "  ・ 大文字小文字だけが異なる同名ファイルの共存" >&2
   echo "========================================" >&2
   echo "" >&2
   rc=1

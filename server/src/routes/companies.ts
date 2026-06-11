@@ -131,6 +131,14 @@ function seedDepartmentFolders(companyId: string, bareRepoPath: string): void {
   // the host git's init.defaultBranch
   execFileSync('git', ['-C', workDir, 'checkout', '-B', 'main'], { stdio: 'pipe' })
 
+  // Normalize line endings to LF on every platform: scripts inside shared
+  // skills break under Git Bash on Windows when checked out as CRLF.
+  // (text=auto only applies to files git detects as text — binaries are safe.)
+  writeFileSync(
+    join(workDir, '.gitattributes'),
+    '# AI Company Builder: テキストファイルの改行コードを全OSでLFに統一\n* text=auto eol=lf\n'
+  )
+
   // Same folder layout as the create-department endpoint in departments.ts
   for (const dept of DEFAULT_DEPARTMENTS) {
     const folderPath = join(workDir, dept.folder)

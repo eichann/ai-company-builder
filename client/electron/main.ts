@@ -488,6 +488,26 @@ app.on('activate', () => {
 app.on('before-quit', () => {
   fileWatchers.forEach((watcher) => watcher.close())
   fileWatchers.clear()
+
+  // Kill running skill tools so dev servers don't outlive the app.
+  // Windows has no process groups/POSIX signals — kill the tree via taskkill.
+  for (const [toolPath, tool] of runningTools) {
+    const pid = tool.process.pid
+    if (!pid) continue
+    console.log('[before-quit] stopping tool:', toolPath)
+    if (process.platform === 'win32') {
+      try {
+        spawn('taskkill', ['/pid', pid.toString(), '/f', '/t'], { windowsHide: true })
+      } catch { /* best effort on quit */ }
+    } else {
+      try {
+        process.kill(-pid, 'SIGTERM')
+      } catch {
+        try { tool.process.kill('SIGTERM') } catch { /* already gone */ }
+      }
+    }
+  }
+  runningTools.clear()
 })
 
 // IPC Handlers for file system operations
@@ -2169,9 +2189,34 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     let hadConflicts = false
     let conflictFiles: string[] = []
 
+    // Windows: another process (running skill tool, editor, AV scan) holding
+    // a file makes rebase fail with a transient lock error that clears
+    // moments later — these are not conflicts, so retry before giving up.
+    const isWindowsLockError = (e: unknown): boolean => {
+      if (process.platform !== 'win32') return false
+      const msg = e instanceof Error ? e.message : String(e)
+      return /permission denied|unable to unlink|unlink of file|unable to create .+\.lock|index\.lock|sharing violation|resource busy/i.test(msg)
+    }
+
     try {
       console.log('Git sync: Pulling with rebase...')
-      await git.pull('origin', 'main', ['--rebase'])
+      try {
+        await git.pull('origin', 'main', ['--rebase'])
+      } catch (firstPullError) {
+        if (!isWindowsLockError(firstPullError)) throw firstPullError
+        const maxRetries = 2
+        for (let attempt = 1; ; attempt++) {
+          console.warn(`Git sync: Pull hit a file lock, retrying (${attempt}/${maxRetries})...`)
+          await git.rebase(['--abort']).catch(() => { /* no rebase in progress */ })
+          await new Promise((resolve) => setTimeout(resolve, 800))
+          try {
+            await git.pull('origin', 'main', ['--rebase'])
+            break
+          } catch (retryError) {
+            if (attempt >= maxRetries || !isWindowsLockError(retryError)) throw retryError
+          }
+        }
+      }
     } catch (pullError) {
       console.log('Git sync: Pull/rebase failed, checking for conflicts...')
 
@@ -2492,6 +2537,16 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
       }
     } catch (configError) {
       console.warn('Git setup: Could not configure user identity:', configError)
+    }
+
+    // Windows: deep Japanese folder trees easily exceed MAX_PATH (260 chars)
+    // and break checkout — opt this repo into long path support
+    if (process.platform === 'win32') {
+      try {
+        await git.addConfig('core.longpaths', 'true', false)
+      } catch (longPathError) {
+        console.warn('Git setup: Could not set core.longpaths:', longPathError)
+      }
     }
 
     // Add/update origin remote
@@ -3566,7 +3621,7 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
     if (!fs.existsSync(nodeModulesPath)) {
       console.log('[tools:start] Installing dependencies...')
       try {
-        await execAsync('npm install', { cwd: toolPath })
+        await execAsync('npm install', { cwd: toolPath, env: getShellEnv() })
       } catch (installErr) {
         console.error('[tools:start] npm install failed:', installErr)
         return { success: false, error: `npm install failed: ${installErr instanceof Error ? installErr.message : installErr}` }
@@ -3624,20 +3679,41 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
     console.log('[tools:start] Using port:', port)
 
     // Start the tool — write stdout/stderr to log file to avoid EBADF with pipes
-    const npmCmd = process.platform === 'win32' ? 'npm.cmd' : 'npm'
     const logPath = path.join(toolPath, '.tool-output.log')
     const logFd = fs.openSync(logPath, 'w')
+    const npmArgs = ['run', startCommand, '--', '--port', port.toString()]
+    // getShellEnv handles the Windows Path-key replacement; PORT rides along
+    const toolEnv = { ...getShellEnv(), PORT: port.toString() }
 
-    console.log('[tools:start] About to spawn:', npmCmd, 'run', startCommand)
-    // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
-    // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
-    const childProcess = spawn(npmCmd, ['run', startCommand, '--', '--port', port.toString()], {
-      cwd: toolPath,
-      stdio: ['ignore', logFd, logFd],
-      detached: true,
-      env: { ...process.env, PORT: port.toString(), PATH: getShellPath() },
-      ...(process.getuid ? { uid: process.getuid(), gid: process.getgid!() } : {}),
-    })
+    console.log('[tools:start] About to spawn: npm', npmArgs.join(' '))
+    let childProcess: ChildProcess
+    if (process.platform === 'win32') {
+      // npm is npm.cmd on Windows: batch files cannot be spawned directly
+      // (Node blocks it since CVE-2024-27980). Run through cmd.exe with
+      // spaced args quoted — same pattern as the chat-server claude spawn.
+      // No `detached`: tools:stop kills the tree from this cmd.exe pid via
+      // taskkill /t.
+      const quoted = ['npm', ...npmArgs]
+        .map(a => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
+        .join(' ')
+      childProcess = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', quoted], {
+        cwd: toolPath,
+        stdio: ['ignore', logFd, logFd],
+        env: toolEnv,
+        windowsVerbatimArguments: true,
+        windowsHide: true,
+      })
+    } else {
+      // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
+      // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
+      childProcess = spawn('npm', npmArgs, {
+        cwd: toolPath,
+        stdio: ['ignore', logFd, logFd],
+        detached: true,
+        env: toolEnv,
+        ...(process.getuid ? { uid: process.getuid(), gid: process.getgid!() } : {}),
+      })
+    }
     console.log('[tools:start] Spawn succeeded, pid:', childProcess.pid)
 
     // Close the log fd in the parent (child has its own copy)
@@ -3686,7 +3762,19 @@ ipcMain.handle('tools:stop', async (_, toolPath: string) => {
     if (runningTool.process.pid) {
       // On Windows, we need to kill the process tree
       if (process.platform === 'win32') {
-        spawn('taskkill', ['/pid', runningTool.process.pid.toString(), '/f', '/t'])
+        // Await taskkill so a failure is visible instead of silently
+        // leaving an orphaned dev server holding files and the port
+        await new Promise<void>((resolve) => {
+          const tk = spawn('taskkill', ['/pid', runningTool.process.pid!.toString(), '/f', '/t'], { windowsHide: true })
+          tk.on('exit', (code) => {
+            if (code !== 0) console.warn(`[tools:stop] taskkill exited with ${code} for pid ${runningTool.process.pid}`)
+            resolve()
+          })
+          tk.on('error', (err) => {
+            console.error('[tools:stop] taskkill failed:', err)
+            resolve()
+          })
+        })
       } else {
         // On Unix, kill the process group
         try {
