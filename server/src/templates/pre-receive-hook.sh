@@ -76,7 +76,7 @@ while read old_sha new_sha refname; do
         pattern_name="${pattern_entry%%|*}"
         pattern_regex="${pattern_entry#*|}"
 
-        if echo "$content" | grep -qE "$pattern_regex"; then
+        if echo "$content" | grep -qE -e "$pattern_regex"; then
           detected_files+=("  - $file ($pattern_name)")
           found_secrets=1
           break
@@ -106,7 +106,7 @@ while read old_sha new_sha refname; do
           pattern_name="${pattern_entry%%|*}"
           pattern_regex="${pattern_entry#*|}"
 
-          if echo "$added_content" | grep -qE "$pattern_regex"; then
+          if echo "$added_content" | grep -qE -e "$pattern_regex"; then
             # 同じファイルの重複を避ける
             entry="  - $current_file ($pattern_name)"
             already_found=0

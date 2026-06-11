@@ -20,7 +20,7 @@ if (!existsSync(REPOS_DIR)) {
 const HOOK_TEMPLATE_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'pre-receive-hook.sh')
 
 // Install pre-receive hook to a bare repository
-function installPreReceiveHook(repoPath: string): boolean {
+export function installPreReceiveHook(repoPath: string): boolean {
   try {
     const hooksDir = join(repoPath, 'hooks')
     if (!existsSync(hooksDir)) {
@@ -151,8 +151,14 @@ gitRoute.get('/repos/:companyId', async (c) => {
     }, 404)
   }
 
-  // Build HTTPS URL
-  const publicUrl = process.env.PUBLIC_URL || `https://${c.req.header('host') || 'localhost:3001'}`
+  // Build the git remote URL. Without PUBLIC_URL, mirror the scheme the
+  // client actually reached us with — hardcoding https breaks plain-HTTP
+  // setups (e.g. http://localhost:3001 in development): git is told an
+  // https:// remote and fails the TLS handshake on every fetch/push.
+  const requestProto =
+    c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.replace(':', '')
+  const publicUrl =
+    process.env.PUBLIC_URL || `${requestProto}://${c.req.header('host') || 'localhost:3001'}`
   const httpsUrl = `${publicUrl}/api/git-http/${sanitizedId}.git`
 
   // Build SSH URL (legacy, for backwards compatibility)
