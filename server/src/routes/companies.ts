@@ -8,14 +8,15 @@ import { join } from 'path'
 export const companiesRoute = new Hono()
 
 // Default departments for new companies
+// Folder names are intentionally the same as the Japanese department names —
+// the department folder pattern allows Japanese (see CLAUDE.md naming rules)
 const DEFAULT_DEPARTMENTS = [
-  { name: '全社共通', nameEn: 'Company-wide', folder: 'shared', icon: 'Buildings', color: '#f59e0b', description: '会社理念、ビジョン、共通ルール' },
-  { name: '営業部', nameEn: 'Sales', folder: 'sales', icon: 'Storefront', color: '#3b82f6', description: '顧客対応、提案書作成、売上管理' },
-  { name: '経理部', nameEn: 'Accounting', folder: 'accounting', icon: 'ChartPie', color: '#10b981', description: '経費処理、月次決算、予算管理' },
-  { name: '人事部', nameEn: 'HR', folder: 'hr', icon: 'Users', color: '#ec4899', description: '採用、労務管理、研修企画' },
-  { name: 'コンテンツ', nameEn: 'Contents', folder: 'contents', icon: 'Article', color: '#8b5cf6', description: 'ブログ、SNS、マーケティング資料' },
-  { name: '開発部', nameEn: 'Development', folder: 'development', icon: 'Code', color: '#6366f1', description: 'プロダクト開発、技術調査' },
-  { name: '総務', nameEn: 'General Affairs', folder: 'general', icon: 'Buildings', color: '#f59e0b', description: '社内調整、備品管理、総合窓口' },
+  { name: '営業部', nameEn: 'Sales', folder: '営業部', icon: 'Storefront', color: '#3b82f6', description: '顧客対応、提案書作成、売上管理' },
+  { name: '経理部', nameEn: 'Accounting', folder: '経理部', icon: 'ChartPie', color: '#10b981', description: '経費処理、月次決算、予算管理' },
+  { name: '人事部', nameEn: 'HR', folder: '人事部', icon: 'Users', color: '#ec4899', description: '採用、労務管理、研修企画' },
+  { name: 'コンテンツ', nameEn: 'Contents', folder: 'コンテンツ', icon: 'Article', color: '#8b5cf6', description: 'ブログ、SNS、マーケティング資料' },
+  { name: '開発部', nameEn: 'Development', folder: '開発部', icon: 'Code', color: '#6366f1', description: 'プロダクト開発、技術調査' },
+  { name: '総務', nameEn: 'General Affairs', folder: '総務', icon: 'Buildings', color: '#f59e0b', description: '社内調整、備品管理、総合窓口' },
 ]
 
 // Helper: Initialize default departments for a company
