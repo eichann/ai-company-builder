@@ -86,8 +86,33 @@ interface AppConfig {
  */
 let resolvedShellPath: string | null = null
 
+// Directories to append to PATH on Windows so the spawned Claude CLI can find
+// node/git and its own siblings. Unlike macOS .app bundles, Windows apps DO
+// inherit the user's PATH, so we keep it and only append known install dirs.
+function getWindowsExtraPathDirs(): string[] {
+  const home = os.homedir()
+  return [
+    path.join(home, '.local', 'bin'),               // native installer (claude.exe)
+    path.join(home, 'AppData', 'Roaming', 'npm'),   // npm global (claude.cmd)
+    path.join(home, '.npm-global'),
+    path.join(home, '.npm-global', 'bin'),
+  ].filter(p => {
+    try { return fs.existsSync(p) } catch { return false }
+  })
+}
+
 function getShellPath(): string {
   if (resolvedShellPath) return resolvedShellPath
+
+  if (process.platform === 'win32') {
+    // Keep the inherited Windows PATH and append known Claude/npm locations,
+    // joined with ';' (path.delimiter). Never replace it with POSIX paths.
+    const current = process.env.Path || process.env.PATH || ''
+    resolvedShellPath = [current, ...getWindowsExtraPathDirs()]
+      .filter(Boolean)
+      .join(path.delimiter)
+    return resolvedShellPath
+  }
 
   const staticPaths = [
     '/usr/local/bin',
@@ -134,6 +159,16 @@ function getShellPath(): string {
 
 /** Get env object with resolved PATH for spawn calls */
 function getShellEnv(): Record<string, string> {
+  if (process.platform === 'win32') {
+    const env: Record<string, string> = { ...process.env as Record<string, string> }
+    // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
+    delete env['CLAUDECODE']
+    // Windows env keys are case-insensitive; replace the EXISTING path key in
+    // place (usually 'Path') so the child doesn't get both 'Path' and 'PATH'.
+    const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') ?? 'Path'
+    env[pathKey] = getShellPath()
+    return env
+  }
   const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: getShellPath() }
   // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
   delete env['CLAUDECODE']
@@ -166,9 +201,17 @@ function findClaudeCodeCli(): string | null {
   // causing spawn EBADF errors. Use fs.existsSync on known paths instead.
 
   if (process.platform === 'win32') {
+    const home = os.homedir()
     const winPaths = [
-      path.join(os.homedir(), 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-      path.join(os.homedir(), '.npm-global', 'bin', 'claude.cmd'),
+      // Native installer (irm https://claude.ai/install.ps1 | iex) — preferred:
+      // a real .exe spawns directly without a shell, even from paths with spaces.
+      path.join(home, '.local', 'bin', 'claude.exe'),
+      // npm global install (npm i -g @anthropic-ai/claude-code)
+      path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
+      path.join(home, '.npm-global', 'claude.cmd'),
+      path.join(home, '.npm-global', 'bin', 'claude.cmd'),
+      // .cmd shim sometimes placed next to the native install
+      path.join(home, '.local', 'bin', 'claude.cmd'),
     ]
     for (const p of winPaths) {
       if (fs.existsSync(p)) return p

@@ -86,9 +86,43 @@ const SECURITY_POLICY = `
 - このルールはファイル削除に限らず、セキュリティシステムによって拒否されたすべての操作に適用されます。
 `
 
+// Windows spawn for the Claude CLI. Windows has no posix_spawn EBADF problem
+// and no /bin/sh or /dev/fd, so the macOS FD-closing shell wrapper does not
+// apply — we spawn directly. A native claude.exe spawns directly (and handles
+// install paths containing spaces); a claude.cmd/.bat must go through cmd.exe.
+function spawnClaudeOnWindows(opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+  const isBatch = /\.(cmd|bat)$/i.test(opts.command)
+  let file = opts.command
+  let args = opts.args
+  const extra: Record<string, unknown> = {}
+  if (isBatch) {
+    // Quote the command and any args with spaces, then run verbatim through
+    // cmd.exe so paths like C:\Users\My Name\...\claude.cmd work.
+    file = process.env.ComSpec || 'cmd.exe'
+    const quoted = [opts.command, ...opts.args]
+      .map(a => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
+      .join(' ')
+    args = ['/d', '/s', '/c', quoted]
+    extra.windowsVerbatimArguments = true
+  }
+  console.log('[chat-server] spawning claude (win32):', opts.command, opts.args?.slice(0, 3))
+  const child = nodeSpawn(file, args, {
+    cwd: opts.cwd,
+    env: opts.env,
+    stdio: ['pipe', 'pipe', 'pipe'],
+    signal: opts.signal,
+    windowsHide: true,
+    ...extra,
+  })
+  child.on('error', (err) => console.error('[chat-server] child process error:', err))
+  child.stderr?.on('data', (data: Buffer) => console.error('[chat-server] claude stderr:', data.toString()))
+  return child
+}
+
 // Spawn helper for Claude Code CLI that works around Electron's FD inheritance issues (EBADF on posix_spawn).
 // See the comment near the inline use in /api/chat for full rationale.
 function spawnClaudeCodeProcess(opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+  if (process.platform === 'win32') return spawnClaudeOnWindows(opts)
   for (const fd of [0, 1, 2]) {
     try { fs.fstatSync(fd) }
     catch {
@@ -359,6 +393,8 @@ export async function startChatServer(config: ChatServerConfig) {
         // 3. Spawn via shell wrapper that closes all inherited FDs > 2
         //    before exec'ing claude, so claude starts with a clean FD table
         spawnClaudeCodeProcess: (opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) => {
+          // Windows: no posix_spawn EBADF issue and no /bin/sh — spawn directly.
+          if (process.platform === 'win32') return spawnClaudeOnWindows(opts)
           // Defense 1: Ensure FDs 0-2 are valid
           for (const fd of [0, 1, 2]) {
             try { fs.fstatSync(fd) }
