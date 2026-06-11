@@ -103,7 +103,17 @@ function App() {
         const result = await window.electronAPI.getCompanies()
         if (cancelled || !result?.success || !Array.isArray(result.data)) return
         const stillAccessible = (result.data as Array<{ id: string }>).some((c) => c.id === last.id)
-        if (stillAccessible) setCurrentCompany(last)
+        if (!stillAccessible) {
+          safeWriteLastCompany(user.id, null)
+          return
+        }
+        // The persisted rootPath may have been deleted or moved on disk since
+        // the last session. Restoring it anyway bricks the session (no files,
+        // no git, and no UI path back) — fall back to the company selector so
+        // setup can re-clone instead.
+        const folderExists = await window.electronAPI.exists(last.rootPath)
+        if (cancelled) return
+        if (folderExists) setCurrentCompany(last)
         else safeWriteLastCompany(user.id, null)
       } catch {
         // Network/IPC failure: keep the persisted entry and let the user pick this time.
