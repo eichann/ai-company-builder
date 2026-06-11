@@ -736,10 +736,36 @@ ipcMain.handle('fs:watch', async (_, rootPath: string) => {
     }
 
     const watcher = chokidar.watch(safePath, {
-      ignored: /node_modules|\.git/,
+      ignored: (targetPath, stats) => {
+        // Skip VCS/dependency dirs and transient sandbox dirs (e.g. headless
+        // Chrome profiles under `.workspace` that skills spawn). These contain
+        // Unix domain sockets (SingletonSocket) and other special files that
+        // make fs.watch throw "UNKNOWN" on macOS.
+        if (/(^|[\\/])(\.git|node_modules|\.workspace)([\\/]|$)/.test(targetPath)) {
+          return true
+        }
+        // Never watch non-regular files (sockets, FIFOs, devices) — watching
+        // them throws and would otherwise crash the watcher.
+        if (stats && !stats.isFile() && !stats.isDirectory()) {
+          return true
+        }
+        return false
+      },
       persistent: true,
       ignoreInitial: true,
       depth: 10,
+      followSymlinks: false,
+      ignorePermissionErrors: true,
+    })
+
+    // An unwatchable file (e.g. a socket in a temp browser profile) makes
+    // chokidar emit 'error'. Without a listener this surfaces as an unhandled
+    // promise rejection that freezes the app, so swallow it here.
+    watcher.on('error', (error) => {
+      console.warn(
+        '[fs:watch] watcher error (ignored):',
+        error instanceof Error ? error.message : error
+      )
     })
 
     // Debounce file change events to avoid flooding IPC during bulk operations
