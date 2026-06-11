@@ -75,6 +75,24 @@ function createSlug(name: string): string {
     .replace(/^-|-$/g, '')
 }
 
+// Helper: Build a unique slug. Japanese-only names produce an empty base
+// slug, so fall back to the company id; collisions get a numeric suffix
+// instead of rejecting creation (the client has no slug input to fix it).
+// An explicitly requested slug (admin panel) is sanitized and honored.
+function buildUniqueSlug(name: string, requestedSlug: unknown, companyId: string): string {
+  const base =
+    (typeof requestedSlug === 'string' && createSlug(requestedSlug)) ||
+    createSlug(name) ||
+    `company-${companyId.slice(0, 8)}`
+
+  let slug = base
+  for (let n = 2; ; n++) {
+    const existing = db.prepare('SELECT id FROM companies WHERE slug = ?').get(slug)
+    if (!existing) return slug
+    slug = `${base}-${n}`
+  }
+}
+
 // Helper: Create Git bare repo for company
 function createCompanyRepo(companyId: string): string {
   if (!existsSync(REPOS_DIR)) {
@@ -196,14 +214,8 @@ companiesRoute.post('/', async (c) => {
   }
 
   const id = generateId()
-  const slug = createSlug(name)
+  const slug = buildUniqueSlug(name, body.slug, id)
   const timestamp = now()
-
-  // Check if slug already exists
-  const existing = db.prepare('SELECT id FROM companies WHERE slug = ?').get(slug)
-  if (existing) {
-    return c.json({ error: 'A company with a similar name already exists' }, 409)
-  }
 
   // Create Git repo
   let repoPath: string | null = null
