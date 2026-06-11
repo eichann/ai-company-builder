@@ -199,35 +199,8 @@ export function CompanySelector() {
         }
       }
 
-      // If no departments (empty remote / owner's first setup), create defaults
-      if (departments.length === 0) {
-        const defaultDepts = ['sales', 'hr', 'general']
-        for (const deptId of defaultDepts) {
-          const template = DEPARTMENT_TEMPLATES.find((t) => t.id === deptId)
-          if (!template) continue
-
-          const deptPath = `${companyPath}/${template.name}`
-          await window.electronAPI.createDirectory(deptPath)
-
-          // Create subdirectories
-          for (const folder of template.defaultFolders) {
-            await window.electronAPI.createDirectory(`${deptPath}/${folder}`)
-          }
-
-          // Create AGENT.md
-          if (template.agentConfig) {
-            const agentMd = `# ${template.agentConfig.name}\n\n${template.agentConfig.description}\n\n## Skills\n\n${template.agentConfig.skills.map(s => `- ${s}`).join('\n')}\n`
-            await window.electronAPI.writeFile(`${deptPath}/AGENT.md`, agentMd)
-          }
-
-          departments.push({
-            id: deptId,
-            name: template.name,
-            path: deptPath,
-            hasAgent: !!template.agentConfig,
-          })
-        }
-      }
+      // Note: default department folders are seeded server-side at company
+      // creation (companies.ts), so a fresh clone already contains them.
 
       // Done!
       setSetupStep('done')

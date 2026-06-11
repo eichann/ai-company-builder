@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync } from 'fs'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
 
 export const companiesRoute = new Hono()
@@ -64,6 +64,7 @@ function toCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
 // Base directory for Git repositories
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
+const WORKDIR_DIR = join(DATA_DIR, 'workdirs') // Must match departments.ts so GETs reuse the same clone
 
 // Helper: Create slug from name
 function createSlug(name: string): string {
@@ -86,6 +87,46 @@ function createCompanyRepo(companyId: string): string {
     execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
   }
   return repoPath
+}
+
+// Helper: Seed default department folders into the company repo, so the
+// filesystem (source of truth) matches the DB rows created by
+// initializeDefaultDepartments. Without this, GET /departments returns an
+// empty list (it only returns DB rows whose folder exists on disk).
+function seedDepartmentFolders(companyId: string, bareRepoPath: string): void {
+  const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
+  const workDir = join(WORKDIR_DIR, sanitizedId)
+
+  if (!existsSync(WORKDIR_DIR)) {
+    mkdirSync(WORKDIR_DIR, { recursive: true })
+  }
+  if (!existsSync(workDir)) {
+    execFileSync('git', ['clone', bareRepoPath, workDir], { stdio: 'pipe' })
+  }
+  // The bare repo is empty here; pin the unborn branch to main regardless of
+  // the host git's init.defaultBranch
+  execFileSync('git', ['-C', workDir, 'checkout', '-B', 'main'], { stdio: 'pipe' })
+
+  // Same folder layout as the create-department endpoint in departments.ts
+  for (const dept of DEFAULT_DEPARTMENTS) {
+    const folderPath = join(workDir, dept.folder)
+    mkdirSync(folderPath, { recursive: true })
+    writeFileSync(join(folderPath, '.gitkeep'), '')
+
+    const personalDir = join(folderPath, '.personal')
+    mkdirSync(personalDir, { recursive: true })
+    writeFileSync(join(personalDir, '.gitignore'), '# Personal workspace — not synced\n*\n!.gitignore\n')
+  }
+
+  execFileSync('git', ['-C', workDir, 'add', '-A'], { stdio: 'pipe' })
+  // Explicit identity: seeding must not depend on host-level git config
+  execFileSync('git', [
+    '-C', workDir,
+    '-c', 'user.name=AI Company Builder',
+    '-c', 'user.email=system@ai-company-builder.local',
+    'commit', '-m', 'Initialize default department folders',
+  ], { stdio: 'pipe' })
+  execFileSync('git', ['-C', workDir, 'push', 'origin', 'main'], { stdio: 'pipe' })
 }
 
 // List companies for the current user
@@ -191,6 +232,16 @@ companiesRoute.post('/', async (c) => {
   } catch (e) {
     console.error('Failed to initialize departments:', e)
     // Continue - company is created, departments can be added later
+  }
+
+  // Seed the matching folders into the repo (filesystem = source of truth)
+  if (repoPath) {
+    try {
+      seedDepartmentFolders(id, repoPath)
+    } catch (e) {
+      console.error('Failed to seed department folders:', e)
+      // Continue - folders can be created later via the departments API
+    }
   }
 
   const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(id) as Record<string, unknown>
