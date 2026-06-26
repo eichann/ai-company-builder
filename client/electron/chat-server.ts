@@ -374,13 +374,6 @@ export async function startChatServer(config: ChatServerConfig) {
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],
         streamingInput: 'always',
-        // AskUserQuestion has no answer channel in headless/no-TTY mode: the SDK
-        // auto-resolves it with empty answers ({answers:{}}) before canUseTool or
-        // PreToolUse hooks can fire, so the question can never be answered and the
-        // turn breaks (claude-code #50728, closed as "not planned"). Disabling it
-        // by bare name removes the tool from Claude's context entirely, so Claude
-        // asks clarifying questions as plain text instead.
-        disallowedTools: ['AskUserQuestion'],
         ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
         // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
         // accepts `xhigh` (Opus 4.7 only). The SDK passes the string straight to the
