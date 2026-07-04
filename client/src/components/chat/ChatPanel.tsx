@@ -28,7 +28,7 @@ import {
   ArrowCounterClockwise,
   ShieldWarning,
 } from '@phosphor-icons/react'
-import { useAppStore } from '../../stores/appStore'
+import { useAppStore, MODEL_EFFORT_OPTIONS, MODEL_LABELS, type AIModel, type AIEffort } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
@@ -1614,10 +1614,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     aiEffortRef.current = aiEffort
   }, [aiEffort])
 
-  // xhigh is only valid on Opus 4.7. If the user switches to a non-opus model while
-  // xhigh is selected, demote to high so we don't silently rely on CLI fallback.
+  // Keep the selected effort valid for the current model. If the user switches to a
+  // model that doesn't support the current effort (e.g. xhigh on Opus 4.6), demote to
+  // 'high' (a level every model supports) instead of relying on silent CLI fallback.
   useEffect(() => {
-    if (aiModel !== 'opus' && aiEffort === 'xhigh') {
+    if (!MODEL_EFFORT_OPTIONS[aiModel].includes(aiEffort)) {
       setAIEffort('high')
     }
   }, [aiModel, aiEffort, setAIEffort])
@@ -1642,6 +1643,10 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const lastNotifiedTitleRef = useRef<string | null>(null)
   // Claude CLI session ID (persisted across app restarts via ChatSession)
   const claudeSessionIdRef = useRef<string | null>(null)
+  // Model this chat session was started with. A resumed CLI session keeps its original
+  // model regardless of later selections, so we capture it on the first message and show
+  // it in the (locked) model selector for the rest of the conversation.
+  const sessionModelRef = useRef<AIModel | null>(null)
 
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
@@ -1742,6 +1747,23 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       console.error('[useChat] Error:', err)
     },
   })
+
+  // A new chat starts with an assistant greeting, so the model isn't pinned until the
+  // user actually sends a message (which creates/locks the CLI session). Gate on that.
+  const hasUserMessage = messages.some((m) => m.role === 'user')
+
+  // Capture the model at the first user message (locks it for this session); clear on new chat.
+  useEffect(() => {
+    if (hasUserMessage) {
+      if (sessionModelRef.current === null) sessionModelRef.current = aiModel
+    } else {
+      sessionModelRef.current = null
+    }
+  }, [hasUserMessage, aiModel])
+
+  // Model is fixed once the user has sent a message (resumed sessions keep their original model).
+  const modelLocked = hasUserMessage
+  const displayedModel: AIModel = modelLocked ? (sessionModelRef.current ?? aiModel) : aiModel
 
   // Associate pending images with new user messages
   useEffect(() => {
@@ -2357,34 +2379,37 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Model Selector (Claude Code mode only) */}
+          {/* Model Selector (Claude Code mode only). Locked once the chat has started, since
+              a resumed CLI session keeps the model it was created with. */}
           {authMode === 'claude-code' && (
             <select
-              value={aiModel}
-              onChange={(e) => setAIModel(e.target.value as 'sonnet' | 'opus' | 'haiku')}
-              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
+              value={displayedModel}
+              disabled={modelLocked}
+              title={modelLocked ? 'モデルはチャット開始時に固定されます（変更は新しいチャットから）' : undefined}
+              onChange={(e) => setAIModel(e.target.value as AIModel)}
+              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
-              <option value="haiku">Haiku</option>
-              <option value="sonnet">Sonnet</option>
-              <option value="opus">Opus</option>
+              <option value="opus-4-6">{MODEL_LABELS['opus-4-6']}</option>
+              <option value="opus-4-8">{MODEL_LABELS['opus-4-8']}</option>
+              <option value="sonnet">{MODEL_LABELS.sonnet}</option>
+              <option value="haiku">{MODEL_LABELS.haiku}</option>
             </select>
           )}
 
-          {/* Effort Level Selector (Claude Code mode only) */}
+          {/* Effort Level Selector (Claude Code mode only). Options depend on the model. */}
           {authMode === 'claude-code' && (
             <select
               value={aiEffort}
-              onChange={(e) => setAIEffort(e.target.value as 'low' | 'medium' | 'high' | 'xhigh' | 'max')}
+              onChange={(e) => setAIEffort(e.target.value as AIEffort)}
               className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              {/* xhigh is only meaningful on Opus 4.7; hide for other models to avoid silent fallback to high */}
-              {aiModel === 'opus' && <option value="xhigh">xHigh</option>}
-              <option value="max">Max</option>
+              {MODEL_EFFORT_OPTIONS[aiModel].map((eff) => (
+                <option key={eff} value={eff}>
+                  {eff === 'xhigh' ? 'xHigh' : eff.charAt(0).toUpperCase() + eff.slice(1)}
+                </option>
+              ))}
             </select>
           )}
 
