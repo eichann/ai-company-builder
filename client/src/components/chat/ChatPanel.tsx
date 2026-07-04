@@ -428,6 +428,8 @@ function UserMessageBubble({
   const [isEditing, setIsEditing] = useState(false)
   const [editText, setEditText] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [showAllFiles, setShowAllFiles] = useState(false)
+  const VISIBLE_FILE_COUNT = 3
 
   const originalText = message.parts
     .filter((p): p is Extract<typeof p, { type: 'text' }> => p.type === 'text')
@@ -493,9 +495,6 @@ function UserMessageBubble({
       </div>
     )
   }
-
-  const [showAllFiles, setShowAllFiles] = useState(false)
-  const VISIBLE_FILE_COUNT = 3
 
   return (
     <div className="group relative">
