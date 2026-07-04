@@ -949,7 +949,7 @@ ipcMain.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
       gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
     }
     const existingLines = gitignoreContent.split('\n').map((line) => line.trim())
-    const missing = ['.env', '.env.*'].filter((p) => !existingLines.includes(p))
+    const missing = ['.env', '.env.*', '!.env.example', '!.env.sample'].filter((p) => !existingLines.includes(p))
     if (missing.length > 0) {
       const prefix = gitignoreContent.length > 0 && !gitignoreContent.endsWith('\n') ? '\n' : ''
       const header = existingLines.includes('# Secrets — never sync (local only)')
@@ -2016,6 +2016,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       { pattern: 'node_modules/', comment: '# Dependencies' },
       { pattern: '.env', comment: '# Secrets — never sync (local only)' },
       { pattern: '.env.*', comment: '' },
+      { pattern: '!.env.example', comment: '# Keep templates shared' },
+      { pattern: '!.env.sample', comment: '' },
     ]
 
     const patternsToAdd: string[] = []
@@ -2031,7 +2033,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       fs.appendFileSync(gitignorePath, addition)
       gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
     } else if (!fs.existsSync(gitignorePath)) {
-      const seed = '.backups/\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n'
+      const seed = '.backups/\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n'
       fs.writeFileSync(gitignorePath, seed)
       gitignoreContent = seed
     }
@@ -2647,7 +2649,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
         // Create .gitignore if it doesn't exist
         const gitignorePath = path.join(repoPath, '.gitignore')
         if (!fs.existsSync(gitignorePath)) {
-          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n# Secrets — never sync (local only)\n.env\n.env.*\n')
+          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n')
         }
 
         await git.raw(['add', '--sparse', '.'])
