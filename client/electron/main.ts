@@ -939,6 +939,25 @@ ipcMain.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
     const envPath = path.join(safePath, '.env')
     const content = stringifyEnvFile(vars)
     await fs.promises.writeFile(envPath, content, 'utf-8')
+
+    // Self-heal: ensure secrets are never synced, even for older folders whose
+    // .gitignore predates the seed (or had the entries removed). The .env file
+    // holds API keys, so it must stay local-only.
+    const gitignorePath = path.join(safePath, '.gitignore')
+    let gitignoreContent = ''
+    if (fs.existsSync(gitignorePath)) {
+      gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
+    }
+    const existingLines = gitignoreContent.split('\n').map((line) => line.trim())
+    const missing = ['.env', '.env.*', '!.env.example', '!.env.sample'].filter((p) => !existingLines.includes(p))
+    if (missing.length > 0) {
+      const prefix = gitignoreContent.length > 0 && !gitignoreContent.endsWith('\n') ? '\n' : ''
+      const header = existingLines.includes('# Secrets — never sync (local only)')
+        ? ''
+        : '# Secrets — never sync (local only)\n'
+      fs.appendFileSync(gitignorePath, prefix + header + missing.join('\n') + '\n')
+    }
+
     return { success: true }
   } catch (error) {
     console.error('Failed to write .env:', error)
@@ -1995,6 +2014,10 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       { pattern: '.backups/', comment: '' },
       { pattern: '.workspace/', comment: '# AI-generated temp files' },
       { pattern: 'node_modules/', comment: '# Dependencies' },
+      { pattern: '.env', comment: '# Secrets — never sync (local only)' },
+      { pattern: '.env.*', comment: '' },
+      { pattern: '!.env.example', comment: '# Keep templates shared' },
+      { pattern: '!.env.sample', comment: '' },
     ]
 
     const patternsToAdd: string[] = []
@@ -2010,8 +2033,9 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       fs.appendFileSync(gitignorePath, addition)
       gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
     } else if (!fs.existsSync(gitignorePath)) {
-      fs.writeFileSync(gitignorePath, '.backups/\nnode_modules/\n')
-      gitignoreContent = '.backups/\nnode_modules/\n'
+      const seed = '.backups/\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n'
+      fs.writeFileSync(gitignorePath, seed)
+      gitignoreContent = seed
     }
 
     // Detect large files (>100MB) and add to .gitignore — async to avoid blocking UI
@@ -2625,7 +2649,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
         // Create .gitignore if it doesn't exist
         const gitignorePath = path.join(repoPath, '.gitignore')
         if (!fs.existsSync(gitignorePath)) {
-          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n')
+          fs.writeFileSync(gitignorePath, '.DS_Store\n*.log\nnode_modules/\n.backups/\n.workspace/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n')
         }
 
         await git.raw(['add', '--sparse', '.'])

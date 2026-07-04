@@ -4,10 +4,18 @@
  * All route files that handle companyId or file paths must sanitize
  * them to prevent directory traversal attacks (e.g., ../../etc/passwd).
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 import { readFileSync } from 'fs'
 import { join } from 'path'
 import { readdirSync } from 'fs'
+
+// Mock auth so importing departments.ts does not load the real auth module,
+// which calls process.exit(1) at import time when AUTH_SECRET is unset.
+vi.mock('../../src/lib/auth', () => ({
+  getUserFromRequest: vi.fn(),
+}))
+
+import { isValidFolderName } from '../../src/routes/departments'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
@@ -50,30 +58,25 @@ describe('Path traversal prevention', () => {
     expect(violations).toEqual([])
   })
 
-  it('folder name validation rejects path traversal characters', () => {
-    // Verify the isValidFolderName regex from departments.ts
-    const deptContent = readFileSync(join(ROUTES_DIR, 'departments.ts'), 'utf-8')
+  it('isValidFolderName rejects path traversal and injection characters', () => {
+    // Exercise the actual implementation imported from departments.ts,
+    // not a regex literal copied into the test. This keeps the test honest
+    // if the implementation's validation ever changes.
 
-    // Verify the function exists
-    expect(deptContent, 'isValidFolderName function must exist in departments.ts')
-      .toContain('isValidFolderName')
-
-    // Use the known pattern directly (verified against source)
-    // Pattern: /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
-    expect(deptContent).toContain('^[a-zA-Z0-9][a-zA-Z0-9._-]*$')
-
-    const pattern = /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/
-
-    // These must be rejected (path traversal, injection, etc.)
+    // These must be rejected (path traversal, injection, hidden files, etc.)
     const maliciousNames = [
       '../etc',
       '..\\etc',
+      '..',
+      '.',
       '.hidden',
       '/absolute',
       'path/traversal',
+      'back\\slash',
       'name;injection',
       'name`injection`',
       'name$(cmd)',
+      'name with space',
       '',
       ' ',
       '-startsWithDash',
@@ -82,23 +85,28 @@ describe('Path traversal prevention', () => {
 
     for (const name of maliciousNames) {
       expect(
-        pattern.test(name),
+        isValidFolderName(name),
         `isValidFolderName should reject "${name}"`
       ).toBe(false)
     }
 
-    // These must be accepted
+    // These must be accepted. Department folders allow ASCII and Japanese
+    // (hiragana / katakana / kanji), per CLAUDE.md folder-naming rules.
     const validNames = [
       'sales',
       'my-dept',
       'dept_name',
       'dept.v2',
       'Department1',
+      '営業部',       // kanji
+      'えいぎょう',    // hiragana
+      'エンジニア',    // katakana
+      '開発_dev',     // kanji + ASCII mix
     ]
 
     for (const name of validNames) {
       expect(
-        pattern.test(name),
+        isValidFolderName(name),
         `isValidFolderName should accept "${name}"`
       ).toBe(true)
     }
