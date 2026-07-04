@@ -2140,21 +2140,27 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       await window.electronAPI.deleteChatSession(currentCompany.id, sessionId)
       loadSessions()
       if (currentSessionId === sessionId) {
-        startNewChat()
+        // Skip the leading save: otherwise the just-deleted session (still in
+        // currentSessionId/messages) would be re-persisted and reappear in history.
+        startNewChat({ skipSave: true })
       }
     } catch (e) {
       console.error('Failed to delete session:', e)
     }
   }
 
-  async function startNewChat() {
+  async function startNewChat(options?: { skipSave?: boolean }) {
     // Stop any in-flight stream so a partial assistant response is captured before saving
     if (status === 'streaming' || status === 'submitted') {
       stop()
       await new Promise(r => setTimeout(r, 150))
     }
-    // Save current session (including draft input) before starting a new one
-    await saveCurrentSession()
+    // Save current session (including draft input) before starting a new one.
+    // Skipped when invoked right after deleting the active session, so the
+    // deleted session is not re-persisted from the still-populated state.
+    if (!options?.skipSave) {
+      await saveCurrentSession()
+    }
     // Clear Claude CLI session mapping on the server
     if (appSessionIdRef.current) {
       fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
@@ -2438,7 +2444,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
 
           {/* New Chat/Tab Button */}
           <button
-            onClick={onNewTab || startNewChat}
+            onClick={onNewTab || (() => startNewChat())}
             className="w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
             title={t('chat.newChat')}
           >
