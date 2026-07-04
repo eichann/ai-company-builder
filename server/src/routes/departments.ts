@@ -51,7 +51,7 @@ function canEditDepartments(role: string): boolean {
 }
 
 // Helper: Validate folder name (ASCII + Japanese allowed)
-function isValidFolderName(folder: string): boolean {
+export function isValidFolderName(folder: string): boolean {
   return /^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/.test(folder)
 }
 
