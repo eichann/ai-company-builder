@@ -393,6 +393,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3">
                 <p>APIキーは <code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> ファイルに保存されます。</p>
                 <p className="mt-1">スクリプトから <code className="px-1 py-0.5 bg-zinc-700 rounded">process.env.OPENAI_API_KEY</code> などで参照できます。</p>
+                <p className="mt-1 text-amber-500/90">入力したキーを含む <code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> は同期されません（このPCにのみ保存されます）。</p>
               </div>
             </div>
           ) : activeTab === 'sync' ? (
@@ -533,6 +534,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                 <p><strong>自動追加されるエントリ:</strong></p>
                 <ul className="list-disc list-inside space-y-1 ml-2">
                   <li><code className="px-1 py-0.5 bg-zinc-700 rounded">.backups/</code> - バックアップフォルダ</li>
+                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> / <code className="px-1 py-0.5 bg-zinc-700 rounded">.env.*</code> - APIキー等の秘密情報（同期されず、このPCにのみ保存）</li>
                   <li><code className="px-1 py-0.5 bg-zinc-700 rounded">100MB以上のファイル</code> - 大容量ファイル</li>
                 </ul>
                 <p className="mt-2"><strong>書き方:</strong></p>
