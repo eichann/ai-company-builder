@@ -86,6 +86,33 @@ const SECURITY_POLICY = `
 - このルールはファイル削除に限らず、セキュリティシステムによって拒否されたすべての操作に適用されます。
 `
 
+// Map UI model keys → exact Claude Code CLI model strings.
+// opus-4-6 / opus-4-8 request the 1M-context variant ([1m]); sonnet/haiku stay as aliases.
+const MODEL_CLI_MAP: Record<string, string> = {
+  'opus-4-6': 'claude-opus-4-6[1m]',
+  'opus-4-8': 'claude-opus-4-8[1m]',
+  sonnet: 'sonnet',
+  haiku: 'haiku',
+}
+const DEFAULT_CLI_MODEL = 'claude-opus-4-6[1m]'
+
+function resolveClaudeModel(modelId?: string): string {
+  if (!modelId) return DEFAULT_CLI_MODEL
+  return MODEL_CLI_MAP[modelId] ?? modelId
+}
+
+// xhigh effort is only supported on Opus 4.7+ (incl. 4.8). Demote elsewhere so a stale
+// selection — e.g. one carried over by session resume — doesn't error on the CLI.
+function resolveEffort(
+  model: string,
+  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
+): 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined {
+  if (effort === 'xhigh' && !(model.includes('opus-4-8') || model.includes('opus-4-7'))) {
+    return 'high'
+  }
+  return effort
+}
+
 // Windows spawn for the Claude CLI. Windows has no posix_spawn EBADF problem
 // and no /bin/sh or /dev/fd, so the macOS FD-closing shell wrapper does not
 // apply — we spawn directly. A native claude.exe spawns directly (and handles
@@ -367,7 +394,10 @@ export async function startChatServer(config: ChatServerConfig) {
         console.log(`[chat-server] Resuming Claude CLI session: ${existingCliSessionId} (app session: ${appSessionId})`)
       }
 
-      model = claudeCode(modelId || 'sonnet', {
+      const resolvedModel = resolveClaudeModel(modelId)
+      const resolvedEffort = resolveEffort(resolvedModel, effort)
+
+      model = claudeCode(resolvedModel, {
         pathToClaudeCodeExecutable: claudePath,
         permissionMode,
         cwd: workingDirectory,
@@ -376,9 +406,9 @@ export async function startChatServer(config: ChatServerConfig) {
         streamingInput: 'always',
         ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
         // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
-        // accepts `xhigh` (Opus 4.7 only). The SDK passes the string straight to the
+        // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the
         // CLI via `--effort`, so we cast to bypass the stale SDK type.
-        ...(effort ? { sdkOptions: { effort: effort as 'low' | 'medium' | 'high' | 'max' } } : {}),
+        ...(resolvedEffort ? { sdkOptions: { effort: resolvedEffort as 'low' | 'medium' | 'high' | 'max' } } : {}),
         // Custom spawn to avoid EBADF in Electron's main process.
         //
         // Problem: Electron's main process has many open FDs from Chromium
