@@ -10,7 +10,8 @@
     "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 vite",
     "build": "tsc && vite build && electron-builder",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0"
+    "lint": "eslint .",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "build": {
     "appId": "com.ai-company-builder.client",
@@ -89,6 +90,7 @@
     "zustand": "^4.5.2"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.2",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/react-syntax-highlighter": "^15.5.13",
@@ -96,9 +98,14 @@
     "autoprefixer": "^10.4.19",
     "electron": "^31.3.1",
     "electron-builder": "^24.13.3",
+    "eslint": "^9",
+    "eslint-plugin-react-hooks": "^5.2.0",
+    "eslint-plugin-react-refresh": "^0.5.3",
+    "globals": "^17.7.0",
     "postcss": "^8.4.39",
     "tailwindcss": "^3.4.6",
     "typescript": "^5.5.3",
+    "typescript-eslint": "^8.62.1",
     "vite": "^5.3.4",
     "vite-plugin-electron": "^0.28.7",
     "vite-plugin-electron-renderer": "^0.14.5"
