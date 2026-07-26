@@ -314,6 +314,22 @@ export async function startChatServer(config: ChatServerConfig) {
         if (input.hook_event_name !== 'PreToolUse') {
           return { continue: true }
         }
+        // Background subagents outlive the turn, but the SDK closes the hook
+        // control channel (CLI stdin) at the first result — their later hook
+        // round-trips then fail open, bypassing the dangerous-command gate, and
+        // their results never reach the UI. Force every subagent launch to run
+        // synchronously instead. (Bash's own run_in_background is unaffected;
+        // the tool name is 'Task' on some CLI versions and 'Agent' on others.)
+        if (input.tool_name === 'Task' || input.tool_name === 'Agent') {
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'allow',
+              updatedInput: { ...(input.tool_input ?? {}), run_in_background: false },
+            },
+          }
+        }
         if (input.tool_name === 'Bash') {
           const cmd = String(input.tool_input?.command || '')
           for (const pattern of DANGEROUS_PATTERNS) {
