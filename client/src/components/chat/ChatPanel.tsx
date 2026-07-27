@@ -2395,8 +2395,10 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
               className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
-              <option value="opus-4-6">{MODEL_LABELS['opus-4-6']}</option>
+              <option value="fable-5">{MODEL_LABELS['fable-5']}</option>
+              <option value="opus-5">{MODEL_LABELS['opus-5']}</option>
               <option value="opus-4-8">{MODEL_LABELS['opus-4-8']}</option>
+              <option value="opus-4-6">{MODEL_LABELS['opus-4-6']}</option>
               <option value="sonnet">{MODEL_LABELS.sonnet}</option>
               <option value="haiku">{MODEL_LABELS.haiku}</option>
             </select>

@@ -8,18 +8,21 @@ export type Theme = 'light' | 'dark'
 // Language type
 export type Language = 'en' | 'ja'
 
-// AI Model type. Opus is split into explicit 4.6 / 4.8 (1M context) choices;
-// sonnet/haiku remain as CLI aliases.
-export type AIModel = 'opus-4-6' | 'opus-4-8' | 'sonnet' | 'haiku'
+// AI Model type. Opus is split into explicit 4.6 / 4.8 / 5 (1M context) choices; Fable 5 has
+// a native 1M context window; sonnet/haiku remain as CLI aliases.
+export type AIModel = 'opus-4-6' | 'opus-4-8' | 'opus-5' | 'fable-5' | 'sonnet' | 'haiku'
 
 // AI Effort level type. Valid levels depend on the model (see MODEL_EFFORT_OPTIONS);
-// e.g. `xhigh` is only supported on Opus 4.7+ (incl. 4.8), not 4.6/sonnet/haiku.
+// e.g. `xhigh` is only supported on Opus 4.7+ (incl. 4.8), Opus 5, and Fable 5, not
+// 4.6/sonnet/haiku.
 export type AIEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 // Effort levels valid per model. Drives the effort selector options and clamping.
 export const MODEL_EFFORT_OPTIONS: Record<AIModel, AIEffort[]> = {
   'opus-4-6': ['low', 'medium', 'high', 'max'],
   'opus-4-8': ['low', 'medium', 'high', 'xhigh', 'max'],
+  'opus-5': ['low', 'medium', 'high', 'xhigh', 'max'],
+  'fable-5': ['low', 'medium', 'high', 'xhigh', 'max'],
   sonnet: ['low', 'medium', 'high', 'max'],
   haiku: ['low', 'medium', 'high'],
 }
@@ -28,6 +31,8 @@ export const MODEL_EFFORT_OPTIONS: Record<AIModel, AIEffort[]> = {
 export const MODEL_LABELS: Record<AIModel, string> = {
   'opus-4-6': 'Opus 4.6',
   'opus-4-8': 'Opus 4.8',
+  'opus-5': 'Opus 5',
+  'fable-5': 'Fable 5',
   sonnet: 'Sonnet',
   haiku: 'Haiku',
 }
@@ -36,7 +41,7 @@ export const MODEL_LABELS: Record<AIModel, string> = {
 const getInitialModel = (): AIModel => {
   if (typeof window !== 'undefined') {
     const saved = localStorage.getItem('aiModel')
-    if (saved === 'opus-4-6' || saved === 'opus-4-8' || saved === 'sonnet' || saved === 'haiku') {
+    if (saved === 'opus-4-6' || saved === 'opus-4-8' || saved === 'opus-5' || saved === 'fable-5' || saved === 'sonnet' || saved === 'haiku') {
       return saved
     }
     if (saved === 'opus') return 'opus-4-6' // migrate legacy 'opus' alias
