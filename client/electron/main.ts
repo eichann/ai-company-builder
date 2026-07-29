@@ -2107,28 +2107,78 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
     }
 
-    // Auto-detect nested Git repositories (e.g. user ran `git init` in a subfolder, or cloned an external repo).
-    // Without this, `git add` would record them as gitlinks (160000 mode) and other members pulling
-    // would see empty folders. We add them to .gitignore and unstage any existing gitlink so ACB
-    // ignores them entirely; users who need the contents can clone separately.
+    // Detect nested Git repositories (e.g. user ran `git init` in a subfolder,
+    // or copied in a cloned repo). Left alone, `git add` would record them as
+    // gitlinks (160000 mode) and other members pulling would see empty folders.
+    // Newly found repos require the user's choice BEFORE anything is modified:
+    // the pre-consent `rm --cached` of the 2026-07-29 incident untracked a
+    // whole shared folder (653 files) and surfaced as a terrifying "653 files
+    // deleted" warning even though nothing was gone from disk.
     const newlyExcludedNestedRepos: string[] = []
     try {
       const nestedRepos = await findNestedGitRepos(repoPath)
       if (nestedRepos.length > 0) {
         const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
-        const lines = currentGitignore.split('\n')
-        const existingPatterns = new Set(lines.map(l => l.trim()))
-        const additions: string[] = []
+        const existingPatterns = new Set(currentGitignore.split('\n').map(l => l.trim()))
+        const newRepos = nestedRepos.filter(repo => !existingPatterns.has(`/${repo}/`))
+        const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
 
-        for (const repo of nestedRepos) {
-          const pattern = `/${repo}/`
-          if (!existingPatterns.has(pattern)) {
-            additions.push(pattern)
+        for (const repo of newRepos) {
+          if (!win) {
+            // No window to ask — legacy behavior (exclude silently)
             newlyExcludedNestedRepos.push(repo)
+            continue
           }
 
-          // Unstage any existing gitlink so the next `git add` doesn't re-record it.
-          // `git rm --cached` is a no-op (errors silently) when the path isn't tracked.
+          // A folder that is already shared (tracked files in HEAD) most
+          // likely picked up a stray .git from a copied clone. Excluding it
+          // would delete it from every member's machine — the right fix is
+          // usually to drop the inner .git and keep sharing.
+          const isShared = (await git.raw(['ls-files', '--', repo])).trim().length > 0
+
+          if (isShared) {
+            const { response } = await dialog.showMessageBox(win, {
+              type: 'warning',
+              buttons: ['.git を取り除いて共有を続ける（推奨）', '同期対象から除外する', 'キャンセル'],
+              defaultId: 0,
+              cancelId: 2,
+              title: '共有中のフォルダに別のGit情報を検出',
+              message: `「${repo}」の中に別のGit管理情報(.git)が見つかりました。`,
+              detail: `フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します`,
+            })
+            if (response === 2) {
+              return { success: false, error: `同期を中止しました（「${repo}」に別のGitリポジトリが含まれています）` }
+            }
+            if (response === 0) {
+              fs.rmSync(path.join(repoPath, repo, '.git'), { recursive: true, force: true })
+              console.log(`Git sync: Removed inner .git of "${repo}" (user chose to keep sharing)`)
+              continue // stays shared — no exclusion
+            }
+            // response === 1 → exclude below
+          } else {
+            const { response } = await dialog.showMessageBox(win, {
+              type: 'warning',
+              buttons: ['同期対象から除外して続行', 'キャンセル'],
+              defaultId: 0,
+              cancelId: 1,
+              title: '外部Gitリポジトリを検出',
+              message: `「${repo}」は別のGitリポジトリです。`,
+              detail: `このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。`,
+            })
+            if (response === 1) {
+              return { success: false, error: `同期を中止しました（「${repo}」は外部Gitリポジトリです）` }
+            }
+          }
+          newlyExcludedNestedRepos.push(repo)
+        }
+
+        // Mutations happen only after the user has chosen. Unstage gitlinks
+        // for excluded repos (previously consented ones too — `rm --cached`
+        // errors silently when the path isn't tracked).
+        const excludedRepos = nestedRepos.filter(
+          repo => newlyExcludedNestedRepos.includes(repo) || existingPatterns.has(`/${repo}/`)
+        )
+        for (const repo of excludedRepos) {
           try {
             await git.raw(['rm', '--cached', '-rf', repo])
             console.log(`Git sync: Removed gitlink for nested repo "${repo}"`)
@@ -2137,11 +2187,11 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           }
         }
 
-        if (additions.length > 0) {
+        if (newlyExcludedNestedRepos.length > 0) {
           const trailingNewline = currentGitignore.endsWith('\n') || currentGitignore === '' ? '' : '\n'
-          const section = `${trailingNewline}\n# Auto-ignored: nested Git repositories (managed independently)\n${additions.join('\n')}\n`
+          const section = `${trailingNewline}\n# Auto-ignored: nested Git repositories (managed independently)\n${newlyExcludedNestedRepos.map(repo => `/${repo}/`).join('\n')}\n`
           await fs.promises.appendFile(gitignorePath, section)
-          console.log(`Git sync: Added ${additions.length} nested repo(s) to .gitignore:`, additions)
+          console.log(`Git sync: Added ${newlyExcludedNestedRepos.length} nested repo(s) to .gitignore:`, newlyExcludedNestedRepos)
         }
       }
     } catch (nestedRepoError) {
@@ -2184,9 +2234,13 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 
     let restoredFolders: string[] = []
 
-    // 2. Check for deleted files before staging
+    // 2. Check for deleted files before staging. Deletions staged by the
+    //    consented nested-repo exclusion above are intentional — keep them
+    //    out of the warning dialog (and never "restore" them).
     const preAddStatus = await git.status()
-    const deletedFiles = preAddStatus.deleted
+    const deletedFiles = preAddStatus.deleted.filter(
+      f => !newlyExcludedNestedRepos.some(repo => f === repo || f.startsWith(`${repo}/`))
+    )
 
     // If files were deleted locally, warn the user before syncing
     if (deletedFiles.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
