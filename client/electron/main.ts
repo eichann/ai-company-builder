@@ -1559,22 +1559,28 @@ function getResolvedGit() {
 
 // Create a simpleGit instance with HTTPS token authentication
 function createGit(repoPath: string): SimpleGit {
-  const { binary: gitBinary, envOverrides, fallback } = getResolvedGit()
+  const { binary: gitBinary, envOverrides } = getResolvedGit()
   const askPassPath = getGitAskPassPath()
   const sessionToken = extractSessionToken(authCookies)
 
   return simpleGit(repoPath, {
     binary: gitBinary,
     unsafe: { allowUnsafeCustomBinary: true },
+    // Kill any git process that produces no output for 5 minutes. Without
+    // this, a git process waiting on input that will never come (there is no
+    // terminal) hangs `await` forever and freezes sync with it. Network
+    // transfers stay alive because sync passes --progress to fetch/pull/push.
+    timeout: { block: 5 * 60 * 1000 },
     config: [
       'core.hooksPath=/dev/null',
       'credential.helper=',
       'core.quotePath=false',
-      // The system git fallback can be old (e.g. Apple Git 2.39, whose
-      // chunked HTTP push is broken — it fails even against github.com over
-      // HTTP/1.1). Buffer pushes up to 500MB so git never switches to
-      // chunked transfer above the 1MiB default.
-      ...(fallback ? ['http.postBuffer=524288000'] : []),
+      // Old clients (e.g. Apple Git 2.39, still reachable via the system git
+      // fallback) have a broken chunked HTTP push — it fails even against
+      // github.com over HTTP/1.1. Buffer pushes up to 500MB so git never
+      // switches to chunked transfer above the 1MiB default, regardless of
+      // which binary was resolved.
+      'http.postBuffer=524288000',
     ],
     // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
     // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
@@ -1585,6 +1591,13 @@ function createGit(repoPath: string): SimpleGit {
       GIT_ASKPASS: askPassPath,
       GIT_TOKEN: sessionToken,
       GIT_TERMINAL_PROMPT: '0',
+      // Continuing a rebase after a conflicted pick opens an editor to
+      // confirm the commit message. In a GUI-launched app that editor is vi
+      // with no terminal attached — it blocks forever (the 2026-07-29 sync
+      // freeze). `true` accepts the recorded message non-interactively; git
+      // always invokes editors via its own sh, so this works on Windows too.
+      GIT_EDITOR: 'true',
+      GIT_SEQUENCE_EDITOR: 'true',
       ...envOverrides,
     })
 }
@@ -1950,7 +1963,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     if (fs.existsSync(pendingPushFile)) {
       console.log('Git sync: Found pending push, retrying...')
       try {
-        await git.push('origin', 'main', ['--set-upstream'])
+        await git.push('origin', 'main', ['--set-upstream', '--progress'])
         fs.unlinkSync(pendingPushFile)
         console.log('Git sync: Pending push succeeded')
       } catch (retryError) {
@@ -2125,7 +2138,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     // 1. Fetch from origin
     console.log('Git sync: Fetching from origin...')
     try {
-      await git.fetch('origin')
+      await git.fetch(['--progress', 'origin'])
     } catch (fetchError) {
       console.warn('Git sync: Fetch failed (may be offline):', fetchError)
     }
@@ -2225,7 +2238,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     try {
       console.log('Git sync: Pulling with rebase...')
       try {
-        await git.pull('origin', 'main', ['--rebase'])
+        await git.pull('origin', 'main', ['--rebase', '--progress'])
       } catch (firstPullError) {
         if (!isWindowsLockError(firstPullError)) throw firstPullError
         const maxRetries = 2
@@ -2234,7 +2247,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           await git.rebase(['--abort']).catch(() => { /* no rebase in progress */ })
           await new Promise((resolve) => setTimeout(resolve, 800))
           try {
-            await git.pull('origin', 'main', ['--rebase'])
+            await git.pull('origin', 'main', ['--rebase', '--progress'])
             break
           } catch (retryError) {
             if (attempt >= maxRetries || !isWindowsLockError(retryError)) throw retryError
@@ -2402,7 +2415,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 
     try {
       console.log('Git sync: Pushing to origin...')
-      await git.push('origin', 'main', ['--set-upstream'])
+      await git.push('origin', 'main', ['--set-upstream', '--progress'])
     } catch (pushError) {
       // Check if push was rejected due to secret detection
       const pushErrorMsg = pushError instanceof Error ? pushError.message : String(pushError)
@@ -2426,7 +2439,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.error('Git sync: Push to main failed:', pushErrorMsg)
       // Try master branch if main fails
       try {
-        await git.push('origin', 'master', ['--set-upstream'])
+        await git.push('origin', 'master', ['--set-upstream', '--progress'])
       } catch (masterPushError) {
         // Check secret detection on master push too
         const masterErrorMsg = masterPushError instanceof Error ? masterPushError.message : String(masterPushError)
@@ -2593,7 +2606,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
     if (remoteHasCommits) {
       // Remote has content — pull it down (member joining existing company)
       console.log('Git setup: Remote has commits, fetching...')
-      await git.fetch('origin')
+      await git.fetch(['--progress', 'origin'])
 
       // Determine the main branch name
       const lsRemote = await git.listRemote(['--heads', 'origin'])
@@ -2615,7 +2628,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
           console.log('Git setup: Uncommitted changes detected, skipping pull (will resolve on next sync)')
         } else {
           try {
-            await git.pull('origin', remoteBranch, ['--rebase'])
+            await git.pull('origin', remoteBranch, ['--rebase', '--progress'])
             console.log(`Git setup: Pulled origin/${remoteBranch} into ${localBranch}`)
           } catch (pullError) {
             console.warn('Git setup: Pull failed, will resolve on next sync:', pullError)
@@ -2660,7 +2673,7 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
       try {
         const status = await git.status()
         const branch = status.current || 'main'
-        await git.push('origin', branch, ['--set-upstream'])
+        await git.push('origin', branch, ['--set-upstream', '--progress'])
         console.log(`Git setup: Pushed to origin/${branch}`)
       } catch (pushError) {
         console.warn('Git setup: Push failed (may be first time or network issue):', pushError)
@@ -3010,7 +3023,7 @@ ipcMain.handle('git:pushToServer', async (_, repoPath: string) => {
 
     // Push with set-upstream
     const branch = status.current || 'main'
-    await git.push('origin', branch, ['--set-upstream', '--force'])
+    await git.push('origin', branch, ['--set-upstream', '--force', '--progress'])
 
     return { success: true, message: `Pushed to server (branch: ${branch})` }
   } catch (error) {
