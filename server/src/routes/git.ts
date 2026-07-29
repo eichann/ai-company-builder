@@ -37,6 +37,39 @@ export function installPreReceiveHook(repoPath: string): boolean {
   }
 }
 
+// Standard configuration for a company bare repository. Idempotent — applied
+// on creation and again at startup, so config and hook upgrades reach
+// repositories created by older server versions.
+export function configureBareRepo(repoPath: string): void {
+  // Enable HTTP push (required for git-http-backend)
+  execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
+  // The repo is the whole team's shared history: a force push or branch
+  // deletion from one member's broken clone must never be able to erase
+  // everyone else's work.
+  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyNonFastForwards', 'true'], { stdio: 'pipe' })
+  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyDeletes', 'true'], { stdio: 'pipe' })
+  // Pre-receive hook: secret / gitlink / Windows-incompatible path checks
+  installPreReceiveHook(repoPath)
+}
+
+// Bring every existing repository up to the current standard configuration.
+export function configureAllBareRepos(): { total: number; failed: number } {
+  let total = 0
+  let failed = 0
+  if (!existsSync(REPOS_DIR)) return { total, failed }
+  for (const name of readdirSync(REPOS_DIR)) {
+    if (!name.endsWith('.git')) continue
+    total++
+    try {
+      configureBareRepo(join(REPOS_DIR, name))
+    } catch (error) {
+      failed++
+      console.error(`Failed to configure repository ${name}:`, error)
+    }
+  }
+  return { total, failed }
+}
+
 // List all repositories
 gitRoute.get('/repos', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
@@ -110,11 +143,8 @@ gitRoute.post('/repos', async (c) => {
     // never default to the container git's default (master).
     execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
 
-    // Enable HTTP push (required for git-http-backend)
-    execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
-
-    // Install pre-receive hook for secret detection
-    installPreReceiveHook(repoPath)
+    // Standard config (HTTP push, force-push protection) + pre-receive hook
+    configureBareRepo(repoPath)
 
     return c.json({
       success: true,

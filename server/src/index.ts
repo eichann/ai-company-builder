@@ -13,12 +13,19 @@ import { sshKeysRoute } from './routes/ssh-keys'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
 import { syncRoute } from './routes/sync'
-import { gitRoute } from './routes/git'
+import { gitRoute, configureAllBareRepos } from './routes/git'
 import { gitHttpRoute } from './routes/git-http'
 import { invitationsRoute } from './routes/invitations'
 
 // Initialize database
 initDatabase()
+
+// Bring existing company repos up to the current standard configuration
+// (force-push protection, HTTP push, latest pre-receive hook)
+{
+  const { total, failed } = configureAllBareRepos()
+  console.log(`Configured ${total - failed}/${total} bare repositories${failed > 0 ? ` (${failed} failed)` : ''}`)
+}
 
 // Clean up expired sessions on startup
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
