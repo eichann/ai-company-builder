@@ -1903,32 +1903,45 @@ ipcMain.handle('git:grep', async (_, repoPath: string, query: string, folderPath
 const syncLocks = new Map<string, Promise<unknown>>()
 
 ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
-  // Prevent concurrent syncs for the same repository
-  const existing = syncLocks.get(repoPath)
-  if (existing) {
-    console.log('Git sync: Already syncing, waiting for previous sync to complete...')
-    try { await existing } catch { /* ignore previous sync errors */ }
-  }
+  // Serialize syncs per repository. Register our run BEFORE waiting on the
+  // previous one — the old code awaited first and registered later, so two
+  // clicks queued behind the same sync woke together and ran concurrently
+  // (WP-3.1).
+  const previous = syncLocks.get(repoPath)
 
   const syncPromise = (async () => {
+  if (previous) {
+    console.log('Git sync: Already syncing, waiting for previous sync to complete...')
+    try { await previous } catch { /* previous sync errors belong to its caller */ }
+  }
   try {
     const git: SimpleGit = createGit(repoPath)
     const backupsDir = path.join(repoPath, '.backups')
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)
     const backupPath = path.join(backupsDir, timestamp)
 
-    // Recover from stale rebase/merge state (e.g., app crashed mid-sync)
+    // Recover from stale rebase/merge state (e.g., app crashed mid-sync).
+    // A rebase in progress is signalled by the rebase-merge / rebase-apply
+    // directory — REBASE_HEAD is just a ref that can linger after a rebase
+    // finished, so it must not be used as the indicator (WP-3.1).
     const gitDir = path.join(repoPath, '.git')
-    const staleStates = ['REBASE_HEAD', 'MERGE_HEAD', 'CHERRY_PICK_HEAD']
-    for (const stateFile of staleStates) {
+    const rebaseInProgress = () =>
+      fs.existsSync(path.join(gitDir, 'rebase-merge')) || fs.existsSync(path.join(gitDir, 'rebase-apply'))
+    if (rebaseInProgress()) {
+      console.log('Git sync: Detected stale rebase, aborting...')
+      try {
+        await git.rebase(['--abort'])
+      } catch (abortError) {
+        console.warn('Git sync: Failed to abort rebase:', abortError)
+      }
+    }
+    for (const stateFile of ['MERGE_HEAD', 'CHERRY_PICK_HEAD']) {
       if (fs.existsSync(path.join(gitDir, stateFile))) {
         console.log(`Git sync: Detected stale ${stateFile}, aborting...`)
         try {
-          if (stateFile === 'REBASE_HEAD') {
-            await git.rebase(['--abort'])
-          } else if (stateFile === 'MERGE_HEAD') {
+          if (stateFile === 'MERGE_HEAD') {
             await git.merge(['--abort'])
-          } else if (stateFile === 'CHERRY_PICK_HEAD') {
+          } else {
             await git.raw(['cherry-pick', '--abort'])
           }
         } catch (abortError) {
@@ -2224,7 +2237,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 
     // 4. Pull with rebase
     let hadConflicts = false
-    let conflictFiles: string[] = []
+    const conflictFiles: string[] = []
 
     // Windows: another process (running skill tool, editor, AV scan) holding
     // a file makes rebase fail with a transient lock error that clears
@@ -2255,81 +2268,113 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
         }
       }
     } catch (pullError) {
-      console.log('Git sync: Pull/rebase failed, checking for conflicts...')
-
-      // Check if it's a conflict
-      const statusAfterPull = await git.status()
-      if (statusAfterPull.conflicted.length > 0) {
-        hadConflicts = true
-        conflictFiles = statusAfterPull.conflicted
-
-        console.log(`Git sync: Conflict detected in ${conflictFiles.length} files`)
-
-        // a. Backup conflicting files (clean local version from localHash)
-        fs.mkdirSync(backupPath, { recursive: true })
-
-        for (const file of conflictFiles) {
-          try {
-            const destPath = path.join(backupPath, file)
-            fs.mkdirSync(path.dirname(destPath), { recursive: true })
-            // Use git cat-file to extract as binary-safe Buffer
-            // (git.show returns string, which corrupts binary files)
-            const { binary: gitBinary } = getResolvedGit()
-            const content = await new Promise<Buffer>((resolve, reject) => {
-              const chunks: Buffer[] = []
-              const proc = require('child_process').spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
-                cwd: repoPath,
-                stdio: ['ignore', 'pipe', 'ignore'],
-                ...(process.getuid ? { uid: process.getuid() } : {}),
-              })
-              proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
-              proc.on('close', (code: number) => {
-                if (code === 0) resolve(Buffer.concat(chunks))
-                else reject(new Error(`git cat-file exited with ${code}`))
-              })
-              proc.on('error', reject)
-            })
-            fs.writeFileSync(destPath, content)
-          } catch {
-            // File might not exist in localHash (e.g., new file on server side only)
-          }
-        }
-
-        // Save metadata
-        const metadata = {
-          timestamp: new Date().toISOString(),
-          reason: 'conflict',
-          conflictFiles,
-          message: commitMessage || 'Sync from AI Company Builder'
-        }
-        fs.writeFileSync(
-          path.join(backupPath, '_metadata.json'),
-          JSON.stringify(metadata, null, 2)
-        )
-
-        // b. Resolve conflicts: take server version (--ours in rebase context = upstream)
-        console.log('Git sync: Resolving conflicts with server version...')
-        await git.checkout(['--ours', '--', ...conflictFiles])
-        await git.add(conflictFiles)
-
-        // c. Continue rebase (non-conflicting files are already auto-merged by git)
-        try {
-          console.log('Git sync: Continuing rebase...')
-          await git.rebase(['--continue'])
-        } catch {
-          // If all local changes were only in conflicting files,
-          // the rebased commit may be empty → skip it
-          console.log('Git sync: Rebase continue failed, trying skip...')
-          try {
-            await git.rebase(['--skip'])
-          } catch {
-            // Rebase may already be complete
-          }
-        }
-
+      if (!rebaseInProgress()) {
+        // Not a conflict — e.g. network error or no remote tracking branch
+        console.warn('Git sync: Pull failed but no rebase in progress:', pullError)
       } else {
-        // Not a conflict, maybe network error or no remote tracking
-        console.warn('Git sync: Pull failed but no conflicts:', pullError)
+        console.log('Git sync: Pull stopped mid-rebase, resolving conflicts...')
+
+        // Back up the local version of the given files (extracted from
+        // localHash, binary-safe) into the timestamped backup folder.
+        const backupConflictFiles = async (files: string[]) => {
+          fs.mkdirSync(backupPath, { recursive: true })
+          for (const file of files) {
+            try {
+              const destPath = path.join(backupPath, file)
+              fs.mkdirSync(path.dirname(destPath), { recursive: true })
+              // Use git cat-file to extract as binary-safe Buffer
+              // (git.show returns string, which corrupts binary files)
+              const { binary: gitBinary } = getResolvedGit()
+              const content = await new Promise<Buffer>((resolve, reject) => {
+                const chunks: Buffer[] = []
+                const proc = require('child_process').spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
+                  cwd: repoPath,
+                  stdio: ['ignore', 'pipe', 'ignore'],
+                  ...(process.getuid ? { uid: process.getuid() } : {}),
+                })
+                proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
+                proc.on('close', (code: number) => {
+                  if (code === 0) resolve(Buffer.concat(chunks))
+                  else reject(new Error(`git cat-file exited with ${code}`))
+                })
+                proc.on('error', reject)
+              })
+              fs.writeFileSync(destPath, content)
+            } catch {
+              // File might not exist in localHash (e.g., new file on server side only)
+            }
+          }
+          // Cumulative metadata — overwritten each round with the full list
+          fs.writeFileSync(
+            path.join(backupPath, '_metadata.json'),
+            JSON.stringify({
+              timestamp: new Date().toISOString(),
+              reason: 'conflict',
+              conflictFiles,
+              message: commitMessage || 'Sync from AI Company Builder'
+            }, null, 2)
+          )
+        }
+
+        // A rebase replays commits one by one and pauses on every pick that
+        // conflicts, so resolution has to be a loop: back up local, take the
+        // server version, continue — until the rebase finishes. The old code
+        // handled a single round and then fell back to `rebase --skip`,
+        // which silently dropped a commit whenever a second pick conflicted.
+        const MAX_ROUNDS = 200 // hard stop against a livelock
+        for (let round = 1; rebaseInProgress(); round++) {
+          if (round > MAX_ROUNDS) {
+            console.error('Git sync: Conflict resolution did not converge, aborting rebase')
+            await git.rebase(['--abort']).catch(() => { /* best effort */ })
+            return {
+              success: false,
+              errorType: 'conflict',
+              error: '競合の自動解消が収束しませんでした。変更はローカルに保存されています。もう一度同期してください。'
+            }
+          }
+
+          const statusNow = await git.status()
+          if (statusNow.conflicted.length > 0) {
+            hadConflicts = true
+            console.log(`Git sync: Conflict detected in ${statusNow.conflicted.length} files (round ${round})`)
+            const newConflicts = statusNow.conflicted.filter(f => !conflictFiles.includes(f))
+            conflictFiles.push(...newConflicts)
+
+            // a. Backup local versions, b. take the server version
+            // (--ours = upstream during a rebase), c. mark resolved
+            await backupConflictFiles(newConflicts)
+            console.log('Git sync: Resolving conflicts with server version...')
+            await git.checkout(['--ours', '--', ...statusNow.conflicted])
+            await git.add(statusNow.conflicted)
+          }
+
+          try {
+            console.log('Git sync: Continuing rebase...')
+            await git.rebase(['--continue'])
+          } catch (continueError) {
+            const msg = continueError instanceof Error ? continueError.message : String(continueError)
+            if (!rebaseInProgress()) {
+              break // the rebase actually finished (e.g. the final pick was empty)
+            }
+            if (/empty|no changes|nothing to commit/i.test(msg)) {
+              // Taking the server version left this pick with no content of
+              // its own — skipping it is correct here (and only here).
+              console.log('Git sync: Pick became empty, skipping...')
+              await git.rebase(['--skip']).catch(() => { /* next round handles new conflicts */ })
+            } else if ((await git.status()).conflicted.length === 0) {
+              // Stuck for an unknown reason. Never guess with --skip (it
+              // drops a commit) — abort and surface the error instead.
+              console.error('Git sync: Cannot continue rebase, aborting:', msg)
+              await git.rebase(['--abort']).catch(() => { /* best effort */ })
+              return {
+                success: false,
+                errorType: 'conflict',
+                error: `同期を安全に完了できませんでした（rebaseを継続できません）。変更はローカルに保存されています。\n${msg}`
+              }
+            }
+            // else: the next pick conflicted — the loop resolves it next round
+          }
+        }
       }
     }
 
