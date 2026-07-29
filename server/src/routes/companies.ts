@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
-import { installPreReceiveHook } from './git'
+import { configureBareRepo } from './git'
 import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -105,10 +105,9 @@ function createCompanyRepo(companyId: string): string {
     // Pin the branch name: the client hardcodes origin/main, so the repo must
     // never default to the container git's default (master).
     execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
-    // Same setup as the repo-creation endpoint in git.ts: enable HTTP push
-    // and protect against gitlink pushes.
-    execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
-    installPreReceiveHook(repoPath)
+    // Same setup as the repo-creation endpoint in git.ts: HTTP push,
+    // force-push protection, pre-receive hook.
+    configureBareRepo(repoPath)
   }
   return repoPath
 }
