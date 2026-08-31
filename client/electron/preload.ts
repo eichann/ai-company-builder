@@ -267,6 +267,9 @@ interface GitResult {
   // Sync-specific fields
   hadConflicts?: boolean
   conflictFiles?: string[]
+  // Subset of conflictFiles the server had deleted; sync followed the deletion
+  // instead of overwriting with a server version that no longer exists.
+  deletedConflictFiles?: string[]
   backupPath?: string
   restoredFolders?: string[]
   ignoredLargeFiles?: string[]

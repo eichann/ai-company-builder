@@ -1899,6 +1899,36 @@ ipcMain.handle('git:grep', async (_, repoPath: string, query: string, folderPath
   }
 })
 
+// Split the unmerged index entries into the conflicts whose server version
+// still exists and the ones the server deleted.
+//
+// `git checkout --ours <path>` extracts stage 2 of the index. A modify/delete
+// conflict — the server deleted a file the member had edited (status `DU`) —
+// has stage 1 and stage 3 but no stage 2, so the command fails, and it fails
+// *atomically*: every other path passed in the same call stays unresolved too.
+// Classifying first lets each group get the operation it can actually take.
+//
+// -z because department folders use Japanese names: without it git quotes
+// non-ASCII paths as "\345\226\266..." unless core.quotePath happens to be off.
+async function classifyConflicts(git: SimpleGit): Promise<{ take: string[]; drop: string[] }> {
+  const raw = await git.raw(['ls-files', '-u', '-z'])
+  // path -> set of stage numbers (1 = base, 2 = ours/server, 3 = theirs/local)
+  const stages = new Map<string, Set<number>>()
+  for (const entry of (raw || '').split('\0')) {
+    if (!entry) continue
+    const tab = entry.indexOf('\t')
+    if (tab === -1) continue
+    const stage = Number(entry.slice(0, tab).split(' ')[2])
+    const file = entry.slice(tab + 1)
+    if (!stages.has(file)) stages.set(file, new Set())
+    stages.get(file)!.add(stage)
+  }
+  const take: string[] = []
+  const drop: string[] = []
+  for (const [file, s] of stages) (s.has(2) ? take : drop).push(file)
+  return { take, drop }
+}
+
 // Sync lock per repository to prevent concurrent syncs
 const syncLocks = new Map<string, Promise<unknown>>()
 
@@ -2292,6 +2322,11 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     // 4. Pull with rebase
     let hadConflicts = false
     const conflictFiles: string[] = []
+    // Conflicted paths the server had deleted. `checkout --ours` cannot resolve
+    // these (the index has no stage 2), so sync follows the deletion — tracked
+    // separately because the user has to be told the file was *removed*, not
+    // overwritten, or its disappearance looks like data loss.
+    const deletedConflictFiles: string[] = []
 
     // Windows: another process (running skill tool, editor, AV scan) holding
     // a file makes rebase fail with a transient lock error that clears
@@ -2328,6 +2363,22 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       } else {
         console.log('Git sync: Pull stopped mid-rebase, resolving conflicts...')
 
+        // Cumulative metadata — rewritten whenever the conflict lists grow or
+        // a round finishes classifying, so `deletedConflictFiles` is never
+        // stale (it is only known *after* the round resolves its conflicts).
+        const writeBackupMetadata = () => {
+          fs.writeFileSync(
+            path.join(backupPath, '_metadata.json'),
+            JSON.stringify({
+              timestamp: new Date().toISOString(),
+              reason: 'conflict',
+              conflictFiles,
+              deletedConflictFiles,
+              message: commitMessage || 'Sync from AI Company Builder'
+            }, null, 2)
+          )
+        }
+
         // Back up the local version of the given files (extracted from
         // localHash, binary-safe) into the timestamped backup folder.
         const backupConflictFiles = async (files: string[]) => {
@@ -2358,16 +2409,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
               // File might not exist in localHash (e.g., new file on server side only)
             }
           }
-          // Cumulative metadata — overwritten each round with the full list
-          fs.writeFileSync(
-            path.join(backupPath, '_metadata.json'),
-            JSON.stringify({
-              timestamp: new Date().toISOString(),
-              reason: 'conflict',
-              conflictFiles,
-              message: commitMessage || 'Sync from AI Company Builder'
-            }, null, 2)
-          )
+          writeBackupMetadata()
         }
 
         // A rebase replays commits one by one and pauses on every pick that
@@ -2394,12 +2436,46 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
             const newConflicts = statusNow.conflicted.filter(f => !conflictFiles.includes(f))
             conflictFiles.push(...newConflicts)
 
-            // a. Backup local versions, b. take the server version
-            // (--ours = upstream during a rebase), c. mark resolved
+            // a. Backup local versions (works for server-deleted files too:
+            // the content is read out of localHash, not the worktree), then
+            // b. adopt whatever the server decided, c. mark resolved.
             await backupConflictFiles(newConflicts)
-            console.log('Git sync: Resolving conflicts with server version...')
-            await git.checkout(['--ours', '--', ...statusNow.conflicted])
-            await git.add(statusNow.conflicted)
+            try {
+              // Never hand every conflicted path to a single `checkout --ours`:
+              // one modify/delete conflict makes that call fail atomically and
+              // nothing at all gets resolved. Split by stage 2 first.
+              const { take, drop } = await classifyConflicts(git)
+              if (take.length > 0) {
+                // --ours during a rebase means upstream / server, the inverse
+                // of its meaning during a merge. Do not "fix" this to --theirs.
+                console.log(`Git sync: Taking the server version of ${take.length} file(s)...`)
+                await git.checkout(['--ours', '--', ...take])
+                await git.add(['--', ...take])
+              }
+              if (drop.length > 0) {
+                // The server deleted these; following the deletion is the same
+                // "server wins" policy applied to a file that no longer exists.
+                console.log(`Git sync: Following the server deletion of ${drop.length} file(s)...`)
+                await git.raw(['rm', '--force', '--quiet', '--', ...drop])
+                for (const file of drop) {
+                  if (!deletedConflictFiles.includes(file)) deletedConflictFiles.push(file)
+                }
+                writeBackupMetadata()
+              }
+            } catch (resolveError) {
+              // A raw git failure here used to escape the whole handler, leaving
+              // the rebase in progress and reporting an English git message as
+              // errorType 'unknown'. Stop safely instead: the local work is
+              // committed and the local versions are already in .backups/.
+              const msg = resolveError instanceof Error ? resolveError.message : String(resolveError)
+              console.error('Git sync: Failed to resolve conflicts, aborting rebase:', msg)
+              await git.rebase(['--abort']).catch(() => { /* best effort */ })
+              return {
+                success: false,
+                errorType: 'conflict',
+                error: `競合を自動で解消できませんでした。変更はローカルに保存されています。競合したファイルのローカル版は .backups/ に保存済みです。\n${msg}`
+              }
+            }
           }
 
           try {
@@ -2567,6 +2643,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           pushFailed: true,
           hadConflicts,
           conflictFiles,
+          deletedConflictFiles,
           backupPath: hadConflicts ? backupPath : undefined,
           restoredFolders,
           ignoredLargeFiles,
@@ -2582,11 +2659,20 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
 
     // Success
     if (hadConflicts) {
+      // A file the server deleted has to be reported as deleted, not as
+      // "overwritten" — otherwise the user cannot tell why it vanished.
+      const overwrittenFiles = conflictFiles.filter(f => !deletedConflictFiles.includes(f))
+      const outcomes: string[] = []
+      if (overwrittenFiles.length > 0) outcomes.push(`${overwrittenFiles.length}件はサーバー版で上書き`)
+      if (deletedConflictFiles.length > 0) {
+        outcomes.push(`${deletedConflictFiles.length}件はサーバー側で削除されていたため削除`)
+      }
       return {
         success: true,
-        message: `同期完了。${conflictFiles.length}ファイルが競合したためサーバー版で上書きしました。その他の変更は正常に反映されました。`,
+        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。`,
         hadConflicts: true,
         conflictFiles,
+        deletedConflictFiles,
         backupPath,
         restoredFolders,
         ignoredLargeFiles,
