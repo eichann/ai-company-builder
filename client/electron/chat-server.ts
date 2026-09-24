@@ -87,26 +87,29 @@ const SECURITY_POLICY = `
 `
 
 // Map UI model keys → exact Claude Code CLI model strings.
-// opus-4-6 / opus-4-8 / opus-5 request the 1M-context variant ([1m]); fable-5 has a native
-// 1M context window so it takes no suffix; sonnet/haiku stay as aliases.
+// opus-4-6 / opus-4-8 / opus-5 / opus-5-5 request the 1M-context variant ([1m]); fable-5 has a
+// native 1M context window so it takes no suffix; sonnet/haiku stay as aliases.
 const MODEL_CLI_MAP: Record<string, string> = {
   'opus-4-6': 'claude-opus-4-6[1m]',
   'opus-4-8': 'claude-opus-4-8[1m]',
   'opus-5': 'claude-opus-5[1m]',
+  'opus-5-5': 'claude-opus-5-5[1m]',
   'fable-5': 'claude-fable-5',
   sonnet: 'sonnet',
   haiku: 'haiku',
 }
-const DEFAULT_CLI_MODEL = 'claude-opus-4-6[1m]'
+const DEFAULT_CLI_MODEL = 'claude-opus-5-5[1m]'
 
 function resolveClaudeModel(modelId?: string): string {
   if (!modelId) return DEFAULT_CLI_MODEL
   return MODEL_CLI_MAP[modelId] ?? modelId
 }
 
-// xhigh effort is only supported on Opus 4.7+ (incl. 4.8), Opus 5, and Fable 5. Demote
-// elsewhere so a stale selection — e.g. one carried over by session resume — doesn't error
-// on the CLI. Note: 'claude-opus-4-5' does not contain 'opus-5', so this check is safe.
+// xhigh effort is only supported on Opus 4.7+ (incl. 4.8), Opus 5, Opus 5.5, and Fable 5.
+// Demote elsewhere so a stale selection — e.g. one carried over by session resume — doesn't
+// error on the CLI. Note: 'claude-opus-4-5' does not contain 'opus-5', so this check is safe.
+// The 'opus-5' substring test deliberately also matches 'claude-opus-5-5[1m]' — keep it a
+// substring test, not an exact match, or Opus 5.5 silently loses xhigh.
 function resolveEffort(
   model: string,
   effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
