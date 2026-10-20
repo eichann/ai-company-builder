@@ -4,6 +4,10 @@ import AVFoundation
 import CoreAudio
 import AudioToolbox
 
+let launchTime = ProcessInfo.processInfo.systemUptime
+func timing(_ stage: String) {
+    emit(["type": "timing", "stage": stage, "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - launchTime) * 1000)])
+}
 let outputLock = NSLock()
 func emit(_ value: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: value) else { return }
@@ -67,6 +71,7 @@ func transcribe() async throws {
         emit(["type": "available"])
         return
     }
+    timing("locale-ready")
     let transcriber = SpeechTranscriber(locale: locale, preset: .transcription)
     let analyzer = SpeechAnalyzer(modules: [transcriber])
     let results = Task { () throws -> String in
@@ -77,15 +82,56 @@ func transcribe() async throws {
     // File mode supports deterministic smoke tests without opening a microphone.
     if let index = CommandLine.arguments.firstIndex(of: "--file"), CommandLine.arguments.count > index + 1 {
         let file = try AVAudioFile(forReading: URL(fileURLWithPath: CommandLine.arguments[index + 1]))
-        let fileAnalyzer = try await SpeechAnalyzer(inputAudioFile: file, modules: [transcriber], finishAfterFile: true)
-        _ = fileAnalyzer
+        if CommandLine.arguments.contains("--buffer-before-prepare") {
+            guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
+                  let converter = AVAudioConverter(from: file.processingFormat, to: format) else {
+                throw NSError(domain: "テスト音声を変換できません", code: 4)
+            }
+            let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+            while file.framePosition < file.length {
+                guard let buffer = AVAudioPCMBuffer(pcmFormat: file.processingFormat, frameCapacity: 4096) else { break }
+                try file.read(into: buffer)
+                let capacity = AVAudioFrameCount(Double(buffer.frameLength) * format.sampleRate / buffer.format.sampleRate) + 16
+                guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { break }
+                var supplied = false
+                var conversionError: NSError?
+                converter.convert(to: converted, error: &conversionError) { _, status in
+                    if supplied { status.pointee = .noDataNow; return nil }
+                    supplied = true
+                    status.pointee = .haveData
+                    return buffer
+                }
+                if let conversionError { throw conversionError }
+                if converted.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: converted)) }
+            }
+            continuation.finish()
+            try await analyzer.prepareToAnalyze(in: format)
+            try await analyzer.start(inputSequence: stream)
+            try await analyzer.finalizeAndFinishThroughEndOfInput()
+        } else {
+            let fileAnalyzer = try await SpeechAnalyzer(inputAudioFile: file, modules: [transcriber], finishAfterFile: true)
+            _ = fileAnalyzer
+        }
         emit(["type": "result", "text": try await results.value])
         return
     }
-    guard await AVCaptureDevice.requestAccess(for: .audio) else {
+    if CommandLine.arguments.contains("--prepare-only") {
+        guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
+            throw NSError(domain: "音声形式を利用できません", code: 4)
+        }
+        timing("format-ready")
+        try await analyzer.prepareToAnalyze(in: format)
+        timing("analyzer-ready")
+        results.cancel()
+        return
+    }
+    let permitted = AVCaptureDevice.authorizationStatus(for: .audio) == .authorized ? true : await AVCaptureDevice.requestAccess(for: .audio)
+    guard permitted else {
         throw NSError(domain: "マイクの使用が許可されていません。システム設定のプライバシーとセキュリティをご確認ください", code: 3)
     }
+    timing("permission-ready")
     let engine = AVAudioEngine()
+    defer { engine.stop() }
     let input = engine.inputNode
     let devices = try microphones()
     let requested = CommandLine.arguments.firstIndex(of: "--device").flatMap { index in
@@ -111,8 +157,7 @@ func transcribe() async throws {
         throw NSError(domain: "マイクの音声形式を利用できません", code: 4)
     }
     let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-    try await analyzer.prepareToAnalyze(in: format)
-    try await analyzer.start(inputSequence: stream)
+    timing("device-ready")
     var lastMeterTime = Date.timeIntervalSinceReferenceDate
     input.installTap(onBus: 0, bufferSize: 4096, format: sourceFormat) { buffer, _ in
         let now = Date.timeIntervalSinceReferenceDate
@@ -154,14 +199,25 @@ func transcribe() async throws {
     }
     connectionMonitor.resume()
     defer { connectionMonitor.cancel() }
+    timing("microphone-started")
     emit(["type": "listening", "deviceName": device.name])
     // The parent closes stdin on stop. Cancellation terminates this helper.
-    await Task.detached { while readLine() != nil {} }.value
-    NotificationCenter.default.removeObserver(changed)
-    connectionMonitor.cancel()
-    engine.stop()
+    // Capture immediately. AsyncStream retains audio in memory until the model
+    // is ready; the parent bounds recording to 120 seconds and kills on cancel.
+    // Stop must close the microphone even while model preparation is pending.
+    let stopped = Task {
+        await Task.detached { while readLine() != nil {} }.value
+        NotificationCenter.default.removeObserver(changed)
+        connectionMonitor.cancel()
+        engine.stop()
+        continuation.finish()
+        timing("microphone-stopped")
+    }
+    try await analyzer.prepareToAnalyze(in: format)
+    timing("analyzer-ready")
+    try await analyzer.start(inputSequence: stream)
+    await stopped.value
     input.removeTap(onBus: 0)
-    continuation.finish()
     try await analyzer.finalizeAndFinishThroughEndOfInput()
     emit(["type": "result", "text": try await results.value])
 }

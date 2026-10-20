@@ -44,9 +44,16 @@ class AppleSpeechProvider implements SpeechRecognitionProvider {
   start(onEvent: (event: RecognitionEvent) => void, deviceId?: string) {
     const child = spawnVoiceProcess(this.binary, deviceId ? ['--device', deviceId] : [])
     let finished = false
+    const startedAt = Date.now()
     createInterface({ input: child.stdout }).on('line', line => {
       try {
         const data = JSON.parse(line)
+        if (data.type === 'timing') {
+          if (['locale-ready', 'permission-ready', 'device-ready', 'microphone-started', 'analyzer-ready', 'microphone-stopped'].includes(data.stage) && Number.isFinite(data.elapsedMs)) {
+            console.info('[voice] startup timing', { stage: data.stage, helperMs: data.elapsedMs, totalMs: Date.now() - startedAt })
+          }
+          return
+        }
         if (data.type === 'result' || data.type === 'error') finished = true
         onEvent(data)
       } catch { /* Never log transcript data. */ }
@@ -71,15 +78,19 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
   let check: Promise<VoiceCapabilities> | undefined
   const capabilities = () => check ??= provider.capabilities()
   let owner: WebContents | undefined
+  let requestedAt = 0
   const session = new VoiceInputSession(
     { capabilities, start: (callback, deviceId) => provider.start(callback, deviceId) },
-    async () => process.platform !== 'darwin' || await systemPreferences.askForMediaAccess('microphone'),
+    async () => process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('microphone') === 'granted' || await systemPreferences.askForMediaAccess('microphone'),
     (text, signal) => {
       const cwd = path.join(app.getPath('userData'), 'voice-polisher')
       mkdirSync(cwd, { recursive: true })
       return polishVoice(getCli(), cwd, text, signal, getEnv())
     },
-    event => { if (owner && !owner.isDestroyed()) owner.send('voice:event', event) },
+    event => {
+      if (event.type === 'listening') console.info('[voice] recording ready', { requestToListeningMs: Date.now() - requestedAt })
+      if (owner && !owner.isDestroyed()) owner.send('voice:event', event)
+    },
   )
   const cancel = () => session.cancel()
   ipcMain.handle('voice:capabilities', capabilities)
@@ -95,6 +106,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
       owner.once('destroyed', cancel)
       owner.on('did-start-navigation', cancel)
     }
+    requestedAt = Date.now()
     await session.start(id, deviceId as string | undefined)
   })
   ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
