@@ -1,3 +1,4 @@
+import { startReferenceMcp } from '../consultations/mcp'
 import { MissingAgentSession } from './recovery'
 import type { AgentInteraction } from '../../shared/agent-interaction'
 import { readQuestions, describePermissions } from './codex-interactions'
@@ -72,6 +73,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
     },
     async doStream(options) {
       if (process.platform === 'win32') throw new Error(CODEX_WINDOWS_UNSUPPORTED)
+      let referenceMcp: Awaited<ReturnType<typeof startReferenceMcp>> | undefined
       let rpc: CodexTransport | undefined
       const interactionAbort = new AbortController()
       const pendingInteractions = new Map<string, AbortController>()
@@ -91,6 +93,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         interactionAbort.abort()
         clearTimeout(timeout)
         options.abortSignal?.removeEventListener('abort', abort)
+        referenceMcp?.close()
         rpc?.close()
         controller.close()
       }
@@ -169,20 +172,20 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                 emit({ type: 'text-delta', id, delta: String(p.delta || '') })
               }
               if (message.method === 'item/started' || message.method === 'item/completed') {
-                const item = p.item as { id: string; type: string; text?: string; command?: string; aggregatedOutput?: string; status?: string }
+                const item = p.item as { id: string; type: string; text?: string; command?: string; aggregatedOutput?: string; status?: string; server?: string; tool?: string; result?: unknown; arguments?: unknown }
                 if (item.type === 'agentMessage' && message.method === 'item/completed') {
                   if (!openText.has(item.id)) {
                     emit({ type: 'text-start', id: item.id }); emit({ type: 'text-delta', id: item.id, delta: item.text || '' })
                   }
                   emit({ type: 'text-end', id: item.id }); openText.delete(item.id)
                 }
-                const name = ({ commandExecution: 'Bash', fileChange: 'Write', mcpToolCall: 'MCP', webSearch: 'WebSearch' } as Record<string, string>)[item.type]
+                const name = item.type === 'mcpToolCall' && item.server === 'acb_consultations' ? `mcp__acb_consultations__${item.tool}` : ({ commandExecution: 'Bash', fileChange: 'Write', mcpToolCall: 'MCP', webSearch: 'WebSearch' } as Record<string, string>)[item.type]
                 if (name) {
                   if (!tools.has(item.id)) {
                     tools.set(item.id, name)
-                    emit({ type: 'tool-call', toolCallId: item.id, toolName: name, input: JSON.stringify(item), providerExecuted: true, dynamic: true })
+                    emit({ type: 'tool-call', toolCallId: item.id, toolName: name, input: JSON.stringify(item.server === 'acb_consultations' ? item.arguments : item), providerExecuted: true, dynamic: true })
                   }
-                  if (message.method === 'item/completed') emit({ type: 'tool-result', toolCallId: item.id, toolName: name, result: JSON.parse(JSON.stringify(item)), isError: item.status === 'failed' || item.status === 'declined', dynamic: true })
+                  if (message.method === 'item/completed') emit({ type: 'tool-result', toolCallId: item.id, toolName: name, result: JSON.parse(JSON.stringify(item.server === 'acb_consultations' ? item.result : item)), isError: item.status === 'failed' || item.status === 'declined', dynamic: true })
                 }
               }
               if (message.method === 'turn/completed') {
@@ -197,6 +200,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               }
               if (message.method === 'error' && p.willRetry !== true) finish(new Error((p.error as { message?: string })?.message || 'Codexでエラーが発生しました。'))
             }
+            if (!title && request.references) referenceMcp = await startReferenceMcp(request.references)
+            if (ended) { referenceMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
             const models = await readCodexModels(rpc)
@@ -205,7 +210,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             const effort = title ? (selected.efforts.includes('low') ? 'low' : selected.defaultEffort) : request.effort || selected.defaultEffort
             if (!selected.efforts.includes(effort)) throw new Error('このCodexモデルは選択したeffortに対応していません。')
             const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n')
-            const params = { model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: 'read-only', approvalPolicy: title ? 'never' : 'untrusted', approvalsReviewer: 'user', developerInstructions: system || undefined }
+            const params = { ...(referenceMcp ? { config: { mcp_servers: { acb_consultations: referenceMcp.config } } } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: 'read-only', approvalPolicy: title ? 'never' : 'untrusted', approvalsReviewer: 'user', developerInstructions: system || undefined }
             const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {
               if (request.resumeId && error instanceof Error && error.message.trim() === `no rollout found for thread id ${request.resumeId}`) throw new MissingAgentSession(request.resumeId)
               throw error

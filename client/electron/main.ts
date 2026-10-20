@@ -1,3 +1,4 @@
+import { ConsultationReferences } from './consultations/service'
 import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
@@ -460,6 +461,7 @@ app.whenReady().then(async () => {
       getShellEnv,
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
+      createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
       prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
       onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
       persistAgentSession: (company, id, session) => {

@@ -11,6 +11,7 @@ export interface ChatSession {
     thinking?: string
     images?: string[]
     referenceFiles?: string[]
+    consultationReferences?: Array<{ id: string; title: string }>
   }>
   createdAt: string
   updatedAt: string

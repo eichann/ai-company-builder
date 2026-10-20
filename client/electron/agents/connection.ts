@@ -1,3 +1,4 @@
+import type { ReferenceTools } from '../consultations/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 
@@ -12,6 +13,7 @@ export interface AgentConnection {
     appSessionId?: string
     modelId?: string
     effort?: string
+    references?: ReferenceTools
     resumeId?: string
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
