@@ -58,7 +58,8 @@
         "Contents/Resources/voice/acb-speech"
       ],
       "entitlements": "native/entitlements.plist",
-      "entitlementsInherit": "native/entitlements.plist"
+      "entitlementsInherit": "native/entitlements.plist",
+      "x64ArchFiles": "Contents/Resources/voice/acb-speech"
     },
     "win": {
       "target": [
