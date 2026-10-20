@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
-import type { VoiceCapabilities, VoiceDevice } from '../../../shared/voice-input'
+import type { VoiceCapabilities } from '../../../shared/voice-input'
 
-const MICROPHONE_KEY = 'acb.voice.microphone'
-function savedMicrophone() { try { return localStorage.getItem(MICROPHONE_KEY) ?? '' } catch { return '' } }
+import { microphoneSelection } from '../../lib/microphoneSelection'
 
 export interface VoiceEditor {
   captureInsertion: () => (text: string) => boolean
@@ -16,26 +15,17 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   scope: string
   onBusy: (busy: boolean) => void
 }) {
-  const [devices, setDevices] = useState<VoiceDevice[]>()
-  const [deviceError, setDeviceError] = useState('')
-  const [selectedDevice, setSelectedDevice] = useState(savedMicrophone)
+  const { devices, deviceError, selectedDevice } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
   const [showDevices, setShowDevices] = useState(false)
   const [recordingDevice, setRecordingDevice] = useState('')
   const [level, setLevel] = useState(0)
   const [clipping, setClipping] = useState(false)
   const lastSample = useRef(0)
   const lastAudible = useRef(0)
-  const refreshDevices = useCallback(() => {
-    return window.electronAPI.voiceInput.devices().then(list => { setDevices(list); setDeviceError('') }).catch(() => setDeviceError('マイク一覧を取得できませんでした。「再取得」でお試しください'))
-  }, [])
+  const refreshDevices = microphoneSelection.refresh
   useEffect(() => {
-    if (!active) return
-    void refreshDevices()
-    setSelectedDevice(savedMicrophone())
-    const changed = () => setSelectedDevice(savedMicrophone())
-    window.addEventListener('acb:microphone-changed', changed)
-    return () => window.removeEventListener('acb:microphone-changed', changed)
-  }, [active, refreshDevices])
+    if (!microphoneSelection.getSnapshot().devices) void refreshDevices()
+  }, [refreshDevices])
   useEffect(() => {
     if (!active || !showDevices) return
     const timer = setInterval(() => { void refreshDevices() }, 3000)
@@ -144,9 +134,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
         <select aria-label="使用するマイク" value={selectedDevice} disabled={busy} className="mt-1 block w-full rounded border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2"
           onChange={event => {
             const value = event.target.value
-            setSelectedDevice(value)
-            try { localStorage.setItem(MICROPHONE_KEY, value); window.dispatchEvent(new Event('acb:microphone-changed')) }
-            catch { setDeviceError('マイクの選択を保存できませんでした。今回は選択したマイクを使用します') }
+            microphoneSelection.select(value)
           }}>
           <option value="">システムの既定：{devices?.find(d => d.isDefault)?.name ?? '未接続'}</option>
           {deviceMissing && <option value={selectedDevice}>前回選んだマイク（未接続）</option>}
