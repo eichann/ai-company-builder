@@ -411,7 +411,10 @@ protocol.registerSchemesAsPrivileged([
 
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
-  registerVoiceInput(getClaudeCodeCliPath, getShellEnv)
+  registerVoiceInput(getClaudeCodeCliPath, getShellEnv, () => {
+    const config = loadConfig()
+    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
+  })
   // Handle local-file:// protocol to serve local files (restricted to allowed directories)
   protocol.handle('local-file', (request) => {
     const filePath = decodeURIComponent(request.url.replace('local-file://', ''))

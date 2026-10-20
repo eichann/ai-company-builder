@@ -24,11 +24,11 @@ export class CodexRpc {
   private pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void; timer: ReturnType<typeof setTimeout> }>()
   onMessage: (message: RpcMessage) => void = () => {}
   onFailure: (error: Error) => void = () => {}
-  constructor(env: Record<string, string>) {
+  constructor(env: Record<string, string>, overrides: string[] = []) {
     const cleanEnv = { ...env }
     delete cleanEnv.OPENAI_API_KEY
     delete cleanEnv.CODEX_API_KEY
-    this.child = spawnAgentProcess({ command: findCodex(env), args: ['app-server', '-c', 'model_provider="openai"', '-c', 'forced_login_method="chatgpt"'], env: cleanEnv })
+    this.child = spawnAgentProcess({ command: findCodex(env), args: ['app-server', '-c', 'model_provider="openai"', '-c', 'forced_login_method="chatgpt"', ...overrides.flatMap(value => ['-c', value])], env: cleanEnv })
     this.lines = createInterface({ input: this.child.stdout! })
     this.lines.on('line', line => {
       try {

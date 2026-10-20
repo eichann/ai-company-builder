@@ -1,3 +1,4 @@
+import { CODEX_LOGIN_HELP } from '../../../shared/agent'
 import type { AgentSession, CodexStatus } from '../../../shared/agent'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
@@ -2969,7 +2970,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
   const refreshCodex = async () => {
     setCheckingCodex(true)
     try { setCodexStatus(await window.electronAPI.getCodexStatus()) }
-    catch (e) { setCodexStatus({ available: false, authenticated: false, models: [], error: String(e) }) }
+    catch (e) { setCodexStatus({ available: false, authenticated: false, models: [], error: `${String(e)}\n${CODEX_LOGIN_HELP}` }) }
     finally { setCheckingCodex(false) }
   }
   useEffect(() => { if (authMode === 'codex') void refreshCodex() }, [authMode])
@@ -3105,10 +3106,10 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
 
         <p className="text-xs text-ink-muted">変更は次の送信から適用されます。AIやモデルを切り替えると、相談の表示履歴を渡して新しいAIセッションで続けます。元のAIの内部状態やツール実行結果は引き継ぎません。</p>
         {authMode === 'codex' && <section className="rounded-xl border border-white/[0.08] p-4 space-y-2 text-sm">
-          <p>{checkingCodex ? 'Codexを確認しています…' : codexStatus?.authenticated && codexStatus.models.length ? 'ChatGPTでログイン済み' : 'Codexの準備が必要です'}</p>
+          <p>{checkingCodex ? 'Codexを確認しています…' : codexStatus?.authenticated && codexStatus.models.length ? 'ChatGPTでログイン済み' : codexStatus?.unsupported ? 'Windowsでは未対応です' : 'Codexの準備が必要です'}</p>
           {codexStatus?.error && <p className="text-xs text-red-500">{codexStatus.error}</p>}
-          <p className="text-xs text-ink-muted">未ログインの場合はターミナルで <code>codex login</code> を実行してください。操作に必要な権限は、その都度確認します。</p>
-          <button onClick={() => void refreshCodex()} disabled={checkingCodex} className="text-accent text-xs disabled:opacity-50">接続を再確認</button>
+          {!codexStatus?.unsupported && <p className="text-xs text-ink-muted">接続できない場合は、ターミナルを開いて <code>codex login</code> を実行し、ChatGPTアカウントでログインしてください。その後「接続を再確認」を押してください。</p>}
+          <button onClick={() => void refreshCodex()} disabled={checkingCodex || codexStatus?.unsupported} className="text-accent text-xs disabled:opacity-50">接続を再確認</button>
         </section>}
         {saveError && <p role="alert" className="text-sm text-red-500">{saveError}</p>}
         {/* API Key Input */}

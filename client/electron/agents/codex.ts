@@ -1,3 +1,4 @@
+import { CODEX_LOGIN_HELP, CODEX_WINDOWS_UNSUPPORTED } from '../../shared/agent'
 import type { LanguageModel } from 'ai'
 import crypto from 'node:crypto'
 import os from 'node:os'
@@ -29,11 +30,12 @@ export async function readCodexModels(rpc: CodexTransport): Promise<CodexModel[]
   } while (cursor)
   return models
 }
-async function requireChatGPT(rpc: CodexTransport) {
+export async function requireChatGPT(rpc: CodexTransport) {
   const result = await rpc.request<{ account: { type: string } | null }>('account/read', { refreshToken: false })
   if (result.account?.type !== 'chatgpt') throw new Error('CodexにChatGPTアカウントでログインしてください。ターミナルで codex login を実行後、再確認してください。')
 }
-export async function getCodexStatus(env: Record<string, string>): Promise<CodexStatus> {
+export async function getCodexStatus(env: Record<string, string>, platform: NodeJS.Platform = process.platform): Promise<CodexStatus> {
+  if (platform === 'win32') return { unsupported: true, available: false, authenticated: false, models: [], error: CODEX_WINDOWS_UNSUPPORTED }
   let rpc: CodexRpc | undefined
   let authenticated = false
   try {
@@ -43,7 +45,7 @@ export async function getCodexStatus(env: Record<string, string>): Promise<Codex
     authenticated = true
     return { available: true, authenticated, models: await readCodexModels(rpc) }
   } catch (error) {
-    return { available: !!rpc, authenticated, models: [], error: error instanceof Error ? error.message : String(error) }
+    return { available: !!rpc, authenticated, models: [], error: `${error instanceof Error ? error.message : String(error)}\n${CODEX_LOGIN_HELP}` }
   } finally { rpc?.close() }
 }
 
@@ -66,6 +68,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       return { content: [{ type: 'text', text }], warnings: [], usage: finish.usage, finishReason: finish.finishReason, providerMetadata: finish.providerMetadata }
     },
     async doStream(options) {
+      if (process.platform === 'win32') throw new Error(CODEX_WINDOWS_UNSUPPORTED)
       let rpc: CodexTransport | undefined
       let ended = false
       let threadId: string | undefined
@@ -197,7 +200,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
 }
 export function createCodexConnection(config: Config, createRpc: RpcFactory = defaultRpc): AgentConnection {
   return {
-    id: 'codex', ownsConversation: true, authenticationError: () => undefined,
+    id: 'codex', ownsConversation: true, authenticationError: () => process.platform === 'win32' ? CODEX_WINDOWS_UNSUPPORTED : undefined,
     createChatModel: request => createModel(config, request, false, createRpc),
     createTitleModel: request => createModel(config, request || {}, true, createRpc),
     readMetadata(metadata) {

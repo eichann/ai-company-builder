@@ -23,7 +23,7 @@ export class VoiceInputSession {
     this.active = undefined
     if (old) { clearTimeout(old.timer); old.abort.abort(); old.recognition?.cancel() }
   }
-  async start(id: string, deviceId?: string) {
+  async start(id: string, deviceId?: string, polish = this.polish) {
     if (this.active) throw new Error('音声入力が既に動作中です')
     const session: Session = { id, abort: new AbortController(), phase: 'preparing' }
     this.active = session
@@ -53,7 +53,7 @@ export class VoiceInputSession {
           clearTimeout(session.timer)
           if (!rawText) { fail('音声を聞き取れませんでした'); return }
           session.phase = 'polishing'; send({ type: 'polishing' })
-          void this.polish(rawText, session.abort.signal).then(text => {
+          void polish(rawText, session.abort.signal).then(text => {
             if (this.active !== session) return
             send({ type: 'result', text }); this.cancel()
           }).catch(error => fail(error instanceof Error ? error.message : '整形に失敗しました', rawText))

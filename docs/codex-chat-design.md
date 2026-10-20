@@ -5,7 +5,7 @@
 
 ## 今回の範囲
 
-相談設定に「Codex（ChatGPTプラン）」を追加する。既存のClaude Code／Anthropic APIキー方式を維持する。音声整形と長期引き継ぎは対象外。
+相談設定に「Codex（ChatGPTプラン）」を追加する。既存のClaude Code／Anthropic APIキー方式を維持する。長期引き継ぎは対象外。音声整形の接続先切り替えを追加し、詳細・実測結果は `voice-provider-formatting.md` を参照。
 
 各PCのCodex CLIをstdioで子プロセスとして起動し、公式app-serverのJSON-RPCを利用する。ChatGPTログインを確認し、APIキー認証にはフォールバックしない。未インストール・未ログインの場合は設定画面で手順を表示する。認証情報をACBの設定や履歴へコピーしない。
 
@@ -50,7 +50,7 @@ Codexはread-only sandboxとuntrusted承認方式を使う。コマンド／フ�
 - 実際のHTTPストリームで回答を受け、サーバー再起動後に保存済みIDで合言葉を再現できることを確認。
 - 実際のChatPanelを使った確認用画面でClaude→Codex→Claude、モデル／effortの候補変更を確認。
 - 実際のファイル読み取りで、承認拒否時は実行されず、承認時は読み取った内容とツール結果がチャットストリームに返ることを確認。
-- Windowsは起動経路を共通化したが、実機動作は未検証。
+- Windows版ACBでのCodex相談は現在未対応として設定・実行時に案内し、起動を止める。
 
 今回の方式はローカルアプリでの利用を前提とする。商用／ホスト型サービスへの展開時には公式Sign in with ChatGPTの適用条件を別途確認する。
 

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { LanguageModel, UIMessage } from 'ai'
-import { createCodexConnection, type CodexTransport } from '../electron/agents/codex'
+import { createCodexConnection, getCodexStatus, type CodexTransport } from '../electron/agents/codex'
 import { agentInputMessages, resumeSession } from '../electron/agents/session'
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 
@@ -103,4 +103,14 @@ test('title is ephemeral and never inherits a conversation session', async () =>
   assert.equal(start.params.approvalPolicy, 'never')
   rpc.complete()
   await response
+})
+
+test('Windows reports unsupported without starting Codex', async () => {
+  const status = await getCodexStatus({}, 'win32')
+  assert.equal(status.unsupported, true)
+  assert.equal(status.available, false)
+  assert.equal(status.authenticated, false)
+  assert.deepEqual(status.models, [])
+  assert.match(status.error!, /Windows版ACB/)
+  assert.doesNotMatch(status.error!, /codex login/)
 })
