@@ -70,10 +70,48 @@ function parseRejectionPaths(errorMessage: string, marker: string): string[] {
 export function protectedConfigMessage(paths: string[]): string {
   const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
   return `このファイルは管理者だけが変更できます。\n` +
-    `チャットのAIが自動で実行する設定ファイルのため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
+    `チャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
 }
 
 export class ProtectedConfigRecoveryError extends Error {}
+
+async function assertUpstreamIsAncestor(git: SimpleGit, upstream: string): Promise<{ localHead: string; upstreamHash: string }> {
+  const localHead = (await git.revparse(['HEAD'])).trim()
+  const upstreamHash = (await git.revparse([upstream])).trim()
+  // Compare hashes instead of relying on exit codes: simple-git does not
+  // reject on a non-zero exit that prints nothing (e.g. --is-ancestor).
+  const mergeBase = (await git.raw(['merge-base', upstreamHash, localHead]).catch(() => '')).trim()
+  if (mergeBase !== upstreamHash) {
+    throw new ProtectedConfigRecoveryError('サーバーの最新状態を取り込めていないため、自動で戻せませんでした。もう一度同期してください。')
+  }
+  return { localHead, upstreamHash }
+}
+
+/**
+ * Squash the unpushed commits into one, changing no file. The hook checks
+ * every commit in the pushed range, so a change the member has already undone
+ * in a later commit (e.g. removed a skill's `hooks` after the first rejection)
+ * still blocks the push until the intermediate commit is gone. Sync tries
+ * this before restoring anything: when the squashed push is accepted, the
+ * member's final version of every file is kept.
+ */
+export async function squashUnpushedCommits(options: {
+  git: SimpleGit
+  upstream?: string
+}): Promise<{ squashed: boolean; committed: boolean }> {
+  const { git } = options
+  const { localHead, upstreamHash } = await assertUpstreamIsAncestor(git, options.upstream ?? 'origin/main')
+  const count = Number((await git.raw(['rev-list', '--count', `${upstreamHash}..${localHead}`])).trim())
+  // Zero or one commit: squashing would push exactly what was just rejected.
+  if (!(count > 1)) return { squashed: false, committed: count === 1 }
+  const squashedMessages = (await git.raw(['log', '--format=%s', `${upstreamHash}..${localHead}`]))
+    .split('\n').map(s => s.trim()).filter(Boolean)
+  await git.raw(['reset', '--soft', upstreamHash])
+  const remaining = (await git.raw(['diff', '--cached', '--name-only', '-z', upstreamHash])).replace(/\0/g, '')
+  if (!remaining) return { squashed: true, committed: false }
+  await git.commit(`Sync from AI Company Builder\n\n${squashedMessages.map(m => `- ${m}`).join('\n')}`)
+  return { squashed: true, committed: true }
+}
 
 export interface ProtectedConfigRecoveryResult {
   /** Paths put back to the server's version. */
@@ -130,14 +168,7 @@ export async function restoreProtectedPaths(options: {
   if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
   const fullPaths = new Map(paths.map(p => [p, assertInsideRepo(repoPath, p)]))
 
-  const localHead = (await git.revparse(['HEAD'])).trim()
-  const upstreamHash = (await git.revparse([upstream])).trim()
-  // Compare hashes instead of relying on exit codes: simple-git does not
-  // reject on a non-zero exit that prints nothing (e.g. --is-ancestor).
-  const mergeBase = (await git.raw(['merge-base', upstreamHash, localHead]).catch(() => '')).trim()
-  if (mergeBase !== upstreamHash) {
-    throw new ProtectedConfigRecoveryError('サーバーの最新状態を取り込めていないため、自動で戻せませんでした。もう一度同期してください。')
-  }
+  const { localHead, upstreamHash } = await assertUpstreamIsAncestor(git, upstream)
 
   // Decide per path before touching anything, so an unsupported case aborts
   // with the repository unchanged.

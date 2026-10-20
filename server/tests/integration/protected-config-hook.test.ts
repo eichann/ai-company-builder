@@ -145,6 +145,8 @@ describe('pre-receive hook: protected agent config', () => {
     expect(remoteHead(bare)).toBe(git(['rev-parse', 'HEAD'], clone).trim())
   })
 
+  // Skills are not path-protected; only their auto-run parts are
+  // (skill-autorun-hook.test.ts).
   it('accepts member pushes that do not touch protected paths — skills included', () => {
     const { clone } = setup({
       'README.md': 'hi\n',
@@ -427,5 +429,15 @@ describe('git-http: the pusher role reaches the hook from the server, not the cl
     writeFile(clone, '.claude/settings.json', '{}\n')
     commitAll(clone, 'settings')
     expect((await httpPush('owner')).ok).toBe(true)
+  })
+
+  it('member: a skill with an auto-run part is rejected over HTTP (content check runs under the server), admin accepted', async () => {
+    writeFile(clone, '.claude/skills/x/SKILL.md', '---\nname: x\nhooks:\n  Stop: []\n---\n')
+    commitAll(clone, 'skill with hooks')
+    const r = await httpPush('member')
+    expect(r.ok).toBe(false)
+    expect(protectedPathsIn(r.output)).toEqual(['.claude/skills/x/SKILL.md'])
+    expect(r.output).toContain('frontmatter の hooks')
+    expect((await httpPush('admin')).ok).toBe(true)
   })
 })

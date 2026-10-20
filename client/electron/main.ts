@@ -23,6 +23,7 @@ import {
   parseProtectedConfigPaths,
   protectedConfigMessage,
   restoreProtectedPaths,
+  squashUnpushedCommits,
   ProtectedConfigRecoveryError,
   isPersonalPathRejection,
   parsePersonalPaths,
@@ -2647,10 +2648,67 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           cancelId: 1,
           title: '管理者だけが変更できるファイル',
           message: 'このファイルは管理者だけが変更できます。',
-          detail: `次のファイルは、チャットのAIが自動で実行する設定です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\n配布が必要な場合は、管理者に依頼してください。`,
+          detail: `次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!\`…\` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。`,
         })
         if (response === 1) {
           return { ...rejected, error: `同期を中止しました。\n\n${rejected.error}` }
+        }
+
+        // First try keeping every file as the member has it now. The hook
+        // checks every commit in the range, so a change the member has since
+        // undone (e.g. took the auto-run setting out of a skill after the
+        // first rejection) blocks the push only until the intermediate commit
+        // is squashed away. Restoring right away would throw away — or, for a
+        // new skill, remove — the member's now-acceptable final version.
+        let pathsToRestore = protectedFiles
+        try {
+          const squash = await squashUnpushedCommits({ git })
+          if (squash.squashed) {
+            if (squash.committed) await git.push('origin', 'main', ['--set-upstream', '--progress'])
+            if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
+            const parts = ['同期完了。管理者だけが変更できる内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。']
+            if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
+            parts.push(personalNote())
+            if (!squash.committed) parts.push('共有する変更は他にありませんでした。')
+            return {
+              success: true,
+              message: parts.join(''),
+              untrackedPersonalFiles: personalUntrack?.untracked,
+              restoredProtectedFiles: [],
+              hadConflicts,
+              conflictFiles,
+              deletedConflictFiles,
+              backupPath: hadConflicts ? backupPath : undefined,
+              restoredFolders,
+              ignoredLargeFiles,
+              excludedNestedRepos: newlyExcludedNestedRepos
+            }
+          }
+        } catch (squashError) {
+          const squashMsg = squashError instanceof Error ? squashError.message : String(squashError)
+          if (squashError instanceof ProtectedConfigRecoveryError) return { ...rejected, error: squashMsg }
+          if (isProtectedConfigRejection(squashMsg)) {
+            // Still rejected: restore exactly what the final version still has.
+            const still = parseProtectedConfigPaths(squashMsg)
+            if (still.length > 0) pathsToRestore = still
+          } else if (squashMsg.includes('SECRET_DETECTED')) {
+            return {
+              success: false,
+              error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${squashMsg.split('\n').map(l => l.replace(/^remote:\s*/, '').trim()).filter(l => l.startsWith('- ')).join('\n') || '（詳細不明）'}`,
+              secretDetected: true
+            }
+          } else {
+            // Ordinary push failure (network, a teammate pushed in between):
+            // the squashed commit stays local and the next sync retries it.
+            console.error('Git sync: Push after squashing unpushed commits failed:', squashMsg)
+            fs.writeFileSync(pendingPushFile, new Date().toISOString())
+            return {
+              success: false,
+              error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+              errorType: 'push_failed' as const,
+              pushFailed: true,
+            }
+          }
         }
 
         const protectedBackupPath = path.join(
@@ -2659,7 +2717,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
         )
         let recovery
         try {
-          recovery = await restoreProtectedPaths({ git, repoPath, paths: protectedFiles, backupPath: protectedBackupPath })
+          recovery = await restoreProtectedPaths({ git, repoPath, paths: pathsToRestore, backupPath: protectedBackupPath })
         } catch (recoveryError) {
           const msg = recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
           console.error('Git sync: Protected config recovery failed:', msg)
