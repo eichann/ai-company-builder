@@ -107,3 +107,16 @@ test('restoring or pinning unchanged history does not make an old conversation l
   store.patch(company, restored.id, { pinned: true })
   assert.equal(store.get(company, restored.id)?.updatedAt, existing.updatedAt)
 })
+
+test('provider session patches survive stale autosaves and restart', t => {
+  const { dir, store } = fixture(t)
+  const first = saved(store.save(company, session('provider-switch', { agentSession: { providerId: 'claude-code', id: 'claude-old' }, claudeSessionId: 'claude-old' })))
+  store.patch(company, first.id, { agentSession: { providerId: 'codex', id: 'codex-new', modelId: 'model-a' } })
+  store.save(company, { ...first, draftInput: '残す下書き' })
+  const restored = new ChatHistoryStore(dir).get(company, first.id)!
+  assert.equal(restored.agentSession?.providerId, 'codex')
+  assert.equal(restored.agentSession?.id, 'codex-new')
+  assert.equal(restored.draftInput, '残す下書き')
+  store.patch(company, first.id, { agentSession: null })
+  assert.equal(new ChatHistoryStore(dir).get(company, first.id)?.agentSession, null)
+})

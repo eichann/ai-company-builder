@@ -1,5 +1,7 @@
 # ACB スマート音声入力 設計案
 
+> 接続先切り替え追加: 現在は設定に応じてClaude Code／Codex／Anthropic APIを使う。最新の実装・実測は [voice-provider-formatting.md](voice-provider-formatting.md) を参照。
+
 > 2026-10-20 実装更新: `feat/smart-voice-input` に初期実装を追加。以下の元設計にある「未実装」は設計作成時点の記録です。現在の実装・検証範囲は末尾の「初期実装の状況」を参照。
 
 - 作成日・更新日: 2026-10-20（日本時間）

@@ -92,3 +92,13 @@ test('microphone disconnection ends recording without polishing or switching dev
   assert.equal(polished, false)
   assert.equal(h.events.at(-1)?.type, 'error')
 })
+
+test('each recording retains its own formatter and provider failure preserves raw text', async () => {
+  const h = harness(async () => { throw new Error('default Claude must not run') })
+  await h.session.start('codex', undefined, async text => `Codex:${text}`)
+  h.receive({ type: 'result', text: '発話' }); await tick()
+  assert.deepEqual(h.events.at(-1), { requestId: 'codex', type: 'result', text: 'Codex:発話' })
+  await h.session.start('api', undefined, async () => { throw new Error('API error') })
+  h.receive({ type: 'result', text: '残す原文' }); await tick()
+  assert.deepEqual(h.events.at(-1), { requestId: 'api', type: 'error', message: 'API error', rawText: '残す原文' })
+})

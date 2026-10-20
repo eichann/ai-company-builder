@@ -5,7 +5,8 @@ import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
 import type { VoiceCapabilities, VoiceDevice } from '../shared/voice-input'
-import { polishVoice } from './voice-polisher'
+import { createVoiceFormatter } from './voice-formatter'
+import type { AuthMode } from '../shared/agent'
 
 import { VoiceInputSession, type SpeechRecognitionProvider, type RecognitionEvent } from './voice-session'
 
@@ -57,7 +58,7 @@ class UnavailableSpeechProvider implements SpeechRecognitionProvider {
   start(): never { throw new Error('このOSの音声認識は未対応です') }
 }
 
-export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.ProcessEnv) {
+export function registerVoiceInput(getCli: () => string, getEnv: () => Record<string, string>, getSettings: () => { authMode: AuthMode; apiKey?: string }) {
   const provider: SpeechRecognitionProvider & { devices(): Promise<VoiceDevice[]>; warmUp(): void; dispose(): void } = process.platform === 'darwin'
     ? new AppleSpeechProvider(app.isPackaged ? path.join(process.resourcesPath, 'voice/acb-speech') : path.join(app.getAppPath(), 'native/bin/acb-speech'))
     : new UnavailableSpeechProvider()
@@ -68,11 +69,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
   const session = new VoiceInputSession(
     { capabilities, start: (callback, deviceId) => provider.start(callback, deviceId) },
     async () => process.platform !== 'darwin' || systemPreferences.getMediaAccessStatus('microphone') === 'granted' || await systemPreferences.askForMediaAccess('microphone'),
-    (text, signal) => {
-      const cwd = path.join(app.getPath('userData'), 'voice-polisher')
-      mkdirSync(cwd, { recursive: true })
-      return polishVoice(getCli(), cwd, text, signal, getEnv())
-    },
+    async () => { throw new Error('音声整形の設定がありません') },
     event => {
       if (event.type === 'listening') console.info('[voice] recording ready', { requestToListeningMs: Date.now() - requestedAt })
       if (owner && !owner.isDestroyed()) owner.send('voice:event', event)
@@ -93,7 +90,10 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
       owner.on('did-start-navigation', cancel)
     }
     requestedAt = Date.now()
-    await session.start(id, deviceId as string | undefined)
+    const cwd = path.join(app.getPath('userData'), 'voice-polisher')
+    mkdirSync(cwd, { recursive: true })
+    const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd })
+    await session.start(id, deviceId as string | undefined, formatter)
   })
   ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
   ipcMain.handle('voice:cancel', (event, id: string) => { if (owner === event.sender) session.cancel(id) })
