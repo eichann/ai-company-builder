@@ -28,18 +28,30 @@ jobs:
       - run: pnpm -r typecheck
 
   test-client:
-    name: Client tests
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+    name: Client tests (macOS)
+    # macOS on purpose. The desktop client ships for macOS (and Windows), and
+    # its POSIX spawn wrappers (electron/voice-process.ts,
+    # electron/agents/process.ts) run `exec N>&-` through /bin/sh. On macOS that
+    # is bash, which handles multi-digit fds; on Ubuntu it is dash, which
+    # treats `exec 10>&-` as running a command named "10" and exits. So the
+    # voice-helper / voice-polisher tests fail on ubuntu-latest because of a
+    # real Linux-only bug in application code, which this CI-only change does
+    # not fix. macOS also lets us run the AVFoundation Swift test.
+    runs-on: macos-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       # node:test via tsx. tests/*-ui.tsx + *-ui.html are browser preview
       # fixtures for manual visual checks (served by Vite), not tests.
-      # tests/audio-level.test.swift needs AVFoundation (macOS only) and is not
-      # wired into any script; it is out of scope for this Linux job.
       - run: npx tsx --test tests/*.test.ts
         working-directory: client
+      # Built without -O so Swift's assert() stays active.
+      - name: Swift audio level test
+        working-directory: client
+        run: |
+          xcrun swiftc -parse-as-library native/AudioLevel.swift tests/audio-level.test.swift -o "$RUNNER_TEMP/audio-level-test"
+          "$RUNNER_TEMP/audio-level-test"
 
   test-server:
     name: Server tests
