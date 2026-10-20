@@ -53,3 +53,42 @@ test('stale cancel/stop does not affect current recording', async () => {
   assert.equal(h.session.busy, true); assert.equal(h.counts().stops, 0)
   h.session.cancel()
 })
+
+test('selected microphone is forwarded unchanged and meter events keep the session listening', async () => {
+  const events: VoiceEvent[] = []
+  let receive!: (event: RecognitionEvent) => void
+  let selected: string | undefined
+  const session = new VoiceInputSession({ capabilities: async () => ({ available: true }), start: (callback, deviceId) => {
+    selected = deviceId; receive = callback; return { stop() {}, cancel() {} }
+  } }, async () => true, async text => text, event => events.push(event))
+  await session.start('a', 'usb:device with spaces')
+  assert.equal(selected, 'usb:device with spaces')
+  receive({ type: 'level', level: 0.7 }); assert.equal(events.length, 0)
+  receive({ type: 'listening', deviceName: 'USB microphone' })
+  receive({ type: 'level', level: 0.6, clipping: false })
+  receive({ type: 'level', level: NaN })
+  assert.deepEqual(events.at(-1), { requestId: 'a', type: 'level', level: 0.6, clipping: false })
+  receive({ type: 'level', level: 2, clipping: true })
+  assert.deepEqual(events.at(-1), { requestId: 'a', type: 'level', level: 1, clipping: true })
+  session.stop('a')
+  receive({ type: 'level', level: 0.5 })
+  assert.equal(events.at(-1)?.type, 'finalizing')
+  session.cancel()
+  const count = events.length
+  receive({ type: 'level', level: 0.9 })
+  assert.equal(events.length, count)
+})
+
+test('microphone disconnection ends recording without polishing or switching devices', async () => {
+  let polished = false
+  const h = harness(async text => { polished = true; return text })
+  await h.session.start('a', 'usb')
+  h.receive({ type: 'listening' })
+  h.receive({ type: 'error', message: 'マイクが切断されました' })
+  h.receive({ type: 'result', text: 'late' })
+  await tick()
+  assert.equal(h.session.busy, false)
+  assert.equal(h.counts().cancels, 1)
+  assert.equal(polished, false)
+  assert.equal(h.events.at(-1)?.type, 'error')
+})

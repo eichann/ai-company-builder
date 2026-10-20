@@ -3,10 +3,10 @@ import { spawnVoiceProcess } from './voice-process'
 import { existsSync, mkdirSync } from 'node:fs'
 import path from 'node:path'
 import { createInterface } from 'node:readline'
-import type { VoiceCapabilities } from '../shared/voice-input'
+import type { VoiceCapabilities, VoiceDevice } from '../shared/voice-input'
 import { polishVoice } from './voice-polisher'
 
-import { VoiceInputSession, type SpeechRecognitionProvider } from './voice-session'
+import { VoiceInputSession, type SpeechRecognitionProvider, type RecognitionEvent } from './voice-session'
 
 class AppleSpeechProvider implements SpeechRecognitionProvider {
   constructor(private readonly binary: string) {}
@@ -25,8 +25,24 @@ class AppleSpeechProvider implements SpeechRecognitionProvider {
       child.on('close', () => { clearTimeout(timer); resolve({ available, reason: available ? undefined : reason }) })
     })
   }
-  start(onEvent: (event: { type: string; text?: string; message?: string }) => void) {
-    const child = spawnVoiceProcess(this.binary, [])
+  async devices(): Promise<VoiceDevice[]> {
+    return new Promise((resolve, reject) => {
+      const child = spawnVoiceProcess(this.binary, ['--devices'])
+      let devices: VoiceDevice[] | undefined
+      const timer = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('マイク一覧の取得がタイムアウトしました')) }, 10_000)
+      createInterface({ input: child.stdout }).on('line', line => {
+        try {
+          const data = JSON.parse(line)
+          if (data.type === 'devices' && Array.isArray(data.devices)) devices = data.devices.filter((d: VoiceDevice) => typeof d.id === 'string' && typeof d.name === 'string' && typeof d.isDefault === 'boolean')
+        } catch { /* invalid protocol */ }
+      })
+      child.stderr.resume()
+      child.on('error', () => { clearTimeout(timer); reject(new Error('マイク一覧を取得できませんでした')) })
+      child.on('close', code => { clearTimeout(timer); if (code === 0 && devices) resolve(devices); else reject(new Error('マイク一覧を取得できませんでした')) })
+    })
+  }
+  start(onEvent: (event: RecognitionEvent) => void, deviceId?: string) {
+    const child = spawnVoiceProcess(this.binary, deviceId ? ['--device', deviceId] : [])
     let finished = false
     createInterface({ input: child.stdout }).on('line', line => {
       try {
@@ -44,18 +60,19 @@ class AppleSpeechProvider implements SpeechRecognitionProvider {
 }
 class UnavailableSpeechProvider implements SpeechRecognitionProvider {
   async capabilities() { return { available: false, reason: '音声入力は現在macOS 26以降に対応しています。Windows対応は準備中です' } }
+  async devices(): Promise<VoiceDevice[]> { return [] }
   start(): never { throw new Error('このOSの音声認識は未対応です') }
 }
 
 export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.ProcessEnv) {
-  const provider: SpeechRecognitionProvider = process.platform === 'darwin'
+  const provider: SpeechRecognitionProvider & { devices(): Promise<VoiceDevice[]> } = process.platform === 'darwin'
     ? new AppleSpeechProvider(app.isPackaged ? path.join(process.resourcesPath, 'voice/acb-speech') : path.join(app.getAppPath(), 'native/bin/acb-speech'))
     : new UnavailableSpeechProvider()
   let check: Promise<VoiceCapabilities> | undefined
   const capabilities = () => check ??= provider.capabilities()
   let owner: WebContents | undefined
   const session = new VoiceInputSession(
-    { capabilities, start: callback => provider.start(callback) },
+    { capabilities, start: (callback, deviceId) => provider.start(callback, deviceId) },
     async () => process.platform !== 'darwin' || await systemPreferences.askForMediaAccess('microphone'),
     (text, signal) => {
       const cwd = path.join(app.getPath('userData'), 'voice-polisher')
@@ -66,8 +83,10 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
   )
   const cancel = () => session.cancel()
   ipcMain.handle('voice:capabilities', capabilities)
-  ipcMain.handle('voice:start', async (event, id: unknown) => {
+  ipcMain.handle('voice:devices', () => provider.devices())
+  ipcMain.handle('voice:start', async (event, id: unknown, deviceId?: unknown) => {
     if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error('無効な音声入力IDです')
+    if (deviceId !== undefined && (typeof deviceId !== 'string' || deviceId.length > 1024 || deviceId.includes('\0'))) throw new Error('無効なマイクIDです')
     if (session.busy) throw new Error('音声入力が既に動作中です')
     if (owner !== event.sender) {
       owner?.removeListener('destroyed', cancel)
@@ -76,7 +95,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
       owner.once('destroyed', cancel)
       owner.on('did-start-navigation', cancel)
     }
-    await session.start(id)
+    await session.start(id, deviceId as string | undefined)
   })
   ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
   ipcMain.handle('voice:cancel', (event, id: string) => { if (owner === event.sender) session.cancel(id) })

@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { Microphone, Stop, X } from '@phosphor-icons/react'
-import type { VoiceCapabilities } from '../../../shared/voice-input'
+import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
+import type { VoiceCapabilities, VoiceDevice } from '../../../shared/voice-input'
+
+const MICROPHONE_KEY = 'acb.voice.microphone'
+function savedMicrophone() { try { return localStorage.getItem(MICROPHONE_KEY) ?? '' } catch { return '' } }
 
 export interface VoiceEditor {
   captureInsertion: () => (text: string) => boolean
@@ -13,6 +16,33 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   scope: string
   onBusy: (busy: boolean) => void
 }) {
+  const [devices, setDevices] = useState<VoiceDevice[]>()
+  const [deviceError, setDeviceError] = useState('')
+  const [selectedDevice, setSelectedDevice] = useState(savedMicrophone)
+  const [showDevices, setShowDevices] = useState(false)
+  const [recordingDevice, setRecordingDevice] = useState('')
+  const [level, setLevel] = useState(0)
+  const [clipping, setClipping] = useState(false)
+  const lastSample = useRef(0)
+  const lastAudible = useRef(0)
+  const refreshDevices = useCallback(() => {
+    return window.electronAPI.voiceInput.devices().then(list => { setDevices(list); setDeviceError('') }).catch(() => setDeviceError('マイク一覧を取得できませんでした。「再取得」でお試しください'))
+  }, [])
+  useEffect(() => {
+    if (!active) return
+    void refreshDevices()
+    setSelectedDevice(savedMicrophone())
+    const changed = () => setSelectedDevice(savedMicrophone())
+    window.addEventListener('acb:microphone-changed', changed)
+    return () => window.removeEventListener('acb:microphone-changed', changed)
+  }, [active, refreshDevices])
+  useEffect(() => {
+    if (!active || !showDevices) return
+    const timer = setInterval(() => { void refreshDevices() }, 3000)
+    return () => clearInterval(timer)
+  }, [active, showDevices, refreshDevices])
+  const deviceMissing = Boolean(selectedDevice && devices && !devices.some(d => d.id === selectedDevice))
+  const deviceLabel = selectedDevice ? devices?.find(d => d.id === selectedDevice)?.name ?? '未接続のマイク' : `システムの既定：${devices?.find(d => d.isDefault)?.name ?? '未接続'}`
   const [caps, setCaps] = useState<VoiceCapabilities>()
   const [phase, setPhase] = useState('idle')
   const [error, setError] = useState('')
@@ -29,6 +59,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     operation.current = undefined
     if (previous) void window.electronAPI.voiceInput.cancel(previous.id).catch(() => {})
     setPhase('idle')
+    setLevel(0); setClipping(false)
     onBusy(false)
     setRawText('')
   }, [onBusy])
@@ -39,6 +70,12 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   useEffect(() => window.electronAPI.voiceInput.onEvent(event => {
     const op = operation.current
     if (!op || op.id !== event.requestId || !current.current.active || op.scope !== current.current.scope) return
+    if (event.type === 'level') {
+      lastSample.current = Date.now()
+      if (event.level > 0.08) lastAudible.current = Date.now()
+      setLevel(event.level); setClipping(event.clipping)
+      return
+    }
     if (event.type === 'result') {
       if (!op.insert(event.text)) { setRawText(event.text); setError('入力欄が変わったため自動挿入しませんでした。下の文章をコピーできます') }
       else { operation.current = undefined; setRawText(''); setError('') }
@@ -48,13 +85,13 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       if (!event.rawText) operation.current = undefined
     } else {
       setPhase(event.type)
-      if (event.type === 'listening') setSeconds(0)
+      if (event.type === 'listening') { setSeconds(0); setRecordingDevice(event.deviceName ?? 'マイク'); lastSample.current = 0; lastAudible.current = Date.now() }
     }
   }), [onBusy])
   useEffect(() => { if (!active || disabled) cancel(); return cancel }, [active, scope, disabled, cancel])
   useEffect(() => {
     if (phase !== 'listening') return
-    const timer = setInterval(() => setSeconds(value => value + 1), 1000)
+    const timer = setInterval(() => { setSeconds(value => value + 1); if (Date.now() - lastSample.current > 500) { setLevel(0); setClipping(false) } }, 1000)
     return () => clearInterval(timer)
   }, [phase])
   const startOrStop = useCallback(async () => {
@@ -63,14 +100,14 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       await window.electronAPI.voiceInput.stop(operation.current.id).catch(() => { cancel(); setError('録音を停止できませんでした') })
       return
     }
-    if (phaseRef.current !== 'idle' || disabled || !active || !caps?.available || !editor.current) return
+    if (phaseRef.current !== 'idle' || disabled || !active || !caps?.available || deviceMissing || !devices?.length || !editor.current) return
     const id = crypto.randomUUID()
     operation.current = { id, insert: editor.current.captureInsertion(), scope }
     phaseRef.current = 'preparing'
-    setError(''); setRawText(''); setPhase('preparing'); onBusy(true)
-    try { await window.electronAPI.voiceInput.start(id) }
+    setError(''); setRawText(''); setLevel(0); setClipping(false); setShowDevices(false); setPhase('preparing'); onBusy(true)
+    try { await window.electronAPI.voiceInput.start(id, selectedDevice || undefined) }
     catch { if (operation.current?.id === id) { cancel(); setError('音声入力を開始できませんでした。別の録音が動作していないかご確認ください') } }
-  }, [active, caps, disabled, editor, scope, onBusy, cancel])
+  }, [active, caps, disabled, editor, scope, onBusy, cancel, selectedDevice, devices, deviceMissing])
   useEffect(() => {
     if (!active) return
     const keydown = (event: KeyboardEvent) => {
@@ -84,19 +121,54 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     return () => { window.removeEventListener('keydown', keydown); window.removeEventListener('blur', blur) }
   }, [active, startOrStop, cancel])
   return <div className="px-2 pt-2 text-xs" aria-live="polite">
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2 flex-wrap">
       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
-        disabled={phase !== 'listening' && (busy || disabled || !caps?.available)}
+        disabled={phase !== 'listening' && (busy || disabled || !caps?.available || !devices?.length || deviceMissing)}
         title={caps?.reason ?? '音声入力（⌘⇧M / Ctrl+Shift+M）'}
         aria-label={phase === 'listening' ? '録音を停止して文章を整える' : '音声入力を開始'}
         className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 disabled:opacity-40 ${phase === 'listening' ? 'text-red-600 bg-red-50 dark:bg-red-950' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>
         {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
+      <button type="button" disabled={busy || !caps?.available} aria-label="マイクを選択" aria-expanded={showDevices}
+        onClick={() => { setShowDevices(value => !value); void refreshDevices() }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-40"><CaretDown size={14} /></button>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
       {!busy && caps?.available && !rawText && <span className="opacity-50">話した内容をClaudeで整えて入力します</span>}
       {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
     </div>
+    {caps?.available && <div className="mt-1 mb-2 text-[11px] text-gray-500 dark:text-zinc-400 truncate" title={phase === 'listening' ? recordingDevice : deviceLabel}>
+      {phase === 'listening' ? recordingDevice : deviceLabel}
+    </div>}
+    {showDevices && <div className="my-2 rounded-lg border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
+      <label className="block">使用するマイク
+        <select aria-label="使用するマイク" value={selectedDevice} disabled={busy} className="mt-1 block w-full rounded border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2"
+          onChange={event => {
+            const value = event.target.value
+            setSelectedDevice(value)
+            try { localStorage.setItem(MICROPHONE_KEY, value); window.dispatchEvent(new Event('acb:microphone-changed')) }
+            catch { setDeviceError('マイクの選択を保存できませんでした。今回は選択したマイクを使用します') }
+          }}>
+          <option value="">システムの既定：{devices?.find(d => d.isDefault)?.name ?? '未接続'}</option>
+          {deviceMissing && <option value={selectedDevice}>前回選んだマイク（未接続）</option>}
+          {devices?.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}
+        </select>
+      </label>
+      <div className="flex justify-between gap-2"><span className="opacity-60">選択はこのPCに保存します。録音中は変更できません。</span><button type="button" onClick={() => void refreshDevices()} className="underline shrink-0">再取得</button></div>
+    </div>}
+    {deviceError && <p className="my-1 text-amber-700 dark:text-amber-400">{deviceError}</p>}
+    {deviceMissing && <p className="my-1 text-amber-700 dark:text-amber-400">選択したマイクが未接続です。⌄からマイクを選び直してください。</p>}
+    {devices?.length === 0 && caps?.available && <p className="my-1 text-amber-700 dark:text-amber-400">利用できるマイクが見つかりません。接続後に一覧を再取得してください。</p>}
+    {phase === 'listening' && <div className="mb-2 space-y-1" aria-live="off">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0">入力レベル</span>
+        <div role="meter" aria-label="マイク入力レベル" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)} className="flex gap-1 h-3 flex-1 max-w-56">
+          {Array.from({ length: 16 }, (_, i) => <span key={i} className={`flex-1 rounded-sm transition-colors duration-100 ${level * 16 > i ? clipping ? 'bg-red-500' : i >= 13 ? 'bg-amber-400' : 'bg-emerald-500' : 'bg-gray-200 dark:bg-zinc-700'}`} />)}
+        </div>
+        <span className="shrink-0">{clipping ? '音が大きすぎます' : level > 0.08 ? '音を検出' : '静かです'}</span>
+      </div>
+      {seconds >= 5 && Date.now() - lastSample.current > 3000 && <p className="text-amber-600">マイクから音声データが届いていません。停止して別のマイクをお試しください。</p>}
+      {seconds >= 5 && Date.now() - lastSample.current <= 3000 && Date.now() - lastAudible.current > 5000 && <p className="text-amber-600">音が小さいようです。マイクの選択・ミュート・入力音量をご確認ください。</p>}
+    </div>}
     {error && <p className="my-1 text-amber-700 dark:text-amber-400">{error}</p>}
     {rawText && <div className="my-2 rounded border p-2">
       <p className="mb-2 whitespace-pre-wrap select-text max-h-40 overflow-auto">{rawText}</p>

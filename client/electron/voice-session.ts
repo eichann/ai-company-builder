@@ -1,8 +1,8 @@
 import type { VoiceCapabilities, VoiceEvent } from '../shared/voice-input'
-export type RecognitionEvent = { type: string; text?: string; message?: string }
+export type RecognitionEvent = { type: string; text?: string; message?: string; deviceName?: string; level?: number; clipping?: boolean }
 export interface SpeechRecognitionProvider {
   capabilities(): Promise<VoiceCapabilities>
-  start(onEvent: (event: RecognitionEvent) => void): { stop(): void; cancel(): void }
+  start(onEvent: (event: RecognitionEvent) => void, deviceId?: string): { stop(): void; cancel(): void }
 }
 type Session = { id: string; abort: AbortController; recognition?: ReturnType<SpeechRecognitionProvider['start']>; timer?: ReturnType<typeof setTimeout>; phase: string }
 type VoicePayload = VoiceEvent extends infer E ? E extends VoiceEvent ? Omit<E, 'requestId'> : never : never
@@ -23,7 +23,7 @@ export class VoiceInputSession {
     this.active = undefined
     if (old) { clearTimeout(old.timer); old.abort.abort(); old.recognition?.cancel() }
   }
-  async start(id: string) {
+  async start(id: string, deviceId?: string) {
     if (this.active) throw new Error('音声入力が既に動作中です')
     const session: Session = { id, abort: new AbortController(), phase: 'preparing' }
     this.active = session
@@ -44,7 +44,9 @@ export class VoiceInputSession {
         if (data.type === 'listening' && session.phase === 'preparing') {
           session.phase = 'listening'; clearTimeout(session.timer)
           session.timer = setTimeout(() => this.stop(id), 120_000)
-          send({ type: 'listening' })
+          send({ type: 'listening', deviceName: data.deviceName })
+        } else if (data.type === 'level' && session.phase === 'listening') {
+          if (typeof data.level === 'number' && Number.isFinite(data.level)) send({ type: 'level', level: Math.max(0, Math.min(1, data.level)), clipping: data.clipping === true })
         } else if (data.type === 'error') fail(data.message ?? '音声認識に失敗しました')
         else if (data.type === 'result' && session.phase !== 'polishing') {
           const rawText = typeof data.text === 'string' ? data.text.trim() : ''
@@ -56,7 +58,7 @@ export class VoiceInputSession {
             send({ type: 'result', text }); this.cancel()
           }).catch(error => fail(error instanceof Error ? error.message : '整形に失敗しました', rawText))
         }
-      })
+      }, deviceId)
       session.recognition = recognition
       if (this.active !== session) recognition.cancel()
     } catch (error) { fail(error instanceof Error ? error.message : '音声入力を開始できませんでした') }

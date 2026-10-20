@@ -23,7 +23,8 @@ interface AICompleteData {
 contextBridge.exposeInMainWorld('electronAPI', {
   voiceInput: {
     capabilities: () => ipcRenderer.invoke('voice:capabilities'),
-    start: (id: string) => ipcRenderer.invoke('voice:start', id),
+    devices: () => ipcRenderer.invoke('voice:devices'),
+    start: (id: string, deviceId?: string) => ipcRenderer.invoke('voice:start', id, deviceId),
     stop: (id: string) => ipcRenderer.invoke('voice:stop', id),
     cancel: (id: string) => ipcRenderer.invoke('voice:cancel', id),
     onEvent: (callback: (event: VoiceEvent) => void) => {
