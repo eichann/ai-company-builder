@@ -4,7 +4,7 @@ import AVFoundation
 import CoreAudio
 import AudioToolbox
 
-let launchTime = ProcessInfo.processInfo.systemUptime
+var launchTime = ProcessInfo.processInfo.systemUptime
 func timing(_ stage: String) {
     emit(["type": "timing", "stage": stage, "elapsedMs": Int((ProcessInfo.processInfo.systemUptime - launchTime) * 1000)])
 }
@@ -58,7 +58,7 @@ func microphones() throws -> [Microphone] {
 }
 
 @available(macOS 26.0, *)
-func transcribe() async throws {
+func transcribe(deviceUID: String? = nil) async throws {
     guard SpeechTranscriber.isAvailable,
           let locale = await SpeechTranscriber.supportedLocale(equivalentTo: Locale(identifier: "ja-JP")) else {
         throw NSError(domain: "日本語の音声認識に対応していません", code: 1)
@@ -134,7 +134,7 @@ func transcribe() async throws {
     defer { engine.stop() }
     let input = engine.inputNode
     let devices = try microphones()
-    let requested = CommandLine.arguments.firstIndex(of: "--device").flatMap { index in
+    let requested = deviceUID ?? CommandLine.arguments.firstIndex(of: "--device").flatMap { index in
         CommandLine.arguments.count > index + 1 ? CommandLine.arguments[index + 1] : nil
     }
     guard let device = devices.first(where: { requested == nil ? $0.id == defaultMicrophone() : $0.uid == requested }),
@@ -231,7 +231,21 @@ func transcribe() async throws {
                 emit(["type": "devices", "devices": devices.map { ["id": $0.uid, "name": $0.name, "isDefault": $0.id == defaultID] as [String: Any] }])
                 return
             }
-            if #available(macOS 26.0, *) { try await transcribe() }
+            var deviceUID: String?
+            if CommandLine.arguments.contains("--standby") {
+                // Do not instantiate AVAudioEngine, request permission or open a
+                // microphone until an explicit start command arrives.
+                emit(["type": "standby-ready"])
+                guard let line = await Task.detached(operation: { readLine() }).value else { return }
+                guard let data = line.data(using: .utf8),
+                      let command = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                      command["command"] as? String == "start" else {
+                    throw NSError(domain: "無効な音声入力コマンドです", code: 9)
+                }
+                deviceUID = command["deviceId"] as? String
+                launchTime = ProcessInfo.processInfo.systemUptime
+            }
+            if #available(macOS 26.0, *) { try await transcribe(deviceUID: deviceUID) }
             else { emit(["type": "error", "message": "音声入力にはmacOS 26以降が必要です"]); exit(1) }
         } catch {
             emit(["type": "error", "message": (error as NSError).domain])

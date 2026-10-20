@@ -1,3 +1,4 @@
+import { VoiceHelperPool } from './voice-helper'
 import { app, ipcMain, systemPreferences, type WebContents } from 'electron'
 import { spawnVoiceProcess } from './voice-process'
 import { existsSync, mkdirSync } from 'node:fs'
@@ -9,7 +10,10 @@ import { polishVoice } from './voice-polisher'
 import { VoiceInputSession, type SpeechRecognitionProvider, type RecognitionEvent } from './voice-session'
 
 class AppleSpeechProvider implements SpeechRecognitionProvider {
-  constructor(private readonly binary: string) {}
+  private pool: VoiceHelperPool
+  constructor(private readonly binary: string) { this.pool = new VoiceHelperPool(binary) }
+  warmUp() { this.pool.warmUp() }
+  dispose() { this.pool.dispose() }
   async capabilities(): Promise<VoiceCapabilities> {
     if (!existsSync(this.binary)) return { available: false, reason: '音声認識ヘルパーがありません。Mac用ビルドが必要です' }
     return new Promise(resolve => {
@@ -42,41 +46,23 @@ class AppleSpeechProvider implements SpeechRecognitionProvider {
     })
   }
   start(onEvent: (event: RecognitionEvent) => void, deviceId?: string) {
-    const child = spawnVoiceProcess(this.binary, deviceId ? ['--device', deviceId] : [])
-    let finished = false
-    const startedAt = Date.now()
-    createInterface({ input: child.stdout }).on('line', line => {
-      try {
-        const data = JSON.parse(line)
-        if (data.type === 'timing') {
-          if (['locale-ready', 'permission-ready', 'device-ready', 'microphone-started', 'analyzer-ready', 'microphone-stopped'].includes(data.stage) && Number.isFinite(data.elapsedMs)) {
-            console.info('[voice] startup timing', { stage: data.stage, helperMs: data.elapsedMs, totalMs: Date.now() - startedAt })
-          }
-          return
-        }
-        if (data.type === 'result' || data.type === 'error') finished = true
-        onEvent(data)
-      } catch { /* Never log transcript data. */ }
-    })
-    child.stderr.resume()
-    child.stdin.on('error', () => {})
-    child.on('error', () => onEvent({ type: 'error', message: '音声認識を起動できませんでした' }))
-    child.on('close', () => { if (!finished) onEvent({ type: 'error', message: '音声認識が終了しました。もう一度お試しください' }) })
-    return { stop: () => child.stdin.end(), cancel: () => { finished = true; child.kill('SIGKILL') } }
+    return this.pool.start(onEvent, deviceId)
   }
 }
 class UnavailableSpeechProvider implements SpeechRecognitionProvider {
+  warmUp() {}
+  dispose() {}
   async capabilities() { return { available: false, reason: '音声入力は現在macOS 26以降に対応しています。Windows対応は準備中です' } }
   async devices(): Promise<VoiceDevice[]> { return [] }
   start(): never { throw new Error('このOSの音声認識は未対応です') }
 }
 
 export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.ProcessEnv) {
-  const provider: SpeechRecognitionProvider & { devices(): Promise<VoiceDevice[]> } = process.platform === 'darwin'
+  const provider: SpeechRecognitionProvider & { devices(): Promise<VoiceDevice[]>; warmUp(): void; dispose(): void } = process.platform === 'darwin'
     ? new AppleSpeechProvider(app.isPackaged ? path.join(process.resourcesPath, 'voice/acb-speech') : path.join(app.getAppPath(), 'native/bin/acb-speech'))
     : new UnavailableSpeechProvider()
   let check: Promise<VoiceCapabilities> | undefined
-  const capabilities = () => check ??= provider.capabilities()
+  const capabilities = () => check ??= provider.capabilities().then(result => { if (result.available) provider.warmUp(); return result })
   let owner: WebContents | undefined
   let requestedAt = 0
   const session = new VoiceInputSession(
@@ -111,5 +97,5 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => NodeJS.Pr
   })
   ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
   ipcMain.handle('voice:cancel', (event, id: string) => { if (owner === event.sender) session.cancel(id) })
-  app.on('before-quit', cancel)
+  app.on('before-quit', () => { provider.dispose(); cancel() })
 }
