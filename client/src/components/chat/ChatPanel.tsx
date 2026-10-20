@@ -1,3 +1,6 @@
+import { OpenConsultationContext } from './consultation-context'
+import { ConsultationReferenceLink } from './ConsultationReference'
+import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
@@ -79,7 +82,11 @@ function uiMessageToSessionMessage(
 ): ChatSession['messages'][0] {
   let content = ''
   let thinking: string | undefined
+  const consultationReferences: ConsultationReference[] = []
   for (const part of msg.parts) {
+    const p = part as { type: string; toolName?: string; output?: unknown; data?: ConsultationReference }
+    const ref = p.type === 'data-consultation-reference' ? p.data : referenceFromTool(p.toolName || p.type.replace(/^tool-/, ''), p.output)
+    if (ref && !consultationReferences.some(r => r.id === ref.id)) consultationReferences.push(ref)
     if (part.type === 'text') content += part.text
     if (part.type === 'reasoning') thinking = (thinking || '') + part.text
     // Summarize tool invocations as text
@@ -98,6 +105,7 @@ function uiMessageToSessionMessage(
     content,
     timestamp: timestamp.toISOString(),
     thinking,
+    ...(consultationReferences.length ? { consultationReferences } : {}),
   }
 }
 
@@ -109,6 +117,7 @@ function sessionMessageToUIMessage(
     parts.push({ type: 'reasoning' as const, text: msg.thinking })
   }
   parts.push({ type: 'text' as const, text: msg.content })
+  for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
   return {
     id: msg.id,
     role: msg.role as 'user' | 'assistant',
@@ -151,6 +160,8 @@ const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
 
 function getToolDisplayName(toolName: string): string {
   const names: Record<string, string> = {
+    mcp__acb_consultations__search_consultations: '過去の相談を検索',
+    mcp__acb_consultations__read_consultation: '過去の相談を参照',
     readFile: 'ファイル読取',
     writeFile: 'ファイル書込',
     listDirectory: 'ディレクトリ一覧',
@@ -176,6 +187,9 @@ function ToolInvocationPartView({ toolName, state, input, output, errorText }: T
   const isRunning = state === 'input-streaming' || state === 'input-available'
   const isDone = state === 'output-available'
   const isError = state === 'output-error'
+
+  const reference = referenceFromTool(toolName, output)
+  if (reference) return <ConsultationReferenceLink reference={reference} />
 
   // Build summary for the tool input
   let inputSummary = ''
@@ -621,6 +635,8 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
               </div>
             )
           }
+
+          if (part.type === 'data-consultation-reference') return <ConsultationReferenceLink key={index} reference={part.data as ConsultationReference} />
 
           if (part.type === 'step-start') {
             return (
@@ -2939,6 +2955,13 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   }
 
   return (
+    <OpenConsultationContext.Provider value={id => {
+      if (!currentCompany) return
+      void window.electronAPI.getChatSession(currentCompany.id, id).then(session => {
+        if (session) openSession(id)
+        else window.alert("この相談は削除されたか、参照できません。")
+      }).catch(() => window.alert("相談を開けませんでした。"))
+    }}>
     <div ref={panelRef} className="h-full relative flex min-w-0">
       {sidebarOpen && <>
         {compact && <button aria-label="相談一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
@@ -2995,6 +3018,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
         </div>
       )}
     </div>
+    </OpenConsultationContext.Provider>
   )
 }
 

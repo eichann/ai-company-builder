@@ -1,3 +1,4 @@
+import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -22,6 +23,7 @@ import crypto from 'crypto'
 import net from 'net'
 
 export interface ChatServerConfig extends ClaudeConnectionConfig {
+  createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -181,7 +183,9 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId }
+    const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
+    if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

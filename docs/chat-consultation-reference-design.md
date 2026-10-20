@@ -129,3 +129,11 @@ ElectronとJSONを維持し、新しいDBや常駐サーバーは追加しない
 - Codex: https://developers.openai.com/codex/customization/memories
 
 CodexのローカルメモリーとChatGPT Webのメモリーは別の保存系である。ChatGPTのメモリーがそのままACBから検索できるという設計にはしない。
+
+## 実装時の更新（2026-10-20）
+
+引き継ぎ機能をPR #91でmainへマージした後、`feat/consultation-reference`で実装。検証結果は `chat-consultation-reference-validation.md` を参照。
+
+Codex CLI 0.153.4ではdynamicToolsをthread/resumeに追加できなかったため、通常相談は短命のローカルHTTP MCP接続を使用する。各回答の開始時だけループバック上に起動し、ランダムな認証トークンで保護し、終了・停止時に閉じる。常駐プロセスや利用者のグローバル設定は追加しない。ClaudeはAgent SDKのインプロセスMCPを使用する。両方とも同一の検索・読み取り処理を呼ぶ。
+
+初期版ではメモと原文を分けて読む。メモの後の発言があることを明示し、必要な場合だけ原文を追加取得する。参照結果は4回・20 KiBの共通上限。メモ未整理と原文未読を区別するため、原文には省略の有無も明示する。

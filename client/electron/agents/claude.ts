@@ -1,3 +1,5 @@
+import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
+import { referenceSchemas, referenceDescriptions, type ReferenceToolName } from '../consultations/tools'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -96,7 +98,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references }) {
       const claudePath = config.getClaudeCodeCliPath()
       const permissionMode = config.getPermissionMode()
 
@@ -178,7 +180,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
             // Read-only tools: auto-allow
             const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-            if (readOnlyTools.includes(toolName)) {
+            if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`))) {
               return { behavior: 'allow' as const }
             }
             // Request approval from UI
@@ -205,6 +207,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const resolvedModel = resolveClaudeModel(modelId)
       const resolvedEffort = resolveEffort(resolvedModel, effort as Parameters<typeof resolveEffort>[1])
 
+      const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
       let missingSession = false
       const native = createModel(resolvedModel, {
         pathToClaudeCodeExecutable: claudePath,
@@ -213,6 +216,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],
         streamingInput: 'always',
+        ...(referenceServer ? { mcpServers: { acb_consultations: referenceServer }, allowedTools: Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) } : {}),
         ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
         // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
         // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the
