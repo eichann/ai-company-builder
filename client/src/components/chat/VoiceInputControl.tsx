@@ -126,15 +126,17 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       </button>
       <kbd className="shrink-0 whitespace-nowrap rounded border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
       <span className="text-gray-500 dark:text-zinc-400">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
-      <button type="button" disabled={busy || !caps?.available} aria-label="マイクを選択" aria-expanded={showDevices}
-        onClick={() => { setShowDevices(value => !value); void refreshDevices() }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-40"><CaretDown size={14} /></button>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
       {!busy && caps?.available && !rawText && <span className="opacity-50">話した内容をAIで整えて入力します</span>}
       {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
     </div>
-    {caps?.available && <div className="mt-1 mb-2 text-[11px] text-gray-500 dark:text-zinc-400 truncate" title={phase === 'listening' ? recordingDevice : deviceLabel}>
-      {phase === 'listening' ? recordingDevice : deviceLabel}
-    </div>}
+    {caps?.available && <button type="button" disabled={busy} aria-label="マイクを選択" aria-expanded={showDevices}
+      title={phase === 'listening' ? recordingDevice : deviceLabel}
+      onClick={() => { setShowDevices(value => !value); void refreshDevices() }}
+      className="mt-1 mb-2 flex max-w-full items-center gap-1 rounded px-2 py-1 text-xs text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-60">
+      <span className="truncate">{phase === 'listening' ? recordingDevice : deviceLabel}</span>
+      <CaretDown size={14} className={`shrink-0 transition-transform ${showDevices ? 'rotate-180' : ''}`} />
+    </button>}
     {caps?.available && !configured && !busy && <div className="my-2 flex items-center gap-2 flex-wrap rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-amber-800 dark:text-amber-200">
       <span>はじめに、自分の使うマイクを設定してください。</span>
       <button type="button" className="underline font-medium" onClick={() => { setShowDevices(true); void refreshDevices() }}>マイクを設定</button>
