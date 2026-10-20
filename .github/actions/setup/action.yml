@@ -1,0 +1,31 @@
+name: Setup pnpm workspace
+description: Install pnpm and Node.js, restore the pnpm store cache, and install the workspace with the frozen lockfile.
+
+runs:
+  using: composite
+  steps:
+    # pnpm 9 on purpose: pnpm-lock.yaml is currently written by pnpm 9, which
+    # does not read the `patchedDependencies` / `allowBuilds` settings in
+    # pnpm-workspace.yaml (those are pnpm 10+/11 features). pnpm 10+ would see
+    # the fd-slicer patch, find it missing from the lockfile, and refuse a
+    # --frozen-lockfile install. Bump this together with regenerating the
+    # lockfile on the newer pnpm.
+    - uses: pnpm/action-setup@v6
+      with:
+        version: 9
+
+    # Node 20 matches server/Dockerfile and admin/Dockerfile (node:20-slim)
+    # and the engines floor in the root package.json.
+    - uses: actions/setup-node@v7
+      with:
+        node-version: 20
+        cache: pnpm
+
+    - name: Install dependencies
+      shell: bash
+      env:
+        # CI never launches Electron: typecheck uses the bundled .d.ts and the
+        # client tests run under plain Node via tsx. Skipping the ~100MB
+        # binary download keeps installs fast and off a flaky network path.
+        ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      run: pnpm install --frozen-lockfile

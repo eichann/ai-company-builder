@@ -1,0 +1,81 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A new push to the same PR / branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Read-only token: no step publishes anything, and PRs from forks must work
+# without secrets.
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck (all packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # shared, server, client: tsc --noEmit; admin: next typegen && tsc --noEmit
+      - run: pnpm -r typecheck
+
+  test-client:
+    name: Client tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # node:test via tsx. tests/*-ui.tsx + *-ui.html are browser preview
+      # fixtures for manual visual checks (served by Vite), not tests.
+      # tests/audio-level.test.swift needs AVFoundation (macOS only) and is not
+      # wired into any script; it is out of scope for this Linux job.
+      - run: npx tsx --test tests/*.test.ts
+        working-directory: client
+
+  test-server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npx vitest run
+        working-directory: server
+
+  lint-changed:
+    name: Lint (changed files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the merge base with main is available.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Resolve base commit
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          echo "Linting changes since $base"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      - run: .github/scripts/lint-changed.sh "${{ steps.base.outputs.sha }}"
