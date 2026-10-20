@@ -767,7 +767,14 @@ ${promptContent}
         refreshSkills()
         invalidateCommitCache()
 
-        if (result.hadConflicts) {
+        if (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) {
+          // Protected agent config was put back to the server's version
+          setSyncNotification({
+            type: 'warning',
+            message: result.message || `管理者だけが変更できるファイルをサーバーの状態に戻しました: ${result.restoredProtectedFiles.join(', ')}`,
+            backupPath: result.protectedBackupPath || result.backupPath
+          })
+        } else if (result.hadConflicts) {
           setSyncNotification({
             type: 'warning',
             message: result.message || `${result.conflictFiles?.length || 0}ファイルが競合しました。サーバー版で上書きしました。`,
@@ -803,6 +810,7 @@ ${promptContent}
 
       // Auto-hide success notification after 3 seconds (unless there were warnings)
       const hasWarnings = result.hadConflicts ||
+        (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
         (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
         (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)

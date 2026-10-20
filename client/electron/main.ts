@@ -18,6 +18,13 @@ import { claudeCode } from 'ai-sdk-provider-claude-code'
 import { streamText, generateText } from 'ai'
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import simpleGit, { SimpleGit } from 'simple-git'
+import {
+  isProtectedConfigRejection,
+  parseProtectedConfigPaths,
+  protectedConfigMessage,
+  restoreProtectedPaths,
+  ProtectedConfigRecoveryError,
+} from './protected-config'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
 import net from 'net'
@@ -2527,8 +2534,18 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       }
     }
 
-    // 5. Push (only if we have local changes to push)
-    if (!hasLocalChanges && !hadConflicts) {
+    // 5. Push (only if we have local changes to push). Commits left unpushed
+    //    by an earlier sync also count: a push the server rejected (e.g. a
+    //    protected config change the member cancelled out of) writes no
+    //    PENDING_PUSH, and without this check the next sync with no new edits
+    //    would report success while those commits never reach the team.
+    let unpushedCommits = 0
+    try {
+      unpushedCommits = Number((await git.raw(['rev-list', '--count', 'origin/main..HEAD'])).trim()) || 0
+    } catch {
+      // No origin/main yet (first sync) — hasLocalChanges decides as before.
+    }
+    if (!hasLocalChanges && !hadConflicts && unpushedCommits === 0) {
       // No local changes and no conflicts — just pulled remote changes
       let successMessage = restoredFolders.length > 0
         ? `部署フォルダを復元しました: ${restoredFolders.join(', ')}`
@@ -2549,8 +2566,119 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.log('Git sync: Pushing to origin...')
       await git.push('origin', 'main', ['--set-upstream', '--progress'])
     } catch (pushError) {
-      // Check if push was rejected due to secret detection
       const pushErrorMsg = pushError instanceof Error ? pushError.message : String(pushError)
+
+      // The server only lets an owner/admin change agent-execution config
+      // (.claude/settings.json, .mcp.json, .claude/hooks/ ... — Claude Code
+      // runs the commands in them without a prompt). The rejected change is
+      // already committed locally and the hook checks every commit in the
+      // pushed range, so a plain retry would fail at this same step forever.
+      // Offer the way out: put just those paths back to the server's version
+      // (member's copy saved in .backups/ first), squash the unpushed commits
+      // without them, push again. Never write PENDING_PUSH for this.
+      if (isProtectedConfigRejection(pushErrorMsg)) {
+        const protectedFiles = parseProtectedConfigPaths(pushErrorMsg)
+        console.warn('Git sync: Push rejected — protected config changed by a non-admin:', protectedFiles)
+        const rejected = {
+          success: false,
+          errorType: 'protected_config' as const,
+          protectedFiles,
+          error: `${protectedConfigMessage(protectedFiles)}\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。`,
+          hadConflicts,
+          conflictFiles,
+          deletedConflictFiles,
+          backupPath: hadConflicts ? backupPath : undefined,
+        }
+        const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
+        if (!win || protectedFiles.length === 0) return rejected
+
+        const shown = protectedFiles.length <= 10
+          ? protectedFiles
+          : [...protectedFiles.slice(0, 10), `... 他 ${protectedFiles.length - 10} ファイル`]
+        const { response } = await dialog.showMessageBox(win, {
+          type: 'warning',
+          buttons: ['サーバーの状態に戻して同期する（推奨）', 'キャンセル'],
+          defaultId: 0,
+          cancelId: 1,
+          title: '管理者だけが変更できるファイル',
+          message: 'このファイルは管理者だけが変更できます。',
+          detail: `次のファイルは、チャットのAIが自動で実行する設定です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\n配布が必要な場合は、管理者に依頼してください。`,
+        })
+        if (response === 1) {
+          return { ...rejected, error: `同期を中止しました。\n\n${rejected.error}` }
+        }
+
+        const protectedBackupPath = path.join(
+          backupsDir,
+          `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 23)}_protected`
+        )
+        let recovery
+        try {
+          recovery = await restoreProtectedPaths({ git, repoPath, paths: protectedFiles, backupPath: protectedBackupPath })
+        } catch (recoveryError) {
+          const msg = recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
+          console.error('Git sync: Protected config recovery failed:', msg)
+          return {
+            ...rejected,
+            error: recoveryError instanceof ProtectedConfigRecoveryError
+              ? msg
+              : `ファイルをサーバーの状態に戻せませんでした。変更はこのPCに残っています。\n${msg}`,
+          }
+        }
+
+        if (recovery.committed) {
+          try {
+            await git.push('origin', 'main', ['--set-upstream', '--progress'])
+          } catch (retryError) {
+            const retryMsg = retryError instanceof Error ? retryError.message : String(retryError)
+            if (isProtectedConfigRejection(retryMsg)) {
+              const remaining = parseProtectedConfigPaths(retryMsg)
+              return { ...rejected, protectedFiles: remaining, error: protectedConfigMessage(remaining) }
+            }
+            if (retryMsg.includes('SECRET_DETECTED')) {
+              return {
+                success: false,
+                error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${retryMsg.split('\n').map(l => l.replace(/^remote:\s*/, '').trim()).filter(l => l.startsWith('- ')).join('\n') || '（詳細不明）'}`,
+                secretDetected: true
+              }
+            }
+            // The local history is clean now; an ordinary push failure (network,
+            // a teammate pushed in between) is retried by the next sync.
+            console.error('Git sync: Push after protected config recovery failed:', retryMsg)
+            fs.writeFileSync(pendingPushFile, new Date().toISOString())
+            return {
+              success: false,
+              error: '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。',
+              errorType: 'push_failed' as const,
+              pushFailed: true,
+              restoredProtectedFiles: [...recovery.restored, ...recovery.removed],
+              protectedBackupPath: recovery.backupPath ?? undefined,
+            }
+          }
+        }
+        if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
+
+        const reverted = [...recovery.restored, ...recovery.removed]
+        const parts = [`同期完了。管理者だけが変更できるファイル（${reverted.length}件）はサーバーの状態に戻しました。`]
+        if (recovery.backupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
+        if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
+        parts.push(recovery.committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
+        return {
+          success: true,
+          message: parts.join(''),
+          restoredProtectedFiles: reverted,
+          protectedBackupPath: recovery.backupPath ?? undefined,
+          hadConflicts,
+          conflictFiles,
+          deletedConflictFiles,
+          backupPath: hadConflicts ? backupPath : (recovery.backupPath ?? undefined),
+          restoredFolders,
+          ignoredLargeFiles,
+          excludedNestedRepos: newlyExcludedNestedRepos
+        }
+      }
+
+      // Check if push was rejected due to secret detection
       if (pushErrorMsg.includes('SECRET_DETECTED')) {
         // Extract file list from error message
         // git prefixes pre-receive hook stderr with "remote: "
@@ -3170,6 +3298,10 @@ ipcMain.handle('git:pushToServer', async (_, repoPath: string) => {
   } catch (error) {
     console.error('Git push error:', error)
     const errorMsg = error instanceof Error ? error.message : String(error)
+    if (isProtectedConfigRejection(errorMsg)) {
+      const protectedFiles = parseProtectedConfigPaths(errorMsg)
+      return { success: false, error: protectedConfigMessage(protectedFiles), errorType: 'protected_config', protectedFiles }
+    }
     if (errorMsg.includes('SECRET_DETECTED')) {
       const fileLines = errorMsg
         .split('\n')
