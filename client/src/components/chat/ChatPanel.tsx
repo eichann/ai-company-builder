@@ -5,6 +5,7 @@ import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
 import type { AgentSession, CodexStatus } from '../../../shared/agent'
+import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
@@ -2822,7 +2823,9 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
-  const [permissionMode, setPermissionMode] = useState<'bypassPermissions' | 'default'>('bypassPermissions')
+  const [permissionMode, setPermissionMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE)
+  // Only persist a mode the user actually picked, so an unset mode keeps following the default.
+  const loadedPermissionModeRef = useRef<PermissionMode | null>(null)
 
   const keyLoadedRef = useRef(false)
   if (!keyLoadedRef.current) {
@@ -2840,6 +2843,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
 
   async function loadPermissionMode() {
     const mode = await window.electronAPI.getPermissionMode()
+    loadedPermissionModeRef.current = mode
     setPermissionMode(mode)
   }
 
@@ -2850,7 +2854,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
       if (authMode === 'api-key' && apiKey && !apiKey.includes('*')) {
         await window.electronAPI.setApiKey(apiKey)
       }
-      await window.electronAPI.setPermissionMode(permissionMode)
+      if (permissionMode !== loadedPermissionModeRef.current) await window.electronAPI.setPermissionMode(permissionMode)
       onClose()
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error))
@@ -3030,42 +3034,31 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
               {t('chatSettings.permissionMode')}
             </label>
             <div className="space-y-2">
-              <button
-                onClick={() => setPermissionMode('bypassPermissions')}
-                className={`w-full text-left p-3 rounded-lg border transition-all duration-200 ${
-                  permissionMode === 'bypassPermissions'
-                    ? 'border-accent/50 bg-accent/10'
-                    : 'border-white/[0.06] bg-surface-elevated hover:border-white/[0.1]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-ink">{t('chatSettings.permissionBypass')}</div>
-                    <div className="text-xs text-ink-muted mt-0.5">{t('chatSettings.permissionBypassDesc')}</div>
+              {([
+                ['auto', 'permissionAuto'],
+                ['default', 'permissionDefault'],
+                ['bypassPermissions', 'permissionBypass'],
+              ] as const).map(([mode, key]) => (
+                <button
+                  key={mode}
+                  onClick={() => setPermissionMode(mode)}
+                  className={`w-full text-left p-3 rounded-lg border transition-all duration-200 ${
+                    permissionMode === mode
+                      ? 'border-accent/50 bg-accent/10'
+                      : 'border-white/[0.06] bg-surface-elevated hover:border-white/[0.1]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <div className="text-sm font-medium text-ink">{t(`chatSettings.${key}`)}</div>
+                      <div className="text-xs text-ink-muted mt-0.5">{t(`chatSettings.${key}Desc`)}</div>
+                    </div>
+                    {permissionMode === mode && (
+                      <Check size={16} weight="bold" className="text-accent flex-shrink-0" />
+                    )}
                   </div>
-                  {permissionMode === 'bypassPermissions' && (
-                    <Check size={16} weight="bold" className="text-accent flex-shrink-0" />
-                  )}
-                </div>
-              </button>
-              <button
-                onClick={() => setPermissionMode('default')}
-                className={`w-full text-left p-3 rounded-lg border transition-all duration-200 ${
-                  permissionMode === 'default'
-                    ? 'border-accent/50 bg-accent/10'
-                    : 'border-white/[0.06] bg-surface-elevated hover:border-white/[0.1]'
-                }`}
-              >
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-sm font-medium text-ink">{t('chatSettings.permissionDefault')}</div>
-                    <div className="text-xs text-ink-muted mt-0.5">{t('chatSettings.permissionDefaultDesc')}</div>
-                  </div>
-                  {permissionMode === 'default' && (
-                    <Check size={16} weight="bold" className="text-accent flex-shrink-0" />
-                  )}
-                </div>
-              </button>
+                </button>
+              ))}
             </div>
           </div>
         )}

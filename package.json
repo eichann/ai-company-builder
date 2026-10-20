@@ -18,5 +18,10 @@
   "engines": {
     "node": ">=20.0.0",
     "pnpm": ">=9.0.0"
+  },
+  "pnpm": {
+    "patchedDependencies": {
+      "ai-sdk-provider-claude-code@3.4.2": "patches/ai-sdk-provider-claude-code@3.4.2.patch"
+    }
   }
 }

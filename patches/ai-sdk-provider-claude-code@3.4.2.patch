@@ -1,0 +1,52 @@
+diff --git a/dist/index.cjs b/dist/index.cjs
+index 30b57cf35607848628d96046f2aa0c13908c9699..d0711c22aab7049f21aa68d47edfea09250466e0 100644
+--- a/dist/index.cjs
++++ b/dist/index.cjs
+@@ -476,7 +476,7 @@ var claudeCodeSettingsSchema = import_zod.z.object({
+   ).optional(),
+   executable: import_zod.z.enum(["bun", "deno", "node"]).optional(),
+   executableArgs: import_zod.z.array(import_zod.z.string()).optional(),
+-  permissionMode: import_zod.z.enum(["default", "acceptEdits", "bypassPermissions", "plan", "delegate", "dontAsk"]).optional(),
++  permissionMode: import_zod.z.enum(["default", "acceptEdits", "bypassPermissions", "plan", "delegate", "dontAsk", "auto"]).optional(),
+   permissionPromptToolName: import_zod.z.string().optional(),
+   continue: import_zod.z.boolean().optional(),
+   resume: import_zod.z.string().optional(),
+diff --git a/dist/index.d.cts b/dist/index.d.cts
+index 33a5bd56665ed446c45d6b5595c56730dec04984..26b07b63fa146a7a1b78e2cdf3336beabe068d23 100644
+--- a/dist/index.d.cts
++++ b/dist/index.d.cts
+@@ -104,7 +104,7 @@ interface ClaudeCodeSettings {
+      * Permission mode for tool usage
+      * @default 'default'
+      */
+-    permissionMode?: PermissionMode;
++    permissionMode?: PermissionMode | 'auto';
+     /**
+      * Custom tool name for permission prompts
+      */
+diff --git a/dist/index.d.ts b/dist/index.d.ts
+index 33a5bd56665ed446c45d6b5595c56730dec04984..26b07b63fa146a7a1b78e2cdf3336beabe068d23 100644
+--- a/dist/index.d.ts
++++ b/dist/index.d.ts
+@@ -104,7 +104,7 @@ interface ClaudeCodeSettings {
+      * Permission mode for tool usage
+      * @default 'default'
+      */
+-    permissionMode?: PermissionMode;
++    permissionMode?: PermissionMode | 'auto';
+     /**
+      * Custom tool name for permission prompts
+      */
+diff --git a/dist/index.js b/dist/index.js
+index 1ec248e3feee50cf901d5c47d1470099992b5788..7b262e54aabeb68c751ff5cd8cb9a87d7b7ec622 100644
+--- a/dist/index.js
++++ b/dist/index.js
+@@ -439,7 +439,7 @@ var claudeCodeSettingsSchema = z.object({
+   ).optional(),
+   executable: z.enum(["bun", "deno", "node"]).optional(),
+   executableArgs: z.array(z.string()).optional(),
+-  permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan", "delegate", "dontAsk"]).optional(),
++  permissionMode: z.enum(["default", "acceptEdits", "bypassPermissions", "plan", "delegate", "dontAsk", "auto"]).optional(),
+   permissionPromptToolName: z.string().optional(),
+   continue: z.boolean().optional(),
+   resume: z.string().optional(),

@@ -4,6 +4,11 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
+patchedDependencies:
+  ai-sdk-provider-claude-code@3.4.2:
+    hash: ggcm5rmpnqr5tqy25npcf4txai
+    path: patches/ai-sdk-provider-claude-code@3.4.2.patch
+
 importers:
 
   .: {}
@@ -121,7 +126,7 @@ importers:
         version: 6.0.92(zod@4.3.6)
       ai-sdk-provider-claude-code:
         specifier: ^3.4.2
-        version: 3.4.2(zod@4.3.6)
+        version: 3.4.2(patch_hash=ggcm5rmpnqr5tqy25npcf4txai)(zod@4.3.6)
       chokidar:
         specifier: ^5.0.0
         version: 5.0.0
@@ -7053,7 +7058,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  ai-sdk-provider-claude-code@3.4.2(zod@4.3.6):
+  ai-sdk-provider-claude-code@3.4.2(patch_hash=ggcm5rmpnqr5tqy25npcf4txai)(zod@4.3.6):
     dependencies:
       '@ai-sdk/provider': 3.0.8
       '@ai-sdk/provider-utils': 4.0.15(zod@4.3.6)

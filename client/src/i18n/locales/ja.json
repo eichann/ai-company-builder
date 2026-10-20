@@ -143,8 +143,10 @@
     "setupStep3": "claude login",
     "setupStep4": "このアプリを再起動",
     "permissionMode": "権限モード",
-    "permissionBypass": "自動（推奨）",
-    "permissionBypassDesc": "危険な操作のみ自動ブロック",
+    "permissionAuto": "自動（推奨）",
+    "permissionAutoDesc": "安全な操作は自動で実行し、危なそうな操作は止める",
+    "permissionBypass": "制限なし",
+    "permissionBypassDesc": "すべて確認なしで実行（削除などの危険なコマンドのみ確認）",
     "permissionDefault": "確認あり",
     "permissionDefaultDesc": "書込・実行前にユーザー確認"
   },

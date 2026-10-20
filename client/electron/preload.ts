@@ -2,7 +2,9 @@ import type { HandoffCompletion, HandoffView } from '../shared/handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
+import type { PermissionMode } from '../shared/permission-mode'
 // Use require for CommonJS compatibility in Electron preload
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
 
 // Types for AI messages
@@ -181,7 +183,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   isClaudeCodeAvailable: () => ipcRenderer.invoke('config:isClaudeCodeAvailable'),
   getClaudeCodeStatus: () => ipcRenderer.invoke('config:getClaudeCodeStatus'),
   getPermissionMode: () => ipcRenderer.invoke('config:getPermissionMode'),
-  setPermissionMode: (mode: 'bypassPermissions' | 'default') =>
+  setPermissionMode: (mode: PermissionMode) =>
     ipcRenderer.invoke('config:setPermissionMode', mode),
 
   // Server URL config
@@ -525,8 +527,8 @@ declare global {
         error: string | null
         checkedAt: number
       }>
-      getPermissionMode: () => Promise<'bypassPermissions' | 'default'>
-      setPermissionMode: (mode: 'bypassPermissions' | 'default') => Promise<boolean>
+      getPermissionMode: () => Promise<PermissionMode>
+      setPermissionMode: (mode: PermissionMode) => Promise<boolean>
 
       // Server URL config
       getServerUrl: () => Promise<string | null>
