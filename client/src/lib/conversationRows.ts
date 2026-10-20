@@ -13,3 +13,11 @@ export function buildConversationRows(sessions: ChatSession[], tabs: Conversatio
       .sort((a, b) => Number(!!b.tab) - Number(!!a.tab) || Number(!!b.session?.pinned) - Number(!!a.session?.pinned) ||
         (b.session?.updatedAt ?? '').localeCompare(a.session?.updatedAt ?? ''))
 }
+
+// Search runs over all sessions before pagination. Open and pinned chats always
+// remain visible; the limit only controls ordinary history rows in the sidebar.
+export function paginateConversationRows(rows: ReturnType<typeof buildConversationRows>, historyLimit: number) {
+  let historyCount = 0
+  const visibleRows = rows.filter(row => row.tab || row.session?.pinned || ++historyCount <= historyLimit)
+  return { visibleRows, remaining: Math.max(0, historyCount - historyLimit) }
+}
