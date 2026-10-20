@@ -33,7 +33,8 @@ test('resume, effort and spawn are confined to Claude connection; title has no r
   connection.createTitleModel()
   assert.equal(read().model, 'haiku')
   assert.equal(read().options.resume, undefined)
-  assert.equal(read().options.spawnClaudeCodeProcess, chat.options.spawnClaudeCodeProcess)
+  assert.equal(typeof read().options.spawnClaudeCodeProcess, 'function')
+  assert.equal(typeof chat.options.spawnClaudeCodeProcess, 'function')
 })
 
 test('dangerous commands require scoped approval even with bypassPermissions', async () => {

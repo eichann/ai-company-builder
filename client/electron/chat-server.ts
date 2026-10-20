@@ -1,3 +1,5 @@
+import { recoverSessionModel } from './agents/recovery'
+import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
 import { createCodexConnection } from './agents/codex'
 import type { AgentSession, AuthMode } from '../shared/agent'
@@ -20,6 +22,10 @@ import crypto from 'crypto'
 import net from 'net'
 
 export interface ChatServerConfig extends ClaudeConnectionConfig {
+  prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
+  onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
+  persistAgentSession?: (company: string, id: string, session: AgentSession) => void
+  onChatActivity?: (token: string, active: boolean) => void
   getApiKey: () => string | undefined
   getAuthMode: () => 'claude-code' | 'codex' | 'api-key'
   buildSystemPrompt: (workingDirectory?: string) => string
@@ -121,6 +127,7 @@ export async function startChatServer(config: ChatServerConfig) {
       effort,
       referenceFiles,
       appSessionId,
+      companyId,
       claudeSessionId: bodyClaudeSessionId,
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
@@ -135,6 +142,7 @@ export async function startChatServer(config: ChatServerConfig) {
       effort?: string
       referenceFiles?: string[]
       appSessionId?: string
+      companyId?: string
       claudeSessionId?: string
       agentSession?: AgentSession | null
       authMode?: AuthMode
@@ -173,7 +181,23 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
-    const model = connection.createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId })
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId }
+    let usedMemo = false
+    const recoveryEvent = (status: HandoffRecovery['status']) => {
+      if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
+    }
+    const model = companyId && appSessionId && config.prepareRecovery && existingCliSessionId
+      ? recoverSessionModel(connection, modelRequest, {
+        prepare: () => config.prepareRecovery!(companyId, appSessionId, messages),
+        started: value => { usedMemo = value; recoveryEvent('recovering') },
+        session: id => {
+          const session = { providerId: authMode, id, modelId }
+          config.persistAgentSession?.(companyId, appSessionId, session)
+          agentSessionMap.set(appSessionId, session)
+        },
+        finished: () => recoveryEvent('recovered'),
+        failed: () => recoveryEvent('error'),
+      }) : connection.createChatModel(modelRequest)
 
     // API key mode: add filesystem tools + optional skill tools
     const tools = (() => {
@@ -190,14 +214,6 @@ export async function startChatServer(config: ChatServerConfig) {
       else if (candidate && candidate.providerId !== authMode) inputMessages = agentInputMessages(messages)
     } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
     const modelMessages = await convertToModelMessages(inputMessages)
-
-    // Debug: log reference files and system prompt
-    if (referenceFiles && referenceFiles.length > 0) {
-      console.log('[chat-server] Reference files:', referenceFiles)
-    }
-    if (finalSystemPrompt) {
-      console.log('[chat-server] System prompt (last 300 chars):', finalSystemPrompt.slice(-300))
-    }
 
     // Claude Code CLI mode with resume: send only the latest user message
     // (CLI already has the full conversation context from its session)
@@ -257,7 +273,18 @@ export async function startChatServer(config: ChatServerConfig) {
       }
     }
 
-    const result = streamText({
+    const activityToken = crypto.randomUUID()
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      c.req.raw.signal.removeEventListener('abort', release)
+      config.onChatActivity?.(activityToken, false)
+    }
+    config.onChatActivity?.(activityToken, true)
+    c.req.raw.signal.addEventListener('abort', release, { once: true })
+    let result
+    try { result = streamText({
       abortSignal: c.req.raw.signal,
       maxRetries: 0,
       model,
@@ -290,10 +317,13 @@ export async function startChatServer(config: ChatServerConfig) {
           if (metadata.contextUsage.contextWindow) su.contextWindowSize = metadata.contextUsage.contextWindow
         }
       },
+      onFinish: release,
+      onAbort: release,
       onError: ({ error }) => {
-        console.error('[chat-server] Stream error:', error)
+        release()
+        console.error('[chat-server] Stream error:', error instanceof Error ? error.message : 'unknown')
       },
-    })
+    }) } catch (error) { release(); throw error }
 
     return result.toUIMessageStreamResponse({
       sendReasoning: true,

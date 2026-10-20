@@ -1,3 +1,4 @@
+import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
@@ -19,6 +20,11 @@ import simpleGit, { SimpleGit } from 'simple-git'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
 import net from 'net'
+import { HandoffStore } from './handoff/store'
+import { HandoffService } from './handoff/service'
+import { writeClaudeHandoff } from './handoff/claude'
+import { writeCodexHandoff } from './handoff/codex'
+import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
 import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
 
@@ -453,6 +459,13 @@ app.whenReady().then(async () => {
       getClaudeCodeCliPath,
       getShellEnv,
       buildSystemPrompt,
+      onChatActivity: (token, active) => handoffs.setBusy(token, active),
+      prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
+      onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
+      persistAgentSession: (company, id, session) => {
+        if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
+        broadcastChatHistoryChanged(company)
+      },
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
@@ -1127,6 +1140,18 @@ ipcMain.handle('tool-approval-response', (_, toolUseId: string, approved: boolea
 
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
+const handoffStore = new HandoffStore(path.join(app.getPath('userData'), 'chat-handoffs'), localHistoryStore)
+const handoffs = new HandoffService(localHistoryStore, handoffStore, async (provider, request) => {
+  const cwd = path.join(app.getPath('userData'), 'handoff-worker')
+  fs.mkdirSync(cwd, { recursive: true })
+  const input = { ...request, cwd, env: getShellEnv() }
+  return provider === 'claude-code' ? writeClaudeHandoff({ ...input, cli: getClaudeCodeCliPath() }) : writeCodexHandoff(input)
+}, (companyId, sessionId) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('handoff:changed', { companyId, sessionId }) })
+try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
+app.on('before-quit', () => handoffs.dispose())
+ipcMain.handle('handoff:get', (_, company: string, id: string) => { handoffs.touch(company, id); return handoffs.view(company, id) })
+ipcMain.handle('handoff:update', (_, company: string, id: string) => handoffs.requestUpdate(company, id))
+ipcMain.handle('handoff:complete', (_, company: string, id: string, receipt: HandoffCompletion) => handoffs.complete(company, id, receipt))
 function broadcastChatHistoryChanged(companyId: string, deletedSessionId?: string): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('chatHistory:changed', { companyId, deletedSessionId })
@@ -1154,6 +1179,7 @@ ipcMain.handle('chatHistory:patchSession', (_, companyId: string, sessionId: str
 })
 ipcMain.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string) => {
   localHistoryStore.delete(companyId, sessionId)
+  handoffs.invalidate(companyId, sessionId)
   broadcastChatHistoryChanged(companyId, sessionId)
   return true
 })

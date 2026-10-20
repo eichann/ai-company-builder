@@ -1,3 +1,4 @@
+import type { HandoffCompletion, HandoffView } from '../shared/handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
@@ -211,6 +212,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   respondToolApproval: (toolUseId: string, approved: boolean) =>
     ipcRenderer.invoke('tool-approval-response', toolUseId, approved),
 
+  getHandoff: (company: string, id: string) => ipcRenderer.invoke('handoff:get', company, id),
+  updateHandoff: (company: string, id: string) => ipcRenderer.invoke('handoff:update', company, id),
+  completeHandoffTurn: (company: string, id: string, receipt: HandoffCompletion) => ipcRenderer.invoke('handoff:complete', company, id, receipt),
+  onHandoffChanged: (callback: (scope: { companyId: string; sessionId: string }) => void) => {
+    const wrapped = (_event: unknown, scope: { companyId: string; sessionId: string }) => callback(scope)
+    ipcRenderer.on('handoff:changed', wrapped)
+    return () => ipcRenderer.off('handoff:changed', wrapped)
+  },
   // Chat history
   getChatSessions: (companyId: string) =>
     ipcRenderer.invoke('chatHistory:getSessions', companyId),
@@ -533,6 +542,10 @@ declare global {
       onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => () => void
       respondToolApproval: (toolUseId: string, approved: boolean) => Promise<boolean>
 
+      getHandoff: (company: string, id: string) => Promise<HandoffView>
+      updateHandoff: (company: string, id: string) => Promise<void>
+      completeHandoffTurn: (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
+      onHandoffChanged: (callback: (scope: { companyId: string; sessionId: string }) => void) => () => void
       // Chat history
       getChatSessions: (companyId: string) => Promise<ChatSession[]>
       getChatSession: (companyId: string, sessionId: string) => Promise<ChatSession | null>
