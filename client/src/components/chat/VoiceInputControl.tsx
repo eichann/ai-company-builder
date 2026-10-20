@@ -125,9 +125,9 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
       <kbd className="shrink-0 whitespace-nowrap rounded border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
-      <span className="text-gray-500 dark:text-zinc-400">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
+      <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
-      {!busy && caps?.available && !rawText && <span className="opacity-50">話した内容をAIで整えて入力します</span>}
+      {!busy && caps?.available && !rawText && <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">話した内容をAIで整えて入力します</span>}
       {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
     </div>
     {caps?.available && <button type="button" disabled={busy} aria-label="マイクを選択" aria-expanded={showDevices}
