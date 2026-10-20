@@ -8,7 +8,11 @@ test('microphone selection and device inventory are shared across chat subscript
     window: { electronAPI: { voiceInput: { devices: async () => { requests++; return [{ id:'usb',name:'USB',isDefault:false }] } } } },
   })
   const { microphoneSelection: store } = await import('../src/lib/microphoneSelection')
+  assert.equal(store.getSnapshot().configured,false)
   await Promise.all([store.refresh(),store.refresh()]); assert.equal(requests,1)
+  store.select('')
+  assert.equal(store.getSnapshot().configured,true)
+  assert.equal(storage.get('acb.voice.microphone'),'')
   store.select('usb')
   const unsubscribe = store.subscribe(() => {})
   unsubscribe()

@@ -18,7 +18,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   onBusy: (busy: boolean) => void
 }) {
   const shortcut = useSyncExternalStore(voiceShortcut.subscribe, voiceShortcut.getSnapshot)
-  const { devices, deviceError, selectedDevice } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
+  const { devices, deviceError, selectedDevice, configured } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
   const [showDevices, setShowDevices] = useState(false)
   const [recordingDevice, setRecordingDevice] = useState('')
   const [level, setLevel] = useState(0)
@@ -125,14 +125,19 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
       <kbd className="shrink-0 whitespace-nowrap rounded border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
+      <span className="text-gray-500 dark:text-zinc-400">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
       <button type="button" disabled={busy || !caps?.available} aria-label="マイクを選択" aria-expanded={showDevices}
         onClick={() => { setShowDevices(value => !value); void refreshDevices() }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-40"><CaretDown size={14} /></button>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
-      {!busy && caps?.available && !rawText && <span className="opacity-50">話した内容をClaudeで整えて入力します</span>}
+      {!busy && caps?.available && !rawText && <span className="opacity-50">話した内容をAIで整えて入力します</span>}
       {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
     </div>
     {caps?.available && <div className="mt-1 mb-2 text-[11px] text-gray-500 dark:text-zinc-400 truncate" title={phase === 'listening' ? recordingDevice : deviceLabel}>
       {phase === 'listening' ? recordingDevice : deviceLabel}
+    </div>}
+    {caps?.available && !configured && !busy && <div className="my-2 flex items-center gap-2 flex-wrap rounded-md bg-amber-50 dark:bg-amber-950/40 px-3 py-2 text-amber-800 dark:text-amber-200">
+      <span>はじめに、自分の使うマイクを設定してください。</span>
+      <button type="button" className="underline font-medium" onClick={() => { setShowDevices(true); void refreshDevices() }}>マイクを設定</button>
     </div>}
     {showDevices && <div className="my-2 rounded-lg border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
       <div className="flex items-center justify-between gap-2">
@@ -153,6 +158,8 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
           {devices?.map(device => <option key={device.id} value={device.id}>{device.name}</option>)}
         </select>
       </label>
+      {!configured && <button type="button" disabled={busy || !devices?.length || deviceMissing} className="rounded bg-accent px-3 py-1.5 text-white disabled:opacity-40"
+        onClick={() => { microphoneSelection.select(selectedDevice); setShowDevices(false) }}>このマイクを使う</button>}
       <div className="flex justify-between gap-2"><span className="opacity-60">選択はこのPCに保存します。録音中は変更できません。</span><button type="button" onClick={() => void refreshDevices()} className="underline shrink-0">再取得</button></div>
     </div>}
     {deviceError && <p className="my-1 text-amber-700 dark:text-amber-400">{deviceError}</p>}
