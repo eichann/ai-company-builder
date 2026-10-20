@@ -210,7 +210,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             const effort = title ? (selected.efforts.includes('low') ? 'low' : selected.defaultEffort) : request.effort || selected.defaultEffort
             if (!selected.efforts.includes(effort)) throw new Error('このCodexモデルは選択したeffortに対応していません。')
             const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n')
-            const params = { ...(referenceMcp ? { config: { mcp_servers: { acb_consultations: referenceMcp.config } } } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: 'read-only', approvalPolicy: title ? 'never' : 'untrusted', approvalsReviewer: 'user', developerInstructions: system || undefined }
+            // Normal chats work within their company workspace; no directory means no write grant.
+            const params = { ...(referenceMcp ? { config: { mcp_servers: { acb_consultations: referenceMcp.config } } } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: !title && request.workingDirectory ? 'workspace-write' : 'read-only', approvalPolicy: title ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: system || undefined }
             const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {
               if (request.resumeId && error instanceof Error && error.message.trim() === `no rollout found for thread id ${request.resumeId}`) throw new MissingAgentSession(request.resumeId)
               throw error

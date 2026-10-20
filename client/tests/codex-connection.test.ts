@@ -101,6 +101,7 @@ test('title is ephemeral and never inherits a conversation session', async () =>
   const start = rpc.calls.find(c => c.method === 'thread/start')!
   assert.equal(start.params.ephemeral, true)
   assert.equal(start.params.approvalPolicy, 'never')
+  assert.equal(start.params.sandbox, 'read-only')
   rpc.complete()
   await response
 })
@@ -167,5 +168,26 @@ test('server-resolved prompts disappear without replying late or interrupting th
   await tick()
   assert.equal(signal.aborted, true)
   assert.equal(rpc.replies.some(r => r.id === 'q' || r.method === 'turn/interrupt'), false)
+  rpc.complete(); await response
+})
+
+ test('normal Codex chats use workspace automation on both start and resume', async () => {
+  for (const resumeId of [undefined, 'thread-a']) {
+    const { rpc, connection } = setup()
+    const response = (connection.createChatModel({ workingDirectory: '/company/workspace', resumeId }) as Model).doGenerate({ prompt })
+    await tick()
+    const params = rpc.calls.find(c => c.method === (resumeId ? 'thread/resume' : 'thread/start'))!.params
+    assert.equal(params.cwd, '/company/workspace')
+    assert.equal(params.sandbox, 'workspace-write')
+    assert.equal(params.approvalPolicy, 'on-request')
+    assert.equal(params.approvalsReviewer, 'user')
+    rpc.complete(); await response
+  }
+})
+test('missing workspace does not make the shared temporary directory writable', async () => {
+  const { rpc, connection } = setup()
+  const response = (connection.createChatModel({}) as Model).doGenerate({ prompt })
+  await tick()
+  assert.equal(rpc.calls.find(c => c.method === 'thread/start')!.params.sandbox, 'read-only')
   rpc.complete(); await response
 })
