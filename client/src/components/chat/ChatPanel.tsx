@@ -1,5 +1,4 @@
 import { OpenConsultationContext } from './consultation-context'
-import { ConsultationReferenceLink } from './ConsultationReference'
 import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
@@ -23,17 +22,13 @@ import {
   CircleNotch,
   CaretDown,
   ArrowUp,
-  Brain,
   CaretUp,
   Plus,
   SidebarSimple,
   X,
-  Terminal,
   File,
-  FolderOpen,
   PencilSimple,
   MarkdownLogo,
-  WarningCircle,
   ArrowCounterClockwise,
   ShieldWarning,
 } from '@phosphor-icons/react'
@@ -41,7 +36,8 @@ import { useAppStore, MODEL_EFFORT_OPTIONS, MODEL_LABELS, type AIModel, type AIE
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
-import { MarkdownMessage } from './MarkdownMessage'
+import { AssistantMessageParts } from './MessageParts'
+import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
 import { useAuthStore } from '../../stores/authStore'
 import type { ChatSession } from '../../../shared/chat-history'
@@ -139,159 +135,7 @@ function ThinkingIndicator() {
   )
 }
 
-function StreamingCursor() {
-  return (
-    <span className="inline-block w-0.5 h-4 bg-accent/70 ml-0.5 animate-pulse-soft align-middle" />
-  )
-}
-
-// ============================================================================
-// Tool Invocation Part Component
-// ============================================================================
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
-  readFile: File,
-  writeFile: PencilSimple,
-  listDirectory: FolderOpen,
-  executeCommand: Terminal,
-  readSkillFile: File,
-}
-
-function getToolDisplayName(toolName: string): string {
-  const names: Record<string, string> = {
-    mcp__acb_consultations__search_consultations: '過去の相談を検索',
-    mcp__acb_consultations__read_consultation: '過去の相談を参照',
-    readFile: 'ファイル読取',
-    writeFile: 'ファイル書込',
-    listDirectory: 'ディレクトリ一覧',
-    executeCommand: 'コマンド実行',
-    readSkillFile: 'スキルファイル読取',
-  }
-  return names[toolName] || toolName
-}
-
-interface ToolPartProps {
-  toolName: string
-  state: string
-  input?: unknown
-  output?: unknown
-  errorText?: string
-}
-
-function ToolInvocationPartView({ toolName, state, input, output, errorText }: ToolPartProps) {
-  const [isExpanded, setIsExpanded] = useState(false)
-  const IconComponent = TOOL_ICONS[toolName] || Terminal
-  const displayName = getToolDisplayName(toolName)
-
-  const isRunning = state === 'input-streaming' || state === 'input-available'
-  const isDone = state === 'output-available'
-  const isError = state === 'output-error'
-
-  const reference = referenceFromTool(toolName, output)
-  if (reference) return <ConsultationReferenceLink reference={reference} />
-
-  // Build summary for the tool input
-  let inputSummary = ''
-  if (input && typeof input === 'object') {
-    const inp = input as Record<string, unknown>
-    if (inp.path) inputSummary = String(inp.path)
-    else if (inp.command) inputSummary = String(inp.command)
-  }
-
-  return (
-    <div className="my-1.5 animate-fade-in">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
-      >
-        {/* Status icon */}
-        {isRunning ? (
-          <CircleNotch size={14} className="animate-spin text-accent flex-shrink-0" />
-        ) : isDone ? (
-          <Check size={14} weight="bold" className="text-green-500 flex-shrink-0" />
-        ) : isError ? (
-          <WarningCircle size={14} weight="fill" className="text-red-400 flex-shrink-0" />
-        ) : (
-          <CircleNotch size={14} className="text-gray-400 flex-shrink-0" />
-        )}
-
-        {/* Tool icon + name */}
-        <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-        <span className="font-medium text-gray-700 dark:text-zinc-300">{displayName}</span>
-
-        {/* Input summary */}
-        {inputSummary && (
-          <span className="text-gray-400 dark:text-zinc-500 font-mono truncate max-w-[200px]">
-            {inputSummary}
-          </span>
-        )}
-
-        {/* Expand caret */}
-        {(isDone || isError) && (
-          <CaretDown
-            size={12}
-            className={`text-gray-400 ml-auto transition-transform ${isExpanded ? 'rotate-180' : ''}`}
-          />
-        )}
-      </button>
-
-      {/* Expanded content */}
-      {isExpanded && (isDone || isError) && (
-        <div className="mt-1 ml-8 text-xs animate-slide-up">
-          {isError && errorText && (
-            <div className="p-2 rounded-md bg-red-500/10 border border-red-500/20 text-red-400 font-mono whitespace-pre-wrap">
-              {errorText}
-            </div>
-          )}
-          {isDone && output != null && (
-            <div className="p-2 rounded-md bg-gray-50 dark:bg-zinc-800/50 border border-gray-200 dark:border-zinc-700 text-gray-600 dark:text-zinc-400 font-mono whitespace-pre-wrap max-h-48 overflow-auto">
-              {typeof output === 'string' ? output : JSON.stringify(output, null, 2)}
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function ThinkingBlock({ content, isStreaming = false }: { content: string; isStreaming?: boolean }) {
-  const { t } = useTranslation()
-  const [isExpanded, setIsExpanded] = useState(true)
-
-  return (
-    <div className="mb-3 animate-fade-in">
-      <button
-        onClick={() => setIsExpanded(!isExpanded)}
-        className="flex items-center gap-2 text-xs text-ink-muted hover:text-ink transition-colors group"
-      >
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-md bg-purple-500/10 border border-purple-500/20">
-          {isStreaming ? (
-            <CircleNotch size={12} className="animate-spin text-purple-400" />
-          ) : (
-            <Brain size={12} weight="fill" className="text-purple-400" />
-          )}
-          <span className="text-purple-300 font-medium">
-            {isStreaming ? t('chat.thinkingInProgress') : t('chat.thought')}
-          </span>
-          <CaretUp
-            size={12}
-            className={`text-purple-400 transition-transform duration-200 ${isExpanded ? '' : 'rotate-180'}`}
-          />
-        </div>
-      </button>
-
-      {isExpanded && (
-        <div className="mt-2 pl-3 border-l-2 border-purple-500/30 animate-slide-up">
-          <div className="text-xs text-ink-muted leading-relaxed whitespace-pre-wrap">
-            {content}
-            {isStreaming && <StreamingCursor />}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
+// Tool rows, subagent groups, thinking and text parts: see MessageParts.tsx.
 
 // ============================================================================
 // Context Usage Gauge
@@ -602,81 +446,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
         )}
 
         {/* Parts rendering for assistant */}
-        {!isUser && message.parts.map((part, index) => {
-          const isLastPart = index === message.parts.length - 1
-
-          if (part.type === 'reasoning') {
-            return (
-              <ThinkingBlock
-                key={index}
-                content={part.text}
-                isStreaming={isStreaming && isLastPart}
-              />
-            )
-          }
-
-          if (part.type === 'text') {
-            // Skip empty text parts (common between tool steps)
-            if (!part.text) return null
-            return (
-              <div
-                key={index}
-                className="relative rounded-2xl rounded-tl-md px-4 py-3 text-[14px] leading-relaxed bg-gray-100 dark:bg-zinc-800 text-gray-900 dark:text-zinc-100 border border-gray-200 dark:border-zinc-700 shadow-glass"
-              >
-                <div className="absolute inset-0 rounded-2xl rounded-tl-md bg-gradient-to-b from-white/[0.02] to-transparent pointer-events-none" />
-                <div className="relative break-words">
-                  {markdownRender ? (
-                    <MarkdownMessage content={part.text} />
-                  ) : (
-                    <div className="whitespace-pre-wrap">{part.text}</div>
-                  )}
-                  {isStreaming && isLastPart && <StreamingCursor />}
-                </div>
-              </div>
-            )
-          }
-
-          if (part.type === 'data-consultation-reference') return <ConsultationReferenceLink key={index} reference={part.data as ConsultationReference} />
-
-          if (part.type === 'step-start') {
-            return (
-              <div key={index} className="my-2 border-t border-gray-200 dark:border-zinc-700/50" />
-            )
-          }
-
-          // Tool invocations: typed tools (tool-readFile, tool-writeFile, etc.)
-          if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
-            const toolPart = part as { type: string; state: string; toolCallId: string; input?: unknown; output?: unknown; errorText?: string }
-            const toolName = part.type.replace('tool-', '')
-            return (
-              <ToolInvocationPartView
-                key={toolPart.toolCallId || index}
-                toolName={toolName}
-                state={toolPart.state}
-                input={toolPart.input}
-                output={toolPart.output}
-                errorText={toolPart.errorText}
-              />
-            )
-          }
-
-          // Dynamic tools (from Claude Code CLI mode)
-          if (part.type === 'dynamic-tool') {
-            const dynPart = part as { type: 'dynamic-tool'; toolName: string; toolCallId: string; state: string; input?: unknown; output?: unknown; errorText?: string }
-            return (
-              <ToolInvocationPartView
-                key={dynPart.toolCallId || index}
-                toolName={dynPart.toolName}
-                state={dynPart.state}
-                input={dynPart.input}
-                output={dynPart.output}
-                errorText={dynPart.errorText}
-              />
-            )
-          }
-
-          return null
-        })}
+        {!isUser && <AssistantMessageParts parts={message.parts} isStreaming={isStreaming} markdown={markdownRender} />}
 
         {/* User message */}
         {isUser && (
@@ -2400,12 +2170,15 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   }, [status, sendMessage, stop, currentSessionId])
 
   // Edit message handler: trim messages after edit point, resend
+  // Reads messages through the ref so the callback keeps its identity while
+  // streaming; depending on `messages` re-rendered every MessageItem per chunk.
   const handleEditMessage = useCallback((messageId: string, newText: string) => {
-    const msgIndex = messages.findIndex(m => m.id === messageId)
+    const current = messagesRef.current
+    const msgIndex = current.findIndex(m => m.id === messageId)
     if (msgIndex === -1) return
-    setMessages(messages.slice(0, msgIndex))
+    setMessages(current.slice(0, msgIndex))
     sendMessage({ text: newText })
-  }, [messages, setMessages, sendMessage])
+  }, [setMessages, sendMessage])
 
   // ============================================================================
   // Render
