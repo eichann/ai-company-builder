@@ -47,8 +47,8 @@ export class CodexRpc {
     this.child.on('exit', () => this.fail(new Error('Codexとの接続が終了しました。')))
     this.child.stdin!.on('error', error => this.fail(error))
   }
-  async initialize() {
-    await this.request('initialize', { clientInfo: { name: 'ai_company_builder', title: 'AI Company Builder', version: '0.0.1' } })
+  async initialize(experimentalApi = false) {
+    await this.request('initialize', { clientInfo: { name: 'ai_company_builder', title: 'AI Company Builder', version: '0.0.1' }, ...(experimentalApi ? { capabilities: { experimentalApi: true } } : {}) })
     this.send({ method: 'initialized' })
   }
   request<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
