@@ -1,0 +1,93 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+# A new push to the same PR / branch supersedes the run in progress.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+# Read-only token: no step publishes anything, and PRs from forks must work
+# without secrets.
+permissions:
+  contents: read
+
+jobs:
+  typecheck:
+    name: Typecheck (all packages)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # shared, server, client: tsc --noEmit; admin: next typegen && tsc --noEmit
+      - run: pnpm -r typecheck
+
+  test-client:
+    name: Client tests (macOS)
+    # macOS on purpose. The desktop client ships for macOS (and Windows), and
+    # its POSIX spawn wrappers (electron/voice-process.ts,
+    # electron/agents/process.ts) run `exec N>&-` through /bin/sh. On macOS that
+    # is bash, which handles multi-digit fds; on Ubuntu it is dash, which
+    # treats `exec 10>&-` as running a command named "10" and exits. So the
+    # voice-helper / voice-polisher tests fail on ubuntu-latest because of a
+    # real Linux-only bug in application code, which this CI-only change does
+    # not fix. macOS also lets us run the AVFoundation Swift test.
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      # node:test via tsx. tests/*-ui.tsx + *-ui.html are browser preview
+      # fixtures for manual visual checks (served by Vite), not tests.
+      - run: npx tsx --test tests/*.test.ts
+        working-directory: client
+      # Built without -O so Swift's assert() stays active.
+      - name: Swift audio level test
+        working-directory: client
+        run: |
+          xcrun swiftc -parse-as-library native/AudioLevel.swift tests/audio-level.test.swift -o "$RUNNER_TEMP/audio-level-test"
+          "$RUNNER_TEMP/audio-level-test"
+
+  test-server:
+    name: Server tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npx vitest run
+        working-directory: server
+
+  lint-changed:
+    name: Lint (changed files)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Full history so the merge base with main is available.
+          fetch-depth: 0
+      - uses: ./.github/actions/setup
+      - name: Resolve base commit
+        id: base
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$BEFORE" ] && [ "$BEFORE" != "0000000000000000000000000000000000000000" ] \
+               && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          echo "Linting changes since $base"
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      - run: .github/scripts/lint-changed.sh "${{ steps.base.outputs.sha }}"
