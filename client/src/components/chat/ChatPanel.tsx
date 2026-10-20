@@ -1,9 +1,11 @@
+import { VoiceInputControl } from './VoiceInputControl'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
+import { history, historyKeymap, isolateHistory } from '@codemirror/commands'
+import { Compartment, EditorState, Transaction } from '@codemirror/state'
+import { EditorView, keymap, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
 import {
   Sparkle,
   GearSix,
@@ -690,11 +692,14 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 // ============================================================================
 
 interface ChatInputApi {
+  captureInsertion: () => (text: string) => boolean
   getValue: () => string
   setValue: (text: string) => void
 }
 
 interface ChatInputProps {
+  voiceActive?: boolean
+  voiceScope?: string
   onSend: (text: string, files?: File[], filePaths?: string[]) => void
   disabled: boolean
   placeholder: string
@@ -869,6 +874,8 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
       doc: '',
       extensions: [
         chatInputCodeMirrorTheme,
+        history(),
+        keymap.of(historyKeymap),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
           spellcheck: 'false',
@@ -1040,12 +1047,24 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
     if (!apiRef) return
     apiRef.current = {
       getValue: () => editorViewRef.current?.state.doc.toString() ?? '',
+      captureInsertion: () => {
+        const view = editorViewRef.current
+        const doc = view?.state.doc
+        const selection = view?.state.selection.main
+        return (text: string) => {
+          if (!view || editorViewRef.current !== view || view.state.doc !== doc || !selection) return false
+          view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length }, userEvent: 'input.voice', annotations: isolateHistory.of('full') })
+          view.focus()
+          return true
+        }
+      },
       setValue: (text: string) => {
         const view = editorViewRef.current
         if (!view) return
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: text },
           selection: { anchor: text.length },
+          annotations: Transaction.addToHistory.of(false),
         })
       },
     }
@@ -1135,6 +1154,19 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
     if (!apiRef) return
     apiRef.current = {
       getValue: () => textareaRef.current?.value ?? '',
+      captureInsertion: () => {
+        const input = textareaRef.current
+        const original = input?.value
+        const from = input?.selectionStart ?? 0
+        const to = input?.selectionEnd ?? 0
+        return (text: string) => {
+          if (!input || textareaRef.current !== input || input.value !== original) return false
+          input.setRangeText(text, from, to, 'end')
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.focus()
+          return true
+        }
+      },
       setValue: (text: string) => {
         if (textareaRef.current) textareaRef.current.value = text
       },
@@ -1245,6 +1277,8 @@ function ImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) 
 }
 
 const ChatInput = memo(function ChatInput({
+  voiceActive = false,
+  voiceScope = '',
   onSend,
   disabled,
   placeholder,
@@ -1256,6 +1290,7 @@ const ChatInput = memo(function ChatInput({
   slashCommands,
   apiRef,
 }: ChatInputProps) {
+  const [voiceBusy, setVoiceBusy] = useState(false)
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const [attachedImages, setAttachedImages] = useState<File[]>([])
   const [attachedFilePaths, setAttachedFilePaths] = useState<string[]>([])
@@ -1349,7 +1384,7 @@ const ChatInput = memo(function ChatInput({
   const inputComponent = isLegacyTextareaMode ? (
     <LegacyTextareaChatInput
       onSend={handleSendWithImages}
-      disabled={disabled}
+      disabled={disabled || voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -1359,7 +1394,7 @@ const ChatInput = memo(function ChatInput({
   ) : (
     <CodeMirrorChatInput
       onSend={handleSendWithImages}
-      disabled={disabled}
+      disabled={disabled || voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -1383,6 +1418,7 @@ const ChatInput = memo(function ChatInput({
           : 'border-transparent'
       }`}
     >
+      {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
       {/* Drag overlay */}
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-accent/10 border-2 border-dashed border-accent pointer-events-none">
@@ -1868,6 +1904,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     if (currentSessionId) onSessionIdChange?.(currentSessionId)
   }, [currentSessionId, onSessionIdChange])
 
+  // Persist drafts immediately when leaving a conversation, including clearing an old draft.
+  useEffect(() => {
+    if (!isActive) void saveRef.current(undefined, true)
+  }, [isActive])
+
   // Checkpoint during streaming too. A trailing debounce alone would never fire
   // while tokens keep arriving. Unload has a separate synchronous flush.
   useEffect(() => {
@@ -1932,7 +1973,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     if (!currentCompany?.id || !historyReadyRef.current || deletedRef.current) return false
     const snapshot = override ?? messagesRef.current
     const draftInput = clearDraft ? '' : (chatInputApiRef.current?.getValue() ?? '')
-    if (!snapshot.some(m => m.role === 'user') && !draftInput.trim()) return true
+    if (!snapshot.some(m => m.role === 'user') && !draftInput.trim() && !initialSessionId && revisionRef.current === 0 && !pendingFingerprintRef.current) return true
     const sessionId = appSessionIdRef.current!
     const firstUser = snapshot.find(m => m.role === 'user')
     const title = customTitleRef.current?.title || (firstUser ? extractMessageText(firstUser).slice(0, 60) : t('chat.newChat'))
@@ -2418,6 +2459,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
         <div className="p-4 pb-7">
           <ChatInput
+            voiceActive={isActive}
+            voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current}
             placeholder={t('chat.inputPlaceholder')}

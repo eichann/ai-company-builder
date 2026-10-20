@@ -56,3 +56,6 @@ temp/
 
 # Playwright MCP artifacts
 .playwright-mcp/
+
+# Native speech helper (built per platform)
+client/native/bin/
