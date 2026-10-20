@@ -3178,6 +3178,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
 
         <p className="text-xs text-ink-muted">変更は次の送信から適用されます。AIやモデルを切り替えると、相談の表示履歴を渡して新しいAIセッションで続けます。元のAIの内部状態やツール実行結果は引き継ぎません。</p>
         {authMode === 'codex' && <section className="rounded-xl border border-white/[0.08] p-4 space-y-2 text-sm">
+          <p className="text-xs text-ink-muted">作業フォルダ内の通常作業は自動で進めます。フォルダ外への書き込みや、追加権限が必要な操作では確認します。</p>
           <p>{checkingCodex ? 'Codexを確認しています…' : codexStatus?.authenticated && codexStatus.models.length ? 'ChatGPTでログイン済み' : codexStatus?.unsupported ? 'Windowsでは未対応です' : 'Codexの準備が必要です'}</p>
           {codexStatus?.error && <p className="text-xs text-red-500">{codexStatus.error}</p>}
           {!codexStatus?.unsupported && <p className="text-xs text-ink-muted">接続できない場合は、ターミナルを開いて <code>codex login</code> を実行し、ChatGPTアカウントでログインしてください。その後「接続を再確認」を押してください。</p>}
