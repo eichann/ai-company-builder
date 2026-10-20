@@ -1,3 +1,5 @@
+import { AgentInteractionCard } from './AgentInteractionCard'
+import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
 import type { AgentSession, CodexStatus } from '../../../shared/agent'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
@@ -1640,6 +1642,30 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     setPendingChatInput(null, false)
   }, [setPendingChatInput])
 
+  const [interactions, setInteractions] = useState<AgentInteractionRequest[]>([])
+  const currentInteraction = interactions.find(item => item.appSessionId === appSessionIdRef.current)
+  useEffect(() => {
+    let active = true
+    const closed = new Set<string>()
+    const add = (request: AgentInteractionRequest) => {
+      if (!active || closed.has(request.id) || request.appSessionId !== appSessionIdRef.current) return
+      setInteractions(queue => queue.some(item => item.id === request.id) ? queue : [...queue, request])
+    }
+    const unsubscribe = window.electronAPI.onAgentInteraction(add)
+    const unsubscribeClosed = window.electronAPI.onAgentInteractionClosed(request => {
+      closed.add(request.id)
+      setInteractions(queue => queue.filter(item => item.id !== request.id))
+    })
+    void window.electronAPI.getAgentInteractions().then(requests => requests.forEach(add)).catch(() => {})
+    return () => {
+      active = false; unsubscribe(); unsubscribeClosed()
+      const sessionId = appSessionIdRef.current
+      void window.electronAPI.getAgentInteractions().then(requests => Promise.all(requests
+        .filter(item => item.appSessionId === sessionId)
+        .map(item => window.electronAPI.respondAgentInteraction(item.id, { cancelled: true })))).catch(() => {})
+    }
+  }, [])
+
   // Tool approval state
   const [pendingApprovals, setPendingApprovals] = useState<ToolApprovalRequest[]>([])
   const pendingApproval = pendingApprovals[0]
@@ -2526,6 +2552,12 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         </div>
       )}
       {/* Tool Approval Banner (above input) */}
+      {currentInteraction && <AgentInteractionCard key={currentInteraction.id} request={currentInteraction} onRespond={async response => {
+        const id = currentInteraction.id
+        const accepted = await window.electronAPI.respondAgentInteraction(id, response)
+        if (accepted) setInteractions(queue => queue.filter(item => item.id !== id))
+        return accepted
+      }} />}
       {pendingApproval && (
         <ToolApprovalBanner
           request={pendingApproval}

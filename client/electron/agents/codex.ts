@@ -1,3 +1,5 @@
+import type { AgentInteraction } from '../../shared/agent-interaction'
+import { readQuestions, describePermissions } from './codex-interactions'
 import { CODEX_LOGIN_HELP, CODEX_WINDOWS_UNSUPPORTED } from '../../shared/agent'
 import type { LanguageModel } from 'ai'
 import crypto from 'node:crypto'
@@ -70,6 +72,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
     async doStream(options) {
       if (process.platform === 'win32') throw new Error(CODEX_WINDOWS_UNSUPPORTED)
       let rpc: CodexTransport | undefined
+      const interactionAbort = new AbortController()
+      const pendingInteractions = new Map<string, AbortController>()
       let ended = false
       let threadId: string | undefined
       let turnId: string | undefined
@@ -83,6 +87,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         if (ended) return
         if (error) emit({ type: 'error', error })
         ended = true
+        interactionAbort.abort()
         clearTimeout(timeout)
         options.abortSignal?.removeEventListener('abort', abort)
         rpc?.close()
@@ -91,6 +96,20 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       const abort = () => {
         if (threadId && turnId) rpc?.send({ id: `interrupt-${turnId}`, method: 'turn/interrupt', params: { threadId, turnId } })
         finish(new Error('応答を停止しました。'))
+      }
+      const askInteraction = async (message: RpcMessage, body: AgentInteraction) => {
+        const controller = new AbortController()
+        const cancel = () => controller.abort()
+        const id = String(message.id)
+        pendingInteractions.set(id, controller)
+        interactionAbort.signal.addEventListener('abort', cancel, { once: true })
+        try {
+          const answer = await config.requestInteraction!(body, request.appSessionId!, controller.signal)
+          return { answer, closed: controller.signal.aborted }
+        } finally {
+          pendingInteractions.delete(id)
+          interactionAbort.signal.removeEventListener('abort', cancel)
+        }
       }
       const answerRequest = async (message: RpcMessage) => {
         const params = message.params || {}
@@ -103,10 +122,22 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             : !decisions || decisions.includes('decline') ? 'decline' : 'cancel'
           rpc?.send({ id: message.id, result: { decision } })
         } else if (message.method === 'item/permissions/requestApproval') {
-          // Never grant permissions silently. Unsupported granular approvals fail closed.
-          rpc?.send({ id: message.id, result: { permissions: {}, scope: 'turn' } })
+          const description = describePermissions(params.permissions, params.reason, params.cwd)
+          const { answer, closed } = !title && request.appSessionId && config.requestInteraction
+            ? await askInteraction(message, description) : { answer: { approved: false }, closed: false }
+          if (ended || closed) return
+          const requested = params.permissions as Record<string, unknown>
+          const permissions = description.supported && 'approved' in answer && answer.approved
+            ? Object.fromEntries(Object.entries(requested).filter(([, value]) => value != null)) : {}
+          rpc?.send({ id: message.id, result: { permissions, scope: 'turn' } })
         } else if (message.method === 'item/tool/requestUserInput') {
-          rpc?.send({ id: message.id, result: { answers: {} } })
+          if (title || !request.appSessionId || !config.requestInteraction) { abort(); return }
+          const questions = readQuestions(params.questions)
+          const { answer, closed } = await askInteraction(message, { kind: 'questions', questions })
+          if (ended || closed) return
+          if (!('answers' in answer)) { abort(); return }
+          const answers = Object.fromEntries(questions.map(q => [q.id, { answers: [answer.answers[q.id]] }]))
+          rpc?.send({ id: message.id, result: { answers } })
         } else if (message.method === 'mcpServer/elicitation/request') {
           rpc?.send({ id: message.id, result: { action: 'decline' } })
         } else {
@@ -128,6 +159,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               if (message.id !== undefined && message.method) { void answerRequest(message).catch(e => finish(e)); return }
               const p = message.params || {}
               if (p.threadId && threadId && p.threadId !== threadId) return
+              if (message.method === 'serverRequest/resolved') pendingInteractions.get(String(p.requestId))?.abort()
               if (message.method === 'turn/started') turnId = (p.turn as { id: string }).id
               if (message.method === 'thread/tokenUsage/updated') tokenUsage = p.tokenUsage as TokenUsage
               if (message.method === 'item/agentMessage/delta') {

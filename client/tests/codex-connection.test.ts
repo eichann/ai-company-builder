@@ -114,3 +114,58 @@ test('Windows reports unsupported without starting Codex', async () => {
   assert.match(status.error!, /Windows版ACB/)
   assert.doesNotMatch(status.error!, /codex login/)
 })
+
+test('Codex questions map answers by id and permissions grant only the exact request for one turn', async () => {
+  const rpc = new FakeRpc()
+  const requests: { kind: string; app: string }[] = []
+  const connection = createCodexConnection({ getShellEnv: () => ({}), requestInteraction: async (request, app) => {
+    requests.push({ kind: request.kind, app })
+    return request.kind === 'questions' ? { answers: { format: 'Markdown' } } : { approved: true }
+  } }, () => rpc)
+  const response = (connection.createChatModel({ appSessionId: 'chat-a' }) as Model).doGenerate({ prompt })
+  await tick()
+  rpc.onMessage({ id: 'q', method: 'item/tool/requestUserInput', params: { questions: [{ id: 'format', header: '形式', question: '保存形式は？', options: null, isOther: false, isSecret: false }] } })
+  await tick()
+  assert.deepEqual(rpc.replies.find(r => r.id === 'q')?.result, { answers: { format: { answers: ['Markdown'] } } })
+  const permissions = { network: null, fileSystem: { read: null, write: ['/tmp/export'] } }
+  rpc.onMessage({ id: 'p', method: 'item/permissions/requestApproval', params: { permissions, reason: '保存', cwd: '/tmp' } })
+  await tick()
+  assert.deepEqual(rpc.replies.find(r => r.id === 'p')?.result, { permissions: { fileSystem: permissions.fileSystem }, scope: 'turn' })
+  assert.deepEqual(requests, [{ kind: 'questions', app: 'chat-a' }, { kind: 'permissions', app: 'chat-a' }])
+  rpc.complete(); await response
+})
+test('stopping a turn cancels outstanding interaction and never sends a late answer', async () => {
+  const rpc = new FakeRpc()
+  let settle!: (answer: { approved: boolean }) => void
+  let interactionSignal!: AbortSignal
+  const abort = new AbortController()
+  const connection = createCodexConnection({ getShellEnv: () => ({}), requestInteraction: (_r, _app, signal) => {
+    interactionSignal = signal; return new Promise(resolve => { settle = resolve })
+  } }, () => rpc)
+  const response = (connection.createChatModel({ appSessionId: 'chat-a' }) as Model).doGenerate({ prompt, abortSignal: abort.signal })
+  await tick()
+  rpc.onMessage({ id: 'p', method: 'item/permissions/requestApproval', params: { permissions: { network: { enabled: true } } } })
+  await tick(); abort.abort()
+  await assert.rejects(response, /停止/)
+  assert.equal(interactionSignal.aborted, true)
+  settle({ approved: true }); await tick()
+  assert.equal(rpc.replies.some(r => r.id === 'p'), false)
+})
+
+test('server-resolved prompts disappear without replying late or interrupting the ongoing turn', async () => {
+  const rpc = new FakeRpc()
+  let signal!: AbortSignal
+  const connection = createCodexConnection({ getShellEnv: () => ({}), requestInteraction: (_r, _app, s) => {
+    signal = s
+    return new Promise(resolve => s.addEventListener('abort', () => resolve({ cancelled: true }), { once: true }))
+  } }, () => rpc)
+  const response = (connection.createChatModel({ appSessionId: 'chat-a' }) as Model).doGenerate({ prompt })
+  await tick()
+  rpc.onMessage({ id: 'q', method: 'item/tool/requestUserInput', params: { questions: [{ id: 'q', header: '質問', question: '続けますか', options: null, isOther: false, isSecret: false }] } })
+  await tick()
+  rpc.onMessage({ method: 'serverRequest/resolved', params: { threadId: 'thread-a', requestId: 'q' } })
+  await tick()
+  assert.equal(signal.aborted, true)
+  assert.equal(rpc.replies.some(r => r.id === 'q' || r.method === 'turn/interrupt'), false)
+  rpc.complete(); await response
+})

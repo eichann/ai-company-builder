@@ -1,3 +1,5 @@
+import { AgentInteractions } from './agent-interactions'
+import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
@@ -451,6 +453,18 @@ app.whenReady().then(async () => {
       getClaudeCodeCliPath,
       getShellEnv,
       buildSystemPrompt,
+      requestInteraction: (request, appSessionId, signal) => {
+        const owner = mainWindow?.webContents
+        if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
+        const ownerId = owner.id
+        const close = () => agentInteractions.closeOwner(ownerId)
+        owner.once('destroyed', close)
+        owner.once('did-start-navigation', close)
+        return agentInteractions.request(ownerId, appSessionId, request, signal).finally(() => {
+          owner.removeListener('destroyed', close)
+          owner.removeListener('did-start-navigation', close)
+        })
+      },
       requestToolApproval: (toolName, toolInput, toolUseId, appSessionId) => {
         return new Promise((resolve) => {
           pendingApprovals.set(toolUseId, { resolve })
@@ -1091,6 +1105,13 @@ ipcMain.handle('config:setDocbaseCookie', (_, cookie: string) => {
   }
   return true
 })
+
+const agentInteractions = new AgentInteractions((owner, event, request) => {
+  const target = mainWindow?.webContents
+  if (target && !target.isDestroyed() && target.id === owner) target.send(`agent-interaction:${event}`, request)
+})
+ipcMain.handle('agent-interaction:list', event => agentInteractions.list(event.sender.id))
+ipcMain.handle('agent-interaction:respond', (event, id: string, response: AgentInteractionResponse) => agentInteractions.respond(event.sender.id, id, response))
 
 // Tool approval IPC (chat-server → renderer → response)
 const pendingApprovals = new Map<string, { resolve: (result: { approved: boolean }) => void }>()

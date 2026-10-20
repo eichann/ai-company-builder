@@ -1,3 +1,4 @@
+import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 
 /** The Vercel model interface remains the streaming boundary; no second agent loop. */
@@ -20,6 +21,7 @@ export interface AgentConnection {
 }
 
 export interface AgentHostConfig {
+  requestInteraction?: (request: AgentInteraction, appSessionId: string, signal: AbortSignal) => Promise<AgentInteractionResponse>
   getShellEnv: () => Record<string, string>
   requestToolApproval?: (
     toolName: string,

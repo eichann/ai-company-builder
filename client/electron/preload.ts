@@ -1,3 +1,4 @@
+import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
 // Use require for CommonJS compatibility in Electron preload
@@ -186,6 +187,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getServerUrl: () => ipcRenderer.invoke('config:getServerUrl'),
   setServerUrl: (url: string) => ipcRenderer.invoke('config:setServerUrl', url),
   validateServerUrl: (url: string) => ipcRenderer.invoke('config:validateServerUrl', url),
+
+  onAgentInteraction: (callback: (request: AgentInteractionRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: AgentInteractionRequest) => callback(request)
+    ipcRenderer.on('agent-interaction:request', handler)
+    return () => ipcRenderer.removeListener('agent-interaction:request', handler)
+  },
+  onAgentInteractionClosed: (callback: (request: AgentInteractionRequest) => void) => {
+    const handler = (_event: Electron.IpcRendererEvent, request: AgentInteractionRequest) => callback(request)
+    ipcRenderer.on('agent-interaction:closed', handler)
+    return () => ipcRenderer.removeListener('agent-interaction:closed', handler)
+  },
+  getAgentInteractions: (): Promise<AgentInteractionRequest[]> => ipcRenderer.invoke('agent-interaction:list'),
+  respondAgentInteraction: (id: string, response: AgentInteractionResponse): Promise<boolean> => ipcRenderer.invoke('agent-interaction:respond', id, response),
 
   // Tool approval
   onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => {
@@ -509,6 +523,11 @@ declare global {
       getServerUrl: () => Promise<string | null>
       setServerUrl: (url: string) => Promise<boolean>
       validateServerUrl: (url: string) => Promise<{ valid: boolean; error?: string; serverName?: string; version?: string }>
+
+      onAgentInteraction: (callback: (request: AgentInteractionRequest) => void) => () => void
+      onAgentInteractionClosed: (callback: (request: AgentInteractionRequest) => void) => () => void
+      getAgentInteractions: () => Promise<AgentInteractionRequest[]>
+      respondAgentInteraction: (id: string, response: AgentInteractionResponse) => Promise<boolean>
 
       // Tool approval
       onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => () => void
