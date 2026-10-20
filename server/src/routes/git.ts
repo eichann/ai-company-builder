@@ -48,7 +48,8 @@ export function configureBareRepo(repoPath: string): void {
   // everyone else's work.
   execFileSync('git', ['-C', repoPath, 'config', 'receive.denyNonFastForwards', 'true'], { stdio: 'pipe' })
   execFileSync('git', ['-C', repoPath, 'config', 'receive.denyDeletes', 'true'], { stdio: 'pipe' })
-  // Pre-receive hook: secret / gitlink / Windows-incompatible path checks
+  // Pre-receive hook: secret / gitlink / Windows-incompatible path checks,
+  // and owner/admin-only agent-execution config (.claude/settings.json, .mcp.json ...)
   installPreReceiveHook(repoPath)
 }
 
@@ -326,7 +327,7 @@ gitRoute.delete('/repos/:companyId', async (c) => {
         message: 'Repository deleted successfully',
       },
     })
-  } catch (error) {
+  } catch {
     return c.json({
       success: false,
       error: 'Failed to delete repository',

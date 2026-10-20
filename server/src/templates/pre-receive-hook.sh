@@ -6,6 +6,11 @@
 #   入れ子の .git をうっかりコミットすると他メンバーが空フォルダを掴むため。
 #   既存の gitlink には触れない（newmode 160000 の「追加/変更」のみ対象）ので、
 #   既に gitlink を含むリポジトリも通常の push は引き続き可能。
+# - チャットのAI(Claude Code)が確認なしにコマンドを実行する設定ファイル
+#   (.claude/settings.json, .mcp.json, .claude/hooks/ など、どの階層でも)の
+#   変更を、会社のオーナー・管理者以外からはブロックする。
+#   役割はサーバー(git-http.ts)が認証済みユーザーから ACB_PUSHER_ROLE に設定する。
+#   値が無い・不明な場合は、保護対象パスについてのみ拒否する(fail closed)。
 #
 
 ZERO_SHA="0000000000000000000000000000000000000000"
@@ -31,10 +36,78 @@ declare -a detected_gitlinks=()
 found_winpaths=0
 declare -a detected_winpaths=()
 
+# --- 実行設定ファイルの保護 ---
+# Claude Code はチャットの作業フォルダにあるこれらのファイルを読み込み、
+# 書かれたコマンドを確認なしに実行する（hooks / MCPサーバー / statusLine /
+# apiKeyHelper / env など）。共有リポジトリ経由で全員に配られるので、
+# 変更できるのはオーナー・管理者だけにする。
+# - 大文字小文字は区別しない（macOS/Windows のファイルシステムでは
+#   .Claude/Settings.json も .claude/settings.json として読まれる）
+# - ".claude" という名前のファイル/シンボリックリンク自体も対象。
+#   別フォルダへのリンクで .claude を作る抜け道を塞ぐ
+PROTECTED_RE='(^|/)\.mcp\.json$|(^|/)\.claude$|(^|/)\.claude/settings(\.local)?\.json$|(^|/)\.claude/hooks(/|$)'
+case "${ACB_PUSHER_ROLE:-}" in
+  owner|admin) protected_allowed=1 ;;
+  *) protected_allowed=0 ;;
+esac
+found_protected=0
+declare -a detected_protected=()
+
+# ref 更新 (old → new) で変更される保護対象パスを1行1パスで出力する。
+# 「変更」= 追加・変更・削除・リネーム（リネームは元と先の両方）。
+#  1) このプッシュで新しく入るコミットそれぞれの差分
+#     （マージコミットは combined diff = どの親とも異なるパスだけ。
+#      サーバー側で管理者が入れた変更をマージしただけでは引っかからない）
+#  2) 既存ブランチの更新なら、旧tip→新tip の正味の差分
+#     （古いコミットをマージして保護ファイルを巻き戻す抜け道を塞ぐ）
+# 新規ブランチ/初回プッシュ(旧SHAがゼロ)は 1) が全コミットを覆う
+# （--root でルートコミットも空ツリーとの差分になる）。
+# サブシェル + pipefail: git が失敗したら非ゼロで返し、呼び出し側で fail closed。
+list_protected_changes() (
+  set -o pipefail
+  old="$1"
+  new="$2"
+  commits=$(git rev-list "$new" --not --all) || exit 1
+  net=""
+  if [ "$old" != "$ZERO_SHA" ]; then
+    net=$(git diff-tree -r --no-renames --name-only -z "$old" "$new" | tr '\0' '\n') || exit 1
+  fi
+  per_commit=""
+  if [ -n "$commits" ]; then
+    per_commit=$(printf '%s\n' "$commits" \
+      | git diff-tree --stdin -r --root -c --no-renames --name-only -z --no-commit-id \
+      | tr '\0' '\n') || exit 1
+  fi
+  printf '%s\n%s\n' "$net" "$per_commit" | LC_ALL=C grep -iE "$PROTECTED_RE" | LC_ALL=C sort -u
+  exit 0
+)
+
 while read old_sha new_sha refname; do
-  # ブランチ削除は無視
+  # ブランチ削除は無視（receive.denyDeletes が別途拒否する。
+  # 削除は残るブランチの内容を変えないので保護チェックも不要）
   if [ "$new_sha" = "$ZERO_SHA" ]; then
     continue
+  fi
+
+  # --- 実行設定ファイルの保護 ---
+  if [ "$protected_allowed" -eq 0 ]; then
+    if ! protected_changes=$(list_protected_changes "$old_sha" "$new_sha" 2>/dev/null); then
+      # 差分を確認できない場合は安全側に倒す（管理者以外は拒否）
+      protected_changes="（変更内容を確認できませんでした: $refname）"
+    fi
+    if [ -n "$protected_changes" ]; then
+      while IFS= read -r pp; do
+        [ -z "$pp" ] && continue
+        already=0
+        for existing in "${detected_protected[@]}"; do
+          if [ "$existing" = "  - $pp" ]; then already=1; break; fi
+        done
+        if [ "$already" -eq 0 ]; then
+          detected_protected+=("  - $pp")
+          found_protected=1
+        fi
+      done <<< "$protected_changes"
+    fi
   fi
 
   # --- Windows非互換パス検知 ---
@@ -157,6 +230,28 @@ while read old_sha new_sha refname; do
 done
 
 rc=0
+
+if [ "$found_protected" -eq 1 ]; then
+  # 出力形式はクライアント(client/electron/protected-config.ts)が解析する:
+  # マーカー行の後、次の次の区切り線までにある "- " 行が対象パス。
+  echo "" >&2
+  echo "========================================" >&2
+  echo "[PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  echo "以下のファイルは、チャットのAIが確認なしにコマンドを実行する設定です。" >&2
+  echo "会社のオーナー・管理者だけが追加・変更・削除できます:" >&2
+  for entry in "${detected_protected[@]}"; do
+    printf '%s\n' "$entry" >&2
+  done
+  echo "" >&2
+  echo "プッシュをブロックしました。これらのファイルをサーバーの状態に戻してから" >&2
+  echo "再度同期してください（ACBクライアントの同期ボタンから自動で戻せます）。" >&2
+  echo "配布が必要な場合は、オーナー・管理者に依頼してください。" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  rc=1
+fi
 
 if [ "$found_secrets" -eq 1 ]; then
   echo "" >&2

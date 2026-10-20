@@ -57,12 +57,13 @@ function authenticateGitRequest(c: { req: { raw: Request; header: (name: string)
   return null
 }
 
-// Check if user has access to the company
-function authorizeForCompany(userId: string, companyId: string): boolean {
+// Check if user has access to the company. Returns the member's role for that
+// company (owner / admin / member), or null when the user is not a member.
+function authorizeForCompany(userId: string, companyId: string): string | null {
   const membership = db.prepare(
     'SELECT role FROM memberships WHERE user_id = ? AND company_id = ?'
   ).get(userId, companyId) as { role: string } | undefined
-  return !!membership
+  return membership ? membership.role : null
 }
 
 // Sanitize company ID to prevent path traversal
@@ -77,6 +78,7 @@ function sanitizeCompanyId(raw: string): string {
 async function handleGitCgi(
   c: { req: { raw: Request; header: (name: string) => string | undefined; query: (name: string) => string | undefined } },
   user: AuthUser,
+  role: string,
   pathInfo: string,
   method: string,
 ): Promise<Response> {
@@ -91,6 +93,17 @@ async function handleGitCgi(
     REQUEST_METHOD: method,
     REMOTE_USER: user.email,
     SERVER_PROTOCOL: 'HTTP/1.1',
+    // Who is pushing, for the pre-receive hook: it lets only owner/admin
+    // change agent-execution config (.claude/settings.json, .mcp.json,
+    // .claude/hooks/ ...) and fails closed when ACB_PUSHER_ROLE is absent.
+    // Derived only from the authenticated session + memberships table, and
+    // set after the process.env spread so nothing inherited overrides it.
+    // A client cannot inject these: request headers reach the CGI only as the
+    // two variables copied explicitly below (CONTENT_TYPE,
+    // HTTP_CONTENT_ENCODING), and push options are not advertised.
+    ACB_PUSHER_ROLE: role,
+    ACB_PUSHER_ID: user.id,
+    ACB_PUSHER_EMAIL: user.email,
   }
 
   const contentType = c.req.header('Content-Type')
@@ -351,7 +364,7 @@ function extractCompanyId(repo: string): string {
 }
 
 // Middleware: authenticate and authorize
-function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => string | undefined; param: (name: string) => string } }): { user: AuthUser; companyId: string } | Response {
+function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => string | undefined; param: (name: string) => string } }): { user: AuthUser; companyId: string; role: string } | Response {
   const user = authenticateGitRequest(c)
   if (!user) {
     return new Response('Authentication required', {
@@ -372,50 +385,51 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
     return new Response('Repository not found', { status: 404 })
   }
 
-  if (!authorizeForCompany(user.id, companyId)) {
+  const role = authorizeForCompany(user.id, companyId)
+  if (!role) {
     return new Response('Forbidden', { status: 403 })
   }
 
-  return { user, companyId }
+  return { user, companyId, role }
 }
 
 // GET /:repo/info/refs
 gitHttpRoute.get('/:repo/info/refs', async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
-  const { user, companyId } = result
+  const { user, companyId, role } = result
 
   const service = c.req.query('service')
   if (!service || !['git-upload-pack', 'git-receive-pack'].includes(service)) {
     return c.text('Invalid service', 400)
   }
 
-  return handleGitCgi(c, user, `/${companyId}.git/info/refs`, 'GET')
+  return handleGitCgi(c, user, role, `/${companyId}.git/info/refs`, 'GET')
 })
 
 // POST /:repo/git-upload-pack
 gitHttpRoute.post('/:repo/git-upload-pack', async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
-  const { user, companyId } = result
+  const { user, companyId, role } = result
 
-  return handleGitCgi(c, user, `/${companyId}.git/git-upload-pack`, 'POST')
+  return handleGitCgi(c, user, role, `/${companyId}.git/git-upload-pack`, 'POST')
 })
 
 // POST /:repo/git-receive-pack
 gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
-  const { user, companyId } = result
+  const { user, companyId, role } = result
 
-  return handleGitCgi(c, user, `/${companyId}.git/git-receive-pack`, 'POST')
+  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST')
 })
 
 // GET /:repo/HEAD
 gitHttpRoute.get('/:repo/HEAD', async (c) => {
   const result = authAndAuthorize(c)
   if (result instanceof Response) return result
-  const { user, companyId } = result
+  const { user, companyId, role } = result
 
-  return handleGitCgi(c, user, `/${companyId}.git/HEAD`, 'GET')
+  return handleGitCgi(c, user, role, `/${companyId}.git/HEAD`, 'GET')
 })

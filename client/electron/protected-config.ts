@@ -1,0 +1,215 @@
+// Recovery from a push the server rejected because it changed agent-execution
+// config that only a company owner/admin may change.
+//
+// The server's pre-receive hook (server/src/templates/pre-receive-hook.sh)
+// rejects any push in which *some commit* adds, modifies, deletes or renames
+// a protected path (.claude/settings.json, .claude/settings.local.json,
+// .mcp.json, anything under .claude/hooks/ — at any depth) unless the pusher
+// is an owner/admin. Claude Code runs the commands in those files without a
+// prompt, so a member could otherwise run code on every teammate's machine.
+//
+// The rejected change is already committed locally, so retrying the push can
+// never succeed: every sync would fail at the same step — the failure shape
+// documented under "Non-Negotiable Guards" in CLAUDE.md. A revert commit on
+// top does not help either, because the hook checks every commit in the
+// pushed range. The way out is to rewrite the unpushed commits:
+//
+//   1. back up the member's version of each path into .backups/<timestamp>/
+//   2. `reset --soft <upstream>` — squash the unpushed commits into the index
+//      (the member's other changes stay staged, nothing in the worktree moves)
+//   3. put each protected path back to the server's version, or remove it if
+//      the server does not have it
+//   4. commit what is left (the member's other changes) as one commit
+//
+// The caller then pushes again.
+
+import fs from 'node:fs'
+import path from 'node:path'
+import type { SimpleGit } from 'simple-git'
+
+export const PROTECTED_CONFIG_MARKER = '[PROTECTED_CONFIG]'
+
+/** True when a push error came from the protected-config check. */
+export function isProtectedConfigRejection(errorMessage: string): boolean {
+  return errorMessage.includes(PROTECTED_CONFIG_MARKER)
+}
+
+/**
+ * Paths listed in the PROTECTED_CONFIG section of a push error. The hook
+ * prints: separator, marker line, separator, explanation, "  - <path>" lines,
+ * explanation, separator. git prefixes every hook line with "remote: ".
+ * Only the "- " lines inside that section count — other sections
+ * (SECRET_DETECTED, ...) use the same bullet style.
+ */
+export function parseProtectedConfigPaths(errorMessage: string): string[] {
+  const lines = errorMessage.split(/\r?\n/).map(line => line.replace(/^remote:\s?/, '').trimEnd())
+  const start = lines.findIndex(line => line.includes(PROTECTED_CONFIG_MARKER))
+  if (start === -1) return []
+  const paths: string[] = []
+  let separators = 0
+  for (const line of lines.slice(start + 1)) {
+    const trimmed = line.trim()
+    if (/^=+$/.test(trimmed)) {
+      if (++separators === 2) break
+      continue
+    }
+    if (trimmed.startsWith('- ')) {
+      const p = trimmed.slice(2)
+      if (p && !paths.includes(p)) paths.push(p)
+    }
+  }
+  return paths
+}
+
+/** Plain-words explanation shown to the member (Japanese UI). */
+export function protectedConfigMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `このファイルは管理者だけが変更できます。\n` +
+    `チャットのAIが自動で実行する設定ファイルのため、会社のオーナー・管理者以外の変更は共有できません。\n\n${list}`
+}
+
+export class ProtectedConfigRecoveryError extends Error {}
+
+export interface ProtectedConfigRecoveryResult {
+  /** Paths put back to the server's version. */
+  restored: string[]
+  /** Paths the server does not have, removed locally. */
+  removed: string[]
+  /** Folder holding the member's version of each path (null if none needed). */
+  backupPath: string | null
+  /** True when a commit with the member's remaining changes was created. */
+  committed: boolean
+}
+
+type EntryType = 'blob' | 'tree' | null
+
+async function entryAt(git: SimpleGit, rev: string, file: string): Promise<{ type: EntryType; oid: string | null }> {
+  try {
+    // ls-tree on the exact path: one line "<mode> <type> <oid>\t<path>", or nothing.
+    const out = (await git.raw(['ls-tree', '-z', rev, '--', file])).split('\0')[0]
+    if (!out) return { type: null, oid: null }
+    const [meta] = out.split('\t')
+    const [, type, oid] = meta.split(' ')
+    return { type: type === 'tree' ? 'tree' : 'blob', oid }
+  } catch {
+    return { type: null, oid: null }
+  }
+}
+
+function assertInsideRepo(repoPath: string, file: string): string {
+  const root = path.resolve(repoPath)
+  const full = path.resolve(root, file)
+  if (path.isAbsolute(file) || file.split(/[\\/]/).includes('..') || !full.startsWith(root + path.sep)) {
+    throw new ProtectedConfigRecoveryError(`不正なパスです: ${file}`)
+  }
+  return full
+}
+
+/**
+ * Rewrite the unpushed commits so they no longer touch the given protected
+ * paths, keeping a copy of the member's version in `backupPath` first.
+ * `upstream` must be an ancestor of HEAD (sync has just rebased onto it);
+ * otherwise nothing is changed and an error is thrown — squashing onto a
+ * non-ancestor would revert other members' work.
+ */
+export async function restoreProtectedPaths(options: {
+  git: SimpleGit
+  repoPath: string
+  paths: string[]
+  backupPath: string
+  upstream?: string
+  commitMessage?: string
+}): Promise<ProtectedConfigRecoveryResult> {
+  const { git, repoPath, paths, backupPath } = options
+  const upstream = options.upstream ?? 'origin/main'
+  if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
+  const fullPaths = new Map(paths.map(p => [p, assertInsideRepo(repoPath, p)]))
+
+  const localHead = (await git.revparse(['HEAD'])).trim()
+  const upstreamHash = (await git.revparse([upstream])).trim()
+  // Compare hashes instead of relying on exit codes: simple-git does not
+  // reject on a non-zero exit that prints nothing (e.g. --is-ancestor).
+  const mergeBase = (await git.raw(['merge-base', upstreamHash, localHead]).catch(() => '')).trim()
+  if (mergeBase !== upstreamHash) {
+    throw new ProtectedConfigRecoveryError('サーバーの最新状態を取り込めていないため、自動で戻せませんでした。もう一度同期してください。')
+  }
+
+  // Decide per path before touching anything, so an unsupported case aborts
+  // with the repository unchanged.
+  const plan: Array<{ file: string; local: { type: EntryType; oid: string | null }; server: { type: EntryType; oid: string | null } }> = []
+  for (const file of paths) {
+    const local = await entryAt(git, localHead, file)
+    const server = await entryAt(git, upstreamHash, file)
+    if (local.type === 'tree' && server.type === 'blob') {
+      throw new ProtectedConfigRecoveryError(`「${file}」は自動で戻せない形で変更されています。管理者に相談してください。`)
+    }
+    plan.push({ file, local, server })
+  }
+
+  // 1. Back up the member's version (binary-safe, from the commit — the
+  //    worktree equals HEAD right after sync's commit).
+  const backedUp: string[] = []
+  for (const { file, local, server } of plan) {
+    if (local.type !== 'blob' || local.oid === server.oid) continue
+    const dest = path.join(backupPath, file)
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    const content: Buffer = await git.binaryCatFile(['-p', `${localHead}:${file}`])
+    fs.writeFileSync(dest, content)
+    backedUp.push(file)
+  }
+  const restored: string[] = []
+  const removed: string[] = []
+  for (const { file, local, server } of plan) {
+    if (local.type === 'blob' && local.oid === server.oid) continue
+    // A folder now (e.g. .claude was briefly a symlink in an earlier commit):
+    // only an intermediate commit touched this path and squashing drops it.
+    // Never check a folder out over the member's work — skills live there.
+    if (local.type === 'tree') continue
+    if (server.type !== null) restored.push(file)
+    else if (local.type !== null) removed.push(file)
+  }
+  if (backedUp.length > 0 || restored.length > 0 || removed.length > 0) {
+    fs.mkdirSync(backupPath, { recursive: true })
+    fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
+      timestamp: new Date().toISOString(),
+      reason: 'protected_config',
+      protectedFiles: paths,
+      backedUpFiles: backedUp,
+      restoredFiles: restored,
+      removedFiles: removed,
+      localHead,
+    }, null, 2))
+  }
+
+  // Messages of the commits being squashed, so their descriptions survive.
+  const squashedMessages = (await git.raw(['log', '--format=%s', `${upstreamHash}..${localHead}`]))
+    .split('\n').map(s => s.trim()).filter(Boolean)
+
+  // 2. Squash the unpushed commits into the index.
+  await git.raw(['reset', '--soft', upstreamHash])
+
+  // 3. Put each protected path back to the server's version.
+  for (const { file, local, server } of plan) {
+    if (local.type === 'tree' || (local.type === 'blob' && local.oid === server.oid)) continue
+    if (local.type === 'blob') {
+      await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', file])
+      fs.rmSync(fullPaths.get(file)!, { force: true }) // a symlink is removed, not followed
+    }
+    if (server.type !== null) {
+      await git.raw(['checkout', upstreamHash, '--', file])
+    }
+  }
+
+  // 4. Commit the member's remaining changes (if any are left).
+  let committed = false
+  const remaining = (await git.raw(['diff', '--cached', '--name-only', '-z', upstreamHash])).replace(/\0/g, '')
+  if (remaining) {
+    const subject = options.commitMessage
+      || (squashedMessages.length === 1 ? squashedMessages[0] : 'Sync from AI Company Builder')
+    const body = squashedMessages.length > 1 ? `\n\n${squashedMessages.map(m => `- ${m}`).join('\n')}` : ''
+    await git.commit(`${subject}${body}\n\n（管理者専用の設定ファイルの変更は除外し、サーバーの状態に戻しました）`)
+    committed = true
+  }
+
+  return { restored, removed, backupPath: backedUp.length > 0 ? backupPath : null, committed }
+}

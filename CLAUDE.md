@@ -170,7 +170,11 @@ Implemented in `client/electron/main.ts` (`ipcMain.handle('git:sync', ...)`).
          └─ stage 2 absent  → git rm --force (the server deleted it)
       c. git rebase --continue
 12. Department folder protection (restore folders deleted locally)
-13. git push --set-upstream --progress → on failure write PENDING_PUSH
+13. git push --set-upstream --progress (also when only earlier unpushed
+    commits are left) → on failure write PENDING_PUSH
+    └─ Rejected with PROTECTED_CONFIG → ask the member; on "restore":
+         back up their version → reset --soft origin/main → put the
+         protected paths back to the server version → commit → push again
 ```
 
 ### Conflict Resolution Strategy
@@ -208,6 +212,8 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | `syncLocks` registers the run **before** awaiting the previous one | Registering afterwards let two queued clicks wake together and run concurrently against the same repository. |
 | Nested-repo handling asks the user **before** any mutation | The pre-consent version ran `git rm --cached -rf` and appended to `.gitignore` first, untracking an entire shared folder and surfacing as a "653 files deleted" warning even though nothing had left the disk — and cancelling did not roll it back. A folder that is already shared offers "remove the inner .git and keep sharing" as the default. |
 | Server bare repos set `receive.denyNonFastForwards` and `receive.denyDeletes` (`configureBareRepo` in `server/src/routes/git.ts`, applied at creation and on startup to all repos) | Shared history is the team's only copy. Without these, one client's force push erases everyone's work. This was a near miss — only an auth failure stopped a `push --force-with-lease` from a diverged client. |
+| Only owner/admin may change agent-execution config: the pre-receive hook rejects with `PROTECTED_CONFIG` any push in which some commit adds, modifies, deletes or renames `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, anything under `.claude/hooks/`, or a file/symlink named `.claude` — at any depth, case-insensitively. The role comes from `memberships` via `ACB_PUSHER_ROLE`, set server-side in `git-http.ts`; a missing role fails closed for these paths only | The chat runs Claude Code in the shared checkout with `settingSources: ['user', 'project']`, and in non-interactive mode it runs a project `UserPromptSubmit` hook and starts a `.mcp.json` stdio server **without any prompt** (verified with the real CLI). `settings.json` also carries `statusLine`, `apiKeyHelper`, `env` and permission rules. Sync shares nearly everything, so any member could run arbitrary commands on every teammate's machine at their next chat message. Distribution itself is legitimate (an MCP server shared via `.mcp.json` is in production use), so the rule restricts *who*, not *what*. Skills (`.claude/skills/`) stay unrestricted — sharing them is the core feature. |
+| A `PROTECTED_CONFIG` rejection is resolved by **rewriting the unpushed commits**, never by a retry or a revert commit (`client/electron/protected-config.ts`) | The rejected change is already committed and the hook checks *every* commit in the range, so a retry or a revert on top fails at the same step forever — the "permanently unable to sync" shape again. The dialog backs up the member's version, squashes the unpushed commits with `reset --soft origin/main` (refused unless `origin/main` is an ancestor of `HEAD`, or it would revert teammates' work), restores just those paths to the server's version (or removes them), and commits the rest. Push is also attempted whenever commits are still unpushed, because a rejected push writes no `PENDING_PUSH` and a sync with no new edits used to report success while the commits never left the machine. |
 
 ### Backup Structure
 
@@ -218,6 +224,10 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 │       ├── sales/proposal.md    ← local version of a conflicted file
 │       └── _metadata.json       ← timestamp, reason, cumulative conflict list
 │                                  (`conflictFiles` + `deletedConflictFiles`)
+│   └── 2026-02-21T14-31-00-000_protected/
+│       ├── .mcp.json            ← member's version of a protected file that
+│       │                          sync put back to the server's version
+│       └── _metadata.json       ← reason `protected_config`, restored/removed paths
 └── .git/
 ```
 
@@ -228,8 +238,16 @@ Backups older than 30 days are pruned at the start of each sync.
 - Push failure writes `.git/PENDING_PUSH`; the next sync retries it first. The
   local commit is never rolled back — the user's work stays committed.
 - Results carry an `errorType` (`network` / `auth` / `conflict` / `locked` /
-  `push_failed` / `unknown`) so the UI can explain the failure in plain terms.
+  `push_failed` / `protected_config` / `unknown`) so the UI can explain the
+  failure in plain terms.
 - A pre-receive hook on the server rejects pushes containing secrets; the
   client detects `SECRET_DETECTED` in the push error and lists the files.
+- The same hook rejects protected agent config changed by a non-admin with a
+  `[PROTECTED_CONFIG]` section listing the paths. Sync shows
+  「このファイルは管理者だけが変更できます」 with the list and offers to put
+  those files back to the server's version and sync the rest; cancelling (or
+  no window) returns `errorType: 'protected_config'` with `protectedFiles`,
+  and the next sync offers the same choice again. Successful recovery reports
+  `restoredProtectedFiles` and `protectedBackupPath`.
 - On Windows, a transient file lock during rebase (skill tool, editor, or AV
   scanner holding a file) is retried twice before being treated as a failure.
