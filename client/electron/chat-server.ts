@@ -15,6 +15,7 @@ import {
   stepCountIs,
   type UIMessage,
 } from 'ai'
+import { limitedUIMessageStreamResponse } from './ui-stream-limits'
 import { createClaudeConnection } from './agents/claude'
 import { createApiConnection } from './agents/anthropic-api'
 import type { ClaudeConnectionConfig } from './agents/claude'
@@ -329,8 +330,14 @@ export async function startChatServer(config: ChatServerConfig) {
       },
     }) } catch (error) { release(); throw error }
 
-    return result.toUIMessageStreamResponse({
-      sendReasoning: true,
+    // Every tool payload is bounded before it reaches the renderer (see
+    // ui-stream-limits.ts): @ai-sdk/react structuredClones the whole message
+    // per chunk, so unbounded image results froze the UI. CLI agents never get
+    // tool parts replayed (agentInputMessages keeps only text/file), so they
+    // use tight limits; api-key mode replays recent tool parts to the model and
+    // keeps its already-bounded outputs verbatim.
+    return limitedUIMessageStreamResponse(result, {
+      ownsConversation: connection.ownsConversation,
       onError: error => error instanceof Error ? error.message : 'AIとの接続でエラーが発生しました。',
     })
   })
