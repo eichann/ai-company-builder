@@ -1,3 +1,4 @@
+import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
@@ -1738,6 +1739,9 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   // Claude CLI session ID (persisted across app restarts via ChatSession)
   const claudeSessionIdRef = useRef<string | null>(null)
   const agentSessionRef = useRef<AgentSession | null | undefined>(undefined)
+  const handoffRequestRef = useRef<{ companyId: string; sessionId: string; provider: AuthMode } | null>(null)
+  const companyIdRef = useRef(currentCompany?.id)
+  companyIdRef.current = currentCompany?.id
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
     return new DefaultChatTransport({
@@ -1769,6 +1773,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           body.referenceFiles = pendingFilePathsRef.current
           pendingFilePathsRef.current = []
         }
+        handoffRequestRef.current = companyIdRef.current && appSessionIdRef.current ? { companyId: companyIdRef.current, sessionId: appSessionIdRef.current, provider: authModeRef.current } : null
         return body
       },
     })
@@ -1816,7 +1821,16 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport,
     experimental_throttle: 50,
-    onFinish: () => {
+    onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
+      const receipt = handoffRequestRef.current
+      if (receipt && !isAbort && !isDisconnect && !isError && finishReason === 'stop') {
+        const content = uiMessageToSessionMessage(message, new Date()).content
+        void (async () => {
+          if (appSessionIdRef.current !== receipt.sessionId || companyIdRef.current !== receipt.companyId) return
+          if (!await saveCurrentSession(finishedMessages)) return
+          await window.electronAPI.completeHandoffTurn(receipt.companyId, receipt.sessionId, { messageId: message.id, content, provider: receipt.provider })
+        })().catch(() => { setHistoryError('履歴は保存されましたが、引き継ぎメモの更新予約ができませんでした。') })
+      }
       // Refresh file tree in case AI created/modified files
       window.dispatchEvent(new Event('refresh-file-tree'))
       // Fetch context window usage
@@ -2510,6 +2524,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           </button>
         </div>
       </header>
+      {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isActive} />}
 
 
       {historyError && (

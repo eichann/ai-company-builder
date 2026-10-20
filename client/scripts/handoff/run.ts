@@ -47,13 +47,13 @@ if (provider === 'claude-code') {
   text = await generateCodexText({ env, cwd, system: recallSystem, text: recall, signal: new AbortController().signal, modelId: 'gpt-5.6-luna', onMetrics: metrics => results.push({ phase: 'new-session-recall', ...metrics }) })
 }
 fs.writeFileSync(path.join(output, 'new-session-recall.md'), text + '\n')
-// Archive: both snapshots disappear and outstanding tool calls fail even after restart.
+// Deletion: both snapshots disappear and outstanding tool calls fail even after restart.
 const late = restarted.begin()
-restarted.archive()
+restarted.delete()
 let lateSaveRejected = false
 try { late.save('late') } catch { lateSaveRejected = true }
-const archived = new HandoffTrialStore(path.join(output, 'memo-store'))
-results.push({ phase: 'archive', lateSaveRejected, aborted: late.signal.aborted, memoMissingAfterRestart: archived.read() === undefined, files: fs.readdirSync(path.join(output, 'memo-store')) })
+const deleted = new HandoffTrialStore(path.join(output, 'memo-store'))
+results.push({ phase: 'delete', lateSaveRejected, aborted: late.signal.aborted, memoMissingAfterRestart: deleted.read() === undefined, files: fs.readdirSync(path.join(output, 'memo-store')) })
 late.close()
 fs.writeFileSync(path.join(output, 'metrics.json'), JSON.stringify(results, null, 2))
 console.log(JSON.stringify(results.slice(-2)))

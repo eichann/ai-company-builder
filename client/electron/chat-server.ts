@@ -20,6 +20,7 @@ import crypto from 'crypto'
 import net from 'net'
 
 export interface ChatServerConfig extends ClaudeConnectionConfig {
+  onChatActivity?: (token: string, active: boolean) => void
   getApiKey: () => string | undefined
   getAuthMode: () => 'claude-code' | 'codex' | 'api-key'
   buildSystemPrompt: (workingDirectory?: string) => string
@@ -191,14 +192,6 @@ export async function startChatServer(config: ChatServerConfig) {
     } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
     const modelMessages = await convertToModelMessages(inputMessages)
 
-    // Debug: log reference files and system prompt
-    if (referenceFiles && referenceFiles.length > 0) {
-      console.log('[chat-server] Reference files:', referenceFiles)
-    }
-    if (finalSystemPrompt) {
-      console.log('[chat-server] System prompt (last 300 chars):', finalSystemPrompt.slice(-300))
-    }
-
     // Claude Code CLI mode with resume: send only the latest user message
     // (CLI already has the full conversation context from its session)
     // Without resume: send all messages (first request in session)
@@ -257,7 +250,18 @@ export async function startChatServer(config: ChatServerConfig) {
       }
     }
 
-    const result = streamText({
+    const activityToken = crypto.randomUUID()
+    let released = false
+    const release = () => {
+      if (released) return
+      released = true
+      c.req.raw.signal.removeEventListener('abort', release)
+      config.onChatActivity?.(activityToken, false)
+    }
+    config.onChatActivity?.(activityToken, true)
+    c.req.raw.signal.addEventListener('abort', release, { once: true })
+    let result
+    try { result = streamText({
       abortSignal: c.req.raw.signal,
       maxRetries: 0,
       model,
@@ -290,10 +294,13 @@ export async function startChatServer(config: ChatServerConfig) {
           if (metadata.contextUsage.contextWindow) su.contextWindowSize = metadata.contextUsage.contextWindow
         }
       },
+      onFinish: release,
+      onAbort: release,
       onError: ({ error }) => {
+        release()
         console.error('[chat-server] Stream error:', error)
       },
-    })
+    }) } catch (error) { release(); throw error }
 
     return result.toUIMessageStreamResponse({
       sendReasoning: true,

@@ -10,7 +10,7 @@ import type { CodexTransport } from '../electron/agents/codex'
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 const memo = HANDOFF_HEADINGS.map(h => `## ${h}\n- 未確認`).join('\n\n')
 
-test('archive removes memo, backup, cancels active jobs and rejects late writes after restart', t => {
+test('delete removes memo, backup, cancels active jobs and rejects late writes after restart', t => {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-handoff-test-'))
   t.after(() => fs.rmSync(directory, { recursive: true, force: true }))
   const store = new HandoffTrialStore(directory)
@@ -18,13 +18,13 @@ test('archive removes memo, backup, cancels active jobs and rejects late writes 
   const second = store.begin(); second.save(memo); second.close()
   assert.ok(fs.existsSync(path.join(directory, 'handoff.backup.json')))
   const late = store.begin()
-  store.archive()
+  store.delete()
   assert.equal(late.signal.aborted, true)
-  assert.throws(() => late.save(memo), /アーカイブ/)
-  assert.deepEqual(fs.readdirSync(directory), ['archived.json'])
+  assert.throws(() => late.save(memo), /削除/)
+  assert.deepEqual(fs.readdirSync(directory), ['deleted.json'])
   const restarted = new HandoffTrialStore(directory)
   assert.equal(restarted.read(), undefined)
-  assert.throws(() => restarted.begin(), /アーカイブ/)
+  assert.throws(() => restarted.begin(), /削除/)
   // Crash after tombstone, before cleanup: constructor completes the deletion.
   fs.writeFileSync(path.join(directory, 'handoff.backup.json'), JSON.stringify({ markdown: memo }))
   new HandoffTrialStore(directory)
