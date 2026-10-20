@@ -104,6 +104,10 @@ async function handleGitCgi(
     ACB_PUSHER_ROLE: role,
     ACB_PUSHER_ID: user.id,
     ACB_PUSHER_EMAIL: user.email,
+    // The hook inspects skill/agent/command Markdown for auto-run parts with
+    // node. Hand it this server's own binary so the check does not depend on
+    // PATH (it fails closed for those files when node cannot be run).
+    ACB_NODE: process.execPath,
   }
 
   const contentType = c.req.header('Content-Type')

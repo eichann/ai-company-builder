@@ -11,6 +11,11 @@
 #   変更を、会社のオーナー・管理者以外からはブロックする。
 #   役割はサーバー(git-http.ts)が認証済みユーザーから ACB_PUSHER_ROLE に設定する。
 #   値が無い・不明な場合は、保護対象パスについてのみ拒否する(fail closed)。
+# - スキル・エージェント・コマンド(.claude/skills|agents|commands/、どの階層でも)
+#   の Markdown のうち、Claude Code が確認なしに実行する部分(frontmatter の
+#   hooks / mcpServers 等、本文の !`コマンド` と ```! ブロック)を含むものの
+#   追加・変更を、オーナー・管理者以外からはブロックする。スキル自体の共有は
+#   自由（自動実行の部分を含まなければ誰でも追加・変更できる。削除は常に可）。
 # - 個人用フォルダ(.personal、どの階層でも)の中身の追加・変更を、役割に
 #   関係なくブロックする（直下の .gitignore と、削除は許可）。
 #
@@ -123,6 +128,141 @@ list_personal_additions() (
   exit 0
 )
 
+# --- スキル・エージェント・コマンドの自動実行部分 ---
+# スキルの共有はこの製品の中心機能なので .claude/skills/ 等はパスでは保護しない。
+# ただし Markdown の中には、読み込まれただけで Claude Code がコマンドを実行する
+# 部分がある。それを含むファイルの追加・変更は、オーナー・管理者だけに許可する。
+# 対象（Claude Code 2.1.304 の実装に合わせて、やや広めに判定する）:
+#  - frontmatter のキー hooks / mcpServers / lspServers / monitors（どの階層・
+#    引用符付き・フロー形式 {…}・エスケープ表記も対象）
+#  - 本文の !`…`（行頭または空白の直後の !` で始まるもの。コードブロック内でも
+#    Claude Code は実行するので対象）と ```! で始まるブロック
+#  - シンボリックリンク（リンク先の内容はこのフックでは確認できない）
+# 判定は .md ファイルだけ（Claude Code はスキル・エージェント・コマンドとして
+# .md しか読まない）。削除は常に許可。内容を確認できない場合は拒否(fail closed)。
+# 判定は node で行う（サーバーの実行環境には必ずある。git-http.ts が ACB_NODE に
+# サーバー自身の node を渡す）。node 自体が無い場合も、対象パスについてのみ拒否する。
+AUTORUN_DIR_RE='(^|/)\.claude/(skills|agents|commands)(/|$)'
+AUTORUN_NODE="${ACB_NODE:-node}"
+found_autorun=0
+declare -a detected_autorun=()
+
+# ref 更新で追加・変更されるエントリの raw 差分(-z)を出力する。
+# 対象の差分は list_protected_changes と同じ（新コミットごと + 正味の差分）。
+list_autorun_raw() (
+  set -o pipefail
+  old="$1"
+  new="$2"
+  commits=$(git rev-list "$new" --not --all) || exit 1
+  if [ "$old" != "$ZERO_SHA" ]; then
+    git diff-tree -r --no-renames --no-abbrev -z "$old" "$new" || exit 1
+  fi
+  if [ -n "$commits" ]; then
+    printf '%s\n' "$commits" \
+      | git diff-tree --stdin -r --root -c --no-renames --no-abbrev -z --no-commit-id || exit 1
+  fi
+  exit 0
+)
+
+# stdin: list_autorun_raw の出力。stdout: 違反ファイルごとに "パス<TAB>理由"。
+# 失敗（git の読み出し失敗など）は非ゼロ終了 → 呼び出し側で fail closed。
+read -r -d '' AUTORUN_JS <<'JS' || true
+const { spawnSync } = require('child_process')
+const DIR = /(^|\/)\.claude\/(skills|agents|commands)(\/|$)/i
+const tokens = require('fs').readFileSync(0).toString('utf8').split('\0')
+const symlinks = new Set()
+const blobsByPath = new Map()
+for (let i = 0; i < tokens.length; i++) {
+  const meta = tokens[i]
+  if (!meta.startsWith(':')) continue
+  const path = tokens[++i]
+  if (path === undefined) throw new Error('truncated diff')
+  // ":old new osha nsha S" / combined (merge) "::m1 m2 mR s1 s2 sR SS"
+  const parents = meta.match(/^:+/)[0].length
+  const f = meta.slice(parents).split(' ')
+  const mode = f[parents]
+  const sha = f[2 * parents + 1]
+  if (!DIR.test(path)) continue
+  if (mode === undefined || sha === undefined) throw new Error('bad diff line')
+  if (/^0+$/.test(mode) || /^0+$/.test(sha)) continue // deleted
+  if (mode === '120000') { symlinks.add(path); continue }
+  if (mode === '160000' || !/\.md$/i.test(path)) continue
+  if (!blobsByPath.has(path)) blobsByPath.set(path, new Set())
+  blobsByPath.get(path).add(sha)
+}
+
+const shas = [...new Set([...blobsByPath.values()].flatMap(s => [...s]))]
+const contents = new Map()
+if (shas.length > 0) {
+  const r = spawnSync('git', ['cat-file', '--batch'], { input: shas.join('\n') + '\n', maxBuffer: 1 << 30 })
+  if (r.status !== 0) throw new Error('git cat-file failed')
+  const out = r.stdout
+  let pos = 0
+  for (const sha of shas) {
+    const nl = out.indexOf(10, pos)
+    const header = out.toString('utf8', pos, nl).split(' ')
+    if (header[0] !== sha || header[1] !== 'blob') throw new Error('missing blob ' + sha)
+    const size = Number(header[2])
+    contents.set(sha, out.subarray(nl + 1, nl + 1 + size))
+    pos = nl + 1 + size + 1
+  }
+}
+
+const KEYS = ['hooks', 'mcpServers', 'lspServers', 'monitors']
+// A key spelled as a whole YAML scalar: at line start / after "? " "- " "{" ","
+// "[" / after an anchor or tag, optionally quoted, then ":" or the end of the
+// scalar (an anchored "&a hooks" can be reused as a key through "*a :").
+const KEY_RE = new RegExp(
+  String.raw`(?:^[ \t]*|[?\-][ \t]+|[{,\[][ \t]*|[&!]\S*[ \t]+)["']?(${KEYS.join('|')})["']?[ \t]*(?::|$|[,\]}#])`,
+  'gim')
+
+function findings(buf) {
+  let text = buf.toString('utf8')
+  if (text.charCodeAt(0) === 0xfeff) text = text.slice(1)
+  const found = new Set()
+  // Frontmatter: Claude Code reads it only when the file starts with "---",
+  // up to the next "---" (anywhere). Leading blank lines are accepted here too.
+  const lf = text.replace(/\r\n?/g, '\n')
+  const open = /^\s*---/.exec(lf)
+  if (open) {
+    const start = open.index + open[0].length
+    const end = lf.indexOf('---', start)
+    const fm = lf.slice(start, end < 0 ? undefined : end)
+      .replace(/\\\n[ \t]*/g, '') // escaped line break inside a double-quoted key
+      .replace(/\\x([0-9a-fA-F]{2})|\\u([0-9a-fA-F]{4})|\\U([0-9a-fA-F]{8})/g, (m, a, b, c) => {
+        const cp = parseInt(a || b || c, 16)
+        return cp <= 0x10ffff ? String.fromCodePoint(cp) : m
+      })
+    for (const m of fm.matchAll(KEY_RE)) {
+      found.add(`frontmatter の ${KEYS.find(k => k.toLowerCase() === m[1].toLowerCase())}`)
+    }
+  }
+  // Body: Claude Code runs ```!…``` blocks and !`…` where "!" starts a line
+  // or follows whitespace (/(?<=^|\s)!`[^`]+`/m), fenced code included. Any
+  // opener counts, closed or not: arguments substituted at invocation time can
+  // complete it.
+  if (text.includes('```!')) found.add('```! ブロック')
+  if (/(?<=^|\s)!`/m.test(text)) found.add('!`…` コマンド')
+  return [...found]
+}
+
+const clean = p => p.replace(/[\x00-\x1f\x7f]/g, '?')
+for (const p of [...symlinks].sort()) {
+  process.stdout.write(`${clean(p)}\tシンボリックリンク（リンク先を確認できません）\n`)
+}
+for (const [p, set] of [...blobsByPath].sort((a, b) => (a[0] < b[0] ? -1 : 1))) {
+  if (symlinks.has(p)) continue
+  const all = new Set()
+  for (const sha of set) for (const f of findings(contents.get(sha))) all.add(f)
+  if (all.size > 0) process.stdout.write(`${clean(p)}\t${[...all].join(', ')}\n`)
+}
+JS
+
+check_autorun() (
+  set -o pipefail
+  list_autorun_raw "$1" "$2" | "$AUTORUN_NODE" -e "$AUTORUN_JS"
+)
+
 while read old_sha new_sha refname; do
   # ブランチ削除は無視（receive.denyDeletes が別途拒否する。
   # 削除は残るブランチの内容を変えないので保護チェックも不要）
@@ -148,6 +288,33 @@ while read old_sha new_sha refname; do
           found_protected=1
         fi
       done <<< "$protected_changes"
+    fi
+  fi
+
+  # --- スキル・エージェント・コマンドの自動実行部分（オーナー・管理者以外） ---
+  if [ "$protected_allowed" -eq 0 ]; then
+    if ! autorun_changes=$(check_autorun "$old_sha" "$new_sha" 2>/dev/null); then
+      # 内容を確認できない（node が無い、git の読み出し失敗など）:
+      # 対象フォルダ内で変更されたパスを全部、安全側に倒して拒否する
+      autorun_changes=$(list_autorun_raw "$old_sha" "$new_sha" 2>/dev/null | tr '\0' '\n' \
+        | LC_ALL=C grep -v '^:' | LC_ALL=C grep -iE "$AUTORUN_DIR_RE" | LC_ALL=C sort -u \
+        | awk '{ print $0 "\t内容を確認できませんでした" }')
+      # （git 自体が読めない場合は、上の保護ファイルの確認がすでに拒否している）
+    fi
+    if [ -n "$autorun_changes" ]; then
+      while IFS= read -r line; do
+        [ -z "$line" ] && continue
+        ap="${line%%$'\t'*}"
+        reason="${line#*$'\t'}"
+        already=0
+        for existing in "${detected_autorun[@]}"; do
+          if [ "${existing%%$'\n'*}" = "  - $ap" ]; then already=1; break; fi
+        done
+        if [ "$already" -eq 0 ]; then
+          detected_autorun+=("  - $ap"$'\n'"      （${reason}）")
+          found_autorun=1
+        fi
+      done <<< "$autorun_changes"
     fi
   fi
 
@@ -310,22 +477,37 @@ if [ "$found_personal" -eq 1 ]; then
   rc=1
 fi
 
-if [ "$found_protected" -eq 1 ]; then
+if [ "$found_protected" -eq 1 ] || [ "$found_autorun" -eq 1 ]; then
   # 出力形式はクライアント(client/electron/protected-config.ts)が解析する:
   # マーカー行の後、次の次の区切り線までにある "- " 行が対象パス。
+  # それ以外の行（説明・理由の行）は "- " で始めないこと。
   echo "" >&2
   echo "========================================" >&2
   echo "[PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています" >&2
   echo "========================================" >&2
-  echo "" >&2
-  echo "以下のファイルは、チャットのAIが確認なしにコマンドを実行する設定です。" >&2
-  echo "会社のオーナー・管理者だけが追加・変更・削除できます:" >&2
-  for entry in "${detected_protected[@]}"; do
-    printf '%s\n' "$entry" >&2
-  done
+  if [ "$found_protected" -eq 1 ]; then
+    echo "" >&2
+    echo "以下のファイルは、チャットのAIが確認なしにコマンドを実行する設定です。" >&2
+    echo "会社のオーナー・管理者だけが追加・変更・削除できます:" >&2
+    for entry in "${detected_protected[@]}"; do
+      printf '%s\n' "$entry" >&2
+    done
+  fi
+  if [ "$found_autorun" -eq 1 ]; then
+    echo "" >&2
+    echo "以下のスキル・エージェント・コマンドには、チャットのAIが確認なしに" >&2
+    echo "コマンドを実行する「自動実行の設定」が含まれています。" >&2
+    echo "自動実行の設定は、会社のオーナー・管理者だけが追加・変更できます:" >&2
+    for entry in "${detected_autorun[@]}"; do
+      printf '%s\n' "$entry" >&2
+    done
+  fi
   echo "" >&2
   echo "プッシュをブロックしました。これらのファイルをサーバーの状態に戻してから" >&2
   echo "再度同期してください（ACBクライアントの同期ボタンから自動で戻せます）。" >&2
+  if [ "$found_autorun" -eq 1 ]; then
+    echo "スキル等は、自動実行の設定を取り除けば、そのまま共有できます。" >&2
+  fi
   echo "配布が必要な場合は、オーナー・管理者に依頼してください。" >&2
   echo "========================================" >&2
   echo "" >&2
