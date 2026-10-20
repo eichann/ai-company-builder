@@ -27,6 +27,10 @@ vi.mock('../../src/lib/auth', () => ({
 
 import { configureBareRepo } from '../../src/routes/git'
 
+// beforeAll runs ~10 real git commands; the default 10s hook timeout is too
+// tight when the other git-heavy hook suites run in parallel.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
+
 function git(args: string[], cwd?: string): string {
   return execFileSync('git', args, { stdio: 'pipe', ...(cwd ? { cwd } : {}) }).toString()
 }

@@ -774,6 +774,13 @@ ${promptContent}
             message: result.message || `管理者だけが変更できるファイルをサーバーの状態に戻しました: ${result.restoredProtectedFiles.join(', ')}`,
             backupPath: result.protectedBackupPath || result.backupPath
           })
+        } else if (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) {
+          // .personal/ files are never shared; sync untracked them (kept on disk)
+          setSyncNotification({
+            type: 'warning',
+            message: result.message || `個人用フォルダ（.personal）のファイルを共有対象から外しました: ${result.untrackedPersonalFiles.join(', ')}`,
+            backupPath: result.backupPath
+          })
         } else if (result.hadConflicts) {
           setSyncNotification({
             type: 'warning',
@@ -811,6 +818,7 @@ ${promptContent}
       // Auto-hide success notification after 3 seconds (unless there were warnings)
       const hasWarnings = result.hadConflicts ||
         (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
+        (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
         (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
         (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)

@@ -18,6 +18,9 @@ import {
   parseProtectedConfigPaths,
   restoreProtectedPaths,
   ProtectedConfigRecoveryError,
+  isPersonalPathRejection,
+  parsePersonalPaths,
+  untrackPersonalPaths,
 } from '../electron/protected-config'
 
 const HOOK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../server/src/templates/pre-receive-hook.sh')
@@ -39,16 +42,13 @@ function memberGit(dir: string): SimpleGit {
   return simpleGit(dir, { config: ['core.hooksPath=/dev/null', 'core.quotePath=false'] }).env(env)
 }
 
-function setupServer(t: { after: (fn: () => void) => void }) {
+function setupServer(t: { after: (fn: () => void) => void }, legacy: Record<string, string> = {}) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-protected-sync-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))
   const bare = path.join(root, 'company.git')
   execFileSync('git', ['init', '-q', '--bare', '--initial-branch=main', bare])
   sh(['config', 'receive.denyNonFastForwards', 'true'], bare)
   sh(['config', 'receive.denyDeletes', 'true'], bare)
-  fs.copyFileSync(HOOK, path.join(bare, 'hooks', 'pre-receive'))
-  fs.chmodSync(path.join(bare, 'hooks', 'pre-receive'), 0o755)
-
   // An admin publishes the shared MCP config (the legitimate distribution path).
   const admin = path.join(root, 'admin')
   execFileSync('git', ['clone', '-q', bare, admin], { stdio: 'pipe' })
@@ -58,9 +58,15 @@ function setupServer(t: { after: (fn: () => void) => void }) {
   write(admin, '.gitignore', '.backups/\n') // as sync's essential patterns
   write(admin, '.mcp.json', '{"mcpServers":{"playwright":{"command":"npx"}}}\n')
   write(admin, '営業部/.gitkeep', '')
-  sh(['add', '-A'], admin)
+  // Files shared before the hook existed (e.g. a hand-made .personal/).
+  for (const [rel, content] of Object.entries(legacy)) write(admin, rel, content)
+  sh(['add', '-A', '-f', '.'], admin)
   sh([...id, 'commit', '-q', '-m', 'seed'], admin)
   sh(['push', '-q', 'origin', 'main'], admin, { ACB_PUSHER_ROLE: 'admin' })
+  // The hook is installed after the seed, as the server does on startup
+  // for repositories that predate it.
+  fs.copyFileSync(HOOK, path.join(bare, 'hooks', 'pre-receive'))
+  fs.chmodSync(path.join(bare, 'hooks', 'pre-receive'), 0o755)
 
   const member = path.join(root, 'member')
   execFileSync('git', ['clone', '-q', bare, member], { stdio: 'pipe' })
@@ -226,6 +232,123 @@ test('restoreProtectedPaths rejects paths outside the repository', async t => {
   const { member } = setupServer(t)
   await assert.rejects(
     restoreProtectedPaths({ git: memberGit(member), repoPath: member, paths: ['../evil/.mcp.json'], backupPath: path.join(member, '.backups', 'z') }),
+    ProtectedConfigRecoveryError,
+  )
+})
+
+// ---------------------------------------------------------------------------
+// .personal/ — never shared, recovered by untracking (not by restoring)
+// ---------------------------------------------------------------------------
+
+// The essential patterns sync appends to the root .gitignore (main.ts).
+const PERSONAL_IGNORE = '# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n'
+
+async function pushError(git: SimpleGit): Promise<string> {
+  try {
+    await git.push('origin', 'main', ['--set-upstream', '--progress'])
+  } catch (e) {
+    return e instanceof Error ? e.message : String(e)
+  }
+  return ''
+}
+
+test('.personal/ committed by an older client → PERSONAL_PATH → untracked, kept on disk, rest reaches the server', async t => {
+  const { bare, member } = setupServer(t)
+  const git = memberGit(member)
+
+  // An older client (no .personal ignore) committed a hand-made root
+  // .personal/ together with real work.
+  write(member, '.personal/memo.md', 'private memo\n')
+  write(member, '営業部/.personal/下書き.md', 'draft\n')
+  write(member, '営業部/報告.md', '# 報告\n')
+  await git.raw(['add', '--sparse', '.'])
+  await git.commit('old client sync')
+  // The new client's sync step: ensure essential ignore patterns, add, commit.
+  fs.appendFileSync(path.join(member, '.gitignore'), PERSONAL_IGNORE)
+  write(member, '営業部/.personal/後で.md', 'later\n') // now ignored, never staged
+  await git.raw(['add', '--sparse', '.'])
+  await git.commit('new client sync')
+  assert.equal((await git.raw(['ls-files', '--', '営業部/.personal/後で.md'])).trim(), '')
+
+  const err = await pushError(git)
+  t.diagnostic(`rejected push (PERSONAL_PATH section):\n${err.split('\n').filter(l => /PERSONAL_PATH|\s- /.test(l)).join('\n')}`)
+  assert.equal(isPersonalPathRejection(err), true)
+  assert.equal(isProtectedConfigRejection(err), false)
+  const paths = parsePersonalPaths(err)
+  assert.deepEqual(paths.sort(), ['.personal/memo.md', '営業部/.personal/下書き.md'].sort())
+
+  const result = await untrackPersonalPaths({ git, repoPath: member, paths })
+  t.diagnostic(`untrack result: ${JSON.stringify(result)}`)
+  assert.equal(result.committed, true)
+  assert.deepEqual(result.untracked.sort(), paths.sort())
+  await git.push('origin', 'main', ['--set-upstream', '--progress'])
+
+  // The rest reached the server; nothing under .personal/ did.
+  assert.equal(sh(['rev-parse', 'main'], bare).trim(), (await git.revparse(['HEAD'])).trim())
+  assert.equal(sh(['show', 'main:営業部/報告.md'], bare), '# 報告\n')
+  assert.match(sh(['show', 'main:.gitignore'], bare), /\*\*\/\.personal\/\*/)
+  const serverFiles = sh(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', 'main'], bare)
+  t.diagnostic(`server files after recovery:\n${serverFiles}`)
+  assert.doesNotMatch(serverFiles, /\.personal\//)
+  // The member keeps every private file, and the worktree is clean (ignored).
+  assert.equal(fs.readFileSync(path.join(member, '.personal', 'memo.md'), 'utf-8'), 'private memo\n')
+  assert.equal(fs.readFileSync(path.join(member, '営業部', '.personal', '下書き.md'), 'utf-8'), 'draft\n')
+  assert.equal(fs.readFileSync(path.join(member, '営業部', '.personal', '後で.md'), 'utf-8'), 'later\n')
+  assert.equal((await git.status()).isClean(), true)
+})
+
+test('a .personal/ file shared before the rule: modifying it is rejected, recovery unshares it (server deletion)', async t => {
+  const { bare, member } = setupServer(t, { '.personal/legacy.md': 'v1\n', '営業部/.personal/.gitignore': '*\n!.gitignore\n' })
+  const git = memberGit(member)
+  fs.appendFileSync(path.join(member, '.gitignore'), PERSONAL_IGNORE)
+  write(member, '.personal/legacy.md', 'v2\n') // still tracked → still staged
+  write(member, '営業部/メモ.md', 'm\n')
+  await git.raw(['add', '--sparse', '.'])
+  await git.commit('sync')
+
+  const err = await pushError(git)
+  const paths = parsePersonalPaths(err)
+  assert.deepEqual(paths, ['.personal/legacy.md'])
+  const result = await untrackPersonalPaths({ git, repoPath: member, paths })
+  assert.deepEqual(result.untracked, ['.personal/legacy.md'])
+  await git.push('origin', 'main')
+
+  assert.throws(() => sh(['cat-file', '-e', 'main:.personal/legacy.md'], bare)) // unshared
+  assert.equal(sh(['show', 'main:営業部/.personal/.gitignore'], bare), '*\n!.gitignore\n') // kept
+  assert.equal(sh(['show', 'main:営業部/メモ.md'], bare), 'm\n')
+  assert.equal(fs.readFileSync(path.join(member, '.personal', 'legacy.md'), 'utf-8'), 'v2\n') // member's copy kept
+  assert.equal((await git.status()).isClean(), true)
+})
+
+test('PERSONAL_PATH and PROTECTED_CONFIG in one push: untrack first, then the admin-config recovery', async t => {
+  const { bare, member } = setupServer(t)
+  const git = memberGit(member)
+  write(member, '.personal/memo.md', 'p\n')
+  write(member, '.mcp.json', '{"mcpServers":{}}\n')
+  write(member, 'notes.md', 'n\n')
+  await git.raw(['add', '--sparse', '.'])
+  await git.commit('both')
+
+  // Same order as git:sync: PERSONAL_PATH is resolved before anything else.
+  const first = await pushError(git)
+  assert.deepEqual(parsePersonalPaths(first), ['.personal/memo.md'])
+  assert.deepEqual(parseProtectedConfigPaths(first), ['.mcp.json'])
+  await untrackPersonalPaths({ git, repoPath: member, paths: parsePersonalPaths(first) })
+  const second = await pushError(git)
+  assert.equal(isPersonalPathRejection(second), false)
+  assert.deepEqual(parseProtectedConfigPaths(second), ['.mcp.json'])
+  await restoreProtectedPaths({ git, repoPath: member, paths: ['.mcp.json'], backupPath: path.join(member, '.backups', 'both_protected') })
+  assert.equal(await pushError(git), '')
+
+  assert.equal(sh(['show', 'main:notes.md'], bare), 'n\n')
+  assert.throws(() => sh(['cat-file', '-e', 'main:.personal/memo.md'], bare))
+  assert.equal(fs.existsSync(path.join(member, '.personal', 'memo.md')), true)
+})
+
+test('untrackPersonalPaths refuses paths outside .personal/', async t => {
+  const { member } = setupServer(t)
+  await assert.rejects(
+    untrackPersonalPaths({ git: memberGit(member), repoPath: member, paths: ['notes.md'] }),
     ProtectedConfigRecoveryError,
   )
 })

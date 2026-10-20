@@ -24,6 +24,11 @@ import {
   protectedConfigMessage,
   restoreProtectedPaths,
   ProtectedConfigRecoveryError,
+  isPersonalPathRejection,
+  parsePersonalPaths,
+  personalPathMessage,
+  untrackPersonalPaths,
+  type PersonalUntrackResult,
 } from './protected-config'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
@@ -2038,6 +2043,12 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       { pattern: '.env.*', comment: '' },
       { pattern: '!.env.example', comment: '# Keep templates shared' },
       { pattern: '!.env.sample', comment: '' },
+      // Personal workspaces are never shared, at any depth (the server
+      // rejects them too — PERSONAL_PATH). The in-folder .gitignore that the
+      // server writes into department .personal/ folders stays shared. `**/`
+      // because a pattern with a slash is anchored to this file's directory.
+      { pattern: '**/.personal/*', comment: '# Personal workspaces — never sync (local only)' },
+      { pattern: '!**/.personal/.gitignore', comment: '' },
     ]
 
     const patternsToAdd: string[] = []
@@ -2053,7 +2064,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       fs.appendFileSync(gitignorePath, addition)
       gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
     } else if (!fs.existsSync(gitignorePath)) {
-      const seed = '.backups/\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n'
+      const seed = '.backups/\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n!.env.example\n!.env.sample\n**/.personal/*\n!**/.personal/.gitignore\n'
       fs.writeFileSync(gitignorePath, seed)
       gitignoreContent = seed
     }
@@ -2562,9 +2573,43 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       }
     }
 
+    // Set when a PERSONAL_PATH rejection was resolved by untracking files.
+    let personalUntrack = null as PersonalUntrackResult | null // widened: assigned inside nested try
+    const personalNote = () => personalUntrack && personalUntrack.untracked.length > 0
+      ? `個人用フォルダ（.personal）のファイル${personalUntrack.untracked.length}件は共有できないため、共有対象から外しました（このPCには残っています）。`
+      : ''
+
     try {
       console.log('Git sync: Pushing to origin...')
-      await git.push('origin', 'main', ['--set-upstream', '--progress'])
+      try {
+        await git.push('origin', 'main', ['--set-upstream', '--progress'])
+      } catch (firstPushError) {
+        // `.personal/` content is never shared, for anyone (the server rejects
+        // it with PERSONAL_PATH). It is the member's private file, so the fix
+        // is to untrack it — keep it on disk — not to restore a server version.
+        // No dialog: nothing is lost and there is no choice to make. The
+        // commits are squashed because the hook checks every commit in the
+        // range. A remaining rejection (e.g. PROTECTED_CONFIG reported in the
+        // same push) falls through to the handling below.
+        const firstMsg = firstPushError instanceof Error ? firstPushError.message : String(firstPushError)
+        if (!isPersonalPathRejection(firstMsg)) throw firstPushError
+        const personalFiles = parsePersonalPaths(firstMsg)
+        console.warn('Git sync: Push rejected — .personal/ content:', personalFiles)
+        try {
+          personalUntrack = await untrackPersonalPaths({ git, repoPath, paths: personalFiles })
+        } catch (untrackError) {
+          const msg = untrackError instanceof Error ? untrackError.message : String(untrackError)
+          return {
+            success: false,
+            errorType: 'personal_path' as const,
+            personalFiles,
+            error: `${personalPathMessage(personalFiles)}\n\n${untrackError instanceof ProtectedConfigRecoveryError ? msg : `共有対象から外せませんでした。変更はこのPCに残っています。\n${msg}`}`,
+          }
+        }
+        if (personalUntrack.committed) {
+          await git.push('origin', 'main', ['--set-upstream', '--progress'])
+        }
+      }
     } catch (pushError) {
       const pushErrorMsg = pushError instanceof Error ? pushError.message : String(pushError)
 
@@ -2662,10 +2707,12 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
         const parts = [`同期完了。管理者だけが変更できるファイル（${reverted.length}件）はサーバーの状態に戻しました。`]
         if (recovery.backupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
         if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
+        parts.push(personalNote())
         parts.push(recovery.committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
         return {
           success: true,
           message: parts.join(''),
+          untrackedPersonalFiles: personalUntrack?.untracked,
           restoredProtectedFiles: reverted,
           protectedBackupPath: recovery.backupPath ?? undefined,
           hadConflicts,
@@ -2675,6 +2722,18 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
           restoredFolders,
           ignoredLargeFiles,
           excludedNestedRepos: newlyExcludedNestedRepos
+        }
+      }
+
+      // Still rejected for .personal/ content after untracking (should not
+      // happen) — stop without PENDING_PUSH rather than retry forever.
+      if (isPersonalPathRejection(pushErrorMsg)) {
+        const personalFiles = parsePersonalPaths(pushErrorMsg)
+        return {
+          success: false,
+          errorType: 'personal_path' as const,
+          personalFiles,
+          error: `${personalPathMessage(personalFiles)}\n\nもう一度同期してください。`,
         }
       }
 
@@ -2754,7 +2813,8 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       }
       return {
         success: true,
-        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。`,
+        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。${personalNote()}その他の変更は正常に反映されました。`,
+        untrackedPersonalFiles: personalUntrack?.untracked,
         hadConflicts: true,
         conflictFiles,
         deletedConflictFiles,
@@ -2769,10 +2829,12 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
     if (ignoredLargeFiles.length > 0) {
       successMessage += `（${ignoredLargeFiles.length}個の大容量ファイルを同期対象外にしました）`
     }
+    if (personalNote()) successMessage += `。${personalNote()}`
 
     return {
       success: true,
       message: successMessage,
+      untrackedPersonalFiles: personalUntrack?.untracked,
       restoredFolders,
       ignoredLargeFiles,
       excludedNestedRepos: newlyExcludedNestedRepos

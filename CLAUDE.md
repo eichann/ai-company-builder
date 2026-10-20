@@ -153,7 +153,8 @@ Implemented in `client/electron/main.ts` (`ipcMain.handle('git:sync', ...)`).
 0. Serialize per repository (syncLocks)
 1. Recover from stale rebase / merge / cherry-pick state
 2. Retry a PENDING_PUSH left by a previous failed sync
-3. Ensure .gitignore essentials (.backups/, .workspace/, node_modules/, .env*)
+3. Ensure .gitignore essentials (.backups/, .workspace/, node_modules/, .env*,
+   **/.personal/* with !**/.personal/.gitignore)
 4. Scan for >100MB files → append to .gitignore
 5. Detect nested Git repositories → ask the user BEFORE modifying anything
 6. git fetch --progress origin
@@ -172,6 +173,8 @@ Implemented in `client/electron/main.ts` (`ipcMain.handle('git:sync', ...)`).
 12. Department folder protection (restore folders deleted locally)
 13. git push --set-upstream --progress (also when only earlier unpushed
     commits are left) → on failure write PENDING_PUSH
+    ├─ Rejected with PERSONAL_PATH → reset --soft origin/main →
+    │    git rm --cached those paths (files stay on disk) → commit → push again
     └─ Rejected with PROTECTED_CONFIG → ask the member; on "restore":
          back up their version → reset --soft origin/main → put the
          protected paths back to the server version → commit → push again
@@ -214,6 +217,7 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | Server bare repos set `receive.denyNonFastForwards` and `receive.denyDeletes` (`configureBareRepo` in `server/src/routes/git.ts`, applied at creation and on startup to all repos) | Shared history is the team's only copy. Without these, one client's force push erases everyone's work. This was a near miss — only an auth failure stopped a `push --force-with-lease` from a diverged client. |
 | Only owner/admin may change agent-execution config: the pre-receive hook rejects with `PROTECTED_CONFIG` any push in which some commit adds, modifies, deletes or renames `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, anything under `.claude/hooks/`, or a file/symlink named `.claude` — at any depth, case-insensitively. The role comes from `memberships` via `ACB_PUSHER_ROLE`, set server-side in `git-http.ts`; a missing role fails closed for these paths only | The chat runs Claude Code in the shared checkout with `settingSources: ['user', 'project']`, and in non-interactive mode it runs a project `UserPromptSubmit` hook and starts a `.mcp.json` stdio server **without any prompt** (verified with the real CLI). `settings.json` also carries `statusLine`, `apiKeyHelper`, `env` and permission rules. Sync shares nearly everything, so any member could run arbitrary commands on every teammate's machine at their next chat message. Distribution itself is legitimate (an MCP server shared via `.mcp.json` is in production use), so the rule restricts *who*, not *what*. Skills (`.claude/skills/`) stay unrestricted — sharing them is the core feature. |
 | A `PROTECTED_CONFIG` rejection is resolved by **rewriting the unpushed commits**, never by a retry or a revert commit (`client/electron/protected-config.ts`) | The rejected change is already committed and the hook checks *every* commit in the range, so a retry or a revert on top fails at the same step forever — the "permanently unable to sync" shape again. The dialog backs up the member's version, squashes the unpushed commits with `reset --soft origin/main` (refused unless `origin/main` is an ancestor of `HEAD`, or it would revert teammates' work), restores just those paths to the server's version (or removes them), and commits the rest. Push is also attempted whenever commits are still unpushed, because a rejected push writes no `PENDING_PUSH` and a sync with no new edits used to report success while the commits never left the machine. |
+| `.personal/` content is never shared, for anyone (owner/admin included): the pre-receive hook rejects with `PERSONAL_PATH` any push in which a commit (or the net `old..new` diff) adds or modifies a file inside a directory named `.personal` at any depth, case-insensitively. Exceptions: the `.gitignore` directly inside a `.personal/` (the server writes it when creating a company or department, and its own local-transport push must keep working), and deletions (how an already-shared file gets unshared). Sync also adds `**/.personal/*` + `!**/.personal/.gitignore` to the root `.gitignore` (`**/` because a pattern with a slash is anchored to the `.gitignore`'s directory) | Department `.personal/` folders were protected only by the `.gitignore` inside them, so a `.personal/` created by hand anywhere else synced like a normal folder and its files were shared with the whole company. Recovery differs from `PROTECTED_CONFIG`: the file is the member's private file, so sync untracks it (`git rm --cached`, kept on disk) instead of restoring a server version, after squashing the unpushed commits for the same every-commit reason. No dialog — nothing is lost. A file the server already had is deleted from the server by that commit. |
 
 ### Backup Structure
 
@@ -249,5 +253,9 @@ Backups older than 30 days are pruned at the start of each sync.
   no window) returns `errorType: 'protected_config'` with `protectedFiles`,
   and the next sync offers the same choice again. Successful recovery reports
   `restoredProtectedFiles` and `protectedBackupPath`.
+- `[PERSONAL_PATH]` (any pusher, `.personal/` content) is handled first and
+  without a dialog: the listed paths are untracked and the push retried; the
+  result carries `untrackedPersonalFiles`. If that fails it returns
+  `errorType: 'personal_path'` with `personalFiles` (no `PENDING_PUSH`).
 - On Windows, a transient file lock during rebase (skill tool, editor, or AV
   scanner holding a file) is retried twice before being treated as a failure.

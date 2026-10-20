@@ -302,7 +302,7 @@ interface GitResult {
   ignoredLargeFiles?: string[]
   // Nested repos auto-detected and added to .gitignore during this sync
   excludedNestedRepos?: string[]
-  errorType?: 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'unknown' | string
+  errorType?: 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'personal_path' | 'unknown' | string
   secretDetected?: boolean
   // Agent-execution config paths (.claude/settings.json, .mcp.json, ...) the
   // server refused because only an owner/admin may change them
@@ -311,6 +311,10 @@ interface GitResult {
   // protectedBackupPath)
   restoredProtectedFiles?: string[]
   protectedBackupPath?: string
+  // .personal/ paths the server refused (never shared, for anyone)
+  personalFiles?: string[]
+  // .personal/ paths sync untracked so the rest could be shared (kept on disk)
+  untrackedPersonalFiles?: string[]
 }
 
 interface GitRepoResult {
