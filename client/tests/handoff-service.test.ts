@@ -117,3 +117,12 @@ test('closing the service and reopening retains memo and draft; deletion rejects
   assert.equal(f.history.save('company', old).status, 'deleted')
   assert.equal(reopened.read('company', 'chat').memo, undefined)
 })
+test('old conversations can manually create a memo even when the native session is already gone', async t => {
+  const f = fixture(t); f.add('chat', 1)
+  f.history.patch('company', 'chat', { agentSession: { providerId: 'codex', id: 'missing' } })
+  const service = new HandoffService(f.history, f.store, async (_, r) => { r.save(memo); return metrics }, () => {}, { idleMs: 1 })
+  t.after(() => service.dispose())
+  assert.equal(service.view('company', 'chat').canUpdate, true)
+  service.requestUpdate('company', 'chat'); await tick()
+  assert.equal(service.view('company', 'chat').markdown, memo)
+})

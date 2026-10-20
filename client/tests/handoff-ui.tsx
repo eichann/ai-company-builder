@@ -10,7 +10,7 @@ const sessions: ChatSession[] = [{ companyId, id: 'example', title: '予約フ�
 const historyListeners = new Set<(scope: { companyId: string; deletedSessionId?: string }) => void>()
 const memoListeners = new Set<(scope: { companyId: string; sessionId: string }) => void>()
 const markdown = '## 目的\n- デスクトップ版の予約フォームを作成。\n\n## 決定事項・制約\n- JSON保存を維持する。配布に影響を出さないため。\n- 公開前の確認者はユーザー。\n\n## 現在の状態\n- AI報告・未検証：試作品を作成。\n\n## 未解決事項\n- テストログの確認。\n\n## 次に行うこと\n1. ログを確認する。\n2. ユーザーに画面を見せる。\n\n## 参照先\n- なし'
-let view: HandoffView = { status: 'saved', markdown, updatedAt: '2026-10-20T10:00:00Z', provider: 'codex', message: 'メモを保存しています。自動復旧への接続は次の段階です。', canUpdate: true, pendingTurns: 1, metrics: { totalMs: 7400, inputTokens: 6500, outputTokens: 630 } }
+let view: HandoffView = { status: 'saved', recovery: { status: 'recovered', usedMemo: true, at: '2026-10-20T10:00:00Z' }, markdown, updatedAt: '2026-10-20T10:00:00Z', provider: 'codex', message: 'メモを保存しています。AIセッションが見つからない場合の引き継ぎに使います。', canUpdate: true, pendingTurns: 1, metrics: { totalMs: 7400, inputTokens: 6500, outputTokens: 630 } }
 Object.assign(window, { electronAPI: {
   getChatSessions: async () => [...sessions],
   getHandoff: async () => ({ ...view }),

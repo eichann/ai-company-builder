@@ -1,3 +1,5 @@
+import { wrapLanguageModel } from 'ai'
+import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
 import crypto from 'crypto'
 import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
@@ -88,6 +90,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
     id: 'claude-code',
     ownsConversation: true,
     authenticationError: () => config.isClaudeCodeAuthenticated() ? undefined : 'Claude Code CLIが認証されていません。',
+    isMissingSession(error, sessionId) {
+      if (error instanceof MissingAgentSession) return error.sessionId === sessionId
+      const value = error as { data?: { stderr?: string }; message?: string } | undefined
+      const text = value?.data?.stderr || value?.message || ''
+      return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
+    },
     createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId }) {
       const claudePath = config.getClaudeCodeCliPath()
       const permissionMode = config.getPermissionMode()
@@ -197,7 +205,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const resolvedModel = resolveClaudeModel(modelId)
       const resolvedEffort = resolveEffort(resolvedModel, effort as Parameters<typeof resolveEffort>[1])
 
-      return createModel(resolvedModel, {
+      let missingSession = false
+      const native = createModel(resolvedModel, {
         pathToClaudeCodeExecutable: claudePath,
         permissionMode,
         cwd: workingDirectory,
@@ -222,12 +231,34 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // 2. Set uid to force fork+exec instead of posix_spawn for THIS spawn
         // 3. Spawn via shell wrapper that closes all inherited FDs > 2
         //    before exec'ing claude, so claude starts with a clean FD table
-        spawnClaudeCodeProcess,
+        spawnClaudeCodeProcess: opts => {
+          const child = spawnClaudeCodeProcess(opts)
+          // The SDK can discard stderr on result errors; inspect only this exact startup failure.
+          let pending = ''
+          if (existingCliSessionId) child.stderr?.on('data', (chunk: Buffer) => {
+            pending += chunk.toString()
+            const lines = pending.split('\n'); pending = lines.pop()!.slice(-512)
+            if (lines.some(line => line.trim() === `No conversation found with session ID: ${existingCliSessionId}`)) missingSession = true
+          })
+          return child
+        },
         hooks: {
           PreToolUse: [{ hooks: [preToolUseHook] }],
         },
         ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
       })
+      if (!existingCliSessionId) return native
+      return wrapLanguageModel({ model: native, middleware: {
+        specificationVersion: 'v3',
+        wrapStream: async ({ doStream }) => {
+          const result = await doStream()
+          return { ...result, stream: result.stream.pipeThrough(new TransformStream({
+            transform(part, controller) {
+              controller.enqueue(part.type === 'error' && missingSession ? { type: 'error', error: new MissingAgentSession(existingCliSessionId) } : part)
+            },
+          })) }
+        },
+      } })
     },
     createTitleModel() {
       return createModel('haiku', {

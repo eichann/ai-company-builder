@@ -2,7 +2,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { atomicWrite, type ChatHistoryStore } from '../chat-history-store'
 import type { ChatSession } from '../../shared/chat-history'
-import type { HandoffCompletion, HandoffView } from '../../shared/handoff'
+import type { HandoffCompletion, HandoffView, HandoffRecovery } from '../../shared/handoff'
 import { HandoffStore, fingerprint, matches, type Cursor, type HandoffState } from './store'
 import { handoffInputText, validateHandoff, type HandoffInput, type HandoffMetrics, type HandoffRequest } from './contract'
 
@@ -44,6 +44,7 @@ export function handoffChunk(session: ChatSession, state: HandoffState): { input
 export class HandoffService {
   private queue = new Map<string, { company: string; id: string }>()
   private busy = new Set<string>()
+  private recovering = new Set<string>()
   private running?: { key: string; controller: AbortController }
   private timer?: ReturnType<typeof setTimeout>
   private disposed = false
@@ -51,6 +52,14 @@ export class HandoffService {
   constructor(private history: ChatHistoryStore, readonly store: HandoffStore, private writer: Writer,
     private changed: (company: string, id: string) => void, options: Partial<Options> = {}) { this.options = { ...defaults, ...options } }
 
+  recordRecovery(company: string, id: string, recovery: HandoffRecovery) {
+    if (!this.history.get(company, id)) return
+    const state = this.store.read(company, id)
+    if (recovery.status === 'recovering') this.recovering.add(keyOf(company, id)); else this.recovering.delete(keyOf(company, id))
+    state.recovery = recovery
+    this.store.write(company, id, state)
+    this.changed(company, id)
+  }
   complete(company: string, id: string, receipt: HandoffCompletion) {
     const session = this.history.get(company, id)
     if (!session) return
@@ -78,6 +87,16 @@ export class HandoffService {
   requestUpdate(company: string, id: string) {
     const view = this.view(company, id)
     if (!view.canUpdate) throw new Error(view.message)
+    const session = this.history.get(company, id)!
+    const state = this.store.read(company, id)
+    // Explicit manual update also works for old conversations with no post-install completion receipt.
+    if (!state.checkpoint) {
+      const provider = session.agentSession?.providerId ?? (session.claudeSessionId ? 'claude-code' : undefined)
+      if (!provider || provider === 'api-key' || !session.messages.length) throw new Error('この相談のAI接続を確認できません。')
+      const cursor = { index: session.messages.length, offset: 0 }
+      state.checkpoint = { cursor, hash: fingerprint(session.messages, cursor), provider, messageId: session.messages.at(-1)!.id }
+      this.store.write(company, id, state)
+    }
     this.queue.set(keyOf(company, id), { company, id })
     this.changed(company, id); this.wake()
   }
@@ -88,6 +107,7 @@ export class HandoffService {
   invalidate(company: string, id: string) {
     const key = keyOf(company, id)
     this.queue.delete(key)
+    this.recovering.delete(key)
     if (this.running?.key === key) this.running.controller.abort()
     this.store.remove(company, id)
     this.changed(company, id)
@@ -98,11 +118,12 @@ export class HandoffService {
     const state = this.store.read(company, id)
     const checkpoint = state.checkpoint
     const key = keyOf(company, id)
-    const supported = checkpoint?.provider !== 'api-key'
-    const pending = !!checkpoint && (!state.memo || !atEnd(checkpoint.cursor, state.memo.cursor))
+    const provider = checkpoint?.provider ?? session.agentSession?.providerId ?? (session.claudeSessionId ? 'claude-code' : undefined)
+    const supported = provider !== 'api-key'
+    const pending = checkpoint ? (!state.memo || !atEnd(checkpoint.cursor, state.memo.cursor)) : !!provider && !!session.messages.length
     const status = !supported ? 'unsupported' : this.running?.key === key ? 'running' : this.queue.has(key) ? 'queued' : state.error ? 'error' : state.memo ? 'saved' : 'waiting'
-    const message = status === 'unsupported' ? 'APIキー方式のメモ自動保存は未対応です。' : status === 'running' ? '引き継ぎメモを整理中…' : status === 'queued' ? '会話が落ち着いてから更新します。利用量の上限に達した場合は待機します。' : state.error || (state.memo ? 'メモを保存しています。自動復旧への接続は次の段階です。' : '会話が長くなると自動保存します。短い会話は「メモを更新」でも確認できます。')
-    return { status, message, markdown: state.memo?.markdown, updatedAt: state.memo?.updatedAt, provider: state.memo?.provider ?? checkpoint?.provider, metrics: state.memo?.metrics, pendingTurns: Math.max(0, state.turns - (state.memo?.turns ?? 0)), canUpdate: pending && supported && status !== 'running' && status !== 'queued' }
+    const message = status === 'unsupported' ? 'APIキー方式のメモ自動保存は未対応です。' : status === 'running' ? '引き継ぎメモを整理中…' : status === 'queued' ? '会話が落ち着いてから更新します。利用量の上限に達した場合は待機します。' : state.error || (state.memo ? 'メモを保存しています。AIセッションが見つからない場合の引き継ぎに使います。' : '会話が長くなると自動保存します。短い会話は「メモを更新」でも確認できます。')
+    return { status, message, recovery: state.recovery?.status === 'recovering' && !this.recovering.has(key) ? { ...state.recovery, status: 'error' } : state.recovery, markdown: state.memo?.markdown, updatedAt: state.memo?.updatedAt, provider: state.memo?.provider ?? checkpoint?.provider, metrics: state.memo?.metrics, pendingTurns: Math.max(0, state.turns - (state.memo?.turns ?? 0)), canUpdate: pending && supported && status !== 'running' && status !== 'queued' }
   }
   private due(session: ChatSession, state: HandoffState) {
     if (!state.checkpoint || (state.memo && atEnd(state.memo.cursor, state.checkpoint.cursor))) return false

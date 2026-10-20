@@ -1,3 +1,4 @@
+import type { HandoffRecovery } from '../../shared/handoff'
 import fs from 'node:fs'
 import path from 'node:path'
 import { createHash } from 'node:crypto'
@@ -9,7 +10,7 @@ import { validateHandoff } from './contract'
 export interface Cursor { index: number; offset: number }
 export interface Checkpoint { cursor: Cursor; hash: string; provider: AuthMode; messageId: string }
 export interface Memo { cursor: Cursor; hash: string; markdown: string; updatedAt: string; provider: AuthMode; turns: number; metrics: Pick<HandoffMetrics, 'totalMs' | 'inputTokens' | 'outputTokens'> }
-export interface HandoffState { version: 1; turns: number; checkpoint?: Checkpoint; memo?: Memo; lastAttempt?: number; catchUp?: boolean; error?: string }
+export interface HandoffState { recovery?: HandoffRecovery; version: 1; turns: number; checkpoint?: Checkpoint; memo?: Memo; lastAttempt?: number; catchUp?: boolean; error?: string }
 export const emptyState = (): HandoffState => ({ version: 1, turns: 0 })
 export function validateId(id: string) { if (typeof id !== 'string' || !/^[a-zA-Z0-9_-]{1,200}$/.test(id)) throw new Error('相談の識別子が不正です') }
 export function fingerprint(messages: ChatSession['messages'], cursor: Cursor) {

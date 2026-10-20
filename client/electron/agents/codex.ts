@@ -1,3 +1,4 @@
+import { MissingAgentSession } from './recovery'
 import type { AgentInteraction } from '../../shared/agent-interaction'
 import { readQuestions, describePermissions } from './codex-interactions'
 import { CODEX_LOGIN_HELP, CODEX_WINDOWS_UNSUPPORTED } from '../../shared/agent'
@@ -205,8 +206,12 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!selected.efforts.includes(effort)) throw new Error('このCodexモデルは選択したeffortに対応していません。')
             const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n')
             const params = { model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: 'read-only', approvalPolicy: title ? 'never' : 'untrusted', approvalsReviewer: 'user', developerInstructions: system || undefined }
-            const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title })
+            const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {
+              if (request.resumeId && error instanceof Error && error.message.trim() === `no rollout found for thread id ${request.resumeId}`) throw new MissingAgentSession(request.resumeId)
+              throw error
+            })
             threadId = result.thread.id
+            emit({ type: 'response-metadata', id: threadId })
             const input: Array<{ type: 'text'; text: string; text_elements: never[] } | { type: 'image'; url: string }> = []
             for (const message of options.prompt) {
               if (message.role === 'system' || message.role === 'tool') continue
@@ -233,6 +238,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
 export function createCodexConnection(config: Config, createRpc: RpcFactory = defaultRpc): AgentConnection {
   return {
     id: 'codex', ownsConversation: true, authenticationError: () => process.platform === 'win32' ? CODEX_WINDOWS_UNSUPPORTED : undefined,
+    isMissingSession: (error, id) => error instanceof MissingAgentSession && error.sessionId === id,
     createChatModel: request => createModel(config, request, false, createRpc),
     createTitleModel: request => createModel(config, request || {}, true, createRpc),
     readMetadata(metadata) {

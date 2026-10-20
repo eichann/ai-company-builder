@@ -5,6 +5,7 @@ import type { LanguageModel } from 'ai'
 export interface AgentConnection {
   readonly id: string
   readonly ownsConversation: boolean
+  isMissingSession?(error: unknown, sessionId: string): boolean
   authenticationError(): string | undefined
   createChatModel(request: {
     workingDirectory?: string

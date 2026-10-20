@@ -1,3 +1,4 @@
+import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
@@ -459,6 +460,12 @@ app.whenReady().then(async () => {
       getShellEnv,
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
+      prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
+      onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
+      persistAgentSession: (company, id, session) => {
+        if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
+        broadcastChatHistoryChanged(company)
+      },
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })

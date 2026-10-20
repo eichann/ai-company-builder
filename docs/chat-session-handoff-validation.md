@@ -1,7 +1,7 @@
 # 引き継ぎメモ: 段階Aの検証結果
 
 実施日: 2026-10-20 / ブランチ: `feat/chat-session-handoff`
-基点: main `4b205b2`。通常相談への自動保存・復旧は未接続、未マージ。
+基点: main `4b205b2`。以下は段階A時点の記録。現在は段階B/Cを接続済み・未マージ。最新の検証は `chat-session-handoff-recovery.md` を参照。
 
 ## 結論
 
