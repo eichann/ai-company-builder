@@ -1,3 +1,4 @@
+import type { AgentSession, CodexStatus } from '../../../shared/agent'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
@@ -42,7 +43,7 @@ import type { ChatSession } from '../../../shared/chat-history'
 // Types
 // ============================================================================
 
-type AuthMode = 'claude-code' | 'api-key'
+type AuthMode = 'claude-code' | 'codex' | 'api-key'
 
 // ============================================================================
 // Hooks
@@ -1602,6 +1603,7 @@ interface ChatPanelChatProps {
   activeDepartment?: { name: string; folder: string }
   serverInfo: { port: number; authToken: string }
   authMode: AuthMode
+  codexStatus: CodexStatus
   slashCommands?: SlashCommandItem[]
   onShowSettings: () => void
   onTitleChange?: (title: string) => void
@@ -1612,7 +1614,7 @@ interface ChatPanelChatProps {
   onSessionIdChange?: (sessionId: string | null) => void
 }
 
-function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1622,6 +1624,14 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const setAIModel = useAppStore((state) => state.setAIModel)
   const aiEffort = useAppStore((state) => state.aiEffort)
   const setAIEffort = useAppStore((state) => state.setAIEffort)
+  const [codexModelId, setCodexModelId] = useState(() => localStorage.getItem('acb-codex-model') || '')
+  const [codexEffort, setCodexEffort] = useState(() => localStorage.getItem('acb-codex-effort') || '')
+  const codexModel = codexStatus.models.find(m => m.id === codexModelId) || codexStatus.models.find(m => m.isDefault) || codexStatus.models[0]
+  const selectedCodexEffort = codexModel?.efforts.includes(codexEffort) ? codexEffort : codexModel?.defaultEffort || ''
+  const selectedModel = authMode === 'codex' ? codexModel?.id : aiModel
+  const selectedEffort = authMode === 'codex' ? selectedCodexEffort : aiEffort
+  const authModeRef = useRef(authMode)
+  authModeRef.current = authMode
   const chatMarkdownRender = useAppStore((state) => state.chatMarkdownRender)
   const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
@@ -1630,7 +1640,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   }, [setPendingChatInput])
 
   // Tool approval state
-  const [pendingApproval, setPendingApproval] = useState<ToolApprovalRequest | null>(null)
+  const [pendingApprovals, setPendingApprovals] = useState<ToolApprovalRequest[]>([])
+  const pendingApproval = pendingApprovals[0]
 
   useEffect(() => {
     const unsub = window.electronAPI.onToolApprovalRequest((data) => {
@@ -1638,21 +1649,21 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) {
         return // Not for this tab
       }
-      setPendingApproval(data)
+      setPendingApprovals(queue => queue.some(p => p.toolUseId === data.toolUseId) ? queue : [...queue, data])
     })
     return unsub
   }, [])
 
   const handleToolApprovalResponse = useCallback((toolUseId: string, approved: boolean) => {
     window.electronAPI.respondToolApproval(toolUseId, approved)
-    setPendingApproval(null)
+    setPendingApprovals(queue => queue.filter(p => p.toolUseId !== toolUseId))
   }, [])
 
   // Refs for dynamic body params
   const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
   const activeDepartmentRef = useRef(activeDepartment)
-  const aiModelRef = useRef(aiModel)
-  const aiEffortRef = useRef(aiEffort)
+  const aiModelRef = useRef<string | undefined>(selectedModel)
+  const aiEffortRef = useRef<string>(selectedEffort)
 
   useEffect(() => {
     workingDirRef.current = departmentPath || currentCompany?.rootPath
@@ -1663,12 +1674,12 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   }, [activeDepartment])
 
   useEffect(() => {
-    aiModelRef.current = aiModel
-  }, [aiModel])
+    aiModelRef.current = selectedModel
+  }, [selectedModel])
 
   useEffect(() => {
-    aiEffortRef.current = aiEffort
-  }, [aiEffort])
+    aiEffortRef.current = selectedEffort
+  }, [selectedEffort])
 
   // Keep the selected effort valid for the current model. If the user switches to a
   // model that doesn't support the current effort (e.g. xhigh on Opus 4.6), demote to
@@ -1699,11 +1710,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const lastNotifiedTitleRef = useRef<string | null>(null)
   // Claude CLI session ID (persisted across app restarts via ChatSession)
   const claudeSessionIdRef = useRef<string | null>(null)
-  // Model this chat session was started with. A resumed CLI session keeps its original
-  // model regardless of later selections, so we capture it on the first message and show
-  // it in the (locked) model selector for the rest of the conversation.
-  const sessionModelRef = useRef<AIModel | null>(null)
-
+  const agentSessionRef = useRef<AgentSession | null | undefined>(undefined)
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
     return new DefaultChatTransport({
@@ -1711,6 +1718,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       headers: { Authorization: `Bearer ${serverInfo.authToken}` },
       body: () => {
         const body: Record<string, unknown> = {
+          authMode: authModeRef.current,
+          agentSession: agentSessionRef.current,
           workingDirectory: workingDirRef.current,
           activeDepartment: activeDepartmentRef.current || undefined,
           modelId: aiModelRef.current,
@@ -1794,6 +1803,10 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         })
           .then(res => res.json())
           .then(data => {
+            if (data.agentSession) {
+              if (appSessionIdRef.current === finishedSessionId) agentSessionRef.current = data.agentSession
+              void window.electronAPI.patchChatSession(finishedCompanyId, finishedSessionId, { agentSession: data.agentSession }).catch(() => {})
+            }
             if (data.claudeSessionId) {
               if (appSessionIdRef.current === finishedSessionId) claudeSessionIdRef.current = data.claudeSessionId
               void window.electronAPI.patchChatSession(finishedCompanyId, finishedSessionId, { claudeSessionId: data.claudeSessionId }).catch(() => {})
@@ -1807,22 +1820,13 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     },
   })
 
-  // A new chat starts with an assistant greeting, so the model isn't pinned until the
-  // user actually sends a message (which creates/locks the CLI session). Gate on that.
-  const hasUserMessage = messages.some((m) => m.role === 'user')
-
-  // Capture the model at the first user message (locks it for this session); clear on new chat.
   useEffect(() => {
-    if (hasUserMessage) {
-      if (sessionModelRef.current === null) sessionModelRef.current = aiModel
-    } else {
-      sessionModelRef.current = null
-    }
-  }, [hasUserMessage, aiModel])
+    if (status === 'ready' || status === 'error') setPendingApprovals([])
+  }, [status])
 
-  // Model is fixed once the user has sent a message (resumed sessions keep their original model).
-  const modelLocked = hasUserMessage
-  const displayedModel: AIModel = modelLocked ? (sessionModelRef.current ?? aiModel) : aiModel
+  // Model/provider changes start a fresh native session with visible history.
+  const modelLocked = status === 'submitted' || status === 'streaming'
+  const displayedModel = aiModel
 
   // Associate pending images with new user messages
   useEffect(() => {
@@ -1911,6 +1915,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           revisionRef.current = session.revision ?? 0
           createdAtRef.current = session.createdAt
           claudeSessionIdRef.current = session.claudeSessionId ?? null
+          agentSessionRef.current = session.agentSession
           for (const msg of session.messages) timestampsRef.current.set(msg.id, new Date(msg.timestamp))
           setMessages(session.messages.map(sessionMessageToUIMessage))
           setMessageImages(new Map(session.messages.filter(m => m.images).map(m => [m.id, m.images!])))
@@ -2030,10 +2035,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       revision: revisionRef.current,
       writerId: writerIdRef.current,
       writeSequence: ++writeSequenceRef.current,
+      ...(agentSessionRef.current !== undefined ? { agentSession: agentSessionRef.current } : {}),
       ...(claudeSessionIdRef.current ? { claudeSessionId: claudeSessionIdRef.current } : {}),
       ...(customTitleRef.current ? { titleAutoGenerated: customTitleRef.current.auto } : {}),
     }
-    const fingerprint = JSON.stringify([sessionId, session.messages, draftInput, session.claudeSessionId])
+    const fingerprint = JSON.stringify([sessionId, session.messages, draftInput, session.claudeSessionId, session.agentSession])
     if (!override && fingerprint === savedFingerprintRef.current && !pendingFingerprintRef.current) return true
     if (!sync && !override && fingerprint === pendingFingerprintRef.current) return true
     pendingFingerprintRef.current = fingerprint
@@ -2102,7 +2108,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           'Content-Type': 'application/json',
           Authorization: `Bearer ${serverInfo.authToken}`,
         },
-        body: JSON.stringify({ messages: transcript }),
+        body: JSON.stringify({ messages: transcript, authMode: authModeRef.current, modelId: aiModelRef.current }),
       })
       if (!res.ok) return
       const data = await res.json() as { title?: string; error?: string }
@@ -2148,6 +2154,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     acknowledgedSequenceRef.current = 0
     deletedRef.current = false
     claudeSessionIdRef.current = null
+    agentSessionRef.current = null
     timestampsRef.current.clear()
     const greeting: UIMessage[] = [{
       id: '1',
@@ -2357,7 +2364,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           <div className="flex items-center gap-2">
             <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">{t('chat.assistant')}</span>
             <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
-              {authMode === 'claude-code' ? 'Max' : 'API'}
+              {authMode === 'codex' ? 'Codex' : authMode === 'claude-code' ? 'Claude' : 'API'}
             </span>
             {/* Status indicator */}
             {status === 'submitted' && (
@@ -2382,13 +2389,24 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         </div>
 
         <div className="flex items-center gap-1">
-          {/* Model Selector (Claude Code mode only). Locked once the chat has started, since
-              a resumed CLI session keeps the model it was created with. */}
+          {authMode === 'codex' && <>
+            <select aria-label="Codexモデル" value={codexModel?.id || ''} disabled={modelLocked || !codexModel}
+              onChange={e => { setCodexModelId(e.target.value); localStorage.setItem('acb-codex-model', e.target.value) }}
+              className="h-7 max-w-44 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+              {codexStatus.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
+            </select>
+            <select aria-label="Codex思考の強さ" value={selectedCodexEffort} disabled={modelLocked || !codexModel}
+              onChange={e => { setCodexEffort(e.target.value); localStorage.setItem('acb-codex-effort', e.target.value) }}
+              className="h-7 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+              {codexModel?.efforts.map(e => <option key={e} value={e}>{e}</option>)}
+            </select>
+          </>}
+          {/* Model selection is locked only while a turn is in flight. */}
           {authMode === 'claude-code' && (
             <select
               value={displayedModel}
               disabled={modelLocked}
-              title={modelLocked ? 'モデルはチャット開始時に固定されます（変更は新しいチャットから）' : undefined}
+              title={modelLocked ? '応答中はモデルを変更できません' : undefined}
               onChange={(e) => setAIModel(e.target.value as AIModel)}
               className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
@@ -2500,6 +2518,12 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         />
       )}
 
+      {authMode === 'codex' && (!codexStatus.authenticated || !codexModel) && (
+        <div role="alert" className="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
+          {codexStatus.error || 'Codexの接続を確認してください。'}
+          <button onClick={onShowSettings} className="ml-2 underline">設定を開く</button>
+        </div>
+      )}
       {/* Tool Approval Banner (above input) */}
       {pendingApproval && (
         <ToolApprovalBanner
@@ -2517,7 +2541,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
             voiceActive={isActive}
             voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
-            disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current}
+            disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || (authMode === 'codex' && (!codexStatus.authenticated || !codexModel))}
             placeholder={t('chat.inputPlaceholder')}
             hint={t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
@@ -2631,6 +2655,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   // Auth state
   const [isReady, setIsReady] = useState(false)
   const [authMode, setAuthMode] = useState<AuthMode>('claude-code')
+  const [codexStatus, setCodexStatus] = useState<CodexStatus>({ available: false, authenticated: false, models: [] })
   const [claudeCodeAvailable, setClaudeCodeAvailable] = useState(false)
   const [claudeCodeError, setClaudeCodeError] = useState<string | null>(null)
   const [showSettings, setShowSettings] = useState(false)
@@ -2794,15 +2819,16 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
       setClaudeCodeError(ccStatus.error)
       setAuthMode(savedAuthMode)
 
-      if (savedAuthMode === 'claude-code' && ccAvailable) {
+      if (savedAuthMode === 'codex') {
+        const status = await window.electronAPI.getCodexStatus()
+        setCodexStatus(status)
+        // Keep the chat mounted, including drafts; show actionable auth errors in settings.
+        setIsReady(true)
+      } else if (savedAuthMode === 'claude-code' && ccAvailable) {
         setIsReady(true)
       } else if (savedAuthMode === 'api-key' && hasApiKey) {
         setIsReady(true)
-      } else if (ccAvailable) {
-        setAuthMode('claude-code')
-        await window.electronAPI.setAuthMode('claude-code')
-        setIsReady(true)
-      }
+      } else if (!background) setIsReady(false)
     } finally {
       if (!background) setIsChecking(false)
     }
@@ -2890,6 +2916,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
                 activeDepartment={activeDepartment}
                 serverInfo={serverInfo}
                 authMode={authMode}
+                codexStatus={codexStatus}
                 slashCommands={slashCommands}
                 onShowSettings={() => setShowSettings(true)}
                 onTitleChange={(title) => updateTabTitle(tab.id, title)}
@@ -2936,6 +2963,16 @@ interface AuthSettingsProps {
 function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCodeError, onClose }: AuthSettingsProps) {
   const { t } = useTranslation()
   const [authMode, setAuthMode] = useState<AuthMode>(initialAuthMode)
+  const [codexStatus, setCodexStatus] = useState<CodexStatus | null>(null)
+  const [checkingCodex, setCheckingCodex] = useState(false)
+  const [saveError, setSaveError] = useState('')
+  const refreshCodex = async () => {
+    setCheckingCodex(true)
+    try { setCodexStatus(await window.electronAPI.getCodexStatus()) }
+    catch (e) { setCodexStatus({ available: false, authenticated: false, models: [], error: String(e) }) }
+    finally { setCheckingCodex(false) }
+  }
+  useEffect(() => { if (authMode === 'codex') void refreshCodex() }, [authMode])
   const [apiKey, setApiKey] = useState('')
   const [saving, setSaving] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
@@ -2968,9 +3005,11 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
         await window.electronAPI.setApiKey(apiKey)
       }
       await window.electronAPI.setPermissionMode(permissionMode)
+      onClose()
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : String(error))
     } finally {
       setSaving(false)
-      onClose()
     }
   }
 
@@ -3026,6 +3065,14 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
             </div>
           </button>
 
+          <button onClick={() => setAuthMode('codex')}
+            className={`w-full text-left p-4 rounded-xl border transition-colors ${authMode === 'codex' ? 'border-accent/50 bg-accent/10' : 'border-white/[0.06] bg-surface-elevated'}`}>
+            <div className="flex items-center justify-between">
+              <div><div className="font-medium text-ink text-sm">Codex（ChatGPTプラン）</div>
+                <div className="text-xs text-ink-muted mt-1">自分のChatGPTアカウントの利用枠で相談します</div></div>
+              {authMode === 'codex' && <Check size={18} className="text-accent" />}
+            </div>
+          </button>
           {/* API Key Option */}
           <button
             onClick={() => setAuthMode('api-key')}
@@ -3056,6 +3103,14 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
           </button>
         </div>
 
+        <p className="text-xs text-ink-muted">変更は次の送信から適用されます。AIやモデルを切り替えると、相談の表示履歴を渡して新しいAIセッションで続けます。元のAIの内部状態やツール実行結果は引き継ぎません。</p>
+        {authMode === 'codex' && <section className="rounded-xl border border-white/[0.08] p-4 space-y-2 text-sm">
+          <p>{checkingCodex ? 'Codexを確認しています…' : codexStatus?.authenticated && codexStatus.models.length ? 'ChatGPTでログイン済み' : 'Codexの準備が必要です'}</p>
+          {codexStatus?.error && <p className="text-xs text-red-500">{codexStatus.error}</p>}
+          <p className="text-xs text-ink-muted">未ログインの場合はターミナルで <code>codex login</code> を実行してください。操作に必要な権限は、その都度確認します。</p>
+          <button onClick={() => void refreshCodex()} disabled={checkingCodex} className="text-accent text-xs disabled:opacity-50">接続を再確認</button>
+        </section>}
+        {saveError && <p role="alert" className="text-sm text-red-500">{saveError}</p>}
         {/* API Key Input */}
         {authMode === 'api-key' && (
           <div className="space-y-3 pt-2 animate-fade-in">
@@ -3173,7 +3228,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
       <div className="flex-shrink-0 p-4 border-t border-white/[0.04]">
         <button
           onClick={handleSave}
-          disabled={saving || (authMode === 'api-key' && !apiKey)}
+          disabled={saving || (authMode === 'api-key' && !apiKey) || (authMode === 'codex' && (checkingCodex || !codexStatus?.authenticated || !codexStatus.models.length))}
           className="
             w-full py-3 rounded-xl
             bg-accent hover:bg-accent/90

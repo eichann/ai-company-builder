@@ -119,7 +119,8 @@ export class ChatHistoryStore {
         pinned: existing.pinned,
         pinnedAt: existing.pinnedAt,
         createdAt: existing.createdAt,
-        claudeSessionId: incoming.claudeSessionId || existing.claudeSessionId,
+        claudeSessionId: existing.claudeSessionId || incoming.claudeSessionId,
+        agentSession: existing.agentSession !== undefined ? existing.agentSession : incoming.agentSession,
       } : {}),
       revision: (existing?.revision ?? 0) + 1,
       updatedAt: existing && JSON.stringify([existing.messages, existing.draftInput ?? '']) ===
@@ -149,6 +150,10 @@ export class ChatHistoryStore {
     if (typeof patch.pinned === 'boolean') {
       session.pinned = patch.pinned
       session.pinnedAt = patch.pinned ? new Date().toISOString() : undefined
+    }
+    if (patch.agentSession !== undefined) {
+      if (patch.agentSession !== null && (!['claude-code', 'codex', 'api-key'].includes(patch.agentSession.providerId) || typeof patch.agentSession.id !== 'string' || !patch.agentSession.id)) throw new Error('不正なAIセッションです。')
+      session.agentSession = patch.agentSession
     }
     if (typeof patch.claudeSessionId === 'string') session.claudeSessionId = patch.claudeSessionId
     this.write(companyId, data)

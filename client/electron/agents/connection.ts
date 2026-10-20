@@ -9,12 +9,22 @@ export interface AgentConnection {
     workingDirectory?: string
     appSessionId?: string
     modelId?: string
-    effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+    effort?: string
     resumeId?: string
   }): LanguageModel
-  createTitleModel(): LanguageModel
+  createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {
     sessionId?: string
     contextUsage?: { inputTokens: number; outputTokens: number; contextWindow?: number }
   }
+}
+
+export interface AgentHostConfig {
+  getShellEnv: () => Record<string, string>
+  requestToolApproval?: (
+    toolName: string,
+    toolInput: Record<string, unknown>,
+    toolUseId: string,
+    appSessionId?: string,
+  ) => Promise<{ approved: boolean }>
 }

@@ -173,8 +173,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getApiKey: () => ipcRenderer.invoke('config:getApiKey'),
   setApiKey: (apiKey: string) => ipcRenderer.invoke('config:setApiKey', apiKey),
   hasApiKey: () => ipcRenderer.invoke('config:hasApiKey'),
+  getCodexStatus: () => ipcRenderer.invoke('codex:status'),
   getAuthMode: () => ipcRenderer.invoke('config:getAuthMode'),
-  setAuthMode: (mode: 'claude-code' | 'api-key') => ipcRenderer.invoke('config:setAuthMode', mode),
+  setAuthMode: (mode: 'claude-code' | 'codex' | 'api-key') => ipcRenderer.invoke('config:setAuthMode', mode),
   isClaudeCodeAvailable: () => ipcRenderer.invoke('config:isClaudeCodeAvailable'),
   getClaudeCodeStatus: () => ipcRenderer.invoke('config:getClaudeCodeStatus'),
   getPermissionMode: () => ipcRenderer.invoke('config:getPermissionMode'),
@@ -489,8 +490,9 @@ declare global {
       getApiKey: () => Promise<string | null>
       setApiKey: (apiKey: string) => Promise<boolean>
       hasApiKey: () => Promise<boolean>
-      getAuthMode: () => Promise<'claude-code' | 'api-key'>
-      setAuthMode: (mode: 'claude-code' | 'api-key') => Promise<boolean>
+      getCodexStatus: () => Promise<import('../shared/agent').CodexStatus>
+      getAuthMode: () => Promise<'claude-code' | 'codex' | 'api-key'>
+      setAuthMode: (mode: 'claude-code' | 'codex' | 'api-key') => Promise<boolean>
       isClaudeCodeAvailable: () => Promise<boolean>
       getClaudeCodeStatus: () => Promise<{
         available: boolean

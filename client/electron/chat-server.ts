@@ -1,3 +1,6 @@
+import { resumeSession, agentInputMessages } from './agents/session'
+import { createCodexConnection } from './agents/codex'
+import type { AgentSession, AuthMode } from '../shared/agent'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
 import { cors } from 'hono/cors'
@@ -18,7 +21,7 @@ import net from 'net'
 
 export interface ChatServerConfig extends ClaudeConnectionConfig {
   getApiKey: () => string | undefined
-  getAuthMode: () => 'claude-code' | 'api-key'
+  getAuthMode: () => 'claude-code' | 'codex' | 'api-key'
   buildSystemPrompt: (workingDirectory?: string) => string
 }
 
@@ -84,8 +87,8 @@ export async function startChatServer(config: ChatServerConfig) {
     return usage
   }
 
-  // Claude Code CLI session ID tracking (appSessionId → claudeCliSessionId)
-  const agentSessionMap = new Map<string, { providerId: string; id: string }>()
+  // Current native session for each ACB conversation (provider-tagged).
+  const agentSessionMap = new Map<string, AgentSession>()
 
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
@@ -119,6 +122,8 @@ export async function startChatServer(config: ChatServerConfig) {
       referenceFiles,
       appSessionId,
       claudeSessionId: bodyClaudeSessionId,
+      agentSession: bodyAgentSession,
+      authMode: requestedAuthMode,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
@@ -127,17 +132,19 @@ export async function startChatServer(config: ChatServerConfig) {
       skillInfo?: { skillFolderPath: string }
       images?: Array<{ mediaType: string; data: string }>
       modelId?: string
-      effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max'
+      effort?: string
       referenceFiles?: string[]
       appSessionId?: string
       claudeSessionId?: string
+      agentSession?: AgentSession | null
+      authMode?: AuthMode
     } = body
 
-    const authMode = config.getAuthMode()
-    const connection = authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
+    const authMode = requestedAuthMode || config.getAuthMode()
+    if (!['claude-code', 'codex', 'api-key'].includes(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
+    const connection = authMode === 'codex' ? createCodexConnection(config) : authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
 
-    // Claude Code CLI mode: minimal context only (working directory + language)
-    // Claude Code has its own comprehensive system prompt; heavy injection degrades quality.
+    // Native agents own their system prompts; ACB supplies only workspace context.
     // API key mode: build full system prompt as before.
     let finalSystemPrompt: string | undefined
     if (connection.ownsConversation) {
@@ -152,19 +159,17 @@ export async function startChatServer(config: ChatServerConfig) {
       }
       if (referenceFiles && referenceFiles.length > 0) {
         const fileList = referenceFiles.map(p => `- ${p}`).join('\n')
-        const refInstruction = `\n\n重要: ユーザーが以下のファイルを参照として添付しました。回答する前に、必ずこれらのファイルをReadツールで読み込み、内容を踏まえて回答してください:\n${fileList}`
+        const refInstruction = `\n\n重要: ユーザーが以下のファイルを参照として添付しました。回答する前に、必ずこれらのファイルを読み込み、内容を踏まえて回答してください:\n${fileList}`
         finalSystemPrompt = (finalSystemPrompt || '') + refInstruction
       }
     } else {
       finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
     }
 
-    // Legacy persisted IDs belong only to Claude. Keep the wire format compatible.
+    // A different provider/model starts from visible history, never an older native session.
     const storedSession = appSessionId ? agentSessionMap.get(appSessionId) : undefined
-    const existingCliSessionId = connection.ownsConversation
-      ? ((connection.id === 'claude-code' ? bodyClaudeSessionId : undefined)
-        || (storedSession?.providerId === connection.id ? storedSession.id : undefined))
-      : undefined
+    const candidate: AgentSession | null | undefined = storedSession || bodyAgentSession || (bodyAgentSession === undefined && bodyClaudeSessionId ? { providerId: 'claude-code', id: bodyClaudeSessionId } : undefined)
+    const existingCliSessionId = connection.ownsConversation ? resumeSession(candidate, authMode, modelId) : undefined
 
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
@@ -179,7 +184,12 @@ export async function startChatServer(config: ChatServerConfig) {
       return { ...fsTools, ...skillTools }
     })()
 
-    const modelMessages = await convertToModelMessages(messages)
+    let inputMessages = messages
+    try {
+      if (connection.ownsConversation) inputMessages = agentInputMessages(messages, existingCliSessionId)
+      else if (candidate && candidate.providerId !== authMode) inputMessages = agentInputMessages(messages)
+    } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
+    const modelMessages = await convertToModelMessages(inputMessages)
 
     // Debug: log reference files and system prompt
     if (referenceFiles && referenceFiles.length > 0) {
@@ -248,6 +258,8 @@ export async function startChatServer(config: ChatServerConfig) {
     }
 
     const result = streamText({
+      abortSignal: c.req.raw.signal,
+      maxRetries: 0,
       model,
       ...(finalSystemPrompt ? { system: finalSystemPrompt } : {}),
       messages: finalMessages,
@@ -267,9 +279,10 @@ export async function startChatServer(config: ChatServerConfig) {
             noCacheTokens: usage.inputTokenDetails?.noCacheTokens ?? 0,
           }
         }
+        if (!connection.ownsConversation && appSessionId) agentSessionMap.set(appSessionId, { providerId: authMode, id: appSessionId, modelId })
         const metadata = connection.readMetadata(providerMetadata)
         if (metadata.sessionId && appSessionId) {
-          agentSessionMap.set(appSessionId, { providerId: connection.id, id: metadata.sessionId })
+          agentSessionMap.set(appSessionId, { providerId: authMode, id: metadata.sessionId, modelId })
         }
         if (metadata.contextUsage) {
           su.accumulatedInputTokens = metadata.contextUsage.inputTokens
@@ -284,23 +297,24 @@ export async function startChatServer(config: ChatServerConfig) {
 
     return result.toUIMessageStreamResponse({
       sendReasoning: true,
+      onError: error => error instanceof Error ? error.message : 'AIとの接続でエラーが発生しました。',
     })
   })
 
   // GET /api/session/:appSessionId — return CLI session ID for persistence
   // POST /api/generate-title — generate a concise title for a chat session using Haiku
   app.post('/api/generate-title', async (c) => {
-    const body = await c.req.json() as { messages: Array<{ role: 'user' | 'assistant'; content: string }> }
+    const body = await c.req.json() as { messages: Array<{ role: 'user' | 'assistant'; content: string }>; authMode?: AuthMode; modelId?: string }
     const inputMessages = Array.isArray(body?.messages) ? body.messages : []
     if (inputMessages.length === 0) {
       return c.json({ error: 'No messages provided' }, 400)
     }
 
-    const authMode = config.getAuthMode()
-    const connection = authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
+    const authMode = body.authMode || config.getAuthMode()
+    const connection = authMode === 'codex' ? createCodexConnection(config) : authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
-    const model = connection.createTitleModel()
+    const model = connection.createTitleModel({ modelId: body.modelId })
 
     // Build a compact transcript (cap input to keep cost minimal)
     const MAX_TRANSCRIPT_CHARS = 1500
@@ -326,7 +340,7 @@ ${transcript}
 タイトル:`
 
     try {
-      const result = await generateText({ model, prompt })
+      const result = await generateText({ model, prompt, maxRetries: 0 })
       let title = (result.text || '').trim()
       // Strip surrounding quotes if any
       title = title.replace(/^["「『'`]+/, '').replace(/["」』'`]+$/, '').trim()
@@ -348,7 +362,7 @@ ${transcript}
     const id = c.req.param('appSessionId')
     const session = agentSessionMap.get(id)
     const claudeSessionId = session?.providerId === 'claude-code' ? session.id : null
-    return c.json({ claudeSessionId })
+    return c.json({ claudeSessionId, agentSession: session || null })
   })
 
   // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat / tab close)

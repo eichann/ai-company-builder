@@ -1,3 +1,4 @@
+import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
 import path from 'path'
@@ -80,7 +81,7 @@ const getConfigPath = () => path.join(app.getPath('userData'), 'config.json')
 
 interface AppConfig {
   anthropicApiKey?: string
-  authMode?: 'claude-code' | 'api-key'
+  authMode?: 'claude-code' | 'codex' | 'api-key'
   permissionMode?: 'bypassPermissions' | 'default'
   serverUrl?: string
   docbaseCookie?: string
@@ -433,7 +434,7 @@ app.whenReady().then(async () => {
     const serverConfig: ChatServerConfig = {
       getAuthMode: () => {
         const config = loadConfig()
-        return (config.authMode || 'claude-code') as 'claude-code' | 'api-key'
+        return (config.authMode || 'claude-code') as 'claude-code' | 'codex' | 'api-key'
       },
       getApiKey: () => {
         const config = loadConfig()
@@ -996,13 +997,16 @@ ipcMain.handle('config:hasApiKey', () => {
 })
 
 // Auth mode management
+ipcMain.handle('codex:status', () => getCodexStatus(getShellEnv()))
+
 ipcMain.handle('config:getAuthMode', () => {
   const config = loadConfig()
   return config.authMode || 'claude-code'
 })
 
-ipcMain.handle('config:setAuthMode', (_, mode: 'claude-code' | 'api-key') => {
+ipcMain.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-key') => {
   const config = loadConfig()
+  if (!['claude-code', 'codex', 'api-key'].includes(mode)) throw new Error('不明なAI接続方式です。')
   config.authMode = mode
   saveConfig(config)
   return true
@@ -3947,6 +3951,7 @@ ipcMain.handle('ai:chat', async (_event, messages: ChatMessage[], systemPrompt?:
 
   // Build system prompt with working directory context
   const finalSystemPrompt = systemPrompt || buildSystemPrompt(workingDirectory)
+  if (authMode === 'codex') return { error: 'Codexは相談チャットから利用してください。' }
 
   try {
     let model
