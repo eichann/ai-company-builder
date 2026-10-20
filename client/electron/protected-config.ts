@@ -42,8 +42,13 @@ export function isProtectedConfigRejection(errorMessage: string): boolean {
  * (SECRET_DETECTED, ...) use the same bullet style.
  */
 export function parseProtectedConfigPaths(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, PROTECTED_CONFIG_MARKER)
+}
+
+// Shared by every hook section that lists paths (PROTECTED_CONFIG, PERSONAL_PATH).
+function parseRejectionPaths(errorMessage: string, marker: string): string[] {
   const lines = errorMessage.split(/\r?\n/).map(line => line.replace(/^remote:\s?/, '').trimEnd())
-  const start = lines.findIndex(line => line.includes(PROTECTED_CONFIG_MARKER))
+  const start = lines.findIndex(line => line.includes(marker))
   if (start === -1) return []
   const paths: string[] = []
   let separators = 0
@@ -212,4 +217,95 @@ export async function restoreProtectedPaths(options: {
   }
 
   return { restored, removed, backupPath: backedUp.length > 0 ? backupPath : null, committed }
+}
+
+// ---------------------------------------------------------------------------
+// .personal/ — never shared, for anyone
+// ---------------------------------------------------------------------------
+//
+// The hook rejects with [PERSONAL_PATH] any push in which a commit adds or
+// modifies a file inside a directory named `.personal` (any depth), except
+// the `.gitignore` directly inside it — for every pusher, owner/admin
+// included. Unlike protected config, the fix is not "take the server's
+// version": the file is the member's private file, so it is untracked (kept
+// on disk, and ignored from now on by the essential `**/.personal/*` sync
+// pattern). Deletions are always allowed, which is also how a file shared
+// before the rule existed gets unshared. As with protected config, the
+// unpushed commits are squashed first because the hook checks every commit
+// in the pushed range.
+
+export const PERSONAL_PATH_MARKER = '[PERSONAL_PATH]'
+
+export function isPersonalPathRejection(errorMessage: string): boolean {
+  return errorMessage.includes(PERSONAL_PATH_MARKER)
+}
+
+export function parsePersonalPaths(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, PERSONAL_PATH_MARKER)
+}
+
+export interface PersonalUntrackResult {
+  /** Paths taken out of the shared repository (still on disk). */
+  untracked: string[]
+  /** True when a commit with the member's remaining changes was created. */
+  committed: boolean
+}
+
+/**
+ * Squash the unpushed commits and leave the given `.personal/` paths out of
+ * them with `git rm --cached` — the files stay on disk. A path the server
+ * already has (shared before the rule) is deleted from the server by this
+ * commit, which the hook always allows.
+ */
+export async function untrackPersonalPaths(options: {
+  git: SimpleGit
+  repoPath: string
+  paths: string[]
+  upstream?: string
+}): Promise<PersonalUntrackResult> {
+  const { git, repoPath, paths } = options
+  const upstream = options.upstream ?? 'origin/main'
+  if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
+  for (const p of paths) {
+    assertInsideRepo(repoPath, p)
+    if (!/(^|\/)\.personal\//i.test(p)) {
+      throw new ProtectedConfigRecoveryError(`個人用フォルダのファイルではありません: ${p}`)
+    }
+  }
+
+  const localHead = (await git.revparse(['HEAD'])).trim()
+  const upstreamHash = (await git.revparse([upstream])).trim()
+  const mergeBase = (await git.raw(['merge-base', upstreamHash, localHead]).catch(() => '')).trim()
+  if (mergeBase !== upstreamHash) {
+    throw new ProtectedConfigRecoveryError('サーバーの最新状態を取り込めていないため、自動で外せませんでした。もう一度同期してください。')
+  }
+
+  const squashedMessages = (await git.raw(['log', '--format=%s', `${upstreamHash}..${localHead}`]))
+    .split('\n').map(s => s.trim()).filter(Boolean)
+
+  // Squash, then drop the paths from the index only (worktree untouched).
+  await git.raw(['reset', '--soft', upstreamHash])
+  const untracked: string[] = []
+  for (const file of paths) {
+    const inIndex = (await git.raw(['ls-files', '-z', '--', file])).replace(/\0/g, '')
+    if (!inIndex) continue
+    await git.raw(['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', '--', file])
+    untracked.push(file)
+  }
+
+  let committed = false
+  const remaining = (await git.raw(['diff', '--cached', '--name-only', '-z', upstreamHash])).replace(/\0/g, '')
+  if (remaining) {
+    const subject = squashedMessages.length === 1 ? squashedMessages[0] : 'Sync from AI Company Builder'
+    const body = squashedMessages.length > 1 ? `\n\n${squashedMessages.map(m => `- ${m}`).join('\n')}` : ''
+    await git.commit(`${subject}${body}\n\n（個人用フォルダ .personal のファイルは共有対象から外しました）`)
+    committed = true
+  }
+  return { untracked, committed }
+}
+
+/** Plain-words explanation for the member (Japanese UI). */
+export function personalPathMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `個人用フォルダ（.personal）のファイルは、誰であっても共有できません。\n\n${list}`
 }

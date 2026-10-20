@@ -11,6 +11,8 @@
 #   変更を、会社のオーナー・管理者以外からはブロックする。
 #   役割はサーバー(git-http.ts)が認証済みユーザーから ACB_PUSHER_ROLE に設定する。
 #   値が無い・不明な場合は、保護対象パスについてのみ拒否する(fail closed)。
+# - 個人用フォルダ(.personal、どの階層でも)の中身の追加・変更を、役割に
+#   関係なくブロックする（直下の .gitignore と、削除は許可）。
 #
 
 ZERO_SHA="0000000000000000000000000000000000000000"
@@ -82,6 +84,45 @@ list_protected_changes() (
   exit 0
 )
 
+# --- 個人用フォルダ(.personal)の共有禁止 ---
+# どの階層でも ".personal" という名前のフォルダの中身は、誰であっても
+# （オーナー・管理者も）共有できない。部署フォルダの .personal/.gitignore
+# だけでは、手で作った別の場所の .personal/ が普通に共有されてしまうため、
+# サーバー側で強制する。
+# - 例外1: .personal/ の直下の .gitignore（サーバーが部署作成時に書く）
+# - 例外2: 削除は常に許可（共有済みのファイルを共有から外す手段）
+# 大文字小文字は区別しない（macOS/Windows の core.ignorecase と揃える）。
+PERSONAL_RE='(^|/)\.personal/'
+PERSONAL_ALLOWED_RE='(^|/)\.personal/\.gitignore$'
+found_personal=0
+declare -a detected_personal=()
+
+# ref 更新で .personal/ の中に追加・変更されるパス（削除は除く）を出力する。
+# 対象の差分は list_protected_changes と同じ（新コミットごと + 正味の差分）。
+# リネームは --no-renames で「元の削除 + 先の追加」になるので、
+# .personal/ への移動は追加として検出され、.personal/ からの移動は許可される。
+list_personal_additions() (
+  set -o pipefail
+  old="$1"
+  new="$2"
+  commits=$(git rev-list "$new" --not --all) || exit 1
+  net=""
+  if [ "$old" != "$ZERO_SHA" ]; then
+    net=$(git diff-tree -r --no-renames --diff-filter=d --name-only -z "$old" "$new" | tr '\0' '\n') || exit 1
+  fi
+  per_commit=""
+  if [ -n "$commits" ]; then
+    per_commit=$(printf '%s\n' "$commits" \
+      | git diff-tree --stdin -r --root -c --no-renames --diff-filter=d --name-only -z --no-commit-id \
+      | tr '\0' '\n') || exit 1
+  fi
+  printf '%s\n%s\n' "$net" "$per_commit" \
+    | LC_ALL=C grep -iE "$PERSONAL_RE" \
+    | LC_ALL=C grep -viE "$PERSONAL_ALLOWED_RE" \
+    | LC_ALL=C sort -u
+  exit 0
+)
+
 while read old_sha new_sha refname; do
   # ブランチ削除は無視（receive.denyDeletes が別途拒否する。
   # 削除は残るブランチの内容を変えないので保護チェックも不要）
@@ -108,6 +149,24 @@ while read old_sha new_sha refname; do
         fi
       done <<< "$protected_changes"
     fi
+  fi
+
+  # --- 個人用フォルダ(.personal)の共有禁止（役割に関係なく全員） ---
+  if ! personal_changes=$(list_personal_additions "$old_sha" "$new_sha" 2>/dev/null); then
+    personal_changes="（変更内容を確認できませんでした: $refname）"
+  fi
+  if [ -n "$personal_changes" ]; then
+    while IFS= read -r pp; do
+      [ -z "$pp" ] && continue
+      already=0
+      for existing in "${detected_personal[@]}"; do
+        if [ "$existing" = "  - $pp" ]; then already=1; break; fi
+      done
+      if [ "$already" -eq 0 ]; then
+        detected_personal+=("  - $pp")
+        found_personal=1
+      fi
+    done <<< "$personal_changes"
   fi
 
   # --- Windows非互換パス検知 ---
@@ -230,6 +289,26 @@ while read old_sha new_sha refname; do
 done
 
 rc=0
+
+if [ "$found_personal" -eq 1 ]; then
+  # 出力形式は PROTECTED_CONFIG と同じ（client/electron/protected-config.ts が解析）
+  echo "" >&2
+  echo "========================================" >&2
+  echo "[PERSONAL_PATH] 個人用フォルダ(.personal)のファイルが含まれています" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  echo "以下は個人用フォルダ(.personal)の中のファイルです。" >&2
+  echo ".personal の中身は、誰であっても共有できません:" >&2
+  for entry in "${detected_personal[@]}"; do
+    printf '%s\n' "$entry" >&2
+  done
+  echo "" >&2
+  echo "プッシュをブロックしました。これらのファイルを共有対象から外してから" >&2
+  echo "再度同期してください（ACBクライアントは自動で外します。ファイルはPCに残ります）。" >&2
+  echo "========================================" >&2
+  echo "" >&2
+  rc=1
+fi
 
 if [ "$found_protected" -eq 1 ]; then
   # 出力形式はクライアント(client/electron/protected-config.ts)が解析する:
