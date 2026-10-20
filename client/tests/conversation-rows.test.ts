@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows } from '../src/lib/conversationRows'
+import { buildConversationRows, paginateConversationRows } from '../src/lib/conversationRows'
 import type { ChatSession } from '../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSession> = {}): ChatSession => ({ id, companyId: 'company', title: id, messages: [], createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
@@ -22,4 +22,20 @@ test('blank tabs remain accessible and a closed tab returns to history without l
   const rows = buildConversationRows(sessions, [], '')
   assert.equal(rows[0].tab, undefined)
   assert.equal(rows[0].session?.id, 'saved')
+})
+
+test('history expands by page while open/pinned rows stay visible and search covers hidden history', () => {
+  const sessions = [session('open'), session('pinned', {pinned:true}), ...Array.from({length:45}, (_,i)=>session(`history-${i}`))]
+  const tabs = [{id:'tab',title:'open',sessionId:'open'}]
+  const rows = buildConversationRows(sessions,tabs,'')
+  const first = paginateConversationRows(rows,20)
+  assert.equal(first.visibleRows.length,22)
+  assert.equal(first.remaining,25)
+  assert.deepEqual(first.visibleRows.slice(0,2).map(r=>r.session?.id),['open','pinned'])
+  assert.equal(paginateConversationRows(rows,40).remaining,5)
+  assert.equal(paginateConversationRows(rows,60).visibleRows.length,47)
+  assert.equal(paginateConversationRows(rows,60).remaining,0)
+  const searched = paginateConversationRows(buildConversationRows(sessions,tabs,'history-44'),20)
+  assert.equal(searched.visibleRows[0].session?.id,'history-44')
+  assert.equal(searched.remaining,0)
 })

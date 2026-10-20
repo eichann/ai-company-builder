@@ -1,3 +1,4 @@
+import { registerVoiceInput } from './voice-input'
 import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -409,6 +410,7 @@ protocol.registerSchemesAsPrivileged([
 
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
+  registerVoiceInput(getClaudeCodeCliPath, getShellEnv)
   // Handle local-file:// protocol to serve local files (restricted to allowed directories)
   protocol.handle('local-file', (request) => {
     const filePath = decodeURIComponent(request.url.replace('local-file://', ''))

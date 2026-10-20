@@ -1,3 +1,4 @@
+import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
 // Use require for CommonJS compatibility in Electron preload
 const { contextBridge, ipcRenderer } = require('electron')
@@ -20,6 +21,18 @@ interface AICompleteData {
 }
 
 contextBridge.exposeInMainWorld('electronAPI', {
+  voiceInput: {
+    capabilities: () => ipcRenderer.invoke('voice:capabilities'),
+    devices: () => ipcRenderer.invoke('voice:devices'),
+    start: (id: string, deviceId?: string) => ipcRenderer.invoke('voice:start', id, deviceId),
+    stop: (id: string) => ipcRenderer.invoke('voice:stop', id),
+    cancel: (id: string) => ipcRenderer.invoke('voice:cancel', id),
+    onEvent: (callback: (event: VoiceEvent) => void) => {
+      const listener = (_event: unknown, value: VoiceEvent) => callback(value)
+      ipcRenderer.on('voice:event', listener)
+      return () => ipcRenderer.removeListener('voice:event', listener)
+    },
+  },
   // Authentication
   signUp: (email: string, password: string, name?: string) =>
     ipcRenderer.invoke('auth:signUp', email, password, name),
@@ -413,6 +426,7 @@ interface BackupRestoreResult {
 declare global {
   interface Window {
     electronAPI: {
+      voiceInput: VoiceInputAPI
       // Authentication
       signUp: (email: string, password: string, name?: string) => Promise<AuthResult>
       signIn: (email: string, password: string) => Promise<AuthResult>

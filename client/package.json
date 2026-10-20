@@ -8,10 +8,12 @@
   "scripts": {
     "dev": "vite",
     "dev:no-spellcheck": "ELECTRON_DISABLE_SPELLCHECK=1 vite",
-    "build": "tsc && vite build && electron-builder",
+    "build": "node scripts/build-speech.mjs && tsc && vite build && electron-builder",
     "preview": "vite preview",
     "lint": "eslint .",
-    "typecheck": "tsc --noEmit -p tsconfig.json"
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "build:speech": "node scripts/build-speech.mjs",
+    "predev": "node scripts/build-speech.mjs"
   },
   "build": {
     "appId": "com.ai-company-builder.client",
@@ -39,7 +41,21 @@
         "dmg",
         "zip"
       ],
-      "mergeASARs": false
+      "mergeASARs": false,
+      "extraResources": [
+        {
+          "from": "native/bin/acb-speech",
+          "to": "voice/acb-speech"
+        }
+      ],
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "話した内容を相談の入力欄に入力するためにマイクを使用します。"
+      },
+      "binaries": [
+        "Contents/Resources/voice/acb-speech"
+      ],
+      "entitlements": "native/entitlements.plist",
+      "entitlementsInherit": "native/entitlements.plist"
     },
     "win": {
       "target": [

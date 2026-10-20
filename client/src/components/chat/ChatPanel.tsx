@@ -1,9 +1,12 @@
+import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
+import { VoiceInputControl } from './VoiceInputControl'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
-import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
+import { history, historyKeymap, isolateHistory } from '@codemirror/commands'
+import { Compartment, EditorState, Transaction } from '@codemirror/state'
+import { EditorView, keymap, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
 import {
   Sparkle,
   GearSix,
@@ -690,11 +693,18 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 // ============================================================================
 
 interface ChatInputApi {
+  focus: () => void
+  captureInsertion: () => (text: string) => boolean
   getValue: () => string
   setValue: (text: string) => void
 }
 
 interface ChatInputProps {
+  initialDraft?: string
+  onDraftChange?: (text: string) => void
+  keepCursor?: boolean
+  voiceActive?: boolean
+  voiceScope?: string
   onSend: (text: string, files?: File[], filePaths?: string[]) => void
   disabled: boolean
   placeholder: string
@@ -747,6 +757,9 @@ const chatInputCodeMirrorTheme = EditorView.theme({
 })
 
 const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
+  keepCursor = false,
+  initialDraft,
+  onDraftChange,
   onSend,
   disabled,
   placeholder,
@@ -758,6 +771,9 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   slashCommands,
   apiRef,
 }: ChatInputProps) {
+  const draftBufferRef = useRef(initialDraft ?? '')
+  const onDraftChangeRef = useRef(onDraftChange)
+  onDraftChangeRef.current = onDraftChange
   const editorHostRef = useRef<HTMLDivElement>(null)
   const editorViewRef = useRef<EditorView | null>(null)
   const onSendRef = useRef(onSend)
@@ -866,9 +882,11 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
     const placeholderCompartment = placeholderCompartmentRef.current
 
     const state = EditorState.create({
-      doc: '',
+      doc: draftBufferRef.current,
       extensions: [
         chatInputCodeMirrorTheme,
+        history(),
+        keymap.of(historyKeymap),
         EditorView.lineWrapping,
         EditorView.contentAttributes.of({
           spellcheck: 'false',
@@ -993,6 +1011,12 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
             return false
           },
         }),
+        EditorView.updateListener.of(update => {
+          if (update.docChanged) {
+            draftBufferRef.current = update.state.doc.toString()
+            onDraftChangeRef.current?.(draftBufferRef.current)
+          }
+        }),
         // Slash command detection
         EditorView.updateListener.of((update) => {
           if (!update.docChanged) return
@@ -1039,13 +1063,28 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   useEffect(() => {
     if (!apiRef) return
     apiRef.current = {
-      getValue: () => editorViewRef.current?.state.doc.toString() ?? '',
+      focus: () => editorViewRef.current?.focus(),
+      getValue: () => draftBufferRef.current,
+      captureInsertion: () => {
+        const view = editorViewRef.current
+        const doc = view?.state.doc
+        const selection = view?.state.selection.main
+        return (text: string) => {
+          if (!view || editorViewRef.current !== view || view.state.doc !== doc || !selection) return false
+          view.dispatch({ changes: { from: selection.from, to: selection.to, insert: text }, selection: { anchor: selection.from + text.length }, userEvent: 'input.voice', annotations: isolateHistory.of('full') })
+          view.focus()
+          return true
+        }
+      },
       setValue: (text: string) => {
+        draftBufferRef.current = text
+        onDraftChangeRef.current?.(text)
         const view = editorViewRef.current
         if (!view) return
         view.dispatch({
           changes: { from: 0, to: view.state.doc.length, insert: text },
           selection: { anchor: text.length },
+          annotations: Transaction.addToHistory.of(false),
         })
       },
     }
@@ -1060,11 +1099,12 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
 
     view.dispatch({
       effects: editableCompartmentRef.current.reconfigure([
-        EditorView.editable.of(!disabled),
+        EditorView.editable.of(!disabled || keepCursor),
         EditorState.readOnly.of(disabled),
       ]),
     })
-  }, [disabled])
+    if (keepCursor) view.focus()
+  }, [disabled, keepCursor])
 
   useEffect(() => {
     const view = editorViewRef.current
@@ -1121,6 +1161,9 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
 
 // Legacy textarea fallback (enabled via chatInputBare perf flag for debugging)
 const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
+  keepCursor = false,
+  initialDraft,
+  onDraftChange,
   onSend,
   disabled,
   placeholder,
@@ -1134,15 +1177,30 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
   useEffect(() => {
     if (!apiRef) return
     apiRef.current = {
+      focus: () => textareaRef.current?.focus(),
       getValue: () => textareaRef.current?.value ?? '',
+      captureInsertion: () => {
+        const input = textareaRef.current
+        const original = input?.value
+        const from = input?.selectionStart ?? 0
+        const to = input?.selectionEnd ?? 0
+        return (text: string) => {
+          if (!input || textareaRef.current !== input || input.value !== original) return false
+          input.setRangeText(text, from, to, 'end')
+          input.dispatchEvent(new Event('input', { bubbles: true }))
+          input.focus()
+          return true
+        }
+      },
       setValue: (text: string) => {
         if (textareaRef.current) textareaRef.current.value = text
+        onDraftChange?.(text)
       },
     }
     return () => {
       if (apiRef) apiRef.current = null
     }
-  }, [apiRef])
+  }, [apiRef, onDraftChange])
 
   const handleSend = useCallback(() => {
     const textarea = textareaRef.current
@@ -1151,8 +1209,9 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
     if (value && !disabled) {
       onSend(value)
       textarea.value = ''
+      onDraftChange?.('')
     }
-  }, [disabled, onSend])
+  }, [disabled, onSend, onDraftChange])
 
   const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     onInputActivity?.()
@@ -1173,12 +1232,15 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
     <div className="relative">
       <div className="flex items-end gap-2 p-2 rounded-md bg-white dark:bg-zinc-900 border border-gray-300 dark:border-zinc-700">
         <textarea
+          defaultValue={initialDraft}
+          onInput={event => onDraftChange?.(event.currentTarget.value)}
           ref={textareaRef}
           onKeyDown={handleKeyDown}
           onCompositionStart={() => { onInputActivity?.(); onCompositionStateChange?.(true) }}
           onCompositionEnd={() => { onInputActivity?.(); onCompositionStateChange?.(false) }}
           placeholder={placeholder}
-          disabled={disabled}
+          disabled={disabled && !keepCursor}
+          readOnly={disabled}
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
@@ -1245,6 +1307,10 @@ function ImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) 
 }
 
 const ChatInput = memo(function ChatInput({
+  initialDraft,
+  onDraftChange,
+  voiceActive = false,
+  voiceScope = '',
   onSend,
   disabled,
   placeholder,
@@ -1256,6 +1322,7 @@ const ChatInput = memo(function ChatInput({
   slashCommands,
   apiRef,
 }: ChatInputProps) {
+  const [voiceBusy, setVoiceBusy] = useState(false)
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
   const [attachedImages, setAttachedImages] = useState<File[]>([])
   const [attachedFilePaths, setAttachedFilePaths] = useState<string[]>([])
@@ -1348,8 +1415,11 @@ const ChatInput = memo(function ChatInput({
 
   const inputComponent = isLegacyTextareaMode ? (
     <LegacyTextareaChatInput
+      initialDraft={initialDraft}
+      onDraftChange={onDraftChange}
       onSend={handleSendWithImages}
-      disabled={disabled}
+      disabled={disabled || voiceBusy}
+      keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -1358,8 +1428,11 @@ const ChatInput = memo(function ChatInput({
     />
   ) : (
     <CodeMirrorChatInput
+      initialDraft={initialDraft}
+      onDraftChange={onDraftChange}
       onSend={handleSendWithImages}
-      disabled={disabled}
+      disabled={disabled || voiceBusy}
+      keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -1383,6 +1456,7 @@ const ChatInput = memo(function ChatInput({
           : 'border-transparent'
       }`}
     >
+      {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
       {/* Drag overlay */}
       {isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-accent/10 border-2 border-dashed border-accent pointer-events-none">
@@ -1800,6 +1874,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const [historyError, setHistoryError] = useState<string | null>(null)
   const saveRef = useRef<(override?: UIMessage[], sync?: boolean, clearDraft?: boolean) => Promise<boolean>>(async () => true)
   // Imperative handle to read/write the chat input value for per-session draft persistence
+  const draftInputRef = useRef('')
+  const handleDraftChange = useCallback((text: string) => { draftInputRef.current = text }, [])
   const chatInputApiRef = useRef<ChatInputApi | null>(null)
   // Tracks whether title auto-generation has been attempted/completed for the current session
   const titleGenerationDoneRef = useRef(false)
@@ -1839,7 +1915,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           setMessages(session.messages.map(sessionMessageToUIMessage))
           setMessageImages(new Map(session.messages.filter(m => m.images).map(m => [m.id, m.images!])))
           setMessageReferenceFiles(new Map(session.messages.filter(m => m.referenceFiles).map(m => [m.id, m.referenceFiles!])))
-          chatInputApiRef.current?.setValue(session.draftInput ?? '')
+          draftInputRef.current = session.draftInput ?? ''
+          chatInputApiRef.current?.setValue(draftInputRef.current)
           titleGenerationDoneRef.current = session.titleAutoGenerated !== undefined
           customTitleRef.current = session.titleAutoGenerated !== undefined || session.messages.some(m => m.role === 'user')
             ? { title: session.title, auto: session.titleAutoGenerated ?? false } : null
@@ -1867,6 +1944,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   useEffect(() => {
     if (currentSessionId) onSessionIdChange?.(currentSessionId)
   }, [currentSessionId, onSessionIdChange])
+
+  // Persist drafts immediately when leaving a conversation, including clearing an old draft.
+  useEffect(() => {
+    if (!isActive) void saveRef.current(undefined, true)
+  }, [isActive])
 
   // Checkpoint during streaming too. A trailing debounce alone would never fire
   // while tokens keep arriving. Unload has a separate synchronous flush.
@@ -1931,8 +2013,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     if (sync) syncSaveFailedRef.current = false
     if (!currentCompany?.id || !historyReadyRef.current || deletedRef.current) return false
     const snapshot = override ?? messagesRef.current
-    const draftInput = clearDraft ? '' : (chatInputApiRef.current?.getValue() ?? '')
-    if (!snapshot.some(m => m.role === 'user') && !draftInput.trim()) return true
+    const draftInput = clearDraft ? '' : draftInputRef.current
+    if (!snapshot.some(m => m.role === 'user') && !draftInput.trim() && !initialSessionId && revisionRef.current === 0 && !pendingFingerprintRef.current) return true
     const sessionId = appSessionIdRef.current!
     const firstUser = snapshot.find(m => m.role === 'user')
     const title = customTitleRef.current?.title || (firstUser ? extractMessageText(firstUser).slice(0, 60) : t('chat.newChat'))
@@ -2095,8 +2177,19 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     }
   }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
 
-  // Scroll tracking
+  // History content mounts after restoration; hidden tabs have no layout.
+  // Reset only on opening a chat, so reading older messages stays possible.
+  useLayoutEffect(() => {
+    if (!isActive || isRestoringSession) return
+    shouldAutoScrollRef.current = true
+    pendingAutoScrollRef.current = false
+    const container = messagesContainerRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }, [isActive, isRestoringSession])
+
+  // Attach after the message list actually mounts, not while the spinner is shown.
   useEffect(() => {
+    if (!isActive || isRestoringSession) return
     const container = messagesContainerRef.current
     if (!container) return
 
@@ -2111,10 +2204,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     return () => {
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [])
+  }, [isActive, isRestoringSession])
 
   // Auto-scroll when messages change
   useEffect(() => {
+    if (!isActive || isRestoringSession) return
     if (isInputComposingRef.current) {
       pendingAutoScrollRef.current = true
       return
@@ -2122,7 +2216,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     if (!shouldAutoScrollRef.current) return
     pendingAutoScrollRef.current = false
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
-  }, [messages, status])
+  }, [messages, status, isActive, isRestoringSession])
 
   // Composition handling
   const flushAfterComposition = useCallback(() => {
@@ -2418,6 +2512,10 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
         <div className="p-4 pb-7">
           <ChatInput
+            initialDraft={draftInputRef.current}
+            onDraftChange={handleDraftChange}
+            voiceActive={isActive}
+            voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current}
             placeholder={t('chat.inputPlaceholder')}
@@ -2808,7 +2906,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
 
       {/* Settings overlay */}
       {showSettings && (
-        <div className="absolute inset-0 z-10">
+        <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
           <AuthSettings
             authMode={authMode}
             claudeCodeAvailable={claudeCodeAvailable}
@@ -2891,6 +2989,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
+        <section className="rounded-xl border border-gray-200 dark:border-zinc-700 p-4"><VoiceShortcutSettings /></section>
         <div className="space-y-3">
           <label className="block text-xs font-medium tracking-wide uppercase text-ink-muted mb-3">
             {t('chatSettings.selectMethod')}
