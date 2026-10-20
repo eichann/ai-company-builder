@@ -124,7 +124,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
         {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
-      <kbd className="text-[11px] opacity-60" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
+      <kbd className="shrink-0 whitespace-nowrap rounded border border-gray-200 dark:border-zinc-700 px-1.5 py-0.5 font-sans text-xs leading-5 text-gray-600 dark:text-zinc-300" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
       <button type="button" disabled={busy || !caps?.available} aria-label="マイクを選択" aria-expanded={showDevices}
         onClick={() => { setShowDevices(value => !value); void refreshDevices() }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-40"><CaretDown size={14} /></button>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
@@ -135,6 +135,13 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       {phase === 'listening' ? recordingDevice : deviceLabel}
     </div>}
     {showDevices && <div className="my-2 rounded-lg border border-gray-200 dark:border-zinc-700 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="font-medium">マイク設定</span>
+        <button type="button" onClick={() => setShowDevices(false)} aria-label="マイク選択を閉じる"
+          className="flex items-center gap-1 rounded px-2 py-1 hover:bg-gray-100 dark:hover:bg-zinc-800">
+          <X size={14} /><span>閉じる</span>
+        </button>
+      </div>
       <label className="block">使用するマイク
         <select aria-label="使用するマイク" value={selectedDevice} disabled={busy} className="mt-1 block w-full rounded border border-gray-300 dark:border-zinc-600 bg-white dark:bg-zinc-900 p-2"
           onChange={event => {

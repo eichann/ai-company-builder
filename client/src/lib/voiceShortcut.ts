@@ -31,5 +31,11 @@ export function matchesVoiceShortcut(event: KeyboardEvent, value: VoiceShortcut)
 }
 export function formatVoiceShortcut(value: VoiceShortcut): string {
   const key = value.code.replace(/^(Key|Digit)/, '')
-  return isMac ? `${value.ctrl ? '⌃' : ''}${value.alt ? '⌥' : ''}${value.shift ? '⇧' : ''}${value.meta ? '⌘' : ''}${key}` : [...(value.ctrl ? ['Ctrl'] : []), ...(value.alt ? ['Alt'] : []), ...(value.shift ? ['Shift'] : []), ...(value.meta ? ['Win'] : []), key].join('+')
+  return [
+    ...(value.ctrl ? ['Ctrl'] : []),
+    ...(value.alt ? [isMac ? 'Option' : 'Alt'] : []),
+    ...(value.shift ? ['Shift'] : []),
+    ...(value.meta ? [isMac ? '⌘' : 'Win'] : []),
+    key,
+  ].join(' + ')
 }
