@@ -1,3 +1,4 @@
+import { voiceShortcut, formatVoiceShortcut, matchesVoiceShortcut } from '../../lib/voiceShortcut'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
 import type { VoiceCapabilities } from '../../../shared/voice-input'
@@ -5,6 +6,7 @@ import type { VoiceCapabilities } from '../../../shared/voice-input'
 import { microphoneSelection } from '../../lib/microphoneSelection'
 
 export interface VoiceEditor {
+  focus?: () => void
   captureInsertion: () => (text: string) => boolean
 }
 
@@ -15,6 +17,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   scope: string
   onBusy: (busy: boolean) => void
 }) {
+  const shortcut = useSyncExternalStore(voiceShortcut.subscribe, voiceShortcut.getSnapshot)
   const { devices, deviceError, selectedDevice } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
   const [showDevices, setShowDevices] = useState(false)
   const [recordingDevice, setRecordingDevice] = useState('')
@@ -75,9 +78,9 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       if (!event.rawText) operation.current = undefined
     } else {
       setPhase(event.type)
-      if (event.type === 'listening') { setSeconds(0); setRecordingDevice(event.deviceName ?? 'マイク'); lastSample.current = 0; lastAudible.current = Date.now() }
+      if (event.type === 'listening') { editor.current?.focus?.(); setSeconds(0); setRecordingDevice(event.deviceName ?? 'マイク'); lastSample.current = 0; lastAudible.current = Date.now() }
     }
-  }), [onBusy])
+  }), [onBusy, editor])
   useEffect(() => { if (!active || disabled) cancel(); return cancel }, [active, scope, disabled, cancel])
   useEffect(() => {
     if (phase !== 'listening') return
@@ -86,6 +89,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   }, [phase])
   const startOrStop = useCallback(async () => {
     if (phaseRef.current === 'listening' && operation.current) {
+      phaseRef.current = 'finalizing'
       setPhase('finalizing')
       await window.electronAPI.voiceInput.stop(operation.current.id).catch(() => { cancel(); setError('録音を停止できませんでした') })
       return
@@ -101,25 +105,26 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   useEffect(() => {
     if (!active) return
     const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.repeat) return
-      if ((event.metaKey || event.ctrlKey) && event.shiftKey && event.code === 'KeyM') { event.preventDefault(); void startOrStop() }
+      if (event.isComposing || event.repeat || document.querySelector('[role="dialog"]')) return
+      if (matchesVoiceShortcut(event, shortcut)) { event.preventDefault(); event.stopPropagation(); void startOrStop() }
       if (event.key === 'Escape' && operation.current) { event.preventDefault(); cancel() }
     }
     const blur = () => { if (phaseRef.current !== 'preparing') cancel() }
-    window.addEventListener('keydown', keydown)
+    window.addEventListener('keydown', keydown, true)
     window.addEventListener('blur', blur)
-    return () => { window.removeEventListener('keydown', keydown); window.removeEventListener('blur', blur) }
-  }, [active, startOrStop, cancel])
+    return () => { window.removeEventListener('keydown', keydown, true); window.removeEventListener('blur', blur) }
+  }, [active, startOrStop, cancel, shortcut])
   return <div className="px-2 pt-2 text-xs" aria-live="polite">
     <div className="flex items-center gap-2 flex-wrap">
       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
         disabled={phase !== 'listening' && (busy || disabled || !caps?.available || !devices?.length || deviceMissing)}
-        title={caps?.reason ?? '音声入力（⌘⇧M / Ctrl+Shift+M）'}
+        title={caps?.reason ?? `音声入力（${formatVoiceShortcut(shortcut)}：開始／停止）`}
         aria-label={phase === 'listening' ? '録音を停止して文章を整える' : '音声入力を開始'}
         className={`flex items-center gap-1.5 rounded-md px-2 py-1.5 disabled:opacity-40 ${phase === 'listening' ? 'text-red-600 bg-red-50 dark:bg-red-950' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>
         {phase === 'listening' ? <Stop size={16} weight="fill" /> : <Microphone size={16} />}
         {phase === 'listening' ? `録音中 ${seconds}秒・停止` : phase === 'preparing' ? 'マイクを準備中…' : phase === 'finalizing' ? '音声を認識中…' : phase === 'polishing' ? '文章を整えています…' : '音声入力'}
       </button>
+      <kbd className="text-[11px] opacity-60" title="もう一度押すと停止">{formatVoiceShortcut(shortcut)}</kbd>
       <button type="button" disabled={busy || !caps?.available} aria-label="マイクを選択" aria-expanded={showDevices}
         onClick={() => { setShowDevices(value => !value); void refreshDevices() }} className="p-1 rounded hover:bg-gray-100 dark:hover:bg-zinc-800 disabled:opacity-40"><CaretDown size={14} /></button>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}

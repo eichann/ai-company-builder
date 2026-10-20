@@ -13,7 +13,7 @@ function fakeCli(body: string) {
 test('voice text goes through stdin as data with isolated non-persistent CLI flags', async () => {
   const f = fakeCli(`
 const args = process.argv.slice(2)
-if (!args.includes('--safe-mode') || !args.includes('--no-session-persistence') || args[args.indexOf('--tools') + 1] !== '') process.exit(2)
+if (args[args.indexOf('--model') + 1] !== 'haiku' || !args.includes('--safe-mode') || !args.includes('--no-session-persistence') || args[args.indexOf('--tools') + 1] !== '') process.exit(2)
 let input = ''; process.stdin.on('data', chunk => input += chunk)
 process.stdin.on('end', () => console.log(JSON.stringify({result: JSON.parse(input).transcript})))
 `)

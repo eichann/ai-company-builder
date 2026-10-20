@@ -1,3 +1,4 @@
+import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -692,6 +693,7 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 // ============================================================================
 
 interface ChatInputApi {
+  focus: () => void
   captureInsertion: () => (text: string) => boolean
   getValue: () => string
   setValue: (text: string) => void
@@ -700,6 +702,7 @@ interface ChatInputApi {
 interface ChatInputProps {
   initialDraft?: string
   onDraftChange?: (text: string) => void
+  keepCursor?: boolean
   voiceActive?: boolean
   voiceScope?: string
   onSend: (text: string, files?: File[], filePaths?: string[]) => void
@@ -754,6 +757,7 @@ const chatInputCodeMirrorTheme = EditorView.theme({
 })
 
 const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
+  keepCursor = false,
   initialDraft,
   onDraftChange,
   onSend,
@@ -1059,6 +1063,7 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   useEffect(() => {
     if (!apiRef) return
     apiRef.current = {
+      focus: () => editorViewRef.current?.focus(),
       getValue: () => draftBufferRef.current,
       captureInsertion: () => {
         const view = editorViewRef.current
@@ -1094,11 +1099,12 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
 
     view.dispatch({
       effects: editableCompartmentRef.current.reconfigure([
-        EditorView.editable.of(!disabled),
+        EditorView.editable.of(!disabled || keepCursor),
         EditorState.readOnly.of(disabled),
       ]),
     })
-  }, [disabled])
+    if (keepCursor) view.focus()
+  }, [disabled, keepCursor])
 
   useEffect(() => {
     const view = editorViewRef.current
@@ -1155,6 +1161,7 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
 
 // Legacy textarea fallback (enabled via chatInputBare perf flag for debugging)
 const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
+  keepCursor = false,
   initialDraft,
   onDraftChange,
   onSend,
@@ -1170,6 +1177,7 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
   useEffect(() => {
     if (!apiRef) return
     apiRef.current = {
+      focus: () => textareaRef.current?.focus(),
       getValue: () => textareaRef.current?.value ?? '',
       captureInsertion: () => {
         const input = textareaRef.current
@@ -1231,7 +1239,8 @@ const LegacyTextareaChatInput = memo(function LegacyTextareaChatInput({
           onCompositionStart={() => { onInputActivity?.(); onCompositionStateChange?.(true) }}
           onCompositionEnd={() => { onInputActivity?.(); onCompositionStateChange?.(false) }}
           placeholder={placeholder}
-          disabled={disabled}
+          disabled={disabled && !keepCursor}
+          readOnly={disabled}
           spellCheck={false}
           autoCorrect="off"
           autoCapitalize="off"
@@ -1410,6 +1419,7 @@ const ChatInput = memo(function ChatInput({
       onDraftChange={onDraftChange}
       onSend={handleSendWithImages}
       disabled={disabled || voiceBusy}
+      keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -1422,6 +1432,7 @@ const ChatInput = memo(function ChatInput({
       onDraftChange={onDraftChange}
       onSend={handleSendWithImages}
       disabled={disabled || voiceBusy}
+      keepCursor={voiceBusy}
       placeholder={placeholder}
       hint={hint}
       onCompositionStateChange={onCompositionStateChange}
@@ -2166,8 +2177,19 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     }
   }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
 
-  // Scroll tracking
+  // History content mounts after restoration; hidden tabs have no layout.
+  // Reset only on opening a chat, so reading older messages stays possible.
+  useLayoutEffect(() => {
+    if (!isActive || isRestoringSession) return
+    shouldAutoScrollRef.current = true
+    pendingAutoScrollRef.current = false
+    const container = messagesContainerRef.current
+    if (container) container.scrollTop = container.scrollHeight
+  }, [isActive, isRestoringSession])
+
+  // Attach after the message list actually mounts, not while the spinner is shown.
   useEffect(() => {
+    if (!isActive || isRestoringSession) return
     const container = messagesContainerRef.current
     if (!container) return
 
@@ -2182,10 +2204,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     return () => {
       container.removeEventListener('scroll', handleScroll)
     }
-  }, [])
+  }, [isActive, isRestoringSession])
 
   // Auto-scroll when messages change
   useEffect(() => {
+    if (!isActive || isRestoringSession) return
     if (isInputComposingRef.current) {
       pendingAutoScrollRef.current = true
       return
@@ -2193,7 +2216,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     if (!shouldAutoScrollRef.current) return
     pendingAutoScrollRef.current = false
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
-  }, [messages, status])
+  }, [messages, status, isActive, isRestoringSession])
 
   // Composition handling
   const flushAfterComposition = useCallback(() => {
@@ -2883,7 +2906,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
 
       {/* Settings overlay */}
       {showSettings && (
-        <div className="absolute inset-0 z-10">
+        <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
           <AuthSettings
             authMode={authMode}
             claudeCodeAvailable={claudeCodeAvailable}
@@ -2966,6 +2989,7 @@ function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, claudeCo
 
       {/* Content */}
       <div className="flex-1 overflow-auto p-4 space-y-4">
+        <section className="rounded-xl border border-gray-200 dark:border-zinc-700 p-4"><VoiceShortcutSettings /></section>
         <div className="space-y-3">
           <label className="block text-xs font-medium tracking-wide uppercase text-ink-muted mb-3">
             {t('chatSettings.selectMethod')}

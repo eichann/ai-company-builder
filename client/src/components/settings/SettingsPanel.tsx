@@ -1,3 +1,4 @@
+import { VoiceShortcutSettings } from './VoiceShortcutSettings'
 import { useState, useEffect, useCallback } from 'react'
 import { X, Eye, EyeSlash, Plus, Trash, Code, Key, FloppyDisk, Check, FileText, Cloud, CloudArrowDown, ArrowCounterClockwise, SpinnerGap, FolderSimple } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
@@ -16,7 +17,7 @@ interface SettingsPanelProps {
   onClose: () => void
 }
 
-type TabType = 'apikeys' | 'sync' | 'gitignore' | 'advanced'
+type TabType = 'apikeys' | 'sync' | 'gitignore' | 'advanced' | 'voice'
 
 export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
@@ -220,6 +221,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
 
   return (
     <div
+      role="dialog" aria-label="設定"
       className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center"
       onClick={handleBackdropClick}
     >
@@ -236,7 +238,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </div>
 
         {/* Tab Switcher */}
-        <div className="flex border-b border-zinc-800">
+        <div className="flex border-b border-zinc-800 overflow-x-auto shrink-0">
           <button
             onClick={() => setActiveTab('apikeys')}
             className={`
@@ -293,11 +295,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
             <Code size={16} />
             詳細設定
           </button>
+          <button onClick={() => setActiveTab('voice')} className={`shrink-0 px-4 py-3 text-sm border-b-2 ${activeTab === 'voice' ? 'border-amber-500 text-zinc-100' : 'border-transparent text-zinc-500'}`}>音声入力</button>
         </div>
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto p-6">
-          {loading ? (
+          {activeTab === 'voice' ? <div className="dark"><VoiceShortcutSettings /></div> : loading ? (
             <div className="flex items-center justify-center py-12">
               <div className="text-zinc-500">読み込み中...</div>
             </div>
@@ -570,7 +573,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
         </div>
 
         {/* Footer (hidden for sync tab — actions are inline) */}
-        {activeTab !== 'sync' && (
+        {activeTab !== 'sync' && activeTab !== 'voice' && (
         <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
           {error ? (
             <div className="text-sm text-red-400">{error}</div>

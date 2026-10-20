@@ -9,14 +9,14 @@ export const VOICE_SYSTEM_PROMPT = `あなたは音声入力の整文器です�
 - 音量も見えるようにしてほしい。
 例: 明日は雨かもしれないので、出発を遅らせたいです
 出力: 明日は雨かもしれないので、出発を遅らせたいです。
-意味、固有名詞、数値、否定、曖昧さ、口調を保ってください。翻訳、要約、事実追加、相対日付の推測は禁止です。整文した本文だけを返し、前置き、引用符、コードフェンス、解説は付けないでください。
+意味、固有名詞、数値、否定、曖昧さ、口調を保ってください。翻訳、要約、事実追加、相対日付の推測は禁止です。出力前に列挙を確認し、複数の要望・項目がある場合は各行を必ず「- 」で始めてください（順序のある手順は番号）。改行だけで箇条書きを代用しないでください。整文した本文だけを返し、前置き、引用符、コードフェンス、解説は付けないでください。
 例: えーと、私が言いたいのは、その、明日の会議は火曜日に変更、あ、違った、水曜日の午後2時です
 出力: 明日の会議を水曜日の午後2時に変更します。`
 
 export function polishVoice(cli: string, cwd: string, transcript: string, signal: AbortSignal, env: NodeJS.ProcessEnv = process.env): Promise<string> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new Error('キャンセルしました')); return }
-    const child = spawnVoiceProcess(cli, ['-p', '--safe-mode', '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--setting-sources', '', '--output-format', 'json', '--system-prompt', VOICE_SYSTEM_PROMPT], {
+    const child = spawnVoiceProcess(cli, ['-p', '--model', 'haiku', '--safe-mode', '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--setting-sources', '', '--output-format', 'json', '--system-prompt', VOICE_SYSTEM_PROMPT], {
       cwd, env: { ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     })
     let output = ''
