@@ -143,8 +143,10 @@
     "setupStep3": "claude login",
     "setupStep4": "Restart this app",
     "permissionMode": "Permission Mode",
-    "permissionBypass": "Auto (Recommended)",
-    "permissionBypassDesc": "Auto-block dangerous operations only",
+    "permissionAuto": "Auto (Recommended)",
+    "permissionAutoDesc": "Runs safe actions automatically and stops risky ones",
+    "permissionBypass": "No restrictions",
+    "permissionBypassDesc": "Runs everything without asking (only dangerous commands such as deletes ask)",
     "permissionDefault": "Confirm",
     "permissionDefaultDesc": "Ask before write/execute"
   },

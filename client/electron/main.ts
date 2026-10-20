@@ -9,7 +9,7 @@ import path from 'path'
 import fs from 'fs'
 import os from 'os'
 import { fileURLToPath } from 'url'
-import { exec, spawn, ChildProcess } from 'child_process'
+import { exec, execFileSync, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
@@ -28,6 +28,7 @@ import { writeCodexHandoff } from './handoff/codex'
 import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
 import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
+import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
 
 // Allowed directory roots for file system access control
 // Paths are added when the user selects a directory via dialog or sets up a company folder
@@ -91,7 +92,7 @@ const getConfigPath = () => path.join(app.getPath('userData'), 'config.json')
 interface AppConfig {
   anthropicApiKey?: string
   authMode?: 'claude-code' | 'codex' | 'api-key'
-  permissionMode?: 'bypassPermissions' | 'default'
+  permissionMode?: PermissionMode
   serverUrl?: string
   docbaseCookie?: string
 }
@@ -452,10 +453,8 @@ app.whenReady().then(async () => {
         const config = loadConfig()
         return config.anthropicApiKey
       },
-      getPermissionMode: () => {
-        const config = loadConfig()
-        return (config.permissionMode || 'bypassPermissions') as 'bypassPermissions' | 'default'
-      },
+      // Unset → 'auto'. A mode the user saved explicitly is kept as-is.
+      getPermissionMode: () => normalizePermissionMode(loadConfig().permissionMode),
       isClaudeCodeAuthenticated,
       getClaudeCodeCliPath,
       getShellEnv,
@@ -1054,11 +1053,11 @@ ipcMain.handle('config:getClaudeCodeStatus', () => {
 })
 
 ipcMain.handle('config:getPermissionMode', () => {
-  const config = loadConfig()
-  return config.permissionMode || 'bypassPermissions'
+  return normalizePermissionMode(loadConfig().permissionMode)
 })
 
-ipcMain.handle('config:setPermissionMode', (_, mode: 'bypassPermissions' | 'default') => {
+ipcMain.handle('config:setPermissionMode', (_, mode: PermissionMode) => {
+  if (!PERMISSION_MODES.includes(mode)) return false
   const config = loadConfig()
   config.permissionMode = mode
   saveConfig(config)
@@ -1479,7 +1478,7 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
   const dugiteBinary = resolveGitBinary()
   try {
     // Quick check: can the bundled binary actually execute?
-    require('child_process').execFileSync(dugiteBinary, ['--version'], {
+    execFileSync(dugiteBinary, ['--version'], {
       timeout: 3000,
       stdio: 'ignore',
     })
@@ -2220,7 +2219,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
       console.warn('Git sync: Sparse checkout reconcile failed:', sparseUpdateError)
     }
 
-    let restoredFolders: string[] = []
+    const restoredFolders: string[] = []
 
     // 2. Check for deleted files before staging. Deletions staged by the
     //    consented nested-repo exclusion above are intentional — keep them
@@ -2350,7 +2349,7 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
               const { binary: gitBinary } = getResolvedGit()
               const content = await new Promise<Buffer>((resolve, reject) => {
                 const chunks: Buffer[] = []
-                const proc = require('child_process').spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
+                const proc = spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
                   cwd: repoPath,
                   stdio: ['ignore', 'pipe', 'ignore'],
                   ...(process.getuid ? { uid: process.getuid() } : {}),
@@ -3139,7 +3138,6 @@ ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, f
 // Open backup folder in Finder/Explorer
 ipcMain.handle('backup:openFolder', async (_, backupPath: string) => {
   try {
-    const { shell } = require('electron')
     await shell.openPath(backupPath)
     return { success: true }
   } catch (error) {
@@ -3716,7 +3714,7 @@ ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: 
 ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
   try {
     const gitignorePath = path.join(rootPath, '.gitignore')
-    let content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
+    const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
     const lines = content.split('\n')
 
     if (!lines.some(l => l.trim() === skillRelativePath)) {

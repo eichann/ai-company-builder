@@ -6,9 +6,12 @@ import { claudeCode } from 'ai-sdk-provider-claude-code'
 import crypto from 'crypto'
 import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
 import type { AgentConnection, AgentHostConfig } from './connection'
+import type { PermissionMode } from '../../shared/permission-mode'
+
+type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
 export interface ClaudeConnectionConfig extends AgentHostConfig {
-  getPermissionMode: () => 'bypassPermissions' | 'default'
+  getPermissionMode: () => PermissionMode
   isClaudeCodeAuthenticated: () => boolean
   getClaudeCodeCliPath: () => string
 
@@ -59,6 +62,30 @@ const MODEL_CLI_MAP: Record<string, string> = {
 }
 const DEFAULT_CLI_MODEL = 'claude-opus-5-5[1m]'
 
+// `auto` (Claude Code's classifier mode) can be unavailable in two ways, and
+// both must degrade to 'default' — which asks through canUseTool — rather than
+// break the chat:
+// 1. The CLI predates `auto`: it rejects the flag and exits 1 before any output
+//    ("error: option '--permission-mode <mode>' argument 'auto' is invalid").
+//    The turn is re-run in 'default' and that CLI path is remembered for the run.
+// 2. The CLI knows `auto` but this account / plan / model / settings cannot use
+//    it: the CLI itself runs in 'default'. The init message is not reliable for
+//    this (it can still say 'auto'); the PreToolUse hook's permission_mode is.
+// ai-sdk-provider-claude-code 3.4.2 only accepts `auto` through
+// patches/ai-sdk-provider-claude-code@3.4.2.patch (drop it with the AI SDK major upgrade).
+const AUTO_REJECTED = /--permission-mode[^\n]*'auto' is invalid/
+const autoUnsupportedClis = new Set<string>()
+const notifiedConversations = new Set<string>()
+export const PERMISSION_FALLBACK_NOTICE = {
+  cli: 'お使いのClaude Codeは自動モードに対応していないため、「確認あり」で実行します（Claude Codeを更新すると自動モードになります）。',
+  account: 'この環境では自動モードを使えないため、「確認あり」で実行します。',
+} as const
+
+function noticeParts(text: string): StreamPart[] {
+  const id = `permission-mode-notice-${crypto.randomUUID()}`
+  return [{ type: 'text-start', id }, { type: 'text-delta', id, delta: `※ ${text}\n\n` }, { type: 'text-end', id }]
+}
+
 function resolveClaudeModel(modelId?: string): string {
   if (!modelId) return DEFAULT_CLI_MODEL
   return MODEL_CLI_MAP[modelId] ?? modelId
@@ -100,11 +127,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
     },
     createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references }) {
       const claudePath = config.getClaudeCodeCliPath()
-      const permissionMode = config.getPermissionMode()
+      const requestedMode = config.getPermissionMode()
+      const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
+      const permissionMode: PermissionMode = cliLacksAuto ? 'default' : requestedMode
 
+      // The mode the CLI actually runs tools in (it reports it on every hook call).
+      let observedMode: string | undefined
       // PreToolUse hook: request UI approval for dangerous patterns (works even in bypassPermissions)
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const preToolUseHook = async (input: any) => {
+        if (typeof input.permission_mode === 'string') observedMode = input.permission_mode
         if (input.hook_event_name !== 'PreToolUse') {
           return { continue: true }
         }
@@ -164,24 +196,25 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             }
           }
         }
-        return {
-          continue: true,
-          hookSpecificOutput: {
-            hookEventName: 'PreToolUse',
-            permissionDecision: 'allow',
-          },
-        }
+        // No decision: leave it to the permission mode. Returning 'allow' here
+        // skipped both the auto-mode classifier and the 'default' approval
+        // prompt for every tool.
+        return { continue: true }
       }
 
-      // canUseTool: UI approval dialog (only in 'default' mode)
+      // canUseTool: UI approval dialog. In 'auto' the classifier denies risky
+      // calls outright (no prompt); calls reach canUseTool when the CLI falls
+      // back to asking — auto unavailable (it starts in 'default') or the
+      // classifier's denial limit — so 'auto' needs it as much as 'default'.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canUseToolFn: any = permissionMode === 'default' && config.requestToolApproval
+      const canUseToolFn: any = permissionMode !== 'bypassPermissions' && config.requestToolApproval
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
-            // Read-only tools: auto-allow
+            // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
+            // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
             const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
             if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`))) {
-              return { behavior: 'allow' as const }
+              return { behavior: 'allow' as const, updatedInput: toolInput }
             }
             // Request approval from UI
             const result = await config.requestToolApproval!(
@@ -191,7 +224,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               appSessionId,
             )
             if (result.approved) {
-              return { behavior: 'allow' as const }
+              return { behavior: 'allow' as const, updatedInput: toolInput }
             }
             return {
               behavior: 'deny' as const,
@@ -207,60 +240,129 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const resolvedModel = resolveClaudeModel(modelId)
       const resolvedEffort = resolveEffort(resolvedModel, effort as Parameters<typeof resolveEffort>[1])
 
-      const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
-      let missingSession = false
-      const native = createModel(resolvedModel, {
-        pathToClaudeCodeExecutable: claudePath,
-        permissionMode,
-        cwd: workingDirectory,
-        env: config.getShellEnv(),
-        settingSources: ['user', 'project'],
-        streamingInput: 'always',
-        ...(referenceServer ? { mcpServers: { acb_consultations: referenceServer }, allowedTools: Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) } : {}),
-        ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
-        // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
-        // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the
-        // CLI via `--effort`, so we cast to bypass the stale SDK type.
-        ...(resolvedEffort ? { sdkOptions: { effort: resolvedEffort as 'low' | 'medium' | 'high' | 'max' } } : {}),
-        // Custom spawn to avoid EBADF in Electron's main process.
-        //
-        // Problem: Electron's main process has many open FDs from Chromium
-        // (GPU, IPC, renderer, crash reporter, etc.) that lack FD_CLOEXEC.
-        // These inherited FDs cause posix_spawn to fail with EBADF — both
-        // when WE spawn the Claude CLI, and when the Claude CLI itself
-        // tries to spawn subprocesses (Bash tool, Glob tool, etc.).
-        //
-        // Fix (3 layers):
-        // 1. Repair FDs 0-2 if invalid (reopen to /dev/null)
-        // 2. Set uid to force fork+exec instead of posix_spawn for THIS spawn
-        // 3. Spawn via shell wrapper that closes all inherited FDs > 2
-        //    before exec'ing claude, so claude starts with a clean FD table
-        spawnClaudeCodeProcess: opts => {
-          const child = spawnClaudeCodeProcess(opts)
-          // The SDK can discard stderr on result errors; inspect only this exact startup failure.
-          let pending = ''
-          if (existingCliSessionId) child.stderr?.on('data', (chunk: Buffer) => {
-            pending += chunk.toString()
-            const lines = pending.split('\n'); pending = lines.pop()!.slice(-512)
-            if (lines.some(line => line.trim() === `No conversation found with session ID: ${existingCliSessionId}`)) missingSession = true
-          })
-          return child
-        },
-        hooks: {
-          PreToolUse: [{ hooks: [preToolUseHook] }],
-        },
-        ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
-      })
-      if (!existingCliSessionId) return native
-      return wrapLanguageModel({ model: native, middleware: {
+      const createNative = (mode: PermissionMode) => {
+        // One MCP server instance per query: a fallback re-run must not reuse the first one.
+        const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
+        const state = { missingSession: false, autoRejected: false }
+        const model = createModel(resolvedModel, {
+          pathToClaudeCodeExecutable: claudePath,
+          permissionMode: mode,
+          cwd: workingDirectory,
+          env: config.getShellEnv(),
+          settingSources: ['user', 'project'],
+          streamingInput: 'always',
+          ...(referenceServer ? { mcpServers: { acb_consultations: referenceServer }, allowedTools: Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) } : {}),
+          ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
+          // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
+          // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the
+          // CLI via `--effort`, so we cast to bypass the stale SDK type.
+          ...(resolvedEffort ? { sdkOptions: { effort: resolvedEffort as 'low' | 'medium' | 'high' | 'max' } } : {}),
+          // Custom spawn to avoid EBADF in Electron's main process.
+          //
+          // Problem: Electron's main process has many open FDs from Chromium
+          // (GPU, IPC, renderer, crash reporter, etc.) that lack FD_CLOEXEC.
+          // These inherited FDs cause posix_spawn to fail with EBADF — both
+          // when WE spawn the Claude CLI, and when the Claude CLI itself
+          // tries to spawn subprocesses (Bash tool, Glob tool, etc.).
+          //
+          // Fix (3 layers):
+          // 1. Repair FDs 0-2 if invalid (reopen to /dev/null)
+          // 2. Set uid to force fork+exec instead of posix_spawn for THIS spawn
+          // 3. Spawn via shell wrapper that closes all inherited FDs > 2
+          //    before exec'ing claude, so claude starts with a clean FD table
+          spawnClaudeCodeProcess: opts => {
+            const child = spawnClaudeCodeProcess(opts)
+            // The SDK can discard stderr on result errors; inspect only these exact startup failures.
+            let pending = ''
+            if (existingCliSessionId || mode === 'auto') child.stderr?.on('data', (chunk: Buffer) => {
+              pending += chunk.toString()
+              const lines = pending.split('\n'); pending = lines.pop()!.slice(-512)
+              if (existingCliSessionId && lines.some(line => line.trim() === `No conversation found with session ID: ${existingCliSessionId}`)) state.missingSession = true
+              if (mode === 'auto' && lines.some(line => AUTO_REJECTED.test(line))) state.autoRejected = true
+            })
+            return child
+          },
+          hooks: {
+            PreToolUse: [{ hooks: [preToolUseHook] }],
+          },
+          ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
+        })
+        return { model, state }
+      }
+
+      const primary = createNative(permissionMode)
+      if (!existingCliSessionId && requestedMode !== 'auto') return primary.model
+      // The fallback notice is shown once per conversation, as soon as it applies,
+      // outside any open text block.
+      const takeNotice = (text: string | undefined) => {
+        if (!text || (appSessionId && notifiedConversations.has(appSessionId))) return undefined
+        if (appSessionId) notifiedConversations.add(appSessionId)
+        return text
+      }
+      const relay = (stream: ReadableStream<StreamPart>, state: typeof primary.state, pendingNotice: () => string | undefined) => {
+        let shown = false
+        const openText = new Set<string>()
+        return stream.pipeThrough(new TransformStream<StreamPart, StreamPart>({
+          transform(part, controller) {
+            if (!shown && openText.size === 0 && part.type !== 'stream-start' && part.type !== 'response-metadata' && part.type !== 'error') {
+              const pending = pendingNotice()
+              if (pending) {
+                shown = true
+                const text = takeNotice(pending)
+                if (text) for (const extra of noticeParts(text)) controller.enqueue(extra)
+              }
+            }
+            if (part.type === 'text-start') openText.add(part.id)
+            else if (part.type === 'text-end') openText.delete(part.id)
+            controller.enqueue(part.type === 'error' && state.missingSession && existingCliSessionId ? { type: 'error', error: new MissingAgentSession(existingCliSessionId) } : part)
+          },
+        }))
+      }
+      const cliNotice = () => PERMISSION_FALLBACK_NOTICE.cli
+      const accountNotice = () => (observedMode === 'default' ? PERMISSION_FALLBACK_NOTICE.account : undefined)
+      return wrapLanguageModel({ model: primary.model, middleware: {
         specificationVersion: 'v3',
-        wrapStream: async ({ doStream }) => {
-          const result = await doStream()
-          return { ...result, stream: result.stream.pipeThrough(new TransformStream({
-            transform(part, controller) {
-              controller.enqueue(part.type === 'error' && missingSession ? { type: 'error', error: new MissingAgentSession(existingCliSessionId) } : part)
+        wrapStream: async ({ doStream, params }) => {
+          if (requestedMode !== 'auto' || cliLacksAuto) {
+            const result = await doStream()
+            return { ...result, stream: relay(result.stream, primary.state, cliLacksAuto ? cliNotice : () => undefined) }
+          }
+          // A CLI without `auto` rejects the flag before producing anything:
+          // peek at the first real part and, on that exact failure, re-run the
+          // turn in 'default' (nothing has reached the user yet).
+          const fallback = async () => {
+            autoUnsupportedClis.add(claudePath)
+            console.warn(`[chat-server] ${claudePath} does not support --permission-mode auto; falling back to default`)
+            const retry = createNative('default')
+            const result = await retry.model.doStream(params)
+            return { ...result, stream: relay(result.stream, retry.state, cliNotice) }
+          }
+          let result
+          try { result = await doStream() } catch (error) {
+            if (primary.state.autoRejected) return fallback()
+            throw error
+          }
+          const reader = result.stream.getReader()
+          const head: StreamPart[] = []
+          for (;;) {
+            const next = await reader.read()
+            if (next.done) break
+            head.push(next.value)
+            if (next.value.type !== 'stream-start') break
+          }
+          if (head.at(-1)?.type === 'error' && primary.state.autoRejected) {
+            await reader.cancel().catch(() => {})
+            return fallback()
+          }
+          const replay = new ReadableStream<StreamPart>({
+            start(controller) { for (const part of head) controller.enqueue(part) },
+            async pull(controller) {
+              const next = await reader.read()
+              if (next.done) controller.close(); else controller.enqueue(next.value)
             },
-          })) }
+            cancel(reason) { return reader.cancel(reason) },
+          })
+          return { ...result, stream: relay(replay, primary.state, accountNotice) }
         },
       } })
     },

@@ -12,3 +12,7 @@ allowBuilds:
   unrs-resolver: true
 patchedDependencies:
   fd-slicer@1.1.0: patches/fd-slicer@1.1.0.patch
+  # Adds Claude Code's `auto` permission mode to the provider's settings enum.
+  # Drop it once the AI SDK major is upgraded (provider >= 4.x accepts `auto`).
+  # Also listed under package.json "pnpm" because pnpm 9 reads patches only there.
+  ai-sdk-provider-claude-code@3.4.2: patches/ai-sdk-provider-claude-code@3.4.2.patch
