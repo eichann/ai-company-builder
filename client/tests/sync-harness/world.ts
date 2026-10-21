@@ -151,6 +151,8 @@ export interface WorldOptions {
   impl?: SyncImplFactory
   /** Per-sync hang limit. Default SYNC_TIMEOUT_MS. */
   syncTimeoutMs?: number
+  /** Locale for every git process and the hook. Default 'C' (the server container's). */
+  locale?: string
   /** Seed .gitignore. Default: the essential patterns (no first-sync noise). */
   gitignore?: string | null
 }
@@ -166,6 +168,7 @@ export class World {
   readonly departments: string[]
   readonly impl: SyncImplFactory
   readonly syncTimeoutMs: number
+  readonly locale: string
   private readonly gitconfig: string
 
   private constructor(root: string, options: WorldOptions) {
@@ -174,6 +177,7 @@ export class World {
     this.departments = options.departments ?? []
     this.impl = options.impl ?? createGitSync
     this.syncTimeoutMs = options.syncTimeoutMs ?? SYNC_TIMEOUT_MS
+    this.locale = options.locale ?? 'C'
     this.gitconfig = path.join(root, 'gitconfig')
   }
 
@@ -195,10 +199,14 @@ export class World {
   env(extra: Record<string, string> = {}): NodeJS.ProcessEnv {
     const env: NodeJS.ProcessEnv = { ...process.env }
     for (const key of Object.keys(env)) {
-      if (key.startsWith('ACB_') || key.startsWith('GIT_') || key === 'NODE_TEST_CONTEXT') delete env[key]
+      if (key.startsWith('ACB_') || key.startsWith('GIT_') || key.startsWith('LC_') || key === 'LANG' || key === 'NODE_TEST_CONTEXT') delete env[key]
     }
     return {
       ...env,
+      // The pre-receive hook runs in this environment (local transport). The
+      // production server runs it in a container with no locale set, i.e. the
+      // POSIX locale; pin that so results do not depend on the machine.
+      LC_ALL: this.locale,
       GIT_CONFIG_GLOBAL: this.gitconfig,
       GIT_CONFIG_NOSYSTEM: '1',
       GIT_AUTHOR_DATE: FIXED_DATE,

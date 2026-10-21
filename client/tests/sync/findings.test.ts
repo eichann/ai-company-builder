@@ -61,6 +61,25 @@ describe('git:sync findings', { concurrency: 4 }, () => {
     await settleAndCheck(world)
   })
 
+  // Found when the harness first ran in CI; NOT fixed (server hook). The
+  // pre-receive hook's "paths differing only by case" check pipes the tree
+  // through `tr | sort | uniq -d` in the inherited locale. Under a UTF-8
+  // locale whose collation does not order these characters (macOS
+  // en_US.UTF-8 here), uniq treats different Japanese names as equal and the
+  // push is rejected with WINPATH_DETECTED. The production container runs
+  // with no locale (POSIX), where the check is bytewise — the harness pins
+  // that — but a server started with LANG=en_US.UTF-8 would reject ordinary
+  // Japanese file names.
+  test('Japanese file names pass the hook under a UTF-8 locale', {
+    skip: KNOWN ? false : 'known issue: pre-receive case-duplicate check is locale-dependent (see comment)',
+  }, async t => {
+    const world = World.create(t, { members: [{ name: 'a' }], locale: 'en_US.UTF-8' })
+    const [a] = world.members
+    a.write('営業部/見積.md', '1\n').write('営業部/提案書.md', '2\n')
+    const out = await a.sync()
+    assert.equal(out.result.success, true, JSON.stringify(out.result))
+  })
+
   // Found by the soak; NOT fixed (policy question, no data loss). Lines sync
   // itself appends to .gitignore (nested-repo exclusions, large files) are
   // committed with the member's work, so when two members' syncs both change
