@@ -482,3 +482,43 @@ export function replaceScopeRules(
     return getScopeById(conn, companyId, scope.id)
   })()
 }
+
+/**
+ * Move the rules of the scope at `fromPath`, and of every scope under it, to
+ * the same relative places under `toPath` — "新しい場所に移す" for rules
+ * whose folder was renamed by a sync push (lib/orphaned-scopes.ts). The
+ * caller checks that `toPath` exists and that no scope in its subtree has
+ * rules; this throws if one does, so nothing is ever merged or overwritten.
+ *
+ * Moves rule rows (ids and created_at/by kept), not scope rows, which is why
+ * this is not moveScopeSubtree: that one moves whole scope rows for a
+ * department rename, where the department's own row moves along. Here
+ * - a rule-less scope already at a target path (e.g. a department created in
+ *   the admin panel) is kept and receives the rules, instead of being
+ *   replaced as "stale";
+ * - a department scope at the old path stays where its department says it is
+ *   (startup seeding would move it back anyway) and only loses its rules;
+ * - a folder scope left without rules is removed, as usual.
+ * Returns how many rules moved.
+ */
+export function moveScopeRules(conn: Conn, companyId: string, fromPath: string, toPath: string, createdBy: string | null): number {
+  const from = normalizeScopePath(fromPath)
+  const to = normalizeScopePath(toPath)
+  if (!from || !to || from === to) return 0
+  const inSubtree = (root: string, path: string) => path === root || path.startsWith(`${root}/`)
+  if (inSubtree(from, to) || inSubtree(to, from)) throw new Error('Cannot move rules into or out of their own folder')
+  return conn.transaction(() => {
+    const scopes = listScopesWithRules(conn, companyId)
+    if (scopes.some(s => inSubtree(to, s.path) && s.rules.length > 0)) {
+      throw new Error(`Rules already exist at ${to}`)
+    }
+    let moved = 0
+    for (const s of scopes.filter(s => inSubtree(from, s.path) && s.rules.length > 0)) {
+      const dest = ensureFolderScope(conn, companyId, to + s.path.slice(from.length), createdBy)
+      moved += conn.prepare(`UPDATE scope_rules SET scope_id = ? WHERE scope_id = ?`).run(dest.id, s.id).changes
+      const src = getScopeById(conn, companyId, s.id)
+      if (src) dropEmptyFolderScope(conn, src)
+    }
+    return moved
+  })()
+}

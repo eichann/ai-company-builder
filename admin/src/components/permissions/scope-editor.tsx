@@ -7,6 +7,7 @@ import { Eye, Info, LockSimple, User, UserCircle, X } from '@phosphor-icons/reac
 import { ConfirmDialog } from '@/components/app/confirm-dialog'
 import { EditorPicker } from '@/components/permissions/editor-picker'
 import { EffectivePreview } from '@/components/permissions/effective-preview'
+import { OutdatedClientsDialog, useOutdatedClients } from '@/components/permissions/outdated-clients-dialog'
 import { SubfolderPicker } from '@/components/permissions/subfolder-picker'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -162,9 +163,32 @@ export function ScopeEditor({
     setTouched(false)
   }
 
-  const send = async (rules: RuleInput[]) => {
-    await permissionsApi.replaceScope(companyId, node.path, rules)
+  const send = async (rules: RuleInput[], force = false) => {
+    await permissionsApi.replaceScope(companyId, node.path, rules, { force })
     onChanged()
+  }
+
+  // 409 OUTDATED_CLIENTS: someone who would lose edit access is on an app
+  // that cannot recover from it. Explain, and let owners/admins force.
+  const { catchOutdated, dialogProps: outdatedDialog } = useOutdatedClients()
+
+  const undo = (previous: RuleInput[]) => {
+    const failed = (err: unknown) => toast.error('元に戻せませんでした', { description: describeError(err) })
+    send(previous).then(
+      () => toast.success('元に戻しました'),
+      (err: unknown) => {
+        const forced = async () => {
+          try {
+            await send(previous, true)
+            toast.success('元に戻しました')
+          } catch (e) {
+            failed(e)
+            throw e
+          }
+        }
+        if (!catchOutdated(err, forced)) failed(err)
+      }
+    )
   }
 
   const save = () => {
@@ -173,23 +197,18 @@ export function ScopeEditor({
     const lost = losingEdit(before, after)
     const previous = rulesAsInputs(ownRules)
     const label = draftLabel(draft, members)
-    const run = async () => {
+    const rules = rulesFromDraft(draft)
+    const run = async (force = false) => {
       setBusy(true)
       try {
-        await send(rulesFromDraft(draft))
+        await send(rules, force)
         setTouched(false)
         toast.success(`${node.name}：編集できる人を「${label}」にしました`, {
-          action: {
-            label: '元に戻す',
-            onClick: () => {
-              send(previous).then(
-                () => toast.success('元に戻しました'),
-                (err: unknown) => toast.error('元に戻せませんでした', { description: describeError(err) })
-              )
-            },
-          },
+          action: { label: '元に戻す', onClick: () => undo(previous) },
         })
       } catch (err) {
+        // Not an error toast: the dialog explains (and resolves) it.
+        if (!force && catchOutdated(err, () => run(true))) return
         toast.error('権限を保存できませんでした', { description: describeError(err) })
         throw err
       } finally {
@@ -218,7 +237,7 @@ export function ScopeEditor({
         </>
       ),
       confirmLabel: '保存する',
-      run,
+      run: () => run(),
     })
   }
 
@@ -386,6 +405,8 @@ export function ScopeEditor({
         </div>
         <EffectivePreview effective={effective} draft={draftPreview} path={node.path} nameOf={nameOf} />
       </section>
+
+      <OutdatedClientsDialog {...outdatedDialog} />
 
       <ConfirmDialog
         open={confirm !== null}

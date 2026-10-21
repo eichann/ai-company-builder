@@ -42,6 +42,21 @@
  *   member not named by any rule would lose read access there, which is a
  *   read restriction by another name.
  *
+ * Outdated apps (guardWrite): a desktop app older than #114 does not
+ * understand a `[WRITE_DENIED]` rejection and retries it on every sync
+ * forever. So every change above (and the move below) is applied in a
+ * transaction, the members who would lose write access anywhere in the
+ * affected subtree are computed (lib/write-loss.ts), and if any of them runs
+ * an app without the recovery — or one whose version is unknown — the change
+ * is rolled back and answered 409 OUTDATED_CLIENTS with those members. An
+ * owner/admin may override with `force: true` (body, or `?force=true` on a
+ * DELETE); a manager sending it gets 403. Nothing else is recorded.
+ *   POST   /permissions/scopes/:scopeId/move  { toPath } move the rules of a
+ *          folder (and of folders inside it) to another existing folder — for
+ *          rules left behind by a rename made by a sync push
+ *          (lib/orphaned-scopes.ts). Same authorization as editing, for both
+ *          the old and the new place.
+ *
  * Audit: there is no audit log in this codebase yet; rule rows keep
  * created_at / created_by.
  */
@@ -55,14 +70,19 @@ import {
   getMemberRole,
   getRuleWithScope,
   getScopeById,
+  getScopeByPath,
   listScopeRules,
   listScopesWithRules,
   managedDepartmentIds,
+  moveScopeRules,
   replaceScopeRules,
   sqlitePermissionRepository,
   updateRuleAccess,
   upsertScopeRule,
 } from '../lib/permission-store'
+import { getClientActivityForCompany } from '../lib/client-activity'
+import { supportsWriteDeniedRecovery } from '../lib/client-version'
+import { membersLosingWrite } from '../lib/write-loss'
 import {
   applicableRules,
   findGoverningScope,
@@ -226,6 +246,94 @@ function scopeResponse(c: Ctx, scopeId: string, status: 200 | 201 = 200) {
   }, status)
 }
 
+// ----------------------------------------------------------------------------
+// Outdated-app guard (see the module comment)
+// ----------------------------------------------------------------------------
+
+export const OUTDATED_CLIENTS_ERROR =
+  'Some members who would lose edit access use a desktop app that cannot recover from a write restriction; ask them to update the app first'
+
+export interface OutdatedMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: string
+  clientVersion: string | null
+  /** clientVersion, or 不明 when unknown. */
+  version: string
+  lastSeenAt: string | null
+}
+
+class OutdatedClientsBlock extends Error {
+  constructor(readonly members: OutdatedMember[]) {
+    super('OUTDATED_CLIENTS')
+  }
+}
+
+function latestOf(...values: Array<string | null | undefined>): string | null {
+  let best: string | null = null
+  for (const v of values) if (v && (!best || v > best)) best = v
+  return best
+}
+
+/**
+ * `force` from the body or the query string. A manager may not override.
+ * Returns a Response to send when the request must be refused.
+ */
+function parseForce(c: Ctx, actor: Actor, body: Record<string, unknown> | null): boolean | Response {
+  const q = c.req.query('force')
+  const force = body?.force === true || q === 'true' || q === '1'
+  if (force && !FULL_ACCESS_ROLES.has(actor.role)) {
+    return c.json({ error: 'Only owners and admins can save despite outdated apps', code: 'FORCE_NOT_ALLOWED' }, 403)
+  }
+  return force
+}
+
+/**
+ * Run `mutate` in a transaction and keep it only when nobody who loses write
+ * access under `roots` is on an app that cannot recover from [WRITE_DENIED]
+ * (or `force`). Otherwise roll back and answer 409 OUTDATED_CLIENTS.
+ */
+function guardWrite<T>(c: Ctx, actor: Actor, force: boolean, roots: string[], mutate: () => T): T | Response {
+  const companyId = actor.companyId
+  try {
+    return db.transaction(() => {
+      const before = listScopesWithRules(db, companyId)
+      const result = mutate()
+      if (force) return result
+      const members = (db.prepare(`SELECT user_id, role FROM memberships WHERE company_id = ? ORDER BY created_at ASC`)
+        .all(companyId) as Array<{ user_id: string; role: string }>).map(m => ({ userId: m.user_id, role: m.role }))
+      const losing = membersLosingWrite(companyId, members, before, listScopesWithRules(db, companyId), roots)
+      if (losing.length === 0) return result
+      const activity = getClientActivityForCompany(companyId)
+      const blocked = losing.filter(id => !supportsWriteDeniedRecovery(activity.get(id)?.client_version))
+      if (blocked.length === 0) return result
+      const users = getUsersByIds(blocked)
+      const roleOf = new Map(members.map(m => [m.userId, m.role]))
+      throw new OutdatedClientsBlock(blocked.map(id => {
+        const a = activity.get(id)
+        return {
+          userId: id,
+          name: users.get(id)?.name ?? null,
+          email: users.get(id)?.email ?? null,
+          role: roleOf.get(id) ?? 'member',
+          clientVersion: a?.client_version ?? null,
+          version: a?.client_version ?? '不明',
+          lastSeenAt: latestOf(a?.last_seen_at, a?.last_fetch_at, a?.last_push_at),
+        }
+      }))
+    })()
+  } catch (err) {
+    if (!(err instanceof OutdatedClientsBlock)) throw err
+    return c.json({
+      error: OUTDATED_CLIENTS_ERROR,
+      code: 'OUTDATED_CLIENTS',
+      members: err.members,
+      canForce: FULL_ACCESS_ROLES.has(actor.role),
+    }, 409)
+  }
+}
+
 const MAX_RULES_PER_SCOPE = 200
 
 const replaceError = (c: Ctx, error: string, code?: string) => c.json({ error, ...(code ? { code } : {}) }, 400)
@@ -242,6 +350,8 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
   const parsed = parseScopePath(body.path)
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
   if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
+  const force = parseForce(c, actor, body)
+  if (force instanceof Response) return force
 
   if (!Array.isArray(body.rules)) return replaceError(c, 'rules must be an array')
   if (body.rules.length > MAX_RULES_PER_SCOPE) return replaceError(c, `At most ${MAX_RULES_PER_SCOPE} rules per folder`)
@@ -270,7 +380,8 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
   }
 
-  const scope = replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId)
+  const scope = guardWrite(c, actor, force, [parsed.path], () => replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId))
+  if (scope instanceof Response) return scope
   if (!scope) return c.json({ success: true, data: { scope: null, rules: [] } })
   return scopeResponse(c, scope.id)
 })
@@ -286,6 +397,8 @@ permissionRulesRoute.post('/permissions/rules', async (c) => {
   const parsed = parseScopePath(body.path)
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
   if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
+  const force = parseForce(c, actor, body)
+  if (force instanceof Response) return force
   const access = parseAccess(body)
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
   const subject = parseSubject(actor, body)
@@ -295,8 +408,10 @@ permissionRulesRoute.post('/permissions/rules', async (c) => {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
   }
 
-  const { scope, created } = upsertScopeRule(db, actor.companyId, parsed.path, { ...subject, canRead: true, canWrite: access.canWrite }, actor.userId)
-  return scopeResponse(c, scope.id, created ? 201 : 200)
+  const result = guardWrite(c, actor, force, [parsed.path], () =>
+    upsertScopeRule(db, actor.companyId, parsed.path, { ...subject, canRead: true, canWrite: access.canWrite }, actor.userId))
+  if (result instanceof Response) return result
+  return scopeResponse(c, result.scope.id, result.created ? 201 : 200)
 })
 
 // PATCH /permissions/rules/:ruleId  { canWrite, canRead? }
@@ -310,10 +425,16 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
 
   const body = await readJson(c)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
+  const force = parseForce(c, actor, body)
+  if (force instanceof Response) return force
   const access = parseAccess(body)
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
 
-  updateRuleAccess(db, found.rule.id, true, access.canWrite)
+  const done = guardWrite(c, actor, force, [found.scope.path], () => {
+    updateRuleAccess(db, found.rule.id, true, access.canWrite)
+    return true
+  })
+  if (done instanceof Response) return done
   return scopeResponse(c, found.scope.id)
 })
 
@@ -325,6 +446,8 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
   const found = getRuleWithScope(db, actor.companyId, c.req.param('ruleId'))
   if (!found) return c.json({ error: 'Rule not found' }, 404)
   if (!canEditPath(actor, found.scope.path)) return forbiddenEdit(c)
+  const force = parseForce(c, actor, await readJson(c))
+  if (force instanceof Response) return force
 
   const rules = listScopeRules(db, found.scope.id)
   if (rules.length === 1) {
@@ -337,7 +460,11 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
     }, 400)
   }
 
-  deleteRule(db, found.rule.id, found.scope)
+  const done = guardWrite(c, actor, force, [found.scope.path], () => {
+    deleteRule(db, found.rule.id, found.scope)
+    return true
+  })
+  if (done instanceof Response) return done
   return scopeResponse(c, found.scope.id)
 })
 
@@ -350,9 +477,52 @@ permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
   if (!scope) return c.json({ error: 'Scope not found' }, 404)
   if (!canEditPath(actor, scope.path)) return forbiddenEdit(c)
   if (scope.path === '') return c.json({ error: 'The company-wide rule cannot be removed; change it instead' }, 400)
+  const force = parseForce(c, actor, await readJson(c))
+  if (force instanceof Response) return force
 
-  const removed = clearScopeRules(db, scope)
+  const removed = guardWrite(c, actor, force, [scope.path], () => clearScopeRules(db, scope))
+  if (removed instanceof Response) return removed
   return c.json({ success: true, data: { removed } })
+})
+
+// POST /permissions/scopes/:scopeId/move  { toPath, force? }
+// Move the rules of a folder (and of the folders inside it) to another
+// existing folder that has no rules yet. For rules left behind when a folder
+// was renamed by a sync push (GET /permissions → orphanedScopes).
+permissionRulesRoute.post('/permissions/scopes/:scopeId/move', async (c) => {
+  const actor = await authAndAuthorize(c)
+  if (actor instanceof Response) return actor
+  if (!canEditAnything(actor)) return forbiddenEdit(c)
+  const scope = getScopeById(db, actor.companyId, c.req.param('scopeId'))
+  if (!scope) return c.json({ error: 'Scope not found' }, 404)
+  if (scope.path === '') return c.json({ error: 'The company-wide rules cannot be moved' }, 400)
+  if (!canEditPath(actor, scope.path)) return forbiddenEdit(c)
+
+  const body = await readJson(c)
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
+  const parsed = parseScopePath(body.toPath)
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400)
+  if (parsed.path === '') return c.json({ error: 'Rules cannot be moved to the company root' }, 400)
+  if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
+  if (isSameOrAncestorPath(scope.path, parsed.path) || isSameOrAncestorPath(parsed.path, scope.path)) {
+    return c.json({ error: 'Rules cannot be moved into or out of their own folder' }, 400)
+  }
+  const force = parseForce(c, actor, body)
+  if (force instanceof Response) return force
+
+  if ((await resolveRepoFolder(actor.companyId, parsed.path)) === null) {
+    return c.json({ error: 'Folder not found in the company repository' }, 400)
+  }
+  const scopes = listScopesWithRules(db, actor.companyId)
+  if (scopes.some(s => isSameOrAncestorPath(parsed.path, s.path) && s.rules.length > 0)) {
+    return c.json({ error: 'The destination folder (or a folder inside it) already has rules', code: 'TARGET_HAS_RULES' }, 409)
+  }
+
+  const moved = guardWrite(c, actor, force, [scope.path, parsed.path], () =>
+    moveScopeRules(db, actor.companyId, scope.path, parsed.path, actor.userId))
+  if (moved instanceof Response) return moved
+  const dest = getScopeByPath(db, actor.companyId, parsed.path)
+  return c.json({ success: true, data: { moved, toPath: parsed.path, scopeId: dest?.id ?? null } })
 })
 
 // GET /permissions/effective?path=

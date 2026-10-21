@@ -5,6 +5,7 @@ import { Buildings, CaretDown, CaretRight, Folder, Info, LockSimple, ShieldCheck
 
 import { DepartmentIcon } from '@/components/app/department-icon'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
+import { OrphanedScopesCard } from '@/components/permissions/orphaned-scopes'
 import { ScopeEditor, type EditorNode } from '@/components/permissions/scope-editor'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
@@ -41,6 +42,8 @@ interface Node extends EditorNode {
   department: Department | undefined
   hasChildren: boolean
   summary: EffectiveSummary
+  /** Has rules, but the folder is gone from the server (orphanedScopes). */
+  missing: boolean
 }
 
 function depthOf(path: string): number {
@@ -60,6 +63,7 @@ export default function PermissionsPage() {
   const treeRef = useRef<HTMLUListElement>(null)
 
   const scopes = useMemo(() => permissions.data?.scopes ?? [], [permissions.data])
+  const missingPaths = useMemo(() => new Set((permissions.data?.orphanedScopes ?? []).map((o) => o.path)), [permissions.data])
 
   const managedFolders = useMemo(
     () => (departments.data ?? []).filter((d) => managedDepartmentIds.includes(d.id)).map((d) => d.folder.normalize('NFC')),
@@ -95,9 +99,10 @@ export default function PermissionsPage() {
         department,
         hasChildren: !!next && isSameOrAncestorPath(path, next) && next !== path,
         summary: (scope ?? nearest)?.effectiveSummary ?? 'restricted',
+        missing: missingPaths.has(path),
       }
     })
-  }, [scopes, extraPaths, departments.data, company.data])
+  }, [scopes, extraPaths, departments.data, company.data, missingPaths])
 
   // Hide descendants of collapsed nodes (nodes are in tree order).
   const visible = useMemo(() => {
@@ -180,6 +185,14 @@ export default function PermissionsPage() {
         <EmptyState icon={ShieldCheck} title="権限の情報がありません" description="会社の共有フォルダがまだ作られていない可能性があります。" />
       ) : (
         <div className="space-y-6">
+          <OrphanedScopesCard
+            companyId={companyId}
+            orphans={permissions.data?.orphanedScopes ?? []}
+            members={members.data ?? []}
+            canEdit={canEdit}
+            onChanged={permissions.reload}
+          />
+
           {companyScope && (
             <Card className="flex-row items-center gap-4 px-5 py-5">
               <span
@@ -318,6 +331,7 @@ function TreeRow({
             )}
           </span>
           <span className={cn('min-w-0 flex-1 truncate text-sm', kind !== 'folder' && 'font-medium')}>{name}</span>
+          {node.missing && <span className="shrink-0 text-xs text-warning">見つかりません</span>}
           {inherited ? (
             <span className="shrink-0 text-xs text-muted-foreground">継承</span>
           ) : (

@@ -9,10 +9,16 @@ const API_BASE = ''
 /** An HTTP error from the API, keeping the status so the UI can explain it. */
 export class ApiError extends Error {
   readonly status: number
-  constructor(status: number, message: string) {
+  /** The machine-readable `code` of the error body, when the API sent one. */
+  readonly code: string | undefined
+  /** The whole JSON error body (for errors that carry details, e.g. OUTDATED_CLIENTS). */
+  readonly body: Record<string, unknown> | null
+  constructor(status: number, message: string, body: Record<string, unknown> | null = null) {
     super(message)
     this.name = 'ApiError'
     this.status = status
+    this.body = body
+    this.code = typeof body?.code === 'string' ? body.code : undefined
   }
 }
 
@@ -36,8 +42,10 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
   })
 
   if (!res.ok) {
-    const error = (await res.json().catch(() => null)) as { error?: string; message?: string } | null
-    throw new ApiError(res.status, error?.error || error?.message || `Request failed (${res.status})`)
+    const raw: unknown = await res.json().catch(() => null)
+    const error = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+    const message = typeof error?.error === 'string' ? error.error : typeof error?.message === 'string' ? error.message : ''
+    throw new ApiError(res.status, message || `Request failed (${res.status})`, error)
   }
 
   return res.json() as Promise<T>
@@ -192,7 +200,20 @@ export interface Overview {
     unknownClients: OverviewMember[]
     notSyncedRecently: OverviewMember[]
     recentRejections: PushRejection[]
+    /** Absent from servers older than the orphaned-rules check. */
+    orphanedScopes?: OrphanedScopeSummary[]
   }
+}
+
+/** Rules whose folder is gone from the shared branch (renamed or removed by a sync). */
+export interface OrphanedScopeSummary {
+  scopeId: string
+  path: string
+  kind: PermissionScope['kind']
+  ruleCount: number
+  summary: EffectiveSummary
+  /** When the folder was first noticed missing. */
+  since: string
 }
 
 export const overviewApi = {
@@ -307,19 +328,68 @@ export interface RepoFolder {
   hasRules: boolean
 }
 
+export interface OrphanedScope {
+  scopeId: string
+  path: string
+  kind: PermissionScope['kind']
+  departmentId: string | null
+  rules: PermissionRule[]
+  summary: EffectiveSummary
+  since: string
+}
+
+/**
+ * A member who would lose edit access but runs a desktop app that cannot
+ * recover from it (409 OUTDATED_CLIENTS from any rule change).
+ */
+export interface OutdatedMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: Role
+  clientVersion: string | null
+  /** clientVersion, or 不明. */
+  version: string
+  lastSeenAt: string | null
+}
+
+export interface OutdatedClients {
+  members: OutdatedMember[]
+  /** Owners/admins may save anyway (force); managers may not. */
+  canForce: boolean
+}
+
+/** The details of a 409 OUTDATED_CLIENTS, or null for any other error. */
+export function outdatedClientsOf(err: unknown): OutdatedClients | null {
+  if (!(err instanceof ApiError) || err.status !== 409 || err.code !== 'OUTDATED_CLIENTS') return null
+  const members = Array.isArray(err.body?.members) ? (err.body.members as OutdatedMember[]) : []
+  return { members, canForce: err.body?.canForce === true }
+}
+
+/** Save anyway although some members' apps are outdated (owner/admin only). */
+export type ForceOption = { force?: boolean }
+
 const permBase = (companyId: string) => `/api/companies/${enc(companyId)}/permissions`
 
 export const permissionsApi = {
-  get: (companyId: string) => getData<{ scopes: PermissionScope[] }>(permBase(companyId)),
+  get: (companyId: string) =>
+    getData<{ scopes: PermissionScope[]; orphanedScopes?: OrphanedScope[] }>(permBase(companyId)),
 
   /**
    * Replace a place's whole rule set in one step (what the 権限 screen saves).
    * [] = 上の階層と同じ (not allowed for the company root).
    */
-  replaceScope: (companyId: string, path: string, rules: RuleInput[]) =>
+  replaceScope: (companyId: string, path: string, rules: RuleInput[], { force = false }: ForceOption = {}) =>
     getData<ScopeRulesResult>(`${permBase(companyId)}/scopes/by-path`, {
       method: 'PUT',
-      body: { path, rules },
+      body: force ? { path, rules, force } : { path, rules },
+    }),
+
+  /** Move the rules of a place (and of the places inside it) to another existing folder. */
+  moveScope: (companyId: string, scopeId: string, toPath: string, { force = false }: ForceOption = {}) =>
+    getData<{ moved: number; toPath: string; scopeId: string | null }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/move`, {
+      method: 'POST',
+      body: force ? { toPath, force } : { toPath },
     }),
 
   /** Set (create or update) a subject's rule on a folder; the folder stops inheriting. */
@@ -336,8 +406,8 @@ export const permissionsApi = {
     getData<ScopeRulesResult>(`${permBase(companyId)}/rules/${enc(ruleId)}`, { method: 'DELETE' }),
 
   /** Remove every rule of the scope so it inherits from its parent again. */
-  resetScope: (companyId: string, scopeId: string) =>
-    getData<{ removed: number }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/rules`, { method: 'DELETE' }),
+  resetScope: (companyId: string, scopeId: string, { force = false }: ForceOption = {}) =>
+    getData<{ removed: number }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/rules${force ? '?force=true' : ''}`, { method: 'DELETE' }),
 
   effective: (companyId: string, path: string) =>
     getData<EffectiveAccess>(`${permBase(companyId)}/effective?path=${enc(path)}`),

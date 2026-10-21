@@ -7,6 +7,7 @@ import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
 import { observeRejectedPush } from '../lib/push-rejections'
+import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
 import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
 
@@ -496,6 +497,9 @@ function trackActivity(
       onClose: (code, body) => {
         if (code === 0 && body && receivePackSucceeded(body)) {
           recordClientActivity({ userId, companyId, kind: 'push', version, platform })
+          // A push may have renamed or removed a folder that has rules.
+          // Deferred (setImmediate) and asynchronous: never delays the push.
+          scheduleOrphanedScopeCheck(companyId)
         } else {
           // Rejected (or unproven): record any pre-receive hook sections it
           // printed. Deferred and non-throwing — see lib/push-rejections.ts.

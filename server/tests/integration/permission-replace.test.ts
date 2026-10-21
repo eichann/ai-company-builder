@@ -87,6 +87,10 @@ beforeAll(() => {
   for (const [u, role] of Object.entries(ROLE)) {
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
       .run(`m-${u}`, u, CO, role, ts(), ts())
+    // Everyone runs an app that recovers from [WRITE_DENIED], so the
+    // outdated-app guard stays out of these tests (outdated-app-guard.test.ts).
+    db.prepare('INSERT INTO client_activity (user_id, company_id, client_version, last_seen_at, updated_at) VALUES (?, ?, ?, ?, ?)')
+      .run(u, CO, '0.0.1+a031b73.20261021182826', ts(), ts())
   }
   db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ids.sales, CO, '営業部', '営業部', 0, ts(), ts())
