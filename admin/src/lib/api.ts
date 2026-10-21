@@ -130,6 +130,17 @@ export const companiesApi = {
 
   getMembers: (id: string) => getData<Member[]>(`/api/companies/${enc(id)}/members`),
 
+  /** owner / admin. Only the display name changes. */
+  rename: (id: string, name: string) =>
+    getData<Company>(`/api/companies/${enc(id)}`, { method: 'PATCH', body: { name } }),
+
+  /** owner only; the last owner cannot be demoted. */
+  setMemberRole: (companyId: string, userId: string, role: Role) =>
+    getData<{ userId: string; companyId: string; role: Role }>(
+      `/api/companies/${enc(companyId)}/members/${enc(userId)}/role`,
+      { method: 'PUT', body: { role } }
+    ),
+
   removeMember: (companyId: string, userId: string) =>
     apiClient<{ success: boolean }>(`/api/companies/${enc(companyId)}/members/${enc(userId)}`, {
       method: 'DELETE',
@@ -242,9 +253,104 @@ export interface PermissionScope {
   effectiveSummary: EffectiveSummary
 }
 
+/** Who a rule is for. Rules for owners/admins are refused: they can always edit. */
+export type RuleSubject =
+  | { subjectType: 'everyone'; subjectId: null }
+  | { subjectType: 'role'; subjectId: 'member' }
+  | { subjectType: 'user'; subjectId: string }
+
+export interface ScopeRulesResult {
+  /** null when the folder's last rule was removed (it inherits again). */
+  scope: { id: string; path: string; kind: PermissionScope['kind']; inherited: boolean } | null
+  rules: PermissionRule[]
+}
+
+export interface EffectiveMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: Role
+  read: boolean
+  write: boolean
+  reason: 'role' | 'rule' | 'no-rule' | 'not-member'
+  decidedBy: { scopeId: string; path: string; subjectType: PermissionRule['subjectType']; subjectLabel: string } | null
+}
+
+export interface EffectiveAccess {
+  path: string
+  governingScope: { id: string; path: string; inherited: boolean } | null
+  /** false until read restriction ships: everyone can read regardless. */
+  readRestrictionEnforced: boolean
+  members: EffectiveMember[]
+}
+
+export interface RepoFolder {
+  name: string
+  path: string
+  scopeId: string | null
+  hasRules: boolean
+}
+
+const permBase = (companyId: string) => `/api/companies/${enc(companyId)}/permissions`
+
 export const permissionsApi = {
-  get: (companyId: string) =>
-    getData<{ scopes: PermissionScope[] }>(`/api/companies/${enc(companyId)}/permissions`),
+  get: (companyId: string) => getData<{ scopes: PermissionScope[] }>(permBase(companyId)),
+
+  /** Set (create or update) a subject's rule on a folder; the folder stops inheriting. */
+  setRule: (companyId: string, path: string, subject: RuleSubject, canWrite: boolean) =>
+    getData<ScopeRulesResult>(`${permBase(companyId)}/rules`, {
+      method: 'POST',
+      body: { path, ...subject, canWrite },
+    }),
+
+  updateRule: (companyId: string, ruleId: string, canWrite: boolean) =>
+    getData<ScopeRulesResult>(`${permBase(companyId)}/rules/${enc(ruleId)}`, { method: 'PATCH', body: { canWrite } }),
+
+  deleteRule: (companyId: string, ruleId: string) =>
+    getData<ScopeRulesResult>(`${permBase(companyId)}/rules/${enc(ruleId)}`, { method: 'DELETE' }),
+
+  /** Remove every rule of the scope so it inherits from its parent again. */
+  resetScope: (companyId: string, scopeId: string) =>
+    getData<{ removed: number }>(`${permBase(companyId)}/scopes/${enc(scopeId)}/rules`, { method: 'DELETE' }),
+
+  effective: (companyId: string, path: string) =>
+    getData<EffectiveAccess>(`${permBase(companyId)}/effective?path=${enc(path)}`),
+
+  folders: (companyId: string, path: string) =>
+    getData<{ path: string; folders: RepoFolder[] }>(`${permBase(companyId)}/folders?path=${enc(path)}`),
+}
+
+// ---------------------------------------------------------------------------
+// Push rejection history (owner / admin)
+// ---------------------------------------------------------------------------
+
+export interface PushRejectionRecord {
+  id: string
+  userId: string
+  name: string | null
+  email: string | null
+  marker: string
+  paths: string[]
+  createdAt: string
+}
+
+export interface PushRejectionPage {
+  total: number
+  /** Every marker recorded for this company, for the filter. */
+  markers: string[]
+  rejections: PushRejectionRecord[]
+}
+
+export const pushRejectionsApi = {
+  list: (companyId: string, q: { userId?: string; marker?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (q.userId) params.set('userId', q.userId)
+    if (q.marker) params.set('marker', q.marker)
+    if (q.limit !== undefined) params.set('limit', String(q.limit))
+    if (q.offset) params.set('offset', String(q.offset))
+    const qs = params.toString()
+    return getData<PushRejectionPage>(`/api/companies/${enc(companyId)}/push-rejections${qs ? `?${qs}` : ''}`)
+  },
 }
 
 // ---------------------------------------------------------------------------

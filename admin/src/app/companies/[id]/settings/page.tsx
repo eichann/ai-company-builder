@@ -3,12 +3,22 @@
 import { useRouter } from 'next/navigation'
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { LockSimple, SignOut } from '@phosphor-icons/react'
+import { LockSimple, PencilSimple, SignOut } from '@phosphor-icons/react'
 
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { EmptyState, PageHeader } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Skeleton } from '@/components/ui/skeleton'
 import { companiesApi } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
@@ -20,9 +30,10 @@ import { useQuery } from '@/lib/use-query'
 export default function SettingsPage() {
   const router = useRouter()
   const { user } = useAuth()
-  const { companyId, company, role, isAdmin } = useCompany()
+  const { companyId, company, role, isAdmin, refresh } = useCompany()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const [leaving, setLeaving] = useState(false)
+  const [renaming, setRenaming] = useState(false)
 
   if (role !== null && !isAdmin) {
     return (
@@ -57,7 +68,20 @@ export default function SettingsPage() {
             <CardTitle>会社の情報</CardTitle>
           </CardHeader>
           <dl className="divide-y border-t text-sm">
-            <Field label="会社名" value={c?.name} />
+            <Field
+              label="会社名"
+              value={
+                c ? (
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="font-medium">{c.name}</span>
+                    <Button variant="outline" size="sm" onClick={() => setRenaming(true)}>
+                      <PencilSimple />
+                      名前を変更
+                    </Button>
+                  </div>
+                ) : undefined
+              }
+            />
             <Field label="オーナー" value={members.data ? (owner ? owner.name || owner.email : '—') : undefined} />
             <Field label="あなたの役割" value={role ? roleLabel(role) : undefined} />
             <Field label="作成日" value={c ? formatDate(c.createdAt) : undefined} />
@@ -86,6 +110,28 @@ export default function SettingsPage() {
         )}
       </div>
 
+      <Dialog open={renaming} onOpenChange={setRenaming}>
+        <DialogContent className="sm:max-w-md">
+          {renaming && c && (
+            <RenameForm
+              current={c.name}
+              onCancel={() => setRenaming(false)}
+              onSave={async (name) => {
+                try {
+                  await companiesApi.rename(companyId, name)
+                  toast.success(`会社名を「${name}」に変更しました`)
+                  setRenaming(false)
+                  refresh()
+                } catch (err) {
+                  toast.error('会社名を変更できませんでした', { description: describeError(err) })
+                  throw err
+                }
+              }}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
+
       <ConfirmByTypingDialog
         open={leaving}
         onOpenChange={setLeaving}
@@ -105,5 +151,61 @@ function Field({ label, value }: { label: string; value: React.ReactNode | undef
       <dt className="text-muted-foreground">{label}</dt>
       <dd>{value === undefined ? <Skeleton className="h-4 w-40" /> : value}</dd>
     </div>
+  )
+}
+
+const MAX_NAME_LENGTH = 100
+
+function RenameForm({ current, onCancel, onSave }: { current: string; onCancel: () => void; onSave: (name: string) => Promise<void> }) {
+  const [name, setName] = useState(current)
+  const [busy, setBusy] = useState(false)
+  const trimmed = name.trim()
+  const invalid = trimmed.length === 0 || trimmed.length > MAX_NAME_LENGTH
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (invalid || trimmed === current) return
+    setBusy(true)
+    try {
+      await onSave(trimmed)
+    } catch {
+      // Toast shown by the caller; keep the dialog open.
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>会社名を変更</DialogTitle>
+        <DialogDescription>
+          管理画面とデスクトップアプリに表示される名前が変わります。共有フォルダやURLは変わりません。
+        </DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-2">
+        <Label htmlFor="company-name">会社名</Label>
+        <Input
+          id="company-name"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          maxLength={MAX_NAME_LENGTH + 20}
+          autoFocus
+          aria-invalid={invalid || undefined}
+          aria-describedby="company-name-hint"
+        />
+        <p id="company-name-hint" className="text-xs text-muted-foreground">
+          {trimmed.length === 0 ? '会社名を入力してください。' : trimmed.length > MAX_NAME_LENGTH ? `${MAX_NAME_LENGTH}文字以内にしてください。` : `${trimmed.length} / ${MAX_NAME_LENGTH}文字`}
+        </p>
+      </div>
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+          キャンセル
+        </Button>
+        <Button type="submit" disabled={busy || invalid || trimmed === current}>
+          {busy ? '保存しています…' : '保存'}
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }

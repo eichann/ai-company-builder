@@ -18,6 +18,8 @@ export interface CompanyContextValue {
   isAdmin: boolean
   /** Departments the signed-in user is a manager (部署の責任者) of. */
   managedDepartmentIds: string[]
+  /** Re-read the company, the company list and the user's role (after a rename or role change). */
+  refresh: () => void
 }
 
 const CompanyContext = createContext<CompanyContextValue | null>(null)
@@ -40,6 +42,9 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
   // the same role and covers the moment before capabilities arrive.
   const role = capabilities.data?.role ?? company.data?.role ?? null
   const managedDepartmentIds = capabilities.data?.managedDepartmentIds
+  const { reload: reloadCompany } = company
+  const { reload: reloadCompanies } = companies
+  const { reload: reloadCapabilities } = capabilities
 
   const value = useMemo<CompanyContextValue>(
     () => ({
@@ -49,8 +54,13 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
       role,
       isAdmin: isAdminRole(role),
       managedDepartmentIds: managedDepartmentIds ?? [],
+      refresh: () => {
+        reloadCompany()
+        reloadCompanies()
+        reloadCapabilities()
+      },
     }),
-    [companyId, company, companies, role, managedDepartmentIds]
+    [companyId, company, companies, role, managedDepartmentIds, reloadCompany, reloadCompanies, reloadCapabilities]
   )
 
   return <CompanyContext.Provider value={value}>{children}</CompanyContext.Provider>

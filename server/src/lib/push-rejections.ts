@@ -139,18 +139,37 @@ export interface PushRejectionRow {
 }
 
 export function listRecentPushRejections(companyId: string, limit = 20): PushRejectionRow[] {
+  return queryPushRejections(companyId, { limit }).rows
+}
+
+export interface PushRejectionQuery {
+  userId?: string
+  marker?: string
+  limit?: number
+  offset?: number
+}
+
+/** Newest first, optionally filtered by member and/or marker; `total` counts every match. */
+export function queryPushRejections(companyId: string, q: PushRejectionQuery = {}): { rows: PushRejectionRow[]; total: number } {
+  const where = ['company_id = ?']
+  const params: unknown[] = [companyId]
+  if (q.userId) { where.push('user_id = ?'); params.push(q.userId) }
+  if (q.marker) { where.push('marker = ?'); params.push(q.marker) }
+  const total = (db.prepare(`SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}`).get(...params) as { n: number }).n
   const rows = db.prepare(`
     SELECT id, user_id, marker, paths, created_at FROM push_rejections
-    WHERE company_id = ? ORDER BY created_at DESC, rowid DESC LIMIT ?
-  `).all(companyId, limit) as Array<{ id: string; user_id: string; marker: string; paths: string; created_at: string }>
-  return rows.map(r => {
-    let paths: string[] = []
-    try {
-      const parsed: unknown = JSON.parse(r.paths)
-      if (Array.isArray(parsed)) paths = parsed.filter((p): p is string => typeof p === 'string')
-    } catch {
-      // Malformed row: show the rejection without paths.
-    }
-    return { id: r.id, userId: r.user_id, marker: r.marker, paths, createdAt: r.created_at }
-  })
+    WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?
+  `).all(...params, q.limit ?? 20, q.offset ?? 0) as Array<{ id: string; user_id: string; marker: string; paths: string; created_at: string }>
+  return { rows: rows.map(toPushRejectionRow), total }
+}
+
+function toPushRejectionRow(r: { id: string; user_id: string; marker: string; paths: string; created_at: string }): PushRejectionRow {
+  let paths: string[] = []
+  try {
+    const parsed: unknown = JSON.parse(r.paths)
+    if (Array.isArray(parsed)) paths = parsed.filter((p): p is string => typeof p === 'string')
+  } catch {
+    // Malformed row: show the rejection without paths.
+  }
+  return { id: r.id, userId: r.user_id, marker: r.marker, paths, createdAt: r.created_at }
 }

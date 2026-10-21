@@ -181,6 +181,55 @@ async function countFilesInRepoFolder(companyId: string, folder: string): Promis
   return { files, folders }
 }
 
+// Directory entries (trees and gitlinks, hidden ones skipped) of `dir` on the
+// shared branch, '' being the root. null when the repo, branch or directory
+// does not exist.
+async function listRepoDirectory(companyId: string, dir: string): Promise<string[] | null> {
+  const bareRepo = getBareRepoPath(companyId)
+  if (!existsSync(bareRepo)) return null
+  const ref = await resolveSharedBranch(bareRepo)
+  if (!ref) return null
+  const target = dir === '' ? ref : `${ref}:${dir}`
+  if (dir !== '') {
+    try {
+      if ((await git(['-C', bareRepo, 'cat-file', '-t', target])).trim() !== 'tree') return null
+    } catch {
+      return null
+    }
+  }
+  return parseLsTree(await git(['-C', bareRepo, 'ls-tree', '-z', target]))
+    .filter(e => (e.type === 'tree' || e.type === 'commit') && !e.path.startsWith('.'))
+    .map(e => e.path)
+}
+
+/**
+ * Resolve a repo-relative folder path (NFC, '/'-separated, as stored in
+ * `scopes`) against the shared branch of the bare repo, segment by segment,
+ * comparing names in NFC: a Mac client commits Japanese names in NFD, so a
+ * byte-wise lookup of the NFC path would miss them. Returns the path as the
+ * repository spells it, or null when some segment is not a (non-hidden)
+ * folder there. '' (the company root) resolves to ''.
+ */
+export async function resolveRepoFolder(companyId: string, path: string): Promise<string | null> {
+  let stored = ''
+  for (const segment of path.split('/').filter(Boolean)) {
+    const entries = await listRepoDirectory(companyId, stored)
+    const match = entries?.find(e => e.normalize('NFC') === segment.normalize('NFC'))
+    if (!match) return null
+    stored = stored ? `${stored}/${match}` : match
+  }
+  return stored
+}
+
+/** Sub-folder names (NFC, sorted) of an existing folder on the shared branch; null when it does not exist. */
+export async function listRepoSubfolders(companyId: string, path: string): Promise<string[] | null> {
+  const stored = await resolveRepoFolder(companyId, path)
+  if (stored === null) return null
+  const entries = await listRepoDirectory(companyId, stored)
+  if (entries === null) return null
+  return entries.map(e => e.normalize('NFC')).sort((a, b) => a.localeCompare(b, 'ja'))
+}
+
 // Helper: Get or create the working directory for a company, up to date with
 // the bare repo. Mutations only, and only inside withCompanyLock.
 async function getWorkingDir(companyId: string): Promise<string> {

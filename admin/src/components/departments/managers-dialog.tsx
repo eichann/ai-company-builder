@@ -103,7 +103,7 @@ function ManagersForm({
       <DialogHeader className="p-6 pb-4">
         <DialogTitle>「{department.name}」の責任者</DialogTitle>
         <DialogDescription>
-          責任者は、この部署のフォルダの権限を管理画面で確認できます（変更は今後のアップデートで対応予定）。ファイルへのアクセス権は変わりません。複数人を選べます。
+          責任者は、この部署とその中のフォルダの編集権限を管理画面で設定できます。責任者になるだけでは、本人が編集できる場所は変わりません。複数人を選べます。
         </DialogDescription>
       </DialogHeader>
       <Command className="border-y" loop>

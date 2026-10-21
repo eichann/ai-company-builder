@@ -10,6 +10,7 @@ import {
   DotsThree,
   LinkSimple,
   MagnifyingGlass,
+  UserGear,
   UserMinus,
   UserPlus,
   Users,
@@ -53,6 +54,7 @@ import {
   type Invitation,
   type Member,
   type Overview,
+  type Role,
 } from '@/lib/api'
 import { useAuth } from '@/lib/auth-context'
 import { copyText } from '@/lib/clipboard'
@@ -96,7 +98,7 @@ function buildStatusOf(
 }
 
 export default function MembersPage() {
-  const { companyId, isAdmin } = useCompany()
+  const { companyId, isAdmin, role: myRole, refresh } = useCompany()
   const { user } = useAuth()
   const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
   const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
@@ -110,6 +112,9 @@ export default function MembersPage() {
   const [sort, setSort] = useState<{ key: SortKey; dir: 'asc' | 'desc' }>({ key: 'role', dir: 'asc' })
   const [inviteOpen, setInviteOpen] = useState(false)
   const [removing, setRemoving] = useState<Row | null>(null)
+  const [changingRole, setChangingRole] = useState<Row | null>(null)
+  const isOwner = myRole === 'owner'
+  const ownerCount = (members.data ?? []).filter((m) => m.role === 'owner').length
 
   const rows = useMemo<Row[]>(() => {
     if (!members.data) return []
@@ -288,7 +293,7 @@ export default function MembersPage() {
                     )}
                     {isAdmin && (
                       <TableCell className="pr-4 text-right">
-                        {r.member.role !== 'owner' && r.member.userId !== user?.id && (
+                        {(isOwner || (r.member.role !== 'owner' && r.member.userId !== user?.id)) && (
                           <DropdownMenu>
                             <DropdownMenuTrigger asChild>
                               <Button variant="ghost" size="icon-sm" aria-label={`${r.name} の操作`}>
@@ -296,10 +301,18 @@ export default function MembersPage() {
                               </Button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end">
-                              <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(r)}>
-                                <UserMinus />
-                                会社から削除
-                              </DropdownMenuItem>
+                              {isOwner && (
+                                <DropdownMenuItem onSelect={() => setChangingRole(r)}>
+                                  <UserGear />
+                                  役割を変更
+                                </DropdownMenuItem>
+                              )}
+                              {r.member.role !== 'owner' && r.member.userId !== user?.id && (
+                                <DropdownMenuItem variant="destructive" onSelect={() => setRemoving(r)}>
+                                  <UserMinus />
+                                  会社から削除
+                                </DropdownMenuItem>
+                              )}
                             </DropdownMenuContent>
                           </DropdownMenu>
                         )}
@@ -338,6 +351,28 @@ export default function MembersPage() {
 
       {isAdmin && (
         <InviteDialog open={inviteOpen} onOpenChange={setInviteOpen} companyId={companyId} onCreated={invitations.reload} />
+      )}
+
+      {isOwner && (
+        <RoleDialog
+          row={changingRole}
+          isSelf={changingRole?.member.userId === user?.id}
+          lastOwner={changingRole?.member.role === 'owner' && ownerCount <= 1}
+          onOpenChange={(open) => !open && setChangingRole(null)}
+          onSave={async (role) => {
+            if (!changingRole) return
+            try {
+              await companiesApi.setMemberRole(companyId, changingRole.member.userId, role)
+              toast.success(`${changingRole.name} さんを「${roleLabel(role)}」にしました`)
+              setChangingRole(null)
+              members.reload()
+              if (changingRole.member.userId === user?.id) refresh()
+            } catch (err) {
+              toast.error('役割を変更できませんでした', { description: describeError(err) })
+              throw err
+            }
+          }}
+        />
       )}
 
       <ConfirmByTypingDialog
@@ -648,5 +683,106 @@ function PendingInvitations({
         </Card>
       )}
     </section>
+  )
+}
+
+const ROLE_DESCRIPTIONS: Record<Role, string> = {
+  owner: 'すべての操作ができます。役割の変更（管理者の任命・解除）はオーナーだけができます。',
+  admin: 'メンバーの招待・削除、部署・権限・会社の設定など、役割の変更以外のすべての操作ができます。権限のルールに関係なく常にすべて編集できます。',
+  member: '会社のファイルやAIスキルを同期して使えます。編集できる場所は権限の設定に従います。',
+}
+
+function RoleDialog({
+  row,
+  isSelf,
+  lastOwner,
+  onOpenChange,
+  onSave,
+}: {
+  row: Row | null
+  isSelf: boolean
+  lastOwner: boolean
+  onOpenChange: (open: boolean) => void
+  onSave: (role: Role) => Promise<void>
+}) {
+  return (
+    <Dialog open={row !== null} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        {row && <RoleForm key={row.member.userId} row={row} isSelf={isSelf} lastOwner={lastOwner} onCancel={() => onOpenChange(false)} onSave={onSave} />}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function RoleForm({
+  row,
+  isSelf,
+  lastOwner,
+  onCancel,
+  onSave,
+}: {
+  row: Row
+  isSelf: boolean
+  lastOwner: boolean
+  onCancel: () => void
+  onSave: (role: Role) => Promise<void>
+}) {
+  const [role, setRole] = useState<Role>(row.member.role)
+  const [busy, setBusy] = useState(false)
+  const unchanged = role === row.member.role
+  const losingOwnership = isSelf && row.member.role === 'owner' && role !== 'owner'
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    if (unchanged) return
+    setBusy(true)
+    try {
+      await onSave(role)
+    } catch {
+      // Toast shown by the caller; keep the dialog open.
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <form onSubmit={submit} className="grid gap-4">
+      <DialogHeader>
+        <DialogTitle>{row.name} さんの役割</DialogTitle>
+        <DialogDescription>役割によって、管理画面でできることと、編集できる場所が変わります。</DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-2">
+        <Label htmlFor="member-role">役割</Label>
+        <Select value={role} onValueChange={(v) => setRole(v as Role)} disabled={lastOwner}>
+          <SelectTrigger id="member-role">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="owner">オーナー</SelectItem>
+            <SelectItem value="admin">管理者</SelectItem>
+            <SelectItem value="member">メンバー</SelectItem>
+          </SelectContent>
+        </Select>
+        <p className="text-xs text-muted-foreground">{ROLE_DESCRIPTIONS[role]}</p>
+      </div>
+      {lastOwner && (
+        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          この会社のオーナーは{isSelf ? 'あなた' : `${row.name} さん`}だけです。役割を変えるには、先にほかのメンバーをオーナーにしてください。
+        </p>
+      )}
+      {losingOwnership && (
+        <p className="rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm">
+          あなた自身がオーナーではなくなります。役割の変更は、ほかのオーナーにしかできなくなります。
+        </p>
+      )}
+      <DialogFooter>
+        <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
+          キャンセル
+        </Button>
+        <Button type="submit" variant={losingOwnership ? 'destructive' : 'default'} disabled={busy || unchanged || lastOwner}>
+          {busy ? '保存しています…' : '変更する'}
+        </Button>
+      </DialogFooter>
+    </form>
   )
 }

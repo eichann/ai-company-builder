@@ -14,6 +14,18 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/not members of this company/i, '選んだ人の中に、この会社のメンバーではない人がいます。ページを再読み込みしてから選び直してください。'],
   [/at most \d+ managers/i, '1つの部署に設定できる責任者は50人までです。'],
   [/already a member/i, 'すでにこの会社のメンバーです。'],
+  [/read access is not available yet/i, '閲覧の制限はまだ使えません（今後のアップデートで対応予定）。いまは「編集できる」か「閲覧のみ」を選べます。'],
+  [/always read and edit everything/i, 'オーナーと管理者は常にすべて閲覧・編集できるため、ルールは不要です。'],
+  [/rule for everyone cannot be removed/i, '「全員」のルールは、ほかのルールがある間は削除できません。「閲覧のみ」に変えるか、「上の階層に合わせる」で個別ルールをまとめて解除してください。'],
+  [/company-wide rule cannot be removed/i, '会社全体のルールは削除できません。「編集できる」「閲覧のみ」を切り替えて調整してください。'],
+  [/folder not found in the company repository/i, 'このフォルダは会社の共有フォルダにまだありません。誰かが作成して同期してから設定してください。'],
+  [/hidden folders have built-in rules/i, '「.」で始まるフォルダには組み込みのルールがあり、個別に設定できません。'],
+  [/managers of this department can change/i, 'この場所の権限を変更できるのは、オーナー・管理者と、その部署の責任者です。'],
+  [/last owner cannot be demoted/i, '最後のオーナーの役割は変更できません。先にほかのメンバーをオーナーにしてください。'],
+  [/only owners can change member roles/i, '役割を変更できるのはオーナーだけです。'],
+  [/company name is required/i, '会社名を入力してください。'],
+  [/company name must be at most/i, '会社名は100文字以内にしてください。'],
+  [/company name contains invalid characters/i, '会社名に使えない文字（改行など）が含まれています。'],
   [/invitation.*(expired|used|invalid|not found)/i, 'この招待リンクは無効か、有効期限が切れています。管理者に新しいリンクを依頼してください。'],
 ]
 
