@@ -206,7 +206,15 @@ harness — see "Testing Sync" below.
   `conflictFiles`. A file that simply vanishes reads as data loss.
 - Backups are extracted with `git cat-file -p <localHash>:<file>` into a Buffer.
   `git show` returns a string and corrupts binaries (pptx, png, …), which are
-  exactly the files that conflict most often.
+  exactly the files that conflict most often. When the file no longer exists
+  at `localHash` (a later unpushed commit renamed or deleted it), the backup
+  falls back to `:3:<file>` — the local side of the pick being replayed. And
+  when a pick replaces an *earlier* local version that the saved one does not
+  match (the path was renamed away and reused, or edited in several unpushed
+  commits), that version goes to `.backups/<timestamp>_<round>/` with its own
+  `_metadata.json`. Without these the conflicted edit was replaced by the
+  server version and saved nowhere, while the message claimed it was in
+  `.backups/` (found by the sync harness soak).
 
 ### Non-Negotiable Guards
 

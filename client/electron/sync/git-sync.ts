@@ -12,6 +12,7 @@
 import fs from 'fs'
 import path from 'path'
 import { spawn } from 'child_process'
+import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
@@ -435,37 +436,99 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           )
         }
 
-        // Back up the local version of the given files (extracted from
-        // localHash, binary-safe) into the timestamped backup folder.
+        // Use git cat-file to extract as binary-safe Buffer
+        // (git.show returns string, which corrupts binary files)
+        const catFile = (spec: string) => new Promise<Buffer>((resolve, reject) => {
+          const chunks: Buffer[] = []
+          const proc = spawn(deps.gitBinary(), ['cat-file', '-p', spec], {
+            cwd: repoPath,
+            stdio: ['ignore', 'pipe', 'ignore'],
+            ...(process.getuid ? { uid: process.getuid() } : {}),
+          })
+          proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
+          proc.on('close', (code: number) => {
+            if (code === 0) resolve(Buffer.concat(chunks))
+            else reject(new Error(`git cat-file exited with ${code}`))
+          })
+          proc.on('error', reject)
+        })
+
+        // Back up the local version of the given files into the timestamped
+        // backup folder: the member's latest version (localHash) when the
+        // file still exists there, otherwise the local side of the pick being
+        // replayed (index stage 3). The fallback matters when a later,
+        // not-yet-pushed commit renamed or deleted the file — localHash has
+        // no such path, and the edit that conflicted here would otherwise be
+        // replaced by the server version without a copy anywhere.
+        // Git's object id of the content saved for each path, to tell later
+        // which versions a conflicted pick replaces that are not saved yet.
+        const savedVersions = new Map<string, Set<string>>()
+        const markSaved = (file: string, content: Buffer) => {
+          const id = createHash('sha1').update(`blob ${content.length}\0`).update(content).digest('hex')
+          if (!savedVersions.has(file)) savedVersions.set(file, new Set())
+          savedVersions.get(file)!.add(id)
+        }
         const backupConflictFiles = async (files: string[]) => {
           fs.mkdirSync(backupPath, { recursive: true })
           for (const file of files) {
-            try {
-              const destPath = path.join(backupPath, file)
-              fs.mkdirSync(path.dirname(destPath), { recursive: true })
-              // Use git cat-file to extract as binary-safe Buffer
-              // (git.show returns string, which corrupts binary files)
-              const gitBinary = deps.gitBinary()
-              const content = await new Promise<Buffer>((resolve, reject) => {
-                const chunks: Buffer[] = []
-                const proc = spawn(gitBinary, ['cat-file', '-p', `${localHash}:${file}`], {
-                  cwd: repoPath,
-                  stdio: ['ignore', 'pipe', 'ignore'],
-                  ...(process.getuid ? { uid: process.getuid() } : {}),
-                })
-                proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
-                proc.on('close', (code: number) => {
-                  if (code === 0) resolve(Buffer.concat(chunks))
-                  else reject(new Error(`git cat-file exited with ${code}`))
-                })
-                proc.on('error', reject)
-              })
-              fs.writeFileSync(destPath, content)
-            } catch {
-              // File might not exist in localHash (e.g., new file on server side only)
+            const destPath = path.join(backupPath, file)
+            fs.mkdirSync(path.dirname(destPath), { recursive: true })
+            for (const spec of [`${localHash}:${file}`, `:3:${file}`]) {
+              try {
+                const content = await catFile(spec)
+                fs.writeFileSync(destPath, content)
+                markSaved(file, content)
+                break
+              } catch {
+                // Not there (e.g. a file only the server side has) — try the next source.
+              }
             }
           }
           writeBackupMetadata()
+        }
+
+        // The backup above keeps one version per path: the member's latest.
+        // Replaying several unpushed commits can replace an *earlier* local
+        // version of a path that the latest one does not contain — the file
+        // was renamed away and the path reused, or edited differently in
+        // separate commits. Every such version (the local side of this pick,
+        // index stage 3) goes into a sibling folder for this round, with its
+        // own _metadata.json so it lists and restores like any backup.
+        const backupReplacedVersions = async (round: number) => {
+          const raw = await git.raw(['ls-files', '-u', '-z'])
+          const replaced: Array<{ file: string; oid: string }> = []
+          for (const entry of (raw || '').split('\0')) {
+            const tab = entry.indexOf('\t')
+            if (tab === -1) continue
+            const [, oid, stage] = entry.slice(0, tab).split(' ')
+            const file = entry.slice(tab + 1)
+            if (stage === '3' && !savedVersions.get(file)?.has(oid)) replaced.push({ file, oid })
+          }
+          if (replaced.length === 0) return
+          const roundPath = `${backupPath}_${round}`
+          for (const { file, oid } of replaced) {
+            try {
+              const content = await catFile(oid)
+              const destPath = path.join(roundPath, file)
+              fs.mkdirSync(path.dirname(destPath), { recursive: true })
+              fs.writeFileSync(destPath, content)
+              markSaved(file, content)
+            } catch {
+              // Unreadable object — nothing more to save for this path.
+            }
+          }
+          fs.writeFileSync(
+            path.join(roundPath, '_metadata.json'),
+            JSON.stringify({
+              timestamp: deps.now().toISOString(),
+              reason: 'conflict',
+              conflictFiles: replaced.map(r => r.file),
+              deletedConflictFiles: [],
+              message: commitMessage || 'Sync from AI Company Builder',
+              note: 'earlier local version replaced while replaying unpushed commits',
+            }, null, 2)
+          )
+          log.log(`Git sync: Backed up ${replaced.length} earlier local version(s) to ${roundPath}`)
         }
 
         // A rebase replays commits one by one and pauses on every pick that
@@ -496,6 +559,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             // the content is read out of localHash, not the worktree), then
             // b. adopt whatever the server decided, c. mark resolved.
             await backupConflictFiles(newConflicts)
+            await backupReplacedVersions(round)
             try {
               // Never hand every conflicted path to a single `checkout --ours`:
               // one modify/delete conflict makes that call fail atomically and
