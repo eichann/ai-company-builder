@@ -1,6 +1,8 @@
 import { Hono } from 'hono'
-import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
+import { execFile } from 'child_process'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { readdir, rm, stat } from 'fs/promises'
+import { promisify } from 'util'
 import { join } from 'path'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
@@ -68,8 +70,120 @@ function getBareRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${sanitizedId}.git`)
 }
 
-// Helper: Get or create working directory for a company
-function getWorkingDir(companyId: string): string {
+// ============================================================================
+// Git helpers
+//
+// Everything here is asynchronous. These run inside request handlers of the
+// process that also serves every member's git-http traffic: a synchronous git
+// call (the old `execFileSync('git', ['pull', ...])` on every list request)
+// froze the whole server — 42 s on a 7.7 GB working clone — for everyone.
+// ============================================================================
+
+const execFileAsync = promisify(execFile)
+
+async function git(args: string[]): Promise<string> {
+  const { stdout } = await execFileAsync('git', args, {
+    encoding: 'utf8',
+    // ls-tree -r of a large department folder
+    maxBuffer: 512 * 1024 * 1024,
+    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+  })
+  return stdout
+}
+
+// Per-company serialization of working-clone operations. A run registers
+// itself before awaiting the previous one, so two queued requests can never
+// wake up together and run git in the same working directory concurrently.
+const companyLocks = new Map<string, Promise<void>>()
+
+export async function withCompanyLock<T>(companyId: string, fn: () => Promise<T>): Promise<T> {
+  const previous = companyLocks.get(companyId) ?? Promise.resolve()
+  let release!: () => void
+  const current = previous.then(() => new Promise<void>(resolve => { release = resolve }))
+  companyLocks.set(companyId, current)
+  await previous
+  try {
+    return await fn()
+  } finally {
+    release()
+    if (companyLocks.get(companyId) === current) companyLocks.delete(companyId)
+  }
+}
+
+// The shared branch of the bare repo: main, or master for a repo created
+// before the branch name was pinned (the old working-clone pull fell back the
+// same way). null while the repo has no commits.
+async function resolveSharedBranch(bareRepo: string): Promise<string | null> {
+  for (const branch of ['main', 'master']) {
+    try {
+      await git(['-C', bareRepo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])
+      return `refs/heads/${branch}`
+    } catch {
+      // Try the next name
+    }
+  }
+  return null
+}
+
+interface TreeEntry { type: string; path: string }
+
+// `git ls-tree -z` records: "<mode> <type> <object>\t<path>\0" (-z: paths are
+// not quoted, so Japanese names come through as they are)
+function parseLsTree(output: string): TreeEntry[] {
+  const entries: TreeEntry[] = []
+  for (const record of output.split('\0')) {
+    if (!record) continue
+    const tab = record.indexOf('\t')
+    entries.push({ type: record.slice(0, tab).split(' ')[1], path: record.slice(tab + 1) })
+  }
+  return entries
+}
+
+// Helper: List department folders — the non-hidden directories at the root of
+// the shared branch, read straight from the bare repo. This is what a
+// checkout of that branch shows (a gitlink checks out as an empty directory),
+// and it is always current: no working clone, no pull.
+export async function listFoldersFromRepo(companyId: string): Promise<string[]> {
+  const bareRepo = getBareRepoPath(companyId)
+  if (!existsSync(bareRepo)) {
+    throw new Error('Repository not found')
+  }
+  const ref = await resolveSharedBranch(bareRepo)
+  if (!ref) return [] // Empty repo: nothing to check out
+  return parseLsTree(await git(['-C', bareRepo, 'ls-tree', '-z', ref]))
+    .filter(e => (e.type === 'tree' || e.type === 'commit') && !e.path.startsWith('.'))
+    .map(e => e.path)
+}
+
+// Helper: Count files and folders in a department folder of the shared
+// branch, skipping hidden entries and everything below them — the count
+// countFilesInDir makes on a checkout. null when the folder does not exist
+// (or is not a directory).
+async function countFilesInRepoFolder(companyId: string, folder: string): Promise<{ files: number; folders: number } | null> {
+  const bareRepo = getBareRepoPath(companyId)
+  if (!existsSync(bareRepo)) return null
+  const ref = await resolveSharedBranch(bareRepo)
+  if (!ref) return null
+  try {
+    const type = (await git(['-C', bareRepo, 'cat-file', '-t', `${ref}:${folder}`])).trim()
+    if (type !== 'tree') return null
+  } catch {
+    return null
+  }
+
+  let files = 0
+  let folders = 0
+  for (const entry of parseLsTree(await git(['-C', bareRepo, 'ls-tree', '-r', '-t', '-z', `${ref}:${folder}`]))) {
+    if (entry.path.split('/').some(part => part.startsWith('.'))) continue
+    if (entry.type === 'tree' || entry.type === 'commit') folders++
+    else files++
+  }
+  return { files, folders }
+}
+
+// Helper: Get or create the working directory for a company, up to date with
+// the bare repo. Mutations only, and only inside withCompanyLock.
+async function getWorkingDir(companyId: string): Promise<string> {
   const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
   const workDir = join(WORKDIR_DIR, sanitizedId)
   const bareRepo = getBareRepoPath(companyId)
@@ -80,13 +194,13 @@ function getWorkingDir(companyId: string): string {
 
   if (!existsSync(workDir)) {
     // Clone from bare repo
-    execFileSync('git', ['clone', bareRepo, workDir], { stdio: 'pipe' })
+    await git(['clone', bareRepo, workDir])
   } else {
     // Ensure remote URL points to correct bare repo path (fixes server migration issues)
     try {
-      const currentUrl = execFileSync('git', ['-C', workDir, 'remote', 'get-url', 'origin'], { stdio: 'pipe' }).toString().trim()
+      const currentUrl = (await git(['-C', workDir, 'remote', 'get-url', 'origin'])).trim()
       if (currentUrl !== bareRepo) {
-        execFileSync('git', ['-C', workDir, 'remote', 'set-url', 'origin', bareRepo], { stdio: 'pipe' })
+        await git(['-C', workDir, 'remote', 'set-url', 'origin', bareRepo])
       }
     } catch {
       // Ignore - remote might not exist yet
@@ -94,10 +208,10 @@ function getWorkingDir(companyId: string): string {
 
     // Pull latest changes
     try {
-      execFileSync('git', ['-C', workDir, 'pull', 'origin', 'main'], { stdio: 'pipe' })
+      await git(['-C', workDir, 'pull', 'origin', 'main'])
     } catch {
       try {
-        execFileSync('git', ['-C', workDir, 'pull', 'origin', 'master'], { stdio: 'pipe' })
+        await git(['-C', workDir, 'pull', 'origin', 'master'])
       } catch {
         // Ignore pull errors (might be empty repo)
       }
@@ -108,12 +222,12 @@ function getWorkingDir(companyId: string): string {
 }
 
 // Helper: Commit and push changes
-function commitAndPush(workDir: string, message: string): void {
+async function commitAndPush(workDir: string, message: string): Promise<void> {
   try {
-    execFileSync('git', ['-C', workDir, 'add', '-A'], { stdio: 'pipe' })
-    execFileSync('git', ['-C', workDir, 'commit', '-m', message, '--allow-empty'], { stdio: 'pipe' })
+    await git(['-C', workDir, 'add', '-A'])
+    await git(['-C', workDir, 'commit', '-m', message, '--allow-empty'])
     try {
-      execFileSync('git', ['-C', workDir, 'push', 'origin', 'HEAD'], { stdio: 'pipe' })
+      await git(['-C', workDir, 'push', 'origin', 'HEAD'])
     } catch {
       // Ignore push errors (remote might not be available)
     }
@@ -123,45 +237,26 @@ function commitAndPush(workDir: string, message: string): void {
   }
 }
 
-// Helper: List folders from file system
-function listFoldersFromFileSystem(workDir: string): string[] {
-  if (!existsSync(workDir)) {
-    return []
-  }
-
-  try {
-    const items = readdirSync(workDir)
-    return items.filter(item => {
-      if (item.startsWith('.')) return false // Skip hidden files/folders
-      const itemPath = join(workDir, item)
-      return existsSync(itemPath) && statSync(itemPath).isDirectory()
-    })
-  } catch {
-    return []
-  }
-}
-
-// Helper: Count files in a directory (recursive)
-function countFilesInDir(dirPath: string): { files: number; folders: number } {
+// Helper: Count files in a directory of the working clone (recursive)
+async function countFilesInDir(dirPath: string): Promise<{ files: number; folders: number }> {
   let files = 0
   let folders = 0
 
-  function count(path: string) {
+  async function count(path: string) {
     if (!existsSync(path)) return
-    const items = readdirSync(path)
-    for (const item of items) {
+    for (const item of await readdir(path)) {
       if (item.startsWith('.')) continue
       const itemPath = join(path, item)
-      if (statSync(itemPath).isDirectory()) {
+      if ((await stat(itemPath)).isDirectory()) {
         folders++
-        count(itemPath)
+        await count(itemPath)
       } else {
         files++
       }
     }
   }
 
-  count(dirPath)
+  await count(dirPath)
   return { files, folders }
 }
 
@@ -210,9 +305,8 @@ departmentsRoute.get('/', async (c) => {
   }
 
   try {
-    // Get working directory and list folders
-    const workDir = getWorkingDir(companyId)
-    const folders = listFoldersFromFileSystem(workDir)
+    // Folders of the shared branch, read from the bare repo (no pull/clone)
+    const folders = await listFoldersFromRepo(companyId)
 
     // Build department list (DB-registered departments only)
     const departments = buildDepartmentList(companyId, folders)
@@ -301,25 +395,33 @@ departmentsRoute.post('/', async (c) => {
   }
 
   try {
-    const workDir = getWorkingDir(companyId)
-    const folderPath = join(workDir, body.folder)
+    // Working-clone operations, one request per company at a time
+    const created = await withCompanyLock(companyId, async () => {
+      const workDir = await getWorkingDir(companyId)
+      const folderPath = join(workDir, body.folder)
 
-    // Check if folder already exists
-    if (existsSync(folderPath)) {
+      // Check if folder already exists
+      if (existsSync(folderPath)) {
+        return false
+      }
+
+      // Create folder with .gitkeep and .personal workspace
+      mkdirSync(folderPath, { recursive: true })
+      writeFileSync(join(folderPath, '.gitkeep'), '')
+
+      // Create .personal directory (gitignored personal workspace)
+      const personalDir = join(folderPath, '.personal')
+      mkdirSync(personalDir, { recursive: true })
+      writeFileSync(join(personalDir, '.gitignore'), '# Personal workspace — not synced\n*\n!.gitignore\n')
+
+      // Commit and push
+      await commitAndPush(workDir, `Add department: ${body.name}`)
+      return true
+    })
+
+    if (!created) {
       return c.json({ error: 'A folder with this name already exists' }, 409)
     }
-
-    // Create folder with .gitkeep and .personal workspace
-    mkdirSync(folderPath, { recursive: true })
-    writeFileSync(join(folderPath, '.gitkeep'), '')
-
-    // Create .personal directory (gitignored personal workspace)
-    const personalDir = join(folderPath, '.personal')
-    mkdirSync(personalDir, { recursive: true })
-    writeFileSync(join(personalDir, '.gitignore'), '# Personal workspace — not synced\n*\n!.gitignore\n')
-
-    // Commit and push
-    commitAndPush(workDir, `Add department: ${body.name}`)
 
     // Save to DB
     const id = generateId()
@@ -403,28 +505,39 @@ departmentsRoute.put('/:id', async (c) => {
   const body = await c.req.json() as UpdateDepartmentInput
 
   try {
-    const workDir = getWorkingDir(companyId)
+    if (!existsSync(getBareRepoPath(companyId))) {
+      throw new Error('Repository not found')
+    }
     const oldFolder = existing.folder as string
 
-    // Handle folder rename if requested
+    // Handle folder rename if requested (only a rename touches the working clone)
     if (body.folder !== undefined && body.folder !== oldFolder) {
       if (!isValidFolderName(body.folder)) {
         return c.json({
           error: 'Invalid folder name. Use letters, numbers, Japanese characters, dots, hyphens, and underscores.',
         }, 400)
       }
+      const newFolder = body.folder
 
-      const oldPath = join(workDir, oldFolder)
-      const newPath = join(workDir, body.folder)
+      const renamed = await withCompanyLock(companyId, async () => {
+        const workDir = await getWorkingDir(companyId)
+        const oldPath = join(workDir, oldFolder)
+        const newPath = join(workDir, newFolder)
 
-      if (existsSync(newPath)) {
+        if (existsSync(newPath)) {
+          return false
+        }
+
+        if (existsSync(oldPath)) {
+          // Use git mv for proper tracking
+          await git(['-C', workDir, 'mv', oldFolder, newFolder])
+          await commitAndPush(workDir, `Rename department: ${oldFolder} -> ${newFolder}`)
+        }
+        return true
+      })
+
+      if (!renamed) {
         return c.json({ error: 'A folder with this name already exists' }, 409)
-      }
-
-      if (existsSync(oldPath)) {
-        // Use git mv for proper tracking
-        execFileSync('git', ['-C', workDir, 'mv', oldFolder, body.folder], { stdio: 'pipe' })
-        commitAndPush(workDir, `Rename department: ${oldFolder} -> ${body.folder}`)
       }
     }
 
@@ -526,25 +639,25 @@ departmentsRoute.delete('/:id', async (c) => {
   const folder = existing.folder as string
 
   try {
-    const workDir = getWorkingDir(companyId)
-    const folderPath = join(workDir, folder)
+    const { deletedFiles, deletedFolders } = await withCompanyLock(companyId, async () => {
+      const workDir = await getWorkingDir(companyId)
+      const folderPath = join(workDir, folder)
 
-    let deletedFiles = 0
-    let deletedFolders = 0
+      if (!existsSync(folderPath)) {
+        return { deletedFiles: 0, deletedFolders: 0 }
+      }
 
-    if (existsSync(folderPath)) {
       // Count what will be deleted
-      const counts = countFilesInDir(folderPath)
-      deletedFiles = counts.files
-      deletedFolders = counts.folders
+      const counts = await countFilesInDir(folderPath)
 
       // Delete the folder
-      rmSync(folderPath, { recursive: true, force: true })
+      await rm(folderPath, { recursive: true, force: true })
 
       // Commit and push
-      execFileSync('git', ['-C', workDir, 'add', '-A'], { stdio: 'pipe' })
-      commitAndPush(workDir, `Delete department: ${existing.name} (${folder})`)
-    }
+      await git(['-C', workDir, 'add', '-A'])
+      await commitAndPush(workDir, `Delete department: ${existing.name} (${folder})`)
+      return { deletedFiles: counts.files, deletedFolders: counts.folders }
+    })
 
     // Remove from DB, with the department's scopes, their rules and its managers
     db.transaction(() => {
@@ -595,17 +708,15 @@ departmentsRoute.get('/:id/stats', async (c) => {
   }
 
   try {
-    const workDir = getWorkingDir(companyId)
-    const folderPath = join(workDir, existing.folder as string)
+    // Read from the bare repo's shared branch (no pull/clone)
+    const counts = await countFilesInRepoFolder(companyId, existing.folder as string)
 
-    if (!existsSync(folderPath)) {
+    if (!counts) {
       return c.json({
         success: true,
         data: { files: 0, folders: 0, exists: false },
       })
     }
-
-    const counts = countFilesInDir(folderPath)
 
     return c.json({
       success: true,
@@ -689,8 +800,8 @@ departmentsRoute.post('/sync', async (c) => {
   }
 
   try {
-    const workDir = getWorkingDir(companyId)
-    const folders = listFoldersFromFileSystem(workDir)
+    // Same folder listing as GET /, from the bare repo's shared branch
+    const folders = await listFoldersFromRepo(companyId)
 
     // Get existing DB records
     const dbDepts = db.prepare(`

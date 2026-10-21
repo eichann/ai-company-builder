@@ -126,10 +126,20 @@ Admin UI = Can also perform file operations
 
 ### Data Flow
 
-1. **List departments**: Read folders from filesystem, merge DB settings
-2. **Create department**: mkdir → git add → save to DB
-3. **Edit department**: git mv (if renamed) → update DB
-4. **Delete department**: Confirm → rm -rf + git rm -r → delete from DB
+1. **List departments** (and folder stats, `POST /sync`): `git ls-tree` the
+   shared branch (`main`, else `master`) of the company's bare repo — the
+   non-hidden root directories — then return the DB rows (by `sort_order`)
+   whose folder is among them. Read-only requests never pull or clone the
+   server's working clone: a synchronous `git pull` there on every list call
+   froze the whole process (all API and git-http traffic) for 42 s on a
+   7.7 GB clone.
+2. **Create department**: mkdir → git add → commit → push → save to DB
+3. **Edit department**: git mv (if renamed) → commit → push → update DB
+4. **Delete department**: Confirm → rm -rf + git add -A → commit → push → delete from DB
+
+Mutations work in the working clone (`data/workdirs/<companyId>`, pulled
+first) under a per-company promise-chain lock (`withCompanyLock`), and all
+git there is async (`execFile`) — no `execFileSync` in request handlers.
 
 ---
 
