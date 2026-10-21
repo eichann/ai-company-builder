@@ -6,7 +6,7 @@
  * Source: the receive-pack response git-http already captures for
  * client-activity (bounded, see MAX_OBSERVED_BODY_BYTES in routes/git-http.ts).
  * The hook's stderr reaches the client on side-band channel 2; the hook
- * (templates/pre-receive-hook.sh) prints one section per check:
+ * (templates/pre-receive-hook.sh → lib/push-check/report.ts) prints one section per check:
  *
  *     ========================================
  *     [PROTECTED_CONFIG] <title>

@@ -2,7 +2,7 @@
 // rejects a push for changing agent-execution config (PROTECTED_CONFIG).
 //
 // Runs against a real bare repository with the real server pre-receive hook
-// (server/src/templates/pre-receive-hook.sh). Pushing over the local
+// (server/src/templates/pre-receive-hook.sh → lib/push-check). Pushing over the local
 // transport leaves ACB_PUSHER_ROLE unset, which the hook treats as a member
 // (fail closed) — the same outcome as an authenticated member over HTTP.
 import { test } from 'node:test'
@@ -11,7 +11,6 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
-import { fileURLToPath } from 'node:url'
 import simpleGit, { type SimpleGit } from 'simple-git'
 import {
   isProtectedConfigRejection,
@@ -23,8 +22,10 @@ import {
   parsePersonalPaths,
   untrackPersonalPaths,
 } from '../electron/protected-config'
+import { renderPreReceiveHook } from '../../server/src/lib/git-server/hook'
 
-const HOOK = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../server/src/templates/pre-receive-hook.sh')
+// Rendered by the server's own installer (thin caller of the TypeScript push checker).
+const HOOK_SCRIPT = renderPreReceiveHook({ node: process.execPath })
 
 function sh(args: string[], cwd: string, env: NodeJS.ProcessEnv = {}): string {
   return execFileSync('git', args, { cwd, stdio: 'pipe', env: { ...process.env, ...env } }).toString()
@@ -66,7 +67,7 @@ function setupServer(t: { after: (fn: () => void) => void }, legacy: Record<stri
   sh(['push', '-q', 'origin', 'main'], admin, { ACB_PUSHER_ROLE: 'admin' })
   // The hook is installed after the seed, as the server does on startup
   // for repositories that predate it.
-  fs.copyFileSync(HOOK, path.join(bare, 'hooks', 'pre-receive'))
+  fs.writeFileSync(path.join(bare, 'hooks', 'pre-receive'), HOOK_SCRIPT)
   fs.chmodSync(path.join(bare, 'hooks', 'pre-receive'), 0o755)
 
   const member = path.join(root, 'member')

@@ -149,16 +149,21 @@ describe('pre-receive hook: locale independence', () => {
   })
 
   // The check above passes on glibc even without the pin (GNU uniq breaks
-  // collation ties bytewise), so prove the pin itself: every text tool the
+  // collation ties bytewise), so prove the pin itself: every process the
   // hook runs must see LC_ALL=C whatever locale the server was started with.
-  it('runs every text tool in the C locale', () => {
+  // The checks are TypeScript now (lib/push-check): the hook runs node (the
+  // checker, ACB_NODE), which runs git with the environment it was given and
+  // no text tools at all. A node shim records the checker's locale; the text
+  // tool shims would catch any shell tool coming back.
+  it('runs every process under the hook in the C locale', () => {
     const shimDir = join(workDir, 'shims')
     const log = join(workDir, 'shim.log')
     mkdirSync(shimDir, { recursive: true })
     writeFileSync(log, '')
-    const tools = ['tr', 'sort', 'uniq', 'grep', 'sed', 'awk']
-    for (const tool of tools) {
-      const real = execFileSync('sh', ['-c', `command -v ${tool}`]).toString().trim()
+    const tools: Array<[string, string]> = ['tr', 'sort', 'uniq', 'grep', 'sed', 'awk']
+      .map(t => [t, execFileSync('sh', ['-c', `command -v ${t}`]).toString().trim()])
+    tools.push(['node', process.execPath])
+    for (const [tool, real] of tools) {
       const shim = join(shimDir, tool)
       writeFileSync(shim, `#!/bin/sh\necho "${tool} LC_ALL=\${LC_ALL-<unset>}" >> '${log}'\nexec '${real}' "$@"\n`)
       chmodSync(shim, 0o755)
@@ -168,15 +173,12 @@ describe('pre-receive hook: locale independence', () => {
       '営業部/見積.md': '1\n',
       '営業部/提案書.md': '2\n',
     })
-    const env = localeEnv({ LANG: 'en_US.UTF-8' })
+    const env = localeEnv({ LANG: 'en_US.UTF-8' }, { ACB_NODE: join(shimDir, 'node') })
     env.PATH = `${shimDir}:${env.PATH}`
     const r = push(clone, env)
     expect(r.ok).toBe(true)
     const calls = readFileSync(log, 'utf-8').split('\n').filter(Boolean)
-    // The case check alone runs tr, sort and uniq.
-    for (const tool of ['tr', 'sort', 'uniq']) {
-      expect(calls.some(c => c.startsWith(`${tool} `))).toBe(true)
-    }
+    expect(calls.some(c => c.startsWith('node '))).toBe(true)
     expect(calls.filter(c => !c.endsWith('LC_ALL=C'))).toEqual([])
   })
 })
