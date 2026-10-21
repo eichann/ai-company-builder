@@ -147,7 +147,15 @@ phrased in their words — never leave the repository half-rebased.
 
 ### Sync Flow
 
-Implemented in `client/electron/main.ts` (`ipcMain.handle('git:sync', ...)`).
+Implemented in `client/electron/sync/git-sync.ts` (`createGitSync`), which
+imports nothing from Electron: git (`sync/git-factory.ts` — the one place the
+app's git options live), the dialogs (`SyncDialog`, rendered as message boxes
+by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), the
+clock and the logger are injected (`sync/types.ts`). `client/electron/main.ts`
+only wires the real implementations into `ipcMain.handle('git:sync', ...)`.
+Helpers: `sync/conflicts.ts`, `sync/nested-repos.ts`, `sync/sparse.ts`,
+`protected-config.ts`. Every change to sync runs through the multi-member
+harness — see "Testing Sync" below.
 
 ```
 0. Serialize per repository (syncLocks)
@@ -198,7 +206,15 @@ Implemented in `client/electron/main.ts` (`ipcMain.handle('git:sync', ...)`).
   `conflictFiles`. A file that simply vanishes reads as data loss.
 - Backups are extracted with `git cat-file -p <localHash>:<file>` into a Buffer.
   `git show` returns a string and corrupts binaries (pptx, png, …), which are
-  exactly the files that conflict most often.
+  exactly the files that conflict most often. When the file no longer exists
+  at `localHash` (a later unpushed commit renamed or deleted it), the backup
+  falls back to `:3:<file>` — the local side of the pick being replayed. And
+  when a pick replaces an *earlier* local version that the saved one does not
+  match (the path was renamed away and reused, or edited in several unpushed
+  commits), that version goes to `.backups/<timestamp>_<round>/` with its own
+  `_metadata.json`. Without these the conflicted edit was replaced by the
+  server version and saved nowhere, while the message claimed it was in
+  `.backups/` (found by the sync harness soak).
 
 ### Non-Negotiable Guards
 
@@ -211,7 +227,7 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | `timeout: { block: 5 * 60 * 1000 }` | Watchdog: kill any git process that produces no output for 5 minutes, so a process waiting on input that will never arrive cannot hang `await` forever. Long network transfers survive it because fetch/pull/push all pass `--progress`. |
 | `http.postBuffer=524288000` | Old system git (e.g. Apple Git 2.39, still reachable via the system-git fallback) has a broken chunked HTTP push that fails even against github.com. Buffering past the 1MiB default keeps git off chunked transfer regardless of which binary resolved. |
 | Conflict resolution is a **loop**, not a single round | A rebase replays commits one at a time and pauses on *every* conflicting pick. The original single-round code fell back to `rebase --skip`, which silently discarded a whole commit the moment a second pick conflicted. |
-| Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts` in `client/electron/main.ts`) | `git checkout --ours` reads stage 2 of the index, which a modify/delete conflict (server deleted a file the member had edited, status `DU`) does not have — and the command fails **atomically**, so every other path in the same call stays unresolved too. The exception escaped both the conflict loop and its `catch (pullError)`, so sync returned an `unknown` error with the rebase still in progress; every retry aborted the stale rebase and died at the same pick. A pilot user was left permanently unable to sync — commits safe locally, but nothing reaching the team. Triggered whenever the server deletes a file, or moves one while also rewriting it (rename detection misses below the similarity threshold). |
+| Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts` in `client/electron/sync/conflicts.ts`) | `git checkout --ours` reads stage 2 of the index, which a modify/delete conflict (server deleted a file the member had edited, status `DU`) does not have — and the command fails **atomically**, so every other path in the same call stays unresolved too. The exception escaped both the conflict loop and its `catch (pullError)`, so sync returned an `unknown` error with the rebase still in progress; every retry aborted the stale rebase and died at the same pick. A pilot user was left permanently unable to sync — commits safe locally, but nothing reaching the team. Triggered whenever the server deletes a file, or moves one while also rewriting it (rename detection misses below the similarity threshold). |
 | `rebase --skip` only when the pick is genuinely empty | Taking the server version can leave a pick with no content of its own — that is the only case where skipping is correct. For any other stall, abort and surface the error. Guessing with `--skip` destroys user commits. |
 | Rebase detection uses the `rebase-merge` / `rebase-apply` directories | `REBASE_HEAD` is just a ref and can linger after a rebase has finished, so it reports in-progress rebases that do not exist and misses recovery. |
 | `syncLocks` registers the run **before** awaiting the previous one | Registering afterwards let two queued clicks wake together and run concurrently against the same repository. |
@@ -263,3 +279,45 @@ Backups older than 30 days are pruned at the start of each sync.
   `errorType: 'personal_path'` with `personalFiles` (no `PENDING_PUSH`).
 - On Windows, a transient file lock during rebase (skill tool, editor, or AV
   scanner holding a file) is retried twice before being treated as a failure.
+
+### Testing Sync
+
+Sync is tested end to end by a multi-member harness (`client/tests/sync-harness/`,
+tests in `client/tests/sync/`, CI job "Sync harness (macOS)"):
+
+```bash
+cd client
+npx tsx --test tests/sync/*.test.ts                   # everything CI runs
+npx tsx --test tests/sync/scenarios.test.ts           # just the scenarios
+SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
+  npx tsx --test tests/sync/soak.test.ts              # a bigger soak
+```
+
+- A `World` is one company: a bare server repo configured like
+  `configureBareRepo` (deny non-fast-forwards / deletes, the real
+  `server/src/templates/pre-receive-hook.sh`) and N member clones. Pushes use
+  the local file transport, so the hook runs as a child of the member's git;
+  the harness sets `ACB_PUSHER_ROLE` / `ACB_PUSHER_ID` / `ACB_PUSHER_EMAIL` /
+  `ACB_NODE` there, exactly the variables `git-http.ts` sets from the
+  session. The HTTP layer itself is not covered here.
+- Each member runs the real `createGitSync` with the real git factory, the
+  real message-box dialog adapter (answers scripted with `willAnswer`, else
+  the default button) and the real server-API adapter over a fake `fetch`.
+  Members `write` / `append` / `remove` / `rename` / `initNestedRepo`, go
+  `offline()`, or let a teammate push first (`beforeNextPush`).
+- Invariants (`invariants.ts`): every sync terminates and leaves no
+  rebase / merge / cherry-pick in progress; no committed work is lost (on the
+  server, or in `.backups/` with metadata, or kept locally at an ignored
+  path); after everyone syncs twice all members are at the server's commit
+  with a clean tree; rejected pushes are recoverable by the next sync.
+- `scenarios.test.ts` maps to the guards table above; `soak.test.ts` is a
+  seeded random soak (`SYNC_SOAK_SEEDS` / `_MEMBERS` / `_ROUNDS`; a failure
+  prints its seed and operation log); `characterization.test.ts` holds sync
+  to a transcript recorded from the pre-extraction handler (re-record with
+  `UPDATE_SYNC_GOLDEN=1` only for an intended behaviour change, and review the
+  JSON diff); `findings.test.ts` holds regressions for bugs the harness found;
+  `harness-selftest.test.ts` proves each invariant fails when sync misbehaves.
+- New sync behaviour (more repositories, adoption, new rejection types) gets
+  a scenario here, ending with `settleAndCheck(world)`.
+  `SYNC_HARNESS_VERBOSE=1` prints every sync log line; `SYNC_HARNESS_KEEP=1`
+  keeps the temporary worlds.

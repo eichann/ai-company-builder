@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import simpleGit from 'simple-git'
+import { createConfiguredGit } from '../electron/sync/git-factory'
 import { build } from 'vite'
 import { buildInfoDefine, compactUtc, computeBuildInfo } from '../scripts/build-info'
 import {
@@ -74,14 +75,20 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
   const seen = await simpleGit(root, { config }).raw(['config', '--get-all', 'http.extraHeader'])
   assert.deepEqual(seen.trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
 
-  // createGit (electron/main.ts) appends them after the guarded settings.
+  // createGit (electron/main.ts) hands them to the shared git factory
+  // (electron/sync/git-factory.ts), which appends them after the guarded
+  // settings — check what git actually sees through that factory.
   const main = readFileSync(path.join(root, 'electron/main.ts'), 'utf8')
   const start = main.indexOf('function createGit(')
   assert.ok(start >= 0, 'createGit not found in electron/main.ts')
   const body = main.slice(start, main.indexOf('\n}\n', start))
-  assert.match(body, /'http\.postBuffer=524288000',\s*(?:\/\/.*\n\s*)*\.\.\.gitIdentityConfig\(\),\s*\]/)
-  assert.match(body, /'credential\.helper='/)
-  assert.match(body, /GIT_EDITOR: 'true'/)
+  assert.match(body, /createConfiguredGit\(/)
+  assert.match(body, /extraConfig: gitIdentityConfig\(\)/)
+  const git = createConfiguredGit(root, { binary: 'git', askPassPath: '/nonexistent', token: '', extraConfig: config })
+  assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
+  assert.equal((await git.raw(['config', '--get', 'http.postBuffer'])).trim(), '524288000')
+  assert.equal((await git.raw(['config', '--get', 'credential.helper'])).trim(), '') // last value wins
+  assert.equal((await git.raw(['var', 'GIT_EDITOR'])).trim(), 'true')
 })
 
 test('fetches to the server origin carry the identity headers, others are untouched', async () => {
