@@ -30,7 +30,7 @@ export class VoiceHelperPool {
         if (data.type === 'standby-ready') { helper.ready = true; clearTimeout(timer); return }
         if (helper.finished || !helper.emit) return
         if (data.type === 'timing') {
-          if (['locale-ready', 'permission-ready', 'device-ready', 'microphone-started', 'analyzer-ready', 'microphone-stopped'].includes(data.stage) && Number.isFinite(data.elapsedMs)) {
+          if (['locale-ready', 'permission-ready', 'device-ready', 'microphone-started', 'analyzer-ready', 'microphone-rebuilt', 'microphone-stopped'].includes(data.stage) && Number.isFinite(data.elapsedMs)) {
             console.info('[voice] startup timing', { stage: data.stage, helperMs: data.elapsedMs, totalMs: Date.now() - helper.startedAt })
           }
           return

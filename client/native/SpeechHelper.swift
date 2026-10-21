@@ -208,60 +208,15 @@ func transcribe(deviceUID: String? = nil) async throws {
     guard AudioUnitSetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &deviceID, UInt32(MemoryLayout<AudioDeviceID>.size)) == noErr else {
         throw NSError(domain: "選択したマイクを使用できませんでした", code: 7)
     }
-    var actualDevice = AudioDeviceID(0)
-    var actualSize = UInt32(MemoryLayout<AudioDeviceID>.size)
-    guard AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &actualDevice, &actualSize) == noErr, actualDevice == deviceID else {
+    guard currentInputDevice(engine) == deviceID else {
         throw NSError(domain: "マイクの切り替えを確認できませんでした。別のマイクをお試しください", code: 8)
     }
-    let sourceFormat = input.outputFormat(forBus: 0)
-    guard sourceFormat.sampleRate > 0, sourceFormat.channelCount > 0,
-          let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
-          let converter = AVAudioConverter(from: sourceFormat, to: format) else {
+    guard let format = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]) else {
         throw NSError(domain: "マイクの音声形式を利用できません", code: 4)
     }
     let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-    timing("device-ready")
-    var lastMeterTime = Date.timeIntervalSinceReferenceDate
-    input.installTap(onBus: 0, bufferSize: 4096, format: sourceFormat) { buffer, _ in
-        let now = Date.timeIntervalSinceReferenceDate
-        if now - lastMeterTime >= 0.1 {
-            lastMeterTime = now
-            let meter = audioLevel(buffer)
-            emit(["type": "level", "level": meter.level, "clipping": meter.clipping])
-        }
-        let capacity = AVAudioFrameCount(Double(buffer.frameLength) * format.sampleRate / sourceFormat.sampleRate) + 16
-        guard let converted = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: capacity) else { return }
-        var supplied = false
-        var error: NSError?
-        converter.convert(to: converted, error: &error) { _, status in
-            if supplied { status.pointee = .noDataNow; return nil }
-            supplied = true
-            status.pointee = .haveData
-            return buffer
-        }
-        if error == nil && converted.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: converted)) }
-    }
-    engine.prepare()
-    try engine.start()
-    // Freeze this recording to the selected device. Never silently switch sources.
-    let changed = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in
-        emit(["type": "error", "message": "マイクの接続または設定が変わったため録音を停止しました。マイクを選び直してください"])
-        exit(1)
-    }
-    defer { NotificationCenter.default.removeObserver(changed) }
-    let connectionMonitor = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .utility))
-    connectionMonitor.schedule(deadline: .now() + 1, repeating: 1)
-    connectionMonitor.setEventHandler {
-        var alive: UInt32 = 0
-        var size = UInt32(MemoryLayout<UInt32>.size)
-        var key = address(kAudioDevicePropertyDeviceIsAlive)
-        if AudioObjectGetPropertyData(device.id, &key, 0, nil, &size, &alive) != noErr || alive == 0 {
-            emit(["type": "error", "message": "録音中のマイクが切断されました。接続し直すか、別のマイクを選んでください"])
-            exit(1)
-        }
-    }
-    connectionMonitor.resume()
-    defer { connectionMonitor.cancel() }
+    let capture = MicrophoneCapture(engine: engine, device: device, target: format, continuation: continuation)
+    try capture.start()
     timing("microphone-started")
     emit(["type": "listening", "deviceName": device.name])
     // The parent closes stdin on stop. Cancellation terminates this helper.
@@ -270,9 +225,7 @@ func transcribe(deviceUID: String? = nil) async throws {
     // Stop must close the microphone even while model preparation is pending.
     let stopped = Task {
         await Task.detached { while readLine() != nil {} }.value
-        NotificationCenter.default.removeObserver(changed)
-        connectionMonitor.cancel()
-        engine.stop()
+        capture.stop()
         continuation.finish()
         timing("microphone-stopped")
     }
@@ -280,9 +233,170 @@ func transcribe(deviceUID: String? = nil) async throws {
     timing("analyzer-ready")
     try await analyzer.start(inputSequence: stream)
     await stopped.value
-    input.removeTap(onBus: 0)
     try await analyzer.finalizeAndFinishThroughEndOfInput()
     emit(["type": "result", "text": try await results.value])
+}
+
+func currentInputDevice(_ engine: AVAudioEngine) -> AudioDeviceID? {
+    guard let unit = engine.inputNode.audioUnit else { return nil }
+    var device = AudioDeviceID(0)
+    var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    guard AudioUnitGetProperty(unit, kAudioOutputUnitProperty_CurrentDevice, kAudioUnitScope_Global, 0, &device, &size) == noErr else { return nil }
+    return device
+}
+func isAlive(_ device: AudioDeviceID) -> Bool {
+    var alive: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    var key = address(kAudioDevicePropertyDeviceIsAlive)
+    return AudioObjectGetPropertyData(device, &key, 0, nil, &size, &alive) == noErr && alive != 0
+}
+func describe(_ format: AVAudioFormat) -> String { "\(format.channelCount)ch/\(Int(format.sampleRate))Hz" }
+
+/// Owns the microphone input chain (tap + converter) of one recording and keeps
+/// it on the device the user chose. Every engine mutation runs on `queue`.
+///
+/// The tap is built for the selected device's *hardware* format
+/// (`inputNode.inputFormat(forBus: 0)`). `inputNode.outputFormat(forBus: 0)`
+/// still describes the system default device after
+/// kAudioOutputUnitProperty_CurrentDevice is changed, and a tap built for that
+/// stale format receives no audio at all once the engine reconfigures for the
+/// real device. See InputRoute.swift for what a configuration change does.
+@available(macOS 26.0, *)
+final class MicrophoneCapture: @unchecked Sendable {
+    private let engine: AVAudioEngine
+    private let device: Microphone
+    private let target: AVAudioFormat
+    private let continuation: AsyncStream<AnalyzerInput>.Continuation
+    private let queue = DispatchQueue(label: "acb-speech.capture")
+    private var tapFormat: AVAudioFormat?
+    private var rebuilds = 0
+    private var stopped = false
+    private var pendingCheck: DispatchWorkItem?
+    private var observer: NSObjectProtocol?
+    private var monitor: DispatchSourceTimer?
+
+    init(engine: AVAudioEngine, device: Microphone, target: AVAudioFormat, continuation: AsyncStream<AnalyzerInput>.Continuation) {
+        self.engine = engine
+        self.device = device
+        self.target = target
+        self.continuation = continuation
+    }
+
+    func start() throws {
+        // Observe before starting: the reconfiguration that follows our own
+        // device selection is posted right after the engine starts.
+        observer = NotificationCenter.default.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { [weak self] _ in
+            self?.configurationChanged()
+        }
+        try queue.sync { try installAndStart() }
+        let monitor = DispatchSource.makeTimerSource(queue: queue)
+        monitor.schedule(deadline: .now() + 1, repeating: 1)
+        monitor.setEventHandler { [weak self] in
+            guard let self, !self.stopped, !isAlive(self.device.id) else { return }
+            self.fail(.deviceGone)
+        }
+        monitor.resume()
+        self.monitor = monitor
+    }
+
+    func stop() {
+        queue.sync {
+            stopped = true
+            pendingCheck?.cancel()
+            monitor?.cancel()
+            if let observer { NotificationCenter.default.removeObserver(observer) }
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+        }
+    }
+
+    /// Builds the tap and converter for the device's current hardware format
+    /// and (re)starts the engine. Audio already yielded stays in the stream.
+    private func installAndStart() throws {
+        let input = engine.inputNode
+        let source = input.inputFormat(forBus: 0)
+        guard source.sampleRate > 0, source.channelCount > 0,
+              let converter = AVAudioConverter(from: source, to: target) else {
+            throw NSError(domain: "マイクの音声形式を利用できません", code: 4)
+        }
+        trace("capture: tap \(describe(source)) on device \(device.id) (engine output bus reports \(describe(input.outputFormat(forBus: 0))))")
+        let target = self.target
+        let continuation = self.continuation
+        var lastMeterTime = Date.timeIntervalSinceReferenceDate
+        input.installTap(onBus: 0, bufferSize: 4096, format: source) { buffer, _ in
+            let now = Date.timeIntervalSinceReferenceDate
+            if now - lastMeterTime >= 0.1 {
+                lastMeterTime = now
+                let meter = audioLevel(buffer)
+                emit(["type": "level", "level": meter.level, "clipping": meter.clipping])
+            }
+            let capacity = AVAudioFrameCount(Double(buffer.frameLength) * target.sampleRate / source.sampleRate) + 16
+            guard let converted = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { return }
+            var supplied = false
+            var error: NSError?
+            converter.convert(to: converted, error: &error) { _, status in
+                if supplied { status.pointee = .noDataNow; return nil }
+                supplied = true
+                status.pointee = .haveData
+                return buffer
+            }
+            if error == nil && converted.frameLength > 0 { continuation.yield(AnalyzerInput(buffer: converted)) }
+        }
+        tapFormat = source
+        if rebuilds == 0 { timing("device-ready") }
+        engine.prepare()
+        try engine.start()
+    }
+
+    private func configurationChanged() {
+        trace("capture: AVAudioEngineConfigurationChange (running=\(engine.isRunning))")
+        // Coalesce a burst of notifications into one decision.
+        queue.async { [self] in
+            guard !stopped else { return }
+            pendingCheck?.cancel()
+            let check = DispatchWorkItem { [weak self] in self?.reconcile() }
+            pendingCheck = check
+            queue.asyncAfter(deadline: .now() + 0.1, execute: check)
+        }
+    }
+
+    private func reconcile() {
+        guard !stopped else { return }
+        let hardware = engine.inputNode.inputFormat(forBus: 0)
+        let state = InputRouteState(
+            currentDevice: currentInputDevice(engine),
+            selectedDevice: device.id,
+            deviceAlive: isAlive(device.id),
+            engineRunning: engine.isRunning,
+            hardwareSampleRate: hardware.sampleRate,
+            hardwareChannels: hardware.channelCount,
+            tapSampleRate: tapFormat?.sampleRate ?? 0,
+            tapChannels: tapFormat?.channelCount ?? 0)
+        let action = decideInputRoute(state, rebuildsSoFar: rebuilds)
+        trace("capture: \(state) -> \(action)")
+        switch action {
+        case .keep:
+            return
+        case .rebuild:
+            rebuilds += 1
+            engine.stop()
+            engine.inputNode.removeTap(onBus: 0)
+            do {
+                try installAndStart()
+                timing("microphone-rebuilt")
+            } catch {
+                trace("capture: rebuild failed: \(error)")
+                fail(.unstable)
+            }
+        case .stop(let reason):
+            fail(reason)
+        }
+    }
+
+    private func fail(_ reason: InputRouteStopReason) {
+        emit(["type": "error", "message": inputRouteMessage(reason)])
+        exit(1)
+    }
 }
 
 // Error code for "this macOS cannot run speech recognition at all" (no retry).
