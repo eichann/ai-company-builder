@@ -16,6 +16,7 @@ import { syncRoute } from './routes/sync'
 import { gitRoute, configureAllBareRepos } from './routes/git'
 import { gitHttpRoute } from './routes/git-http'
 import { invitationsRoute } from './routes/invitations'
+import { clientActivityMiddleware } from './lib/client-activity-middleware'
 
 // Initialize database
 initDatabase()
@@ -97,6 +98,9 @@ app.use('*', cors({
   ],
   credentials: true,
 }))
+
+// Record the desktop-app build (X-ACB-Client-Version) per member and company.
+app.use('/api/*', clientActivityMiddleware)
 
 // Health check
 app.get('/', (c) => {

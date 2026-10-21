@@ -42,6 +42,7 @@ import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
 import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
+import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 
 // Allowed directory roots for file system access control
 // Paths are added when the user selects a directory via dialog or sets up a company folder
@@ -1204,6 +1205,11 @@ function getServerApiUrl(): string {
   return config.serverUrl || process.env.API_URL || ''
 }
 
+// Every fetch() to the server's origin carries X-ACB-Client-Version /
+// X-ACB-Client-Platform, so the server knows which build each member runs.
+installServerFetchIdentity(getServerApiUrl)
+console.log(`[client-identity] build ${BUILD_INFO.version} (built ${BUILD_INFO.builtAt})`)
+
 function extractResponseMessageFromJson(data: unknown): string | undefined {
   if (!data || typeof data !== 'object') return undefined
   const record = data as Record<string, unknown>
@@ -1551,6 +1557,9 @@ function createGit(repoPath: string): SimpleGit {
       // switches to chunked transfer above the 1MiB default, regardless of
       // which binary was resolved.
       'http.postBuffer=524288000',
+      // X-ACB-Client-Version / X-ACB-Client-Platform on git's HTTP requests,
+      // so the server records which build synced (electron/client-identity.ts).
+      ...gitIdentityConfig(),
     ],
     // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
     // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)

@@ -2,6 +2,8 @@ import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { configureBareRepo } from './git'
+import { getClientActivityForCompany } from '../lib/client-activity'
+import { parseClientVersion } from '../lib/client-version'
 import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -322,6 +324,56 @@ companiesRoute.get('/:id/members', async (c) => {
         createdAt: m.created_at,
         email: userInfo?.email ?? null,
         name: userInfo?.name ?? null,
+      }
+    }),
+  })
+})
+
+// Which desktop-app build each member last used and when they last synced
+// (owner/admin only). See lib/client-activity.ts for what is recorded when.
+companiesRoute.get('/:id/client-activity', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const companyId = c.req.param('id')
+  const userMembership = db.prepare(`
+    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
+  `).get(user.id, companyId) as { role: string } | undefined
+
+  if (!userMembership) {
+    return c.json({ error: 'Company not found or access denied' }, 404)
+  }
+  if (!['owner', 'admin'].includes(userMembership.role)) {
+    return c.json({ error: 'Only owners and admins can view client activity' }, 403)
+  }
+
+  const members = db.prepare(`
+    SELECT user_id, role FROM memberships WHERE company_id = ? ORDER BY created_at ASC
+  `).all(companyId) as Array<{ user_id: string; role: string }>
+  const activity = getClientActivityForCompany(companyId)
+  const usersMap = getUsersByIds(members.map(m => m.user_id))
+
+  return c.json({
+    success: true,
+    data: members.map(m => {
+      const row = activity.get(m.user_id)
+      const parsed = parseClientVersion(row?.client_version)
+      const userInfo = usersMap.get(m.user_id)
+      return {
+        userId: m.user_id,
+        role: m.role,
+        email: userInfo?.email ?? null,
+        name: userInfo?.name ?? null,
+        clientVersion: row?.client_version ?? null,
+        build: parsed
+          ? { semver: `${parsed.major}.${parsed.minor}.${parsed.patch}${parsed.prerelease.length ? `-${parsed.prerelease.join('.')}` : ''}`, sha: parsed.sha, commitDate: parsed.commitDate, dev: parsed.dev }
+          : null,
+        clientPlatform: row?.client_platform ?? null,
+        lastSeenAt: row?.last_seen_at ?? null,
+        lastFetchAt: row?.last_fetch_at ?? null,
+        lastPushAt: row?.last_push_at ?? null,
       }
     }),
   })
