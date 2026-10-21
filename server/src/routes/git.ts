@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, rmSync, readFileSync, writeFileSync, chmodSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync } from 'fs'
+import { rm } from 'fs/promises'
 import { join, dirname } from 'path'
 import { fileURLToPath } from 'url'
 import { getUserFromRequest } from '../lib/auth'
@@ -318,7 +319,9 @@ gitRoute.delete('/repos/:companyId', async (c) => {
   }
 
   try {
-    rmSync(repoPath, { recursive: true, force: true })
+    // Async: a company repo can be gigabytes, and a synchronous delete would
+    // stall every other request (and all git-http traffic) meanwhile
+    await rm(repoPath, { recursive: true, force: true })
 
     return c.json({
       success: true,

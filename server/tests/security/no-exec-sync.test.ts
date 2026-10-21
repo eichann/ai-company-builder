@@ -64,14 +64,14 @@ describe('No execSync in server code', () => {
     expect(violations).toEqual([])
   })
 
-  it('route files that use child_process must use safe APIs (execFileSync or spawn)', () => {
+  it('route files that use child_process must use safe APIs (execFile, execFileSync or spawn)', () => {
     for (const filePath of getRouteFiles()) {
       const content = readFileSync(filePath, 'utf-8')
       if (/child_process/.test(content)) {
         const fileName = filePath.replace(ROUTES_DIR + '/', '')
-        // execFileSync and spawn are safe (no shell interpretation)
-        const hasSafeApi = /\bexecFileSync\b/.test(content) || /\bspawn\b/.test(content)
-        expect(hasSafeApi, `${fileName} must use execFileSync or spawn, not execSync`).toBe(true)
+        // execFile, execFileSync and spawn are safe (no shell interpretation)
+        const hasSafeApi = /\bexecFile(Sync)?\b/.test(content) || /\bspawn\b/.test(content)
+        expect(hasSafeApi, `${fileName} must use execFile, execFileSync or spawn, not execSync`).toBe(true)
       }
     }
   })
@@ -97,5 +97,13 @@ describe('No execSync in server code', () => {
     }
 
     expect(violations).toEqual([])
+  })
+
+  it('departments.ts runs no synchronous child process (it shares the process with git-http)', () => {
+    // A synchronous `git pull` of a 7.7 GB working clone on every department
+    // list froze every request and every member's push/fetch for 42 s.
+    const content = readFileSync(join(ROUTES_DIR, 'departments.ts'), 'utf-8')
+      .split('\n').filter(line => !line.trim().startsWith('//')).join('\n')
+    expect(content).not.toMatch(/\b(execFileSync|spawnSync|execSync)\b/)
   })
 })
