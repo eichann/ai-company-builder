@@ -12,6 +12,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -47,6 +48,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -130,6 +132,7 @@
           }
         ],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -158,6 +161,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -260,6 +264,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "warn: Git sync: Fetch failed (may be offline):",
@@ -311,6 +316,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -432,6 +438,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -455,6 +462,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -561,6 +569,7 @@
           }
         ],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Removed inner .git of \"s1\" (user chose to keep sharing)",
           "log: Git sync: Fetching from origin...",
@@ -679,13 +688,7 @@
         "member": "b",
         "result": {
           "success": true,
-          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
-          "hadConflicts": true,
-          "conflictFiles": [
-            ".gitignore"
-          ],
-          "deletedConflictFiles": [],
-          "backupPath": "<ROOT>/members/b/.backups/<TS>",
+          "message": "同期が完了しました",
           "restoredFolders": [],
           "ignoredLargeFiles": [],
           "excludedNestedRepos": [
@@ -694,22 +697,19 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Added 1 nested repo(s) to .gitignore:",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
           "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
-          "log: Git sync: Conflict detected in 1 files (round 1)",
-          "log: Git sync: Taking the server version of 1 file(s)...",
-          "log: Git sync: Continuing rebase...",
           "log: Git sync: Pushing to origin..."
         ]
       }
     ],
     "final": {
       "serverTree": {
-        ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+        ".gitignore": "fdc7167402944086404c53e37bb90ce9a45c06a4",
         "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
         "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
         "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
@@ -718,12 +718,13 @@
         "Sync from AI Company Builder",
         "Sync from AI Company Builder",
         "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
         "seed content",
         "seed"
       ],
       "members": {
         "a": {
-          "headIsServer": true,
+          "headIsServer": false,
           "status": "",
           "tree": {
             ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
@@ -739,33 +740,18 @@
         },
         "b": {
           "headIsServer": true,
-          "status": "?? ext-b/\n",
+          "status": "",
           "tree": {
-            ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+            ".gitignore": "fdc7167402944086404c53e37bb90ce9a45c06a4",
             "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
             "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
             "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
           },
           "pendingPush": false,
-          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n",
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n/ext-b/\n",
           "userName": "b",
           "sparse": "(not sparse)",
-          "backups": [
-            {
-              "metadata": {
-                "timestamp": "<TS>",
-                "reason": "conflict",
-                "conflictFiles": [
-                  ".gitignore"
-                ],
-                "deletedConflictFiles": [],
-                "message": "Sync from AI Company Builder"
-              },
-              "files": {
-                ".gitignore": "c6a9bccd881014550de3fbcf43b33e9abddcb76b"
-              }
-            }
-          ]
+          "backups": []
         }
       }
     }
@@ -798,6 +784,7 @@
           }
         ],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin..."
         ]
@@ -984,6 +971,7 @@
           }
         ],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -1194,6 +1182,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -1327,6 +1316,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -1415,6 +1405,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -1440,6 +1431,7 @@
         "dialogs": [],
         "logs": [
           "log: Git sync: Detected stale rebase, aborting...",
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
@@ -1587,6 +1579,7 @@
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Ignored 1 large file(s):",
           "log: Git sync: Fetching from origin...",
@@ -1599,27 +1592,18 @@
         "member": "b",
         "result": {
           "success": true,
-          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
-          "hadConflicts": true,
-          "conflictFiles": [
-            ".gitignore"
-          ],
-          "deletedConflictFiles": [],
-          "backupPath": "<ROOT>/members/b/.backups/<TS>",
+          "message": "同期が完了しました",
           "restoredFolders": [],
           "ignoredLargeFiles": [],
           "excludedNestedRepos": []
         },
         "dialogs": [],
         "logs": [
+          "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
           "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
-          "log: Git sync: Conflict detected in 1 files (round 1)",
-          "log: Git sync: Taking the server version of 1 file(s)...",
-          "log: Git sync: Continuing rebase...",
           "log: Git sync: Pushing to origin..."
         ]
       },
@@ -1686,22 +1670,7 @@
           "gitignore": "custom/\n\n.backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: Large files (>100MB)\nmedia/huge.mov\n",
           "userName": "b",
           "sparse": "(not sparse)",
-          "backups": [
-            {
-              "metadata": {
-                "timestamp": "<TS>",
-                "reason": "conflict",
-                "conflictFiles": [
-                  ".gitignore"
-                ],
-                "deletedConflictFiles": [],
-                "message": "Sync from AI Company Builder"
-              },
-              "files": {
-                ".gitignore": "d98ecf56cb093e803de611b89892f748eed354a3"
-              }
-            }
-          ]
+          "backups": []
         }
       }
     }

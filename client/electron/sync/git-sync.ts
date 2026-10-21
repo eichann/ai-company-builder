@@ -29,6 +29,7 @@ import {
 } from '../protected-config'
 import { classifyConflicts } from './conflicts'
 import { findNestedGitRepos } from './nested-repos'
+import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { applySparseSelection, readSparseConfig, sparseConfigPath, writeSparseConfig } from './sparse'
 import type { SyncDeps } from './types'
 
@@ -70,6 +71,17 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           log.warn(`Git sync: Failed to abort ${stateFile}:`, abortError)
         }
       }
+    }
+
+    // .gitignore files merge line by line (union) instead of "server wins",
+    // so lines sync added — nested-repo / large-file exclusions, essential
+    // patterns — survive a concurrent change by a teammate. Declared in the
+    // repository-local .git/info/attributes (never committed), before any
+    // rebase can run. See ./gitignore-merge.ts.
+    try {
+      if (ensureGitignoreUnionMerge(gitDir)) log.log('Git sync: Declared .gitignore merge=union in .git/info/attributes')
+    } catch (attributesError) {
+      log.warn('Git sync: Could not declare .gitignore merge=union:', attributesError)
     }
 
     // Clean up old backups (older than 30 days) — async to avoid blocking UI
@@ -230,6 +242,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     // whole shared folder (653 files) and surfaced as a terrifying "653 files
     // deleted" warning even though nothing was gone from disk.
     const newlyExcludedNestedRepos: string[] = []
+    // Every nested repo the member has chosen to exclude (now or earlier).
+    const excludedNestedRepoPaths: string[] = []
     try {
       const nestedRepos = await findNestedGitRepos(repoPath)
       if (nestedRepos.length > 0) {
@@ -277,6 +291,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         const excludedRepos = nestedRepos.filter(
           repo => newlyExcludedNestedRepos.includes(repo) || existingPatterns.has(`/${repo}/`)
         )
+        excludedNestedRepoPaths.push(...excludedRepos)
         for (const repo of excludedRepos) {
           try {
             await git.raw(['rm', '--cached', '-rf', repo])
@@ -570,7 +585,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
                 // of its meaning during a merge. Do not "fix" this to --theirs.
                 log.log(`Git sync: Taking the server version of ${take.length} file(s)...`)
                 await git.checkout(['--ours', '--', ...take])
-                await git.add(['--', ...take])
+                // -f: the member's side may have just excluded the folder
+                // (a shared folder with a stray .git, answered "exclude"), and
+                // a plain add refuses ignored paths — the same pick then fails
+                // on every sync. The server version is being taken, so the
+                // member's ignore rules do not apply to it.
+                await git.add(['-f', '--', ...take])
               }
               if (drop.length > 0) {
                 // The server deleted these; following the deletion is the same
@@ -625,6 +645,36 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             // else: the next pick conflicted — the loop resolves it next round
           }
         }
+      }
+    }
+
+    // 4.4. Union merging can leave a line twice in a .gitignore (both sides
+    //      added it in different places). Drop the copies the merge added
+    //      before they reach the team.
+    try {
+      await tidyMergedGitignores({ git, repoPath, localHash, log })
+    } catch (tidyError) {
+      log.warn('Git sync: Could not tidy merged .gitignore files:', tidyError)
+    }
+
+    // 4.45. Taking the server version of a conflicted file can track a
+    //       teammate's file again inside a folder the member excluded (a
+    //       shared folder with a stray .git, answered "exclude"). Untrack it
+    //       again now, as the member already chose — otherwise only the next
+    //       sync does, and the team needs an extra round to converge.
+    if (excludedNestedRepoPaths.length > 0 && (await git.revparse(['HEAD'])).trim() !== localHash) {
+      try {
+        const retracked: string[] = []
+        for (const repo of excludedNestedRepoPaths) {
+          if ((await git.raw(['ls-files', '--', repo])).trim()) retracked.push(repo)
+        }
+        if (retracked.length > 0) {
+          await git.raw(['rm', '--cached', '-r', '-q', '--', ...retracked])
+          await git.commit(`Stop sharing nested Git repositories: ${retracked.join(', ')}`)
+          log.log('Git sync: Untracked excluded nested repos again after merging:', retracked)
+        }
+      } catch (untrackError) {
+        log.warn('Git sync: Could not untrack excluded nested repos after merging:', untrackError)
       }
     }
 

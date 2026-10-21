@@ -20,6 +20,16 @@
 #   関係なくブロックする（直下の .gitignore と、削除は許可）。
 #
 
+# ロケールを固定する（バイト単位の C ロケール）。
+# サーバーの起動環境のロケールを引き継ぐと、tr / sort / uniq / grep の結果が
+# ホストごとに変わる。例えば LANG=en_US.UTF-8 の macOS では、照合順序を持たない
+# 日本語のファイル名どうしを sort/uniq が「同じ」と判定し、大文字小文字の重複
+# チェックが普通の push を拒否していた。どの環境でも同じ判定になるよう、
+# 最初に固定する（このフックの判定はすべてバイト列/ASCII 前提。node 部分は
+# ロケールを使わない。git が出すメッセージは英語になる）。
+export LC_ALL=C
+unset LANGUAGE
+
 ZERO_SHA="0000000000000000000000000000000000000000"
 EMPTY_TREE="4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 
@@ -344,6 +354,10 @@ while read old_sha new_sha refname; do
     bad_chars=$(printf '%s\n' "$all_paths" | LC_ALL=C grep -E '[<>:"\\|?*]|[[:cntrl:]]' | sed 's/$/ （Windowsで使用できない文字を含む）/')
     bad_trail=$(printf '%s\n' "$all_paths" | grep -E '(\.| )(\/|$)' | sed 's/$/ （フォルダ・ファイル名の末尾がドットまたはスペース）/')
     bad_reserved=$(printf '%s\n' "$all_paths" | grep -iE '(^|/)(con|prn|aux|nul|com[1-9]|lpt[1-9])(\.[^/]*)?(/|$)' | sed 's/$/ （Windows予約デバイス名）/')
+    # 大文字小文字だけが異なるパス（macOS/Windows の既定のファイルシステムでは
+    # 同じファイルになる）。LC_ALL=C なので A-Z だけを小文字にしてバイト比較する。
+    # 全角英字(Ａ/ａ)やアクセント付き文字(É/é)の大文字小文字の組は検出しない。
+    # 日本語のファイル名は大文字小文字が無いので、誤検出も見逃しも起きない。
     bad_case=$(printf '%s\n' "$all_paths" | tr '[:upper:]' '[:lower:]' | sort | uniq -d | sed 's/$/ （大文字小文字のみ異なるパスが複数存在）/')
 
     win_bad=$(printf '%s\n%s\n%s\n%s\n' "$bad_chars" "$bad_trail" "$bad_reserved" "$bad_case" | sed '/^$/d')

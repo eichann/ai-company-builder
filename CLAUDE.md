@@ -159,7 +159,8 @@ harness — see "Testing Sync" below.
 
 ```
 0. Serialize per repository (syncLocks)
-1. Recover from stale rebase / merge / cherry-pick state
+1. Recover from stale rebase / merge / cherry-pick state; declare
+   `.gitignore merge=union` in `.git/info/attributes` (idempotent)
 2. Retry a PENDING_PUSH left by a previous failed sync
 3. Ensure .gitignore essentials (.backups/, .workspace/, node_modules/, .env*,
    **/.personal/* with !**/.personal/.gitignore)
@@ -178,6 +179,8 @@ harness — see "Testing Sync" below.
          ├─ stage 2 present → git checkout --ours → git add (server version)
          └─ stage 2 absent  → git rm --force (the server deleted it)
       c. git rebase --continue
+11.5 If commits were replayed: drop the duplicate lines union merging left
+     in the .gitignore files about to be pushed → commit
 12. Department folder protection (restore folders deleted locally)
 13. git push --set-upstream --progress (also when only earlier unpushed
     commits are left) → on failure write PENDING_PUSH
@@ -192,7 +195,9 @@ harness — see "Testing Sync" below.
 
 ### Conflict Resolution Strategy
 
-- Server version wins for conflicted files
+- Server version wins for conflicted files — except `.gitignore` files (any
+  depth), which merge with git's `union` driver: both sides' lines survive and
+  the file never stops the rebase (see the guards table)
 - A file the server **deleted** follows the deletion — that is the same
   "server wins" rule applied to a file that no longer has a server version
 - Local version is automatically backed up to `.backups/` before being replaced
@@ -201,6 +206,13 @@ harness — see "Testing Sync" below.
 - Uses `rebase --continue` (not `--abort`) to preserve auto-merged files
 - `--ours` during a rebase means **upstream / server**, the inverse of its
   meaning during a merge. Do not "fix" this to `--theirs`.
+- The server version is staged with `git add -f`: when the member's pick had
+  just excluded the folder (a shared folder with a stray `.git`, answered
+  "exclude"), a plain `add` refuses the path as ignored and the same pick
+  failed on every sync (found by the sync harness soak). Taking the server
+  version tracks the teammate's file inside the excluded folder again, so
+  after the rebase sync untracks excluded nested repos once more (`rm
+  --cached`, one extra commit) — the exclusion holds within the same sync.
 - The success message reports the two outcomes separately (overwritten vs.
   deleted) and the result carries `deletedConflictFiles` alongside
   `conflictFiles`. A file that simply vanishes reads as data loss.
@@ -233,6 +245,8 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | `syncLocks` registers the run **before** awaiting the previous one | Registering afterwards let two queued clicks wake together and run concurrently against the same repository. |
 | Nested-repo handling asks the user **before** any mutation | The pre-consent version ran `git rm --cached -rf` and appended to `.gitignore` first, untracking an entire shared folder and surfacing as a "653 files deleted" warning even though nothing had left the disk — and cancelling did not roll it back. A folder that is already shared offers "remove the inner .git and keep sharing" as the default. |
 | Server bare repos set `receive.denyNonFastForwards` and `receive.denyDeletes` (`configureBareRepo` in `server/src/routes/git.ts`, applied at creation and on startup to all repos) | Shared history is the team's only copy. Without these, one client's force push erases everyone's work. This was a near miss — only an auth failure stopped a `push --force-with-lease` from a diverged client. |
+| `.gitignore` files merge with git's built-in `union` driver: sync writes `.gitignore merge=union` into the repository-local `.git/info/attributes` (idempotently, before any rebase; `client/electron/sync/gitignore-merge.ts`). After a rebase that replayed commits, the duplicate lines the merge added to the `.gitignore` files about to be pushed are removed in one extra commit — only copies beyond what either side had, and never a pattern with an opposite (`!`) line between it and the copy kept | Sync appends lines to `.gitignore` itself (nested-repo and large-file exclusions, the essential patterns). When two members changed `.gitignore` concurrently the rebase conflicted on it and "server wins" dropped the member's side, sync's own lines included: the member was asked about the same nested repo again and concurrent syncs did not converge (found by the sync harness soak). `.git/info/attributes` is never committed (nothing is changed in the company repository on the member's behalf), does not depend on global git config, outranks any committed `.gitattributes`, is read by every pick of `pull --rebase` / `rebase --continue`, and a slash-less pattern covers `.gitignore` at any depth. Trade-off: union keeps both sides of an overlapping hunk, so a line one side deleted right next to the other side's change comes back — a path stays ignored that someone wanted shared, which loses nothing and can be removed again. Every other file keeps "server wins". |
+| The pre-receive hook pins `export LC_ALL=C` before anything else | Its "paths that differ only by case" check (`tr '[:upper:]' '[:lower:]' \| sort \| uniq -d`) followed the locale it inherited from the server. Under `LANG=en_US.UTF-8` on macOS, sort/uniq treat distinct Japanese names (no collation weights) as equal, so ordinary pushes were rejected with `WINPATH_DETECTED`; production only escaped because its container sets no locale. Pinned, every host behaves like that container: the check is bytewise and folds A–Z only, the collision that matters on macOS/Windows default filesystems. Non-ASCII case pairs (full-width `Ａ`/`ａ`, accented `É`/`é`) are not folded — as production never did. Every text tool in the hook is byte/ASCII based and the embedded node check does not use the locale; `server/tests/integration/hook-locale.test.ts` pushes under UTF-8 locales and proves each tool sees `LC_ALL=C`. Hooks are re-installed from the template at API startup, so a change to the hook needs a restart. |
 | Only owner/admin may change agent-execution config: the pre-receive hook rejects with `PROTECTED_CONFIG` any push in which some commit adds, modifies, deletes or renames `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, anything under `.claude/hooks/`, or a file/symlink named `.claude` — at any depth, case-insensitively. The role comes from `memberships` via `ACB_PUSHER_ROLE`, set server-side in `git-http.ts`; a missing role fails closed for these paths only | The chat runs Claude Code in the shared checkout with `settingSources: ['user', 'project']`, and in non-interactive mode it runs a project `UserPromptSubmit` hook and starts a `.mcp.json` stdio server **without any prompt** (verified with the real CLI). `settings.json` also carries `statusLine`, `apiKeyHelper`, `env` and permission rules. Sync shares nearly everything, so any member could run arbitrary commands on every teammate's machine at their next chat message. Distribution itself is legitimate (an MCP server shared via `.mcp.json` is in production use), so the rule restricts *who*, not *what*. Skills (`.claude/skills/`) are not path-protected — sharing them is the core feature; only their auto-run parts are (next row). |
 | Skills, subagents and slash commands (`.md` under `.claude/skills/`, `.claude/agents/`, `.claude/commands/`, any depth, case-insensitive) may be added or changed by anyone **unless the new blob contains an auto-run part**: frontmatter key `hooks`, `mcpServers` (or the plugin-style `lspServers` / `monitors`) in any YAML spelling (quoted, flow, escaped, anchored, nested), a body `!` + backtick opener where the `!` starts a line or follows whitespace, or a ```` ```! ```` block — or the entry is a symlink. Then only owner/admin may push it, with the same range logic, role source and fail-closed rules as the row above, reported in the same `PROTECTED_CONFIG` section (path line, then a reason line that does not start with `- `). Deletions are always allowed. The check is JavaScript run with the server's own node (`ACB_NODE`, set in `git-http.ts`); if it cannot run, every changed path in those folders is rejected for non-admins | Claude Code executes these without the model choosing to: a skill's or command's frontmatter `hooks` are registered when it loads, a subagent's inline `mcpServers` are spawned when it runs, and `` !`cmd` `` / ```` ```! ```` are run while the skill or command is expanded — inside fenced code too (only single-line inline code is masked, and substituted arguments can re-pair those backticks, so the hook does not mask at all). Skills can also auto-load by `paths`, and their own `allowed-tools` pre-approve those commands. Text that is not the syntax (`` `!` ``, `!important`, `if ! grep`, prose mentioning hooks) passes. A symlink's target is outside what the hook inspects, and Claude Code follows symlinked skill folders. |
 | A `PROTECTED_CONFIG` rejection is resolved by **rewriting the unpushed commits**, never by a retry or a revert commit (`client/electron/protected-config.ts`) | The rejected change is already committed and the hook checks *every* commit in the range, so a retry or a revert on top fails at the same step forever — the "permanently unable to sync" shape again. The dialog backs up the member's version, squashes the unpushed commits with `reset --soft origin/main` (refused unless `origin/main` is an ancestor of `HEAD`, or it would revert teammates' work), restores just those paths to the server's version (or removes them), and commits the rest. Before restoring, sync first pushes the unpushed commits squashed into one with every file as the member has it: a change they already undid (e.g. took the `hooks` out of a skill after the first rejection) blocks only through its intermediate commit, and restoring would discard — or, for a new skill, remove — an acceptable final version. Push is also attempted whenever commits are still unpushed, because a rejected push writes no `PENDING_PUSH` and a sync with no new edits used to report success while the commits never left the machine. |
