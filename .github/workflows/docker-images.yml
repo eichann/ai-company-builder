@@ -1,0 +1,99 @@
+name: Docker images
+
+# Builds the server (api) and admin images exactly as self-hosters and
+# production do (docker-compose.yml), then smoke-tests them. Nothing is pushed.
+#
+# Separate from ci.yml and path-filtered because a cold image build takes a few
+# minutes — longer than the rest of CI — and only these inputs can break it.
+# Both Dockerfiles once went unbuildable on main without anyone noticing
+# (unpinned pnpm, no lockfile) because nothing built them between deploys.
+on:
+  pull_request:
+    branches: [main]
+    paths: &image-inputs
+      - 'server/Dockerfile'
+      - 'admin/Dockerfile'
+      - '.dockerignore'
+      - 'docker-compose.yml'
+      - 'docs/self-hosting/docker-compose.production.yml'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'patches/**'
+      - 'server/package.json'
+      - 'admin/package.json'
+      - 'shared/package.json'
+      - '.github/workflows/docker-images.yml'
+  push:
+    branches: [main]
+    paths: *image-inputs
+  workflow_dispatch:
+
+concurrency:
+  group: docker-images-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-smoke-test:
+    name: Build and smoke-test images
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      AUTH_SECRET: ci-only-not-a-secret-ci-only-not-a-secret
+      COMPOSE_PROJECT_NAME: acb-ci
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build
+        run: docker compose build --pull api admin
+
+      - name: Start
+        run: |
+          mkdir -p data
+          docker compose up -d --no-build api admin
+
+      - name: API answers and creates its databases
+        run: |
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 2 -o /dev/null \
+            -w 'GET /api/config -> %{http_code}\n' http://127.0.0.1:3001/api/config
+          code=$(curl -s -o /dev/null -w '%{http_code}' \
+            'http://127.0.0.1:3001/api/git-http/x.git/info/refs?service=git-upload-pack')
+          echo "unauthenticated git info/refs -> $code"
+          [ "$code" = 401 ]
+          ls -la data
+          test -f data/app.sqlite && test -f data/auth.sqlite
+
+      - name: API image runs the lockfile versions and loads better-sqlite3
+        run: |
+          docker compose exec -T api node -e '
+            const fs = require("fs")
+            const lock = fs.readFileSync("/dev/stdin", "utf8")
+            const server = lock.slice(lock.indexOf("\n  server:\n"), lock.indexOf("\n  shared:\n"))
+            let bad = 0
+            for (const name of ["better-auth", "hono", "better-sqlite3", "drizzle-orm", "@hono/node-server", "tsx"]) {
+              // scoped names are quoted in the lockfile (\x27 = single quote)
+              const want = server.match(new RegExp(`\\n      \\x27?${name}\\x27?:\\n.*\\n        version: ([^(\\s]+)`))[1]
+              const have = require(`/app/node_modules/${name}/package.json`).version
+              console.log(`${have === want ? "OK " : "BAD"} ${name} lock=${want} image=${have}`)
+              if (have !== want) bad++
+            }
+            new (require("/app/node_modules/better-sqlite3"))(":memory:").prepare("select 1").get()
+            console.log("better-sqlite3 loads; node =", process.execPath)
+            process.exit(bad ? 1 : 0)
+          ' < pnpm-lock.yaml
+
+      - name: Admin serves /
+        run: |
+          curl -fsS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \
+            -w 'GET / -> %{http_code}\n' http://127.0.0.1:3100/
+
+      - name: Logs
+        if: always()
+        run: docker compose logs --no-color --tail 100 api admin
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
