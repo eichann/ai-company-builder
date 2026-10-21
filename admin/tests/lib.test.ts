@@ -1,12 +1,14 @@
 import { describe, expect, it } from 'vitest'
 
-import { ApiError } from '@/lib/api'
+import { ApiError, type PermissionRule } from '@/lib/api'
+import { describeRules, draftFromRules, losingEdit, previewAccess, rulesFromDraft, sameDraft } from '@/lib/edit-access'
 import { describeError } from '@/lib/errors'
 import { isValidFolderName, suggestFolderName } from '@/lib/folder-name'
 import { compareBuilds, formatBuild, formatRelative, latest, parseBuild, parseServerDate } from '@/lib/format'
 import { ruleAccessLabel } from '@/lib/permission-labels'
 import { safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
+import { members } from './fixtures'
 
 describe('dates', () => {
   it('reads SQLite datetime() values as UTC', () => {
@@ -106,5 +108,62 @@ describe('permission labels', () => {
     expect(ruleAccessLabel({ canRead: true, canWrite: true })).toBe('閲覧・編集')
     expect(ruleAccessLabel({ canRead: true, canWrite: false })).toBe('閲覧のみ')
     expect(ruleAccessLabel({ canRead: false, canWrite: false })).toBe('アクセス不可')
+  })
+})
+
+describe('per-place edit choice', () => {
+  const rule = (subjectType: PermissionRule['subjectType'], subjectId: string | null, canWrite: boolean): PermissionRule => ({
+    id: `${subjectType}:${subjectId}`,
+    subjectType,
+    subjectId,
+    subjectLabel: subjectId ?? '全員',
+    canRead: true,
+    canWrite,
+  })
+  const tanaka = { subjectType: 'user', subjectId: 'u_member' } as const
+  const roleMember = { subjectType: 'role', subjectId: 'member' } as const
+
+  it('reads the three choices from rules', () => {
+    expect(draftFromRules([])).toEqual({ draft: { mode: 'inherit', editors: [] }, custom: false })
+    expect(draftFromRules([rule('everyone', null, true)])).toEqual({ draft: { mode: 'everyone', editors: [] }, custom: false })
+    expect(draftFromRules([rule('everyone', null, false), rule('user', 'u_member', true), rule('role', 'member', true)])).toEqual({
+      draft: { mode: 'specific', editors: [tanaka, roleMember] },
+      custom: false,
+    })
+    // A redundant read-only rule under 指定した人だけ changes nothing.
+    expect(draftFromRules([rule('everyone', null, false), rule('user', 'u_member', false)]).custom).toBe(false)
+  })
+
+  it('flags rules the choice cannot express', () => {
+    expect(draftFromRules([rule('everyone', null, true), rule('user', 'u_member', false)]).custom).toBe(true)
+    expect(draftFromRules([rule('everyone', null, false), rule('role', 'member', true), rule('user', 'u_member', false)]).custom).toBe(true)
+    expect(draftFromRules([rule('user', 'u_member', true)]).custom).toBe(true)
+  })
+
+  it('writes a complete rule set for each choice', () => {
+    expect(rulesFromDraft({ mode: 'inherit', editors: [tanaka] })).toEqual([])
+    expect(rulesFromDraft({ mode: 'everyone', editors: [tanaka] })).toEqual([{ subjectType: 'everyone', subjectId: null, canWrite: true }])
+    expect(rulesFromDraft({ mode: 'specific', editors: [tanaka] })).toEqual([
+      { subjectType: 'everyone', subjectId: null, canWrite: false },
+      { subjectType: 'user', subjectId: 'u_member', canWrite: true },
+    ])
+    expect(sameDraft({ mode: 'specific', editors: [tanaka, roleMember] }, { mode: 'specific', editors: [roleMember, tanaka] })).toBe(true)
+    expect(sameDraft({ mode: 'everyone', editors: [tanaka] }, { mode: 'everyone', editors: [] })).toBe(true)
+  })
+
+  it('previews access like the server and finds who loses edit', () => {
+    const open = previewAccess(members, [rule('everyone', null, true)], '')
+    const only = previewAccess(members, rulesFromDraft({ mode: 'specific', editors: [] }), '営業部')
+    expect(only.find((m) => m.userId === 'u_owner')).toMatchObject({ write: true, reason: 'role' })
+    expect(only.find((m) => m.userId === 'u_member')).toMatchObject({ read: true, write: false, decidedBy: { path: '営業部', subjectLabel: '全員' } })
+    expect(losingEdit(open, only).map((m) => m.userId)).toEqual(['u_member'])
+    const userBeatsRole = previewAccess(members, [rule('everyone', null, false), rule('role', 'member', true), rule('user', 'u_member', false)], '')
+    expect(userBeatsRole.find((m) => m.userId === 'u_member')?.write).toBe(false)
+  })
+
+  it('describes a rule set in one line', () => {
+    expect(describeRules([rule('everyone', null, true)], members)).toBe('全員')
+    expect(describeRules([rule('everyone', null, false), rule('user', 'u_member', true)], members)).toBe('指定した人だけ（田中 太郎）')
+    expect(describeRules([rule('everyone', null, false)], members)).toBe('指定した人だけ（オーナーと管理者のみ）')
   })
 })

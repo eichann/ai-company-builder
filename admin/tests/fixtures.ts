@@ -8,6 +8,7 @@ import type {
   Invitation,
   Member,
   EffectiveAccess,
+  InheritedRules,
   Overview,
   PermissionScope,
   PushRejectionPage,
@@ -144,6 +145,8 @@ export const busyOverview: Overview = {
   },
 }
 
+const ROOT_RULES: InheritedRules = { scopeId: 's_company', path: '', rules: [{ id: 'r_everyone', subjectType: 'everyone', subjectId: null, subjectLabel: '全員', canRead: true, canWrite: true }], summary: 'everyone-rw' }
+
 export const permissionScopes: PermissionScope[] = [
   {
     id: 's_company',
@@ -154,8 +157,9 @@ export const permissionScopes: PermissionScope[] = [
     inherited: false,
     rules: [{ id: 'r_everyone', subjectType: 'everyone', subjectId: null, subjectLabel: '全員', canRead: true, canWrite: true }],
     effectiveSummary: 'everyone-rw',
+    inheritedFrom: null,
   },
-  { id: 's_sales', path: '営業部', kind: 'department', departmentId: 'd_sales', repoId: null, inherited: true, rules: [], effectiveSummary: 'everyone-rw' },
+  { id: 's_sales', path: '営業部', kind: 'department', departmentId: 'd_sales', repoId: null, inherited: true, rules: [], effectiveSummary: 'everyone-rw', inheritedFrom: ROOT_RULES },
   {
     id: 's_sales_contracts',
     path: '営業部/契約書',
@@ -168,8 +172,9 @@ export const permissionScopes: PermissionScope[] = [
       { id: 'r_contracts_tanaka', subjectType: 'user', subjectId: 'u_member', subjectLabel: '田中 太郎', canRead: true, canWrite: true },
     ],
     effectiveSummary: 'everyone-r',
+    inheritedFrom: ROOT_RULES,
   },
-  { id: 's_dev', path: 'development', kind: 'department', departmentId: 'd_dev', repoId: null, inherited: true, rules: [], effectiveSummary: 'everyone-rw' },
+  { id: 's_dev', path: 'development', kind: 'department', departmentId: 'd_dev', repoId: null, inherited: true, rules: [], effectiveSummary: 'everyone-rw', inheritedFrom: ROOT_RULES },
 ]
 
 export const invitations: Invitation[] = [

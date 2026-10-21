@@ -21,24 +21,30 @@ function reasonText(m: EffectiveMember, here: string, nameOf: (path: string) => 
   return `${where}の「${m.decidedBy.subjectLabel}」のルール`
 }
 
-/** Who can do what at the selected place, and which rule decided it. */
+/**
+ * Who can do what at the selected place, and which rule decided it: the
+ * server's answer for what is saved, or `draft` (computed in the browser)
+ * while an unsaved choice is shown.
+ */
 export function EffectivePreview({
   effective,
+  draft,
   path,
   nameOf,
 }: {
   effective: QueryResult<EffectiveAccess>
+  draft?: EffectiveMember[] | null
   path: string
   nameOf: (path: string) => string
 }) {
   const [expanded, setExpanded] = useState(false)
   const members = useMemo(() => {
-    const list = effective.data?.members ?? []
+    const list = draft ?? effective.data?.members ?? []
     // Members who cannot edit first: that is what an editor usually checks.
     return [...list].sort((a, b) => Number(a.write) - Number(b.write) || (a.name ?? '').localeCompare(b.name ?? '', 'ja'))
-  }, [effective.data])
+  }, [effective.data, draft])
 
-  if (effective.loading) {
+  if (!draft && effective.loading) {
     return (
       <div className="space-y-2" aria-busy="true" aria-label="読み込み中">
         <Skeleton className="h-4 w-48" />
@@ -47,7 +53,7 @@ export function EffectivePreview({
       </div>
     )
   }
-  if (effective.error && !effective.data) {
+  if (!draft && effective.error && !effective.data) {
     return <ErrorState error={effective.error} onRetry={effective.reload} title="プレビューを読み込めませんでした" className="py-6" />
   }
 
@@ -59,7 +65,11 @@ export function EffectivePreview({
       <p className="text-sm text-muted-foreground">
         編集できる <span className="font-medium text-foreground tabular-nums">{editors}人</span> · 閲覧のみ{' '}
         <span className="font-medium text-foreground tabular-nums">{members.length - editors}人</span>
-        {effective.fetching && <span className="ml-2 text-xs">更新中…</span>}
+        {draft ? (
+          <span className="ml-2 inline-block rounded-full bg-warning/10 whitespace-nowrap px-2 py-0.5 text-xs text-warning">保存前のプレビュー</span>
+        ) : (
+          effective.fetching && <span className="ml-2 text-xs">更新中…</span>
+        )}
       </p>
       <div className="overflow-hidden rounded-lg border">
         <table className="w-full text-sm">
@@ -88,7 +98,7 @@ export function EffectivePreview({
                     </div>
                   </td>
                   <td className="px-2 py-2 text-center">
-                    <Mark on={m.read || !effective.data?.readRestrictionEnforced} label="閲覧" />
+                    <Mark on={m.read || !(effective.data?.readRestrictionEnforced ?? false)} label="閲覧" />
                   </td>
                   <td className="px-2 py-2 text-center">
                     <Mark on={m.write} label="編集" />

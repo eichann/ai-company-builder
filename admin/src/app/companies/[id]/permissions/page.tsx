@@ -30,6 +30,12 @@ const SUMMARY_BADGE: Record<EffectiveSummary, 'success' | 'warning' | 'brand'> =
   restricted: 'warning',
 }
 
+const TREE_BADGE_LABELS: Record<EffectiveSummary, string> = {
+  'everyone-rw': '全員が編集',
+  'everyone-r': '一部が編集',
+  restricted: '制限あり',
+}
+
 interface Node extends EditorNode {
   depth: number
   department: Department | undefined
@@ -124,7 +130,8 @@ export default function PermissionsPage() {
 
   const canEdit = (path: string) => isAdmin || managedFolders.some((f) => isSameOrAncestorPath(f, path))
 
-  const nameOf = (path: string) => nodes.find((n) => n.path === path)?.name ?? (pathSegments(path).at(-1) || '会社全体')
+  const nameOf = (path: string) =>
+    nodes.find((n) => n.path === path)?.name ?? (pathSegments(path).at(-1) || company.data?.name || '会社全体')
 
   const companyScope = scopes.find((s) => s.kind === 'company')
   const explicitCount = scopes.filter((s) => s.kind !== 'company' && !s.inherited).length
@@ -143,13 +150,13 @@ export default function PermissionsPage() {
 
   return (
     <>
-      <PageHeader title="権限" description="会社・部署・フォルダごとに、誰が編集できるかを設定します。" />
+      <PageHeader title="権限" description="会社・部署・フォルダごとに、編集できる人を選びます。" />
 
       <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
         <Info size={18} className="mt-0.5 shrink-0 text-brand" />
         <div className="space-y-1">
           <p>
-            いまは<strong className="font-medium">「編集できる」「閲覧のみ」</strong>を設定できます。閲覧そのものを制限する（見せない）設定は、今後のアップデートで対応予定です。
+            場所ごとに<strong className="font-medium">「上の階層と同じ」「全員」「指定した人だけ」</strong>から編集できる人を選べます。選ばれなかった人は閲覧のみになります。閲覧そのものを制限する（見せない）設定は、今後のアップデートで対応予定です。
           </p>
           <p className="text-muted-foreground">オーナーと管理者は、ルールに関係なく常にすべての場所を閲覧・編集できます。</p>
           {!isAdmin && <p className="text-muted-foreground">あなたが責任者を務める部署と、その中のフォルダだけを表示・変更できます。</p>}
@@ -217,11 +224,13 @@ export default function PermissionsPage() {
 
             <div ref={editorRef} className="scroll-mt-16">
               <ScopeEditor
-                key={selected.path}
+                // A fresh draft whenever the saved rules of this place change.
+                key={`${selected.path}\u0000${JSON.stringify(selected.scope?.rules ?? [])}`}
                 companyId={companyId}
                 node={selected}
                 scopes={scopes}
                 members={members.data ?? []}
+                departments={departments.data ?? []}
                 editable={canEdit(selected.path)}
                 nameOf={nameOf}
                 onChanged={permissions.reload}
@@ -313,7 +322,7 @@ function TreeRow({
             <span className="shrink-0 text-xs text-muted-foreground">継承</span>
           ) : (
             <Badge variant={SUMMARY_BADGE[node.summary]} className="shrink-0">
-              {node.summary === 'everyone-rw' ? '全員が編集' : node.summary === 'everyone-r' ? '一部が編集' : '制限あり'}
+              {TREE_BADGE_LABELS[node.summary]}
             </Badge>
           )}
         </button>

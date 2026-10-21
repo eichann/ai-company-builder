@@ -60,6 +60,25 @@ describe('API client (contract)', () => {
     expect(calls[5].url).toBe(`${base}/permissions/folders?path=`)
   })
 
+  it('replaceScope sends the whole rule set for one path', async () => {
+    const { calls } = mockApi({ [`PUT ${base}/permissions/scopes/by-path`]: { body: ok({ scope: null, rules: [] }) } })
+    await permissionsApi.replaceScope(COMPANY_ID, '営業部/契約書', [
+      { subjectType: 'everyone', subjectId: null, canWrite: false },
+      { subjectType: 'user', subjectId: 'u_member', canWrite: true },
+    ])
+    expect(calls[0]).toMatchObject({
+      method: 'PUT',
+      url: `${base}/permissions/scopes/by-path`,
+      body: {
+        path: '営業部/契約書',
+        rules: [
+          { subjectType: 'everyone', subjectId: null, canWrite: false },
+          { subjectType: 'user', subjectId: 'u_member', canWrite: true },
+        ],
+      },
+    })
+  })
+
   it('push rejections pass filters as query parameters', async () => {
     const { calls } = mockApi({
       [`GET ${base}/push-rejections`]: { body: ok({ total: 0, markers: [], rejections: [] }) },

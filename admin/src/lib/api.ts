@@ -251,7 +251,23 @@ export interface PermissionScope {
   inherited: boolean
   rules: PermissionRule[]
   effectiveSummary: EffectiveSummary
+  /**
+   * What this place follows when it has no rules of its own (上の階層と同じ):
+   * the nearest ancestor with rules. null for the company root. Absent from
+   * servers older than the per-folder choice.
+   */
+  inheritedFrom?: InheritedRules | null
 }
+
+export interface InheritedRules {
+  scopeId: string
+  path: string
+  rules: PermissionRule[]
+  summary: EffectiveSummary
+}
+
+/** One rule of a complete rule set sent to replaceScope (read is always allowed). */
+export type RuleInput = RuleSubject & { canWrite: boolean }
 
 /** Who a rule is for. Rules for owners/admins are refused: they can always edit. */
 export type RuleSubject =
@@ -295,6 +311,16 @@ const permBase = (companyId: string) => `/api/companies/${enc(companyId)}/permis
 
 export const permissionsApi = {
   get: (companyId: string) => getData<{ scopes: PermissionScope[] }>(permBase(companyId)),
+
+  /**
+   * Replace a place's whole rule set in one step (what the 権限 screen saves).
+   * [] = 上の階層と同じ (not allowed for the company root).
+   */
+  replaceScope: (companyId: string, path: string, rules: RuleInput[]) =>
+    getData<ScopeRulesResult>(`${permBase(companyId)}/scopes/by-path`, {
+      method: 'PUT',
+      body: { path, rules },
+    }),
 
   /** Set (create or update) a subject's rule on a folder; the folder stops inheriting. */
   setRule: (companyId: string, path: string, subject: RuleSubject, canWrite: boolean) =>
