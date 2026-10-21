@@ -7,8 +7,10 @@ import type {
   Department,
   Invitation,
   Member,
+  EffectiveAccess,
   Overview,
   PermissionScope,
+  PushRejectionPage,
 } from '@/lib/api'
 
 export const COMPANY_ID = 'co_123'
@@ -161,8 +163,11 @@ export const permissionScopes: PermissionScope[] = [
     departmentId: 'd_sales',
     repoId: null,
     inherited: false,
-    rules: [{ id: 'r_admins', subjectType: 'role', subjectId: 'admin', subjectLabel: '管理者', canRead: true, canWrite: true }],
-    effectiveSummary: 'restricted',
+    rules: [
+      { id: 'r_contracts_everyone', subjectType: 'everyone', subjectId: null, subjectLabel: '全員', canRead: true, canWrite: false },
+      { id: 'r_contracts_tanaka', subjectType: 'user', subjectId: 'u_member', subjectLabel: '田中 太郎', canRead: true, canWrite: true },
+    ],
+    effectiveSummary: 'everyone-r',
   },
   { id: 's_dev', path: 'development', kind: 'department', departmentId: 'd_dev', repoId: null, inherited: true, rules: [], effectiveSummary: 'everyone-rw' },
 ]
@@ -187,5 +192,35 @@ export const invitations: Invitation[] = [
     isUsed: false,
   },
 ]
+
+export function effectiveAt(path: string, governing: string, writers: string[]): EffectiveAccess {
+  return {
+    path,
+    governingScope: { id: `s_${governing || 'company'}`, path: governing, inherited: governing !== path },
+    readRestrictionEnforced: false,
+    members: members.map((m) => {
+      const full = m.role !== 'member'
+      return {
+        userId: m.userId,
+        name: m.name,
+        email: m.email,
+        role: m.role,
+        read: true,
+        write: full || writers.includes(m.userId),
+        reason: full ? 'role' : 'rule',
+        decidedBy: full ? null : { scopeId: 's', path: governing, subjectType: 'everyone', subjectLabel: '全員' },
+      }
+    }),
+  }
+}
+
+export const rejectionPage: PushRejectionPage = {
+  total: 3,
+  markers: ['PROTECTED_CONFIG', 'SECRET_DETECTED', 'SOMETHING_NEW'],
+  rejections: [
+    { id: 'pr1', userId: 'u_member', name: '田中 太郎', email: 'tanaka@example.com', marker: 'SECRET_DETECTED', paths: ['営業部/顧客.env', 'a.txt', 'b.txt', 'c.txt'], createdAt: '2026-10-21T06:00:00.000Z' },
+    { id: 'pr2', userId: 'u_admin', name: '鈴木 一郎', email: 'suzuki@example.com', marker: 'PROTECTED_CONFIG', paths: ['.mcp.json'], createdAt: '2026-10-20T06:00:00.000Z' },
+  ],
+}
 
 export const ok = <T,>(data: T) => ({ success: true, data })

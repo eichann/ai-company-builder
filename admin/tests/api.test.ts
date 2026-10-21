@@ -4,10 +4,12 @@ import {
   ApiError,
   authApi,
   capabilitiesApi,
+  companiesApi,
   departmentsApi,
   invitationsApi,
   overviewApi,
   permissionsApi,
+  pushRejectionsApi,
 } from '@/lib/api'
 import {
   COMPANY_ID,
@@ -34,6 +36,49 @@ describe('API client (contract)', () => {
     mockApi({ [`GET ${base}/permissions`]: { body: ok({ scopes: permissionScopes }) } })
     const data = await permissionsApi.get(COMPANY_ID)
     expect(data.scopes.map((s) => s.path)).toEqual(['', '営業部', '営業部/契約書', 'development'])
+  })
+
+  it('permission rule writes: methods, paths and bodies (read is never sent)', async () => {
+    const { calls } = mockApi({
+      [`POST ${base}/permissions/rules`]: { status: 201, body: ok({ scope: null, rules: [] }) },
+      [`PATCH ${base}/permissions/rules/r 1`]: { body: ok({ scope: null, rules: [] }) },
+      [`DELETE ${base}/permissions/rules/r 1`]: { body: ok({ scope: null, rules: [] }) },
+      [`DELETE ${base}/permissions/scopes/s_1/rules`]: { body: ok({ removed: 2 }) },
+      [`GET ${base}/permissions/effective?path=営業部/契約書`]: { body: ok({ path: '営業部/契約書', members: [] }) },
+      [`GET ${base}/permissions/folders?path=`]: { body: ok({ path: '', folders: [] }) },
+    })
+    await permissionsApi.setRule(COMPANY_ID, '営業部', { subjectType: 'user', subjectId: 'u_member' }, false)
+    expect(calls[0]).toMatchObject({ method: 'POST', body: { path: '営業部', subjectType: 'user', subjectId: 'u_member', canWrite: false } })
+    expect(calls[0].body).not.toHaveProperty('canRead')
+    await permissionsApi.updateRule(COMPANY_ID, 'r 1', true)
+    expect(calls[1]).toMatchObject({ method: 'PATCH', url: `${base}/permissions/rules/r%201`, body: { canWrite: true } })
+    await permissionsApi.deleteRule(COMPANY_ID, 'r 1')
+    expect((await permissionsApi.resetScope(COMPANY_ID, 's_1')).removed).toBe(2)
+    await permissionsApi.effective(COMPANY_ID, '営業部/契約書')
+    expect(calls[4].url).toBe(`${base}/permissions/effective?path=${encodeURIComponent('営業部/契約書')}`)
+    await permissionsApi.folders(COMPANY_ID, '')
+    expect(calls[5].url).toBe(`${base}/permissions/folders?path=`)
+  })
+
+  it('push rejections pass filters as query parameters', async () => {
+    const { calls } = mockApi({
+      [`GET ${base}/push-rejections`]: { body: ok({ total: 0, markers: [], rejections: [] }) },
+      [`GET ${base}/push-rejections?userId=u_member&marker=SECRET_DETECTED&limit=10&offset=20`]: { body: ok({ total: 0, markers: [], rejections: [] }) },
+    })
+    await pushRejectionsApi.list(COMPANY_ID)
+    await pushRejectionsApi.list(COMPANY_ID, { userId: 'u_member', marker: 'SECRET_DETECTED', limit: 10, offset: 20 })
+    expect(calls.map((c) => c.method)).toEqual(['GET', 'GET'])
+  })
+
+  it('rename and role change', async () => {
+    const { calls } = mockApi({
+      [`PATCH ${base}`]: { body: ok({ id: COMPANY_ID, name: '新' }) },
+      [`PUT ${base}/members/u_member/role`]: { body: ok({ userId: 'u_member', companyId: COMPANY_ID, role: 'admin' }) },
+    })
+    await companiesApi.rename(COMPANY_ID, '新')
+    await companiesApi.setMemberRole(COMPANY_ID, 'u_member', 'admin')
+    expect(calls[0]).toMatchObject({ method: 'PATCH', body: { name: '新' } })
+    expect(calls[1]).toMatchObject({ method: 'PUT', body: { role: 'admin' } })
   })
 
   it('GET / PUT department managers', async () => {

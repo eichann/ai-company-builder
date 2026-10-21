@@ -21,6 +21,7 @@
  */
 import type Database from 'better-sqlite3'
 import {
+  findGoverningScope,
   normalizeScopePath,
   type PermissionRepository,
   type ScopeKind,
@@ -203,7 +204,7 @@ export function listScopesWithRules(conn: Conn, companyId: string): ScopeWithRul
   const scopes = conn.prepare(`SELECT * FROM scopes WHERE company_id = ?`).all(companyId) as ScopeRow[]
   const rules = conn.prepare(`
     SELECT r.* FROM scope_rules r JOIN scopes s ON s.id = r.scope_id
-    WHERE s.company_id = ? ORDER BY r.created_at ASC, r.id ASC
+    WHERE s.company_id = ? ORDER BY r.created_at ASC, r.rowid ASC
   `).all(companyId) as RuleRow[]
   const byScope = new Map<string, ScopeRule[]>()
   for (const r of rules) {
@@ -288,5 +289,158 @@ export function replaceDepartmentManagers(conn: Conn, departmentId: string, user
         `).run(departmentId, id, ts, createdBy)
       }
     }
+  })()
+}
+
+// ----------------------------------------------------------------------------
+// Rule editing (Phase 2: admin panel)
+//
+// Write side of the editor in routes/permission-rules.ts. Authorization and
+// validation happen there; these functions only keep the tables consistent:
+//
+// - A scope that starts carrying its own rules *breaks inheritance by
+//   copying*: the rules of the scope that governed it so far are copied in
+//   first (breakInheritance), so adding "田中: 編集できる" to a folder changes
+//   nothing for anyone else. Without the copy, every member not named by the
+//   new rule would fall to "no rule" there (lib/permissions.ts, step 3).
+// - A folder scope (kind 'folder') left without rules is removed; company and
+//   department scopes stay (they follow the company / departments tables).
+// ----------------------------------------------------------------------------
+
+export interface ScopeRecord {
+  id: string
+  companyId: string
+  path: string
+  kind: ScopeKind
+  departmentId: string | null
+}
+
+function toScopeRecord(row: ScopeRow): ScopeRecord {
+  return { id: row.id, companyId: row.company_id, path: row.path, kind: row.kind, departmentId: row.department_id }
+}
+
+export function getScopeByPath(conn: Conn, companyId: string, path: string): ScopeRecord | null {
+  const row = conn.prepare(`SELECT * FROM scopes WHERE company_id = ? AND path = ?`).get(companyId, path) as ScopeRow | undefined
+  return row ? toScopeRecord(row) : null
+}
+
+export function getScopeById(conn: Conn, companyId: string, scopeId: string): ScopeRecord | null {
+  const row = conn.prepare(`SELECT * FROM scopes WHERE company_id = ? AND id = ?`).get(companyId, scopeId) as ScopeRow | undefined
+  return row ? toScopeRecord(row) : null
+}
+
+export function listScopeRules(conn: Conn, scopeId: string): ScopeRule[] {
+  const rows = conn.prepare(`SELECT * FROM scope_rules WHERE scope_id = ? ORDER BY created_at ASC, rowid ASC`).all(scopeId) as RuleRow[]
+  return rows.map(r => ({
+    id: r.id,
+    subjectType: r.subject_type,
+    subjectId: r.subject_id,
+    canRead: r.can_read === 1,
+    canWrite: r.can_write === 1,
+  }))
+}
+
+/** A rule with the scope it belongs to, or null when it is not a rule of `companyId`. */
+export function getRuleWithScope(conn: Conn, companyId: string, ruleId: string): { rule: ScopeRule; scope: ScopeRecord } | null {
+  const row = conn.prepare(`
+    SELECT s.id AS scope_id FROM scope_rules r JOIN scopes s ON s.id = r.scope_id
+    WHERE r.id = ? AND s.company_id = ?
+  `).get(ruleId, companyId) as { scope_id: string } | undefined
+  if (!row) return null
+  const scope = getScopeById(conn, companyId, row.scope_id)
+  const rule = listScopeRules(conn, row.scope_id).find(r => r.id === ruleId)
+  return scope && rule ? { rule, scope } : null
+}
+
+/** The scope at `path`, created as a plain folder scope (no rules) when missing. */
+export function ensureFolderScope(conn: Conn, companyId: string, path: string, createdBy: string | null): ScopeRecord {
+  const existing = getScopeByPath(conn, companyId, path)
+  if (existing) return existing
+  if (path === '') {
+    ensureCompanyScope(conn, companyId, createdBy)
+    return getScopeByPath(conn, companyId, '')!
+  }
+  conn.prepare(`
+    INSERT INTO scopes (id, company_id, path, kind, department_id, repo_id, created_at, created_by)
+    VALUES (?, ?, ?, 'folder', NULL, NULL, ?, ?)
+  `).run(newId(), companyId, path, timestamp(), createdBy)
+  return getScopeByPath(conn, companyId, path)!
+}
+
+function insertRule(conn: Conn, scopeId: string, rule: Omit<ScopeRule, 'id'>, createdBy: string | null): string {
+  const id = newId()
+  conn.prepare(`
+    INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, scopeId, rule.subjectType, rule.subjectId, rule.canRead ? 1 : 0, rule.canWrite ? 1 : 0, timestamp(), createdBy)
+  return id
+}
+
+/**
+ * Give an inheriting scope its own copy of the rules that governed it. No-op
+ * when the scope already has rules. Returns the scope's rules afterwards.
+ */
+export function breakInheritance(conn: Conn, companyId: string, scope: ScopeRecord, createdBy: string | null): ScopeRule[] {
+  const own = listScopeRules(conn, scope.id)
+  if (own.length > 0) return own
+  const others = listScopesWithRules(conn, companyId).filter(s => s.id !== scope.id)
+  const governing = findGoverningScope(others, scope.path)
+  for (const r of governing?.rules ?? []) {
+    insertRule(conn, scope.id, { subjectType: r.subjectType, subjectId: r.subjectId, canRead: r.canRead, canWrite: r.canWrite }, createdBy)
+  }
+  return listScopeRules(conn, scope.id)
+}
+
+/**
+ * Set `subject`'s rule on the scope at `path` (creating the scope, and
+ * copying inherited rules into it, as needed). One rule per subject per
+ * scope: an existing one is updated. Returns the rule id and whether the
+ * scope gained a rule of its own (201) rather than an update (200).
+ */
+export function upsertScopeRule(
+  conn: Conn,
+  companyId: string,
+  path: string,
+  rule: Omit<ScopeRule, 'id'>,
+  createdBy: string,
+): { ruleId: string; created: boolean; scope: ScopeRecord } {
+  return conn.transaction(() => {
+    const scope = ensureFolderScope(conn, companyId, path, createdBy)
+    const wasInheriting = listScopeRules(conn, scope.id).length === 0
+    const rules = breakInheritance(conn, companyId, scope, createdBy)
+    const same = rules.find(r => r.subjectType === rule.subjectType && (r.subjectId ?? null) === (rule.subjectId ?? null))
+    if (same) {
+      updateRuleAccess(conn, same.id, rule.canRead, rule.canWrite)
+      // A rule copied in by breakInheritance a moment ago is new to this scope.
+      return { ruleId: same.id, created: wasInheriting, scope }
+    }
+    return { ruleId: insertRule(conn, scope.id, rule, createdBy), created: true, scope }
+  })()
+}
+
+export function updateRuleAccess(conn: Conn, ruleId: string, canRead: boolean, canWrite: boolean): void {
+  conn.prepare(`UPDATE scope_rules SET can_read = ?, can_write = ? WHERE id = ?`).run(canRead ? 1 : 0, canWrite ? 1 : 0, ruleId)
+}
+
+/** Remove a folder scope that has no rules left (company/department scopes stay). */
+function dropEmptyFolderScope(conn: Conn, scope: ScopeRecord): void {
+  if (scope.kind !== 'folder') return
+  if (listScopeRules(conn, scope.id).length > 0) return
+  conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(scope.id)
+}
+
+export function deleteRule(conn: Conn, ruleId: string, scope: ScopeRecord): void {
+  conn.transaction(() => {
+    conn.prepare(`DELETE FROM scope_rules WHERE id = ?`).run(ruleId)
+    dropEmptyFolderScope(conn, scope)
+  })()
+}
+
+/** Remove every rule of the scope: it inherits from its parent again. Returns how many were removed. */
+export function clearScopeRules(conn: Conn, scope: ScopeRecord): number {
+  return conn.transaction(() => {
+    const n = conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(scope.id).changes
+    dropEmptyFolderScope(conn, scope)
+    return n
   })()
 }

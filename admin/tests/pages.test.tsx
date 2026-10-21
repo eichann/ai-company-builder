@@ -6,28 +6,11 @@ import { describe, expect, it, vi } from 'vitest'
 import DepartmentsPage from '@/app/companies/[id]/departments/page'
 import MembersPage from '@/app/companies/[id]/members/page'
 import OverviewPage from '@/app/companies/[id]/page'
-import PermissionsPage from '@/app/companies/[id]/permissions/page'
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
 import { EmptyState, ErrorState } from '@/components/app/states'
-import { TooltipProvider } from '@/components/ui/tooltip'
-import { AuthProvider } from '@/lib/auth-context'
-import { CompanyProvider } from '@/lib/company-context'
 import { CheckCircle } from '@phosphor-icons/react'
-import {
-  COMPANY_ID,
-  busyOverview,
-  clientActivity,
-  company,
-  departments,
-  invitations,
-  managerCapabilities,
-  managers,
-  members,
-  ok,
-  ownerCapabilities,
-  permissionScopes,
-  quietOverview,
-} from './fixtures'
+import { base, companyRoutes, renderInCompany } from './company-harness'
+import { COMPANY_ID, busyOverview, managerCapabilities, ok, quietOverview } from './fixtures'
 import { mockApi, pending } from './mock-api'
 
 vi.mock('next/navigation', () => ({
@@ -43,34 +26,6 @@ vi.mock('next/link', () => ({
   ),
 }))
 
-const base = `/api/companies/${COMPANY_ID}`
-
-function companyRoutes(caps = ownerCapabilities) {
-  const managerRoutes = Object.fromEntries(
-    departments.map((d) => [`GET ${base}/departments/${d.id}/managers`, { body: ok({ managers: managers[d.id] }) }])
-  )
-  return {
-    'GET /api/me': { body: ok({ id: 'u_owner', email: 'sato@example.com', name: '佐藤 花子' }) },
-    [`GET ${base}`]: { body: ok({ ...company, role: caps.role }) },
-    'GET /api/companies': { body: ok([company]) },
-    [`GET ${base}/me/capabilities`]: { body: ok(caps) },
-    [`GET ${base}/members`]: { body: ok(members) },
-    [`GET ${base}/departments?flat=true`]: { body: ok(departments) },
-    [`GET ${base}/client-activity`]: { body: ok(clientActivity) },
-    [`GET ${base}/invitations`]: { body: ok(invitations) },
-    ...managerRoutes,
-  }
-}
-
-function renderInCompany(ui: ReactNode) {
-  return render(
-    <TooltipProvider>
-      <AuthProvider>
-        <CompanyProvider companyId={COMPANY_ID}>{ui}</CompanyProvider>
-      </AuthProvider>
-    </TooltipProvider>
-  )
-}
 
 describe('shared states', () => {
   it('empty state shows its next action', () => {
@@ -219,28 +174,5 @@ describe('部署', () => {
     renderInCompany(<DepartmentsPage />)
     expect(await screen.findByText('部署がありません')).toBeInTheDocument()
     expect(screen.getAllByRole('button', { name: '部署を追加' }).length).toBeGreaterThan(0)
-  })
-})
-
-describe('権限', () => {
-  it('shows the company default prominently and marks inherited scopes', async () => {
-    mockApi({ ...companyRoutes(), [`GET ${base}/permissions`]: { body: ok({ scopes: permissionScopes }) } })
-    renderInCompany(<PermissionsPage />)
-    expect(await screen.findByText('会社全体の基本ルール')).toBeInTheDocument()
-    expect(screen.getAllByText('全員が閲覧・編集できます').length).toBeGreaterThan(0)
-    expect(screen.getAllByText('継承 · 全員が閲覧・編集できます')).toHaveLength(2)
-    expect(screen.getByText('一部の人だけがアクセスできます')).toBeInTheDocument()
-    expect(screen.getAllByText('閲覧・編集', { selector: 'span' })).toHaveLength(2)
-    // Read-only: no editing controls at all.
-    expect(screen.queryByRole('button', { name: /編集|変更|追加/ })).not.toBeInTheDocument()
-  })
-
-  it('explains when the user may not view permissions', async () => {
-    mockApi({
-      ...companyRoutes(managerCapabilities),
-      [`GET ${base}/permissions`]: { status: 403, body: { error: 'Only owners, admins and department managers can view permissions' } },
-    })
-    renderInCompany(<PermissionsPage />)
-    expect(await screen.findByText('権限を確認できるのは、オーナー・管理者と部署の責任者です')).toBeInTheDocument()
   })
 })

@@ -442,6 +442,110 @@ companiesRoute.post('/:id/members', async (c) => {
   }, 201)
 })
 
+export const MAX_COMPANY_NAME_LENGTH = 100
+
+// Rename a company (owner/admin). Only the display name changes: the slug,
+// repository and folders stay as they are.
+companiesRoute.patch('/:id', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const companyId = c.req.param('id')
+  const membership = db.prepare(`
+    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
+  `).get(user.id, companyId) as { role: string } | undefined
+  if (!membership) {
+    return c.json({ error: 'Company not found or access denied' }, 404)
+  }
+  if (!['owner', 'admin'].includes(membership.role)) {
+    return c.json({ error: 'Only owners and admins can rename the company' }, 403)
+  }
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const raw = (body as { name?: unknown } | null)?.name
+  const name = typeof raw === 'string' ? raw.normalize('NFC').trim() : ''
+  if (!name) {
+    return c.json({ error: 'Company name is required' }, 400)
+  }
+  if (name.length > MAX_COMPANY_NAME_LENGTH) {
+    return c.json({ error: `Company name must be at most ${MAX_COMPANY_NAME_LENGTH} characters` }, 400)
+  }
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000-\u001f\u007f]/.test(name)) {
+    return c.json({ error: 'Company name contains invalid characters' }, 400)
+  }
+
+  db.prepare('UPDATE companies SET name = ?, updated_at = ? WHERE id = ?').run(name, now(), companyId)
+  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as Record<string, unknown>
+  return c.json({ success: true, data: { ...toCamelCase(company), role: membership.role } })
+})
+
+// Change a member's role. Owners only: they alone may grant or revoke admin
+// (and ownership). The last owner can never be demoted — not by another
+// owner (there is none) and not by themselves — so a company always keeps
+// someone who can manage it.
+companiesRoute.put('/:id/members/:userId/role', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const companyId = c.req.param('id')
+  const targetUserId = c.req.param('userId')
+  const membership = db.prepare(`
+    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
+  `).get(user.id, companyId) as { role: string } | undefined
+  if (!membership) {
+    return c.json({ error: 'Company not found or access denied' }, 404)
+  }
+  if (membership.role !== 'owner') {
+    return c.json({ error: 'Only owners can change member roles' }, 403)
+  }
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const role = (body as { role?: unknown } | null)?.role
+  if (role !== 'owner' && role !== 'admin' && role !== 'member') {
+    return c.json({ error: 'Invalid role' }, 400)
+  }
+
+  const target = db.prepare(`
+    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
+  `).get(targetUserId, companyId) as { role: string } | undefined
+  if (!target) {
+    return c.json({ error: 'Member not found' }, 404)
+  }
+
+  if (target.role !== role) {
+    const changed = db.transaction(() => {
+      if (target.role === 'owner') {
+        const owners = (db.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE company_id = ? AND role = 'owner'`)
+          .get(companyId) as { n: number }).n
+        if (owners <= 1) return false
+      }
+      db.prepare('UPDATE memberships SET role = ?, updated_at = ? WHERE user_id = ? AND company_id = ?')
+        .run(role, now(), targetUserId, companyId)
+      return true
+    })()
+    if (!changed) {
+      return c.json({ error: 'The last owner cannot be demoted. Make another member an owner first.' }, 400)
+    }
+  }
+
+  return c.json({ success: true, data: { userId: targetUserId, companyId, role } })
+})
+
 // Remove a member from company
 companiesRoute.delete('/:id/members/:userId', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
