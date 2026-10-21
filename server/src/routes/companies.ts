@@ -4,6 +4,7 @@ import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { configureBareRepo } from './git'
 import { getClientActivityForCompany } from '../lib/client-activity'
 import { parseClientVersion } from '../lib/client-version'
+import { ensureCompanyScope, removeManagerFromCompany, syncCompanyScopes } from '../lib/permission-store'
 import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -261,6 +262,16 @@ companiesRoute.post('/', async (c) => {
     // Continue - company is created, departments can be added later
   }
 
+  // Permission scopes: company-wide `everyone: read + write` (today's fully
+  // open behaviour) and one inheriting scope per department
+  try {
+    ensureCompanyScope(db, id, user.id)
+    syncCompanyScopes(db, id)
+  } catch (e) {
+    console.error('Failed to initialize permission scopes:', e)
+    // Continue - startup seeding creates them on the next restart
+  }
+
   // Seed the matching folders into the repo (filesystem = source of truth)
   if (repoPath) {
     try {
@@ -462,6 +473,7 @@ companiesRoute.delete('/:id/members/:userId', async (c) => {
   db.prepare(`
     DELETE FROM memberships WHERE user_id = ? AND company_id = ?
   `).run(targetUserId, companyId)
+  removeManagerFromCompany(db, companyId, targetUserId)
 
   return c.json({
     success: true,

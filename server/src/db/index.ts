@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
+import { seedPermissionScopes } from '../lib/permission-store'
 
 // Ensure data directory exists
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
@@ -17,9 +18,12 @@ sqlite.pragma('journal_mode = WAL')
 // Export the raw SQLite connection for direct queries
 export const db = sqlite
 
-// Initialize application tables (separate from Better Auth tables)
-export function initDatabase() {
-  sqlite.exec(`
+// Initialize application tables (separate from Better Auth tables).
+// Takes the connection so tests can run it against a copy of an older database.
+// Every change here must stay additive: an older server build must keep
+// working on a database this version has initialized.
+export function initDatabase(conn: Database.Database = sqlite) {
+  conn.exec(`
     -- Application tables
     CREATE TABLE IF NOT EXISTS companies (
       id TEXT PRIMARY KEY,
@@ -104,7 +108,59 @@ export function initDatabase() {
       PRIMARY KEY (user_id, company_id)
     );
 
+    -- Permission model (lib/permissions.ts). Phase 1 stores and exposes it;
+    -- nothing is enforced from these tables yet.
+    -- A scope is a node rules attach to: path '' = the whole company, otherwise
+    -- a repo-relative folder ('コンテンツ', 'コンテンツ/受講生情報'), NFC, no
+    -- leading/trailing slash. repo_id NULL = in the company's main repository.
+    CREATE TABLE IF NOT EXISTS scopes (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL CHECK (kind IN ('company', 'department', 'folder')),
+      department_id TEXT REFERENCES departments(id) ON DELETE CASCADE,
+      repo_id TEXT,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      UNIQUE(company_id, path)
+    );
+
+    CREATE TABLE IF NOT EXISTS scope_rules (
+      id TEXT PRIMARY KEY,
+      scope_id TEXT NOT NULL REFERENCES scopes(id) ON DELETE CASCADE,
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('everyone', 'role', 'user')),
+      subject_id TEXT,
+      can_read INTEGER NOT NULL DEFAULT 0,
+      can_write INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      created_by TEXT
+    );
+
+    -- 部署の責任者. Management rights only: grants no file access by itself.
+    CREATE TABLE IF NOT EXISTS department_managers (
+      department_id TEXT NOT NULL REFERENCES departments(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      created_by TEXT,
+      PRIMARY KEY (department_id, user_id)
+    );
+
+    -- Pushes the pre-receive hook rejected (lib/push-rejections.ts).
+    -- paths: JSON array of strings, capped.
+    CREATE TABLE IF NOT EXISTS push_rejections (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      marker TEXT NOT NULL,
+      paths TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
+    CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);
+    CREATE INDEX IF NOT EXISTS idx_department_managers_user_id ON department_managers(user_id);
+    CREATE INDEX IF NOT EXISTS idx_push_rejections_company_created ON push_rejections(company_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_client_activity_company_id ON client_activity(company_id);
     CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON memberships(user_id);
     CREATE INDEX IF NOT EXISTS idx_memberships_company_id ON memberships(company_id);
@@ -117,7 +173,11 @@ export function initDatabase() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_company_folder ON departments(company_id, folder);
   `)
 
-  console.log('Application database initialized at:', dbPath)
+  // Company scope + default `everyone: read + write` rule, one scope per
+  // department. Idempotent; repairs drift left by older server builds.
+  seedPermissionScopes(conn)
+
+  if (conn === sqlite) console.log('Application database initialized at:', dbPath)
 }
 
 // Helper functions for common operations
