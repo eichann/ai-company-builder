@@ -658,7 +658,7 @@ declare global {
       isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
       listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
       sparseGetExclusions: (repoPath: string) => Promise<{ success: boolean; excluded: string[]; error?: string }>
-      sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string }>
+      sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }>
       gitBinaryStatus: () => Promise<{ bundled: boolean; binary: string }>
 
       // Backup

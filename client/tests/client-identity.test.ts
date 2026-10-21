@@ -87,6 +87,9 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
   const git = createConfiguredGit(root, { binary: 'git', askPassPath: '/nonexistent', token: '', extraConfig: config })
   assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
   assert.equal((await git.raw(['config', '--get', 'http.postBuffer'])).trim(), '524288000')
+  // No diffstat after a fast-forward pull: it would download, in a partial
+  // clone, every teammate change outside the member's departments.
+  assert.equal((await git.raw(['config', '--get', 'merge.stat'])).trim(), 'false')
   assert.equal((await git.raw(['config', '--get', 'credential.helper'])).trim(), '') // last value wins
   assert.equal((await git.raw(['var', 'GIT_EDITOR'])).trim(), 'true')
 })

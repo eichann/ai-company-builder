@@ -30,7 +30,8 @@ import { createGitSync } from './sync/git-sync'
 import { createConfiguredGit } from './sync/git-factory'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
-import { applySparseSelection, readSparseConfig } from './sync/sparse'
+import { isDownloadFailure, readSparseConfig, setSparseExclusions } from './sync/sparse'
+import { checkoutSelectedDepartments } from './sync/first-setup'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
 import net from 'net'
@@ -1816,7 +1817,6 @@ ipcMain.handle('git:grep', async (_, repoPath: string, query: string, folderPath
 // tests/sync-harness). This wires the app's git, dialogs and server API in.
 const gitSync = createGitSync({
   createGit,
-  gitBinary: () => getResolvedGit().binary,
   dialog: createMessageBoxSyncDialog({
     hasWindow: () => !!mainWindow && !mainWindow.isDestroyed(),
     showMessageBox: (options) => {
@@ -1924,6 +1924,60 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
     }
 
     if (remoteHasCommits) {
+      // Check if we have local commits
+      const localLog = await git.log().catch(() => null)
+
+      // First setup with departments picked: download only those (plus what
+      // the whole company shares) — a partial clone with the sparse cone set
+      // before the first checkout (./sync/first-setup.ts). Only for a folder
+      // with no local commits; an existing clone is never converted.
+      if ((!localLog || localLog.total === 0) && Array.isArray(selectedPaths) && selectedPaths.length > 0) {
+        const lsHeads = await git.listRemote(['--heads', 'origin'])
+        const headMatch = lsHeads.match(/refs\/heads\/(\S+)/)
+        let departments: string[] | null = null
+        try {
+          const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
+            headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+          })
+          const deptData = deptResponse.ok ? await deptResponse.json() : null
+          if (deptData?.success && Array.isArray(deptData.data)) {
+            departments = (deptData.data as Array<{ folder?: unknown }>)
+              .map(d => d.folder)
+              .filter((f): f is string => typeof f === 'string' && f.length > 0 && !f.includes('/'))
+          }
+        } catch (deptError) {
+          console.warn('Git setup: Could not load departments, treating root folders as departments:', deptError)
+        }
+        try {
+          const { excluded, included } = await checkoutSelectedDepartments({
+            git,
+            repoPath,
+            branch: headMatch ? headMatch[1] : 'main',
+            departments,
+            selected: selectedPaths.filter((p): p is string => typeof p === 'string'),
+            log: console,
+          })
+          return {
+            success: true,
+            remoteUrl,
+            cloned: true,
+            partial: true,
+            downloadedDepartments: included,
+            excludedDepartments: excluded,
+            message: `Cloned from server (selected departments only): ${remoteUrl}`,
+          }
+        } catch (partialError) {
+          const msg = partialError instanceof Error ? partialError.message : String(partialError)
+          console.error('Git setup: Partial clone failed:', msg)
+          return {
+            success: false,
+            error: isDownloadFailure(msg)
+              ? 'ダウンロードできませんでした。インターネット接続を確認して、もう一度お試しください。'
+              : msg,
+          }
+        }
+      }
+
       // Remote has content — pull it down (member joining existing company)
       console.log('Git setup: Remote has commits, fetching...')
       await git.fetch(['--progress', 'origin'])
@@ -1933,8 +1987,6 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
       const branchMatch = lsRemote.match(/refs\/heads\/(\S+)/)
       const remoteBranch = branchMatch ? branchMatch[1] : 'main'
 
-      // Check if we have local commits
-      const localLog = await git.log().catch(() => null)
       if (!localLog || localLog.total === 0) {
         // No local commits — checkout the remote branch
         await git.checkout(['-b', remoteBranch, `origin/${remoteBranch}`])
@@ -1953,17 +2005,6 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
           } catch (pullError) {
             console.warn('Git setup: Pull failed, will resolve on next sync:', pullError)
           }
-        }
-      }
-
-      // Apply sparse checkout if user selected specific departments
-      if (selectedPaths && selectedPaths.length > 0) {
-        try {
-          await git.raw(['sparse-checkout', 'init', '--cone'])
-          await git.raw(['sparse-checkout', 'set', ...selectedPaths])
-          console.log(`Git setup: Sparse checkout enabled for: ${selectedPaths.join(', ')}`)
-        } catch (sparseError) {
-          console.warn('Git setup: Sparse checkout failed, keeping full checkout:', sparseError)
         }
       }
 
@@ -2025,14 +2066,15 @@ ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
   }
 })
 
-// Set the exclusion list and reconcile the worktree to match.
+// Set the exclusion list and reconcile the worktree to match. In a partial
+// clone (first setup with departments picked), adding a department downloads
+// it; offline nothing changes and the result says so (offline: true).
 ipcMain.handle('git:sparseSetExclusions', async (_, repoPath: string, excluded: string[]) => {
   try {
     const safe = validatePath(repoPath)
-    const git = createGit(safe)
-    await applySparseSelection(git, safe, Array.isArray(excluded) ? excluded : [])
-    const enabled = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
-    return { success: true, enabled, excluded: readSparseConfig(safe).excluded }
+    const result = await setSparseExclusions(createGit(safe), safe, Array.isArray(excluded) ? excluded : [])
+    if (!result.success) console.error('Sparse set exclusions error:', result.error)
+    return result
   } catch (error) {
     console.error('Sparse set exclusions error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

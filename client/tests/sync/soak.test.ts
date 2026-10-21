@@ -11,6 +11,14 @@
 //   SYNC_SOAK_SEEDS=1,2,3   seeds to run (default: 1,2)
 //   SYNC_SOAK_MEMBERS=3     members per world (default: 3)
 //   SYNC_SOAK_ROUNDS=6      rounds (default: 6)
+//   SYNC_SOAK_MIXED_SEEDS=101,102  seeds for the mixed world (default: 101,102)
+//   SYNC_SOAK_PARTIAL=2     partial-clone members in the mixed world, on top
+//                           of the full ones (default: 2)
+//
+// The mixed world adds partial-clone members (first setup with one
+// department picked, World.addPartialMember). They edit only what they have
+// downloaded, and now and then add the other department in settings
+// (online or not).
 //
 // A failure prints the seed and the operation log; rerun with that seed.
 
@@ -18,11 +26,14 @@ import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
 import { World, type Member, type Role } from '../sync-harness/world'
 import { assertConverged, assertNoLostWork } from '../sync-harness/invariants'
+import { readSparseConfig } from '../../electron/sync/sparse'
 
 const SEEDS = (process.env.SYNC_SOAK_SEEDS ?? '1,2').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
 const MEMBERS = Number(process.env.SYNC_SOAK_MEMBERS) || 3
 const ROUNDS = Number(process.env.SYNC_SOAK_ROUNDS) || 6
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
+const MIXED_SEEDS = (process.env.SYNC_SOAK_MIXED_SEEDS ?? '101,102').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
+const PARTIAL = Number(process.env.SYNC_SOAK_PARTIAL ?? 2)
 
 /** mulberry32 — small, fast, good enough for test choices. */
 function prng(seed: number) {
@@ -62,7 +73,7 @@ function expectedFailure(result: { error?: string; errorType?: string; secretDet
   return /^同期を中止しました|^同期がキャンセルされました/.test(result.error ?? '')
 }
 
-async function soak(seed: number, t: { after: (fn: () => void) => void; diagnostic: (s: string) => void }) {
+async function soak(seed: number, t: { after: (fn: () => void) => void; diagnostic: (s: string) => void }, partialMembers = 0) {
   const rnd = prng(seed)
   const roles: Role[] = ['admin', 'member', 'member', 'owner', 'member']
   const world = World.create(t, {
@@ -73,28 +84,57 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       '.mcp.json': '{"mcpServers":{}}\n',
     },
   })
+  for (let i = 0; i < partialMembers; i++) {
+    await world.addPartialMember(`p${i}`, { departments: [i % 2 === 0 ? '営業部' : '開発部'] })
+  }
   const opLog: string[] = []
   const log = (s: string) => opLog.push(s)
   let counter = 0
 
+  // A partial member only edits what it has downloaded (the folders it did
+  // not pick are not on its disk); a full member has everything.
+  const inCone = (m: Member, p: string) =>
+    !m.partial || !readSparseConfig(m.dir).excluded.some(d => p === d || p.startsWith(`${d}/`))
+  const pickIn = (m: Member, xs: readonly string[]): string | null => {
+    const allowed = xs.filter(p => inCone(m, p))
+    return allowed.length > 0 ? rnd.pick(allowed) : null
+  }
+
   // Tracked files the member still has on disk.
   const tracked = (m: Member) => m.git(['ls-files', '-z']).split('\0').filter(f => f && f !== '.gitignore' && !f.endsWith('.gitkeep') && m.exists(f))
 
-  const randomOp = (m: Member) => {
+  const randomOp = async (m: Member) => {
     const n = ++counter
+    if (m.partial && rnd.chance(0.08)) {
+      // Settings → 追加する (downloads the department; fails cleanly offline).
+      const missing = readSparseConfig(m.dir).excluded
+      if (missing.length > 0) {
+        const dept = rnd.pick(missing)
+        const r = await m.addDepartment(dept)
+        log(`${m.name} adds department ${dept} → ${r.success ? 'ok' : r.error}`)
+        assert.ok(r.success || r.offline, `adding a department failed: ${JSON.stringify(r)}`)
+      }
+      return
+    }
     const roll = rnd.int(100)
     if (roll < 35) {
-      const p = rnd.pick(TEXT_PATHS)
-      m.write(p, `${m.name} #${n}\n${'line\n'.repeat(rnd.int(4))}`)
-      log(`${m.name} write ${p}`)
+      const p = pickIn(m, TEXT_PATHS)
+      if (p) {
+        m.write(p, `${m.name} #${n}\n${'line\n'.repeat(rnd.int(4))}`)
+        log(`${m.name} write ${p}`)
+      }
     } else if (roll < 45) {
-      const p = rnd.pick(TEXT_PATHS)
-      m.append(p, `${m.name} appends #${n}\n`)
-      log(`${m.name} append ${p}`)
+      const p = pickIn(m, TEXT_PATHS)
+      if (p) {
+        m.append(p, `${m.name} appends #${n}\n`)
+        log(`${m.name} append ${p}`)
+      }
     } else if (roll < 52) {
-      const p = rnd.pick(BINARY_PATHS)
-      m.write(p, Buffer.from([0x89, 0x50, 0x4e, 0x47, n & 0xff, rnd.int(256), 0, 0xff]))
-      log(`${m.name} binary ${p}`)
+      const p = pickIn(m, BINARY_PATHS)
+      if (p) {
+        m.write(p, Buffer.from([0x89, 0x50, 0x4e, 0x47, n & 0xff, rnd.int(256), 0, 0xff]))
+        log(`${m.name} binary ${p}`)
+      }
     } else if (roll < 60) {
       const files = tracked(m)
       if (files.length > 0) {
@@ -106,15 +146,18 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       const files = tracked(m).filter(f => !f.startsWith('.'))
       if (files.length > 0) {
         const from = rnd.pick(files)
-        const to = `${rnd.pick(['営業部', '開発部', 'shared', 'archive'])}/moved-${n}-${from.split('/').pop()}`
+        const to = `${pickIn(m, ['営業部', '開発部', 'shared', 'archive'])}/moved-${n}-${from.split('/').pop()}`
         if (!m.exists(to)) {
           m.rename(from, to)
           log(`${m.name} rename ${from} -> ${to}`)
         }
       }
     } else if (roll < 71) {
-      m.write(`${rnd.pick(['営業部', '開発部'])}/.personal/memo-${n}.md`, `private ${n}\n`)
-      log(`${m.name} personal file`)
+      const dept = pickIn(m, ['営業部', '開発部'])
+      if (dept) {
+        m.write(`${dept}/.personal/memo-${n}.md`, `private ${n}\n`)
+        log(`${m.name} personal file`)
+      }
     } else if (roll < 77) {
       m.write('.mcp.json', `{"mcpServers":{"s${n}":{"command":"x"}}}\n`)
       log(`${m.name} (${m.role}) edits .mcp.json`)
@@ -145,9 +188,11 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       m.write(`shared/new-${m.name}-${n}.md`, `new ${n}\n`)
       log(`${m.name} new file`)
     } else {
-      const file = rnd.pick(['.gitignore', '営業部/.gitignore', '開発部/.gitignore'])
-      m.append(file, `*.tmp${n}\n`)
-      log(`${m.name} edits ${file}`)
+      const file = pickIn(m, ['.gitignore', '営業部/.gitignore', '開発部/.gitignore'])
+      if (file) {
+        m.append(file, `*.tmp${n}\n`)
+        log(`${m.name} edits ${file}`)
+      }
     }
   }
 
@@ -164,7 +209,7 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       log(`--- round ${round}`)
       for (const m of world.members) {
         const ops = rnd.int(4)
-        for (let i = 0; i < ops; i++) randomOp(m)
+        for (let i = 0; i < ops; i++) await randomOp(m)
       }
       for (const m of rnd.shuffle(world.members)) {
         if (!rnd.chance(0.85)) continue
@@ -198,5 +243,11 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
 describe(`git:sync soak (${MEMBERS} members × ${ROUNDS} rounds)`, { concurrency: CONCURRENCY }, () => {
   for (const seed of SEEDS) {
     test(`seed ${seed}`, async t => soak(seed, t))
+  }
+})
+
+describe(`git:sync soak, mixed full and partial clones (${MEMBERS} full + ${PARTIAL} partial × ${ROUNDS} rounds)`, { concurrency: CONCURRENCY }, () => {
+  for (const seed of PARTIAL > 0 ? MIXED_SEEDS : []) {
+    test(`seed ${seed}`, async t => soak(seed, t, PARTIAL))
   }
 })

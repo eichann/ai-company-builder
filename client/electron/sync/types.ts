@@ -40,8 +40,6 @@ export type SyncLogger = Pick<Console, 'log' | 'warn' | 'error'>
 export interface SyncDeps {
   /** SimpleGit configured like the app's createGit (sync/git-factory.ts). */
   createGit(repoPath: string): SimpleGit
-  /** Binary used for the binary-safe `git cat-file` backups. */
-  gitBinary(): string
   dialog: SyncDialog
   api: SyncServerApi
   /** AI commit message for the staged changes, or null to use the default. */

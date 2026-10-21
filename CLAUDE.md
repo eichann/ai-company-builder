@@ -168,7 +168,7 @@ by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), the
 clock and the logger are injected (`sync/types.ts`). `client/electron/main.ts`
 only wires the real implementations into `ipcMain.handle('git:sync', ...)`.
 Helpers: `sync/conflicts.ts`, `sync/nested-repos.ts`, `sync/sparse.ts`,
-`protected-config.ts`. Every change to sync runs through the multi-member
+`sync/first-setup.ts` (first setup, below), `protected-config.ts`. Every change to sync runs through the multi-member
 harness — see "Testing Sync" below.
 
 ```
@@ -211,6 +211,46 @@ harness — see "Testing Sync" below.
          denied folder is moved back) → commit → push again, once
 ```
 
+### First Setup: Download Only the Picked Departments (partial clone)
+
+A member setting up a company in a **fresh folder** (no local commits) picks
+their departments first (`CompanySelector` →
+「所属する部署を選んでください。他の部署はあとから設定でダウンロードできます」);
+`git:setupCompanyRemote` then runs `checkoutSelectedDepartments`
+(`client/electron/sync/first-setup.ts`): `fetch --filter=blob:none` (commits
+and trees only) → persist the sparse exclusions (the departments *not*
+picked) and set the cone → check out, which downloads just the cone's blobs
+in one batch. The cone is the usual exclusion model: every root folder
+(dotfolders such as `.claude` included) and root file, minus the unpicked
+departments. Nothing picked → full clone as before. Existing clones are
+never converted (no migration).
+
+- Server: `configureBareRepo` sets `uploadpack.allowFilter` and
+  `uploadpack.allowReachableSHA1InWant` (`server/src/lib/git-server/repo-config.ts`).
+  git-http does not forward `Git-Protocol`, so upload-pack speaks v0, which
+  refuses every lazy fetch (a want that is not a ref tip) without the latter;
+  "reachable" is what a full clone already serves, `allowAnySHA1InWant` is
+  not needed.
+- Later fetches keep the filter (`remote.origin.promisor` /
+  `partialclonefilter`). A blob outside the cone that git needs — a rebase
+  replaying over a teammate's rename, restoring a server version, adding a
+  department in settings, `git log -p` — is fetched lazily by git itself,
+  authenticated through the environment `createGit` sets (`GIT_ASKPASS` +
+  `GIT_TOKEN`, inherited by git's own `fetch` child). The token is still
+  never written to disk, so git run **outside the app** (a terminal, or the
+  chat agent running `git log -p` / `git show` over another department) cannot
+  authenticate a lazy fetch: that command fails with an auth error and
+  changes nothing; files and git commands inside the downloaded departments
+  are unaffected.
+- Adding a department in settings (`setSparseExclusions`) downloads it.
+  Offline, `sparse-checkout set` fails and rolls its patterns back, and
+  `applySparseSelection` writes the previous exclusions back, so cone,
+  worktree and config stay as they were and the panel shows
+  「インターネットにつながっているときにダウンロードできます」. Sync offline
+  fails exactly as for a full clone (commit stays local, `PENDING_PUSH`).
+- A department a teammate creates later appears automatically, as for every
+  sparse checkout (cone = all root folders − exclusions).
+
 ### Conflict Resolution Strategy
 
 - Server version wins for conflicted files — except `.gitignore` files (any
@@ -231,10 +271,19 @@ harness — see "Testing Sync" below.
   version tracks the teammate's file inside the excluded folder again, so
   after the rebase sync untracks excluded nested repos once more (`rm
   --cached`, one extra commit) — the exclusion holds within the same sync.
+- Every index update sync makes on a path it did not just check out (`add -f`
+  / `rm` in conflict resolution, the nested-repo and `.personal` untracking,
+  the protected-config restore) passes `--sparse`: in a sparse checkout a
+  root folder the member created before the server had it lies outside the
+  cone, and git refuses to touch it otherwise — the pick failed on every
+  sync (found by the partial-clone soak). No effect on a full checkout.
 - The success message reports the two outcomes separately (overwritten vs.
   deleted) and the result carries `deletedConflictFiles` alongside
   `conflictFiles`. A file that simply vanishes reads as data loss.
-- Backups are extracted with `git cat-file -p <localHash>:<file>` into a Buffer.
+- Backups are extracted with `git cat-file -p <localHash>:<file>` into a Buffer
+  (`binaryCatFile` on the configured git, so a partial clone could fetch a
+  missing object with auth and the watchdog — the local versions are always
+  local in practice).
   `git show` returns a string and corrupts binaries (pptx, png, …), which are
   exactly the files that conflict most often. When the file no longer exists
   at `localHash` (a later unpushed commit renamed or deleted it), the backup
@@ -257,6 +306,8 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | `timeout: { block: 5 * 60 * 1000 }` | Watchdog: kill any git process that produces no output for 5 minutes, so a process waiting on input that will never arrive cannot hang `await` forever. Long network transfers survive it because fetch/pull/push all pass `--progress`. |
 | `http.postBuffer=524288000` | Old system git (e.g. Apple Git 2.39, still reachable via the system-git fallback) has a broken chunked HTTP push that fails even against github.com. Buffering past the 1MiB default keeps git off chunked transfer regardless of which binary resolved. |
 | The mac app's bundled git is **universal** (arm64 + x86_64): electron-builder's `beforePack` hook (`client/scripts/universal-git.mjs`) downloads both darwin dugite-native archives pinned in dugite's `embedded-git.json` (sha256 verified), `lipo -create`s every Mach-O, requires every other file to be byte-identical (else the build fails), keeps symlinks/permissions, and replaces `node_modules/dugite/git` with the result. Git Credential Manager (.NET, per-arch assemblies, ~110MB) is left out — the app clears `credential.helper` and never runs it. CI job "Universal bundled git (macOS)" runs the merge and both slices (`arch -x86_64`) | dugite downloads git for the build machine only, so the universal app built on Apple Silicon shipped an arm64-only git: on Intel Macs `resolveGitBinaryWithFallback` (`main.ts`) dropped to `/usr/bin/git` (Apple Git 2.39, known CVEs) and pushes failed (2026-10-21). `@electron/universal` does not merge anything under `app.asar.unpacked`, it just keeps the x64 slice's copy, so the merge has to happen before packing. The system-git fallback stays as a last resort and logs which binary and arch are in use. |
+| `merge.stat=false` | A pull that fast-forwards prints a diffstat, which reads every file the teammates changed. In a partial clone those blobs were never downloaded, so every sync silently fetched the teammates' changes in departments the member did not pick (found by the partial-clone harness). Nothing reads the diffstat. |
+| Sparse cone changes use one `sparse-checkout set --cone <dirs>` (never `init --cone` + `set`), and a failed change writes the previous exclusions back (`applySparseSelection`) | In a partial clone, widening the cone is a download. `init --cone` alone narrows the worktree to the root files; if the following `set` then failed offline the member's folders vanished from disk. A single `set` rolls its own patterns back on failure, and restoring the config keeps the next sync from retrying a choice that was never applied. |
 | Conflict resolution is a **loop**, not a single round | A rebase replays commits one at a time and pauses on *every* conflicting pick. The original single-round code fell back to `rebase --skip`, which silently discarded a whole commit the moment a second pick conflicted. |
 | Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts` in `client/electron/sync/conflicts.ts`) | `git checkout --ours` reads stage 2 of the index, which a modify/delete conflict (server deleted a file the member had edited, status `DU`) does not have — and the command fails **atomically**, so every other path in the same call stays unresolved too. The exception escaped both the conflict loop and its `catch (pullError)`, so sync returned an `unknown` error with the rebase still in progress; every retry aborted the stale rebase and died at the same pick. A pilot user was left permanently unable to sync — commits safe locally, but nothing reaching the team. Triggered whenever the server deletes a file, or moves one while also rewriting it (rename detection misses below the similarity threshold). |
 | `rebase --skip` only when the pick is genuinely empty | Taking the server version can leave a pick with no content of its own — that is the only case where skipping is correct. For any other stall, abort and surface the error. Guessing with `--skip` destroys user commits. |
@@ -359,7 +410,8 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
 ```
 
 - A `World` is one company: a bare server repo configured like
-  `configureBareRepo` (deny non-fast-forwards / deletes, the real hook
+  `configureBareRepo` (`BARE_REPO_CONFIG`: deny non-fast-forwards / deletes,
+  partial clone; the real hook
   rendered by `server/src/lib/git-server/hook.ts`, i.e. the real push
   checker) and N member clones. Pushes use the local file transport, so the
   hook runs as a child of the member's git; the harness sets
@@ -373,6 +425,11 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   Members `write` / `append` / `remove` / `rename` / `initNestedRepo`, go
   `offline()`, let a teammate push first (`beforeNextPush`), or have a push
   call fail before or after the server accepted it (`failNextPush`).
+  `await world.addPartialMember(name, { departments })` adds a member set up
+  by the real first setup (partial clone over `file://`, only those
+  departments); `addDepartment` / `removeDepartment` are the settings panel,
+  `missingObjects()` what it never downloaded. The harness's own reads in a
+  member's clone set `GIT_NO_LAZY_FETCH` (`NO_LAZY_FETCH`); sync's git never.
 - Invariants (`invariants.ts`): every sync terminates and leaves no
   rebase / merge / cherry-pick in progress; no committed work is lost (on the
   server, or in `.backups/` with metadata, or kept locally at an ignored
@@ -380,7 +437,10 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   with a clean tree; rejected pushes are recoverable by the next sync.
 - `scenarios.test.ts` maps to the guards table above; `soak.test.ts` is a
   seeded random soak (`SYNC_SOAK_SEEDS` / `_MEMBERS` / `_ROUNDS`; a failure
-  prints its seed and operation log); `characterization.test.ts` holds sync
+  prints its seed and operation log), plus a mixed world with partial-clone
+  members (`SYNC_SOAK_MIXED_SEEDS`, `SYNC_SOAK_PARTIAL`);
+  `partial-clone.test.ts` runs every guard for a partial member and checks it
+  never downloads the departments it did not pick; `characterization.test.ts` holds sync
   to a transcript recorded from the pre-extraction handler (re-record with
   `UPDATE_SYNC_GOLDEN=1` only for an intended behaviour change, and review the
   JSON diff); `findings.test.ts` holds regressions for bugs the harness found;

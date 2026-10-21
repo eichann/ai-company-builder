@@ -11,7 +11,6 @@
 
 import fs from 'fs'
 import path from 'path'
-import { spawn } from 'child_process'
 import { createHash } from 'crypto'
 import type { SimpleGit } from 'simple-git'
 import {
@@ -311,7 +310,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         excludedNestedRepoPaths.push(...excludedRepos)
         for (const repo of excludedRepos) {
           try {
-            await git.raw(['rm', '--cached', '-rf', repo])
+            await git.raw(['rm', '--cached', '-rf', '--sparse', repo])
             log.log(`Git sync: Removed gitlink for nested repo "${repo}"`)
           } catch {
             // Not tracked yet — fine.
@@ -469,21 +468,13 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         }
 
         // Use git cat-file to extract as binary-safe Buffer
-        // (git.show returns string, which corrupts binary files)
-        const catFile = (spec: string) => new Promise<Buffer>((resolve, reject) => {
-          const chunks: Buffer[] = []
-          const proc = spawn(deps.gitBinary(), ['cat-file', '-p', spec], {
-            cwd: repoPath,
-            stdio: ['ignore', 'pipe', 'ignore'],
-            ...(process.getuid ? { uid: process.getuid() } : {}),
-          })
-          proc.stdout.on('data', (chunk: Buffer) => chunks.push(chunk))
-          proc.on('close', (code: number) => {
-            if (code === 0) resolve(Buffer.concat(chunks))
-            else reject(new Error(`git cat-file exited with ${code}`))
-          })
-          proc.on('error', reject)
-        })
+        // (git.show returns string, which corrupts binary files). Through the
+        // configured git, not a bare spawn: in a partial clone a missing
+        // object is fetched lazily, which needs the app's auth and the
+        // watchdog. (The member's own versions are always local — they were
+        // written or checked out on this machine — so in practice this never
+        // downloads anything.)
+        const catFile = (spec: string): Promise<Buffer> => git.binaryCatFile(['-p', spec])
 
         // Back up the local version of the given files into the timestamped
         // backup folder: the member's latest version (localHash) when the
@@ -607,13 +598,18 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
                 // a plain add refuses ignored paths — the same pick then fails
                 // on every sync. The server version is being taken, so the
                 // member's ignore rules do not apply to it.
-                await git.add(['-f', '--', ...take])
+                // --sparse: in a sparse checkout the path can lie outside the cone
+                // (the member created a root folder the server did not have when
+                // the cone was last set); without it git refuses to update the
+                // index and the pick fails on every sync (found by the partial-
+                // clone soak). No effect on a full checkout.
+                await git.add(['-f', '--sparse', '--', ...take])
               }
               if (drop.length > 0) {
                 // The server deleted these; following the deletion is the same
                 // "server wins" policy applied to a file that no longer exists.
                 log.log(`Git sync: Following the server deletion of ${drop.length} file(s)...`)
-                await git.raw(['rm', '--force', '--quiet', '--', ...drop])
+                await git.raw(['rm', '--force', '--quiet', '--sparse', '--', ...drop])
                 for (const file of drop) {
                   if (!deletedConflictFiles.includes(file)) deletedConflictFiles.push(file)
                 }
@@ -686,7 +682,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           if ((await git.raw(['ls-files', '--', repo])).trim()) retracked.push(repo)
         }
         if (retracked.length > 0) {
-          await git.raw(['rm', '--cached', '-r', '-q', '--', ...retracked])
+          await git.raw(['rm', '--cached', '-r', '-q', '--sparse', '--', ...retracked])
           await git.commit(`Stop sharing nested Git repositories: ${retracked.join(', ')}`)
           log.log('Git sync: Untracked excluded nested repos again after merging:', retracked)
         }

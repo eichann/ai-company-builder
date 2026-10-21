@@ -60,14 +60,55 @@ export async function listAllRootDirs(git: SimpleGit): Promise<string[]> {
   }
 }
 
+// --- Partial clone ---
+//
+// A member setting up a company for the first time with departments picked
+// gets a partial clone (--filter=blob:none, ./first-setup.ts): blobs outside
+// the cone were never downloaded, and git fetches them lazily (with the
+// app's auth, inherited from createGit's environment) when something needs
+// them. Widening the cone is therefore a download, which needs the network.
+
+/** True for a partial clone (origin is a promisor remote). */
+export async function isPartialClone(git: SimpleGit): Promise<boolean> {
+  return (await git.raw(['config', '--get', 'remote.origin.promisor']).catch(() => '')).trim() === 'true'
+}
+
+/** What the member is told when a folder could not be downloaded (offline, server unreachable). */
+export const DOWNLOAD_NEEDS_NETWORK_MESSAGE = 'インターネットにつながっているときにダウンロードできます'
+
+/**
+ * Whether a git error is a failed download (a lazy fetch or fetch that could
+ * not reach the server), as opposed to e.g. a local file problem.
+ */
+export function isDownloadFailure(message: string): boolean {
+  return /from promisor remote|could not fetch|unable to access|could not resolve host|failed to connect|could not read from remote repository|does not appear to be a git repository|connection (refused|timed out|reset)|operation timed out|network is unreachable|authentication failed|could not read username/i.test(message)
+}
+
 // Reconcile the on-disk sparse cone to match the persisted exclusion list.
 // excluded empty → full checkout (sparse disabled). Otherwise the cone is
 // (remote root folders − excluded). Safe: sparse-checkout never deletes data
 // from the index/server, only what is materialised in the worktree.
+//
+// If git fails (in a partial clone: a folder that has to be downloaded while
+// offline), the previous exclusion list is written back. `sparse-checkout
+// set` / `disable` roll their own patterns back on failure, so config, cone
+// and worktree stay as they were and the next sync does not retry a choice
+// that was never applied.
 export async function applySparseSelection(git: SimpleGit, repoPath: string, excluded: string[]): Promise<void> {
   const cleanExcluded = [...new Set(excluded.filter(Boolean))]
+  const configExisted = fs.existsSync(sparseConfigPath(repoPath))
+  const previous = readSparseConfig(repoPath)
   writeSparseConfig(repoPath, { excluded: cleanExcluded })
+  try {
+    await reconcileCone(git, repoPath, cleanExcluded)
+  } catch (error) {
+    if (configExisted) writeSparseConfig(repoPath, previous)
+    else fs.rmSync(sparseConfigPath(repoPath), { force: true })
+    throw error
+  }
+}
 
+async function reconcileCone(git: SimpleGit, repoPath: string, cleanExcluded: string[]): Promise<void> {
   if (cleanExcluded.length === 0) {
     // Nothing excluded → make sure we are on a full checkout.
     const isSparse = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
@@ -85,11 +126,42 @@ export async function applySparseSelection(git: SimpleGit, repoPath: string, exc
   }
   const desired = allDirs.filter(f => !cleanExcluded.includes(f))
   if (desired.length === 0) {
+    if (await isPartialClone(git)) {
+      // A full checkout of a partial clone downloads every folder — the
+      // opposite of excluding them all. Keep just the root files.
+      await git.raw(['sparse-checkout', 'set', '--cone'])
+      return
+    }
     // User excluded literally everything → fall back to a full checkout.
     await git.raw(['sparse-checkout', 'disable']).catch(() => {})
     writeSparseConfig(repoPath, { excluded: [] })
     return
   }
-  await git.raw(['sparse-checkout', 'init', '--cone'])
-  await git.raw(['sparse-checkout', 'set', ...desired])
+  // One command, not `init --cone` + `set`: init alone narrows the cone to
+  // the root files, and if `set` then failed (a download while offline) the
+  // worktree would be left without its folders.
+  await git.raw(['sparse-checkout', 'set', '--cone', ...desired])
+}
+
+export type SparseExclusionsResult =
+  | { success: true; enabled: boolean; excluded: string[] }
+  | { success: false; error: string; offline?: boolean }
+
+/**
+ * Settings panel: set the exclusion list and reconcile the worktree. Adding a
+ * department to a partial clone downloads it; offline, nothing changes and
+ * the member is told it can be downloaded once online.
+ */
+export async function setSparseExclusions(git: SimpleGit, repoPath: string, excluded: string[]): Promise<SparseExclusionsResult> {
+  try {
+    await applySparseSelection(git, repoPath, excluded)
+    const enabled = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
+    return { success: true, enabled, excluded: readSparseConfig(repoPath).excluded }
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error)
+    if ((await isPartialClone(git)) && isDownloadFailure(msg)) {
+      return { success: false, offline: true, error: DOWNLOAD_NEEDS_NETWORK_MESSAGE }
+    }
+    return { success: false, error: msg }
+  }
 }

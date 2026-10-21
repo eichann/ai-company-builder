@@ -271,7 +271,7 @@ export async function restoreProtectedPaths(options: {
   for (const { file, local, server } of plan) {
     if (local.type === 'tree' || (local.type === 'blob' && local.oid === server.oid)) continue
     if (local.type === 'blob') {
-      await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--', file])
+      await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', file])
       fs.rmSync(fullPaths.get(file)!, { force: true }) // a symlink is removed, not followed
     }
     if (server.type !== null) {
@@ -388,7 +388,7 @@ export async function untrackPersonalPaths(options: {
   for (const file of paths) {
     const inIndex = (await git.raw(['ls-files', '-z', '--', file])).replace(/\0/g, '')
     if (!inIndex) continue
-    await git.raw(['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', '--', file])
+    await git.raw(['rm', '-r', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', file])
     untracked.push(file)
   }
 

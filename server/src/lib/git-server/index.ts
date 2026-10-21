@@ -4,7 +4,8 @@
  *
  *   initBareRepo / configureBareRepo / configureAllBareRepos
  *                       create and configure repositories (force-push and
- *                       branch-deletion protection, HTTP push, the hook)
+ *                       branch-deletion protection, HTTP push, partial
+ *                       clone — ./repo-config.ts — and the hook)
  *   installPreReceiveHook / renderPreReceiveHook   (./hook.ts)
  *                       the hook, a thin caller of lib/push-check
  *   preparePushCheck    the environment one git-http receive-pack request
@@ -26,10 +27,12 @@ import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, wri
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { installPreReceiveHook } from './hook'
+import { BARE_REPO_CONFIG } from './repo-config'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
 import type { ScopeWithRules } from '../permissions'
 
 export { installPreReceiveHook, renderPreReceiveHook, PUSH_CHECK_ENTRY, HOOK_TEMPLATE_PATH } from './hook'
+export { BARE_REPO_CONFIG } from './repo-config'
 export type { PushPolicy } from '../push-check/policy'
 
 /** Create a bare repository (branch pinned to main: the client hardcodes origin/main) and configure it. */
@@ -45,13 +48,11 @@ export function initBareRepo(repoPath: string): void {
  * repositories created by older server versions.
  */
 export function configureBareRepo(repoPath: string): void {
-  // Enable HTTP push (required for git-http-backend)
-  execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
-  // The repo is the whole team's shared history: a force push or branch
-  // deletion from one member's broken clone must never be able to erase
-  // everyone else's work.
-  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyNonFastForwards', 'true'], { stdio: 'pipe' })
-  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyDeletes', 'true'], { stdio: 'pipe' })
+  // HTTP push, force-push / branch-deletion protection, partial clone —
+  // ./repo-config.ts says why each one is set.
+  for (const [key, value] of BARE_REPO_CONFIG) {
+    execFileSync('git', ['-C', repoPath, 'config', key, value], { stdio: 'pipe' })
+  }
   // Pre-receive hook → lib/push-check (secrets, gitlinks, Windows paths,
   // owner/admin-only agent config, .personal, write permission)
   installPreReceiveHook(repoPath)
