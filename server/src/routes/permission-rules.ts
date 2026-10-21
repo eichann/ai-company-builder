@@ -2,10 +2,19 @@
  * Write APIs of the permission editor (Phase 2) and the security screen.
  * Mounted at /api/companies/:companyId next to routes/permissions.ts (reads).
  *
+ *   PUT    /permissions/scopes/by-path        replace a path's whole rule set (what the panel uses)
  *   POST   /permissions/rules                 set a subject's rule on a path
  *   PATCH  /permissions/rules/:ruleId         change a rule's access
  *   DELETE /permissions/rules/:ruleId         remove a rule
  *   DELETE /permissions/scopes/:scopeId/rules back to inheriting (not the company root)
+ *
+ * The admin panel edits one folder at a time as a choice — 上の階層と同じ
+ * (rules: []), 全員 (everyone: edit) or 指定した人だけ (everyone: read only +
+ * an edit rule per chosen member / role) — and saves it with the PUT, which
+ * replaces the set atomically and copies nothing. The per-rule endpoints are
+ * kept for API clients; they still copy the inherited rules into a folder on
+ * its first rule (see below), because a single rule alone would leave
+ * everyone else on that folder without any rule.
  *   GET    /permissions/effective?path=       every member's access at a path, and why
  *   GET    /permissions/folders?path=         sub-folders of a path (to pick one)
  *   GET    /push-rejections                   rejected pushes, filterable (owner/admin)
@@ -24,10 +33,12 @@
  * - Rules for owner/admin (by role or by user) are refused: owners and admins
  *   always read and write everywhere (lib/permissions.ts), so such a rule
  *   would only mislead. That is also why no edit can lock the company out.
- * - A scope with its own rules always keeps a rule for everyone: the first
- *   rule on an inheriting scope copies the inherited rules in
- *   (breakInheritance in lib/permission-store.ts), and the everyone rule can
- *   only go together with all the others (= back to inheriting). Without it a
+ * - A scope with its own rules always keeps a rule for everyone: the PUT
+ *   refuses a non-empty set without one (EVERYONE_RULE_REQUIRED); with the
+ *   per-rule endpoints the first rule on an inheriting scope copies the
+ *   inherited rules in (breakInheritance in lib/permission-store.ts), and the
+ *   everyone rule can only go together with all the others (= back to
+ *   inheriting). Without it a
  *   member not named by any rule would lose read access there, which is a
  *   read restriction by another name.
  *
@@ -47,6 +58,7 @@ import {
   listScopeRules,
   listScopesWithRules,
   managedDepartmentIds,
+  replaceScopeRules,
   sqlitePermissionRepository,
   updateRuleAccess,
   upsertScopeRule,
@@ -213,6 +225,55 @@ function scopeResponse(c: Ctx, scopeId: string, status: 200 | 201 = 200) {
     },
   }, status)
 }
+
+const MAX_RULES_PER_SCOPE = 200
+
+const replaceError = (c: Ctx, error: string, code?: string) => c.json({ error, ...(code ? { code } : {}) }, 400)
+
+// PUT /permissions/scopes/by-path  { path, rules: [{ subjectType, subjectId?, canWrite, canRead? }] }
+// Replaces the path's whole rule set in one transaction. [] = inherit again.
+permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
+  const actor = await authAndAuthorize(c)
+  if (actor instanceof Response) return actor
+  if (!canEditAnything(actor)) return forbiddenEdit(c)
+
+  const body = await readJson(c)
+  if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
+  const parsed = parseScopePath(body.path)
+  if ('error' in parsed) return c.json({ error: parsed.error }, 400)
+  if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
+
+  if (!Array.isArray(body.rules)) return replaceError(c, 'rules must be an array')
+  if (body.rules.length > MAX_RULES_PER_SCOPE) return replaceError(c, `At most ${MAX_RULES_PER_SCOPE} rules per folder`)
+  const rules: Array<Omit<ScopeRule, 'id'>> = []
+  const seen = new Set<string>()
+  for (const item of body.rules as unknown[]) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return replaceError(c, 'Each rule must be an object')
+    const raw = item as Record<string, unknown>
+    const access = parseAccess(raw)
+    if ('error' in access) return replaceError(c, access.error, access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined)
+    const subject = parseSubject(actor, raw)
+    if ('error' in subject) return replaceError(c, subject.error)
+    const key = `${subject.subjectType}:${subject.subjectId ?? ''}`
+    if (seen.has(key)) return replaceError(c, 'Each subject may appear only once', 'DUPLICATE_SUBJECT')
+    seen.add(key)
+    rules.push({ ...subject, canRead: true, canWrite: access.canWrite })
+  }
+  if (rules.length === 0 && parsed.path === '') {
+    return replaceError(c, 'The company-wide rules cannot be removed; change them instead', 'COMPANY_RULE_REQUIRED')
+  }
+  if (rules.length > 0 && !rules.some(r => r.subjectType === 'everyone')) {
+    return replaceError(c, 'A folder with its own rules needs a rule for everyone (it is what lets everyone else read)', 'EVERYONE_RULE_REQUIRED')
+  }
+
+  if (parsed.path !== '' && (await resolveRepoFolder(actor.companyId, parsed.path)) === null) {
+    return c.json({ error: 'Folder not found in the company repository' }, 400)
+  }
+
+  const scope = replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId)
+  if (!scope) return c.json({ success: true, data: { scope: null, rules: [] } })
+  return scopeResponse(c, scope.id)
+})
 
 // POST /permissions/rules  { path, subjectType, subjectId?, canWrite, canRead? }
 permissionRulesRoute.post('/permissions/rules', async (c) => {

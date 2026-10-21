@@ -444,3 +444,41 @@ export function clearScopeRules(conn: Conn, scope: ScopeRecord): number {
     return n
   })()
 }
+
+/**
+ * Replace the whole rule set of the scope at `path` in one transaction — the
+ * write side of the admin panel's per-folder choice (上の階層と同じ / 全員 /
+ * 指定した人だけ). Unlike upsertScopeRule nothing is copied from the parent:
+ * the caller sends the complete set. `rules: []` makes the scope inherit
+ * again (a folder scope is then removed). Rules whose subject is already on
+ * the scope keep their row (id, created_at/by); the others are deleted or
+ * inserted. Validation (subjects, an everyone rule when non-empty, the company
+ * root never empty) is the route's job; this only keeps the tables
+ * consistent, all or nothing. Returns the scope, or null when none is left.
+ */
+export function replaceScopeRules(
+  conn: Conn,
+  companyId: string,
+  path: string,
+  rules: Array<Omit<ScopeRule, 'id'>>,
+  createdBy: string,
+): ScopeRecord | null {
+  return conn.transaction(() => {
+    const existing = getScopeByPath(conn, companyId, path)
+    if (rules.length === 0 && !existing) return null
+    const scope = existing ?? ensureFolderScope(conn, companyId, path, createdBy)
+    const key = (r: Pick<ScopeRule, 'subjectType' | 'subjectId'>) => `${r.subjectType}:${r.subjectId ?? ''}`
+    const current = new Map(listScopeRules(conn, scope.id).map(r => [key(r), r]))
+    const wanted = new Set(rules.map(key))
+    for (const [k, r] of current) {
+      if (!wanted.has(k)) conn.prepare(`DELETE FROM scope_rules WHERE id = ?`).run(r.id)
+    }
+    for (const r of rules) {
+      const same = current.get(key(r))
+      if (same) updateRuleAccess(conn, same.id, r.canRead, r.canWrite)
+      else insertRule(conn, scope.id, r, createdBy)
+    }
+    dropEmptyFolderScope(conn, scope)
+    return getScopeById(conn, companyId, scope.id)
+  })()
+}

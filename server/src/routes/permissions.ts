@@ -118,8 +118,16 @@ permissionsRoute.get('/permissions', async (c) => {
     visible = all.filter(s => roots.some(root => isSameOrAncestorPath(root, s.path)))
   }
 
+  // What each scope would follow without rules of its own ("上の階層と同じ"):
+  // the governing scope among its ancestors. Included even when that ancestor
+  // is outside what a manager receives, so the panel can name what a
+  // department inherits from the company root.
+  const parentOf = new Map(visible.map(s => [s.id, findGoverningScope(all.filter(o => o.id !== s.id && o.path !== s.path), s.path)]))
+
   const userIds = new Set<string>()
-  for (const s of visible) for (const r of s.rules) if (r.subjectType === 'user' && r.subjectId) userIds.add(r.subjectId)
+  for (const s of [...visible, ...[...parentOf.values()].filter(p => p !== null)]) {
+    for (const r of s.rules) if (r.subjectType === 'user' && r.subjectId) userIds.add(r.subjectId)
+  }
   const users = getUsersByIds([...userIds])
   const label = (r: ScopeRule): string => {
     if (r.subjectType === 'everyone') return '全員'
@@ -127,6 +135,14 @@ permissionsRoute.get('/permissions', async (c) => {
     const u = r.subjectId ? users.get(r.subjectId) : undefined
     return u?.name || u?.email || r.subjectId || ''
   }
+  const serialize = (r: ScopeRule) => ({
+    id: r.id,
+    subjectType: r.subjectType,
+    subjectId: r.subjectId,
+    subjectLabel: label(r),
+    canRead: r.canRead,
+    canWrite: r.canWrite,
+  })
 
   return c.json({
     success: true,
@@ -138,15 +154,12 @@ permissionsRoute.get('/permissions', async (c) => {
         departmentId: s.departmentId,
         repoId: s.repoId,
         inherited: s.rules.length === 0,
-        rules: s.rules.map(r => ({
-          id: r.id,
-          subjectType: r.subjectType,
-          subjectId: r.subjectId,
-          subjectLabel: label(r),
-          canRead: r.canRead,
-          canWrite: r.canWrite,
-        })),
+        rules: s.rules.map(serialize),
         effectiveSummary: summarizeRules(findGoverningScope(all, s.path)?.rules ?? []),
+        inheritedFrom: (() => {
+          const p = parentOf.get(s.id)
+          return p ? { scopeId: p.id, path: p.path, rules: p.rules.map(serialize), summary: summarizeRules(p.rules) } : null
+        })(),
       })),
     },
   })
