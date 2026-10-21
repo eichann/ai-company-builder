@@ -92,6 +92,11 @@ export const DEFAULT_ANSWERS: { [K in QuestionKind]: Answer<K> } = {
   protectedConfig: 'restore',
 }
 
+/** How an injected push failure relates to the server (Member.failNextPush). */
+export type PushFault = 'before-server' | 'after-server'
+/** What simple-git throws when the block-timeout watchdog kills git. */
+export const PUSH_FAULT_MESSAGE = 'block timeout reached'
+
 export interface DialogRecord {
   kind: QuestionKind
   answer: string
@@ -408,6 +413,7 @@ export class Member {
   private currentLogs: Array<[string, ...unknown[]]> = []
   private inFlight = 0
   private pushHooks: Array<() => Promise<void> | void> = []
+  private pushFaults: Array<PushFault | null> = []
   /** Paths written since they were last committed by a sync. */
   private readonly pending = new Set<string>()
   /** Latest committed content of every path this member wrote. */
@@ -527,6 +533,20 @@ export class Member {
     return this
   }
 
+  /**
+   * Make this member's next `times` `git push` calls throw. 'after-server':
+   * the push really runs and the server accepts it, then the call fails the
+   * way the watchdog kills a push whose server-side check outlives it (or a
+   * connection that dies after the pack was received). 'before-server': the
+   * call fails without the server ever seeing it. `skip` pushes of the
+   * same sync run normally first (e.g. to hit a re-push after a rejection).
+   */
+  failNextPush(fault: PushFault, options: { times?: number; skip?: number } = {}): this {
+    for (let i = 0; i < (options.skip ?? 0); i++) this.pushFaults.push(null)
+    for (let i = 0; i < (options.times ?? 1); i++) this.pushFaults.push(fault)
+    return this
+  }
+
   private wrapGit(git: SimpleGit): SimpleGit {
     return new Proxy(git, {
       get: (target, prop, receiver) => {
@@ -535,7 +555,11 @@ export class Member {
           return async (...args: unknown[]) => {
             const hook = this.pushHooks.shift()
             if (hook) await hook()
-            return (value as (...a: unknown[]) => unknown).apply(target, args)
+            const fault = this.pushFaults.shift()
+            if (fault === 'before-server') throw new Error(PUSH_FAULT_MESSAGE)
+            const result = await (value as (...a: unknown[]) => Promise<unknown>).apply(target, args)
+            if (fault === 'after-server') throw new Error(PUSH_FAULT_MESSAGE)
+            return result
           }
         }
         return typeof value === 'function' ? value.bind(target) : value
@@ -647,7 +671,10 @@ export class Member {
       this.inFlight--
       // A push hook applies to the sync it was set up for; one whose sync
       // never pushed must not fire inside some later, unrelated sync.
-      if (this.inFlight === 0) this.pushHooks = []
+      if (this.inFlight === 0) {
+        this.pushHooks = []
+        this.pushFaults = []
+      }
     }
     const durationMs = Date.now() - started
     this.results.push(result)
