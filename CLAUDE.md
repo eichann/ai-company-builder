@@ -187,7 +187,9 @@ harness — see "Testing Sync" below.
      in the .gitignore files about to be pushed → commit
 12. Department folder protection (restore folders deleted locally)
 13. git push --set-upstream --progress (also when only earlier unpushed
-    commits are left) → on failure write PENDING_PUSH
+    commits are left) → on failure, unless the server rejected it: fetch, and
+    if origin/main already contains HEAD treat it as pushed; else write
+    PENDING_PUSH
     ├─ Rejected with PERSONAL_PATH → reset --soft origin/main →
     │    git rm --cached those paths (files stay on disk) → commit → push again
     └─ Rejected with PROTECTED_CONFIG → ask the member; on "restore":
@@ -278,6 +280,17 @@ Backups older than 30 days are pruned at the start of each sync.
 
 - Push failure writes `.git/PENDING_PUSH`; the next sync retries it first. The
   local commit is never rolled back — the user's work stays committed.
+- A push that throws is not necessarily a failure: the watchdog can kill it
+  while the server is still running the pre-receive hook, or the connection
+  can die after the pack was accepted (production, 2026-10-21: a ~7-minute
+  hook, the push landed, the member was told it failed). Every push site goes
+  through `pushToServer` → `pushLandedDespiteError`
+  (`client/electron/sync/push-landed.ts`): unless the error is a recognised
+  rejection (hook markers, `[rejected]` / non-fast-forward, auth), sync
+  fetches and, if `origin/main..HEAD` is empty, reports success and clears
+  `PENDING_PUSH`. A failed fetch keeps the failure. A push the server is still
+  checking when that fetch runs is not visible yet — the next sync's
+  `PENDING_PUSH` retry then finds it up to date.
 - Results carry an `errorType` (`network` / `auth` / `conflict` / `locked` /
   `push_failed` / `protected_config` / `unknown`) so the UI can explain the
   failure in plain terms.
@@ -322,7 +335,8 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   real message-box dialog adapter (answers scripted with `willAnswer`, else
   the default button) and the real server-API adapter over a fake `fetch`.
   Members `write` / `append` / `remove` / `rename` / `initNestedRepo`, go
-  `offline()`, or let a teammate push first (`beforeNextPush`).
+  `offline()`, let a teammate push first (`beforeNextPush`), or have a push
+  call fail before or after the server accepted it (`failNextPush`).
 - Invariants (`invariants.ts`): every sync terminates and leaves no
   rebase / merge / cherry-pick in progress; no committed work is lost (on the
   server, or in `.backups/` with metadata, or kept locally at an ignored

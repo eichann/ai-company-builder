@@ -318,6 +318,67 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  // Failure handling: a push that throws after the server accepted it (the
+  // watchdog killed it while the server was still checking, or the connection
+  // died after the pack arrived) is a successful push, not PENDING_PUSH.
+  test('push accepted by the server but the push call fails: reported as synced, no PENDING_PUSH', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a, b] = world.members
+    a.write('landed.md', 'reached the server\n').failNextPush('after-server')
+    const out = ok(await a.sync(), 'a')
+    assert.equal(out.result.message, '同期が完了しました')
+    assert.equal(out.result.pushFailed, undefined)
+    assert.doesNotMatch(String(out.result.message), /失敗/)
+    assert.equal(a.hasPendingPush(), false)
+    assert.ok(out.logs.some(l => l[0] === 'warn' && String(l[1]).includes('already has every local commit')))
+    assert.equal(world.serverFile('landed.md')?.toString(), 'reached the server\n')
+    assert.equal(a.head(), world.serverHead())
+    ok(await b.sync(), 'b')
+    assert.equal(b.readText('landed.md'), 'reached the server\n')
+    await settleAndCheck(world)
+  })
+
+  test('push that never reached the server still writes PENDING_PUSH; the retry counts even if its call fails after landing', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a, b] = world.members
+    // Both the main push and the master fallback fail before the server.
+    a.write('late.md', 'not on the server yet\n').failNextPush('before-server', { times: 2 })
+    const failed = await a.sync()
+    assert.equal(failed.result.success, false)
+    assert.equal(failed.result.errorType, 'push_failed')
+    assert.equal(a.hasPendingPush(), true)
+    assert.equal(world.serverFile('late.md'), null)
+    assert.deepEqual(world.serverBranches(), ['refs/heads/main'])
+
+    // The PENDING_PUSH retry at the start of the next sync lands on the
+    // server but its call fails: still a success, marker cleared.
+    a.failNextPush('after-server')
+    const out = ok(await a.sync(), 'a')
+    assert.ok(logged(out, 'Pending push succeeded'))
+    assert.doesNotMatch(String(out.result.message), /失敗/)
+    assert.equal(a.hasPendingPush(), false)
+    assert.equal(world.serverFile('late.md')?.toString(), 'not on the server yet\n')
+    ok(await b.sync(), 'b')
+    await settleAndCheck(world)
+  })
+
+  test('a re-push after a PROTECTED_CONFIG restore that lands but fails counts as pushed', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a] = world.members
+    const mcp = '{"mcpServers":{"x":{"command":"evil"}}}\n'
+    a.write('notes.md', 'notes\n').write('.mcp.json', mcp)
+    // Push 1 is rejected (PROTECTED_CONFIG); the push after restoring lands
+    // on the server, then its call fails.
+    a.failNextPush('after-server', { skip: 1 })
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['protectedConfig', 'restore']])
+    assert.deepEqual(out.result.restoredProtectedFiles, ['.mcp.json'])
+    assert.equal(a.hasPendingPush(), false)
+    assert.equal(world.serverFile('notes.md')?.toString(), 'notes\n')
+    assert.equal(world.serverFile('.mcp.json'), null)
+    await settleAndCheck(world)
+  })
+
   test('a teammate pushes between pull and push: push_failed, then the next sync succeeds', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'shared.md': '0\n' } })
     const [a, b] = world.members

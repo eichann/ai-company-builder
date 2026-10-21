@@ -28,6 +28,7 @@ import {
   type PersonalUntrackResult,
 } from '../protected-config'
 import { classifyConflicts } from './conflicts'
+import { pushLandedDespiteError } from './push-landed'
 import { findNestedGitRepos } from './nested-repos'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { applySparseSelection, readSparseConfig, sparseConfigPath, writeSparseConfig } from './sparse'
@@ -39,6 +40,18 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
   const log = deps.log
   try {
     const git: SimpleGit = deps.createGit(repoPath)
+    // Every push goes through here. A push that threw although the server
+    // already has the commits (the watchdog killed it while the server was
+    // still checking, or the connection died after the pack was accepted)
+    // counts as pushed — see ./push-landed.ts.
+    const pushToServer = async (branch: 'main' | 'master' = 'main') => {
+      try {
+        await git.push('origin', branch, ['--set-upstream', '--progress'])
+      } catch (pushError) {
+        if (await pushLandedDespiteError(git, log, pushError)) return
+        throw pushError
+      }
+    }
     const backupsDir = path.join(repoPath, '.backups')
     const timestamp = deps.now().toISOString().replace(/[:.]/g, '-').slice(0, 23)
     const backupPath = path.join(backupsDir, timestamp)
@@ -110,7 +123,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     if (fs.existsSync(pendingPushFile)) {
       log.log('Git sync: Found pending push, retrying...')
       try {
-        await git.push('origin', 'main', ['--set-upstream', '--progress'])
+        await pushToServer()
         fs.unlinkSync(pendingPushFile)
         log.log('Git sync: Pending push succeeded')
       } catch (retryError) {
@@ -772,7 +785,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     try {
       log.log('Git sync: Pushing to origin...')
       try {
-        await git.push('origin', 'main', ['--set-upstream', '--progress'])
+        await pushToServer()
       } catch (firstPushError) {
         // `.personal/` content is never shared, for anyone (the server rejects
         // it with PERSONAL_PATH). It is the member's private file, so the fix
@@ -797,7 +810,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           }
         }
         if (personalUntrack.committed) {
-          await git.push('origin', 'main', ['--set-upstream', '--progress'])
+          await pushToServer()
         }
       }
     } catch (pushError) {
@@ -841,7 +854,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         try {
           const squash = await squashUnpushedCommits({ git })
           if (squash.squashed) {
-            if (squash.committed) await git.push('origin', 'main', ['--set-upstream', '--progress'])
+            if (squash.committed) await pushToServer()
             if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
             const parts = ['同期完了。管理者だけが変更できる内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。']
             if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
@@ -908,7 +921,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
 
         if (recovery.committed) {
           try {
-            await git.push('origin', 'main', ['--set-upstream', '--progress'])
+            await pushToServer()
           } catch (retryError) {
             const retryMsg = retryError instanceof Error ? retryError.message : String(retryError)
             if (isProtectedConfigRejection(retryMsg)) {
@@ -993,7 +1006,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       log.error('Git sync: Push to main failed:', pushErrorMsg)
       // Try master branch if main fails
       try {
-        await git.push('origin', 'master', ['--set-upstream', '--progress'])
+        await pushToServer('master')
       } catch (masterPushError) {
         // Check secret detection on master push too
         const masterErrorMsg = masterPushError instanceof Error ? masterPushError.message : String(masterPushError)
