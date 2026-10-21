@@ -38,6 +38,7 @@
     "asarUnpack": [
       "node_modules/dugite/git/**"
     ],
+    "beforePack": "./scripts/universal-git.mjs",
     "mac": {
       "category": "public.app-category.productivity",
       "target": [
