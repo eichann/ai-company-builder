@@ -5,6 +5,7 @@ import { join } from 'path'
 import Database from 'better-sqlite3'
 import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
+import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
 
 export const gitHttpRoute = new Hono()
 
@@ -75,12 +76,25 @@ function sanitizeCompanyId(raw: string): string {
 // CGI handler: Spawn git http-backend and proxy request/response
 // ============================================================================
 
+// Cap on the receive-pack response kept for the report-status check. The
+// report is a few lines per ref plus hook output (sideband progress); a
+// response larger than this is not inspected and the push is not recorded.
+const MAX_OBSERVED_BODY_BYTES = 1024 * 1024
+
+interface CgiObserver {
+  /** Keep a copy of the response body for onClose (bounded). */
+  captureBody?: boolean
+  /** Called once when git http-backend exits, before the response ends. */
+  onClose: (exitCode: number | null, body: Buffer | null) => void
+}
+
 async function handleGitCgi(
   c: { req: { raw: Request; header: (name: string) => string | undefined; query: (name: string) => string | undefined } },
   user: AuthUser,
   role: string,
   pathInfo: string,
   method: string,
+  observer?: CgiObserver,
 ): Promise<Response> {
   const queryString = new URL(c.req.raw.url).searchParams.toString()
 
@@ -210,6 +224,32 @@ async function handleGitCgi(
   let stderrData = ''
   cgi.stderr.on('data', (data: Buffer) => { stderrData += data.toString() })
 
+  // Observation only: a copy of stdout (headers included) for the observer.
+  let observedChunks: Buffer[] | null = observer?.captureBody ? [] : null
+  let observedBytes = 0
+  if (observedChunks) {
+    cgi.stdout.on('data', (chunk: Buffer) => {
+      if (!observedChunks) return
+      observedBytes += chunk.length
+      if (observedBytes > MAX_OBSERVED_BODY_BYTES) observedChunks = null
+      else observedChunks.push(chunk)
+    })
+  }
+  const notifyObserver = (code: number | null) => {
+    if (!observer) return
+    let body: Buffer | null = null
+    if (observedChunks) {
+      const all = Buffer.concat(observedChunks)
+      const end = all.indexOf('\r\n\r\n')
+      body = end === -1 ? null : all.subarray(end + 4)
+    }
+    try {
+      observer.onClose(code, body)
+    } catch (err) {
+      console.error('[git-http] observer failed:', err)
+    }
+  }
+
   return new Promise<Response>((resolve) => {
     let headerBuffer = Buffer.alloc(0)
     let parsedHead: { status: number; headers: Headers; remainder: Buffer } | null = null
@@ -311,6 +351,7 @@ async function handleGitCgi(
     }
 
     cgi.on('close', (code) => {
+      notifyObserver(code)
       cgiClosed = true
       cgiExitCode = code
       if (!resolved) {
@@ -397,6 +438,36 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
   return { user, companyId, role }
 }
 
+// Record which build the user ran (header or unknown) and, via the returned
+// observer, a completed fetch / an accepted push. See lib/client-activity.ts.
+function trackActivity(
+  c: { req: { header: (name: string) => string | undefined } },
+  userId: string,
+  companyId: string,
+  op: 'other' | 'fetch' | 'push',
+): CgiObserver | undefined {
+  const { version, platform } = clientIdentityFromHeaders((n) => c.req.header(n))
+  recordClientActivity({ userId, companyId, kind: 'seen', version, platform })
+  if (op === 'fetch') {
+    return {
+      onClose: (code) => {
+        if (code === 0) recordClientActivity({ userId, companyId, kind: 'fetch', version, platform })
+      },
+    }
+  }
+  if (op === 'push') {
+    return {
+      captureBody: true,
+      onClose: (code, body) => {
+        if (code === 0 && body && receivePackSucceeded(body)) {
+          recordClientActivity({ userId, companyId, kind: 'push', version, platform })
+        }
+      },
+    }
+  }
+  return undefined
+}
+
 // GET /:repo/info/refs
 gitHttpRoute.get('/:repo/info/refs', async (c) => {
   const result = authAndAuthorize(c)
@@ -408,7 +479,10 @@ gitHttpRoute.get('/:repo/info/refs', async (c) => {
     return c.text('Invalid service', 400)
   }
 
-  return handleGitCgi(c, user, role, `/${companyId}.git/info/refs`, 'GET')
+  // A fetch that finds nothing new stops after this advertisement (no
+  // upload-pack POST), so it is what marks "fetched" for an up-to-date member.
+  const observer = trackActivity(c, user.id, companyId, service === 'git-upload-pack' ? 'fetch' : 'other')
+  return handleGitCgi(c, user, role, `/${companyId}.git/info/refs`, 'GET', observer)
 })
 
 // POST /:repo/git-upload-pack
@@ -417,7 +491,8 @@ gitHttpRoute.post('/:repo/git-upload-pack', async (c) => {
   if (result instanceof Response) return result
   const { user, companyId, role } = result
 
-  return handleGitCgi(c, user, role, `/${companyId}.git/git-upload-pack`, 'POST')
+  const observer = trackActivity(c, user.id, companyId, 'fetch')
+  return handleGitCgi(c, user, role, `/${companyId}.git/git-upload-pack`, 'POST', observer)
 })
 
 // POST /:repo/git-receive-pack
@@ -426,7 +501,8 @@ gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
   if (result instanceof Response) return result
   const { user, companyId, role } = result
 
-  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST')
+  const observer = trackActivity(c, user.id, companyId, 'push')
+  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST', observer)
 })
 
 // GET /:repo/HEAD

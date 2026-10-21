@@ -88,7 +88,24 @@ export function initDatabase() {
       UNIQUE(company_id, parent_id, name)
     );
 
+    -- Which desktop-app build each member last used, and when they last
+    -- talked to / fetched from / pushed to the company (lib/client-activity.ts).
+    -- client_version / client_platform are NULL when the client did not
+    -- identify itself (builds older than the X-ACB-Client-Version header).
+    CREATE TABLE IF NOT EXISTS client_activity (
+      user_id TEXT NOT NULL,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      client_version TEXT,
+      client_platform TEXT,
+      last_seen_at TEXT,
+      last_fetch_at TEXT,
+      last_push_at TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, company_id)
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_client_activity_company_id ON client_activity(company_id);
     CREATE INDEX IF NOT EXISTS idx_memberships_user_id ON memberships(user_id);
     CREATE INDEX IF NOT EXISTS idx_memberships_company_id ON memberships(company_id);
     CREATE INDEX IF NOT EXISTS idx_ssh_keys_user_id ON ssh_keys(user_id);
