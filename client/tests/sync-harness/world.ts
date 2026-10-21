@@ -101,6 +101,7 @@ export const QUESTIONS = {
   externalNestedRepo: { title: '外部Gitリポジトリを検出', buttons: { exclude: 0, cancel: 1 } },
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
   protectedConfig: { title: '管理者だけが変更できるファイル', buttons: { restore: 0, cancel: 1 } },
+  writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
 } as const
 
 export type QuestionKind = keyof typeof QUESTIONS
@@ -112,6 +113,7 @@ export const DEFAULT_ANSWERS: { [K in QuestionKind]: Answer<K> } = {
   externalNestedRepo: 'exclude',
   deletedFiles: 'sync-deletions',
   protectedConfig: 'restore',
+  writeDenied: 'restore',
 }
 
 /** How an injected push failure relates to the server (Member.failNextPush). */

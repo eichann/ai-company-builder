@@ -18,7 +18,14 @@ import { claudeCode } from 'ai-sdk-provider-claude-code'
 import { streamText, generateText } from 'ai'
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import type { SimpleGit } from 'simple-git'
-import { isProtectedConfigRejection, parseProtectedConfigPaths, protectedConfigMessage } from './protected-config'
+import {
+  isProtectedConfigRejection,
+  parseProtectedConfigPaths,
+  protectedConfigMessage,
+  isWriteDeniedRejection,
+  parseWriteDeniedPaths,
+  writeDeniedMessage,
+} from './protected-config'
 import { createGitSync } from './sync/git-sync'
 import { createConfiguredGit } from './sync/git-factory'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
@@ -2224,6 +2231,10 @@ ipcMain.handle('git:pushToServer', async (_, repoPath: string) => {
     if (isProtectedConfigRejection(errorMsg)) {
       const protectedFiles = parseProtectedConfigPaths(errorMsg)
       return { success: false, error: protectedConfigMessage(protectedFiles), errorType: 'protected_config', protectedFiles }
+    }
+    if (isWriteDeniedRejection(errorMsg)) {
+      const writeDeniedFiles = parseWriteDeniedPaths(errorMsg)
+      return { success: false, error: writeDeniedMessage(writeDeniedFiles), errorType: 'write_denied', writeDeniedFiles }
     }
     if (errorMsg.includes('SECRET_DETECTED')) {
       const fileLines = errorMsg

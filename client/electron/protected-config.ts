@@ -45,7 +45,8 @@ export function parseProtectedConfigPaths(errorMessage: string): string[] {
   return parseRejectionPaths(errorMessage, PROTECTED_CONFIG_MARKER)
 }
 
-// Shared by every hook section that lists paths (PROTECTED_CONFIG, PERSONAL_PATH).
+// Shared by every hook section that lists paths (PROTECTED_CONFIG, PERSONAL_PATH,
+// WRITE_DENIED).
 function parseRejectionPaths(errorMessage: string, marker: string): string[] {
   const lines = errorMessage.split(/\r?\n/).map(line => line.replace(/^remote:\s?/, '').trimEnd())
   const start = lines.findIndex(line => line.includes(marker))
@@ -54,6 +55,10 @@ function parseRejectionPaths(errorMessage: string, marker: string): string[] {
   let separators = 0
   for (const line of lines.slice(start + 1)) {
     const trimmed = line.trim()
+    // Another section starts: a section printed without separators (such as
+    // WRITE_DENIED) must not swallow the next section's bullets.
+    const section = /^\[[A-Z_]+\]/.exec(trimmed)
+    if (section && section[0] !== marker) break
     if (/^=+$/.test(trimmed)) {
       if (++separators === 2) break
       continue
@@ -74,6 +79,37 @@ export function protectedConfigMessage(paths: string[]): string {
 }
 
 export class ProtectedConfigRecoveryError extends Error {}
+
+// ---------------------------------------------------------------------------
+// WRITE_DENIED — a folder the member may not edit
+// ---------------------------------------------------------------------------
+//
+// The hook rejects with [WRITE_DENIED] any push in which a commit changes a
+// path the pusher has no write permission for. Like PROTECTED_CONFIG it
+// checks every commit in the pushed range, so the recovery is the same:
+// back up, squash the unpushed commits, put those paths back to the server's
+// version (restoreProtectedPaths with reason 'write_denied'), push the rest.
+// The section is "[WRITE_DENIED]", then "  - <path>" lines, then explanation
+// lines that do not start with "  - ".
+
+export const WRITE_DENIED_MARKER = '[WRITE_DENIED]'
+
+export type RestoreReason = 'protected_config' | 'write_denied'
+
+export function isWriteDeniedRejection(errorMessage: string): boolean {
+  return errorMessage.includes(WRITE_DENIED_MARKER)
+}
+
+export function parseWriteDeniedPaths(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, WRITE_DENIED_MARKER)
+}
+
+/** Plain-words explanation shown to the member (Japanese UI). */
+export function writeDeniedMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `編集できないファイルがあります。\n` +
+    `次のファイルは、あなたに編集する権限がないフォルダにあるため、変更を共有できません。\n\n${list}`
+}
 
 async function assertUpstreamIsAncestor(git: SimpleGit, upstream: string): Promise<{ localHead: string; upstreamHash: string }> {
   const localHead = (await git.revparse(['HEAD'])).trim()
@@ -162,9 +198,16 @@ export async function restoreProtectedPaths(options: {
   backupPath: string
   upstream?: string
   commitMessage?: string
+  /**
+   * Why the server refused these paths. 'write_denied' (the member may not
+   * edit that folder) also undoes an exact move into it: the file goes back
+   * to the path it came from instead of vanishing from both places.
+   */
+  reason?: RestoreReason
 }): Promise<ProtectedConfigRecoveryResult> {
   const { git, repoPath, paths, backupPath } = options
   const upstream = options.upstream ?? 'origin/main'
+  const reason = options.reason ?? 'protected_config'
   if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
   const fullPaths = new Map(paths.map(p => [p, assertInsideRepo(repoPath, p)]))
 
@@ -208,8 +251,8 @@ export async function restoreProtectedPaths(options: {
     fs.mkdirSync(backupPath, { recursive: true })
     fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
       timestamp: new Date().toISOString(),
-      reason: 'protected_config',
-      protectedFiles: paths,
+      reason,
+      ...(reason === 'write_denied' ? { writeDeniedFiles: paths } : { protectedFiles: paths }),
       backedUpFiles: backedUp,
       restoredFiles: restored,
       removedFiles: removed,
@@ -236,6 +279,28 @@ export async function restoreProtectedPaths(options: {
     }
   }
 
+  // 3b. A file moved into a folder the member may not edit: its new path was
+  //     just removed, so put it back at the path it was moved from (exact
+  //     moves only — same content — which the server still has).
+  if (reason === 'write_denied') {
+    const movedOids = new Set(plan
+      .filter(({ local, server }) => local.type === 'blob' && server.type === null && local.oid)
+      .map(({ local }) => local.oid as string))
+    if (movedOids.size > 0) {
+      const deleted = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '--diff-filter=D', '-z', upstreamHash]))
+        .split('\0').filter(Boolean)
+      for (const file of deleted) {
+        if (paths.includes(file)) continue
+        const server = await entryAt(git, upstreamHash, file)
+        if (server.type === 'blob' && server.oid && movedOids.has(server.oid)) {
+          await git.raw(['checkout', upstreamHash, '--', file])
+          movedOids.delete(server.oid)
+          restored.push(file)
+        }
+      }
+    }
+  }
+
   // 4. Commit the member's remaining changes (if any are left).
   let committed = false
   const remaining = (await git.raw(['diff', '--cached', '--name-only', '-z', upstreamHash])).replace(/\0/g, '')
@@ -243,7 +308,10 @@ export async function restoreProtectedPaths(options: {
     const subject = options.commitMessage
       || (squashedMessages.length === 1 ? squashedMessages[0] : 'Sync from AI Company Builder')
     const body = squashedMessages.length > 1 ? `\n\n${squashedMessages.map(m => `- ${m}`).join('\n')}` : ''
-    await git.commit(`${subject}${body}\n\n（管理者専用の設定ファイルの変更は除外し、サーバーの状態に戻しました）`)
+    const note = reason === 'write_denied'
+      ? '（編集する権限がないフォルダのファイルの変更は除外し、サーバーの状態に戻しました）'
+      : '（管理者専用の設定ファイルの変更は除外し、サーバーの状態に戻しました）'
+    await git.commit(`${subject}${body}\n\n${note}`)
     committed = true
   }
 

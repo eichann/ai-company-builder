@@ -26,6 +26,10 @@ import {
   personalPathMessage,
   untrackPersonalPaths,
   type PersonalUntrackResult,
+  type ProtectedConfigRecoveryResult,
+  isWriteDeniedRejection,
+  parseWriteDeniedPaths,
+  writeDeniedMessage,
 } from '../protected-config'
 import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
@@ -816,47 +820,82 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     } catch (pushError) {
       const pushErrorMsg = pushError instanceof Error ? pushError.message : String(pushError)
 
-      // The server only lets an owner/admin change agent-execution config
-      // (.claude/settings.json, .mcp.json, .claude/hooks/ ... — Claude Code
-      // runs the commands in them without a prompt). The rejected change is
-      // already committed locally and the hook checks every commit in the
-      // pushed range, so a plain retry would fail at this same step forever.
-      // Offer the way out: put just those paths back to the server's version
-      // (member's copy saved in .backups/ first), squash the unpushed commits
-      // without them, push again. Never write PENDING_PUSH for this.
-      if (isProtectedConfigRejection(pushErrorMsg)) {
-        const protectedFiles = parseProtectedConfigPaths(pushErrorMsg)
-        log.warn('Git sync: Push rejected — protected config changed by a non-admin:', protectedFiles)
+      // Two rejections share one way out because the hook checks every commit
+      // in the pushed range for both — the rejected change is already
+      // committed locally, so a plain retry (or a revert commit on top)
+      // would fail at this same step forever:
+      //  - PROTECTED_CONFIG: only an owner/admin may change agent-execution
+      //    config (.claude/settings.json, .mcp.json, .claude/hooks/ ... —
+      //    Claude Code runs the commands in them without a prompt).
+      //  - WRITE_DENIED: the member has no write permission for the folder.
+      // Ask first (both questions before anything changes), then put just
+      // those paths back to the server's version (member's copy saved in
+      // .backups/ first), squash the unpushed commits without them, push
+      // again — once, for both. Never write PENDING_PUSH for this.
+      const hasProtected = isProtectedConfigRejection(pushErrorMsg)
+      const hasWriteDenied = isWriteDeniedRejection(pushErrorMsg)
+      if (hasProtected || hasWriteDenied) {
+        const protectedFiles = hasProtected ? parseProtectedConfigPaths(pushErrorMsg) : []
+        const writeDeniedListed = hasWriteDenied ? parseWriteDeniedPaths(pushErrorMsg) : []
+        // A path in both lists is handled once, as protected config.
+        const writeDeniedFiles = writeDeniedListed.filter(p => !protectedFiles.includes(p))
+        if (hasProtected) log.warn('Git sync: Push rejected — protected config changed by a non-admin:', protectedFiles)
+        if (hasWriteDenied) log.warn('Git sync: Push rejected — no write permission:', writeDeniedListed)
+        const protectedError = `${protectedConfigMessage(protectedFiles)}\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。`
+        const writeDeniedError = `${writeDeniedMessage(writeDeniedListed)}\n\nもう一度同期ボタンを押すと、これらのファイルを元に戻して残りの変更を同期できます。編集が必要な場合は、そのフォルダの管理者に権限を依頼してください。`
+        const rejectionError = (p: boolean, w: boolean, pFiles: string[], wFiles: string[]) => [
+          p ? `${protectedConfigMessage(pFiles)}` : '',
+          w ? `${writeDeniedMessage(wFiles)}` : '',
+        ].filter(Boolean).join('\n\n')
         const rejected = {
           success: false,
-          errorType: 'protected_config' as const,
-          protectedFiles,
-          error: `${protectedConfigMessage(protectedFiles)}\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。`,
+          errorType: (hasProtected ? 'protected_config' : 'write_denied') as 'protected_config' | 'write_denied',
+          protectedFiles: hasProtected ? protectedFiles : undefined,
+          writeDeniedFiles: hasWriteDenied ? writeDeniedListed : undefined,
+          error: [hasProtected ? protectedError : '', hasWriteDenied ? writeDeniedError : ''].filter(Boolean).join('\n\n'),
           hadConflicts,
           conflictFiles,
           deletedConflictFiles,
           backupPath: hadConflicts ? backupPath : undefined,
         }
-        if (!deps.dialog.canAsk() || protectedFiles.length === 0) return rejected
-
-        const choice = await deps.dialog.confirmProtectedConfigRestore(protectedFiles)
-        if (choice === 'cancel') {
-          return { ...rejected, error: `同期を中止しました。\n\n${rejected.error}` }
+        if (!deps.dialog.canAsk() || (hasProtected && protectedFiles.length === 0) || (hasWriteDenied && writeDeniedListed.length === 0)) {
+          return rejected
         }
+
+        if (hasProtected) {
+          const choice = await deps.dialog.confirmProtectedConfigRestore(protectedFiles)
+          if (choice === 'cancel') {
+            return { ...rejected, errorType: 'protected_config' as const, error: `同期を中止しました。\n\n${rejected.error}` }
+          }
+        }
+        if (writeDeniedFiles.length > 0) {
+          const choice = await deps.dialog.confirmWriteDeniedRestore(writeDeniedFiles)
+          if (choice === 'cancel') {
+            return { ...rejected, errorType: 'write_denied' as const, error: `同期を中止しました。\n\n${rejected.error}` }
+          }
+        }
+
+        // Wording for what was refused: admin-only config, a folder the
+        // member may not edit, or both.
+        const refusedWhat = hasProtected && hasWriteDenied
+          ? '共有できない'
+          : hasProtected ? '管理者だけが変更できる' : '編集する権限がないフォルダの'
 
         // First try keeping every file as the member has it now. The hook
         // checks every commit in the range, so a change the member has since
         // undone (e.g. took the auto-run setting out of a skill after the
-        // first rejection) blocks the push only until the intermediate commit
-        // is squashed away. Restoring right away would throw away — or, for a
-        // new skill, remove — the member's now-acceptable final version.
-        let pathsToRestore = protectedFiles
+        // first rejection, or put back a file in a folder they may not edit)
+        // blocks the push only until the intermediate commit is squashed
+        // away. Restoring right away would throw away — or, for a new skill,
+        // remove — the member's now-acceptable final version.
+        let protectedToRestore = protectedFiles
+        let writeDeniedToRestore = writeDeniedFiles
         try {
           const squash = await squashUnpushedCommits({ git })
           if (squash.squashed) {
             if (squash.committed) await pushToServer()
             if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
-            const parts = ['同期完了。管理者だけが変更できる内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。']
+            const parts = [`同期完了。${refusedWhat}内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。`]
             if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
             parts.push(personalNote())
             if (!squash.committed) parts.push('共有する変更は他にありませんでした。')
@@ -864,7 +903,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               success: true,
               message: parts.join(''),
               untrackedPersonalFiles: personalUntrack?.untracked,
-              restoredProtectedFiles: [],
+              restoredProtectedFiles: hasProtected ? [] : undefined,
+              restoredWriteDeniedFiles: hasWriteDenied ? [] : undefined,
               hadConflicts,
               conflictFiles,
               deletedConflictFiles,
@@ -877,10 +917,24 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         } catch (squashError) {
           const squashMsg = squashError instanceof Error ? squashError.message : String(squashError)
           if (squashError instanceof ProtectedConfigRecoveryError) return { ...rejected, error: squashMsg }
-          if (isProtectedConfigRejection(squashMsg)) {
-            // Still rejected: restore exactly what the final version still has.
-            const still = parseProtectedConfigPaths(squashMsg)
-            if (still.length > 0) pathsToRestore = still
+          const stillProtected = isProtectedConfigRejection(squashMsg)
+          const stillWriteDenied = isWriteDeniedRejection(squashMsg)
+          if (stillProtected || stillWriteDenied) {
+            // Still rejected: restore exactly what the final version still
+            // has. A section that is gone was resolved by the squash.
+            if (stillProtected) {
+              const still = parseProtectedConfigPaths(squashMsg)
+              if (still.length > 0) protectedToRestore = still
+            } else {
+              protectedToRestore = []
+            }
+            if (stillWriteDenied) {
+              const still = parseWriteDeniedPaths(squashMsg)
+              if (still.length > 0) writeDeniedToRestore = still
+              writeDeniedToRestore = writeDeniedToRestore.filter(p => !protectedToRestore.includes(p))
+            } else {
+              writeDeniedToRestore = []
+            }
           } else if (squashMsg.includes('SECRET_DETECTED')) {
             return {
               success: false,
@@ -901,16 +955,25 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           }
         }
 
-        const protectedBackupPath = path.join(
-          backupsDir,
-          `${deps.now().toISOString().replace(/[:.]/g, '-').slice(0, 23)}_protected`
-        )
-        let recovery
+        const stamp = deps.now().toISOString().replace(/[:.]/g, '-').slice(0, 23)
+        let protectedRecovery = null as ProtectedConfigRecoveryResult | null
+        let writeDeniedRecovery = null as ProtectedConfigRecoveryResult | null
         try {
-          recovery = await restoreProtectedPaths({ git, repoPath, paths: pathsToRestore, backupPath: protectedBackupPath })
+          // One after the other, without pushing in between: each squashes
+          // the unpushed commits (the second only the first one's commit).
+          if (protectedToRestore.length > 0) {
+            protectedRecovery = await restoreProtectedPaths({
+              git, repoPath, paths: protectedToRestore, backupPath: path.join(backupsDir, `${stamp}_protected`),
+            })
+          }
+          if (writeDeniedToRestore.length > 0) {
+            writeDeniedRecovery = await restoreProtectedPaths({
+              git, repoPath, paths: writeDeniedToRestore, backupPath: path.join(backupsDir, `${stamp}_write_denied`), reason: 'write_denied',
+            })
+          }
         } catch (recoveryError) {
           const msg = recoveryError instanceof Error ? recoveryError.message : String(recoveryError)
-          log.error('Git sync: Protected config recovery failed:', msg)
+          log.error(hasProtected ? 'Git sync: Protected config recovery failed:' : 'Git sync: Write-denied recovery failed:', msg)
           return {
             ...rejected,
             error: recoveryError instanceof ProtectedConfigRecoveryError
@@ -918,15 +981,38 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               : `ファイルをサーバーの状態に戻せませんでした。変更はこのPCに残っています。\n${msg}`,
           }
         }
+        // Nothing left to restore (should not happen) — report the rejection
+        // rather than claim success with commits still unpushed.
+        if (!protectedRecovery && !writeDeniedRecovery) return rejected
+        const revertedProtected = protectedRecovery ? [...protectedRecovery.restored, ...protectedRecovery.removed] : []
+        const revertedWriteDenied = writeDeniedRecovery ? [...writeDeniedRecovery.restored, ...writeDeniedRecovery.removed] : []
+        const recoveryBackupPath = protectedRecovery?.backupPath ?? writeDeniedRecovery?.backupPath ?? undefined
+        const reverted = {
+          restoredProtectedFiles: hasProtected ? revertedProtected : undefined,
+          protectedBackupPath: protectedRecovery?.backupPath ?? undefined,
+          restoredWriteDeniedFiles: hasWriteDenied ? revertedWriteDenied : undefined,
+          writeDeniedBackupPath: writeDeniedRecovery?.backupPath ?? undefined,
+        }
+        // The later restore saw the final state of the unpushed commits.
+        const committed = (writeDeniedRecovery ?? protectedRecovery)?.committed ?? false
 
-        if (recovery.committed) {
+        if (committed) {
           try {
             await pushToServer()
           } catch (retryError) {
             const retryMsg = retryError instanceof Error ? retryError.message : String(retryError)
-            if (isProtectedConfigRejection(retryMsg)) {
-              const remaining = parseProtectedConfigPaths(retryMsg)
-              return { ...rejected, protectedFiles: remaining, error: protectedConfigMessage(remaining) }
+            const againProtected = isProtectedConfigRejection(retryMsg)
+            const againWriteDenied = isWriteDeniedRejection(retryMsg)
+            if (againProtected || againWriteDenied) {
+              const remainingProtected = againProtected ? parseProtectedConfigPaths(retryMsg) : []
+              const remainingWriteDenied = againWriteDenied ? parseWriteDeniedPaths(retryMsg) : []
+              return {
+                ...rejected,
+                errorType: (againProtected ? 'protected_config' : 'write_denied') as 'protected_config' | 'write_denied',
+                protectedFiles: againProtected ? remainingProtected : undefined,
+                writeDeniedFiles: againWriteDenied ? remainingWriteDenied : undefined,
+                error: rejectionError(againProtected, againWriteDenied, remainingProtected, remainingWriteDenied),
+              }
             }
             if (retryMsg.includes('SECRET_DETECTED')) {
               return {
@@ -937,36 +1023,37 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
             }
             // The local history is clean now; an ordinary push failure (network,
             // a teammate pushed in between) is retried by the next sync.
-            log.error('Git sync: Push after protected config recovery failed:', retryMsg)
+            log.error(hasProtected ? 'Git sync: Push after protected config recovery failed:' : 'Git sync: Push after write-denied recovery failed:', retryMsg)
             fs.writeFileSync(pendingPushFile, deps.now().toISOString())
             return {
               success: false,
-              error: '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。',
+              error: hasProtected && !hasWriteDenied
+                ? '管理者だけが変更できるファイルをサーバーの状態に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。'
+                : `${refusedWhat}ファイルを元に戻しましたが、プッシュに失敗しました。次回の同期で再試行します。`,
               errorType: 'push_failed' as const,
               pushFailed: true,
-              restoredProtectedFiles: [...recovery.restored, ...recovery.removed],
-              protectedBackupPath: recovery.backupPath ?? undefined,
+              ...reverted,
             }
           }
         }
         if (fs.existsSync(pendingPushFile)) fs.unlinkSync(pendingPushFile)
 
-        const reverted = [...recovery.restored, ...recovery.removed]
-        const parts = [`同期完了。管理者だけが変更できるファイル（${reverted.length}件）はサーバーの状態に戻しました。`]
-        if (recovery.backupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
+        const parts = ['同期完了。']
+        if (hasProtected) parts.push(`管理者だけが変更できるファイル（${revertedProtected.length}件）はサーバーの状態に戻しました。`)
+        if (hasWriteDenied) parts.push(`編集する権限がないフォルダのファイル（${revertedWriteDenied.length}件）は元に戻しました。`)
+        if (recoveryBackupPath) parts.push('あなたが編集した版は .backups/ に保存してあります。')
         if (hadConflicts) parts.push(`${conflictFiles.length}ファイルが競合したため、サーバー版を採用しました（競合前のローカル版も .backups/ にあります）。`)
         parts.push(personalNote())
-        parts.push(recovery.committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
+        parts.push(committed ? 'その他の変更は正常に反映されました。' : '共有する変更は他にありませんでした。')
         return {
           success: true,
           message: parts.join(''),
           untrackedPersonalFiles: personalUntrack?.untracked,
-          restoredProtectedFiles: reverted,
-          protectedBackupPath: recovery.backupPath ?? undefined,
+          ...reverted,
           hadConflicts,
           conflictFiles,
           deletedConflictFiles,
-          backupPath: hadConflicts ? backupPath : (recovery.backupPath ?? undefined),
+          backupPath: hadConflicts ? backupPath : recoveryBackupPath,
           restoredFolders,
           ignoredLargeFiles,
           excludedNestedRepos: newlyExcludedNestedRepos

@@ -21,8 +21,11 @@ import {
   isPersonalPathRejection,
   parsePersonalPaths,
   untrackPersonalPaths,
+  isWriteDeniedRejection,
+  parseWriteDeniedPaths,
 } from '../electron/protected-config'
 import { renderPreReceiveHook } from '../../server/src/lib/git-server/hook'
+import { isServerRejection } from '../electron/sync/push-landed'
 
 // Rendered by the server's own installer (thin caller of the TypeScript push checker).
 const HOOK_SCRIPT = renderPreReceiveHook({ node: process.execPath })
@@ -228,6 +231,39 @@ test('parseProtectedConfigPaths reads only the PROTECTED_CONFIG section', () => 
   ].join('\n')
   assert.deepEqual(parseProtectedConfigPaths(output), ['営業部/.mcp.json', '.claude/settings.json'])
   assert.deepEqual(parseProtectedConfigPaths('remote: [SECRET_DETECTED]\nremote:   - a.txt'), [])
+})
+
+test('parseWriteDeniedPaths reads the WRITE_DENIED section, with or without separators', () => {
+  const bare = [
+    'remote: [WRITE_DENIED]',
+    'remote:   - 経理部/予算.xlsx',
+    'remote:   - 経理部/メモ.md',
+    'remote: あなたには上記のフォルダを編集する権限がありません。',
+    'remote: ',
+    'remote: ========================================',
+    'remote: [PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています',
+    'remote: ========================================',
+    'remote:   - .mcp.json',
+    'remote: ========================================',
+    ' ! [remote rejected] main -> main (pre-receive hook declined)',
+  ].join('\n')
+  assert.equal(isWriteDeniedRejection(bare), true)
+  assert.deepEqual(parseWriteDeniedPaths(bare), ['経理部/予算.xlsx', '経理部/メモ.md'])
+  assert.deepEqual(parseProtectedConfigPaths(bare), ['.mcp.json'])
+  const framed = [
+    'remote: ========================================',
+    'remote: [WRITE_DENIED] 編集できないファイルが含まれています',
+    'remote: ========================================',
+    'remote:   - 人事/評価.md',
+    'remote: 権限がありません。',
+    'remote: ========================================',
+    'remote: [SECRET_DETECTED] シークレットが検出されました',
+    'remote:   - leak.txt (AWS Access Key ID)',
+  ].join('\n')
+  assert.deepEqual(parseWriteDeniedPaths(framed), ['人事/評価.md'])
+  assert.equal(isWriteDeniedRejection('remote: [PROTECTED_CONFIG]'), false)
+  // A WRITE_DENIED rejection never counts as a push that landed anyway.
+  assert.equal(isServerRejection(bare), true)
 })
 
 test('restoreProtectedPaths rejects paths outside the repository', async t => {
