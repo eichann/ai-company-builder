@@ -13,13 +13,14 @@
 
 import type { SimpleGit } from 'simple-git'
 import type { SyncLogger } from './types'
-import { PERSONAL_PATH_MARKER, PROTECTED_CONFIG_MARKER } from '../protected-config'
+import { PERSONAL_PATH_MARKER, PROTECTED_CONFIG_MARKER, WRITE_DENIED_MARKER } from '../protected-config'
 
 /** Markers of a push the server (or its auth) refused: it definitely did not land. */
 const REJECTION_MARKERS = [
   'SECRET_DETECTED',
   PROTECTED_CONFIG_MARKER,
   PERSONAL_PATH_MARKER,
+  WRITE_DENIED_MARKER,
   'WINPATH_DETECTED',
   '[rejected]',
   '[remote rejected]',

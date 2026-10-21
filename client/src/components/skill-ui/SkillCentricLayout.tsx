@@ -774,6 +774,13 @@ ${promptContent}
             message: result.message || `管理者だけが変更できるファイルをサーバーの状態に戻しました: ${result.restoredProtectedFiles.join(', ')}`,
             backupPath: result.protectedBackupPath || result.backupPath
           })
+        } else if (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) {
+          // Files in a folder the member may not edit were put back to the server's version
+          setSyncNotification({
+            type: 'warning',
+            message: result.message || `編集する権限がないフォルダのファイルを元に戻しました: ${result.restoredWriteDeniedFiles.join(', ')}`,
+            backupPath: result.writeDeniedBackupPath || result.backupPath
+          })
         } else if (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) {
           // .personal/ files are never shared; sync untracked them (kept on disk)
           setSyncNotification({
@@ -818,6 +825,7 @@ ${promptContent}
       // Auto-hide success notification after 3 seconds (unless there were warnings)
       const hasWarnings = result.hadConflicts ||
         (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
+        (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) ||
         (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
         (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||

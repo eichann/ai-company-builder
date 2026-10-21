@@ -9,7 +9,8 @@ export interface SyncDialog {
   /**
    * False when there is no window to ask in. Sync then takes its no-UI path:
    * nested repos are excluded silently, deletions sync without a warning,
-   * and a protected-config rejection is reported without recovery.
+   * and a protected-config or write-denied rejection is reported
+   * without recovery.
    */
   canAsk(): boolean
   /** A folder that is already shared contains its own .git. */
@@ -20,6 +21,8 @@ export interface SyncDialog {
   confirmDeletedFiles(files: string[]): Promise<'sync-deletions' | 'restore' | 'cancel'>
   /** The server rejected a change to owner/admin-only config. */
   confirmProtectedConfigRestore(files: string[]): Promise<'restore' | 'cancel'>
+  /** The server rejected changes in a folder the member may not edit. */
+  confirmWriteDeniedRestore(files: string[]): Promise<'restore' | 'cancel'>
 }
 
 /** Server calls sync makes. Network failures throw; sync logs and moves on. */

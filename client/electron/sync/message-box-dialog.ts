@@ -87,5 +87,21 @@ export function createMessageBoxSyncDialog(host: MessageBoxHost): SyncDialog {
       })
       return response === 1 ? 'cancel' : 'restore'
     },
+
+    async confirmWriteDeniedRestore(deniedFiles) {
+      const shown = deniedFiles.length <= 10
+        ? deniedFiles
+        : [...deniedFiles.slice(0, 10), `... 他 ${deniedFiles.length - 10} ファイル`]
+      const { response } = await host.showMessageBox({
+        type: 'warning',
+        buttons: ['元に戻して残りを同期', 'キャンセル'],
+        defaultId: 0,
+        cancelId: 1,
+        title: '編集できないファイルがあります',
+        message: '編集する権限がないフォルダのファイルが変更されています。',
+        detail: `次のファイルは、あなたに編集する権限がないフォルダにあります。これらの変更は共有できないため、同期が止まっています。\n\n${shown.join('\n')}\n\n・「元に戻して残りを同期」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\n編集が必要な場合は、そのフォルダの管理者に権限を依頼してください。`,
+      })
+      return response === 1 ? 'cancel' : 'restore'
+    },
   }
 }
