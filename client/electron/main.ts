@@ -1446,16 +1446,20 @@ function extractSessionToken(cookies: string[]): string {
 }
 
 // Resolve git binary: try dugite's bundled git first, fall back to system git.
-// dugite bundles git for the build machine's architecture, which may not match
-// the runtime architecture (e.g. arm64 build running on Intel Mac).
+// The mac build ships a universal (arm64 + x86_64) bundled git
+// (scripts/universal-git.mjs). The system-git fallback is a last resort only:
+// Apple Git 2.39 at /usr/bin/git has a broken chunked HTTP push and known
+// CVEs, which is what Intel Macs ran while the bundled git was arm64-only.
 function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<string, string>; fallback: boolean } {
   const dugiteBinary = resolveGitBinary()
   try {
     // Quick check: can the bundled binary actually execute?
-    execFileSync(dugiteBinary, ['--version'], {
+    const version = execFileSync(dugiteBinary, ['--version'], {
       timeout: 3000,
-      stdio: 'ignore',
-    })
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+    console.log(`[git] Using bundled git: ${dugiteBinary} (${version}, ${process.platform}-${process.arch})`)
     const gitDir = resolveGitDir()
     return {
       binary: dugiteBinary,
@@ -1465,9 +1469,10 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
       },
       fallback: false,
     }
-  } catch {
-    // Bundled git failed (likely arch mismatch) — fall back to system git
-    console.warn('[git] Bundled git binary failed, falling back to system git')
+  } catch (error) {
+    // Bundled git failed (e.g. arch mismatch) — fall back to system git
+    const reason = error instanceof Error ? error.message : String(error)
+    console.warn(`[git] Bundled git ${dugiteBinary} failed on ${process.platform}-${process.arch} (${reason}); falling back to system git`)
     const systemPaths = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git']
     for (const p of systemPaths) {
       if (fs.existsSync(p)) {

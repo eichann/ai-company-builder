@@ -79,6 +79,65 @@ jobs:
           SYNC_SOAK_MEMBERS: '3'
           SYNC_SOAK_ROUNDS: '8'
 
+  universal-git:
+    name: Universal bundled git (macOS)
+    # The mac app ships dugite's git as a universal binary merged from the
+    # arm64 and x64 dugite-native archives (client/scripts/universal-git.mjs,
+    # run as electron-builder's beforePack). An arm64-only git made Intel Macs
+    # fall back to Apple Git 2.39, whose push is broken. Runs only when the
+    # merge script, the client's package.json / lockfile or this workflow
+    # changes; the merge itself takes seconds.
+    runs-on: macos-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Check for relevant changes
+        id: changed
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+          BEFORE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            base=$(git merge-base "origin/$BASE_REF" HEAD)
+          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
+            base="$BEFORE"
+          else
+            base=$(git rev-parse HEAD~1)
+          fi
+          if git diff --quiet "$base" HEAD -- client/scripts/universal-git.mjs client/package.json pnpm-lock.yaml .github/workflows/ci.yml; then
+            echo "run=false" >> "$GITHUB_OUTPUT"
+            echo "No changes to the bundled-git build inputs; skipping."
+          else
+            echo "run=true" >> "$GITHUB_OUTPUT"
+          fi
+      - if: steps.changed.outputs.run == 'true'
+        uses: ./.github/actions/setup
+      - name: Merge the arm64 and x64 dugite-native archives
+        if: steps.changed.outputs.run == 'true'
+        working-directory: client
+        run: node scripts/universal-git.mjs --out "$RUNNER_TEMP/git-universal"
+      - name: Every Mach-O is universal; both slices run
+        if: steps.changed.outputs.run == 'true'
+        env:
+          DIR: ${{ runner.temp }}/git-universal
+        run: |
+          node client/scripts/universal-git.mjs --verify "$DIR"
+          if ! arch -x86_64 /usr/bin/true 2>/dev/null; then
+            sudo softwareupdate --install-rosetta --agree-to-license
+          fi
+          export GIT_EXEC_PATH="$DIR/libexec/git-core" GIT_CONFIG_NOSYSTEM=1
+          for a in x86_64 arm64; do
+            echo "== $a"
+            arch -"$a" "$DIR/bin/git" --version
+            arch -"$a" "$DIR/bin/git" lfs version
+            # git-remote-https is a child of git: it must run in the same slice.
+            arch -"$a" "$DIR/bin/git" -c protocol.version=2 ls-remote https://github.com/git/git HEAD
+          done
+          arch -x86_64 "$DIR/bin/git" lfs version | grep -q 'darwin amd64'
+
   test-server:
     name: Server tests
     runs-on: ubuntu-latest
