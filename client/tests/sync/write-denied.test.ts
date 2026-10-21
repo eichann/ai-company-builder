@@ -7,7 +7,7 @@
 // The worlds run the real push checker: World.setScopes hands it the
 // permission snapshot git-http would write for each member's push.
 
-import { describe, test } from 'node:test'
+import { describe, test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'
 import { World, DEFAULT_SCOPES, type HarnessScope, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck } from '../sync-harness/invariants'
@@ -56,8 +56,14 @@ function create(
   return world
 }
 
+// Each sync already fails as a hang after SYNC_TIMEOUT_MS; this bounds a
+// whole scenario too, so a stuck test fails fast instead of eating the job.
+const SCENARIO_TIMEOUT_MS = Number(process.env.SYNC_HARNESS_SCENARIO_TIMEOUT_MS) || 10 * 60_000
+const scenario = (name: string, fn: (t: TestContext) => Promise<void>) =>
+  test(name, { timeout: SCENARIO_TIMEOUT_MS }, fn)
+
 describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
-  test('denied + allowed edit → restore: the allowed edit reaches the server, the denied file is the server version, backed up', async t => {
+  scenario('denied + allowed edit → restore: the allowed edit reaches the server, the denied file is the server version, backed up', async t => {
     const world = create(t)
     const [a] = world.members
     a.write('経理部/予算.md', '予算 改ざん\n').write('営業部/提案.md', '提案 v2\n')
@@ -83,7 +89,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('cancel: write_denied with the paths, no PENDING_PUSH; the next sync offers it again; no window reports only', async t => {
+  scenario('cancel: write_denied with the paths, no PENDING_PUSH; the next sync offers it again; no window reports only', async t => {
     const world = create(t)
     const [a] = world.members
     a.write('経理部/新規.md', 'new\n').write('営業部/メモ.md', 'memo\n')
@@ -112,7 +118,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('a denied file the member deleted comes back from the server', async t => {
+  scenario('a denied file the member deleted comes back from the server', async t => {
     const world = create(t)
     const [a] = world.members
     a.remove('経理部/予算.md').write('営業部/提案.md', '提案 v2\n')
@@ -126,7 +132,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('a move from an allowed folder into a denied one is undone: the file is back where it was', async t => {
+  scenario('a move from an allowed folder into a denied one is undone: the file is back where it was', async t => {
     const world = create(t)
     const [a] = world.members
     a.rename('営業部/提案.md', '経理部/提案.md').write('営業部/別件.md', 'other\n')
@@ -143,7 +149,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('several unpushed commits: every allowed change survives the squash', async t => {
+  scenario('several unpushed commits: every allowed change survives the squash', async t => {
     const world = create(t)
     const [a] = world.members
     a.offline()
@@ -163,7 +169,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('a denied edit the member already undid in a later commit: squashing alone gets the rest through', async t => {
+  scenario('a denied edit the member already undid in a later commit: squashing alone gets the rest through', async t => {
     const world = create(t)
     const [a] = world.members
     a.offline()
@@ -181,7 +187,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('a teammate pushes concurrently: before the first push, and between the rejection and the re-push', async t => {
+  scenario('a teammate pushes concurrently: before the first push, and between the rejection and the re-push', async t => {
     const world = create(t)
     const [a, b] = world.members
     // b pushes right before a's first push: a's push fails non-fast-forward.
@@ -214,7 +220,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('WRITE_DENIED and PROTECTED_CONFIG in one push: both asked, both restored, one push', async t => {
+  scenario('WRITE_DENIED and PROTECTED_CONFIG in one push: both asked, both restored, one push', async t => {
     const mcp = '{"mcpServers":{"playwright":{"command":"npx"}}}\n'
     const world = create(t, { seed: { '経理部/予算.md': BUDGET, '.mcp.json': mcp } })
     const [a] = world.members
@@ -239,7 +245,7 @@ describe('git:sync WRITE_DENIED', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
-  test('a member allowed to edit the folder, and an admin, are not asked', async t => {
+  scenario('a member allowed to edit the folder, and an admin, are not asked', async t => {
     const world = create(t, {}, [{ path: '経理部' }]) // every role "member"
     const [a, b, admin] = world.members
     admin.write('経理部/予算.md', '予算 admin\n')
