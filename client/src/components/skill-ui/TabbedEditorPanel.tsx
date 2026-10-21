@@ -29,6 +29,8 @@ import {
   type MarkdownDiffViewHandle,
 } from './MarkdownReview'
 import { useAuthStore } from '../../stores/authStore'
+import { useWriteAccess } from '../../hooks/useWriteAccess'
+import { ReadOnlyBadge } from './ReadOnlyBadge'
 
 interface OpenFile {
   path: string
@@ -163,7 +165,6 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, {
       }
 
       const query = searchText.trim().toLowerCase()
-      let count = 0
       const walker = document.createTreeWalker(bodyRef.current, NodeFilter.SHOW_TEXT)
       const matches: { node: Text; idx: number }[] = []
 
@@ -201,7 +202,6 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, {
         mark.className = 'bg-yellow-200 dark:bg-yellow-500/40 rounded-sm'
         mark.textContent = before.textContent
         before.parentNode?.replaceChild(mark, before)
-        count++
       }
 
       setMatchCount(matches.length)
@@ -361,6 +361,7 @@ export function TabbedEditorPanel({
   gotoLine,
 }: TabbedEditorPanelProps) {
   const [fileContents, setFileContents] = useState<Map<string, OpenFile>>(new Map())
+  const { isReadOnly } = useWriteAccess()
   const [, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const loadingRef = useRef<Set<string>>(new Set())
@@ -741,6 +742,14 @@ export function TabbedEditorPanel({
         </div>
 
       </div>
+
+      {/* 閲覧のみ: the member may not write this file's folder (per-folder write rules) */}
+      {activeFilePath && isReadOnly(activeFilePath) && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 bg-gray-50 dark:bg-zinc-900/40 text-[11px] text-gray-500 dark:text-zinc-400">
+          <ReadOnlyBadge />
+          <span className="truncate">このフォルダは閲覧のみです。変更しても共有されず、同期すると元に戻ります（変更は .backups/ に保存されます）。</span>
+        </div>
+      )}
 
       {/* Error message */}
       {error && (

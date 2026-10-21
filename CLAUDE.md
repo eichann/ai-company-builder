@@ -388,3 +388,41 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   a scenario here, ending with `settleAndCheck(world)`.
   `SYNC_HARNESS_VERBOSE=1` prints every sync log line; `SYNC_HARNESS_KEEP=1`
   keeps the temporary worlds.
+
+---
+
+## Architecture: Chat Write Guard (read-only folders)
+
+The in-app chat runs Claude Code in the member's checkout. Per-folder write
+rules are enforced at push (`[WRITE_DENIED]`), so an AI edit in a folder the
+member may only read used to be rejected at sync and moved to `.backups/`
+("the AI's work vanished"). The chat now refuses such edits before they run:
+
+- Server: `GET /api/companies/:companyId/me/write-access` →
+  `{ version, role, all, scopes: [{ path, write }] }` (`writeAccessSummary` in
+  `server/src/lib/permissions.ts`; ETag = version, `If-None-Match` → 304).
+  `all: true` for owner/admin or when nothing restricts the member.
+- Client: `client/shared/write-access.ts` evaluates a path exactly like
+  `resolveAccess` + the push gate (NFC, deepest listed scope decides, A–Z
+  folded spelling must be writable too). `client/electron/write-access-store.ts`
+  caches it per company — fetched when the renderer opens a company, after
+  every successful sync, and at each chat turn (3 s budget, cached answer on
+  failure).
+- `client/electron/write-guard.ts` + the PreToolUse hook in
+  `client/electron/agents/claude.ts` deny `Write` / `Edit` / `MultiEdit` /
+  `NotebookEdit` (and best-effort Bash `>` / `>>` / `&>` / `tee` to a literal
+  path) whose target resolves inside the company root to a read-only folder,
+  with a Japanese reason telling the AI to ask the member instead of retrying.
+  Hooks run in every permission mode (bypass included) and for subagents. The
+  api-key mode's `writeFile` / `executeCommand` use the same check.
+- Deliberately NOT done: Claude Code permission deny rules
+  (`disallowedTools: ['Edit(...)']`). Deny beats allow, so a writable folder
+  inside a read-only one cannot be expressed; matching is case/NFD-sensitive;
+  and the provider ignores `disallowedTools` whenever `allowedTools` is set
+  (the consultation MCP tools).
+- Limits: other Bash writes (`cp`, `mv`, `sed -i`, scripts, `cd x && … > y`)
+  and Codex are not covered; unknown access (offline, server error) blocks
+  nothing and is logged. The server check and the `[WRITE_DENIED]` recovery
+  stay the safety net. Paths are judged lexically (no symlink resolution).
+- Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in
+  the file tree (where read-only starts) and above the open file.

@@ -1,6 +1,7 @@
 import type { ReferenceTools } from '../consultations/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
+import type { WriteGuard } from '../write-guard'
 
 /** The Vercel model interface remains the streaming boundary; no second agent loop. */
 export interface AgentConnection {
@@ -15,6 +16,8 @@ export interface AgentConnection {
     effort?: string
     references?: ReferenceTools
     resumeId?: string
+    /** Refuse edits to read-only folders before they happen (write-guard.ts). */
+    writeGuard?: WriteGuard
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

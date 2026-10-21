@@ -20,6 +20,7 @@ import { createClaudeConnection } from './agents/claude'
 import { createApiConnection } from './agents/anthropic-api'
 import type { ClaudeConnectionConfig } from './agents/claude'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
+import type { WriteGuard } from './write-guard'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -32,6 +33,12 @@ export interface ChatServerConfig extends ClaudeConnectionConfig {
   getApiKey: () => string | undefined
   getAuthMode: () => 'claude-code' | 'codex' | 'api-key'
   buildSystemPrompt: (workingDirectory?: string) => string
+  /**
+   * The write guard for a chat in this company (write-guard.ts): refreshes the
+   * member's write access (short timeout, cached answer on failure) and
+   * returns undefined when nothing is known — then nothing is blocked.
+   */
+  getWriteGuard?: (companyId: string, companyRoot: string) => Promise<WriteGuard | undefined>
 }
 
 // ============================================================================
@@ -131,6 +138,7 @@ export async function startChatServer(config: ChatServerConfig) {
       referenceFiles,
       appSessionId,
       companyId,
+      companyRootPath,
       claudeSessionId: bodyClaudeSessionId,
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
@@ -146,6 +154,7 @@ export async function startChatServer(config: ChatServerConfig) {
       referenceFiles?: string[]
       appSessionId?: string
       companyId?: string
+      companyRootPath?: string
       claudeSessionId?: string
       agentSession?: AgentSession | null
       authMode?: AuthMode
@@ -186,7 +195,8 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authenticationError) return c.json({ error: authenticationError }, 401)
     const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references }
+    const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, writeGuard }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -207,7 +217,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // API key mode: add filesystem tools + optional skill tools
     const tools = (() => {
       if (connection.ownsConversation) return undefined
-      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval) : undefined
+      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard) : undefined
       const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath) : undefined
       if (!fsTools && !skillTools) return undefined
       return { ...fsTools, ...skillTools }

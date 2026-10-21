@@ -6,11 +6,14 @@
  *   GET /permissions        owner/admin (all scopes); department managers
  *                           (the subtrees of the departments they manage)
  *   GET /me/capabilities    any member
+ *   GET /me/write-access    any member: where they may write (for the desktop
+ *                           app's AI guard; ETag / If-None-Match → 304)
  *
  * Department managers are in routes/departments.ts (/:id/managers).
  * Semantics of scopes and rules: lib/permissions.ts. Nothing here enforces
  * anything — Phase 1 only stores and exposes the model.
  */
+import { createHash } from 'crypto'
 import { Hono } from 'hono'
 import { db } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
@@ -23,6 +26,7 @@ import {
   FULL_ACCESS_ROLES,
   isSameOrAncestorPath,
   summarizeRules,
+  writeAccessSummary,
   type ScopeRule,
 } from '../lib/permissions'
 import { listRecentPushRejections } from '../lib/push-rejections'
@@ -177,4 +181,22 @@ permissionsRoute.get('/me/capabilities', async (c) => {
       managedDepartmentIds: managedDepartmentIds(db, companyId, auth.userId),
     },
   })
+})
+
+// GET /api/companies/:companyId/me/write-access
+// The caller's write access as data the client evaluates per path with
+// resolveAccess()'s semantics (see writeAccessSummary in lib/permissions.ts).
+// `version` (also the ETag) changes whenever the answer changes.
+permissionsRoute.get('/me/write-access', async (c) => {
+  const auth = await authenticateMember(c)
+  if (auth instanceof Response) return auth
+  const companyId = c.req.param('companyId')!
+  const summary = writeAccessSummary(listScopesWithRules(db, companyId), auth.userId, auth.role)
+  const version = createHash('sha256').update(JSON.stringify({ role: auth.role, ...summary })).digest('hex').slice(0, 32)
+  const etag = `"${version}"`
+  c.header('ETag', etag)
+  c.header('Cache-Control', 'private, no-cache')
+  const inm = c.req.header('If-None-Match')
+  if (inm && inm.split(',').some(t => t.trim() === etag)) return c.body(null, 304)
+  return c.json({ success: true, data: { version, role: auth.role, ...summary } })
 })

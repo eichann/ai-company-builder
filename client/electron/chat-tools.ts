@@ -4,6 +4,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { exec } from 'child_process'
 import crypto from 'crypto'
+import { checkWritePath, decideToolWrite, type WriteGuard } from './write-guard'
 
 // Approval callback type (optional, injected from chat-server)
 export type RequestApproval = (
@@ -85,7 +86,7 @@ export function createSkillTools(skillFolderPath: string) {
   }
 }
 
-export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval) {
+export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard) {
   return {
     readFile: tool({
       description:
@@ -103,6 +104,9 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Write content to a file at the given path (relative to the working directory). Creates parent directories if needed.',
       inputSchema: writeFileSchema,
       execute: async ({ path: filePath, content }) => {
+        // Read-only folder: refuse before asking the member to approve it.
+        const guarded = writeGuard ? checkWritePath(writeGuard, validatePath(filePath, workingDirectory)) : undefined
+        if (guarded?.deny) throw new Error(guarded.message)
         if (requestApproval) {
           const result = await requestApproval('writeFile', { path: filePath }, crypto.randomUUID())
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
@@ -136,6 +140,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Execute a shell command in the working directory. Use for build, test, or inspection tasks. Dangerous commands are blocked.',
       inputSchema: executeCommandSchema,
       execute: async ({ command }) => {
+        const guarded = decideToolWrite(writeGuard, 'Bash', { command }, workingDirectory)
+        if (guarded.deny) throw new Error(guarded.message)
         if (requestApproval) {
           const result = await requestApproval('executeCommand', { command }, crypto.randomUUID())
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
