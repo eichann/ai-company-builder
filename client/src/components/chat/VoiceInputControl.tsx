@@ -1,9 +1,8 @@
 import { voiceShortcut, formatVoiceShortcut, matchesVoiceShortcut } from '../../lib/voiceShortcut'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
-import type { VoiceCapabilities } from '../../../shared/voice-input'
-
-import { microphoneSelection } from '../../lib/microphoneSelection'
+import { microphoneSelection, deviceFailureMessage } from '../../lib/microphoneSelection'
+import { voiceAvailability, recheckView } from '../../lib/voiceAvailability'
 
 export interface VoiceEditor {
   focus?: () => void
@@ -18,7 +17,9 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   onBusy: (busy: boolean) => void
 }) {
   const shortcut = useSyncExternalStore(voiceShortcut.subscribe, voiceShortcut.getSnapshot)
-  const { devices, deviceError, selectedDevice, configured } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
+  const { devices, deviceError, deviceFailure, refreshing, selectedDevice, configured } = useSyncExternalStore(microphoneSelection.subscribe, microphoneSelection.getSnapshot)
+  const { caps, checking } = useSyncExternalStore(voiceAvailability.subscribe, voiceAvailability.getSnapshot)
+  const recheck = recheckView({ caps, checking, devices, deviceFailure, refreshing })
   const [showDevices, setShowDevices] = useState(false)
   const [recordingDevice, setRecordingDevice] = useState('')
   const [level, setLevel] = useState(0)
@@ -26,9 +27,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   const lastSample = useRef(0)
   const lastAudible = useRef(0)
   const refreshDevices = microphoneSelection.refresh
-  useEffect(() => {
-    if (!microphoneSelection.getSnapshot().devices) void refreshDevices()
-  }, [refreshDevices])
+  useEffect(() => { void voiceAvailability.load() }, [])
   useEffect(() => {
     if (!active || !showDevices) return
     const timer = setInterval(() => { void refreshDevices() }, 3000)
@@ -36,7 +35,6 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   }, [active, showDevices, refreshDevices])
   const deviceMissing = Boolean(selectedDevice && devices && !devices.some(d => d.id === selectedDevice))
   const deviceLabel = selectedDevice ? devices?.find(d => d.id === selectedDevice)?.name ?? '未接続のマイク' : `システムの既定：${devices?.find(d => d.isDefault)?.name ?? '未接続'}`
-  const [caps, setCaps] = useState<VoiceCapabilities>()
   const [phase, setPhase] = useState('idle')
   const [error, setError] = useState('')
   const [rawText, setRawText] = useState('')
@@ -57,9 +55,6 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     setRawText('')
   }, [onBusy])
 
-  useEffect(() => {
-    void window.electronAPI.voiceInput.capabilities().then(setCaps).catch(() => setCaps({ available: false, reason: '音声入力を利用できません。アプリを再起動してください' }))
-  }, [])
   useEffect(() => window.electronAPI.voiceInput.onEvent(event => {
     const op = operation.current
     if (!op || op.id !== event.requestId || !current.current.active || op.scope !== current.current.scope) return
@@ -114,6 +109,10 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     window.addEventListener('blur', blur)
     return () => { window.removeEventListener('keydown', keydown, true); window.removeEventListener('blur', blur) }
   }, [active, startOrStop, cancel, shortcut])
+  // 「もう一度確認」: re-runs both the speech probe and the microphone list.
+  // Rendered next to every message that asks the user to retry.
+  const recheckButton = <button type="button" disabled={recheck.running} onClick={() => void voiceAvailability.recheck()}
+    className="shrink-0 rounded border border-current px-2 py-0.5 font-medium disabled:opacity-50">{recheck.running ? '確認中…' : 'もう一度確認'}</button>
   return <div className="px-2 pt-2 text-xs" aria-live="polite">
     <div className="flex items-center gap-2 flex-wrap">
       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
@@ -128,7 +127,9 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">{phase === 'listening' ? 'もう1回押すと停止・整文' : '1回押すと開始・もう1回で停止'}</span>
       {busy && <button type="button" onClick={cancel} aria-label="音声入力をキャンセル" className="p-1"><X size={16} /></button>}
       {!busy && caps?.available && !rawText && <span className="text-[10px] text-gray-400 dark:text-zinc-500 opacity-60">話した内容をAIで整えて入力します</span>}
+      {!caps && checking && <span className="opacity-60">音声入力を確認中…</span>}
       {caps && !caps.available && <span className="opacity-60">{caps.reason}</span>}
+      {caps && !caps.available && recheck.show && recheckButton}
     </div>
     {caps?.available && <button type="button" disabled={busy} aria-label="マイクを選択" aria-expanded={showDevices}
       title={phase === 'listening' ? recordingDevice : deviceLabel}
@@ -165,8 +166,12 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       <div className="flex justify-between gap-2"><span className="opacity-60">選択はこのPCに保存します。録音中は変更できません。</span><button type="button" onClick={() => void refreshDevices()} className="underline shrink-0">再取得</button></div>
     </div>}
     {deviceError && <p className="my-1 text-amber-700 dark:text-amber-400">{deviceError}</p>}
-    {deviceMissing && <p className="my-1 text-amber-700 dark:text-amber-400">選択したマイクが未接続です。⌄からマイクを選び直してください。</p>}
-    {devices?.length === 0 && caps?.available && <p className="my-1 text-amber-700 dark:text-amber-400">利用できるマイクが見つかりません。接続後に一覧を再取得してください。</p>}
+    {deviceMissing && caps?.available && <p className="my-1 text-amber-700 dark:text-amber-400">選択したマイクが未接続です。⌄からマイクを選び直してください。</p>}
+    {caps?.available && !devices && !deviceFailure && <p className="my-1 opacity-60">マイク一覧を取得中…</p>}
+    {recheck.deviceProblem && <p className="my-1 flex flex-wrap items-center gap-2 text-amber-700 dark:text-amber-400">
+      <span>{recheck.deviceProblem === 'none-found' ? '利用できるマイクが見つかりません。マイクを接続してから「もう一度確認」を押してください' : deviceFailureMessage(recheck.deviceProblem)}</span>
+      {recheckButton}
+    </p>}
     {phase === 'listening' && <div className="mb-2 space-y-1" aria-live="off">
       <div className="flex items-center gap-2">
         <span className="shrink-0">入力レベル</span>

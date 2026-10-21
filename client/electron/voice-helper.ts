@@ -1,5 +1,6 @@
 import { createInterface } from 'node:readline'
 import { spawnVoiceProcess } from './voice-process'
+import { HELPER_TIMEOUT_MS } from './voice-probe'
 import type { RecognitionEvent } from './voice-session'
 
 type Helper = { child: ReturnType<typeof spawnVoiceProcess>; emit?: (event: RecognitionEvent) => void; finished: boolean; startedAt: number; ready: boolean }
@@ -20,7 +21,9 @@ export class VoiceHelperPool {
     const child = spawnVoiceProcess(this.binary, ['--standby'])
     const helper: Helper = { child, finished: false, startedAt: 0, ready: false }
     this.helpers.add(helper)
-    const timer = setTimeout(() => child.kill('SIGKILL'), 10_000)
+    // Same launch budget as the one-shot probe: on a loaded Mac the exec alone
+    // can take 10+ s, and a recording may already have been handed this helper.
+    const timer = setTimeout(() => child.kill('SIGKILL'), HELPER_TIMEOUT_MS)
     createInterface({ input: child.stdout }).on('line', line => {
       try {
         const data = JSON.parse(line)

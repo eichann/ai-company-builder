@@ -38,22 +38,85 @@ func defaultMicrophone() -> AudioDeviceID {
     _ = AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &key, 0, nil, &size, &value)
     return value
 }
+// Opt-in diagnostics for slow device enumeration (`--devices-debug`, or
+// ACB_SPEECH_TIMING=1 with any mode). Written to stderr only, never to the
+// stdout protocol, and silent unless explicitly requested.
+let debugTiming = CommandLine.arguments.contains("--devices-debug") || ProcessInfo.processInfo.environment["ACB_SPEECH_TIMING"] == "1"
+let traceStart = ProcessInfo.processInfo.systemUptime
+func trace(_ message: @autoclosure () -> String) {
+    guard debugTiming else { return }
+    let line = String(format: "[acb-speech %8.1fms] ", (ProcessInfo.processInfo.systemUptime - traceStart) * 1000) + message() + "\n"
+    FileHandle.standardError.write(Data(line.utf8))
+}
+func timed<T>(_ label: @autoclosure () -> String, _ body: () -> T) -> T {
+    guard debugTiming else { return body() }
+    let start = ProcessInfo.processInfo.systemUptime
+    let value = body()
+    trace(String(format: "%8.1fms  ", (ProcessInfo.processInfo.systemUptime - start) * 1000) + label())
+    return value
+}
+// Time from exec to main(): dyld, framework loading and the system's first-run
+// code assessment all happen before any of our code runs.
+func launchDelayMs() -> Double? {
+    var info = kinfo_proc()
+    var size = MemoryLayout<kinfo_proc>.stride
+    var mib: [Int32] = [CTL_KERN, KERN_PROC, KERN_PROC_PID, getpid()]
+    guard sysctl(&mib, 4, &info, &size, nil, 0) == 0 else { return nil }
+    let started = info.kp_proc.p_un.__p_starttime
+    let startedAt = Double(started.tv_sec) + Double(started.tv_usec) / 1_000_000
+    return (Date().timeIntervalSince1970 - startedAt) * 1000
+}
+func uint32Property(_ id: AudioObjectID, _ selector: AudioObjectPropertySelector) -> UInt32? {
+    var key = address(selector)
+    var value: UInt32 = 0
+    var size = UInt32(MemoryLayout<UInt32>.size)
+    guard AudioObjectGetPropertyData(id, &key, 0, nil, &size, &value) == noErr else { return nil }
+    return value
+}
+func fourCC(_ value: UInt32?) -> String {
+    guard let value else { return "?" }
+    let bytes = [24, 16, 8, 0].map { UInt8((value >> UInt32($0)) & 0xff) }
+    return bytes.allSatisfy({ $0 >= 32 && $0 < 127 }) ? String(decoding: bytes, as: UTF8.self) : String(value)
+}
+func inputStreamCount(_ id: AudioDeviceID) -> UInt32? {
+    var streams = address(kAudioDevicePropertyStreams, kAudioDevicePropertyScopeInput)
+    var size: UInt32 = 0
+    guard AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &size) == noErr else { return nil }
+    return size / UInt32(MemoryLayout<AudioStreamID>.size)
+}
 func microphones() throws -> [Microphone] {
     var key = address(kAudioHardwarePropertyDevices)
     var size: UInt32 = 0
-    guard AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &key, 0, nil, &size) == noErr else {
+    let sizeStatus = timed("system: device list size (first HAL call)") {
+        AudioObjectGetPropertyDataSize(AudioObjectID(kAudioObjectSystemObject), &key, 0, nil, &size)
+    }
+    guard sizeStatus == noErr else {
         throw NSError(domain: "マイク一覧を取得できませんでした", code: 5)
     }
     var ids = [AudioDeviceID](repeating: 0, count: Int(size) / MemoryLayout<AudioDeviceID>.size)
-    guard AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &key, 0, nil, &size, &ids) == noErr else {
+    let listStatus = timed("system: device list (\(ids.count) devices)") {
+        AudioObjectGetPropertyData(AudioObjectID(kAudioObjectSystemObject), &key, 0, nil, &size, &ids)
+    }
+    guard listStatus == noErr else {
         throw NSError(domain: "マイク一覧を取得できませんでした", code: 5)
     }
+    if debugTiming {
+        // Diagnostic only: describe every device, including output-only ones
+        // that normal enumeration skips, so a slow device can be identified.
+        for id in ids {
+            let transport = timed("device \(id): transport type") { uint32Property(id, kAudioDevicePropertyTransportType) }
+            let objectClass = timed("device \(id): class") { uint32Property(id, kAudioObjectPropertyClass) }
+            let name = timed("device \(id): name") { stringProperty(id, kAudioObjectPropertyName) }
+            trace("device \(id): name=\(name ?? "?") transport=\(fourCC(transport)) class=\(fourCC(objectClass))")
+        }
+    }
+    // Only input-capable devices are asked for anything beyond their input
+    // stream count: one cheap size query per device, then UID and name.
     return ids.compactMap { id in
-        var streams = address(kAudioDevicePropertyStreams, kAudioDevicePropertyScopeInput)
-        var streamSize: UInt32 = 0
-        guard AudioObjectGetPropertyDataSize(id, &streams, 0, nil, &streamSize) == noErr, streamSize > 0,
-              let uid = stringProperty(id, kAudioDevicePropertyDeviceUID) else { return nil }
-        return Microphone(id: id, uid: uid, name: stringProperty(id, kAudioObjectPropertyName) ?? "マイク")
+        guard let count = timed("device \(id): input stream count", { inputStreamCount(id) }), count > 0,
+              let uid = timed("device \(id): UID", { stringProperty(id, kAudioDevicePropertyDeviceUID) }) else { return nil }
+        let name = timed("device \(id): name", { stringProperty(id, kAudioObjectPropertyName) })
+        return Microphone(id: id, uid: uid, name: name ?? "マイク")
     }
 }
 
@@ -222,12 +285,24 @@ func transcribe(deviceUID: String? = nil) async throws {
     emit(["type": "result", "text": try await results.value])
 }
 
+// Error code for "this macOS cannot run speech recognition at all" (no retry).
+let unsupportedOSCode = 10
+
 @main struct SpeechHelper {
     static func main() async {
         do {
-            if CommandLine.arguments.contains("--devices") {
+            let oneShot = ["--probe", "--devices", "--devices-debug"].contains(where: CommandLine.arguments.contains)
+            if let delay = launchDelayMs() {
+                trace(String(format: "exec -> main: %.1fms", delay))
+                // One-shot modes report how long the system held the process
+                // before main() (code-signing / system policy assessment), so
+                // the app can log where a slow probe or device list spent its
+                // time. Never emitted in standby/recording mode.
+                if oneShot { emit(["type": "launch", "execToMainMs": Int(delay)]) }
+            }
+            if CommandLine.arguments.contains("--devices") || CommandLine.arguments.contains("--devices-debug") {
                 let devices = try microphones()
-                let defaultID = defaultMicrophone()
+                let defaultID = timed("system: default input device") { defaultMicrophone() }
                 emit(["type": "devices", "devices": devices.map { ["id": $0.uid, "name": $0.name, "isDefault": $0.id == defaultID] as [String: Any] }])
                 return
             }
@@ -246,9 +321,11 @@ func transcribe(deviceUID: String? = nil) async throws {
                 launchTime = ProcessInfo.processInfo.systemUptime
             }
             if #available(macOS 26.0, *) { try await transcribe(deviceUID: deviceUID) }
-            else { emit(["type": "error", "message": "音声入力にはmacOS 26以降が必要です"]); exit(1) }
+            else { emit(["type": "error", "message": "音声入力にはmacOS 26以降が必要です", "code": unsupportedOSCode]); exit(1) }
         } catch {
-            emit(["type": "error", "message": (error as NSError).domain])
+            // `code` lets the app tell a permanent condition from one worth
+            // retrying; see voice-probe.ts.
+            emit(["type": "error", "message": (error as NSError).domain, "code": (error as NSError).code])
             exit(1)
         }
     }
