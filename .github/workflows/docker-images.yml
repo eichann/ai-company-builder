@@ -91,11 +91,14 @@ jobs:
             -w '%{http_code}' http://127.0.0.1:3100/login)
           echo "GET /login -> $code"
           [ "$code" = 200 ]
-          # PID 1 must be the standalone server, never `next dev`.
-          cmd=$(docker compose exec -T admin sh -c 'tr "\0" " " < /proc/1/cmdline')
-          echo "admin PID 1: $cmd"
-          case "$cmd" in *"admin/server.js"*) ;; *) echo "::error::admin is not running the production server"; exit 1 ;; esac
-          docker compose exec -T admin node -e 'process.exit(process.env.NODE_ENV === "production" ? 0 : 1)'
+          # The standalone server, never `next dev`: the image holds the built
+          # server and no source to compile (Next renames its process title to
+          # "next-server" either way, so the command line proves nothing).
+          docker compose exec -T admin sh -c \
+            'test -f /app/admin/server.js && test -d /app/admin/.next/static && ! test -e /app/admin/src && ! test -e /app/admin/node_modules/.bin/next' \
+            || { echo "::error::admin image is not the standalone production build"; exit 1; }
+          docker compose exec -T admin node -e 'process.exit(process.env.NODE_ENV === "production" ? 0 : 1)' \
+            || { echo "::error::admin is not running with NODE_ENV=production"; exit 1; }
 
       - name: Admin forwards /api/* to the API (target read at runtime)
         run: |
