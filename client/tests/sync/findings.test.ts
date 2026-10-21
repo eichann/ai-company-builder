@@ -59,6 +59,29 @@ describe('git:sync findings', { concurrency: 4 }, () => {
     await settleAndCheck(world)
   })
 
+  // Found by the soak once it could exclude shared folders (after the
+  // .gitignore union fix). A member answers "exclude" for a shared folder
+  // with a stray .git — the commit untracks the folder and adds it to
+  // .gitignore — while a teammate edits a file in it. Replaying the pick
+  // conflicts (modify/delete), sync takes the server version, and
+  // `git add` refused it as ignored: the rebase was aborted, and the next
+  // sync stopped at the same pick again.
+  test('excluding a shared folder while a teammate edits it does not get stuck', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '営業部/提案書.md': 'v0\n' } })
+    const [a, b] = world.members
+    b.write('営業部/提案書.md', 'edit by b\n')
+    assert.equal((await b.sync()).result.success, true)
+    a.initNestedRepo('営業部').willAnswer('sharedNestedRepo', 'exclude')
+    const out = await a.sync()
+    assert.equal(out.result.success, true, JSON.stringify(out.result))
+    // The exclusion holds within this one sync: the folder left the server.
+    assert.equal(world.serverFile('営業部/提案書.md'), null)
+    assert.equal(a.head(), world.serverHead())
+    assert.equal(a.readText('営業部/提案書.md'), 'edit by b\n')
+    assert.ok(a.isIgnored('営業部/提案書.md'))
+    await settleAndCheck(world)
+  })
+
   // Found when the harness first ran in CI (server hook). The pre-receive
   // hook's "paths differing only by case" check piped the tree through
   // `tr | sort | uniq -d` in the inherited locale. Under a UTF-8 locale whose

@@ -206,6 +206,13 @@ harness — see "Testing Sync" below.
 - Uses `rebase --continue` (not `--abort`) to preserve auto-merged files
 - `--ours` during a rebase means **upstream / server**, the inverse of its
   meaning during a merge. Do not "fix" this to `--theirs`.
+- The server version is staged with `git add -f`: when the member's pick had
+  just excluded the folder (a shared folder with a stray `.git`, answered
+  "exclude"), a plain `add` refuses the path as ignored and the same pick
+  failed on every sync (found by the sync harness soak). Taking the server
+  version tracks the teammate's file inside the excluded folder again, so
+  after the rebase sync untracks excluded nested repos once more (`rm
+  --cached`, one extra commit) — the exclusion holds within the same sync.
 - The success message reports the two outcomes separately (overwritten vs.
   deleted) and the result carries `deletedConflictFiles` alongside
   `conflictFiles`. A file that simply vanishes reads as data loss.
