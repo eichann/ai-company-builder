@@ -105,3 +105,40 @@ export function isClientVersionAtLeast(version: string | null | undefined, minim
   if (!parsed) return false
   return compareClientVersions(parsed, minimum) >= 0
 }
+
+// ----------------------------------------------------------------------------
+// Feature gates
+// ----------------------------------------------------------------------------
+
+/**
+ * Committer date (UTC, YYYYMMDDHHmmss) of a031b73 — "feat(sync): recover from
+ * WRITE_DENIED rejections like PROTECTED_CONFIG (#114)", the first main commit
+ * whose desktop app understands a `[WRITE_DENIED]` push rejection. An older
+ * app treats it as a generic push failure and retries the same rejected
+ * commits on every sync, forever.
+ *
+ * Computed with
+ *   TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S a031b73
+ */
+export const WRITE_DENIED_RECOVERY_COMMIT_DATE = '20261021182826'
+
+/**
+ * Does this desktop-app build recover from `[WRITE_DENIED]`?
+ *
+ * Decided by the build's commit date alone, compared with
+ * WRITE_DENIED_RECOVERY_COMMIT_DATE: the semver has been 0.0.1 for every build
+ * so far, and unlike compareClientVersions a `-dev` build counts by its commit
+ * like any other — a developer running main from after #114 has the recovery.
+ * Unknown means unsupported: no version (never connected, or an app older than
+ * the X-ACB-Client-Version header), an unparsable one, or one without a commit
+ * date (a build made without git). Fails closed on purpose: the cost of a
+ * wrong "supported" is a member who can never sync again.
+ *
+ * (A build from a branch that forked before #114 but was committed later would
+ * pass; release builds come from main, where the dates are monotonic enough.)
+ */
+export function supportsWriteDeniedRecovery(version: string | null | undefined): boolean {
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return false
+  return parsed.commitDate >= WRITE_DENIED_RECOVERY_COMMIT_DATE
+}

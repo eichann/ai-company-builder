@@ -156,6 +156,17 @@ export function initDatabase(conn: Database.Database = sqlite) {
       created_at TEXT NOT NULL
     );
 
+    -- Scopes with rules whose folder is missing on the shared branch (renamed
+    -- or removed by a sync push, outside the admin panel), with when that was
+    -- first noticed (lib/orphaned-scopes.ts). Derived from git and rewritten
+    -- on every check; only detected_at carries information of its own.
+    CREATE TABLE IF NOT EXISTS orphaned_scopes (
+      scope_id TEXT PRIMARY KEY REFERENCES scopes(id) ON DELETE CASCADE,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      detected_at TEXT NOT NULL,
+      commit_id TEXT NOT NULL
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);

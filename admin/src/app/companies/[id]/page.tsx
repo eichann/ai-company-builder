@@ -7,6 +7,7 @@ import {
   CheckCircle,
   ClockCounterClockwise,
   DownloadSimple,
+  FolderSimpleDashed,
   ProhibitInset,
   Question,
   TreeStructure,
@@ -15,6 +16,7 @@ import {
 import type { Icon } from '@phosphor-icons/react'
 
 import { DepartmentIcon } from '@/components/app/department-icon'
+import { ORPHANED_DESCRIPTION, ORPHANED_TITLE } from '@/components/permissions/orphaned-scopes'
 import { EmptyState, ErrorState, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
@@ -23,6 +25,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { companiesApi, departmentsApi, overviewApi, type Overview, type OverviewMember, type PushRejection } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { formatBuild, formatDateTime, formatRelative, latest, parseBuild, roleLabel } from '@/lib/format'
+import { SUMMARY_LABELS } from '@/lib/permission-labels'
 import { explainRejection } from '@/lib/rejections'
 import { useQuery } from '@/lib/use-query'
 
@@ -50,7 +53,7 @@ function AdminOverview() {
             <StatCard icon={Users} label="メンバー" value={`${overview.data.memberCount}人`} href={`${base}/members`} />
             <StatCard icon={TreeStructure} label="部署" value={`${overview.data.departmentCount}`} href={`${base}/departments`} />
           </div>
-          <Attention attention={overview.data.attention} membersHref={`${base}/members`} />
+          <Attention attention={overview.data.attention} membersHref={`${base}/members`} permissionsHref={`${base}/permissions`} />
         </div>
       ) : null}
     </>
@@ -60,12 +63,16 @@ function AdminOverview() {
 function Attention({
   attention,
   membersHref,
+  permissionsHref,
 }: {
   attention: Overview['attention']
   membersHref: string
+  permissionsHref: string
 }) {
   const { recentRejections, outdatedClients, unknownClients, notSyncedRecently } = attention
-  const total = recentRejections.length + outdatedClients.length + unknownClients.length + notSyncedRecently.length
+  const orphanedScopes = attention.orphanedScopes ?? []
+  const total =
+    recentRejections.length + orphanedScopes.length + outdatedClients.length + unknownClients.length + notSyncedRecently.length
 
   if (total === 0) {
     return (
@@ -92,6 +99,28 @@ function Attention({
         >
           {recentRejections.map((r) => (
             <RejectionRow key={r.id} rejection={r} />
+          ))}
+        </AttentionCard>
+      )}
+
+      {orphanedScopes.length > 0 && (
+        <AttentionCard
+          icon={FolderSimpleDashed}
+          tone="warning"
+          title={ORPHANED_TITLE}
+          description={ORPHANED_DESCRIPTION}
+          footer={<FooterLink href={permissionsHref}>権限の画面で対応する</FooterLink>}
+        >
+          {orphanedScopes.map((o) => (
+            <li key={o.scopeId} className="flex items-center gap-3 px-5 py-2.5">
+              <div className="min-w-0 flex-1">
+                <div className="truncate font-mono text-sm">{o.path}</div>
+                <div className="truncate text-xs text-muted-foreground">ルール：{SUMMARY_LABELS[o.summary]}</div>
+              </div>
+              <time className="shrink-0 text-xs text-muted-foreground" dateTime={o.since} title={formatDateTime(o.since)}>
+                {formatRelative(o.since)}から
+              </time>
+            </li>
           ))}
         </AttentionCard>
       )}

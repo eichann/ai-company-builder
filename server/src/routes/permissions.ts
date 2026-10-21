@@ -9,6 +9,10 @@
  *   GET /me/write-access    any member: where they may write (for the desktop
  *                           app's AI guard; ETag / If-None-Match → 304)
  *
+ * /overview (attention.orphanedScopes) and /permissions (orphanedScopes) list
+ * scopes with rules whose folder no longer exists on the shared branch
+ * (lib/orphaned-scopes.ts).
+ *
  * Department managers are in routes/departments.ts (/:id/managers).
  * Semantics of scopes and rules: lib/permissions.ts. Nothing here enforces
  * anything — Phase 1 only stores and exposes the model.
@@ -30,6 +34,7 @@ import {
   type ScopeRule,
 } from '../lib/permissions'
 import { listRecentPushRejections } from '../lib/push-rejections'
+import { findOrphanedScopes } from '../lib/orphaned-scopes'
 
 export const permissionsRoute = new Hono()
 
@@ -67,6 +72,7 @@ permissionsRoute.get('/overview', async (c) => {
     .get(companyId) as { n: number }).n
   const activity = getClientActivityForCompany(companyId)
   const rejections = listRecentPushRejections(companyId, 20)
+  const orphaned = await findOrphanedScopes(companyId)
   const users = getUsersByIds([...new Set([...memberships.map(m => m.user_id), ...rejections.map(r => r.userId)])])
 
   const members: OverviewMember[] = memberships.map(m => {
@@ -98,6 +104,15 @@ permissionsRoute.get('/overview', async (c) => {
           marker: r.marker,
           paths: r.paths,
           createdAt: r.createdAt,
+        })),
+        // Details (who the rules name) are on GET /permissions.
+        orphanedScopes: orphaned.map(o => ({
+          scopeId: o.scope.id,
+          path: o.scope.path,
+          kind: o.scope.kind,
+          ruleCount: o.scope.rules.length,
+          summary: summarizeRules(o.scope.rules),
+          since: o.since,
         })),
       },
     },
@@ -148,9 +163,23 @@ permissionsRoute.get('/permissions', async (c) => {
     canWrite: r.canWrite,
   })
 
+  // Rules whose folder is gone from the shared branch (renamed or removed by a
+  // sync push): see lib/orphaned-scopes.ts.
+  const visibleIds = new Set(visible.map(s => s.id))
+  const orphaned = (await findOrphanedScopes(companyId)).filter(o => visibleIds.has(o.scope.id))
+
   return c.json({
     success: true,
     data: {
+      orphanedScopes: orphaned.map(o => ({
+        scopeId: o.scope.id,
+        path: o.scope.path,
+        kind: o.scope.kind,
+        departmentId: o.scope.departmentId,
+        rules: o.scope.rules.map(serialize),
+        summary: summarizeRules(o.scope.rules),
+        since: o.since,
+      })),
       scopes: visible.map(s => ({
         id: s.id,
         path: s.path,
