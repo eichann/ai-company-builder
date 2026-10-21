@@ -24,7 +24,9 @@ require('node:readline').createInterface({input:process.stdin}).on('line',line=>
   const pool = new VoiceHelperPool(cli)
   try {
     pool.warmUp(); pool.warmUp()
-    for(let i=0;i<100 && !existsSync(ready);i++) await delay(20)
+    // Launching a process can take seconds on a loaded machine (that is what
+    // HELPER_TIMEOUT_MS is about); 2 s flaked with the whole suite running.
+    for(let i=0;i<500 && !existsSync(ready);i++) await delay(20)
     assert.ok(existsSync(ready))
     assert.equal(existsSync(started),false)
     const events: string[] = []
