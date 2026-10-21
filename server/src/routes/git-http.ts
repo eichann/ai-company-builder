@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
+import { observeRejectedPush } from '../lib/push-rejections'
 
 export const gitHttpRoute = new Hono()
 
@@ -461,6 +462,10 @@ function trackActivity(
       onClose: (code, body) => {
         if (code === 0 && body && receivePackSucceeded(body)) {
           recordClientActivity({ userId, companyId, kind: 'push', version, platform })
+        } else {
+          // Rejected (or unproven): record any pre-receive hook sections it
+          // printed. Deferred and non-throwing — see lib/push-rejections.ts.
+          observeRejectedPush(companyId, userId, body)
         }
       },
     }

@@ -16,6 +16,7 @@ import { syncRoute } from './routes/sync'
 import { gitRoute, configureAllBareRepos } from './routes/git'
 import { gitHttpRoute } from './routes/git-http'
 import { invitationsRoute } from './routes/invitations'
+import { permissionsRoute } from './routes/permissions'
 import { clientActivityMiddleware } from './lib/client-activity-middleware'
 
 // Initialize database
@@ -154,6 +155,7 @@ app.route('/api/me', meRoute)
 app.route('/api/users/me/ssh-keys', sshKeysRoute)
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
+app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/sync', syncRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)

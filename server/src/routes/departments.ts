@@ -3,10 +3,17 @@ import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, readdirSync, rmSync, statSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { db, generateId, now } from '../db'
-import { getUserFromRequest } from '../lib/auth'
+import { getUserFromRequest, getUsersByIds } from '../lib/auth'
+import {
+  deleteDepartmentScopes,
+  ensureDepartmentScope,
+  listDepartmentManagerIds,
+  moveScopeSubtree,
+  replaceDepartmentManagers,
+  syncCompanyScopes,
+} from '../lib/permission-store'
 import type {
   Department,
-  DepartmentWithChildren,
   CreateDepartmentInput,
   UpdateDepartmentInput,
   ReorderDepartmentItem,
@@ -346,6 +353,8 @@ departmentsRoute.post('/', async (c) => {
       timestamp,
       user.id
     )
+    // The department's permission scope (no rules: inherits from the company)
+    ensureDepartmentScope(db, companyId, id, body.folder.trim(), user.id)
 
     const department = db.prepare('SELECT * FROM departments WHERE id = ?').get(id) as Record<string, unknown>
 
@@ -457,9 +466,17 @@ departmentsRoute.put('/:id', async (c) => {
       values.push(now())
       values.push(deptId)
 
-      db.prepare(`
-        UPDATE departments SET ${updates.join(', ')} WHERE id = ?
-      `).run(...values)
+      db.transaction(() => {
+        db.prepare(`
+          UPDATE departments SET ${updates.join(', ')} WHERE id = ?
+        `).run(...values)
+        // Folder renamed: the department's scope and every folder scope
+        // under it move with it (rules stay attached).
+        if (body.folder !== undefined && body.folder.trim() !== oldFolder) {
+          moveScopeSubtree(db, companyId, oldFolder, body.folder.trim())
+          ensureDepartmentScope(db, companyId, deptId, body.folder.trim(), user.id)
+        }
+      })()
     }
 
     const department = db.prepare('SELECT * FROM departments WHERE id = ?').get(deptId) as Record<string, unknown>
@@ -529,8 +546,11 @@ departmentsRoute.delete('/:id', async (c) => {
       commitAndPush(workDir, `Delete department: ${existing.name} (${folder})`)
     }
 
-    // Remove from DB
-    db.prepare('DELETE FROM departments WHERE id = ?').run(deptId)
+    // Remove from DB, with the department's scopes, their rules and its managers
+    db.transaction(() => {
+      deleteDepartmentScopes(db, companyId, deptId, folder)
+      db.prepare('DELETE FROM departments WHERE id = ?').run(deptId)
+    })()
 
     return c.json({
       success: true,
@@ -594,7 +614,7 @@ departmentsRoute.get('/:id/stats', async (c) => {
         exists: true,
       },
     })
-  } catch (error) {
+  } catch {
     return c.json({
       success: true,
       data: { files: 0, folders: 0, exists: false },
@@ -714,6 +734,9 @@ departmentsRoute.post('/sync', async (c) => {
       }
     }
 
+    // Departments added/removed above get / lose their permission scopes
+    syncCompanyScopes(db, companyId)
+
     return c.json({
       success: true,
       message: `Synced: ${added} added, ${removed} removed`,
@@ -726,4 +749,96 @@ departmentsRoute.post('/sync', async (c) => {
       error: `Failed to sync: ${error instanceof Error ? error.message : 'Unknown error'}`,
     }, 500)
   }
+})
+
+// ============================================================================
+// Department managers (部署の責任者)
+//
+// Owner/admin assign them per department. In Phase 1 the assignment is only
+// stored and exposed; being a manager grants no file access (see
+// lib/permissions.ts).
+// ============================================================================
+
+function departmentInCompany(deptId: string, companyId: string): boolean {
+  return !!db.prepare('SELECT 1 FROM departments WHERE id = ? AND company_id = ?').get(deptId, companyId)
+}
+
+function managerList(deptId: string): Array<{ userId: string; name: string | null; email: string | null }> {
+  const ids = listDepartmentManagerIds(db, deptId)
+  const users = getUsersByIds(ids)
+  return ids.map(id => ({ userId: id, name: users.get(id)?.name ?? null, email: users.get(id)?.email ?? null }))
+}
+
+// GET /api/companies/:companyId/departments/:id/managers - any member (read-only)
+departmentsRoute.get('/:id/managers', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const companyId = c.req.param('companyId')
+  const deptId = c.req.param('id')
+  if (!companyId || !deptId) {
+    return c.json({ error: 'Company ID and Department ID are required' }, 400)
+  }
+
+  const membership = getUserMembership(user.id, companyId)
+  if (!membership) {
+    return c.json({ error: 'Company not found or access denied' }, 404)
+  }
+  if (!departmentInCompany(deptId, companyId)) {
+    return c.json({ error: 'Department not found' }, 404)
+  }
+
+  return c.json({ success: true, data: { managers: managerList(deptId) } })
+})
+
+export const MAX_MANAGERS_PER_DEPARTMENT = 50
+
+// PUT /api/companies/:companyId/departments/:id/managers - owner/admin; replaces the set
+departmentsRoute.put('/:id/managers', async (c) => {
+  const user = await getUserFromRequest(c.req.raw)
+  if (!user) {
+    return c.json({ error: 'Unauthorized' }, 401)
+  }
+
+  const companyId = c.req.param('companyId')
+  const deptId = c.req.param('id')
+  if (!companyId || !deptId) {
+    return c.json({ error: 'Company ID and Department ID are required' }, 400)
+  }
+
+  const membership = getUserMembership(user.id, companyId)
+  if (!membership) {
+    return c.json({ error: 'Company not found or access denied' }, 404)
+  }
+  if (!canEditDepartments(membership.role)) {
+    return c.json({ error: 'Only owners and admins can assign department managers' }, 403)
+  }
+  if (!departmentInCompany(deptId, companyId)) {
+    return c.json({ error: 'Department not found' }, 404)
+  }
+
+  let body: unknown
+  try {
+    body = await c.req.json()
+  } catch {
+    return c.json({ error: 'Invalid JSON body' }, 400)
+  }
+  const userIds = (body as { userIds?: unknown } | null)?.userIds
+  if (!Array.isArray(userIds) || !userIds.every(id => typeof id === 'string' && id.length > 0)) {
+    return c.json({ error: 'userIds must be an array of user IDs' }, 400)
+  }
+  const unique = [...new Set(userIds as string[])]
+  if (unique.length > MAX_MANAGERS_PER_DEPARTMENT) {
+    return c.json({ error: `A department can have at most ${MAX_MANAGERS_PER_DEPARTMENT} managers` }, 400)
+  }
+  const notMembers = unique.filter(id => !getUserMembership(id, companyId))
+  if (notMembers.length > 0) {
+    return c.json({ error: `Not members of this company: ${notMembers.join(', ')}` }, 400)
+  }
+
+  replaceDepartmentManagers(db, deptId, unique, user.id)
+
+  return c.json({ success: true, data: { managers: managerList(deptId) } })
 })
