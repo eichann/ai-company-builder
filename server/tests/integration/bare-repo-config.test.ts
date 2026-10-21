@@ -69,6 +69,12 @@ describe('configureBareRepo', () => {
     expect(git(['-C', bareRepo, 'config', 'receive.denyDeletes']).trim()).toBe('true')
   })
 
+  it('enables partial clone (filter + lazy fetch of reachable objects), nothing wider', () => {
+    expect(git(['-C', bareRepo, 'config', 'uploadpack.allowFilter']).trim()).toBe('true')
+    expect(git(['-C', bareRepo, 'config', 'uploadpack.allowReachableSHA1InWant']).trim()).toBe('true')
+    expect(() => git(['-C', bareRepo, 'config', 'uploadpack.allowAnySHA1InWant'])).toThrow()
+  })
+
   it('installs an executable pre-receive hook', () => {
     const hook = join(bareRepo, 'hooks', 'pre-receive')
     expect(existsSync(hook)).toBe(true)

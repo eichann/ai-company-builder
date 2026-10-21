@@ -38,6 +38,9 @@ import { createConfiguredGit } from '../../electron/sync/git-factory'
 import { createMessageBoxSyncDialog, type MessageBoxHost, type SyncMessageBoxOptions } from '../../electron/sync/message-box-dialog'
 import { createFetchSyncServerApi } from '../../electron/sync/server-api'
 import { renderPreReceiveHook } from '../../../server/src/lib/git-server/hook'
+import { BARE_REPO_CONFIG } from '../../../server/src/lib/git-server/repo-config'
+import { checkoutSelectedDepartments } from '../../electron/sync/first-setup'
+import { readSparseConfig, setSparseExclusions, type SparseExclusionsResult } from '../../electron/sync/sparse'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const HOOK_PATH = path.resolve(HERE, '../../../server/src/templates/pre-receive-hook.sh')
@@ -69,6 +72,13 @@ export const FIXED_DATE = '2026-01-01T00:00:00+0000'
 /** A sync that takes longer than this is reported as a hang. */
 export const SYNC_TIMEOUT_MS = Number(process.env.SYNC_HARNESS_TIMEOUT_MS) || 120_000
 const VERBOSE = !!process.env.SYNC_HARNESS_VERBOSE
+/**
+ * For the harness's own reads in a member's clone: never download. In a
+ * partial clone git would otherwise fetch a missing blob from the server to
+ * answer, which changes what the member has (and fails while offline).
+ * Never set for the git that sync itself runs.
+ */
+export const NO_LAZY_FETCH = { GIT_NO_LAZY_FETCH: '1' } as const
 
 export type Role = 'owner' | 'admin' | 'member'
 
@@ -260,9 +270,10 @@ export class World {
     ].join('\n'))
     fs.mkdirSync(path.dirname(this.bare), { recursive: true })
     this.git(this.root, ['init', '-q', '--bare', '--initial-branch=main', this.bare])
-    // configureBareRepo (server/src/routes/git.ts), minus http.receivepack.
-    this.git(this.bare, ['config', 'receive.denyNonFastForwards', 'true'])
-    this.git(this.bare, ['config', 'receive.denyDeletes', 'true'])
+    // configureBareRepo's settings (server/src/lib/git-server/repo-config.ts):
+    // force-push / deletion protection, and partial clone for the members
+    // created with addPartialMember (http.receivepack is set but unused).
+    for (const [key, value] of BARE_REPO_CONFIG) this.git(this.bare, ['config', key, value])
 
     const seedDir = path.join(this.root, 'seed')
     this.git(this.root, ['clone', '-q', this.bare, seedDir])
@@ -321,6 +332,19 @@ export class World {
     return m
   }
 
+  /**
+   * Add a member who set the company up for the first time with departments
+   * picked: a partial clone (blob:none) with the sparse cone set before the
+   * first checkout, by the app's own first-setup code. `departments` are the
+   * picked folders; the world's departments not picked are not downloaded.
+   */
+  async addPartialMember(name: string, options: { role?: Role; departments: string[] }): Promise<Member> {
+    const m = new Member(this, name, options.role ?? 'member', { partial: true })
+    await m.setupPartial(options.departments)
+    this.members.push(m)
+    return m
+  }
+
   /** Server main tree: path → blob id. */
   serverTree(): Map<string, string> {
     const out = this.git(this.bare, ['ls-tree', '-r', '-z', 'main'])
@@ -352,12 +376,14 @@ export class World {
 
   /** Text of every blob reachable from `revs` in the repository at `cwd`. */
   texts(cwd: string, revs: string[]): string[] {
-    const ids = this.git(cwd, ['rev-list', '--objects', ...revs]).split('\n').filter(Boolean).map(l => l.slice(0, 40))
-    const types = execFileSync('git', ['cat-file', '--batch-check'], { cwd, env: this.env(), input: ids.join('\n') + '\n', maxBuffer: 1 << 28 })
+    // --missing: a partial member's clone lacks blobs it never needed; they
+    // are not that member's work (its own versions are always local).
+    const ids = this.git(cwd, ['rev-list', '--objects', '--missing=allow-promisor', ...revs], NO_LAZY_FETCH).split('\n').filter(Boolean).map(l => l.slice(0, 40))
+    const types = execFileSync('git', ['cat-file', '--batch-check'], { cwd, env: this.env(NO_LAZY_FETCH), input: ids.join('\n') + '\n', maxBuffer: 1 << 28 })
       .toString().split('\n')
     const blobs = ids.filter((_, i) => types[i]?.split(' ')[1] === 'blob')
     if (blobs.length === 0) return []
-    const out = execFileSync('git', ['cat-file', '--batch'], { cwd, env: this.env(), input: blobs.join('\n') + '\n', maxBuffer: 1 << 30 })
+    const out = execFileSync('git', ['cat-file', '--batch'], { cwd, env: this.env(NO_LAZY_FETCH), input: blobs.join('\n') + '\n', maxBuffer: 1 << 30 })
     const texts: string[] = []
     let pos = 0
     for (let i = 0; i < blobs.length; i++) {
@@ -460,15 +486,31 @@ export class Member {
   /** Latest committed content of every path this member wrote. */
   readonly obligations = new Map<string, Obligation>()
 
-  constructor(world: World, name: string, role: Role) {
+  /** A partial clone (World.addPartialMember): only the picked departments were downloaded. */
+  readonly partial: boolean
+  /** createGit as sync gets it (the app's git configuration). */
+  readonly createGit: (repoPath: string) => SimpleGit
+
+  constructor(world: World, name: string, role: Role, options: { partial?: boolean } = {}) {
     this.world = world
     this.name = name
     this.role = role
+    this.partial = !!options.partial
     this.email = `${name}@example.com`
     this.dir = path.join(world.root, 'members', name)
     fs.mkdirSync(path.dirname(this.dir), { recursive: true })
-    world.git(world.root, ['clone', '-q', world.bare, this.dir])
-    this.remoteUrl = world.bare
+    if (this.partial) {
+      // What git:setupCompanyRemote does before the first setup: an empty
+      // repository with origin. A file:// URL, because git ignores --filter
+      // for a plain local path (it copies the object store instead).
+      fs.mkdirSync(this.dir)
+      this.remoteUrl = `file://${world.bare}`
+      world.git(this.dir, ['init', '-q', '-b', 'main'])
+      world.git(this.dir, ['remote', 'add', 'origin', this.remoteUrl])
+    } else {
+      world.git(world.root, ['clone', '-q', world.bare, this.dir])
+      this.remoteUrl = world.bare
+    }
     this.git(['config', 'user.name', name])
     this.git(['config', 'user.email', this.email])
 
@@ -484,8 +526,7 @@ export class Member {
       baseUrl: 'http://acb.test',
       cookies: ['better-auth.session_token=harness.sig'],
     }
-    const deps: SyncDeps = {
-      createGit: (repoPath: string) => this.wrapGit(createConfiguredGit(repoPath, {
+    this.createGit = (repoPath: string) => this.wrapGit(createConfiguredGit(repoPath, {
         binary: 'git',
         askPassPath: askPass,
         token: '',
@@ -498,8 +539,9 @@ export class Member {
           ACB_NODE: process.execPath,
           ACB_PUSH_POLICY: world.policyFile(`user-${name}`, role),
         },
-      })),
-      gitBinary: () => 'git',
+      }))
+    const deps: SyncDeps = {
+      createGit: this.createGit,
       dialog: createMessageBoxSyncDialog(host.messageBox),
       api: createFetchSyncServerApi({
         baseUrl: () => host.baseUrl,
@@ -516,6 +558,42 @@ export class Member {
       },
     }
     this.sync_ = world.impl(deps, host)
+  }
+
+  // --- partial clone ---------------------------------------------------------
+
+  /** The app's first setup with these departments picked (sync/first-setup.ts). */
+  async setupPartial(selected: string[]): Promise<void> {
+    await checkoutSelectedDepartments({
+      git: this.createGit(this.dir),
+      repoPath: this.dir,
+      branch: 'main',
+      departments: this.world.departments,
+      selected,
+      log: {
+        log: (...args: unknown[]) => this.capture('log', args),
+        warn: (...args: unknown[]) => this.capture('warn', args),
+        error: (...args: unknown[]) => this.capture('error', args),
+      },
+    })
+  }
+
+  /** Settings panel → 追加する: stop excluding a department (downloads it in a partial clone). */
+  addDepartment(folder: string): Promise<SparseExclusionsResult> {
+    const next = readSparseConfig(this.dir).excluded.filter(f => f !== folder)
+    return setSparseExclusions(this.createGit(this.dir), this.dir, next)
+  }
+
+  /** Settings panel → 除外する. */
+  removeDepartment(folder: string): Promise<SparseExclusionsResult> {
+    const next = [...new Set([...readSparseConfig(this.dir).excluded, folder])]
+    return setSparseExclusions(this.createGit(this.dir), this.dir, next)
+  }
+
+  /** Objects reachable from any ref that this clone has never downloaded. */
+  missingObjects(): Set<string> {
+    const out = this.world.git(this.dir, ['rev-list', '--objects', '--missing=print', '--all'], NO_LAZY_FETCH)
+    return new Set(out.split('\n').filter(l => l.startsWith('?')).map(l => l.slice(1).trim()))
   }
 
   // --- the fake server API ---------------------------------------------------
@@ -622,8 +700,9 @@ export class Member {
 
   // --- file operations (what a member does in the app) -----------------------
 
+  /** git in this member's clone, for the harness's own reads and setup (never downloads). */
   git(args: string[]): string {
-    return this.world.git(this.dir, args)
+    return this.world.git(this.dir, args, NO_LAZY_FETCH)
   }
 
   path(rel: string): string {
@@ -743,7 +822,7 @@ export class Member {
         const bytes = this.read(rel)
         let base: Buffer | null = null
         try {
-          base = execFileSync('git', ['cat-file', '-p', `HEAD:${rel}`], { cwd: this.dir, env: this.world.env(), stdio: 'pipe' })
+          base = execFileSync('git', ['cat-file', '-p', `HEAD:${rel}`], { cwd: this.dir, env: this.world.env(NO_LAZY_FETCH), stdio: 'pipe' })
         } catch { /* new file */ }
         snap.set(rel, { blob: blobId(bytes), bytes, added: addedLines(bytes, base) })
       } catch { /* deleted since */ }
@@ -756,7 +835,7 @@ export class Member {
     if (snap.size === 0) return
     const blobs = [...snap.values()].map(o => o.blob)
     const out = execFileSync('git', ['cat-file', '--batch-check'], {
-      cwd: this.dir, env: this.world.env(), input: blobs.join('\n') + '\n',
+      cwd: this.dir, env: this.world.env(NO_LAZY_FETCH), input: blobs.join('\n') + '\n',
     }).toString().split('\n')
     let i = 0
     for (const [rel, ob] of snap) {

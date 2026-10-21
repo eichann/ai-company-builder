@@ -30,7 +30,7 @@ export function assertNoLostWork(world: World, options: { allowUnpushed?: boolea
     // Mid-run (e.g. a member is offline) committed work may still be waiting
     // in the member's own history for the next push.
     const local = options.allowUnpushed
-      ? new Set(m.git(['rev-list', '--objects', 'HEAD']).split('\n').filter(Boolean).map(l => l.slice(0, 40)))
+      ? new Set(m.git(['rev-list', '--objects', '--missing=allow-promisor', 'HEAD']).split('\n').filter(Boolean).map(l => l.slice(0, 40)))
       : new Set<string>()
     let localTexts: Array<Set<string>> | null = null
     const mergedLocally = (added: string[]) => {

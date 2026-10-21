@@ -45,6 +45,12 @@ export function createConfiguredGit(repoPath: string, options: GitFactoryOptions
       // switches to chunked transfer above the 1MiB default, regardless of
       // which binary was resolved.
       'http.postBuffer=524288000',
+      // A pull that fast-forwards prints a diffstat, which reads the content
+      // of every file the teammates changed. In a partial clone (first setup
+      // with departments picked) those are blobs the member never downloaded:
+      // every sync silently fetched the teammates' changes in departments the
+      // member did not pick. Nothing reads the diffstat.
+      'merge.stat=false',
       ...(options.extraConfig ?? []),
     ],
     // Force fork+exec instead of posix_spawn to avoid EBADF in Electron

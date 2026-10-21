@@ -11,9 +11,15 @@ interface UseSparseCheckoutResult {
   excludedPaths: string[]
   /** Whether the initial check is still loading */
   isLoading: boolean
+  /**
+   * Why the last change could not be applied (null when it was). Adding a
+   * department that has to be downloaded while offline reports
+   * 「インターネットにつながっているときにダウンロードできます」; nothing changed.
+   */
+  error: string | null
   /** Stop syncing a folder locally (add to exclusion list) */
   removePath: (folderPath: string) => Promise<boolean>
-  /** Resume syncing a folder locally (remove from exclusion list) */
+  /** Resume syncing a folder locally (remove from exclusion list); downloads it if needed */
   addPath: (folderPath: string) => Promise<boolean>
   /** Clear all exclusions (full checkout) */
   disable: () => Promise<boolean>
@@ -29,6 +35,7 @@ interface UseSparseCheckoutResult {
 export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSparseCheckoutResult {
   const [excludedPaths, setExcludedPaths] = useState<string[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   const loadState = useCallback(async () => {
     if (!rootPath) {
@@ -51,46 +58,38 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     loadState()
   }, [loadState])
 
-  const removePath = useCallback(async (folderPath: string): Promise<boolean> => {
+  // Apply a new exclusion list. On failure the main process has left the
+  // repository as it was; reload so the panel shows what is really on disk.
+  const apply = useCallback(async (next: string[]): Promise<boolean> => {
     if (!rootPath) return false
+    setError(null)
     try {
-      const next = [...new Set([...excludedPaths, folderPath])]
       const result = await window.electronAPI.sparseSetExclusions(rootPath, next)
-      if (!result.success) return false
+      if (!result.success) {
+        setError(result.error || '変更できませんでした')
+        await loadState()
+        return false
+      }
       setExcludedPaths(result.excluded ?? next)
       return true
     } catch (err) {
-      console.error('Failed to exclude folder:', err)
+      console.error('Failed to update sparse checkout:', err)
+      setError(err instanceof Error ? err.message : '変更できませんでした')
       return false
     }
-  }, [rootPath, excludedPaths])
+  }, [rootPath, loadState])
 
-  const addPath = useCallback(async (folderPath: string): Promise<boolean> => {
-    if (!rootPath) return false
-    try {
-      const next = excludedPaths.filter(p => p !== folderPath)
-      const result = await window.electronAPI.sparseSetExclusions(rootPath, next)
-      if (!result.success) return false
-      setExcludedPaths(result.excluded ?? next)
-      return true
-    } catch (err) {
-      console.error('Failed to re-include folder:', err)
-      return false
-    }
-  }, [rootPath, excludedPaths])
+  const removePath = useCallback(
+    (folderPath: string) => apply([...new Set([...excludedPaths, folderPath])]),
+    [apply, excludedPaths],
+  )
 
-  const disable = useCallback(async (): Promise<boolean> => {
-    if (!rootPath) return false
-    try {
-      const result = await window.electronAPI.sparseSetExclusions(rootPath, [])
-      if (!result.success) return false
-      setExcludedPaths([])
-      return true
-    } catch (err) {
-      console.error('Failed to clear sparse exclusions:', err)
-      return false
-    }
-  }, [rootPath])
+  const addPath = useCallback(
+    (folderPath: string) => apply(excludedPaths.filter(p => p !== folderPath)),
+    [apply, excludedPaths],
+  )
+
+  const disable = useCallback(() => apply([]), [apply])
 
   const isCheckedOut = useCallback((folderPath: string): boolean => {
     return !excludedPaths.includes(folderPath)
@@ -100,6 +99,7 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     enabled: excludedPaths.length > 0,
     excludedPaths,
     isLoading,
+    error,
     removePath,
     addPath,
     disable,

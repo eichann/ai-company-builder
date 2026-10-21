@@ -27,7 +27,13 @@ interface ServerCompany {
   updatedAt: string
 }
 
-type ViewMode = 'list' | 'create' | 'clone' | 'openExisting' | 'setup'
+type ViewMode = 'list' | 'create' | 'clone' | 'openExisting' | 'departments' | 'setup'
+
+interface PickableDepartment {
+  id: string
+  name: string
+  folder: string
+}
 type SetupStep = 'folder' | 'git' | 'done'
 
 export function CompanySelector() {
@@ -45,11 +51,17 @@ export function CompanySelector() {
   // For cloning
   const [selectedCompany, setSelectedCompany] = useState<ServerCompany | null>(null)
   const [localPath, setLocalPath] = useState('')
-  const [isCloning, _setIsCloning] = useState(false)
+  const [isCloning] = useState(false)
 
   // For setup progress
   const [setupStep, setSetupStep] = useState<SetupStep>('folder')
   const [setupError, setSetupError] = useState<string | null>(null)
+
+  // Department picker (first setup of a new folder): only the picked
+  // departments are downloaded; the rest can be added later in settings.
+  const [availableDepartments, setAvailableDepartments] = useState<PickableDepartment[]>([])
+  const [pickedDepartments, setPickedDepartments] = useState<Set<string>>(new Set())
+  const [isPreparing, setIsPreparing] = useState(false)
 
   useEffect(() => {
     loadCompanies()
@@ -158,7 +170,44 @@ export function CompanySelector() {
     }
   }
 
-  async function handleSetupCompany() {
+  // 開始: a folder that is not a clone yet first asks which departments to
+  // download (before anything is downloaded). An existing clone, or a
+  // company without departments, goes straight to setup as before.
+  async function handleStartSetup() {
+    if (!selectedCompany || !localPath) return
+    const companyPath = `${localPath}/${selectedCompany.name}`
+    setIsPreparing(true)
+    setError(null)
+    try {
+      const alreadyCloned = await window.electronAPI.exists(`${companyPath}/.git`).catch(() => false)
+      if (!alreadyCloned) {
+        const result = await window.electronAPI.getDepartments(selectedCompany.id).catch(() => null)
+        const departments = (result?.success && result.data ? result.data : [])
+          .filter(d => d.folder && !d.folder.includes('/'))
+          .map(d => ({ id: d.id, name: d.name, folder: d.folder }))
+        if (departments.length > 0) {
+          setAvailableDepartments(departments)
+          setPickedDepartments(new Set())
+          setViewMode('departments')
+          return
+        }
+      }
+    } finally {
+      setIsPreparing(false)
+    }
+    await handleSetupCompany([])
+  }
+
+  function togglePickedDepartment(folder: string) {
+    setPickedDepartments(prev => {
+      const next = new Set(prev)
+      if (next.has(folder)) next.delete(folder)
+      else next.add(folder)
+      return next
+    })
+  }
+
+  async function handleSetupCompany(selectedFolders: string[]) {
     if (!selectedCompany || !localPath) return
 
     setViewMode('setup')
@@ -173,10 +222,21 @@ export function CompanySelector() {
       await window.electronAPI.createDirectory(companyPath)
 
       // Step 3: Setup git remote — this will clone if remote has content
+      // (only the picked departments, when some were picked)
       setSetupStep('git')
-      const gitResult = await window.electronAPI.gitSetupCompanyRemote(companyPath, selectedCompany.id)
+      const gitResult = await window.electronAPI.gitSetupCompanyRemote(
+        companyPath,
+        selectedCompany.id,
+        selectedFolders.length > 0 ? selectedFolders : undefined,
+      )
       if (!gitResult.success) {
         console.warn('Failed to setup git remote:', gitResult.error)
+        if (selectedFolders.length > 0) {
+          // The download itself failed: say so instead of opening an empty
+          // company. Starting again resumes the same setup.
+          setSetupError(gitResult.error || 'ダウンロードできませんでした。もう一度お試しください。')
+          return
+        }
         // Continue anyway - git setup is optional
       }
 
@@ -526,11 +586,11 @@ export function CompanySelector() {
                 戻る
               </button>
               <button
-                onClick={handleSetupCompany}
-                disabled={!localPath || isCloning}
+                onClick={handleStartSetup}
+                disabled={!localPath || isCloning || isPreparing}
                 className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 disabled:bg-accent/50 disabled:cursor-not-allowed text-white rounded-lg px-4 py-3 transition-colors"
               >
-                {isCloning ? (
+                {isCloning || isPreparing ? (
                   <SpinnerGap size={20} className="animate-spin" />
                 ) : (
                   <>
@@ -538,6 +598,68 @@ export function CompanySelector() {
                     <ArrowRight size={18} />
                   </>
                 )}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {viewMode === 'departments' && selectedCompany && (
+          <div className="space-y-6">
+            <div className="text-center">
+              <CloudArrowDown size={64} className="mx-auto mb-4 text-accent" weight="duotone" />
+              <h1 className="text-2xl font-bold text-text-primary mb-2">
+                所属する部署を選択
+              </h1>
+              <p className="text-text-secondary">
+                所属する部署を選んでください。他の部署はあとから設定でダウンロードできます
+              </p>
+            </div>
+
+            <div className="space-y-2 max-h-80 overflow-y-auto">
+              {availableDepartments.map((dept) => {
+                const picked = pickedDepartments.has(dept.folder)
+                return (
+                  <button
+                    key={dept.id}
+                    onClick={() => togglePickedDepartment(dept.folder)}
+                    aria-pressed={picked}
+                    className={`w-full flex items-center gap-3 p-3 rounded-lg border transition-colors text-left ${
+                      picked ? 'border-accent bg-accent/10' : 'border-border hover:border-accent/50'
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded border flex items-center justify-center flex-shrink-0 ${
+                      picked ? 'bg-accent border-accent' : 'border-border'
+                    }`}>
+                      {picked && <Check size={14} className="text-white" weight="bold" />}
+                    </div>
+                    <span className="flex-1 text-text-primary">{dept.name}</span>
+                    <span className="text-xs text-text-secondary font-mono">{dept.folder}/</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <p className="text-xs text-text-secondary">
+              全社で共有しているファイル（スキルなど）は常にダウンロードされます。部署を選ばない場合は、すべての部署をダウンロードします。
+            </p>
+
+            <div className="flex gap-3">
+              <button
+                onClick={() => setViewMode('openExisting')}
+                className="flex-1 flex items-center justify-center gap-2 bg-sidebar-bg hover:bg-activitybar-bg text-text-primary rounded-lg px-4 py-3 transition-colors"
+              >
+                戻る
+              </button>
+              <button
+                onClick={() => handleSetupCompany(
+                  availableDepartments.map(d => d.folder).filter(f => pickedDepartments.has(f)),
+                )}
+                className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white rounded-lg px-4 py-3 transition-colors"
+              >
+                {pickedDepartments.size > 0
+                  ? `選んだ部署をダウンロード（${pickedDepartments.size}）`
+                  : 'すべての部署をダウンロード'}
+                <ArrowRight size={18} />
               </button>
             </div>
           </div>

@@ -419,6 +419,12 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
               ) : (
                 /* Show synced/unsynced departments */
                 <div className="space-y-6">
+                  {sparseCheckout.error && (
+                    <div role="alert" className="text-xs bg-amber-950/40 border border-amber-800/40 rounded-lg p-3 text-amber-400">
+                      {sparseCheckout.error}
+                    </div>
+                  )}
+
                   {/* Synced departments */}
                   <div>
                     <h3 className="text-sm font-medium text-zinc-400 mb-3">ダウンロード済み</h3>
@@ -479,7 +485,10 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                                 className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
                               >
                                 {syncActionInProgress === dept.folder ? (
-                                  <SpinnerGap size={14} className="animate-spin" />
+                                  <>
+                                    <SpinnerGap size={14} className="animate-spin" />
+                                    ダウンロード中…
+                                  </>
                                 ) : (
                                   <>
                                     <CloudArrowDown size={14} />
@@ -513,6 +522,7 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
                   <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3">
                     部署を除外すると、そのフォルダのファイルがローカルから削除されます。
                     サーバーには残るので、いつでも再追加できます。
+                    未ダウンロードの部署は、追加したときにサーバーからダウンロードされます（インターネット接続が必要です）。
                   </div>
                 </div>
               )}
