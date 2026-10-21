@@ -12,9 +12,14 @@
 // member's git, so the hook sees the member's environment. The harness sets
 // ACB_PUSHER_ROLE / ACB_PUSHER_ID / ACB_PUSHER_EMAIL / ACB_NODE there, the
 // same variables server/src/routes/git-http.ts sets for git http-backend
-// from the authenticated session. That exercises the real hook with the real
-// role logic without a database, auth server or HTTP stack, keeps a sync at a
-// few hundred milliseconds, and needs nothing but git and node in CI. What it
+// from the authenticated session, plus ACB_PUSH_POLICY: a permission snapshot
+// file per member, in the format git-http writes per request (default: the
+// seeded `everyone: read + write`; World.setScopes changes it). The hook is
+// rendered by the server's own installer (lib/git-server/hook.ts), so pushes
+// run the real TypeScript push checker. That exercises the real hook with the
+// real role and write-permission logic without a database, auth server or
+// HTTP stack, keeps a sync at a few hundred milliseconds, and needs nothing
+// but git and node in CI. What it
 // does not cover is the HTTP layer itself (askpass, postBuffer, http-backend
 // streaming) — that belongs to the server's git-http tests.
 //
@@ -32,9 +37,26 @@ import type { SyncDeps } from '../../electron/sync/types'
 import { createConfiguredGit } from '../../electron/sync/git-factory'
 import { createMessageBoxSyncDialog, type MessageBoxHost, type SyncMessageBoxOptions } from '../../electron/sync/message-box-dialog'
 import { createFetchSyncServerApi } from '../../electron/sync/server-api'
+import { renderPreReceiveHook } from '../../../server/src/lib/git-server/hook'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const HOOK_PATH = path.resolve(HERE, '../../../server/src/templates/pre-receive-hook.sh')
+
+/** A permission scope as the server's snapshot carries it (server/src/lib/permissions.ts ScopeWithRules). */
+export interface HarnessScope {
+  id: string
+  path: string
+  kind: 'company' | 'department' | 'folder'
+  departmentId: string | null
+  repoId: string | null
+  rules: Array<{ id: string; subjectType: 'everyone' | 'role' | 'user'; subjectId: string | null; canRead: boolean; canWrite: boolean }>
+}
+
+/** What every company is seeded with: the company scope, everyone: read + write. */
+export const DEFAULT_SCOPES: HarnessScope[] = [{
+  id: 'scope-company', path: '', kind: 'company', departmentId: null, repoId: null,
+  rules: [{ id: 'rule-default', subjectType: 'everyone', subjectId: null, canRead: true, canWrite: true }],
+}]
 
 /**
  * A string the server's secret scan flags as an AWS access key id. Built at
@@ -175,6 +197,7 @@ export class World {
   readonly syncTimeoutMs: number
   readonly locale: string
   private readonly gitconfig: string
+  private scopes: HarnessScope[] = DEFAULT_SCOPES
 
   private constructor(root: string, options: WorldOptions) {
     this.root = root
@@ -259,8 +282,9 @@ export class World {
 
     // The hook is installed after the legacy seed, as the server does on
     // startup for repositories that predate it.
+    // Rendered like the server installs it (thin caller of the push checker).
     const hookDest = path.join(this.bare, 'hooks', 'pre-receive')
-    fs.copyFileSync(HOOK_PATH, hookDest)
+    fs.writeFileSync(hookDest, renderPreReceiveHook({ node: process.execPath }))
     fs.chmodSync(hookDest, 0o755)
 
     if (options.seed && Object.keys(options.seed).length > 0) {
@@ -272,6 +296,21 @@ export class World {
     fs.rmSync(seedDir, { recursive: true, force: true })
 
     for (const spec of options.members) this.members.push(new Member(this, spec.name, spec.role ?? 'member'))
+  }
+
+  /** The permission snapshot git-http would write for this member's pushes. */
+  policyFile(userId: string, role: Role): string {
+    const dir = path.join(this.root, 'policies')
+    fs.mkdirSync(dir, { recursive: true })
+    const file = path.join(dir, `${userId}.json`)
+    fs.writeFileSync(file, JSON.stringify({ version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.scopes }))
+    return file
+  }
+
+  /** Replace the company's permission scopes; takes effect at every member's next push. */
+  setScopes(scopes: HarnessScope[]): void {
+    this.scopes = scopes
+    for (const m of this.members) this.policyFile(`user-${m.name}`, m.role)
   }
 
   member(name: string): Member {
@@ -455,6 +494,7 @@ export class Member {
           ACB_PUSHER_ID: `user-${name}`,
           ACB_PUSHER_EMAIL: this.email,
           ACB_NODE: process.execPath,
+          ACB_PUSH_POLICY: world.policyFile(`user-${name}`, role),
         },
       })),
       gitBinary: () => 'git',

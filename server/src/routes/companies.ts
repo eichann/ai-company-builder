@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
-import { configureBareRepo } from './git'
+import { initBareRepo, internalGitEnv } from '../lib/git-server'
 import { getClientActivityForCompany } from '../lib/client-activity'
 import { parseClientVersion } from '../lib/client-version'
 import { ensureCompanyScope, removeManagerFromCompany, syncCompanyScopes } from '../lib/permission-store'
@@ -104,13 +104,9 @@ function createCompanyRepo(companyId: string): string {
   }
   const repoPath = join(REPOS_DIR, `${companyId}.git`)
   if (!existsSync(repoPath)) {
-    mkdirSync(repoPath, { recursive: true })
-    // Pin the branch name: the client hardcodes origin/main, so the repo must
-    // never default to the container git's default (master).
-    execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
-    // Same setup as the repo-creation endpoint in git.ts: HTTP push,
-    // force-push protection, pre-receive hook.
-    configureBareRepo(repoPath)
+    // Same setup as the repo-creation endpoint in git.ts: branch main, HTTP
+    // push, force-push protection, pre-receive hook.
+    initBareRepo(repoPath)
   }
   return repoPath
 }
@@ -160,7 +156,8 @@ function seedDepartmentFolders(companyId: string, bareRepoPath: string): void {
     '-c', 'user.email=system@ai-company-builder.local',
     'commit', '-m', 'Initialize default department folders',
   ], { stdio: 'pipe' })
-  execFileSync('git', ['-C', workDir, 'push', 'origin', 'main'], { stdio: 'pipe' })
+  // The server's own push: marked so the hook skips the write-permission check
+  execFileSync('git', ['-C', workDir, 'push', 'origin', 'main'], { stdio: 'pipe', env: internalGitEnv() })
 }
 
 // List companies for the current user

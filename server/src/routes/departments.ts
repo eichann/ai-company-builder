@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import { execFile } from 'child_process'
+import { internalGitEnv } from '../lib/git-server'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { readdir, rm, stat } from 'fs/promises'
 import { promisify } from 'util'
@@ -86,7 +87,10 @@ async function git(args: string[]): Promise<string> {
     encoding: 'utf8',
     // ls-tree -r of a large department folder
     maxBuffer: 512 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
+    // internalGitEnv: the pushes made here (department folder create /
+    // rename / delete) are the server's own — the hook skips the
+    // write-permission check for them; every content rule still applies.
+    env: { ...internalGitEnv(), GIT_TERMINAL_PROMPT: '0' },
   })
   return stdout
 }

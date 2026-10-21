@@ -7,6 +7,8 @@ import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
 import { observeRejectedPush } from '../lib/push-rejections'
+import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
+import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
 
 export const gitHttpRoute = new Hono()
 
@@ -96,11 +98,16 @@ async function handleGitCgi(
   pathInfo: string,
   method: string,
   observer?: CgiObserver,
+  pushCheck?: PreparedPushCheck,
 ): Promise<Response> {
   const queryString = new URL(c.req.raw.url).searchParams.toString()
 
+  const inherited = { ...process.env } as Record<string, string>
+  // ACB_PUSH_POLICY / ACB_INTERNAL_PUSH select how the hook checks write
+  // permission; only this request (below) may decide them.
+  scrubPushCheckEnv(inherited)
   const cgiEnv: Record<string, string> = {
-    ...process.env as Record<string, string>,
+    ...inherited,
     GIT_PROJECT_ROOT: REPOS_DIR,
     GIT_HTTP_EXPORT_ALL: '1',
     PATH_INFO: pathInfo,
@@ -123,6 +130,10 @@ async function handleGitCgi(
     // node. Hand it this server's own binary so the check does not depend on
     // PATH (it fails closed for those files when node cannot be run).
     ACB_NODE: process.execPath,
+    // receive-pack: the permission snapshot for the write check (see
+    // lib/push-check/policy.ts). Always present on a push, so a client push
+    // is never write-unchecked.
+    ...(pushCheck?.env ?? {}),
   }
 
   const contentType = c.req.header('Content-Type')
@@ -352,6 +363,7 @@ async function handleGitCgi(
     }
 
     cgi.on('close', (code) => {
+      pushCheck?.cleanup()
       notifyObserver(code)
       cgiClosed = true
       cgiExitCode = code
@@ -378,6 +390,7 @@ async function handleGitCgi(
     })
 
     cgi.on('error', (err) => {
+      pushCheck?.cleanup()
       if (!resolved) {
         resolved = true
         console.error(
@@ -437,6 +450,27 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
   }
 
   return { user, companyId, role }
+}
+
+// The permission snapshot the hook checks this push against: the pusher and
+// the company's scopes with their rules, read now (the same rows
+// resolveAccess reads). ensureCompanyScope materialises the default
+// `everyone: read + write` for a company that predates the permission tables
+// (startup seeding normally did it already). If anything here fails, the
+// snapshot is left out and the checker rejects the push (fail closed).
+function pushCheckFor(companyId: string, userId: string): PreparedPushCheck {
+  try {
+    ensureCompanyScope(db, companyId)
+    const role = getMemberRole(db, companyId, userId)
+    return preparePushCheck({
+      companyId,
+      pusher: { id: userId, role },
+      scopes: listScopesWithRules(db, companyId),
+    })
+  } catch (err) {
+    console.error('[git-http] cannot build the push permission snapshot:', err)
+    return { env: { ACB_PUSH_POLICY: '' }, cleanup: () => {} }
+  }
 }
 
 // Record which build the user ran (header or unknown) and, via the returned
@@ -507,7 +541,7 @@ gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
   const { user, companyId, role } = result
 
   const observer = trackActivity(c, user.id, companyId, 'push')
-  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST', observer)
+  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST', observer, pushCheckFor(companyId, user.id))
 })
 
 // GET /:repo/HEAD

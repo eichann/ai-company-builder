@@ -1,10 +1,15 @@
 import { Hono } from 'hono'
 import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, chmodSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync } from 'fs'
 import { rm } from 'fs/promises'
-import { join, dirname } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 import { getUserFromRequest } from '../lib/auth'
+import {
+  configureAllBareRepos as configureAllBareReposIn,
+  configureBareRepo,
+  initBareRepo,
+  installPreReceiveHook,
+} from '../lib/git-server'
 
 export const gitRoute = new Hono()
 
@@ -17,59 +22,13 @@ if (!existsSync(REPOS_DIR)) {
   mkdirSync(REPOS_DIR, { recursive: true })
 }
 
-// Path to the pre-receive hook template
-const HOOK_TEMPLATE_PATH = join(dirname(fileURLToPath(import.meta.url)), '..', 'templates', 'pre-receive-hook.sh')
-
-// Install pre-receive hook to a bare repository
-export function installPreReceiveHook(repoPath: string): boolean {
-  try {
-    const hooksDir = join(repoPath, 'hooks')
-    if (!existsSync(hooksDir)) {
-      mkdirSync(hooksDir, { recursive: true })
-    }
-    const hookDest = join(hooksDir, 'pre-receive')
-    const hookContent = readFileSync(HOOK_TEMPLATE_PATH, 'utf-8')
-    writeFileSync(hookDest, hookContent)
-    chmodSync(hookDest, 0o755)
-    return true
-  } catch (error) {
-    console.error(`Failed to install pre-receive hook to ${repoPath}:`, error)
-    return false
-  }
-}
-
-// Standard configuration for a company bare repository. Idempotent — applied
-// on creation and again at startup, so config and hook upgrades reach
-// repositories created by older server versions.
-export function configureBareRepo(repoPath: string): void {
-  // Enable HTTP push (required for git-http-backend)
-  execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
-  // The repo is the whole team's shared history: a force push or branch
-  // deletion from one member's broken clone must never be able to erase
-  // everyone else's work.
-  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyNonFastForwards', 'true'], { stdio: 'pipe' })
-  execFileSync('git', ['-C', repoPath, 'config', 'receive.denyDeletes', 'true'], { stdio: 'pipe' })
-  // Pre-receive hook: secret / gitlink / Windows-incompatible path checks,
-  // and owner/admin-only agent-execution config (.claude/settings.json, .mcp.json ...)
-  installPreReceiveHook(repoPath)
-}
+// Repository setup and the pre-receive hook live behind the git server
+// boundary (lib/git-server); re-exported for existing callers.
+export { configureBareRepo, installPreReceiveHook }
 
 // Bring every existing repository up to the current standard configuration.
 export function configureAllBareRepos(): { total: number; failed: number } {
-  let total = 0
-  let failed = 0
-  if (!existsSync(REPOS_DIR)) return { total, failed }
-  for (const name of readdirSync(REPOS_DIR)) {
-    if (!name.endsWith('.git')) continue
-    total++
-    try {
-      configureBareRepo(join(REPOS_DIR, name))
-    } catch (error) {
-      failed++
-      console.error(`Failed to configure repository ${name}:`, error)
-    }
-  }
-  return { total, failed }
+  return configureAllBareReposIn(REPOS_DIR)
 }
 
 // List all repositories
@@ -139,14 +98,9 @@ gitRoute.post('/repos', async (c) => {
       })
     }
 
-    // Create bare repository
-    mkdirSync(repoPath, { recursive: true })
-    // Pin the branch name: the client hardcodes origin/main, so the repo must
-    // never default to the container git's default (master).
-    execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
-
-    // Standard config (HTTP push, force-push protection) + pre-receive hook
-    configureBareRepo(repoPath)
+    // Bare repository on main + standard config (HTTP push, force-push
+    // protection) + pre-receive hook
+    initBareRepo(repoPath)
 
     return c.json({
       success: true,
