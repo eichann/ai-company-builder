@@ -53,6 +53,27 @@ jobs:
           xcrun swiftc -parse-as-library native/AudioLevel.swift tests/audio-level.test.swift -o "$RUNNER_TEMP/audio-level-test"
           "$RUNNER_TEMP/audio-level-test"
 
+  sync-harness:
+    name: Sync harness (macOS)
+    # git:sync (client/electron/sync/) driven end to end: several members per
+    # company against a real bare repository with the production pre-receive
+    # hook, scripted dialog answers, the characterization recording, and a
+    # seeded randomized soak. Separate from test-client so the two run in
+    # parallel. macOS for the same reasons as test-client (the client's main
+    # platform; /bin/sh is bash).
+    runs-on: macos-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: git --version
+      - run: npx tsx --test tests/sync/*.test.ts
+        working-directory: client
+        env:
+          SYNC_SOAK_SEEDS: '1,2,3'
+          SYNC_SOAK_MEMBERS: '3'
+          SYNC_SOAK_ROUNDS: '8'
+
   test-server:
     name: Server tests
     runs-on: ubuntu-latest

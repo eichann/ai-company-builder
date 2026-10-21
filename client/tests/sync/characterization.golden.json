@@ -1,0 +1,1709 @@
+{
+  "no-op and plain push/pull": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "営業部/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+        "営業部/a.md": "78981922613b2afb6025042ff6bd878ac1994e85"
+      },
+      "serverSubjects": [
+        "custom message",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "営業部/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "営業部/a.md": "78981922613b2afb6025042ff6bd878ac1994e85"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        },
+        "b": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "営業部/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "営業部/a.md": "78981922613b2afb6025042ff6bd878ac1994e85"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "conflicts: UU + DU + binary in Japanese paths": {
+    "steps": [
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "deletedFiles",
+            "answer": "sync-deletions",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "削除を含めて同期",
+                "削除を取り消して同期",
+                "キャンセル"
+              ],
+              "defaultId": 1,
+              "cancelId": 2,
+              "title": "ファイルの削除を検出",
+              "message": "1個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。",
+              "detail": "営業部/削除予定.md"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。3ファイルが競合しました（2件はサーバー版で上書き、1件はサーバー側で削除されていたため削除）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            "営業部/削除予定.md",
+            "営業部/図.png",
+            "営業部/提案書.md"
+          ],
+          "deletedConflictFiles": [
+            "営業部/削除予定.md"
+          ],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 3 files (round 1)",
+          "log: Git sync: Taking the server version of 2 file(s)...",
+          "log: Git sync: Following the server deletion of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "keep.md": "1611241a98628e52e3d990ba8d03c96c858e12f4",
+        "営業部/図.png": "fbd02d253b39858a32da15b5a8853bcfab770af1",
+        "営業部/提案書.md": "61780798228d17af2d34fce4cfbdf35556832472"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "keep.md": "1611241a98628e52e3d990ba8d03c96c858e12f4",
+            "営業部/図.png": "fbd02d253b39858a32da15b5a8853bcfab770af1",
+            "営業部/提案書.md": "61780798228d17af2d34fce4cfbdf35556832472"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  "営業部/削除予定.md",
+                  "営業部/図.png",
+                  "営業部/提案書.md"
+                ],
+                "deletedConflictFiles": [
+                  "営業部/削除予定.md"
+                ],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                "営業部/削除予定.md": "15c5bea829de61c12bf2c773a7c2861e59b19837",
+                "営業部/図.png": "777966071c63e9440ae14032ceeea48b1da232f1",
+                "営業部/提案書.md": "78981922613b2afb6025042ff6bd878ac1994e85"
+              }
+            }
+          ]
+        },
+        "b": {
+          "headIsServer": false,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "keep.md": "b68fde2a051d9af2fe3ff4c96c0898e5a3212e4d",
+            "営業部/図.png": "fbd02d253b39858a32da15b5a8853bcfab770af1",
+            "営業部/提案書.md": "61780798228d17af2d34fce4cfbdf35556832472"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "offline commits, PENDING_PUSH, multi-pick conflicts": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。",
+          "errorType": "push_failed",
+          "pushFailed": true,
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "warn: Git sync: Fetch failed (may be offline):",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "warn: Git sync: Pull failed but no rebase in progress:",
+          "log: Git sync: Pushing to origin...",
+          "error: Git sync: Push to main failed:",
+          "error: Git sync: Push to master also failed:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。",
+          "errorType": "push_failed",
+          "pushFailed": true,
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Found pending push, retrying...",
+          "warn: Git sync: Pending push retry failed, will try again later:",
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "warn: Git sync: Fetch failed (may be offline):",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "warn: Git sync: Pull failed but no rebase in progress:",
+          "log: Git sync: Pushing to origin...",
+          "error: Git sync: Push to main failed:",
+          "error: Git sync: Push to master also failed:"
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。2ファイルが競合しました（2件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            "f1.md",
+            "f2.md"
+          ],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Found pending push, retrying...",
+          "warn: Git sync: Pending push retry failed, will try again later:",
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 1 files (round 1)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Conflict detected in 1 files (round 2)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "a.md": "78981922613b2afb6025042ff6bd878ac1994e85",
+        "f1.md": "c9c6af7f78bc47490dbf3e822cf2f3c24d4b9061",
+        "f2.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+      },
+      "serverSubjects": [
+        "two",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "a.md": "78981922613b2afb6025042ff6bd878ac1994e85",
+            "f1.md": "c9c6af7f78bc47490dbf3e822cf2f3c24d4b9061",
+            "f2.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  "f1.md",
+                  "f2.md"
+                ],
+                "deletedConflictFiles": [],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                "f1.md": "da0f8ed91a8f2f0f067b3bdf26265d5ca48cf82c",
+                "f2.md": "c1827f07e114c20547dc6a7296588870a4b5b62c"
+              }
+            }
+          ]
+        },
+        "b": {
+          "headIsServer": false,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "f1.md": "c9c6af7f78bc47490dbf3e822cf2f3c24d4b9061",
+            "f2.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "race: teammate pushes between pull and push": {
+    "steps": [
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。",
+          "errorType": "push_failed",
+          "pushFailed": true,
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "error: Git sync: Push to main failed:",
+          "error: Git sync: Push to master also failed:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Found pending push, retrying...",
+          "warn: Git sync: Pending push retry failed, will try again later:",
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "a.md": "78981922613b2afb6025042ff6bd878ac1994e85",
+        "b.md": "61780798228d17af2d34fce4cfbdf35556832472"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "a.md": "78981922613b2afb6025042ff6bd878ac1994e85",
+            "b.md": "61780798228d17af2d34fce4cfbdf35556832472"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        },
+        "b": {
+          "headIsServer": false,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "b.md": "61780798228d17af2d34fce4cfbdf35556832472"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "nested repositories: shared keep / shared exclude / external cancel / external exclude / no window": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "sharedNestedRepo",
+            "answer": "keep-sharing",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                ".git を取り除いて共有を続ける（推奨）",
+                "同期対象から除外する",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 2,
+              "title": "共有中のフォルダに別のGit情報を検出",
+              "message": "「s1」の中に別のGit管理情報(.git)が見つかりました。",
+              "detail": "フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Removed inner .git of \"s1\" (user chose to keep sharing)",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": [
+            "s2"
+          ]
+        },
+        "dialogs": [
+          {
+            "kind": "sharedNestedRepo",
+            "answer": "exclude",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                ".git を取り除いて共有を続ける（推奨）",
+                "同期対象から除外する",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 2,
+              "title": "共有中のフォルダに別のGit情報を検出",
+              "message": "「s2」の中に別のGit管理情報(.git)が見つかりました。",
+              "detail": "フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Removed gitlink for nested repo \"s2\"",
+          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "同期を中止しました（「ext」は外部Gitリポジトリです）"
+        },
+        "dialogs": [
+          {
+            "kind": "externalNestedRepo",
+            "answer": "cancel",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "同期対象から除外して続行",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "外部Gitリポジトリを検出",
+              "message": "「ext」は別のGitリポジトリです。",
+              "detail": "このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": [
+            "ext"
+          ]
+        },
+        "dialogs": [
+          {
+            "kind": "externalNestedRepo",
+            "answer": "exclude",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "同期対象から除外して続行",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "外部Gitリポジトリを検出",
+              "message": "「ext」は別のGitリポジトリです。",
+              "detail": "このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            ".gitignore"
+          ],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/b/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": [
+            "ext-b"
+          ]
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 1 files (round 1)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
+        "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
+            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        },
+        "b": {
+          "headIsServer": true,
+          "status": "?? ext-b/\n",
+          "tree": {
+            ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
+            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  ".gitignore"
+                ],
+                "deletedConflictFiles": [],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                ".gitignore": "c6a9bccd881014550de3fbcf43b33e9abddcb76b"
+              }
+            }
+          ]
+        }
+      }
+    }
+  },
+  "deleted files: cancel / restore / sync; department folder restore": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "同期がキャンセルされました"
+        },
+        "dialogs": [
+          {
+            "kind": "deletedFiles",
+            "answer": "cancel",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "削除を含めて同期",
+                "削除を取り消して同期",
+                "キャンセル"
+              ],
+              "defaultId": 1,
+              "cancelId": 2,
+              "title": "ファイルの削除を検出",
+              "message": "1個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。",
+              "detail": "one.md"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "deletedFiles",
+            "answer": "restore",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "削除を含めて同期",
+                "削除を取り消して同期",
+                "キャンセル"
+              ],
+              "defaultId": 1,
+              "cancelId": 2,
+              "title": "ファイルの削除を検出",
+              "message": "1個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。",
+              "detail": "one.md"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Restoring 1 deleted files",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "warn: Git sync: Skipping invalid department folder: ../evil"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "deletedFiles",
+            "answer": "sync-deletions",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "削除を含めて同期",
+                "削除を取り消して同期",
+                "キャンセル"
+              ],
+              "defaultId": 1,
+              "cancelId": 2,
+              "title": "ファイルの削除を検出",
+              "message": "1個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。",
+              "detail": "one.md"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "warn: Git sync: Skipping invalid department folder: ../evil",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [
+            "営業部"
+          ],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "deletedFiles",
+            "answer": "sync-deletions",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "削除を含めて同期",
+                "削除を取り消して同期",
+                "キャンセル"
+              ],
+              "defaultId": 1,
+              "cancelId": 2,
+              "title": "ファイルの削除を検出",
+              "message": "2個のファイルが削除されています。\nこの削除は同期すると全メンバーに反映されます。",
+              "detail": "営業部/.gitkeep\n営業部/c.md"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Restoring deleted department folder: 営業部",
+          "warn: Git sync: Skipping invalid department folder: ../evil",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "営業部/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+        "営業部/c.md": "f2ad6c76f0115a6ba5b00456a849810e7ec0af20"
+      },
+      "serverSubjects": [
+        "Restore department folders: 営業部",
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "営業部/.gitkeep": "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391",
+            "営業部/c.md": "f2ad6c76f0115a6ba5b00456a849810e7ec0af20"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "protected config: cancel, restore, no window, admin, skill squash path": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "errorType": "protected_config",
+          "protectedFiles": [
+            ".mcp.json"
+          ],
+          "error": "同期を中止しました。\n\nこのファイルは管理者だけが変更できます。\nチャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n・.mcp.json\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。",
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": []
+        },
+        "dialogs": [
+          {
+            "kind": "protectedConfig",
+            "answer": "cancel",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "サーバーの状態に戻して同期する（推奨）",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "管理者だけが変更できるファイル",
+              "message": "このファイルは管理者だけが変更できます。",
+              "detail": "次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n.mcp.json\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!`…` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。管理者だけが変更できるファイル（1件）はサーバーの状態に戻しました。あなたが編集した版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "restoredProtectedFiles": [
+            ".mcp.json"
+          ],
+          "protectedBackupPath": "<ROOT>/members/a/.backups/<TS>_protected",
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>_protected",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "protectedConfig",
+            "answer": "restore",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "サーバーの状態に戻して同期する（推奨）",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "管理者だけが変更できるファイル",
+              "message": "このファイルは管理者だけが変更できます。",
+              "detail": "次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n.mcp.json\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!`…` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "errorType": "protected_config",
+          "protectedFiles": [
+            ".claude/settings.json"
+          ],
+          "error": "このファイルは管理者だけが変更できます。\nチャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n・.claude/settings.json\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。",
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。管理者だけが変更できるファイル（1件）はサーバーの状態に戻しました。あなたが編集した版は .backups/ に保存してあります。共有する変更は他にありませんでした。",
+          "restoredProtectedFiles": [
+            ".claude/settings.json"
+          ],
+          "protectedBackupPath": "<ROOT>/members/a/.backups/<TS>_protected",
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>_protected",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "protectedConfig",
+            "answer": "restore",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "サーバーの状態に戻して同期する（推奨）",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "管理者だけが変更できるファイル",
+              "message": "このファイルは管理者だけが変更できます。",
+              "detail": "次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n.claude/settings.json\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!`…` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "errorType": "protected_config",
+          "protectedFiles": [
+            ".claude/skills/s/SKILL.md"
+          ],
+          "error": "同期を中止しました。\n\nこのファイルは管理者だけが変更できます。\nチャットのAIが自動で実行する設定ファイル（または自動実行の設定を含むスキル）のため、会社のオーナー・管理者以外の変更は共有できません。\n\n・.claude/skills/s/SKILL.md\n\nもう一度同期ボタンを押すと、これらのファイルをサーバーの状態に戻して同期できます。配布が必要な場合は管理者に依頼してください。",
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": []
+        },
+        "dialogs": [
+          {
+            "kind": "protectedConfig",
+            "answer": "cancel",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "サーバーの状態に戻して同期する（推奨）",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "管理者だけが変更できるファイル",
+              "message": "このファイルは管理者だけが変更できます。",
+              "detail": "次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n.claude/skills/s/SKILL.md\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!`…` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。管理者だけが変更できる内容は最新の版には残っていなかったため、ファイルは戻さずにそのまま共有しました。",
+          "restoredProtectedFiles": [],
+          "hadConflicts": false,
+          "conflictFiles": [],
+          "deletedConflictFiles": [],
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [
+          {
+            "kind": "protectedConfig",
+            "answer": "restore",
+            "options": {
+              "type": "warning",
+              "buttons": [
+                "サーバーの状態に戻して同期する（推奨）",
+                "キャンセル"
+              ],
+              "defaultId": 0,
+              "cancelId": 1,
+              "title": "管理者だけが変更できるファイル",
+              "message": "このファイルは管理者だけが変更できます。",
+              "detail": "次のファイルは、チャットのAIが自動で実行する設定（または、自動実行の設定を含むスキル・エージェント・コマンド）です。会社のオーナー・管理者以外が変更した内容は共有できないため、同期が止まっています。\n\n.claude/skills/s/SKILL.md\n\n・「サーバーの状態に戻して同期する」: これらのファイルだけをサーバーの状態に戻し（サーバーに無いファイルはこのPCから取り除き）、その他の変更はそのまま共有します。あなたが編集した版は .backups/ に保存されます\n・「キャンセル」: 何も変更せずに同期を中止します（変更はこのPCに残ります）\n\nスキル等は、自動実行の設定（hooks、mcpServers、!`…` など）を取り除いてから同期すれば、そのまま共有できます。配布が必要な場合は、管理者に依頼してください。"
+            }
+          }
+        ],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — protected config changed by a non-admin:"
+        ]
+      },
+      {
+        "member": "admin",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".claude/skills/s/SKILL.md": "3e06c48bea88c6289644f2475e242fa08c590ff1",
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        ".mcp.json": "4ebe950097764cfd6c41c87a6aeb730ac50ed545",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "n.md": "8ba3a16384aacc37d01564b28401755ce8053f51"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".claude/skills/s/SKILL.md": "3e06c48bea88c6289644f2475e242fa08c590ff1",
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            ".mcp.json": "4ebe950097764cfd6c41c87a6aeb730ac50ed545",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "n.md": "8ba3a16384aacc37d01564b28401755ce8053f51"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "protected_config",
+                "protectedFiles": [
+                  ".mcp.json"
+                ],
+                "backedUpFiles": [
+                  ".mcp.json"
+                ],
+                "restoredFiles": [
+                  ".mcp.json"
+                ],
+                "removedFiles": [],
+                "localHead": "<HASH>"
+              },
+              "files": {
+                ".mcp.json": "c0c1bfafb32310f0585d0c510ff440ab0259a5c1"
+              }
+            },
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "protected_config",
+                "protectedFiles": [
+                  ".claude/settings.json"
+                ],
+                "backedUpFiles": [
+                  ".claude/settings.json"
+                ],
+                "restoredFiles": [],
+                "removedFiles": [
+                  ".claude/settings.json"
+                ],
+                "localHead": "<HASH>"
+              },
+              "files": {
+                ".claude/settings.json": "0967ef424bce6791893e9a57bb952f80fd536e93"
+              }
+            }
+          ]
+        },
+        "admin": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".claude/skills/s/SKILL.md": "3e06c48bea88c6289644f2475e242fa08c590ff1",
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            ".mcp.json": "4ebe950097764cfd6c41c87a6aeb730ac50ed545",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "n.md": "8ba3a16384aacc37d01564b28401755ce8053f51"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "admin",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "personal path and secret rejection": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました。個人用フォルダ（.personal）のファイル1件は共有できないため、共有対象から外しました（このPCには残っています）。",
+          "untrackedPersonalFiles": [
+            "d/.personal/m.md"
+          ],
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — .personal/ content:"
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": false,
+          "error": "シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n- s.md (AWS Access Key ID)",
+          "secretDetected": true
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "d/r.md": "4286f428e3b19fe84de503916ce0e7dc8deefea1",
+        "s.md": "286c5f5776916d7d7d5849988ca9d83e722cf9c2"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "d/r.md": "4286f428e3b19fe84de503916ce0e7dc8deefea1",
+            "s.md": "286c5f5776916d7d7d5849988ca9d83e722cf9c2"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "stale rebase and merge recovery": {
+    "steps": [
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            "x.md"
+          ],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected stale rebase, aborting...",
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 1 files (round 1)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            "x.md"
+          ],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/a/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected stale MERGE_HEAD, aborting...",
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 1 files (round 1)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "x.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "x.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  "x.md"
+                ],
+                "deletedConflictFiles": [],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                "x.md": "78981922613b2afb6025042ff6bd878ac1994e85"
+              }
+            },
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  "x.md"
+                ],
+                "deletedConflictFiles": [],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                "x.md": "c1827f07e114c20547dc6a7296588870a4b5b62c"
+              }
+            }
+          ]
+        },
+        "b": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "x.md": "e6bfff5c1d0f0ecd501552b43a1e13d8008abc31"
+          },
+          "pendingPush": false,
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": []
+        }
+      }
+    }
+  },
+  "gitignore essentials, large files, sparse exclusions": {
+    "steps": [
+      {
+        "member": "a",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました（1個の大容量ファイルを同期対象外にしました）",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [
+            "media/huge.mov"
+          ],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Ignored 1 large file(s):",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期完了。1ファイルが競合しました（1件はサーバー版で上書き）。競合前のローカル版は .backups/ に保存してあります。その他の変更は正常に反映されました。",
+          "hadConflicts": true,
+          "conflictFiles": [
+            ".gitignore"
+          ],
+          "deletedConflictFiles": [],
+          "backupPath": "<ROOT>/members/b/.backups/<TS>",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase...",
+          "log: Git sync: Pull stopped mid-rebase, resolving conflicts...",
+          "log: Git sync: Conflict detected in 1 files (round 1)",
+          "log: Git sync: Taking the server version of 1 file(s)...",
+          "log: Git sync: Continuing rebase...",
+          "log: Git sync: Pushing to origin..."
+        ]
+      },
+      {
+        "member": "b",
+        "result": {
+          "success": true,
+          "message": "同期が完了しました",
+          "restoredFolders": [],
+          "ignoredLargeFiles": [],
+          "excludedNestedRepos": []
+        },
+        "dialogs": [],
+        "logs": [
+          "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
+          "log: Git sync: Fetching from origin...",
+          "log: Git sync: Reset legacy sparse checkout to full checkout (no config found)",
+          "log: Git sync: Local commit hash: <HASH>",
+          "log: Git sync: Pulling with rebase..."
+        ]
+      }
+    ],
+    "final": {
+      "serverTree": {
+        ".gitignore": "b504aefa5bb1d48e95c51f7178cb95881cca98a9",
+        "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+        "media/small.txt": "b4785957bc986dc39c629de9fac9df46972c00fc",
+        "営業部/y.md": "975fbec8256d3e8a3797e7a3611380f27c49f4ac",
+        "開発部/x.md": "587be6b4c3f93f93c489c0111bba5596147a26cb"
+      },
+      "serverSubjects": [
+        "Sync from AI Company Builder",
+        "seed content",
+        "seed"
+      ],
+      "members": {
+        "a": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "b504aefa5bb1d48e95c51f7178cb95881cca98a9",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "media/small.txt": "b4785957bc986dc39c629de9fac9df46972c00fc",
+            "営業部/y.md": "975fbec8256d3e8a3797e7a3611380f27c49f4ac",
+            "開発部/x.md": "587be6b4c3f93f93c489c0111bba5596147a26cb"
+          },
+          "pendingPush": false,
+          "gitignore": "custom/\n\n.backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: Large files (>100MB)\nmedia/huge.mov\n",
+          "userName": "a",
+          "sparse": "(not sparse)",
+          "backups": []
+        },
+        "b": {
+          "headIsServer": true,
+          "status": "",
+          "tree": {
+            ".gitignore": "b504aefa5bb1d48e95c51f7178cb95881cca98a9",
+            "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
+            "media/small.txt": "b4785957bc986dc39c629de9fac9df46972c00fc",
+            "営業部/y.md": "975fbec8256d3e8a3797e7a3611380f27c49f4ac",
+            "開発部/x.md": "587be6b4c3f93f93c489c0111bba5596147a26cb"
+          },
+          "pendingPush": false,
+          "gitignore": "custom/\n\n.backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: Large files (>100MB)\nmedia/huge.mov\n",
+          "userName": "b",
+          "sparse": "(not sparse)",
+          "backups": [
+            {
+              "metadata": {
+                "timestamp": "<TS>",
+                "reason": "conflict",
+                "conflictFiles": [
+                  ".gitignore"
+                ],
+                "deletedConflictFiles": [],
+                "message": "Sync from AI Company Builder"
+              },
+              "files": {
+                ".gitignore": "d98ecf56cb093e803de611b89892f748eed354a3"
+              }
+            }
+          ]
+        }
+      }
+    }
+  }
+}
