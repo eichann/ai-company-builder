@@ -1529,6 +1529,9 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const handoffRequestRef = useRef<{ companyId: string; sessionId: string; provider: AuthMode } | null>(null)
   const companyIdRef = useRef(currentCompany?.id)
   companyIdRef.current = currentCompany?.id
+  // The company checkout root: the chat's write guard judges paths relative to it.
+  const companyRootRef = useRef(currentCompany?.rootPath)
+  companyRootRef.current = currentCompany?.rootPath
   // Transport (memoized - only recreated when server info changes)
   const transport = useMemo(() => {
     return new DefaultChatTransport({
@@ -1540,6 +1543,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           agentSession: agentSessionRef.current,
           workingDirectory: workingDirRef.current,
           companyId: companyIdRef.current,
+          companyRootPath: companyRootRef.current,
           activeDepartment: activeDepartmentRef.current || undefined,
           modelId: aiModelRef.current,
           effort: aiEffortRef.current,

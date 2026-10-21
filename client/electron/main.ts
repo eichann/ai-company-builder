@@ -43,6 +43,7 @@ import { ChatHistoryStore } from './chat-history-store'
 import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
+import { createWriteAccessStore } from './write-access-store'
 
 // Allowed directory roots for file system access control
 // Paths are added when the user selects a directory via dialog or sets up a company folder
@@ -474,6 +475,12 @@ app.whenReady().then(async () => {
       getShellEnv,
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
+      getWriteGuard: async (companyId, root) => {
+        const access = await writeAccessStore.refresh(companyId, { timeoutMs: 3000 })
+        if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
+        // getAccess reads the live cache, so a refresh during a long chat applies at once.
+        return { root, getAccess: () => writeAccessStore.get(companyId) }
+      },
       createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
       prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
       onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
@@ -1276,6 +1283,7 @@ ipcMain.handle('auth:signOut', async () => {
       },
     })
     authCookies = []
+    writeAccessStore.clear()
     return { success: true }
   } catch (error) {
     console.error('Sign out error:', error)
@@ -1818,8 +1826,29 @@ const gitSync = createGitSync({
   log: console,
 })
 
-ipcMain.handle('git:sync', (_, repoPath: string, companyId: string, commitMessage: string) =>
-  gitSync(repoPath, companyId, commitMessage))
+ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
+  const result = await gitSync(repoPath, companyId, commitMessage)
+  // Rules may have changed since the last look: refresh the chat guard / badges.
+  if (result.success && companyId) void writeAccessStore.refresh(companyId)
+  return result
+})
+
+// Per-folder write access of the signed-in member (shared/write-access.ts).
+// The renderer asks when it opens a company and gets writeAccess:changed
+// broadcasts after that; the chat refreshes it per turn, sync after success.
+const writeAccessStore = createWriteAccessStore({
+  baseUrl: getServerApiUrl,
+  cookies: () => authCookies,
+  onChange: (companyId, access) => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('writeAccess:changed', { companyId, access })
+  },
+})
+ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
+  if (typeof companyId !== 'string' || !companyId) return null
+  const cached = writeAccessStore.get(companyId)
+  if (cached && !refresh) return cached
+  return (await writeAccessStore.refresh(companyId)) ?? null
+})
 
 // Setup Git remote for a company
 ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: string, selectedPaths?: string[]) => {

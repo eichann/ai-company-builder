@@ -7,6 +7,7 @@ import crypto from 'crypto'
 import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
 import type { AgentConnection, AgentHostConfig } from './connection'
 import type { PermissionMode } from '../../shared/permission-mode'
+import { decideToolWrite } from '../write-guard'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -125,7 +126,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, writeGuard }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -153,6 +154,21 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               hookEventName: 'PreToolUse',
               permissionDecision: 'allow',
               updatedInput: { ...(input.tool_input ?? {}), run_in_background: false },
+            },
+          }
+        }
+        // Read-only folders (per-folder write rules): refuse before the tool
+        // runs, with a reason the model relays to the member instead of
+        // retrying. Unknown access never blocks (the server still checks).
+        const guarded = decideToolWrite(writeGuard, String(input.tool_name), input.tool_input, typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory)
+        if (guarded.deny) {
+          console.log(`[hooks] Blocked write to read-only folder: ${input.tool_name} ${guarded.path}`)
+          return {
+            continue: true,
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: guarded.message,
             },
           }
         }

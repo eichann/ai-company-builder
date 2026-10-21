@@ -20,6 +20,8 @@ import { getFileIcon, FolderIcon } from './FileIcons'
 import { isPerfCutEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { isReviewSidecarFile, detectReviewStatus, hasUnseenReviews } from './MarkdownReview'
+import { ReadOnlyBadge } from './ReadOnlyBadge'
+import { useWriteAccess } from '../../hooks/useWriteAccess'
 
 interface FileEntry {
   name: string
@@ -53,6 +55,7 @@ export function FileTreePanel({
   onDoubleClickFile,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
+  const { isReadOnly } = useWriteAccess()
   const [files, setFiles] = useState<FileEntry[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadedDirs, setLoadedDirs] = useState<Set<string>>(new Set())
@@ -322,7 +325,7 @@ export function FileTreePanel({
 
   // Resolve a unique destination path (appends " (1)", " (2)" etc. if name already exists)
   const resolveUniquePath = useCallback(async (destDir: string, fileName: string): Promise<string> => {
-    let destPath = `${destDir}/${fileName}`
+    const destPath = `${destDir}/${fileName}`
     try {
       await window.electronAPI.getStats(destPath)
       const dotIdx = fileName.lastIndexOf('.')
@@ -764,6 +767,9 @@ export function FileTreePanel({
     const isHighlighted = isMultiSelected || isFileActive
     const isLoadingChildren = loadingDirs.has(entry.path)
     const children = childrenCache.current.get(entry.path) || []
+    // 閲覧のみ: badge where read-only starts (a top-level entry, or the parent is writable).
+    const showReadOnly = entry.isDirectory && isReadOnly(entry.path)
+      && (depth === 0 || !isReadOnly(entry.path.substring(0, entry.path.lastIndexOf('/'))))
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === 'F2') {
@@ -925,6 +931,7 @@ export function FileTreePanel({
           </span>
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
           <span className="truncate" title={entry.name}>{entry.name}</span>
+          {showReadOnly && <ReadOnlyBadge compact />}
           {(() => {
             if (entry.isDirectory) return null
             const dirPath = entry.path.substring(0, entry.path.lastIndexOf('/'))
@@ -968,8 +975,11 @@ export function FileTreePanel({
     <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/50 border-r border-gray-200 dark:border-zinc-800/50 relative">
       {/* Header */}
       <div className="flex items-center justify-between px-3 py-2 border-b border-gray-200 dark:border-zinc-800/50">
-        <span className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider">
-          {t('fileTree.title')}
+        <span className="flex items-center gap-1.5 min-w-0">
+          <span className="text-xs font-medium text-gray-500 dark:text-zinc-500 uppercase tracking-wider">
+            {t('fileTree.title')}
+          </span>
+          {departmentPath && isReadOnly(departmentPath) && <ReadOnlyBadge compact />}
         </span>
         <div className="flex items-center gap-1">
           <button

@@ -3,6 +3,7 @@ import type { AgentInteractionRequest, AgentInteractionResponse } from '../share
 import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
 import type { PermissionMode } from '../shared/permission-mode'
+import type { WriteAccess } from '../shared/write-access'
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
@@ -94,6 +95,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:addRemote', repoPath, remoteName, remoteUrl),
   gitSync: (repoPath: string, companyId: string, commitMessage: string) =>
     ipcRenderer.invoke('git:sync', repoPath, companyId, commitMessage),
+  // Per-folder write access (閲覧のみ badges); refreshed by sync and the chat.
+  getWriteAccess: (companyId: string, refresh?: boolean) =>
+    ipcRenderer.invoke('writeAccess:get', companyId, refresh),
+  onWriteAccessChanged: (callback: (data: { companyId: string; access: WriteAccess }) => void) => {
+    const wrapped = (_event: unknown, data: { companyId: string; access: WriteAccess }) => callback(data)
+    ipcRenderer.on('writeAccess:changed', wrapped)
+    return () => ipcRenderer.off('writeAccess:changed', wrapped)
+  },
   gitPreview: (repoPath: string) =>
     ipcRenderer.invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>
@@ -581,6 +590,8 @@ declare global {
       gitIsRepo: (repoPath: string) => Promise<GitRepoResult>
       gitAddRemote: (repoPath: string, remoteName: string, remoteUrl: string) => Promise<GitResult>
       gitSync: (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
+      getWriteAccess: (companyId: string, refresh?: boolean) => Promise<WriteAccess | null>
+      onWriteAccessChanged: (callback: (data: { companyId: string; access: WriteAccess }) => void) => () => void
       gitPreview: (repoPath: string) => Promise<{
         success: boolean
         hasChanges: boolean

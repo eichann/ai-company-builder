@@ -177,3 +177,34 @@ export function summarizeRules(rules: ScopeRule[]): EffectiveSummary {
   if (everyoneRead && others.every(r => r.canRead)) return 'everyone-r'
   return 'restricted'
 }
+
+/**
+ * What one member may write, in a form a client can evaluate for any path
+ * with exactly resolveAccess()'s semantics (GET /me/write-access; the desktop
+ * app uses it to stop the in-app AI from editing folders the push would
+ * reject with [WRITE_DENIED]).
+ *
+ * - `all: true`: the member may write every path (owner/admin, or every scope
+ *   with rules lets them write). `scopes` is then empty.
+ * - otherwise `scopes` lists every scope that HAS rules (the transparent ones
+ *   decide nothing) with the outcome of its rules for this member. For a path,
+ *   the deepest listed scope at or above it decides; none → no write
+ *   (resolveAccess's 'no-rule').
+ *
+ * Paths are NFC, '/'-separated, '' = company root, sorted parents first.
+ */
+export interface WriteAccessSummary {
+  all: boolean
+  scopes: Array<{ path: string; write: boolean }>
+}
+
+export function writeAccessSummary(scopes: ScopeWithRules[], userId: string, role: string): WriteAccessSummary {
+  if (FULL_ACCESS_ROLES.has(role)) return { all: true, scopes: [] }
+  const decided = scopes
+    .filter(s => s.rules.length > 0)
+    .map(s => ({ path: s.path, write: applicableRules(s.rules, userId, role).some(r => r.canWrite) }))
+    .sort((a, b) => compareScopePaths(a.path, b.path))
+  const hasRoot = decided.some(s => s.path === '')
+  if (hasRoot && decided.every(s => s.write)) return { all: true, scopes: [] }
+  return { all: false, scopes: decided }
+}
