@@ -24,7 +24,7 @@ const run = (cmd, args) => {
 }
 const slices = ['arm64', 'x86_64'].map(arch => {
   const slice = path.join(work, `acb-speech-${arch}`)
-  run('xcrun', ['swiftc', '-parse-as-library', '-O', '-target', `${arch}-apple-macos14.0`, path.join(root, 'native/SpeechHelper.swift'), path.join(root, 'native/AudioLevel.swift'), '-o', slice, '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', path.join(root, 'native/Info.plist')])
+  run('xcrun', ['swiftc', '-parse-as-library', '-O', '-target', `${arch}-apple-macos14.0`, path.join(root, 'native/SpeechHelper.swift'), path.join(root, 'native/AudioLevel.swift'), path.join(root, 'native/InputRoute.swift'), '-o', slice, '-Xlinker', '-sectcreate', '-Xlinker', '__TEXT', '-Xlinker', '__info_plist', '-Xlinker', path.join(root, 'native/Info.plist')])
   return slice
 })
 run('xcrun', ['lipo', '-create', ...slices, '-output', path.join(out, 'acb-speech')])

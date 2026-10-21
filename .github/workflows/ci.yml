@@ -52,6 +52,11 @@ jobs:
         run: |
           xcrun swiftc -parse-as-library native/AudioLevel.swift tests/audio-level.test.swift -o "$RUNNER_TEMP/audio-level-test"
           "$RUNNER_TEMP/audio-level-test"
+      - name: Swift input route test
+        working-directory: client
+        run: |
+          xcrun swiftc -parse-as-library native/InputRoute.swift tests/input-route.test.swift -o "$RUNNER_TEMP/input-route-test"
+          "$RUNNER_TEMP/input-route-test"
 
   sync-harness:
     name: Sync harness (macOS)
