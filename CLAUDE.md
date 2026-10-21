@@ -70,9 +70,13 @@ The docker-compose.yml mounts the following:
 - `./server/src:/app/src`
 - `./shared:/app/shared`
 - `./data:/app/data`
-- `./admin/src:/app/admin/src`
 
 When adding new directories, update docker-compose.yml accordingly.
+
+The admin image is a production build (`next build`, standalone server) with
+no source mount: rebuild it after admin changes (`docker compose up -d --build
+admin`), or use `pnpm dev:admin` on the host for hot reload. `/api/*` is
+forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at runtime.
 
 ---
 

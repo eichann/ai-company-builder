@@ -45,6 +45,10 @@ services:
       - "autoheal=true"
 
   admin:
+    # Production build (next build + standalone server), also for local runs:
+    # the admin is internet-facing in production and must not run `next dev`.
+    # Source changes need a rebuild (`docker compose up -d --build admin`);
+    # for hot reload run `pnpm dev:admin` on the host instead (README "Develop").
     build:
       context: .
       dockerfile: admin/Dockerfile
@@ -52,16 +56,12 @@ services:
       # Loopback by default — see the api service note
       - "${BIND_ADDR:-127.0.0.1}:3100:3100"
     environment:
-      - NODE_ENV=${NODE_ENV:-development}
-      - NEXT_PUBLIC_API_URL=${PUBLIC_URL:-http://localhost:3001}
-      # Server-side /api/* proxy target — must reach the api container over the
-      # compose network (localhost inside the admin container is admin itself)
+      # Server-side /api/* proxy target, read at runtime by admin/src/proxy.ts —
+      # must reach the api container over the compose network (localhost
+      # inside the admin container is admin itself)
       - API_PROXY_URL=http://api:3001
       # Cap Node heap (smaller than api: admin is mostly static rendering)
       - NODE_OPTIONS=--max-old-space-size=1024
-    volumes:
-      # Mount source for hot reload
-      - ./admin/src:/app/admin/src
     depends_on:
       - api
     restart: unless-stopped

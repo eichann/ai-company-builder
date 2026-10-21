@@ -1,399 +1,352 @@
 'use client'
 
-import { useEffect, useState, use } from 'react'
-import { useRouter } from 'next/navigation'
+import type { ReactNode } from 'react'
 import Link from 'next/link'
-import { useAuth } from '@/lib/auth-context'
-import { companiesApi, invitationsApi, departmentsApi, Company, Member, Invitation, Department } from '@/lib/api'
+import {
+  ArrowRight,
+  CheckCircle,
+  ClockCounterClockwise,
+  DownloadSimple,
+  ProhibitInset,
+  Question,
+  TreeStructure,
+  Users,
+} from '@phosphor-icons/react'
+import type { Icon } from '@phosphor-icons/react'
 
-export default function CompanyDetailPage({ params }: { params: Promise<{ id: string }> }) {
-  const { id } = use(params)
-  const router = useRouter()
-  const { user, loading: authLoading } = useAuth()
-  const [company, setCompany] = useState<Company | null>(null)
-  const [members, setMembers] = useState<Member[]>([])
-  const [invitations, setInvitations] = useState<Invitation[]>([])
-  const [departments, setDepartments] = useState<Department[]>([])
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
+import { DepartmentIcon } from '@/components/app/department-icon'
+import { EmptyState, ErrorState, PageHeader } from '@/components/app/states'
+import { Avatar } from '@/components/ui/avatar'
+import { Badge } from '@/components/ui/badge'
+import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Skeleton } from '@/components/ui/skeleton'
+import { companiesApi, departmentsApi, overviewApi, type Overview, type OverviewMember, type PushRejection } from '@/lib/api'
+import { useCompany } from '@/lib/company-context'
+import { formatBuild, formatDateTime, formatRelative, latest, parseBuild, roleLabel } from '@/lib/format'
+import { explainRejection } from '@/lib/rejections'
+import { useQuery } from '@/lib/use-query'
 
-  // Invite link state
-  const [showCreateInvite, setShowCreateInvite] = useState(false)
-  const [inviteRole, setInviteRole] = useState<'admin' | 'member'>('member')
-  const [inviteExpireDays, setInviteExpireDays] = useState(7)
-  const [creating, setCreating] = useState(false)
-  const [copiedToken, setCopiedToken] = useState<string | null>(null)
+export default function OverviewPage() {
+  const { isAdmin, role } = useCompany()
+  if (role === null) return <OverviewSkeleton />
+  return isAdmin ? <AdminOverview /> : <MemberOverview />
+}
 
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/login')
-    }
-  }, [authLoading, user, router])
+function AdminOverview() {
+  const { companyId } = useCompany()
+  const overview = useQuery(`overview:${companyId}`, () => overviewApi.get(companyId))
+  const base = `/companies/${companyId}`
 
-  useEffect(() => {
-    if (user) {
-      loadData()
-    }
-  }, [user, id])
+  return (
+    <>
+      <PageHeader title="概要" description="対応が必要なことだけを表示しています。" />
+      {overview.loading ? (
+        <OverviewSkeleton bare />
+      ) : overview.error && !overview.data ? (
+        <ErrorState error={overview.error} onRetry={overview.reload} />
+      ) : overview.data ? (
+        <div className="space-y-8">
+          <div className="grid gap-3 sm:grid-cols-2">
+            <StatCard icon={Users} label="メンバー" value={`${overview.data.memberCount}人`} href={`${base}/members`} />
+            <StatCard icon={TreeStructure} label="部署" value={`${overview.data.departmentCount}`} href={`${base}/departments`} />
+          </div>
+          <Attention attention={overview.data.attention} membersHref={`${base}/members`} />
+        </div>
+      ) : null}
+    </>
+  )
+}
 
-  const loadData = async () => {
-    try {
-      const [companyRes, membersRes, invitationsRes, departmentsRes] = await Promise.all([
-        companiesApi.get(id),
-        companiesApi.getMembers(id),
-        invitationsApi.list(id),
-        departmentsApi.list(id, true), // flat=true
-      ])
-      setCompany(companyRes.data)
-      setMembers(membersRes.data)
-      setInvitations(invitationsRes.data)
-      setDepartments(departmentsRes.data as Department[])
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load company')
-    } finally {
-      setLoading(false)
-    }
-  }
+function Attention({
+  attention,
+  membersHref,
+}: {
+  attention: Overview['attention']
+  membersHref: string
+}) {
+  const { recentRejections, outdatedClients, unknownClients, notSyncedRecently } = attention
+  const total = recentRejections.length + outdatedClients.length + unknownClients.length + notSyncedRecently.length
 
-  const handleCreateInvitation = async (e: React.FormEvent) => {
-    e.preventDefault()
-    setCreating(true)
-    try {
-      await invitationsApi.create(id, inviteRole, inviteExpireDays)
-      setShowCreateInvite(false)
-      setInviteRole('member')
-      setInviteExpireDays(7)
-      loadData()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create invitation')
-    } finally {
-      setCreating(false)
-    }
-  }
-
-  const handleDeleteInvitation = async (invitationId: string) => {
-    if (!confirm('この招待リンクを削除しますか？')) return
-    try {
-      await invitationsApi.delete(id, invitationId)
-      loadData()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to delete invitation')
-    }
-  }
-
-  const copyInviteLink = async (token: string) => {
-    const baseUrl = window.location.origin
-    const link = `${baseUrl}/invite/${token}`
-
-    try {
-      // Try modern clipboard API first
-      await navigator.clipboard.writeText(link)
-      setCopiedToken(token)
-      setTimeout(() => setCopiedToken(null), 2000)
-    } catch {
-      // Fallback for HTTP environments: use execCommand
-      const textArea = document.createElement('textarea')
-      textArea.value = link
-      textArea.style.position = 'fixed'
-      textArea.style.left = '-9999px'
-      document.body.appendChild(textArea)
-      textArea.select()
-      try {
-        document.execCommand('copy')
-        setCopiedToken(token)
-        setTimeout(() => setCopiedToken(null), 2000)
-      } catch {
-        // If all else fails, show the link in a prompt
-        window.prompt('リンクをコピーしてください:', link)
-      }
-      document.body.removeChild(textArea)
-    }
-  }
-
-  const handleRemoveMember = async (userId: string) => {
-    if (!confirm('このメンバーを削除しますか？')) return
-    try {
-      await companiesApi.removeMember(id, userId)
-      loadData()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to remove member')
-    }
-  }
-
-  if (authLoading || !user) {
+  if (total === 0) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950">
-        <div className="text-zinc-400">読み込み中...</div>
-      </div>
+      <EmptyState
+        icon={CheckCircle}
+        title="対応が必要なことはありません"
+        description="全員のアプリが最新で、最近の同期も問題なく行われています。"
+      />
     )
   }
 
   return (
-    <div className="min-h-screen bg-zinc-950">
-      {/* Header */}
-      <header className="border-b border-zinc-800 bg-zinc-900/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16 gap-4">
-            <Link href="/dashboard" className="text-zinc-400 hover:text-white transition-colors">
-              ← 戻る
-            </Link>
-            <h1 className="text-xl font-bold text-white">
-              {company?.name || '読み込み中...'}
-            </h1>
-          </div>
+    <section aria-labelledby="attention-heading" className="space-y-3">
+      <h2 id="attention-heading" className="text-sm font-semibold">
+        要対応 <span className="ml-1 font-normal text-muted-foreground">{total}件</span>
+      </h2>
+
+      {recentRejections.length > 0 && (
+        <AttentionCard
+          icon={ProhibitInset}
+          tone="destructive"
+          title="同期がブロックされました"
+          description="共有できないファイルが含まれていたため、サーバーが同期を止めました。本人のPCにファイルは残っています。"
+        >
+          {recentRejections.map((r) => (
+            <RejectionRow key={r.id} rejection={r} />
+          ))}
+        </AttentionCard>
+      )}
+
+      {outdatedClients.length > 0 && (
+        <AttentionCard
+          icon={DownloadSimple}
+          tone="warning"
+          title="アプリの更新が必要です"
+          description="古いバージョンのデスクトップアプリを使っています。最新版への更新を案内してください。"
+          footer={<FooterLink href={membersHref}>メンバー一覧で確認</FooterLink>}
+        >
+          {outdatedClients.map((m) => (
+            <MemberRow key={m.userId} member={m} detail={formatBuild(parseBuild(m.clientVersion), m.clientVersion)} sub={`最終接続 ${formatRelative(m.lastSeenAt)}`} />
+          ))}
+        </AttentionCard>
+      )}
+
+      {unknownClients.length > 0 && (
+        <AttentionCard
+          icon={Question}
+          tone="muted"
+          title="アプリのバージョンがわかりません"
+          description="まだ一度もアプリから接続していないか、バージョンを送らない古いアプリを使っています。"
+        >
+          {unknownClients.map((m) => (
+            <MemberRow
+              key={m.userId}
+              member={m}
+              detail={m.lastSeenAt ? `最終接続 ${formatRelative(m.lastSeenAt)}` : '未接続'}
+            />
+          ))}
+        </AttentionCard>
+      )}
+
+      {notSyncedRecently.length > 0 && (
+        <AttentionCard
+          icon={ClockCounterClockwise}
+          tone="muted"
+          title="しばらく同期していません"
+          description="変更がチームに共有されていない可能性があります。同期ボタンを押すよう声をかけてください。"
+        >
+          {notSyncedRecently.map((m) => {
+            const lastSync = latest(m.lastFetchAt, m.lastPushAt)
+            return (
+              <MemberRow
+                key={m.userId}
+                member={m}
+                detail={lastSync ? `最終同期 ${formatRelative(lastSync)}` : '同期の記録なし'}
+              />
+            )
+          })}
+        </AttentionCard>
+      )}
+    </section>
+  )
+}
+
+const TONES = {
+  destructive: 'bg-destructive/10 text-destructive',
+  warning: 'bg-warning/15 text-warning',
+  muted: 'bg-muted text-muted-foreground',
+} as const
+
+function AttentionCard({
+  icon: IconComponent,
+  tone,
+  title,
+  description,
+  footer,
+  children,
+}: {
+  icon: Icon
+  tone: keyof typeof TONES
+  title: string
+  description: string
+  footer?: ReactNode
+  children: ReactNode
+}) {
+  const count = Array.isArray(children) ? children.length : 1
+  return (
+    <Card className="overflow-hidden">
+      <div className="flex gap-3 px-5 pt-4 pb-3">
+        <span className={`mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-lg ${TONES[tone]}`}>
+          <IconComponent size={17} weight="bold" />
+        </span>
+        <div className="min-w-0 space-y-0.5">
+          <h3 className="flex items-center gap-2 text-sm font-semibold">
+            {title}
+            <Badge variant="secondary">{count}</Badge>
+          </h3>
+          <p className="text-sm text-muted-foreground">{description}</p>
         </div>
-      </header>
+      </div>
+      <ul className="divide-y border-t">{children}</ul>
+      {footer && <div className="border-t px-5 py-2.5">{footer}</div>}
+    </Card>
+  )
+}
 
-      <main className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {loading ? (
-          <div className="text-center py-12 text-zinc-400">読み込み中...</div>
-        ) : error ? (
-          <div className="p-4 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400">
-            {error}
-          </div>
-        ) : company ? (
-          <div className="space-y-8">
-            {/* Company Info */}
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">会社情報</h2>
-              <dl className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <dt className="text-sm text-zinc-500">会社名</dt>
-                  <dd className="text-white">{company.name}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-zinc-500">スラッグ</dt>
-                  <dd className="text-white font-mono">{company.slug}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-zinc-500">リポジトリパス</dt>
-                  <dd className="text-white font-mono text-sm">{company.repoPath || '-'}</dd>
-                </div>
-                <div>
-                  <dt className="text-sm text-zinc-500">作成日</dt>
-                  <dd className="text-white">
-                    {new Date(company.createdAt).toLocaleDateString('ja-JP')}
-                  </dd>
-                </div>
-              </dl>
-            </div>
+function FooterLink({ href, children }: { href: string; children: ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex items-center gap-1 rounded text-sm font-medium text-brand underline-offset-4 outline-none hover:underline focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      {children}
+      <ArrowRight size={14} />
+    </Link>
+  )
+}
 
-            {/* Invitation Links */}
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-white">招待リンク</h2>
-                <button
-                  onClick={() => setShowCreateInvite(true)}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  招待リンクを作成
-                </button>
-              </div>
+function MemberRow({ member, detail, sub }: { member: OverviewMember; detail: string; sub?: string }) {
+  const name = member.name || member.email || '名前未設定'
+  return (
+    <li className="flex items-center gap-3 px-5 py-2.5">
+      <Avatar name={name} seed={member.userId} />
+      <div className="min-w-0 flex-1">
+        <div className="truncate text-sm font-medium">{name}</div>
+        <div className="truncate text-xs text-muted-foreground">
+          {member.email} · {roleLabel(member.role)}
+        </div>
+      </div>
+      <div className="text-right">
+        <div className="text-sm tabular-nums">{detail}</div>
+        {sub && <div className="text-xs text-muted-foreground">{sub}</div>}
+      </div>
+    </li>
+  )
+}
 
-              {/* Create Invitation Form */}
-              {showCreateInvite && (
-                <form onSubmit={handleCreateInvitation} className="mb-6 p-4 bg-zinc-800/50 rounded-lg">
-                  <div className="flex gap-4 items-end">
-                    <div>
-                      <label className="block text-sm text-zinc-400 mb-1">役割</label>
-                      <select
-                        value={inviteRole}
-                        onChange={(e) => setInviteRole(e.target.value as 'admin' | 'member')}
-                        className="px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value="member">メンバー</option>
-                        <option value="admin">管理者</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="block text-sm text-zinc-400 mb-1">有効期限</label>
-                      <select
-                        value={inviteExpireDays}
-                        onChange={(e) => setInviteExpireDays(Number(e.target.value))}
-                        className="px-3 py-2 bg-zinc-700 border border-zinc-600 rounded-lg text-white text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                      >
-                        <option value={1}>1日</option>
-                        <option value={7}>7日</option>
-                        <option value={30}>30日</option>
-                      </select>
-                    </div>
-                    <button
-                      type="submit"
-                      disabled={creating}
-                      className="px-4 py-2 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white text-sm font-medium rounded-lg transition-colors"
-                    >
-                      {creating ? '作成中...' : '作成'}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowCreateInvite(false)}
-                      className="px-4 py-2 bg-zinc-700 hover:bg-zinc-600 text-white text-sm font-medium rounded-lg transition-colors"
-                    >
-                      キャンセル
-                    </button>
-                  </div>
-                </form>
-              )}
+function RejectionRow({ rejection }: { rejection: PushRejection }) {
+  const explanation = explainRejection(rejection.marker)
+  const name = rejection.name || '不明なメンバー'
+  const shown = rejection.paths.slice(0, 3)
+  const rest = rejection.paths.length - shown.length
+  return (
+    <li className="flex gap-3 px-5 py-3">
+      <Avatar name={name} seed={rejection.userId} />
+      <div className="min-w-0 flex-1 space-y-1">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-3">
+          <span className="text-sm font-medium">{name}</span>
+          <time className="text-xs text-muted-foreground" dateTime={rejection.createdAt} title={formatDateTime(rejection.createdAt)}>
+            {formatRelative(rejection.createdAt)}
+          </time>
+        </div>
+        <p className="text-sm">
+          {explanation ? explanation.title : <span className="font-mono text-xs">{rejection.marker}</span>}
+        </p>
+        {explanation && <p className="text-xs text-muted-foreground">{explanation.advice}</p>}
+        {shown.length > 0 && (
+          <ul className="flex flex-wrap gap-1.5 pt-0.5">
+            {shown.map((p) => (
+              <li key={p} className="max-w-full truncate rounded bg-muted px-1.5 py-0.5 font-mono text-xs">
+                {p}
+              </li>
+            ))}
+            {rest > 0 && <li className="px-1 py-0.5 text-xs text-muted-foreground">ほか{rest}件</li>}
+          </ul>
+        )}
+      </div>
+    </li>
+  )
+}
 
-              {/* Invitations List */}
-              <div className="space-y-2">
-                {invitations.length === 0 ? (
-                  <p className="text-zinc-500 text-sm py-4 text-center">招待リンクはありません</p>
-                ) : (
-                  invitations.map((invitation) => (
-                    <div
-                      key={invitation.id}
-                      className={`flex items-center justify-between p-3 rounded-lg ${
-                        invitation.isUsed || invitation.isExpired
-                          ? 'bg-zinc-800/20 opacity-60'
-                          : 'bg-zinc-800/30'
-                      }`}
-                    >
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2">
-                          <span className={`text-xs px-2 py-0.5 rounded ${
-                            invitation.role === 'admin'
-                              ? 'bg-purple-500/10 text-purple-400'
-                              : 'bg-zinc-700/50 text-zinc-400'
-                          }`}>
-                            {invitation.role === 'admin' ? '管理者' : 'メンバー'}
-                          </span>
-                          {invitation.isUsed && (
-                            <span className="text-xs bg-green-500/10 text-green-400 px-2 py-0.5 rounded">使用済み</span>
-                          )}
-                          {invitation.isExpired && !invitation.isUsed && (
-                            <span className="text-xs bg-red-500/10 text-red-400 px-2 py-0.5 rounded">期限切れ</span>
-                          )}
-                          {invitation.isUsed && (invitation.usedByName || invitation.usedByEmail) && (
-                            <span className="text-xs text-zinc-300">
-                              → {invitation.usedByName || invitation.usedByEmail}
-                            </span>
-                          )}
-                        </div>
-                        <div className="text-xs text-zinc-500 mt-1">
-                          作成: {invitation.createdByName || invitation.createdByEmail || '不明'} / {new Date(invitation.createdAt).toLocaleDateString('ja-JP')} /
-                          期限: {new Date(invitation.expiresAt).toLocaleDateString('ja-JP')}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        {!invitation.isUsed && !invitation.isExpired && (
-                          <button
-                            onClick={() => copyInviteLink(invitation.token)}
-                            className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors ${
-                              copiedToken === invitation.token
-                                ? 'bg-green-600 text-white'
-                                : 'bg-zinc-700 hover:bg-zinc-600 text-white'
-                            }`}
-                          >
-                            {copiedToken === invitation.token ? 'コピー済み' : 'リンクをコピー'}
-                          </button>
-                        )}
-                        <button
-                          onClick={() => handleDeleteInvitation(invitation.id)}
-                          className="text-red-400 hover:text-red-300 text-sm transition-colors"
-                        >
-                          削除
-                        </button>
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
+function StatCard({ icon: IconComponent, label, value, href }: { icon: Icon; label: string; value: string; href: string }) {
+  return (
+    <Link
+      href={href}
+      className="group flex items-center gap-4 rounded-xl border bg-card px-5 py-4 shadow-xs transition-colors outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50"
+    >
+      <span className="flex size-9 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+        <IconComponent size={18} />
+      </span>
+      <div className="flex-1">
+        <div className="text-xs text-muted-foreground">{label}</div>
+        <div className="text-xl font-semibold tabular-nums">{value}</div>
+      </div>
+      <ArrowRight size={16} className="text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+    </Link>
+  )
+}
 
-            {/* Members */}
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-              <h2 className="text-lg font-semibold text-white mb-4">メンバー</h2>
+/** Members, and managers who are members, see their own place in the company. */
+function MemberOverview() {
+  const { companyId, role, managedDepartmentIds, company } = useCompany()
+  const departments = useQuery(`departments:${companyId}`, () => departmentsApi.list(companyId))
+  const members = useQuery(`members:${companyId}`, () => companiesApi.getMembers(companyId))
+  const base = `/companies/${companyId}`
+  const managed = (departments.data ?? []).filter((d) => managedDepartmentIds.includes(d.id))
 
-              {/* Members List */}
-              <div className="space-y-2">
-                {members.map((member) => (
-                  <div
-                    key={member.id}
-                    className="flex items-center justify-between p-3 bg-zinc-800/30 rounded-lg"
-                  >
-                    <div>
-                      <div className="text-white">{member.name || member.email}</div>
-                      {member.name && (
-                        <div className="text-sm text-zinc-500">{member.email}</div>
-                      )}
-                    </div>
-                    <div className="flex items-center gap-3">
-                      <span className={`text-xs px-2 py-1 rounded-full ${
-                        member.role === 'owner'
-                          ? 'bg-amber-500/10 text-amber-400'
-                          : member.role === 'admin'
-                          ? 'bg-purple-500/10 text-purple-400'
-                          : 'bg-zinc-700/50 text-zinc-400'
-                      }`}>
-                        {member.role === 'owner' ? 'オーナー' : member.role === 'admin' ? '管理者' : 'メンバー'}
-                      </span>
-                      {member.role !== 'owner' && member.userId !== user.id && (
-                        <button
-                          onClick={() => handleRemoveMember(member.userId)}
-                          className="text-red-400 hover:text-red-300 text-sm transition-colors"
-                        >
-                          削除
-                        </button>
-                      )}
-                    </div>
-                  </div>
+  return (
+    <>
+      <PageHeader title="概要" description={`${company.data?.name ?? ''} でのあなたの役割と担当です。`} />
+      <div className="space-y-8">
+        <div className="grid gap-3 sm:grid-cols-2">
+          {members.data ? (
+            <StatCard icon={Users} label="メンバー" value={`${members.data.length}人`} href={`${base}/members`} />
+          ) : (
+            <Skeleton className="h-[74px] rounded-xl" />
+          )}
+          {departments.data ? (
+            <StatCard icon={TreeStructure} label="部署" value={`${departments.data.length}`} href={`${base}/departments`} />
+          ) : (
+            <Skeleton className="h-[74px] rounded-xl" />
+          )}
+        </div>
+
+        <Card>
+          <CardHeader className="pb-5">
+            <CardTitle>あなたの役割: {role ? roleLabel(role) : ''}</CardTitle>
+            <CardDescription>
+              メンバーや部署の変更はオーナー・管理者が行います。変更が必要なときは管理者に依頼してください。
+            </CardDescription>
+          </CardHeader>
+          {managed.length > 0 && (
+            <div className="border-t px-5 py-4">
+              <div className="mb-2 text-xs font-medium text-muted-foreground">責任者を務めている部署</div>
+              <ul className="flex flex-wrap gap-2">
+                {managed.map((d) => (
+                  <li key={d.id} className="flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-sm">
+                    <DepartmentIcon icon={d.icon} color={d.color} size="sm" />
+                    {d.name}
+                  </li>
                 ))}
-              </div>
+              </ul>
             </div>
+          )}
+        </Card>
 
-            {/* Departments */}
-            <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-6">
-              <div className="flex justify-between items-center mb-4">
-                <h2 className="text-lg font-semibold text-white">部署</h2>
-                <Link
-                  href={`/companies/${id}/departments`}
-                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium rounded-lg transition-colors"
-                >
-                  部署を管理
-                </Link>
-              </div>
+        {!!departments.error && !departments.data && <ErrorState error={departments.error} onRetry={departments.reload} />}
+      </div>
+    </>
+  )
+}
 
-              {/* Departments List */}
-              <div className="space-y-2">
-                {departments.length === 0 ? (
-                  <p className="text-zinc-500 text-sm py-4 text-center">部署はありません</p>
-                ) : (
-                  departments
-                    .sort((a, b) => a.sortOrder - b.sortOrder)
-                    .map((dept) => (
-                    <div
-                      key={dept.id}
-                      className="flex items-center justify-between p-3 bg-zinc-800/30 rounded-lg"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div
-                          className="w-8 h-8 rounded-lg flex items-center justify-center text-white text-sm"
-                          style={{ backgroundColor: dept.color }}
-                        >
-                          {dept.name.charAt(0)}
-                        </div>
-                        <div>
-                          <div className="text-white">{dept.name}</div>
-                          {dept.nameEn && (
-                            <div className="text-xs text-zinc-500">{dept.nameEn}</div>
-                          )}
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="text-xs text-zinc-500 font-mono">{dept.folder}</span>
-                        {!dept.isActive && (
-                          <span className="text-xs bg-zinc-700/50 text-zinc-400 px-2 py-0.5 rounded">無効</span>
-                        )}
-                      </div>
-                    </div>
-                  ))
-                )}
-              </div>
-            </div>
-          </div>
-        ) : null}
-      </main>
+function OverviewSkeleton({ bare = false }: { bare?: boolean }) {
+  return (
+    <div aria-busy="true" aria-label="読み込み中">
+      {!bare && (
+        <div className="space-y-2 pb-6">
+          <Skeleton className="h-6 w-24" />
+          <Skeleton className="h-4 w-64" />
+        </div>
+      )}
+      <div className="space-y-8">
+        <div className="grid gap-3 sm:grid-cols-2">
+          <Skeleton className="h-[74px] rounded-xl" />
+          <Skeleton className="h-[74px] rounded-xl" />
+        </div>
+        <div className="space-y-3">
+          <Skeleton className="h-4 w-20" />
+          <Skeleton className="h-40 rounded-xl" />
+        </div>
+      </div>
     </div>
   )
 }

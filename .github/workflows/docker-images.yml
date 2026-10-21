@@ -85,10 +85,23 @@ jobs:
             process.exit(bad ? 1 : 0)
           ' < pnpm-lock.yaml
 
-      - name: Admin serves /
+      - name: Admin serves /login from the production server
         run: |
-          curl -fsS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \
-            -w 'GET / -> %{http_code}\n' http://127.0.0.1:3100/
+          code=$(curl -sS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \
+            -w '%{http_code}' http://127.0.0.1:3100/login)
+          echo "GET /login -> $code"
+          [ "$code" = 200 ]
+          # PID 1 must be the standalone server, never `next dev`.
+          cmd=$(docker compose exec -T admin sh -c 'tr "\0" " " < /proc/1/cmdline')
+          echo "admin PID 1: $cmd"
+          case "$cmd" in *"admin/server.js"*) ;; *) echo "::error::admin is not running the production server"; exit 1 ;; esac
+          docker compose exec -T admin node -e 'process.exit(process.env.NODE_ENV === "production" ? 0 : 1)'
+
+      - name: Admin forwards /api/* to the API (target read at runtime)
+        run: |
+          # The image is built without API_PROXY_URL; compose sets it only at
+          # runtime, so this proves the proxy target is not frozen at build time.
+          curl -fsS -o /dev/null -w 'GET :3100/api/config -> %{http_code}\n' http://127.0.0.1:3100/api/config
 
       - name: Logs
         if: always()

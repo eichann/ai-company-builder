@@ -1,20 +1,16 @@
+import path from "path";
 import type { NextConfig } from "next";
 
-// Proxy /api/* to the API server. In production a reverse proxy (Caddy)
-// intercepts /api/* before it reaches the admin, but for local/dev (no
-// reverse proxy) Next.js must proxy it itself. A rewrite is a transparent
-// HTTP proxy, so auth Set-Cookie headers pass through intact — unlike a
-// fetch-based route handler, which drops them.
-// API_PROXY_URL must be reachable from the Next.js server process
-// (e.g. http://api:3001 inside Docker, http://localhost:3001 for `pnpm dev`).
-const apiProxyTarget = process.env.API_PROXY_URL || "http://localhost:3001";
+// /api/* is forwarded to the API server by src/proxy.ts (read at runtime),
+// not by `rewrites()` here, which `next build` would freeze into the image.
 
 const nextConfig: NextConfig = {
-  async rewrites() {
-    return [
-      { source: "/api/:path*", destination: `${apiProxyTarget}/api/:path*` },
-    ];
-  },
+  // Self-contained server (.next/standalone) for the production image.
+  output: "standalone",
+  // Monorepo: trace dependencies from the workspace root so the standalone
+  // output includes packages pnpm links from the root node_modules.
+  outputFileTracingRoot: path.join(__dirname, ".."),
+  poweredByHeader: false,
 };
 
 export default nextConfig;
