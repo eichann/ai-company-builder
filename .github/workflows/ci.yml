@@ -89,6 +89,19 @@ jobs:
       - run: npx vitest run
         working-directory: server
 
+  test-admin:
+    name: Admin tests
+    # API client against contract fixtures + page rendering (loading / empty /
+    # error states, role-dependent controls) in jsdom. A few seconds; no
+    # browser download.
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - run: npx vitest run
+        working-directory: admin
+
   lint-changed:
     name: Lint (changed files)
     runs-on: ubuntu-latest

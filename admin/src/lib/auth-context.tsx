@@ -1,14 +1,14 @@
 'use client'
 
-import { createContext, useContext, useEffect, useState, useCallback, ReactNode } from 'react'
-import { User, meApi, authApi } from './api'
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
+import { authApi, meApi, type User } from './api'
 
 interface AuthContextType {
   user: User | null
   loading: boolean
-  error: string | null
   signIn: (email: string, password: string) => Promise<void>
-  signUp: (email: string, password: string, name: string) => Promise<void>
+  /** Signs up (first user, or with an invitation token) and loads the session. */
+  signUp: (email: string, password: string, name: string, invitationToken?: string) => Promise<void>
   signOut: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -18,14 +18,10 @@ const AuthContext = createContext<AuthContextType | null>(null)
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null)
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => {
+  const loadUser = useCallback(async () => {
     try {
-      setLoading(true)
-      setError(null)
-      const res = await meApi.getMe()
-      setUser(res.data)
+      setUser(await meApi.getMe())
     } catch {
       setUser(null)
     } finally {
@@ -34,45 +30,56 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    let active = true
+    meApi.getMe().then(
+      (u) => {
+        if (active) {
+          setUser(u)
+          setLoading(false)
+        }
+      },
+      () => {
+        if (active) {
+          setUser(null)
+          setLoading(false)
+        }
+      }
+    )
+    return () => {
+      active = false
+    }
+  }, [])
 
-  const signIn = async (email: string, password: string) => {
-    setError(null)
-    try {
+  const signIn = useCallback(
+    async (email: string, password: string) => {
       await authApi.signIn(email, password)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign in failed')
-      throw err
-    }
-  }
+      await loadUser()
+    },
+    [loadUser]
+  )
 
-  const signUp = async (email: string, password: string, name: string) => {
-    setError(null)
-    try {
-      await authApi.signUp(email, password, name)
-      await refresh()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Sign up failed')
-      throw err
-    }
-  }
+  const signUp = useCallback(
+    async (email: string, password: string, name: string, invitationToken?: string) => {
+      await authApi.signUp(email, password, name, invitationToken)
+      await loadUser()
+    },
+    [loadUser]
+  )
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     try {
       await authApi.signOut()
+    } finally {
       setUser(null)
-    } catch (err) {
-      console.error('Sign out failed:', err)
     }
-  }
+  }, [])
 
-  return (
-    <AuthContext.Provider value={{ user, loading, error, signIn, signUp, signOut, refresh }}>
-      {children}
-    </AuthContext.Provider>
+  const value = useMemo(
+    () => ({ user, loading, signIn, signUp, signOut, refresh: loadUser }),
+    [user, loading, signIn, signUp, signOut, loadUser]
   )
+
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }
 
 export function useAuth() {

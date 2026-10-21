@@ -1,5 +1,20 @@
-// Use relative path - Next.js rewrites will proxy to API server
+// Typed client for the API server.
+//
+// Requests use relative URLs: in production Caddy routes /api/* to the API
+// server, and without a reverse proxy the admin's own /api/* proxy
+// (src/proxy.ts) forwards them. Either way the session cookie is first-party.
+
 const API_BASE = ''
+
+/** An HTTP error from the API, keeping the status so the UI can explain it. */
+export class ApiError extends Error {
+  readonly status: number
+  constructor(status: number, message: string) {
+    super(message)
+    this.name = 'ApiError'
+    this.status = status
+  }
+}
 
 type RequestOptions = {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE' | 'PATCH'
@@ -7,10 +22,7 @@ type RequestOptions = {
   headers?: Record<string, string>
 }
 
-export async function apiClient<T>(
-  endpoint: string,
-  options: RequestOptions = {}
-): Promise<T> {
+export async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options
 
   const res = await fetch(`${API_BASE}${endpoint}`, {
@@ -19,19 +31,39 @@ export async function apiClient<T>(
       'Content-Type': 'application/json',
       ...headers,
     },
-    body: body ? JSON.stringify(body) : undefined,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
     credentials: 'include',
   })
 
   if (!res.ok) {
-    const error = await res.json().catch(() => ({ error: 'Unknown error' }))
-    throw new Error(error.error || error.message || 'Request failed')
+    const error = (await res.json().catch(() => null)) as { error?: string; message?: string } | null
+    throw new ApiError(res.status, error?.error || error?.message || `Request failed (${res.status})`)
   }
 
-  return res.json()
+  return res.json() as Promise<T>
 }
 
-// Auth API
+/** `{ success, data }` envelope used by every company-scoped endpoint. */
+type Envelope<T> = { success: boolean; data: T }
+
+async function getData<T>(endpoint: string, options?: RequestOptions): Promise<T> {
+  const res = await apiClient<Envelope<T>>(endpoint, options)
+  return res.data
+}
+
+const enc = encodeURIComponent
+
+// ---------------------------------------------------------------------------
+// Auth
+// ---------------------------------------------------------------------------
+
+export interface User {
+  id: string
+  email: string
+  name: string | null
+  createdAt?: string
+}
+
 export const authApi = {
   signIn: (email: string, password: string) =>
     apiClient('/api/auth/sign-in/email', {
@@ -39,6 +71,10 @@ export const authApi = {
       body: { email, password },
     }),
 
+  /**
+   * After the first user exists the server only accepts sign-ups that carry a
+   * valid invitation token in X-Invitation-Token (server/src/index.ts).
+   */
   signUp: (email: string, password: string, name: string, invitationToken?: string) =>
     apiClient('/api/auth/sign-up/email', {
       method: 'POST',
@@ -46,27 +82,23 @@ export const authApi = {
       headers: invitationToken ? { 'X-Invitation-Token': invitationToken } : {},
     }),
 
-  signOut: () =>
-    apiClient('/api/auth/sign-out', { method: 'POST', body: {} }),
-
-  getSession: () =>
-    apiClient<{ user: User | null }>('/api/auth/get-session'),
+  signOut: () => apiClient('/api/auth/sign-out', { method: 'POST', body: {} }),
 }
 
-// User types
-export interface User {
-  id: string
-  email: string
-  name: string | null
-  createdAt: string
-}
-
-// Me API
 export const meApi = {
-  getMe: () => apiClient<{ success: boolean; data: User }>('/api/me'),
+  getMe: () => getData<User>('/api/me'),
 }
 
-// Company types
+export const configApi = {
+  get: () => getData<{ name: string; version: string; setupComplete: boolean }>('/api/config'),
+}
+
+// ---------------------------------------------------------------------------
+// Companies & members
+// ---------------------------------------------------------------------------
+
+export type Role = 'owner' | 'admin' | 'member'
+
 export interface Company {
   id: string
   name: string
@@ -75,79 +107,156 @@ export interface Company {
   repoPath: string | null
   createdAt: string
   updatedAt: string
-  role?: string
+  role?: Role
 }
 
 export interface Member {
   id: string
   userId: string
   companyId: string
-  role: string
+  role: Role
   email: string | null
   name: string | null
   createdAt: string
 }
 
-// Companies API
 export const companiesApi = {
-  list: () =>
-    apiClient<{ success: boolean; data: Company[] }>('/api/companies'),
+  list: () => getData<Company[]>('/api/companies'),
 
-  create: (name: string, slug: string) =>
-    apiClient<{ success: boolean; data: Company }>('/api/companies', {
-      method: 'POST',
-      body: { name, slug },
-    }),
+  create: (name: string, slug?: string) =>
+    getData<Company>('/api/companies', { method: 'POST', body: { name, slug } }),
 
-  get: (id: string) =>
-    apiClient<{ success: boolean; data: Company }>(`/api/companies/${id}`),
+  get: (id: string) => getData<Company>(`/api/companies/${enc(id)}`),
 
-  getMembers: (id: string) =>
-    apiClient<{ success: boolean; data: Member[] }>(`/api/companies/${id}/members`),
-
-  inviteMember: (id: string, email: string, role: string = 'member') =>
-    apiClient<{ success: boolean; data: Member }>(`/api/companies/${id}/members`, {
-      method: 'POST',
-      body: { email, role },
-    }),
+  getMembers: (id: string) => getData<Member[]>(`/api/companies/${enc(id)}/members`),
 
   removeMember: (companyId: string, userId: string) =>
-    apiClient(`/api/companies/${companyId}/members/${userId}`, {
+    apiClient<{ success: boolean }>(`/api/companies/${enc(companyId)}/members/${enc(userId)}`, {
       method: 'DELETE',
     }),
 }
 
-// SSH Keys API
-export interface SSHKey {
+// ---------------------------------------------------------------------------
+// Capabilities (what the signed-in user may do in a company)
+// ---------------------------------------------------------------------------
+
+export interface Capabilities {
+  role: Role
+  managedDepartmentIds: string[]
+}
+
+export const capabilitiesApi = {
+  get: (companyId: string) => getData<Capabilities>(`/api/companies/${enc(companyId)}/me/capabilities`),
+}
+
+// ---------------------------------------------------------------------------
+// Overview (owner / admin)
+// ---------------------------------------------------------------------------
+
+export interface OverviewMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: Role
+  clientVersion: string | null
+  lastSeenAt: string | null
+  lastFetchAt: string | null
+  lastPushAt: string | null
+}
+
+export interface PushRejection {
   id: string
-  fingerprint: string
-  deviceName: string | null
-  isActive: boolean
-  lastUsedAt: string | null
+  userId: string
+  name: string | null
+  marker: string
+  paths: string[]
   createdAt: string
 }
 
-export const sshKeysApi = {
-  list: () =>
-    apiClient<{ success: boolean; data: SSHKey[] }>('/api/users/me/ssh-keys'),
-
-  register: (publicKey: string, deviceName?: string) =>
-    apiClient<{ success: boolean; data: SSHKey }>('/api/users/me/ssh-keys', {
-      method: 'POST',
-      body: { publicKey, deviceName },
-    }),
-
-  delete: (id: string) =>
-    apiClient(`/api/users/me/ssh-keys/${id}`, { method: 'DELETE' }),
+export interface Overview {
+  memberCount: number
+  departmentCount: number
+  attention: {
+    outdatedClients: OverviewMember[]
+    unknownClients: OverviewMember[]
+    notSyncedRecently: OverviewMember[]
+    recentRejections: PushRejection[]
+  }
 }
 
-// Invitation types
+export const overviewApi = {
+  get: (companyId: string) => getData<Overview>(`/api/companies/${enc(companyId)}/overview`),
+}
+
+// ---------------------------------------------------------------------------
+// Client activity (#102; owner / admin)
+// ---------------------------------------------------------------------------
+
+export interface ClientBuild {
+  semver: string
+  sha: string | null
+  commitDate: string | null
+  dev: boolean
+}
+
+export interface ClientActivity {
+  userId: string
+  role: Role
+  email: string | null
+  name: string | null
+  clientVersion: string | null
+  build: ClientBuild | null
+  clientPlatform: string | null
+  lastSeenAt: string | null
+  lastFetchAt: string | null
+  lastPushAt: string | null
+}
+
+export const clientActivityApi = {
+  list: (companyId: string) => getData<ClientActivity[]>(`/api/companies/${enc(companyId)}/client-activity`),
+}
+
+// ---------------------------------------------------------------------------
+// Permissions (read-only in Phase 1)
+// ---------------------------------------------------------------------------
+
+export type EffectiveSummary = 'everyone-rw' | 'everyone-r' | 'restricted'
+
+export interface PermissionRule {
+  id: string
+  subjectType: 'everyone' | 'role' | 'user'
+  subjectId: string | null
+  subjectLabel: string
+  canRead: boolean
+  canWrite: boolean
+}
+
+export interface PermissionScope {
+  id: string
+  path: string
+  kind: 'company' | 'department' | 'folder'
+  departmentId: string | null
+  repoId: string | null
+  inherited: boolean
+  rules: PermissionRule[]
+  effectiveSummary: EffectiveSummary
+}
+
+export const permissionsApi = {
+  get: (companyId: string) =>
+    getData<{ scopes: PermissionScope[] }>(`/api/companies/${enc(companyId)}/permissions`),
+}
+
+// ---------------------------------------------------------------------------
+// Invitations
+// ---------------------------------------------------------------------------
+
 export interface Invitation {
   id: string
   companyId: string
   companyName: string
   token: string
-  role: string
+  role: Role
   createdBy: string
   createdByName: string | null
   createdByEmail: string | null
@@ -161,32 +270,33 @@ export interface Invitation {
   isUsed: boolean
 }
 
-// Invitations API
 export const invitationsApi = {
-  list: (companyId: string) =>
-    apiClient<{ success: boolean; data: Invitation[] }>(`/api/companies/${companyId}/invitations`),
+  list: (companyId: string) => getData<Invitation[]>(`/api/companies/${enc(companyId)}/invitations`),
 
-  create: (companyId: string, role: string = 'member', expiresInDays: number = 7) =>
-    apiClient<{ success: boolean; data: Invitation }>(`/api/companies/${companyId}/invitations`, {
+  create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7) =>
+    getData<Invitation>(`/api/companies/${enc(companyId)}/invitations`, {
       method: 'POST',
       body: { role, expiresInDays },
     }),
 
   delete: (companyId: string, invitationId: string) =>
-    apiClient(`/api/companies/${companyId}/invitations/${invitationId}`, {
+    apiClient<{ success: boolean }>(`/api/companies/${enc(companyId)}/invitations/${enc(invitationId)}`, {
       method: 'DELETE',
     }),
 
   validate: (token: string) =>
-    apiClient<{ success: boolean; data: { companyName: string; role: string; expiresAt: string } }>(`/api/invitations/${token}`),
+    getData<{ companyName: string; role: Role; expiresAt: string }>(`/api/invitations/${enc(token)}`),
 
   accept: (token: string) =>
-    apiClient<{ success: boolean; data: { companyId: string; companyName: string; role: string } }>(`/api/invitations/${token}/accept`, {
+    getData<{ companyId: string; companyName: string; role: Role }>(`/api/invitations/${enc(token)}/accept`, {
       method: 'POST',
     }),
 }
 
-// Department types
+// ---------------------------------------------------------------------------
+// Departments
+// ---------------------------------------------------------------------------
+
 export interface Department {
   id: string
   companyId: string
@@ -204,14 +314,7 @@ export interface Department {
   createdBy: string | null
 }
 
-export interface DepartmentWithChildren extends Department {
-  children: DepartmentWithChildren[]
-  depth: number
-  path: string
-}
-
 export interface CreateDepartmentInput {
-  parentId?: string | null
   name: string
   nameEn?: string
   folder: string
@@ -227,54 +330,51 @@ export interface UpdateDepartmentInput {
   icon?: string
   color?: string
   description?: string | null
-  isActive?: boolean
 }
 
-export interface ReorderDepartmentItem {
-  id: string
-  sortOrder: number
+export interface DepartmentManager {
+  userId: string
+  name: string | null
+  email: string | null
 }
 
-// Departments API
+const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`
+
 export const departmentsApi = {
-  list: (companyId: string, flat: boolean = false) =>
-    apiClient<{ success: boolean; data: Department[] | DepartmentWithChildren[] }>(
-      `/api/companies/${companyId}/departments${flat ? '?flat=true' : ''}`
-    ),
-
-  get: (companyId: string, departmentId: string) =>
-    apiClient<{ success: boolean; data: Department }>(`/api/companies/${companyId}/departments/${departmentId}`),
+  list: (companyId: string) => getData<Department[]>(`${deptBase(companyId)}?flat=true`),
 
   create: (companyId: string, data: CreateDepartmentInput) =>
-    apiClient<{ success: boolean; data: Department }>(`/api/companies/${companyId}/departments`, {
-      method: 'POST',
-      body: data,
-    }),
+    getData<Department>(deptBase(companyId), { method: 'POST', body: data }),
 
   update: (companyId: string, departmentId: string, data: UpdateDepartmentInput) =>
-    apiClient<{ success: boolean; data: Department }>(`/api/companies/${companyId}/departments/${departmentId}`, {
-      method: 'PUT',
-      body: data,
-    }),
+    getData<Department>(`${deptBase(companyId)}/${enc(departmentId)}`, { method: 'PUT', body: data }),
 
   delete: (companyId: string, departmentId: string) =>
-    apiClient<{ success: boolean; deletedFiles?: number; deletedFolders?: number }>(`/api/companies/${companyId}/departments/${departmentId}`, {
-      method: 'DELETE',
-    }),
-
-  reorder: (companyId: string, items: ReorderDepartmentItem[]) =>
-    apiClient<{ success: boolean }>(`/api/companies/${companyId}/departments/reorder`, {
-      method: 'POST',
-      body: { items },
-    }),
-
-  stats: (companyId: string, departmentId: string) =>
-    apiClient<{ success: boolean; data: { files: number; folders: number; exists: boolean } }>(
-      `/api/companies/${companyId}/departments/${departmentId}/stats`
+    apiClient<{ success: boolean; deletedFiles?: number; deletedFolders?: number }>(
+      `${deptBase(companyId)}/${enc(departmentId)}`,
+      { method: 'DELETE' }
     ),
 
+  reorder: (companyId: string, items: Array<{ id: string; sortOrder: number }>) =>
+    apiClient<{ success: boolean }>(`${deptBase(companyId)}/reorder`, { method: 'POST', body: { items } }),
+
+  stats: (companyId: string, departmentId: string) =>
+    getData<{ files: number; folders: number; exists: boolean }>(
+      `${deptBase(companyId)}/${enc(departmentId)}/stats`
+    ),
+
+  /** Register top-level folders that exist in the repository but not as departments. */
   sync: (companyId: string) =>
-    apiClient<{ success: boolean; added: number; removed: number }>(`/api/companies/${companyId}/departments/sync`, {
+    apiClient<{ success: boolean; added: number; removed: number }>(`${deptBase(companyId)}/sync`, {
       method: 'POST',
+    }),
+
+  getManagers: (companyId: string, departmentId: string) =>
+    getData<{ managers: DepartmentManager[] }>(`${deptBase(companyId)}/${enc(departmentId)}/managers`),
+
+  setManagers: (companyId: string, departmentId: string, userIds: string[]) =>
+    getData<{ managers: DepartmentManager[] }>(`${deptBase(companyId)}/${enc(departmentId)}/managers`, {
+      method: 'PUT',
+      body: { userIds },
     }),
 }

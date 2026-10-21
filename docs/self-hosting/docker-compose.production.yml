@@ -36,14 +36,13 @@ services:
       dockerfile: admin/Dockerfile
     ports:
       - "127.0.0.1:3100:3100"
+    # Production build (next build + standalone server). Code updates need
+    # `up -d --build`, which the Updating section of the guide already uses.
     environment:
-      - NODE_ENV=${NODE_ENV:-production}
-      - NEXT_PUBLIC_API_URL=${PUBLIC_URL}
-      # Server-side /api/* proxy target — must reach the api container over the
-      # compose network (localhost inside the admin container is admin itself)
+      # Server-side /api/* proxy target, read at runtime — must reach the api
+      # container over the compose network (localhost inside the admin
+      # container is admin itself)
       - API_PROXY_URL=http://api:3001
-    volumes:
-      - ./admin/src:/app/admin/src
     depends_on:
       - api
     restart: unless-stopped

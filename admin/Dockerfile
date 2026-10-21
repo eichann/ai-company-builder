@@ -1,4 +1,17 @@
-FROM node:20-slim
+# Build context is the repo root — see docker-compose.yml.
+#
+# Production image: `next build` with standalone output, served by Node with
+# no dev server, no source and no dev dependencies. The admin is
+# internet-facing behind Caddy, so it must not run `next dev` (verbose error
+# overlays, on-demand compilation, a much larger attack surface).
+#
+# For hot reload, run `pnpm dev:admin` on the host (README "Develop"), or build
+# the `dev` stage: docker build --target dev -f admin/Dockerfile .
+
+# ---------------------------------------------------------------------------
+# deps: install the admin's dependencies from the committed lockfile
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS deps
 
 WORKDIR /app
 
@@ -8,7 +21,6 @@ WORKDIR /app
 # pnpm-workspace.yaml and fails (ERR_PNPM_PATCH_NOT_FOUND / outdated lockfile).
 RUN npm install -g pnpm@9.15.9
 
-# Copy workspace files (build context is the repo root — see docker-compose.yml).
 # patches/ is referenced by patchedDependencies and must exist at install time.
 COPY package.json pnpm-workspace.yaml pnpm-lock.yaml ./
 COPY patches ./patches
@@ -20,13 +32,46 @@ COPY admin/package.json ./admin/
 RUN pnpm install --frozen-lockfile --filter @ai-company-builder/admin... \
     && rm -rf "$(pnpm store path)"
 
-# Copy source code
+# ---------------------------------------------------------------------------
+# dev: `next dev` with the source baked in (opt-in via --target dev)
+# ---------------------------------------------------------------------------
+FROM deps AS dev
 COPY admin ./admin
-
 WORKDIR /app/admin
+EXPOSE 3100
+CMD ["pnpm", "dev"]
 
-# Expose port
+# ---------------------------------------------------------------------------
+# build: compile the production bundle
+# ---------------------------------------------------------------------------
+FROM deps AS build
+ENV NEXT_TELEMETRY_DISABLED=1
+COPY admin ./admin
+WORKDIR /app/admin
+RUN pnpm build
+
+# ---------------------------------------------------------------------------
+# runtime (default target): the standalone server only
+# ---------------------------------------------------------------------------
+FROM node:20-slim AS runtime
+
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PORT=3100 \
+    HOSTNAME=0.0.0.0
+
+WORKDIR /app
+
+# .next/standalone mirrors the workspace layout (admin/server.js plus the
+# traced node_modules); static assets and public/ are not part of it.
+COPY --from=build --chown=node:node /app/admin/.next/standalone ./
+COPY --from=build --chown=node:node /app/admin/.next/static ./admin/.next/static
+COPY --from=build --chown=node:node /app/admin/public ./admin/public
+
+USER node
 EXPOSE 3100
 
-# Start the dev server
-CMD ["pnpm", "dev"]
+# API_PROXY_URL (where /api/* is forwarded when no reverse proxy sits in
+# front) is read per request by src/proxy.ts, so it is set at `docker run` /
+# compose time, not baked in here.
+CMD ["node", "admin/server.js"]

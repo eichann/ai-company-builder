@@ -85,10 +85,26 @@ jobs:
             process.exit(bad ? 1 : 0)
           ' < pnpm-lock.yaml
 
-      - name: Admin serves /
+      - name: Admin serves /login from the production server
         run: |
-          curl -fsS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \
-            -w 'GET / -> %{http_code}\n' http://127.0.0.1:3100/
+          code=$(curl -sS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \
+            -w '%{http_code}' http://127.0.0.1:3100/login)
+          echo "GET /login -> $code"
+          [ "$code" = 200 ]
+          # The standalone server, never `next dev`: the image holds the built
+          # server and no source to compile (Next renames its process title to
+          # "next-server" either way, so the command line proves nothing).
+          docker compose exec -T admin sh -c \
+            'test -f /app/admin/server.js && test -d /app/admin/.next/static && ! test -e /app/admin/src && ! test -e /app/admin/node_modules/.bin/next' \
+            || { echo "::error::admin image is not the standalone production build"; exit 1; }
+          docker compose exec -T admin node -e 'process.exit(process.env.NODE_ENV === "production" ? 0 : 1)' \
+            || { echo "::error::admin is not running with NODE_ENV=production"; exit 1; }
+
+      - name: Admin forwards /api/* to the API (target read at runtime)
+        run: |
+          # The image is built without API_PROXY_URL; compose sets it only at
+          # runtime, so this proves the proxy target is not frozen at build time.
+          curl -fsS -o /dev/null -w 'GET :3100/api/config -> %{http_code}\n' http://127.0.0.1:3100/api/config
 
       - name: Logs
         if: always()

@@ -1,134 +1,85 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useRouter } from 'next/navigation'
-import Link from 'next/link'
-import { useAuth } from '@/lib/auth-context'
+import { ArrowLeft } from '@phosphor-icons/react'
+
+import { RequireAuth } from '@/components/app/auth-guard'
+import { AuthLayout } from '@/components/app/brand'
+import { Button } from '@/components/ui/button'
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { companiesApi } from '@/lib/api'
+import { describeError } from '@/lib/errors'
 
 export default function NewCompanyPage() {
+  return (
+    <RequireAuth>
+      <NewCompanyForm />
+    </RequireAuth>
+  )
+}
+
+function NewCompanyForm() {
   const router = useRouter()
-  const { user, loading: authLoading } = useAuth()
   const [name, setName] = useState('')
-  const [slug, setSlug] = useState('')
-  const [loading, setLoading] = useState(false)
+  const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (!authLoading && !user) {
-      router.push('/login')
-    }
-  }, [authLoading, user, router])
-
-  // Auto-generate slug from name
-  const handleNameChange = (value: string) => {
-    setName(value)
-    const generatedSlug = value
-      .toLowerCase()
-      .replace(/[^a-z0-9\u3040-\u309f\u30a0-\u30ff\u4e00-\u9faf]/g, '-')
-      .replace(/-+/g, '-')
-      .replace(/^-|-$/g, '')
-    setSlug(generatedSlug)
-  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setError(null)
-    setLoading(true)
-
+    setBusy(true)
     try {
-      const res = await companiesApi.create(name, slug)
-      router.push(`/companies/${res.data.id}`)
+      // The server derives a unique URL slug from the name.
+      const company = await companiesApi.create(name.trim())
+      router.push(`/companies/${company.id}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to create company')
-    } finally {
-      setLoading(false)
+      setError(describeError(err))
+      setBusy(false)
     }
   }
 
-  if (authLoading || !user) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-zinc-950">
-        <div className="text-zinc-400">読み込み中...</div>
-      </div>
-    )
-  }
-
   return (
-    <div className="min-h-screen bg-zinc-950">
-      {/* Header */}
-      <header className="border-b border-zinc-800 bg-zinc-900/50">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-16 gap-4">
-            <Link href="/dashboard" className="text-zinc-400 hover:text-white transition-colors">
-              ← 戻る
-            </Link>
-            <h1 className="text-xl font-bold text-white">新規会社作成</h1>
-          </div>
-        </div>
-      </header>
-
-      <main className="max-w-2xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-zinc-900/50 border border-zinc-800 rounded-xl p-8">
-          <form onSubmit={handleSubmit} className="space-y-6">
-            <div>
-              <label htmlFor="name" className="block text-sm font-medium text-zinc-400 mb-2">
-                会社名
-              </label>
-              <input
-                id="name"
-                type="text"
+    <AuthLayout>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base">会社を作成</CardTitle>
+          <CardDescription>
+            会社ごとに共有フォルダが用意され、標準の部署が作成されます。作成したあなたがオーナーになります。
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="grid gap-4">
+            <div className="grid gap-2">
+              <Label htmlFor="company-name">会社名</Label>
+              <Input
+                id="company-name"
                 value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
-                className="w-full px-4 py-3 bg-zinc-800/50 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all"
+                onChange={(e) => setName(e.target.value)}
                 placeholder="株式会社サンプル"
+                autoFocus
                 required
               />
             </div>
-
-            <div>
-              <label htmlFor="slug" className="block text-sm font-medium text-zinc-400 mb-2">
-                スラッグ（URL識別子）
-              </label>
-              <input
-                id="slug"
-                type="text"
-                value={slug}
-                onChange={(e) => setSlug(e.target.value)}
-                className="w-full px-4 py-3 bg-zinc-800/50 border border-zinc-700 rounded-lg text-white placeholder-zinc-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition-all font-mono"
-                placeholder="sample-company"
-                pattern="[a-z0-9-]+"
-                required
-              />
-              <p className="mt-2 text-sm text-zinc-500">
-                英小文字、数字、ハイフンのみ使用可能
-              </p>
-            </div>
-
             {error && (
-              <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-lg text-red-400 text-sm">
+              <p role="alert" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">
                 {error}
-              </div>
+              </p>
             )}
-
-            <div className="flex gap-4">
-              <Link
-                href="/dashboard"
-                className="flex-1 py-3 px-4 bg-zinc-800 hover:bg-zinc-700 text-white font-medium rounded-lg transition-colors text-center"
-              >
-                キャンセル
-              </Link>
-              <button
-                type="submit"
-                disabled={loading}
-                className="flex-1 py-3 px-4 bg-blue-600 hover:bg-blue-500 disabled:bg-blue-600/50 text-white font-medium rounded-lg transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-zinc-900"
-              >
-                {loading ? '作成中...' : '会社を作成'}
-              </button>
+            <div className="flex items-center justify-between gap-2">
+              <Button type="button" variant="ghost" onClick={() => router.back()}>
+                <ArrowLeft />
+                戻る
+              </Button>
+              <Button type="submit" disabled={busy || !name.trim()}>
+                {busy ? '作成しています…' : '会社を作成'}
+              </Button>
             </div>
           </form>
-        </div>
-      </main>
-    </div>
+        </CardContent>
+      </Card>
+    </AuthLayout>
   )
 }
