@@ -47,11 +47,78 @@ PATTERNS=(
 )
 
 found_secrets=0
-declare -a detected_files=()
+detected_secrets=""
+
+# シークレット検知の作業用一時フォルダ。作れない場合は検査できないので拒否する
+# （クライアントは「送信失敗・次回再試行」として扱う）。
+SCAN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/acb-pre-receive.XXXXXX" 2>/dev/null) || SCAN_DIR=""
+if [ -z "$SCAN_DIR" ] || [ ! -d "$SCAN_DIR" ]; then
+  echo "[HOOK_ERROR] サーバーで一時ファイルを作成できないため、変更を確認できませんでした" >&2
+  exit 1
+fi
+trap 'rm -rf "$SCAN_DIR"' EXIT
+trap 'exit 1' HUP INT TERM
+
+# stdin: unified diff（git -c core.quotePath=false diff の出力）。
+# stdout: 検出したエントリ "  - <ファイル> (<パターン名>)"（出現順）。
+#   $1 = line: 追加行ごとに最初に一致したパターン（PATTERNS の順）を取り、
+#              ファイル×パターンごとに1件
+#   $1 = file: ファイルごとに、内容のどこかに一致した最初のパターンで1件
+# 起動するプロセスの数は行数・ファイル数に依存しない（awk 2回 + パターンごとに
+# grep と cut 1回ずつ）。以前は追加行ごと×パターンごとに grep を起動しており、
+# 2万行の push に7分かかって、クライアントの監視タイマー(5分)が push を止めていた。
+# 追加行の内容だけを content に、同じ行番号にそのファイル名を files に書き出し、
+# grep が返す行番号からファイル名を引く（ファイル名はパターンの検査対象にしない）。
+# ファイル名は "+++ b/<path>" 行から取る（空白を含む名前は git が末尾にタブを
+# 付ける。引用符・制御文字を含む名前は git が引用符付きで出すので、そのまま使う）。
+scan_secrets() {
+  : > "$SCAN_DIR/content"
+  : > "$SCAN_DIR/files"
+  awk -v cf="$SCAN_DIR/content" -v ff="$SCAN_DIR/files" '
+    /^diff --git / { header = 1; file = ""; next }
+    header {
+      if (substr($0, 1, 4) == "+++ ") {
+        p = substr($0, 5)
+        if (substr(p, 1, 3) == "\"b/") file = "\"" substr(p, 4)
+        else { if (substr(p, 1, 2) == "b/") p = substr(p, 3); sub(/\t$/, "", p); file = p }
+      } else if (substr($0, 1, 2) == "@@") header = 0
+      next
+    }
+    substr($0, 1, 1) == "+" { print substr($0, 2) > cf; print file > ff }
+  '
+  {
+    i=0
+    for pattern_entry in "${PATTERNS[@]}"; do
+      i=$((i + 1))
+      printf '#%d\t%s\n' "$i" "${pattern_entry%%|*}"
+      grep -anE -e "${pattern_entry#*|}" "$SCAN_DIR/content" | cut -d: -f1
+    done
+  } > "$SCAN_DIR/matches"
+  awk -v mode="$1" '
+    FILENAME == ARGV[1] {
+      if (substr($0, 1, 1) == "#") {
+        t = index($0, "\t"); pi = substr($0, 2, t - 2) + 0; name[pi] = substr($0, t + 1)
+      } else if (!($0 in best)) best[$0] = pi  # パターンは順に並ぶので最初のものが残る
+      next
+    }
+    !(FNR in best) { next }
+    mode == "line" {
+      key = $0 SUBSEP best[FNR]
+      if (!(key in seen)) { seen[key] = 1; print "  - " $0 " (" name[best[FNR]] ")" }
+      next
+    }
+    {
+      if (!($0 in fbest)) { order[++n] = $0; fbest[$0] = best[FNR] }
+      else if (best[FNR] < fbest[$0]) fbest[$0] = best[FNR]
+    }
+    END { for (k = 1; k <= n; k++) print "  - " order[k] " (" name[fbest[order[k]]] ")" }
+  ' "$SCAN_DIR/matches" "$SCAN_DIR/files"
+}
+
 found_gitlinks=0
-declare -a detected_gitlinks=()
+detected_gitlinks=""
 found_winpaths=0
-declare -a detected_winpaths=()
+detected_winpaths=""
 
 # --- 実行設定ファイルの保護 ---
 # Claude Code はチャットの作業フォルダにあるこれらのファイルを読み込み、
@@ -68,7 +135,7 @@ case "${ACB_PUSHER_ROLE:-}" in
   *) protected_allowed=0 ;;
 esac
 found_protected=0
-declare -a detected_protected=()
+detected_protected=""
 
 # ref 更新 (old → new) で変更される保護対象パスを1行1パスで出力する。
 # 「変更」= 追加・変更・削除・リネーム（リネームは元と先の両方）。
@@ -110,7 +177,7 @@ list_protected_changes() (
 PERSONAL_RE='(^|/)\.personal/'
 PERSONAL_ALLOWED_RE='(^|/)\.personal/\.gitignore$'
 found_personal=0
-declare -a detected_personal=()
+detected_personal=""
 
 # ref 更新で .personal/ の中に追加・変更されるパス（削除は除く）を出力する。
 # 対象の差分は list_protected_changes と同じ（新コミットごと + 正味の差分）。
@@ -155,7 +222,7 @@ list_personal_additions() (
 AUTORUN_DIR_RE='(^|/)\.claude/(skills|agents|commands)(/|$)'
 AUTORUN_NODE="${ACB_NODE:-node}"
 found_autorun=0
-declare -a detected_autorun=()
+detected_autorun=""
 
 # ref 更新で追加・変更されるエントリの raw 差分(-z)を出力する。
 # 対象の差分は list_protected_changes と同じ（新コミットごと + 正味の差分）。
@@ -280,6 +347,10 @@ while read old_sha new_sha refname; do
     continue
   fi
 
+  # 各検査の結果は改行区切りの一覧として蓄積し、重複は出力時に awk で除く。
+  # （以前は bash のループで1件ずつ既存の一覧と比べており、件数の2乗に比例して
+  # 遅くなっていた。数千ファイルの push で数十秒かかる）
+
   # --- 実行設定ファイルの保護 ---
   if [ "$protected_allowed" -eq 0 ]; then
     if ! protected_changes=$(list_protected_changes "$old_sha" "$new_sha" 2>/dev/null); then
@@ -287,17 +358,8 @@ while read old_sha new_sha refname; do
       protected_changes="（変更内容を確認できませんでした: $refname）"
     fi
     if [ -n "$protected_changes" ]; then
-      while IFS= read -r pp; do
-        [ -z "$pp" ] && continue
-        already=0
-        for existing in "${detected_protected[@]}"; do
-          if [ "$existing" = "  - $pp" ]; then already=1; break; fi
-        done
-        if [ "$already" -eq 0 ]; then
-          detected_protected+=("  - $pp")
-          found_protected=1
-        fi
-      done <<< "$protected_changes"
+      detected_protected="${detected_protected}${protected_changes}"$'\n'
+      found_protected=1
     fi
   fi
 
@@ -312,19 +374,8 @@ while read old_sha new_sha refname; do
       # （git 自体が読めない場合は、上の保護ファイルの確認がすでに拒否している）
     fi
     if [ -n "$autorun_changes" ]; then
-      while IFS= read -r line; do
-        [ -z "$line" ] && continue
-        ap="${line%%$'\t'*}"
-        reason="${line#*$'\t'}"
-        already=0
-        for existing in "${detected_autorun[@]}"; do
-          if [ "${existing%%$'\n'*}" = "  - $ap" ]; then already=1; break; fi
-        done
-        if [ "$already" -eq 0 ]; then
-          detected_autorun+=("  - $ap"$'\n'"      （${reason}）")
-          found_autorun=1
-        fi
-      done <<< "$autorun_changes"
+      detected_autorun="${detected_autorun}${autorun_changes}"$'\n'
+      found_autorun=1
     fi
   fi
 
@@ -333,17 +384,8 @@ while read old_sha new_sha refname; do
     personal_changes="（変更内容を確認できませんでした: $refname）"
   fi
   if [ -n "$personal_changes" ]; then
-    while IFS= read -r pp; do
-      [ -z "$pp" ] && continue
-      already=0
-      for existing in "${detected_personal[@]}"; do
-        if [ "$existing" = "  - $pp" ]; then already=1; break; fi
-      done
-      if [ "$already" -eq 0 ]; then
-        detected_personal+=("  - $pp")
-        found_personal=1
-      fi
-    done <<< "$personal_changes"
+    detected_personal="${detected_personal}${personal_changes}"$'\n'
+    found_personal=1
   fi
 
   # --- Windows非互換パス検知 ---
@@ -362,17 +404,8 @@ while read old_sha new_sha refname; do
 
     win_bad=$(printf '%s\n%s\n%s\n%s\n' "$bad_chars" "$bad_trail" "$bad_reserved" "$bad_case" | sed '/^$/d')
     if [ -n "$win_bad" ]; then
-      while IFS= read -r entry; do
-        [ -z "$entry" ] && continue
-        already=0
-        for existing in "${detected_winpaths[@]}"; do
-          if [ "$existing" = "  - $entry" ]; then already=1; break; fi
-        done
-        if [ "$already" -eq 0 ]; then
-          detected_winpaths+=("  - $entry")
-          found_winpaths=1
-        fi
-      done <<< "$win_bad"
+      detected_winpaths="${detected_winpaths}${win_bad}"$'\n'
+      found_winpaths=1
     fi
   fi
 
@@ -386,90 +419,46 @@ while read old_sha new_sha refname; do
   new_gitlinks=$(git -c core.quotePath=false diff-tree -r "$gitlink_base" "$new_sha" 2>/dev/null \
     | awk -F'\t' '{ split($1, a, " "); if (a[2] == "160000") print $2 }')
   if [ -n "$new_gitlinks" ]; then
-    while IFS= read -r gl; do
-      [ -z "$gl" ] && continue
-      already=0
-      for existing in "${detected_gitlinks[@]}"; do
-        if [ "$existing" = "  - $gl" ]; then already=1; break; fi
-      done
-      if [ "$already" -eq 0 ]; then
-        detected_gitlinks+=("  - $gl")
-        found_gitlinks=1
-      fi
-    done <<< "$new_gitlinks"
+    detected_gitlinks="${detected_gitlinks}${new_gitlinks}"$'\n'
+    found_gitlinks=1
   fi
 
-  # 初回プッシュ（リポジトリが空）の場合は全ファイルを対象
+  # --- シークレット検知 ---
+  # 既存ブランチ: old..new の差分の追加行だけを検査する。
+  # 新規ブランチ: 先頭コミットで追加・変更されたファイルの内容全体を検査する
+  #   （git diff-tree <commit> = 先頭コミットとその親の差分。ルートコミットと
+  #   マージコミットは対象なし。従来どおり）。
+  # バイナリファイルは差分に内容が出ないので対象外。
   if [ "$old_sha" = "$ZERO_SHA" ]; then
-    # 新規ブランチ: 全ファイルの内容をスキャン
-    files=$(git diff-tree --no-commit-id --name-only -r "$new_sha" 2>/dev/null)
-    if [ -z "$files" ]; then
-      continue
+    git diff-tree --no-commit-id --name-only -r -z --diff-filter=d "$new_sha" \
+      > "$SCAN_DIR/paths" 2>/dev/null
+    secrets_out=""
+    if [ -s "$SCAN_DIR/paths" ]; then
+      # 対象ファイルだけを空ツリーとの差分にする = 内容全体が追加行になる。
+      # パスが多いと xargs が数回に分けて実行する（回数はファイル数に比例しない）。
+      secrets_out=$(GIT_LITERAL_PATHSPECS=1 xargs -0 git -c core.quotePath=false diff \
+          --no-color --no-ext-diff --no-textconv --no-renames --src-prefix=a/ --dst-prefix=b/ \
+          "$EMPTY_TREE" "$new_sha" -- < "$SCAN_DIR/paths" 2>/dev/null \
+        | scan_secrets file)
     fi
-
-    while IFS= read -r file; do
-      content=$(git show "$new_sha:$file" 2>/dev/null)
-      if [ -z "$content" ]; then
-        continue
-      fi
-
-      for pattern_entry in "${PATTERNS[@]}"; do
-        pattern_name="${pattern_entry%%|*}"
-        pattern_regex="${pattern_entry#*|}"
-
-        if echo "$content" | grep -qE -e "$pattern_regex"; then
-          detected_files+=("  - $file ($pattern_name)")
-          found_secrets=1
-          break
-        fi
-      done
-    done <<< "$files"
   else
-    # 既存ブランチへの追加: diff の追加行のみスキャン
-    diff_output=$(git diff "$old_sha" "$new_sha" 2>/dev/null)
-    if [ -z "$diff_output" ]; then
-      continue
-    fi
-
-    current_file=""
-    while IFS= read -r line; do
-      # diff ヘッダからファイル名を取得
-      if [[ "$line" =~ ^diff\ --git\ a/(.+)\ b/(.+)$ ]]; then
-        current_file="${BASH_REMATCH[2]}"
-        continue
-      fi
-
-      # 追加行のみチェック（+で始まり、+++は除外）
-      if [[ "$line" =~ ^\+[^+] ]] || [[ "$line" =~ ^\+$ ]]; then
-        added_content="${line:1}"
-
-        for pattern_entry in "${PATTERNS[@]}"; do
-          pattern_name="${pattern_entry%%|*}"
-          pattern_regex="${pattern_entry#*|}"
-
-          if echo "$added_content" | grep -qE -e "$pattern_regex"; then
-            # 同じファイルの重複を避ける
-            entry="  - $current_file ($pattern_name)"
-            already_found=0
-            for existing in "${detected_files[@]}"; do
-              if [ "$existing" = "$entry" ]; then
-                already_found=1
-                break
-              fi
-            done
-            if [ "$already_found" -eq 0 ]; then
-              detected_files+=("$entry")
-              found_secrets=1
-            fi
-            break
-          fi
-        done
-      fi
-    done <<< "$diff_output"
+    secrets_out=$(git -c core.quotePath=false diff \
+        --no-color --no-ext-diff --no-textconv --src-prefix=a/ --dst-prefix=b/ \
+        "$old_sha" "$new_sha" 2>/dev/null \
+      | scan_secrets line)
+  fi
+  if [ -n "$secrets_out" ]; then
+    detected_secrets="${detected_secrets}${secrets_out}"$'\n'
+    found_secrets=1
   fi
 done
 
 rc=0
+
+# 蓄積した改行区切りの一覧を "  - <項目>" として重複なしに出力する（出現順を保つ）
+print_list() {
+  printf '%s' "$1" | awk 'length($0) > 0 && !seen[$0]++ { print "  - " $0 }' >&2
+}
 
 if [ "$found_personal" -eq 1 ]; then
   # 出力形式は PROTECTED_CONFIG と同じ（client/electron/protected-config.ts が解析）
@@ -480,9 +469,7 @@ if [ "$found_personal" -eq 1 ]; then
   echo "" >&2
   echo "以下は個人用フォルダ(.personal)の中のファイルです。" >&2
   echo ".personal の中身は、誰であっても共有できません:" >&2
-  for entry in "${detected_personal[@]}"; do
-    printf '%s\n' "$entry" >&2
-  done
+  print_list "$detected_personal"
   echo "" >&2
   echo "プッシュをブロックしました。これらのファイルを共有対象から外してから" >&2
   echo "再度同期してください（ACBクライアントは自動で外します。ファイルはPCに残ります）。" >&2
@@ -503,18 +490,21 @@ if [ "$found_protected" -eq 1 ] || [ "$found_autorun" -eq 1 ]; then
     echo "" >&2
     echo "以下のファイルは、チャットのAIが確認なしにコマンドを実行する設定です。" >&2
     echo "会社のオーナー・管理者だけが追加・変更・削除できます:" >&2
-    for entry in "${detected_protected[@]}"; do
-      printf '%s\n' "$entry" >&2
-    done
+    print_list "$detected_protected"
   fi
   if [ "$found_autorun" -eq 1 ]; then
     echo "" >&2
     echo "以下のスキル・エージェント・コマンドには、チャットのAIが確認なしに" >&2
     echo "コマンドを実行する「自動実行の設定」が含まれています。" >&2
     echo "自動実行の設定は、会社のオーナー・管理者だけが追加・変更できます:" >&2
-    for entry in "${detected_autorun[@]}"; do
-      printf '%s\n' "$entry" >&2
-    done
+    # 1行 "パス<TAB>理由" → パス行と理由の行（同じパスは最初の1件だけ）
+    printf '%s' "$detected_autorun" | awk '
+      length($0) == 0 { next }
+      {
+        t = index($0, "\t")
+        if (t > 0) { p = substr($0, 1, t - 1); r = substr($0, t + 1) } else { p = $0; r = $0 }
+      }
+      !seen[p]++ { print "  - " p; print "      （" r "）" }' >&2
   fi
   echo "" >&2
   echo "プッシュをブロックしました。これらのファイルをサーバーの状態に戻してから" >&2
@@ -535,9 +525,8 @@ if [ "$found_secrets" -eq 1 ]; then
   echo "========================================" >&2
   echo "" >&2
   echo "以下のファイルにAPIキー・シークレットが含まれています:" >&2
-  for entry in "${detected_files[@]}"; do
-    echo "$entry" >&2
-  done
+  # 複数の ref で同じエントリが出た場合は1件にする（出現順を保つ）
+  printf '%s' "$detected_secrets" | awk 'length($0) > 0 && !seen[$0]++' >&2
   echo "" >&2
   echo "セキュリティのため、このプッシュはブロックされました。" >&2
   echo "該当ファイルからシークレットを削除してから再度同期してください。" >&2
@@ -553,9 +542,7 @@ if [ "$found_gitlinks" -eq 1 ]; then
   echo "========================================" >&2
   echo "" >&2
   echo "以下のフォルダは、中に .git を持つ外部リポジトリ（サブモジュール扱い）です:" >&2
-  for entry in "${detected_gitlinks[@]}"; do
-    echo "$entry" >&2
-  done
+  print_list "$detected_gitlinks"
   echo "" >&2
   echo "このまま共有すると、他のメンバーには空フォルダとして見えてしまうため、" >&2
   echo "プッシュをブロックしました。次のどちらかで解消してください:" >&2
@@ -579,9 +566,7 @@ if [ "$found_winpaths" -eq 1 ]; then
   echo "" >&2
   echo "以下のパスはWindowsで作成できないため、このまま共有すると" >&2
   echo "Windowsを使うメンバー全員の同期が失敗します:" >&2
-  for entry in "${detected_winpaths[@]}"; do
-    echo "$entry" >&2
-  done
+  print_list "$detected_winpaths"
   echo "" >&2
   echo "プッシュをブロックしました。該当のフォルダ・ファイルの名前を変更して" >&2
   echo "から再度同期してください。Windowsでは次の名前が使えません:" >&2
