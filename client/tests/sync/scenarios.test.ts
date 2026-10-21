@@ -443,6 +443,41 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  // Guard: .gitignore files merge with the union driver (.git/info/attributes).
+  test('concurrent .gitignore changes keep both sides\' lines, at any depth, without a conflict', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '営業部/.gitignore': 'base.tmp\n' } })
+    const [a, b] = world.members
+    a.append('.gitignore', 'a-only/\n').append('営業部/.gitignore', 'a.tmp\n')
+    b.append('.gitignore', 'b-only/\n').append('営業部/.gitignore', 'b.tmp\n')
+    ok(await a.sync(), 'a')
+    const out = ok(await b.sync(), 'b')
+    assert.ok(!out.result.hadConflicts, JSON.stringify(out.result))
+    const root = world.serverFile('.gitignore')?.toString() ?? ''
+    assert.ok(root.includes('a-only/\n') && root.includes('b-only/\n'), root)
+    assert.equal(world.serverFile('営業部/.gitignore')?.toString(), 'base.tmp\na.tmp\nb.tmp\n')
+    await settleAndCheck(world)
+    for (const m of world.members) {
+      // Declared once, locally — nothing about it is committed.
+      const attributes = fs.readFileSync(path.join(m.dir, '.git', 'info', 'attributes'), 'utf-8')
+      assert.equal(attributes.split('\n').filter(l => l === '.gitignore merge=union').length, 1, attributes)
+    }
+    assert.equal(world.serverFile('.gitattributes'), null)
+  })
+
+  test('a line both members added is not duplicated by the union merge', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }] })
+    const [a, b] = world.members
+    a.append('.gitignore', 'x/\nshared/\n')
+    b.append('.gitignore', 'shared/\nz/\n')
+    ok(await a.sync(), 'a')
+    const out = ok(await b.sync(), 'b')
+    assert.ok(logged(out, 'Removed duplicate .gitignore lines'), 'the union merge did not duplicate a line (test premise)')
+    const lines = (world.serverFile('.gitignore')?.toString() ?? '').split('\n')
+    assert.equal(lines.filter(l => l === 'shared/').length, 1, lines.join('\n'))
+    assert.ok(lines.includes('x/') && lines.includes('z/'), lines.join('\n'))
+    await settleAndCheck(world)
+  })
+
   test('first sync on a repository without .gitignore essentials converges for everyone', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }, { name: 'c' }], gitignore: null })
     const [a, b, c] = world.members

@@ -3,7 +3,7 @@
 //
 // K members do random edits (text, binary, Japanese paths, renames,
 // deletions, .personal/ files, protected config, nested repositories,
-// department folder deletion), go offline, have a teammate push in between,
+// department folder deletion, .gitignore edits), go offline, have a teammate push in between,
 // answer dialogs at random — for R rounds. Every sync must terminate cleanly;
 // after every round no committed work may be lost; at the end everyone syncs
 // twice and must converge to the server tree.
@@ -11,7 +11,6 @@
 //   SYNC_SOAK_SEEDS=1,2,3   seeds to run (default: 1,2)
 //   SYNC_SOAK_MEMBERS=3     members per world (default: 3)
 //   SYNC_SOAK_ROUNDS=6      rounds (default: 6)
-//   SYNC_HARNESS_KNOWN_ISSUES=1  also create nested repos that get excluded
 //
 // A failure prints the seed and the operation log; rerun with that seed.
 
@@ -24,8 +23,6 @@ const SEEDS = (process.env.SYNC_SOAK_SEEDS ?? '1,2').split(',').map(s => Number(
 const MEMBERS = Number(process.env.SYNC_SOAK_MEMBERS) || 3
 const ROUNDS = Number(process.env.SYNC_SOAK_ROUNDS) || 6
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
-/** Also exercise the paths behind known, unfixed issues (see findings.test.ts). */
-const KNOWN = !!process.env.SYNC_HARNESS_KNOWN_ISSUES
 
 /** mulberry32 — small, fast, good enough for test choices. */
 function prng(seed: number) {
@@ -125,14 +122,14 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       m.write(`.claude/skills/s${n}/SKILL.md`, rnd.chance(0.5) ? `---\nname: s${n}\nhooks: {}\n---\n` : `---\nname: s${n}\n---\nbody\n`)
       log(`${m.name} (${m.role}) adds skill s${n}`)
     } else if (roll < 83) {
-      // Excluding a nested repo writes .gitignore, which runs into the known
-      // issue in findings.test.ts; without SYNC_HARNESS_KNOWN_ISSUES the soak
-      // only plants a stray .git inside an already shared folder.
+      // A new nested repo is excluded through .gitignore (merged with the
+      // union driver); a stray .git inside an already shared folder is
+      // removed or the folder excluded, as the member answers.
       const shared = [...new Set(tracked(m).filter(f => f.includes('/') && !f.startsWith('.')).map(f => f.split('/')[0]))]
-      if (KNOWN) {
+      if (rnd.chance(0.5) || shared.length === 0) {
         m.initNestedRepo(`ext-${n}`)
         log(`${m.name} creates nested repo ext-${n}`)
-      } else if (shared.length > 0) {
+      } else {
         const dir = rnd.pick(shared)
         m.initNestedRepo(dir, { [`inner-${n}.md`]: `inner ${n}\n` })
         log(`${m.name} plants a .git in shared folder ${dir}`)
@@ -144,9 +141,13 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       }
     } else if (roll < 92) {
       if (rnd.chance(0.5)) { m.offline(); log(`${m.name} offline`) } else { m.online(); log(`${m.name} online`) }
-    } else {
+    } else if (roll < 97) {
       m.write(`shared/new-${m.name}-${n}.md`, `new ${n}\n`)
       log(`${m.name} new file`)
+    } else {
+      const file = rnd.pick(['.gitignore', '営業部/.gitignore', '開発部/.gitignore'])
+      m.append(file, `*.tmp${n}\n`)
+      log(`${m.name} edits ${file}`)
     }
   }
 
@@ -155,7 +156,7 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
     m.willAnswer('deletedFiles', rnd.pick(['sync-deletions', 'sync-deletions', 'restore', 'cancel'] as const))
     m.willAnswer('protectedConfig', rnd.pick(['restore', 'restore', 'cancel'] as const))
     m.willAnswer('externalNestedRepo', rnd.pick(['exclude', 'exclude', 'cancel'] as const))
-    m.willAnswer('sharedNestedRepo', rnd.pick(KNOWN ? ['keep-sharing', 'exclude', 'cancel'] as const : ['keep-sharing', 'keep-sharing', 'cancel'] as const))
+    m.willAnswer('sharedNestedRepo', rnd.pick(['keep-sharing', 'exclude', 'cancel'] as const))
   }
 
   try {

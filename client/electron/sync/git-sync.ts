@@ -29,6 +29,7 @@ import {
 } from '../protected-config'
 import { classifyConflicts } from './conflicts'
 import { findNestedGitRepos } from './nested-repos'
+import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { applySparseSelection, readSparseConfig, sparseConfigPath, writeSparseConfig } from './sparse'
 import type { SyncDeps } from './types'
 
@@ -70,6 +71,17 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           log.warn(`Git sync: Failed to abort ${stateFile}:`, abortError)
         }
       }
+    }
+
+    // .gitignore files merge line by line (union) instead of "server wins",
+    // so lines sync added — nested-repo / large-file exclusions, essential
+    // patterns — survive a concurrent change by a teammate. Declared in the
+    // repository-local .git/info/attributes (never committed), before any
+    // rebase can run. See ./gitignore-merge.ts.
+    try {
+      if (ensureGitignoreUnionMerge(gitDir)) log.log('Git sync: Declared .gitignore merge=union in .git/info/attributes')
+    } catch (attributesError) {
+      log.warn('Git sync: Could not declare .gitignore merge=union:', attributesError)
     }
 
     // Clean up old backups (older than 30 days) — async to avoid blocking UI
@@ -626,6 +638,15 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
           }
         }
       }
+    }
+
+    // 4.4. Union merging can leave a line twice in a .gitignore (both sides
+    //      added it in different places). Drop the copies the merge added
+    //      before they reach the team.
+    try {
+      await tidyMergedGitignores({ git, repoPath, localHash, log })
+    } catch (tidyError) {
+      log.warn('Git sync: Could not tidy merged .gitignore files:', tidyError)
     }
 
     // 4.5. Protect department folders (restore if deleted locally)

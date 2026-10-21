@@ -1,7 +1,7 @@
 // Bugs the harness found in git:sync, each as a regression scenario.
 //
-// Known, not yet fixed issues are skipped with the reason; run them with
-// SYNC_HARNESS_KNOWN_ISSUES=1.
+// A known issue that is not fixed yet is added here skipped with its reason,
+// gated on SYNC_HARNESS_KNOWN_ISSUES=1 so it can still be run on demand.
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -9,8 +9,6 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { World } from '../sync-harness/world'
 import { assertNoLostWork, settleAndCheck } from '../sync-harness/invariants'
-
-const KNOWN = !!process.env.SYNC_HARNESS_KNOWN_ISSUES
 
 describe('git:sync findings', { concurrency: 4 }, () => {
   // Found by the soak. The conflict backup read every conflicted file from
@@ -61,42 +59,40 @@ describe('git:sync findings', { concurrency: 4 }, () => {
     await settleAndCheck(world)
   })
 
-  // Found when the harness first ran in CI; NOT fixed (server hook). The
-  // pre-receive hook's "paths differing only by case" check pipes the tree
-  // through `tr | sort | uniq -d` in the inherited locale. Under a UTF-8
-  // locale whose collation does not order these characters (macOS
-  // en_US.UTF-8 here), uniq treats different Japanese names as equal and the
-  // push is rejected with WINPATH_DETECTED. The production container runs
-  // with no locale (POSIX), where the check is bytewise — the harness pins
-  // that — but a server started with LANG=en_US.UTF-8 would reject ordinary
-  // Japanese file names.
-  test('Japanese file names pass the hook under a UTF-8 locale', {
-    skip: KNOWN ? false : 'known issue: pre-receive case-duplicate check is locale-dependent (see comment)',
-  }, async t => {
+  // Found when the harness first ran in CI (server hook). The pre-receive
+  // hook's "paths differing only by case" check piped the tree through
+  // `tr | sort | uniq -d` in the inherited locale. Under a UTF-8 locale whose
+  // collation does not order these characters (macOS en_US.UTF-8 here), uniq
+  // treated different Japanese names as equal and the push was rejected with
+  // WINPATH_DETECTED. The hook now pins LC_ALL=C itself. This world runs every
+  // git process — and so the hook — with LC_ALL=en_US.UTF-8, overriding the
+  // harness's usual C pin, so it fails if the hook relies on its environment.
+  test('Japanese file names pass the hook under a UTF-8 locale', async t => {
     const world = World.create(t, { members: [{ name: 'a' }], locale: 'en_US.UTF-8' })
     const [a] = world.members
     a.write('営業部/見積.md', '1\n').write('営業部/提案書.md', '2\n')
     const out = await a.sync()
     assert.equal(out.result.success, true, JSON.stringify(out.result))
+    assert.equal(world.serverFile('営業部/提案書.md')?.toString(), '2\n')
   })
 
-  // Found by the soak; NOT fixed (policy question, no data loss). Lines sync
-  // itself appends to .gitignore (nested-repo exclusions, large files) are
-  // committed with the member's work, so when two members' syncs both change
-  // .gitignore the later one hits a conflict and "server wins" drops its
-  // lines. The next sync detects the nested repo again and asks the same
-  // question again; with several members doing this at once, two rounds of
-  // syncing are not enough to converge. Nothing is lost: the repos/large
-  // files are re-detected before `git add`, so they are never committed.
-  test('concurrent .gitignore exclusions converge within two syncs each', {
-    skip: KNOWN ? false : 'known issue: sync-written .gitignore lines are dropped by "server wins" (see comment)',
-  }, async t => {
+  // Found by the soak (policy, no data loss). Lines sync itself appends to
+  // .gitignore (nested-repo exclusions, large files) are committed with the
+  // member's work, so when two members' syncs both changed .gitignore the
+  // later one hit a conflict and "server wins" dropped its lines. The next
+  // sync detected the nested repo again and asked the same question again;
+  // with several members doing this at once, two rounds of syncing were not
+  // enough to converge. .gitignore now merges with the union driver.
+  test('concurrent .gitignore exclusions converge within two syncs each', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] })
     for (const m of world.members) m.initNestedRepo(`ext-${m.name}`)
     for (const m of world.members) await m.sync()
     await settleAndCheck(world)
+    const serverIgnore = world.serverFile('.gitignore')?.toString() ?? ''
     for (const m of world.members) {
       assert.equal(m.dialogHistory.length, 1, `${m.name} was asked about the same nested repo again`)
+      assert.equal(serverIgnore.split('\n').filter(l => l === `/ext-${m.name}/`).length, 1, serverIgnore)
+      assert.ok(m.isIgnored(`ext-${m.name}/inner.md`))
     }
   })
 })
