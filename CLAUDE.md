@@ -118,6 +118,25 @@ import { ... } from '../../shared/types'  // Path inside container
   `sshUrl`. Repository administration is not an API: companies create their
   repository, startup configures every repository and hook.
 
+### Claude Code agent stack (client)
+
+- `@anthropic-ai/claude-agent-sdk` 0.3.304 (its `claudeCodeVersion` is CLI
+  2.1.304) under `ai-sdk-provider-claude-code` 3.6.1 — the AI SDK v6 line
+  (npm tag `ai-sdk-v6`); provider 4.x needs AI SDK 7 (`@ai-sdk/provider` ^4).
+  The provider pins its own SDK exactly, so root `package.json`
+  `pnpm.overrides` keeps one SDK copy at the app's version: bump both together.
+  The provider accepts `auto` natively (the old 3.4.2 patch is gone).
+- The SDK peers on `@modelcontextprotocol/sdk` ^1.29 (in-process MCP servers)
+  and `@anthropic-ai/sdk` (types only, auto-installed).
+- The app never runs the SDK's bundled CLI: every `query` / `claudeCode(...)`
+  passes `pathToClaudeCodeExecutable` (the member's own `claude`), and
+  `vite build` bundles the SDK into `dist-electron`. The SDK's per-platform
+  native binaries (`@anthropic-ai/claude-agent-sdk-<platform>`, ~250 MB) are
+  excluded from the packaged app in `client/package.json` `build.files`.
+- The SDK prints `[CLAUDE_SDK_CAN_USE_TOOL_SHADOWED]` process warnings for
+  the app's `allowedTools` MCP tools and for bypassPermissions. They are
+  informational: AskUserQuestion still reaches `canUseTool` in bypass.
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
