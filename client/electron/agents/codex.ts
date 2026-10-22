@@ -117,7 +117,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         waitingForMember++; clearTimeout(timeout)
         try { return await wait() } finally { waitingForMember--; armTimeout() }
       }
-      const abort = () => {
+      function abort() {
         if (threadId && turnId) rpc?.send({ id: `interrupt-${turnId}`, method: 'turn/interrupt', params: { threadId, turnId } })
         finish(new Error('応答を停止しました。'))
       }

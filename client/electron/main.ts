@@ -104,24 +104,6 @@ function notDownloadedRefusal(absPath: string): string | null {
   return null
 }
 
-/**
- * Refuse creating something at a folder name the member may not use (a
- * private folder they cannot read — the server answers POST …/paths/check;
- * sync's shared, cached checker). Only for paths that do not exist yet (an
- * editor save never waits on it); unknown answers allow — sync's hold-back
- * and the server's [RESERVED_PATH] stay the safety net. The message is the
- * server's own wording, naming only what the member typed.
- */
-async function reservedRefusal(absPath: string): Promise<string | null> {
-  if (fs.existsSync(absPath)) return null
-  const where = companyPathOf(absPath)
-  if (!where) return null
-  const folder = await gitSync.pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
-  if (folder === null) return null
-  console.warn('[fs] Refused a write into a folder name that cannot be used')
-  return reservedPathMessage(folder)
-}
-
 // File watchers map for tracking active watchers
 const fileWatchers: Map<string, FSWatcher> = new Map()
 
@@ -483,123 +465,6 @@ let chatServerInfo: { port: number; authToken: string } | null = null
 protocol.registerSchemesAsPrivileged([
   { scheme: 'local-file', privileges: { stream: true, supportFetchAPI: true } },
 ])
-
-app.whenReady().then(async () => {
-  if (!hasInstanceLock) return
-  registerVoiceInput(getClaudeCodeCliPath, getShellEnv, () => {
-    const config = loadConfig()
-    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
-  })
-  // Handle local-file:// protocol to serve local files (restricted to allowed directories)
-  protocol.handle('local-file', (request) => {
-    const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
-    const resolved = path.resolve(filePath)
-    // Check if path is within an allowed directory
-    let isAllowed = false
-    for (const root of allowedRoots) {
-      if (resolved === root || resolved.startsWith(root + path.sep)) {
-        isAllowed = true
-        break
-      }
-    }
-    if (!isAllowed) {
-      return new Response('Forbidden: path is outside allowed directories', { status: 403 })
-    }
-    return electronNet.fetch('file://' + resolved)
-  })
-  // Start embedded Hono chat server
-  try {
-    const serverConfig: ChatServerConfig = {
-      getAuthMode: () => {
-        const config = loadConfig()
-        return (config.authMode || 'claude-code') as 'claude-code' | 'codex' | 'api-key'
-      },
-      getApiKey: () => {
-        const config = loadConfig()
-        return config.anthropicApiKey
-      },
-      // Unset → 'auto'. A mode the user saved explicitly is kept as-is.
-      getPermissionMode: () => normalizePermissionMode(loadConfig().permissionMode),
-      isClaudeCodeAuthenticated,
-      getClaudeCodeCliPath,
-      getShellEnv,
-      buildSystemPrompt,
-      onChatActivity: (token, active) => handoffs.setBusy(token, active),
-      getWriteGuard: async (companyId, root) => {
-        const [access] = await Promise.all([
-          writeAccessStore.refresh(companyId, { timeoutMs: 3000 }),
-          refreshReadablePrivateFolders(companyId, 3000),
-          refreshInstructionAuthority(companyId, 3000),
-        ])
-        if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
-        // getAccess reads the live cache, so a refresh during a long chat applies at once.
-        return {
-          root,
-          getAccess: () => writeAccessStore.get(companyId),
-          getNotDownloaded: () => notDownloadedFolders(root),
-          getPrivateFolders: () => readablePrivateFolders.get(companyId),
-          getInstructionAuthority: () => instructionAuthority.get(companyId),
-          getPrivateFolderView: () => privateFolderGuardView(root),
-        }
-      },
-      createCompanyFiles: (companyId, root, signal) => {
-        let notDownloaded: string[] = []
-        try { notDownloaded = root ? notDownloadedFolders(root) : [] } catch { /* unknown: the instructions just do not list them */ }
-        return {
-          tools: createCompanyFileTools({ api: companyFilesApi, companyId, companyRoot: root, signal }),
-          instructions: companyFilesInstructions(notDownloaded),
-        }
-      },
-      createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
-      prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
-      onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
-      persistAgentSession: (company, id, session) => {
-        if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
-        broadcastChatHistoryChanged(company)
-      },
-      requestInteraction: (request, appSessionId, signal) => {
-        const owner = mainWindow?.webContents
-        if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
-        const ownerId = owner.id
-        const close = () => agentInteractions.closeOwner(ownerId)
-        owner.once('destroyed', close)
-        owner.once('did-start-navigation', close)
-        return agentInteractions.request(ownerId, appSessionId, request, signal).finally(() => {
-          owner.removeListener('destroyed', close)
-          owner.removeListener('did-start-navigation', close)
-        })
-      },
-      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => {
-        return new Promise((resolve) => {
-          pendingApprovals.set(toolUseId, { resolve })
-          mainWindow?.webContents.send('tool-approval-request', {
-            toolUseId, toolName, toolInput, appSessionId, ...(reason ? { reason } : {}),
-          })
-          // 60s timeout → auto-deny
-          setTimeout(() => {
-            if (pendingApprovals.has(toolUseId)) {
-              pendingApprovals.delete(toolUseId)
-              resolve({ approved: false })
-            }
-          }, 60_000)
-        })
-      },
-    }
-    const result = await startChatServer(serverConfig)
-    chatServerInfo = { port: result.port, authToken: result.authToken }
-  } catch (err) {
-    console.error('[chat-server] Failed to start:', err)
-  }
-
-  createWindow()
-
-  // Send chat server info to renderer once window is ready
-  if (mainWindow && chatServerInfo) {
-    mainWindow.webContents.on('did-finish-load', () => {
-      mainWindow?.webContents.send('chat-server:info', chatServerInfo)
-    })
-  }
-})
 
 // IPC handler for renderer to request chat server info on demand
 ipcMain.handle('chat-server:getInfo', () => {
@@ -1284,6 +1149,20 @@ async function parseJsonResponseSafe(response: Response): Promise<{
 // Session cookie storage (in-memory for the session)
 let authCookies: string[] = []
 
+// Per-folder write access of the signed-in member (shared/write-access.ts).
+// The renderer asks when it opens a company and gets writeAccess:changed
+// broadcasts after that; the chat refreshes it per turn, sync after success.
+const writeAccessStore = createWriteAccessStore({
+  baseUrl: getServerApiUrl,
+  cookies: () => authCookies,
+  onChange: (companyId, access) => {
+    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('writeAccess:changed', { companyId, access })
+  },
+})
+// The chat AI's read-only company files (company-files/): the session stays
+// here in the main process; answers are cached briefly per member.
+const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: () => authCookies, log: console })
+
 // Auth API handlers
 ipcMain.handle('auth:signUp', async (_, email: string, password: string, name?: string) => {
   try {
@@ -1934,6 +1813,24 @@ function privateFolderGuardView(root: string) {
   }
 }
 
+/**
+ * Refuse creating something at a folder name the member may not use (a
+ * private folder they cannot read — the server answers POST …/paths/check;
+ * sync's shared, cached checker). Only for paths that do not exist yet (an
+ * editor save never waits on it); unknown answers allow — sync's hold-back
+ * and the server's [RESERVED_PATH] stay the safety net. The message is the
+ * server's own wording, naming only what the member typed.
+ */
+async function reservedRefusal(absPath: string): Promise<string | null> {
+  if (fs.existsSync(absPath)) return null
+  const where = companyPathOf(absPath)
+  if (!where) return null
+  const folder = await gitSync.pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
+  if (folder === null) return null
+  console.warn('[fs] Refused a write into a folder name that cannot be used')
+  return reservedPathMessage(folder)
+}
+
 // The file tree asks before creating / renaming / moving to a path: a
 // folder named like a private folder the member cannot read is refused with
 // the server's [RESERVED_PATH] sentence (only the name the member typed).
@@ -1946,19 +1843,6 @@ ipcMain.handle('privateFolders:reservedPathRefusal', async (_, targetPath: strin
   }
 })
 
-// Per-folder write access of the signed-in member (shared/write-access.ts).
-// The renderer asks when it opens a company and gets writeAccess:changed
-// broadcasts after that; the chat refreshes it per turn, sync after success.
-const writeAccessStore = createWriteAccessStore({
-  baseUrl: getServerApiUrl,
-  cookies: () => authCookies,
-  onChange: (companyId, access) => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('writeAccess:changed', { companyId, access })
-  },
-})
-// The chat AI's read-only company files (company-files/): the session stays
-// here in the main process; answers are cached briefly per member.
-const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: () => authCookies, log: console })
 ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
   if (typeof companyId !== 'string' || !companyId) return null
   const cached = writeAccessStore.get(companyId)
@@ -3519,5 +3403,125 @@ ipcMain.handle('ai:chat', async (_event, messages: ChatMessage[], systemPrompt?:
       mainWindow.webContents.send('ai:complete')
     }
     return { error: errorMessage }
+  }
+})
+
+// Startup runs last, once every store and service above is initialised: the
+// chat server config below captures them, and keeping the use after the
+// declaration makes no-use-before-define (TDZ) hold by construction.
+app.whenReady().then(async () => {
+  if (!hasInstanceLock) return
+  registerVoiceInput(getClaudeCodeCliPath, getShellEnv, () => {
+    const config = loadConfig()
+    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
+  })
+  // Handle local-file:// protocol to serve local files (restricted to allowed directories)
+  protocol.handle('local-file', (request) => {
+    const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
+    const resolved = path.resolve(filePath)
+    // Check if path is within an allowed directory
+    let isAllowed = false
+    for (const root of allowedRoots) {
+      if (resolved === root || resolved.startsWith(root + path.sep)) {
+        isAllowed = true
+        break
+      }
+    }
+    if (!isAllowed) {
+      return new Response('Forbidden: path is outside allowed directories', { status: 403 })
+    }
+    return electronNet.fetch('file://' + resolved)
+  })
+  // Start embedded Hono chat server
+  try {
+    const serverConfig: ChatServerConfig = {
+      getAuthMode: () => {
+        const config = loadConfig()
+        return (config.authMode || 'claude-code') as 'claude-code' | 'codex' | 'api-key'
+      },
+      getApiKey: () => {
+        const config = loadConfig()
+        return config.anthropicApiKey
+      },
+      // Unset → 'auto'. A mode the user saved explicitly is kept as-is.
+      getPermissionMode: () => normalizePermissionMode(loadConfig().permissionMode),
+      isClaudeCodeAuthenticated,
+      getClaudeCodeCliPath,
+      getShellEnv,
+      buildSystemPrompt,
+      onChatActivity: (token, active) => handoffs.setBusy(token, active),
+      getWriteGuard: async (companyId, root) => {
+        const [access] = await Promise.all([
+          writeAccessStore.refresh(companyId, { timeoutMs: 3000 }),
+          refreshReadablePrivateFolders(companyId, 3000),
+          refreshInstructionAuthority(companyId, 3000),
+        ])
+        if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
+        // getAccess reads the live cache, so a refresh during a long chat applies at once.
+        return {
+          root,
+          getAccess: () => writeAccessStore.get(companyId),
+          getNotDownloaded: () => notDownloadedFolders(root),
+          getPrivateFolders: () => readablePrivateFolders.get(companyId),
+          getInstructionAuthority: () => instructionAuthority.get(companyId),
+          getPrivateFolderView: () => privateFolderGuardView(root),
+        }
+      },
+      createCompanyFiles: (companyId, root, signal) => {
+        let notDownloaded: string[] = []
+        try { notDownloaded = root ? notDownloadedFolders(root) : [] } catch { /* unknown: the instructions just do not list them */ }
+        return {
+          tools: createCompanyFileTools({ api: companyFilesApi, companyId, companyRoot: root, signal }),
+          instructions: companyFilesInstructions(notDownloaded),
+        }
+      },
+      createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
+      prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
+      onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
+      persistAgentSession: (company, id, session) => {
+        if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
+        broadcastChatHistoryChanged(company)
+      },
+      requestInteraction: (request, appSessionId, signal) => {
+        const owner = mainWindow?.webContents
+        if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
+        const ownerId = owner.id
+        const close = () => agentInteractions.closeOwner(ownerId)
+        owner.once('destroyed', close)
+        owner.once('did-start-navigation', close)
+        return agentInteractions.request(ownerId, appSessionId, request, signal).finally(() => {
+          owner.removeListener('destroyed', close)
+          owner.removeListener('did-start-navigation', close)
+        })
+      },
+      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => {
+        return new Promise((resolve) => {
+          pendingApprovals.set(toolUseId, { resolve })
+          mainWindow?.webContents.send('tool-approval-request', {
+            toolUseId, toolName, toolInput, appSessionId, ...(reason ? { reason } : {}),
+          })
+          // 60s timeout → auto-deny
+          setTimeout(() => {
+            if (pendingApprovals.has(toolUseId)) {
+              pendingApprovals.delete(toolUseId)
+              resolve({ approved: false })
+            }
+          }, 60_000)
+        })
+      },
+    }
+    const result = await startChatServer(serverConfig)
+    chatServerInfo = { port: result.port, authToken: result.authToken }
+  } catch (err) {
+    console.error('[chat-server] Failed to start:', err)
+  }
+
+  createWindow()
+
+  // Send chat server info to renderer once window is ready
+  if (mainWindow && chatServerInfo) {
+    mainWindow.webContents.on('did-finish-load', () => {
+      mainWindow?.webContents.send('chat-server:info', chatServerInfo)
+    })
   }
 })

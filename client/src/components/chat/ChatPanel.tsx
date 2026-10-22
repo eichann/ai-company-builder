@@ -1629,6 +1629,9 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     }
   }, [serverInfo.port, serverInfo.authToken])
 
+  // Declared before useChat: its onFinish reports handoff failures here.
+  const [historyError, setHistoryError] = useState<string | null>(null)
+
   // useChat hook
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport,
@@ -1728,7 +1731,6 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const syncSaveFailedRef = useRef(false)
   const messagesRef = useRef(messages)
   messagesRef.current = messages
-  const [historyError, setHistoryError] = useState<string | null>(null)
   const saveRef = useRef<(override?: UIMessage[], sync?: boolean, clearDraft?: boolean) => Promise<boolean>>(async () => true)
   // Imperative handle to read/write the chat input value for per-session draft persistence
   const draftInputRef = useRef('')
@@ -2025,18 +2027,6 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     return true
   }
 
-  // Start new chat and auto-send when skill execution is triggered (only active tab)
-  useEffect(() => {
-    if (!isActive || !historyReadyRef.current) return
-    if (pendingChatNewSession && pendingChatInput) {
-      const text = pendingChatInput
-      setPendingChatInput(null, false)
-      startNewChat().then(started => {
-        if (started) void handleSend(text)
-      })
-    }
-  }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
-
   // History content mounts after restoration; hidden tabs have no layout.
   // Reset only on opening a chat, so reading older messages stays possible.
   useLayoutEffect(() => {
@@ -2193,6 +2183,18 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
   }, [status, sendMessage, stop, currentSessionId])
+
+  // Start new chat and auto-send when skill execution is triggered (only active tab)
+  useEffect(() => {
+    if (!isActive || !historyReadyRef.current) return
+    if (pendingChatNewSession && pendingChatInput) {
+      const text = pendingChatInput
+      setPendingChatInput(null, false)
+      startNewChat().then(started => {
+        if (started) void handleSend(text)
+      })
+    }
+  }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
 
   // Edit message handler: trim messages after edit point, resend
   // Reads messages through the ref so the callback keeps its identity while
