@@ -11,6 +11,8 @@ import {
   Trash,
   Copy,
   SpinnerGap,
+  CloudArrowDown,
+  FolderSimpleDashed,
 } from '@phosphor-icons/react'
 import { ContextMenu, type ContextMenuItem } from '../common/ContextMenu'
 import { normalizePathSeparators } from '../../utils/path'
@@ -22,12 +24,16 @@ import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { isReviewSidecarFile, detectReviewStatus, hasUnseenReviews } from './MarkdownReview'
 import { ReadOnlyBadge } from './ReadOnlyBadge'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
+import { useSparseCheckout } from '../../hooks/useSparseCheckout'
+import { notDownloadedUserMessage, pathKey } from '../../../shared/sparse-paths'
 
 interface FileEntry {
   name: string
   path: string
   isDirectory: boolean
   children?: FileEntry[]
+  /** A folder this computer does not download (sparse exclusion): shown as a placeholder. */
+  notDownloaded?: boolean
 }
 
 // Allowed file extensions for external drop
@@ -56,6 +62,78 @@ export function FileTreePanel({
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
+  // Folders not downloaded on this computer: shown as greyed placeholders
+  // (so nobody thinks they do not exist and recreates them), never written to.
+  const sparse = useSparseCheckout({ rootPath })
+  const [downloading, setDownloading] = useState<Set<string>>(new Set())
+  const repoRel = useCallback((abs: string): string | null => {
+    const root = normalizePathSeparators(rootPath).replace(/\/+$/, '')
+    const p = normalizePathSeparators(abs)
+    if (p === root) return ''
+    return p.startsWith(`${root}/`) ? p.slice(root.length + 1) : null
+  }, [rootPath])
+  /** The not-downloaded folder an absolute path lies in, or null. */
+  const notDownloadedOf = useCallback((abs: string): string | null => {
+    const rel = repoRel(abs)
+    return rel === null ? null : sparse.notDownloadedFolderOf(rel)
+  }, [repoRel, sparse])
+  /** Entries of `dirPath` with placeholders for the not-downloaded folders in it. */
+  const withPlaceholders = useCallback((dirPath: string, entries: FileEntry[]): FileEntry[] => {
+    const rel = repoRel(dirPath)
+    if (rel === null || sparse.excludedPaths.length === 0) return entries
+    if (rel !== '' && sparse.notDownloadedFolderOf(rel)) return []
+    const prefix = rel === '' ? '' : `${pathKey(rel)}/`
+    const extra = new Map<string, boolean>() // child name → is itself excluded
+    for (const ex of sparse.excludedPaths) {
+      const key = pathKey(ex)
+      if (!key.startsWith(prefix)) continue
+      const rest = ex.split('/').slice(rel === '' ? 0 : rel.split('/').length)
+      if (rest.length === 0) continue
+      extra.set(rest[0], (extra.get(rest[0]) ?? false) || rest.length === 1)
+    }
+    if (extra.size === 0) return entries
+    const out = entries.map(e => {
+      for (const [name, excluded] of extra) {
+        if (excluded && e.isDirectory && pathKey(e.name) === pathKey(name)) return { ...e, notDownloaded: true }
+      }
+      return e
+    })
+    for (const [name, excluded] of extra) {
+      if (out.some(e => pathKey(e.name) === pathKey(name))) continue
+      out.push({ name: name.normalize('NFC'), path: `${dirPath}/${name}`, isDirectory: true, notDownloaded: excluded })
+    }
+    return sortEntries(out)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [repoRel, sparse.excludedPaths, sparse.notDownloadedFolderOf])
+
+  const downloadFolder = useCallback(async (entry: FileEntry) => {
+    const folder = notDownloadedOf(entry.path)
+    if (!folder) return
+    setDownloading(prev => new Set(prev).add(entry.path))
+    try {
+      const result = await sparse.apply(sparse.excludedPaths.filter(e => pathKey(e) !== pathKey(folder)))
+      if (!result.success) {
+        setDropWarning(result.offline ? 'インターネットにつながっているときにダウンロードできます' : `ダウンロードできませんでした：${result.error ?? ''}`)
+        setTimeout(() => setDropWarning(null), 5000)
+      } else {
+        childrenCache.current.delete(entry.path)
+        setLoadedDirs(prev => { const n = new Set(prev); n.delete(entry.path); return n })
+        void loadFiles(true)
+      }
+    } finally {
+      setDownloading(prev => { const n = new Set(prev); n.delete(entry.path); return n })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notDownloadedOf, sparse])
+
+  /** Refuse an action that would write into a folder that is not downloaded (the main process refuses too). */
+  const refuseNotDownloaded = useCallback((absTarget: string): boolean => {
+    const folder = notDownloadedOf(absTarget)
+    if (!folder) return false
+    setDropWarning(notDownloadedUserMessage(folder.normalize('NFC')))
+    setTimeout(() => setDropWarning(null), 6000)
+    return true
+  }, [notDownloadedOf])
   const [files, setFiles] = useState<FileEntry[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadedDirs, setLoadedDirs] = useState<Set<string>>(new Set())
@@ -537,6 +615,7 @@ export function FileTreePanel({
 
   // File operations
   const handleNewFile = useCallback((parentPath: string) => {
+    if (refuseNotDownloaded(`${parentPath}/_`)) { closeContextMenu(); return }
     setInputDialog({
       isOpen: true,
       title: t('fileTree.newFile'),
@@ -546,9 +625,10 @@ export function FileTreePanel({
       parentPath,
     })
     closeContextMenu()
-  }, [closeContextMenu, t])
+  }, [closeContextMenu, t, refuseNotDownloaded])
 
   const handleNewFolder = useCallback((parentPath: string) => {
+    if (refuseNotDownloaded(`${parentPath}/_`)) { closeContextMenu(); return }
     setInputDialog({
       isOpen: true,
       title: t('fileTree.newFolder'),
@@ -558,7 +638,7 @@ export function FileTreePanel({
       parentPath,
     })
     closeContextMenu()
-  }, [closeContextMenu, t])
+  }, [closeContextMenu, t, refuseNotDownloaded])
 
   const handleRename = useCallback((entry: FileEntry) => {
     setInputDialog({
@@ -610,6 +690,12 @@ export function FileTreePanel({
   const handleInputConfirm = useCallback(async (value: string) => {
     const { mode, targetPath, parentPath } = inputDialog
 
+    // A name with a '/' could still lead into a folder that is not downloaded.
+    if (refuseNotDownloaded(`${parentPath}/${value}`)) {
+      setInputDialog(prev => ({ ...prev, isOpen: false }))
+      return
+    }
+
     if (mode === 'newFile') {
       const newPath = `${parentPath}/${value}`
       await window.electronAPI.writeFile(newPath, '')
@@ -641,7 +727,7 @@ export function FileTreePanel({
     }
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
-  }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren])
+  }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded])
 
   const handleDeleteConfirm = useCallback(async () => {
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
@@ -702,6 +788,16 @@ export function FileTreePanel({
       ]
     }
 
+    if (entry?.notDownloaded) {
+      return [
+        {
+          label: 'ダウンロード',
+          icon: <CloudArrowDown size={16} />,
+          onClick: () => { closeContextMenu(); void downloadFolder(entry) },
+        },
+      ]
+    }
+
     if (!entry) {
       return [
         {
@@ -758,15 +854,62 @@ export function FileTreePanel({
     )
 
     return items
-  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, closeContextMenu, files, t])
+  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, closeContextMenu, files, t, downloadFolder])
 
-  const renderEntry = (entry: FileEntry, depth: number = 0) => {
+  // A folder this computer does not download: muted, not expandable, not a
+  // drop target; one click downloads it.
+  const renderNotDownloaded = (entry: FileEntry, depth: number) => {
+    const busy = downloading.has(entry.path)
+    return (
+      <div key={entry.path}>
+        <div
+          role="button"
+          tabIndex={0}
+          aria-label={`${entry.name}（未ダウンロード）`}
+          title="このフォルダはこのPCにダウンロードしていません。サーバーにはあります。"
+          onClick={() => setSelectedPaths(new Set())}
+          onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); void downloadFolder(entry) } }}
+          onContextMenu={e => handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))}
+          className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus:ring-1 focus:ring-accent/50 text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
+          style={{ paddingLeft: `${8 + depth * 12}px` }}
+        >
+          <span className="flex-shrink-0 w-3 h-4" />
+          <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+            <FolderSimpleDashed size={14} className="text-gray-400 dark:text-zinc-500" />
+          </span>
+          <span className="truncate" title={entry.name}>{entry.name}</span>
+          <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-2">
+            {busy ? (
+              <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
+                <SpinnerGap size={11} className="animate-spin" />ダウンロード中…
+              </span>
+            ) : (
+              <>
+                <span className="text-[11px] text-gray-400 dark:text-zinc-500 group-hover:hidden group-focus-within:hidden">未ダウンロード</span>
+                <button
+                  type="button"
+                  tabIndex={-1}
+                  onClick={e => { e.stopPropagation(); void downloadFolder(entry) }}
+                  className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10 group-hover:flex group-focus-within:flex"
+                >
+                  <CloudArrowDown size={12} />ダウンロード
+                </button>
+              </>
+            )}
+          </span>
+        </div>
+      </div>
+    )
+  }
+
+  const renderEntry = (entry: FileEntry, depth: number = 0): JSX.Element => {
+    if (entry.notDownloaded) return renderNotDownloaded(entry, depth)
     const isExpanded = expandedDirs.has(entry.path)
     const isFileActive = selectedFilePath === entry.path
     const isMultiSelected = selectedPaths.has(entry.path)
     const isHighlighted = isMultiSelected || isFileActive
     const isLoadingChildren = loadingDirs.has(entry.path)
-    const children = childrenCache.current.get(entry.path) || []
+    const children = withPlaceholders(entry.path, childrenCache.current.get(entry.path) || [])
     // 閲覧のみ: badge where read-only starts (a top-level entry, or the parent is writable).
     const showReadOnly = entry.isDirectory && isReadOnly(entry.path)
       && (depth === 0 || !isReadOnly(entry.path.substring(0, entry.path.lastIndexOf('/'))))
@@ -971,6 +1114,10 @@ export function FileTreePanel({
     )
   }
 
+  const visibleFiles = withPlaceholders(departmentPath, files)
+  // New file / folder from the header goes into the selection's folder: not into a placeholder.
+  const parentNotDownloaded = notDownloadedOf(`${activeParentPath}/_`) !== null
+
   return (
     <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/50 border-r border-gray-200 dark:border-zinc-800/50 relative">
       {/* Header */}
@@ -1001,15 +1148,17 @@ export function FileTreePanel({
           </button>
           <button
             onClick={() => handleNewFile(activeParentPath)}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
-            title={t('fileTree.newFile')}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            disabled={parentNotDownloaded}
+            title={parentNotDownloaded ? 'ダウンロードしていないフォルダには作成できません' : t('fileTree.newFile')}
           >
             <FilePlus size={14} />
           </button>
           <button
             onClick={() => handleNewFolder(activeParentPath)}
-            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors"
-            title={t('fileTree.newFolder')}
+            className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-40 disabled:pointer-events-none"
+            disabled={parentNotDownloaded}
+            title={parentNotDownloaded ? 'ダウンロードしていないフォルダには作成できません' : t('fileTree.newFolder')}
           >
             <FolderPlus size={14} />
           </button>
@@ -1049,12 +1198,12 @@ export function FileTreePanel({
           loadFiles(true)
         }}
       >
-        {files.length === 0 && !isLoading ? (
+        {visibleFiles.length === 0 && !isLoading ? (
           <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-zinc-600">
             {t('fileTree.noFiles')}
           </div>
         ) : (
-          files.map(entry => renderEntry(entry))
+          visibleFiles.map(entry => renderEntry(entry))
         )}
       </div>
 
