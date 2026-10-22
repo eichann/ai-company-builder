@@ -36,6 +36,11 @@ import { notDownloadedFolderFor, notDownloadedFolders } from './sync/not-downloa
 import { createCompanyFilesApi } from './company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
+import { companyPathOf, privateBackupsDir, readPrivateScopesCache, readableScopeOf } from './sync/private-folders'
+
+/** backup:list ids of private folders' backups (kept in .git, privateBackupsDir). */
+const PRIVATE_BACKUP_ID_PREFIX = 'private:'
+import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
@@ -91,9 +96,29 @@ function addAllowedRoot(dirPath: string): void {
  */
 function notDownloadedRefusal(absPath: string): string | null {
   const folder = notDownloadedFolderFor(absPath)
+  if (folder !== null) {
+    console.warn(`[fs] Refused a write into a folder that is not downloaded: ${absPath}`)
+    return notDownloadedUserMessage(folder.normalize('NFC'))
+  }
+  return null
+}
+
+/**
+ * Refuse creating something at a folder name the member may not use (a
+ * private folder they cannot read — the server answers POST …/paths/check;
+ * sync's shared, cached checker). Only for paths that do not exist yet (an
+ * editor save never waits on it); unknown answers allow — sync's hold-back
+ * and the server's [RESERVED_PATH] stay the safety net. The message is the
+ * server's own wording, naming only what the member typed.
+ */
+async function reservedRefusal(absPath: string): Promise<string | null> {
+  if (fs.existsSync(absPath)) return null
+  const where = companyPathOf(absPath)
+  if (!where) return null
+  const folder = await gitSync.pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
   if (folder === null) return null
-  console.warn(`[fs] Refused a write into a folder that is not downloaded: ${absPath}`)
-  return notDownloadedUserMessage(folder.normalize('NFC'))
+  console.warn('[fs] Refused a write into a folder name that cannot be used')
+  return reservedPathMessage(folder)
 }
 
 // File watchers map for tracking active watchers
@@ -513,6 +538,7 @@ app.whenReady().then(async () => {
           getNotDownloaded: () => notDownloadedFolders(root),
           getPrivateFolders: () => readablePrivateFolders.get(companyId),
           getInstructionAuthority: () => instructionAuthority.get(companyId),
+          getPrivateFolderView: () => privateFolderGuardView(root),
         }
       },
       createCompanyFiles: (companyId, root, signal) => {
@@ -706,7 +732,7 @@ ipcMain.handle('fs:readFileBinary', async (_, filePath: string) => {
 ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   try {
     const safePath = validatePath(filePath)
-    if (notDownloadedRefusal(safePath)) return false
+    if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
     await fs.promises.writeFile(safePath, content, 'utf-8')
     return true
   } catch {
@@ -717,7 +743,7 @@ ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
 ipcMain.handle('fs:createDirectory', async (_, dirPath: string) => {
   try {
     const safePath = validatePath(dirPath)
-    if (notDownloadedRefusal(safePath)) return false
+    if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
     await fs.promises.mkdir(safePath, { recursive: true })
     return true
   } catch {
@@ -756,7 +782,7 @@ ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
   try {
     const safeOld = validatePath(oldPath)
     const safeNew = validatePath(newPath)
-    const refused = notDownloadedRefusal(safeNew)
+    const refused = notDownloadedRefusal(safeNew) ?? await reservedRefusal(safeNew)
     if (refused) return { success: false, error: refused }
     await fs.promises.rename(safeOld, safeNew)
     return { success: true, newPath: safeNew }
@@ -770,7 +796,7 @@ ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string)
   try {
     const safeSrc = validatePath(sourcePath)
     const safeDest = validatePath(destinationPath)
-    const refused = notDownloadedRefusal(safeDest)
+    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
     if (refused) return { success: false, error: refused }
     await fs.promises.rename(safeSrc, safeDest)
     return { success: true }
@@ -785,7 +811,7 @@ ipcMain.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationP
   try {
     const safeDest = validatePath(destinationPath)
     const resolved = path.resolve(sourcePath)
-    const refused = notDownloadedRefusal(safeDest)
+    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
     if (refused) return { success: false, error: refused }
 
     try {
@@ -816,7 +842,7 @@ ipcMain.handle('fs:copy', async (_, sourcePath: string, destinationPath: string)
   try {
     const safeSrc = validatePath(sourcePath)
     const safeDest = validatePath(destinationPath)
-    const refused = notDownloadedRefusal(safeDest)
+    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
     if (refused) return { success: false, error: refused }
     const stat = await fs.promises.stat(safeSrc)
     if (stat.isDirectory()) {
@@ -1894,6 +1920,36 @@ ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commit
   return result
 })
 
+// Private folders as the chat write guard sees them, from the cached
+// /me/scopes answer sync keeps in the company's .git (no network call).
+function privateFolderGuardView(root: string) {
+  const cache = readPrivateScopesCache(root)
+  if (!cache) return undefined
+  const readable = [...cache.scopes, ...(cache.pendingPublic ?? [])]
+  return {
+    reservedFolderOf: async (rel: string) => {
+      if (readableScopeOf(readable, rel) || fs.existsSync(path.join(root, ...rel.split('/')))) return null
+      return gitSync.pathChecker.reservedFolderOf(cache.companyId, rel).catch(() => null)
+    },
+    readOnlyFolderOf: (rel: string) => {
+      const scope = readableScopeOf(cache.scopes, rel)
+      return scope && !scope.canWrite ? scope.path : null
+    },
+  }
+}
+
+// The file tree asks before creating / renaming / moving to a path: a
+// folder named like a private folder the member cannot read is refused with
+// the server's [RESERVED_PATH] sentence (only the name the member typed).
+// The fs:* handlers refuse the same paths as a backstop (notDownloadedRefusal).
+ipcMain.handle('privateFolders:reservedPathRefusal', async (_, targetPath: string) => {
+  try {
+    return await reservedRefusal(validatePath(targetPath))
+  } catch {
+    return null
+  }
+})
+
 // Per-folder write access of the signed-in member (shared/write-access.ts).
 // The renderer asks when it opens a company and gets writeAccess:changed
 // broadcasts after that; the chat refreshes it per turn, sync after success.
@@ -2270,6 +2326,17 @@ ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, exclud
     })
     const result = await setSparseExclusions(createGit(safe), safe, Array.isArray(excluded) ? excluded : [])
     if (!result.success) console.error('Sparse set exclusions error:', result.error)
+    // Private folders are their own repositories: download one that is no
+    // longer left out, retire the clone of one that now is (after syncing it).
+    const cache = result.success ? readPrivateScopesCache(safe) : null
+    if (cache && cache.scopes.length > 0) {
+      const reports = await gitSync.applyPrivateFolderChoices(safe, cache.companyId).catch((e: unknown) => {
+        console.warn('Private folders: could not apply download choices:', e)
+        return []
+      })
+      const failed = reports.filter(r => !r.success)
+      if (failed.length > 0) return { ...result, privateFolderErrors: failed.map(r => `『${r.path}』: ${r.error ?? ''}`) }
+    }
     return result
   } catch (error) {
     console.error('Sparse set exclusions error:', error)
@@ -2297,8 +2364,16 @@ ipcMain.handle('git:folderSizes', async (_, repoPath: string, companyId: string,
   try {
     const safe = validatePath(repoPath)
     const fetchSizes = companyId ? serverFolderSizes({ baseUrl: getServerApiUrl(), companyId, cookies: authCookies }) : null
-    const view = await folderSizesView(createGit(safe), fetchSizes, typeof folder === 'string' ? folder : '', Array.isArray(measure) ? measure : [])
-    return { success: true, ...view }
+    const listed = typeof folder === 'string' ? folder : ''
+    const view = await folderSizesView(createGit(safe), fetchSizes, listed, Array.isArray(measure) ? measure : [])
+    // Readable private folders are not in the company repository: list them
+    // where they live (no size — the company's folder sizes cannot see them).
+    const cache = readPrivateScopesCache(safe)
+    const parentOf = (p: string) => p.split('/').slice(0, -1).join('/')
+    const privateNodes = (cache?.scopes ?? [])
+      .filter(s => parentOf(s.path).normalize('NFC') === listed.normalize('NFC') && !view.folders.some(f => f.path.normalize('NFC') === s.path))
+      .map(s => ({ name: s.path.split('/').pop() ?? s.path, path: s.path, size: null, files: null, hasChildren: false, private: true }))
+    return { success: true, ...view, folders: [...view.folders, ...privateNodes] }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
@@ -2333,13 +2408,10 @@ ipcMain.handle('git:listRemoteDirectories', async (_, repoPath: string) => {
 // Get backup history
 ipcMain.handle('backup:list', async (_, repoPath: string) => {
   try {
-    const backupsDir = path.join(repoPath, '.backups')
-
-    if (!fs.existsSync(backupsDir)) {
-      return { success: true, backups: [] }
-    }
-
-    const entries = fs.readdirSync(backupsDir, { withFileTypes: true })
+    // .backups/ in the working tree, and the private folders' backups kept
+    // inside .git (sync/private-folders.ts privateBackupsDir — never in the
+    // working tree, so they can never be staged into the company repository).
+    // The latter are listed with ids prefixed `private:`.
     const backups: Array<{
       id: string
       timestamp: string
@@ -2348,7 +2420,12 @@ ipcMain.handle('backup:list', async (_, repoPath: string) => {
       path: string
     }> = []
 
-    for (const entry of entries) {
+    for (const { dir: backupsDir, idPrefix } of [
+      { dir: path.join(repoPath, '.backups'), idPrefix: '' },
+      { dir: privateBackupsDir(repoPath), idPrefix: PRIVATE_BACKUP_ID_PREFIX },
+    ]) {
+    if (!fs.existsSync(backupsDir)) continue
+    for (const entry of fs.readdirSync(backupsDir, { withFileTypes: true })) {
       if (entry.isDirectory() && !entry.name.startsWith('.')) {
         const backupPath = path.join(backupsDir, entry.name)
         const metadataPath = path.join(backupPath, '_metadata.json')
@@ -2379,13 +2456,14 @@ ipcMain.handle('backup:list', async (_, repoPath: string) => {
         listFiles(backupPath)
 
         backups.push({
-          id: entry.name,
+          id: `${idPrefix}${entry.name}`,
           timestamp: metadata.timestamp || entry.name,
           reason: metadata.reason || 'unknown',
           files: metadata.conflictFiles || files,
           path: backupPath
         })
       }
+    }
     }
 
     // Sort by timestamp (newest first)
@@ -2402,8 +2480,10 @@ ipcMain.handle('backup:list', async (_, repoPath: string) => {
 ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, filePath: string) => {
   try {
     const safeRepoPath = validatePath(repoPath)
-    const backupsDir = path.join(safeRepoPath, '.backups')
-    const backupPath = path.join(backupsDir, backupId)
+    const isPrivate = backupId.startsWith(PRIVATE_BACKUP_ID_PREFIX)
+    const backupsDir = isPrivate ? privateBackupsDir(safeRepoPath) : path.join(safeRepoPath, '.backups')
+    const backupPath = path.join(backupsDir, isPrivate ? backupId.slice(PRIVATE_BACKUP_ID_PREFIX.length) : backupId)
+    if (!backupPath.startsWith(backupsDir + path.sep)) return { success: false, error: 'Invalid backup path' }
     const srcPath = path.resolve(backupPath, filePath)
     const destPath = path.resolve(safeRepoPath, filePath)
 

@@ -150,6 +150,20 @@ export function FileTreePanel({
     setTimeout(() => setDropWarning(null), 6000)
     return true
   }, [notDownloadedOf])
+
+  /**
+   * Refuse a folder name that a private folder the member cannot read already
+   * uses (known to the main process only as a salted hash). The sentence names
+   * only what the member typed. The main process refuses the write too.
+   */
+  const refuseReserved = useCallback(async (absTarget: string): Promise<boolean> => {
+    let message: string | null = null
+    try { message = await window.electronAPI.reservedPathRefusal(absTarget) } catch { /* older preload / preview: allow */ }
+    if (!message) return false
+    setDropWarning(message)
+    setTimeout(() => setDropWarning(null), 6000)
+    return true
+  }, [])
   const [files, setFiles] = useState<FileEntry[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadedDirs, setLoadedDirs] = useState<Set<string>>(new Set())
@@ -715,7 +729,7 @@ export function FileTreePanel({
     const { mode, targetPath, parentPath } = inputDialog
 
     // A name with a '/' could still lead into a folder that is not downloaded.
-    if (refuseNotDownloaded(`${parentPath}/${value}`)) {
+    if (refuseNotDownloaded(`${parentPath}/${value}`) || await refuseReserved(`${parentPath}/${value}`)) {
       setInputDialog(prev => ({ ...prev, isOpen: false }))
       return
     }
@@ -751,11 +765,11 @@ export function FileTreePanel({
     }
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
-  }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded])
+  }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded, refuseReserved])
 
   /** 公開 (or inside a private folder) from 「新しいフォルダ…」: on disk, as before. */
   const createPlainFolder = useCallback(async (parentPath: string, name: string) => {
-    if (refuseNotDownloaded(`${parentPath}/${name}`)) { setNewFolder(null); return }
+    if (refuseNotDownloaded(`${parentPath}/${name}`) || await refuseReserved(`${parentPath}/${name}`)) { setNewFolder(null); return }
     await window.electronAPI.createDirectory(`${parentPath}/${name}`)
     childrenCache.current.delete(parentPath)
     setLoadedDirs(prev => { const next = new Set(prev); next.delete(parentPath); return next })
@@ -765,7 +779,7 @@ export function FileTreePanel({
     if (parentPath === departmentPath) loadFiles(true)
     else await loadChildren(parentPath)
     setNewFolder(null)
-  }, [departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded])
+  }, [departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded, refuseReserved])
 
   // Internal drag & drop: confirm when files cross a private folder's edge
   // (public → private: their past versions stay in everyone's history;
@@ -779,6 +793,7 @@ export function FileTreePanel({
         if (!fileName) continue
         const destPath = await resolveUniquePath(destDir, fileName)
         if (sourcePath === destPath) continue
+        if (await refuseReserved(destPath)) break
         await window.electronAPI.moveItem(sourcePath, destPath)
       }
       setSelectedPaths(new Set())
@@ -794,7 +809,7 @@ export function FileTreePanel({
     if (!crossing) { await run(); return }
     const msg = crossingMessage(crossing, sources.length, '移動')
     setMoveConfirm({ ...msg, run })
-  }, [privateFolders, refusePrivateRoot, resolveUniquePath, loadFiles, setSelectedPaths])
+  }, [privateFolders, refusePrivateRoot, resolveUniquePath, loadFiles, setSelectedPaths, refuseReserved])
 
   const handleDeleteConfirm = useCallback(async () => {
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]

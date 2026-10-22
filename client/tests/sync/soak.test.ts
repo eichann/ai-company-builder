@@ -14,6 +14,16 @@
 //   SYNC_SOAK_MIXED_SEEDS=101,102  seeds for the mixed world (default: 101,102)
 //   SYNC_SOAK_PARTIAL=2     partial-clone members in the mixed world, on top
 //                           of the full ones (default: 2)
+//   SYNC_SOAK_PRIVATE_SEEDS=201,202  seeds for the private-folder world
+//                           (default: 201,202)
+//
+// The private-folder world has private folders (人事/評価, hr/Secret) that
+// some members may read: readers edit inside them, non-readers create the
+// same names in every spelling (NFD, A–Z case), the owner grants and revokes
+// access and now and then makes a folder public (then creates a new one),
+// readers leave a folder out in settings and download it again. After every
+// round no private content may be in the company repository or on a
+// non-reader's disk.
 //
 // The mixed world adds partial-clone members (first setup with one
 // department picked, World.addPartialMember). They edit only what they have
@@ -26,8 +36,10 @@
 
 import { describe, test } from 'node:test'
 import assert from 'node:assert/strict'
-import { World, type Member, type Role } from '../sync-harness/world'
-import { assertConverged, assertNoLostWork } from '../sync-harness/invariants'
+import fs from 'node:fs'
+import path from 'node:path'
+import { World, privateMarker, type HarnessPrivateFolder, type Member, type Role } from '../sync-harness/world'
+import { assertConverged, assertNoLostWork, assertPrivacy } from '../sync-harness/invariants'
 import { readSparseConfig } from '../../electron/sync/sparse'
 import { isNotDownloaded } from '../../shared/sparse-paths'
 
@@ -37,6 +49,7 @@ const ROUNDS = Number(process.env.SYNC_SOAK_ROUNDS) || 6
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
 const MIXED_SEEDS = (process.env.SYNC_SOAK_MIXED_SEEDS ?? '101,102').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
 const PARTIAL = Number(process.env.SYNC_SOAK_PARTIAL ?? 2)
+const PRIVATE_SEEDS = (process.env.SYNC_SOAK_PRIVATE_SEEDS ?? '201,202').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
 
 /** mulberry32 — small, fast, good enough for test choices. */
 function prng(seed: number) {
@@ -287,5 +300,138 @@ describe(`git:sync soak (${MEMBERS} members × ${ROUNDS} rounds)`, { concurrency
 describe(`git:sync soak, mixed full and partial clones (${MEMBERS} full + ${PARTIAL} partial × ${ROUNDS} rounds)`, { concurrency: CONCURRENCY }, () => {
   for (const seed of PARTIAL > 0 ? MIXED_SEEDS : []) {
     test(`seed ${seed}`, async t => soak(seed, t, PARTIAL))
+  }
+})
+
+async function privateSoak(seed: number, t: { after: (fn: () => void) => void; diagnostic: (s: string) => void }) {
+  const rnd = prng(seed)
+  const roles: Role[] = ['owner', 'member', 'member', 'member', 'admin']
+  const count = Math.max(MEMBERS, 3)
+  const world = World.create(t, {
+    members: Array.from({ length: count }, (_, i) => ({ name: `m${i}`, role: roles[i % roles.length] })),
+    departments: ['人事', '営業部', 'hr'],
+    seed: { '人事/規程.md': 'seed\n', '営業部/提案.md': 'seed\n', 'hr/policy.md': 'seed\n' },
+  })
+  const opLog: string[] = []
+  const log = (s: string) => opLog.push(s)
+  let counter = 0
+  const names = world.members.map(m => m.name)
+  world.createPrivateFolder('人事/評価', { viewers: ['m1'] })
+  world.createPrivateFolder('hr/Secret', { viewers: ['m1', 'm2'], editors: ['m1'] })
+  /** Members whose access was taken away and who have not synced since. */
+  const revokedPending = new Set<string>()
+  let generation = 0
+
+  const variants = (p: string) => [p, p.normalize('NFD'), p.toUpperCase(), p.toLowerCase(), p.replace(/^hr\//, 'HR/')]
+  const cloned = (m: Member, f: HarnessPrivateFolder) => fs.existsSync(path.join(m.path(f.path), '.git'))
+
+  const randomOp = async (m: Member) => {
+    const n = ++counter
+    const folders = [...world.privateFolders.values()]
+    const roll = rnd.int(100)
+    if (roll < 40) {
+      const mine = folders.filter(f => world.canRead(f, m.name) && cloned(m, f))
+      if (mine.length > 0) {
+        const f = rnd.pick(mine)
+        const p = `${f.path}/${rnd.pick(['評価表.md', 'notes.md', 'sub/詳細.md'])}`
+        if (rnd.chance(0.3) && m.exists(p)) m.append(p, `${m.name} appends #${n}\n`)
+        else m.write(p, `${privateMarker(f)}\n${m.name} #${n}\n`)
+        log(`${m.name} writes private ${p}`)
+        return
+      }
+    }
+    if (roll < 60) {
+      const p = rnd.pick(['人事/規程.md', '営業部/提案.md', 'hr/policy.md', `営業部/new-${m.name}-${n}.md`])
+      m.write(p, `${m.name} #${n}\n`)
+      log(`${m.name} writes ${p}`)
+    } else if (roll < 75) {
+      // The same name as a private folder the member cannot see (or a variant).
+      const unreadable = folders.filter(f => !world.canRead(f, m.name))
+      if (unreadable.length > 0) {
+        const f = rnd.pick(unreadable)
+        const p = `${rnd.pick(variants(f.path))}/mine-${n}.md`
+        m.write(p, `own notes ${n}\n`)
+        log(`${m.name} writes into a reserved name: ${p}`)
+      }
+    } else if (roll < 82) {
+      if (rnd.chance(0.5)) { m.offline(); log(`${m.name} offline`) } else { m.online(); log(`${m.name} online`) }
+    } else if (roll < 90) {
+      const readable = folders.filter(f => world.canRead(f, m.name))
+      if (readable.length > 0) {
+        const f = rnd.pick(readable)
+        const excluded = readSparseConfig(m.dir).excluded.includes(f.path)
+        const r = excluded ? await m.includeFolder(f.path) : await m.excludeFolder(f.path)
+        const reports = await m.applyPrivateFolderChoices()
+        log(`${m.name} ${excluded ? 'downloads' : 'leaves out'} ${f.path} → ${r.success ? 'ok' : r.error} ${JSON.stringify(reports.map(x => [x.success, x.removed, x.cloned]))}`)
+      }
+    }
+  }
+
+  const ownerOps = () => {
+    const folders = [...world.privateFolders.values()]
+    if (folders.length === 0) return
+    const f = rnd.pick(folders)
+    const roll = rnd.int(100)
+    if (roll < 15) {
+      const who = rnd.pick(names.filter(x => !world.canRead(f, x)))
+      if (who) { world.grantPrivate(f.path, who, { write: rnd.chance(0.7) }); log(`owner grants ${f.path} to ${who}`) }
+    } else if (roll < 28) {
+      const who = rnd.pick([...f.viewers.keys()])
+      if (who && world.member(who).role === 'member') {
+        world.revokePrivate(f.path, who)
+        revokedPending.add(who)
+        log(`owner revokes ${f.path} from ${who}`)
+      }
+    } else if (roll < 33) {
+      world.makePublic(f.path)
+      log(`owner makes ${f.path} public`)
+      const next = `人事/評価${++generation}`
+      world.createPrivateFolder(next, { viewers: [rnd.pick(names)] })
+      log(`owner creates private folder ${next}`)
+    }
+  }
+
+  try {
+    for (let round = 1; round <= ROUNDS; round++) {
+      log(`--- round ${round}`)
+      ownerOps()
+      for (const m of world.members) {
+        const ops = rnd.int(4)
+        for (let i = 0; i < ops; i++) await randomOp(m)
+      }
+      for (const m of rnd.shuffle(world.members)) {
+        if (!revokedPending.has(m.name) && !rnd.chance(0.85)) continue
+        if (revokedPending.has(m.name)) m.online()
+        m.clearAnswers()
+        const out = await m.sync()
+        log(`${m.name} sync → ${out.result.success ? 'ok' : `${out.result.errorType ?? 'fail'}: ${(out.result.error ?? '').split('\n').slice(0, 2).join(' / ')}`}`)
+        if (out.result.success) revokedPending.delete(m.name)
+        else {
+          assert.ok(['push_failed', 'network', 'write_denied'].includes(out.result.errorType ?? '') || expectedFailure(out.result),
+            `unexpected failure: ${JSON.stringify(out.result)}`)
+          if (revokedPending.has(m.name) && out.result.lostPrivateFolders) revokedPending.delete(m.name)
+        }
+      }
+      assertNoLostWork(world, { allowUnpushed: true })
+      if (revokedPending.size === 0) assertPrivacy(world)
+    }
+    log('--- settle')
+    for (const m of world.members) m.online()
+    await world.settle(2)
+    assertConverged(world)
+    assertNoLostWork(world)
+    assertPrivacy(world, { converged: true })
+    t.diagnostic(`private seed ${seed}: ${opLog.length} steps, ${world.members.reduce((n, m) => n + m.results.length, 0)} syncs, ` +
+      `${world.members.reduce((n, m) => n + m.results.filter(r => r.reservedPathFiles).length, 0)} held back reserved names, ` +
+      `${world.members.reduce((n, m) => n + m.results.filter(r => r.lostPrivateFolders).length, 0)} lost access, ` +
+      `${world.members.reduce((n, m) => n + m.results.filter(r => r.madePublicFolders).length, 0)} made public`)
+  } catch (error) {
+    throw new Error(`private soak seed ${seed} failed: ${error instanceof Error ? error.message : String(error)}\n\noperations:\n${opLog.join('\n')}`)
+  }
+}
+
+describe(`git:sync soak, private folders (${Math.max(MEMBERS, 3)} members × ${ROUNDS} rounds)`, { concurrency: CONCURRENCY }, () => {
+  for (const seed of PRIVATE_SEEDS) {
+    test(`seed ${seed}`, async t => privateSoak(seed, t))
   }
 })

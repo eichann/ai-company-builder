@@ -5,7 +5,7 @@
 // downloaded except the folders left out; no re-including inside a folder that
 // is left out). Applying: electron/sync/sparse.ts via useSparseCheckout.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
-import { CaretRight, FolderSimple, FolderSimpleDashed, MagnifyingGlass, SpinnerGap, X, CheckCircle, WifiSlash, WarningCircle } from '@phosphor-icons/react'
+import { CaretRight, FolderSimple, FolderSimpleDashed, Lock, MagnifyingGlass, SpinnerGap, X, CheckCircle, WifiSlash, WarningCircle } from '@phosphor-icons/react'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import type { DepartmentConfig } from '../../types'
 import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../lib/download-selection'
@@ -18,6 +18,8 @@ interface FolderNode {
   size: number | null
   files: number | null
   hasChildren: boolean
+  /** A private folder the member can read (its own repository; downloaded or not as a whole). */
+  private?: boolean
 }
 
 type Phase =
@@ -254,6 +256,12 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
             {deptName ?? node.name.normalize('NFC')}
             {deptName && deptName !== node.name && <span className="ml-2 font-mono text-[11px] text-zinc-400 dark:text-zinc-500">{node.name}/</span>}
           </span>
+          {node.private && (
+            <span className="flex shrink-0 items-center gap-1 text-[11px] text-zinc-500 dark:text-zinc-400" title="非公開フォルダ（見られる人だけに届きます）">
+              <Lock size={12} weight="bold" aria-hidden="true" />
+              非公開
+            </span>
+          )}
           {changed && (
             <span className={`shrink-0 rounded-full px-1.5 py-px text-[10.5px] font-medium ${state === 'unchecked'
               ? 'bg-zinc-100 text-zinc-600 dark:bg-white/[0.08] dark:text-zinc-300'

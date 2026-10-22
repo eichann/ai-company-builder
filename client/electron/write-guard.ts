@@ -29,9 +29,30 @@
  * - `git clone` (and `gh repo clone`) into the company folder outside
  *   `.workspace/`: an external repository there would be shared with the
  *   whole company (or stop sync as a nested repository).
+ * Private folders (`getPrivateFolderView`): a write that would create
+ * something at a folder name the member may not use (a private folder they
+ * cannot read; asked of the server, decideReservedWrite) is refused with the
+ * server's [RESERVED_PATH] sentence (it names only what the AI typed), and a
+ * write into a private folder the member may only read with the read-only
+ * message. Sync's reserved-path hold-back
+ * (sync/reserved-path.ts) stays the safety net.
  */
 import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } from '../shared/write-access'
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
+import { reservedPathMessage } from '../../shared/types/private-folders'
+
+/** Private folders as the guard sees them (from the cached /me/scopes answer, sync/private-folders.ts). */
+export interface PrivateFolderView {
+  /**
+   * The private folder — in the spelling of `rel` — that `rel` would write
+   * into although the member cannot read it, or null. A write there is
+   * refused with the server's [RESERVED_PATH] wording: sync would move the
+   * file to .backups/ instead of sharing it.
+   */
+  reservedFolderOf(rel: string): Promise<string | null>
+  /** The readable private folder `rel` lies in when the member may only read it (canWrite false), or null. */
+  readOnlyFolderOf(rel: string): string | null
+}
 
 export interface WriteGuard {
   /** The company's checkout root (absolute). */
@@ -56,6 +77,8 @@ export interface WriteGuard {
    * departments they manage (company-relative).
    */
   getInstructionAuthority?: () => InstructionAuthority | undefined
+  /** Private folders for the reserved-name and read-only checks (read on every call); undefined = none known. */
+  getPrivateFolderView?: () => PrivateFolderView | undefined
 }
 
 export interface InstructionAuthority {
@@ -120,6 +143,14 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
     if (authority && !mayChangeInstructionFile(authority, rel)) {
       return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: instructionFileMessage(rel) }
     }
+  }
+  // A private folder the member may only read: known locally (cached
+  // /me/scopes), so it applies even when the write access is unknown. Folder
+  // names the member may not use are asked of the server: decideReservedWrite.
+  const privateFolders = guard.getPrivateFolderView?.()
+  if (privateFolders) {
+    const readOnly = privateFolders.readOnlyFolderOf(rel)
+    if (readOnly !== null) return { deny: true, path: rel, folder: readOnly, message: readOnlyMessage(readOnly) }
   }
   const access = guard.getAccess()
   if (!access || access.all) return { deny: false }
@@ -192,6 +223,42 @@ export function bashWriteTargets(command: string): string[] {
     }
   }
   return targets.filter(p => !p.startsWith('/dev/'))
+}
+
+/**
+ * The write targets of one tool call (absolute or relative), as
+ * decideToolWrite judges them.
+ */
+function toolWriteTargets(toolName: string, toolInput: Record<string, unknown> | undefined): string[] {
+  const key = FILE_TOOLS[toolName]
+  if (key) {
+    const target = toolInput?.[key]
+    return typeof target === 'string' && target ? [target] : []
+  }
+  if (toolName === 'Bash' && typeof toolInput?.command === 'string') return bashWriteTargets(toolInput.command)
+  return []
+}
+
+/**
+ * The reserved-name half of the guard, asked of the server (POST
+ * …/paths/check, cached): a write that would create something at a folder
+ * name the member may not use — a private folder they cannot read — is
+ * refused with the server's sentence, naming only what the AI typed. Unknown
+ * answers allow. Run after decideToolWrite.
+ */
+export async function decideReservedWrite(guard: WriteGuard | undefined, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): Promise<GuardDecision> {
+  const view = guard?.getPrivateFolderView?.()
+  if (!guard || !view) return { deny: false }
+  for (const target of toolWriteTargets(toolName, toolInput)) {
+    const rel = repoRelativePath(guard.root, target, cwd)
+    if (!rel) continue
+    const reserved = await view.reservedFolderOf(rel).catch(() => null)
+    if (reserved !== null) {
+      const folder = reserved.normalize('NFC')
+      return { deny: true, path: rel, folder, message: reservedPathMessage(folder) }
+    }
+  }
+  return { deny: false }
 }
 
 /** The PreToolUse decision for one Claude Code tool call. */

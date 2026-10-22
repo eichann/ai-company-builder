@@ -193,8 +193,38 @@ by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), the
 clock and the logger are injected (`sync/types.ts`). `client/electron/main.ts`
 only wires the real implementations into `ipcMain.handle('git:sync', ...)`.
 Helpers: `sync/conflicts.ts`, `sync/nested-repos.ts`, `sync/sparse.ts`,
-`sync/first-setup.ts` (first setup, below), `sync/outside-checkout.ts`, `sync/not-downloaded.ts`, `protected-config.ts`. Every change to sync runs through the multi-member
-harness — see "Testing Sync" below.
+`sync/first-setup.ts` (first setup, below), `sync/outside-checkout.ts`, `sync/not-downloaded.ts`, `protected-config.ts`,
+and for private folders `sync/private-folders.ts`, `sync/private-sync.ts`,
+`sync/reserved-path.ts` (see "Private Folders (client sync, stage 3b)" below).
+Every change to sync runs through the multi-member harness — see "Testing
+Sync" below.
+
+One press syncs several repositories: the company repository first (steps
+0–13 below), then every private folder the member may read — its own scope
+repository, cloned at its path inside the company folder — with the same
+steps, its own `syncLocks` entry and its own `PENDING_PUSH`:
+
+```
+P1. GET /me/scopes (cached in .git/acb-private-scopes.json; offline → the
+    cached answer, and nothing is deleted or handed over)
+    ├─ no longer listed and the company repository has it → made public:
+    │    back up unsynced edits, drop the inner .git and the scope's files
+    │    (the company sync then checks the public version out)
+    ├─ no longer listed and POST …/paths/check says "not usable" (or the
+    │    server says "not a member") → access lost: delete the clone WITHOUT
+    │    a backup (Q1) + notice
+    └─ anything undecided (fetch / check failed) → wait, nothing deleted
+P2. Write every readable private path into the company's .git/info/exclude
+[company repository: steps 0–13; 4 and 5 skip the private clones, 6.6 holds
+ back new files under a reserved name]
+P3. Each readable private folder: excluded in settings → sync it one last
+    time and remove the clone; otherwise clone it when missing (a folder
+    already at the path goes to the private backups first; every segment of
+    the path must be a real directory inside the company folder, and the
+    clone URL must be the company server's own), then steps 0–13 in the
+    clone (read-only viewer: fetch + offer local edits back, never push).
+    A failure in one repository does not stop the others.
+```
 
 ```
 0. Serialize per repository (syncLocks)
@@ -208,13 +238,21 @@ harness — see "Testing Sync" below.
 6. git fetch --progress origin
 6.5 Hold back files created inside excluded (not downloaded) folders, at any
     depth → .backups/<ts>_outside_checkout/ (never staged, never shared)
+6.3 Company repository: stop before anything changes when the server turned
+    an ancestor of a readable private folder (or the folder) into a file or
+    symlink (the pull would delete the clone with its unsynced work)
+6.6 Company repository: new files at or under a folder name the member may
+    not use (POST …/paths/check, cached; unknown never blocks) →
+    .backups/<ts>_reserved_path/ (never staged, never shared)
 7. Reconcile sparse checkout against the user's persisted exclusions:
    non-cone patterns `/*` + `!/<folder>/` (a repository still on the old cone
    mode switches here, downloading nothing); exclusions of folders that exist
    neither on origin/main nor in HEAD are dropped (ignored files in excluded
    folders are kept out of git's reach meanwhile)
 8. Warn if files were deleted locally (sync / restore / cancel)
-9. git add --sparse . → git commit → record localHash
+9. git add --sparse . → unstage anything under .backups/, .workspace/ or a
+   private folder (a shared .gitignore negation can re-include them; index
+   only) → git commit → record localHash
 10. git pull --rebase --progress origin main
     ├─ Success → step 12
     └─ Stopped mid-rebase → step 11
@@ -233,6 +271,13 @@ harness — see "Testing Sync" below.
     PENDING_PUSH
     ├─ Rejected with PERSONAL_PATH → reset --soft origin/main →
     │    git rm --cached those paths (files stay on disk) → commit → push again
+    ├─ Rejected with LOCAL_ONLY_PATH (.backups/ or .workspace/ content, any
+    │    depth) → the PERSONAL_PATH recovery: squash, untrack (kept on disk),
+    │    push once more; a second rejection → errorType 'local_only_path'
+    ├─ Rejected with RESERVED_PATH → squash (ancestor check) → back the
+    │    listed files up to .backups/<ts>_reserved_path/, remove them from the
+    │    commit AND the disk, put an exact move back → commit → push again,
+    │    once (no dialog; the server's reason line is shown verbatim)
     ├─ Rejected with SECRET_DETECTED → squash the unpushed commits (no file
     │    changed) → push once more; with one commit (or still rejected) the
     │    secret is in the files: report them, no PENDING_PUSH
@@ -477,6 +522,12 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | The company's **first** private folder is refused (409 `OUTDATED_CLIENTS`, the #119 shape: `members`, `canForce`) while any member's app is not known to handle private folders (`supportsPrivateFolders` in `server/src/lib/client-version.ts`: build commit date ≥ `PRIVATE_FOLDERS_CLIENT_COMMIT_DATE`; unknown/never-seen = not ready). The constant is `null` until stage 3b (client sync) merges — **set it to that merge commit's date then** — and while it is null **no** private folder can be created at all (409 `PRIVATE_FOLDERS_UNAVAILABLE`, `force` included). Afterwards an owner/admin's `force: true` overrides the first-folder check; a manager sending `force` gets 403 `FORCE_NOT_ALLOWED` | An app older than 3b syncs only the company repository: a reader never receives the folder, and the `[RESERVED_PATH]` rejection is a generic push failure it retries on every sync forever — the "permanently unable to sync" shape again. Later private folders do not re-check: by then the owner has accepted the risk once. Before any released app can sync one, `force` would only create a folder nobody's app can receive. |
 | AI instruction files — `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` at any depth, case-insensitive — may be added, changed or deleted by owner/admin anywhere and by a **department manager inside a department folder they manage** (any depth; root-level ones owner/admin only; owner decision 案B). Anyone else is rejected inside the existing `[PROTECTED_CONFIG]` section (its own sub-list, plain `  - <path>` lines), so current apps already recover (dialog → restore the server's version). The managed folders reach the checker in the git-http snapshot (`managedFolders`); in a scope repository the path is judged as `<scopePath>/<path>`. Pushes without a snapshot (local transport) know no managers. `CLAUDE.local.md` is personal by convention but, once committed, is loaded like `CLAUDE.md` for everyone — so it is protected the same way rather than refused outright (which no current app could recover from). The chat's write guard (`client/electron/write-guard.ts`) refuses the same edits up front | Claude Code / Codex load these into every chat in or below their folder, so whoever writes one steers every teammate's AI there — a prompt injection that runs with each member's permissions, while the files themselves look like harmless Markdown. |
 | `.backups/` and `.workspace/` content is never shared, for anyone: the checker rejects with `[LOCAL_ONLY_PATH]` (`  - <path>` lines, the `PERSONAL_PATH` shape) any push in which a commit (or the net diff) adds or modifies a path inside a directory named `.backups` or `.workspace` at any depth, case-insensitively. Deletions are allowed (how an already-shared file gets unshared). A new marker rather than `PERSONAL_PATH`: current apps' `PERSONAL_PATH` recovery refuses any path that is not under `.personal/`, so reusing it would not let them recover either. Current apps show it as a plain push failure; sync never commits these folders (both are essential `.gitignore` patterns), so only a commit made by hand or by another tool hits it — the fix is `git rm --cached` | `.backups/` holds the versions a member lost a conflict with, `.workspace/` the AI's scratch files and cloned repositories. Shared, they would reach the whole company (and the secret scan sees only text). |
+| The company repository never tracks private content: sync writes every readable private folder's path into the company's `.git/info/exclude` (a managed block, NFC and NFD, `writePrivateExcludes` in `client/electron/sync/private-folders.ts`) — never into the shared `.gitignore` — and after every `git add` in the company repository unstages (index only) anything under a private folder, `.backups/` or `.workspace/` before committing. Private folders' backups live in `.git/acb-private-backups/`, never in the working tree | `.git/info/exclude` alone is not enough: a shared `.gitignore` negation (`!評価/`, `!*`) outranks it, staged the clone as a gitlink, the push was rejected with `[RESERVED_PATH]` and the reader's company sync was stuck for good; one `!.backups/` line in the shared `.gitignore` would have shared every backup — private conflict copies included — with the whole company (security review of 3b, reproduced in the harness). Exclusion pathspecs cannot be used (git refuses an `add` whose pathspec names an ignored path). A shared line would also show the name to people who may not see it (decision B). `[RESERVED_PATH]` stays the last line of defence on the server. |
+| Nested-repository detection (step 5) and the large-file scan (step 4) skip the readable private folders' paths (and a nested repository at a folder name the member may not use is moved to `.backups/<ts>_reserved_path/` whole instead of being offered for exclusion); at placement (P3) a folder at that path that is not a clone of the scope's URL (same URL, or same server path) is moved to the private backups before cloning | Step 5 would ask "exclude this external repository?" and write `/<path>/` into the shared `.gitignore` — the private name — and the scan would name large private files there (plan §1.3 D3). A large file inside a private folder is ignored in that scope repository's own `.gitignore` (its own run), shared only with the folder's readers. |
+| Every place, delete or clone of a private folder first checks that each existing segment of its path is a real directory whose real path stays inside the company folder (`safeScopeDir`); before the company pull, sync stops (`errorType: 'conflict'`, nothing changed) when `origin/main` has a file or symlink at a readable private folder or one of its ancestors. A clone URL must be the company server's (same scheme/host, the server's clone path; never `-…` or `ext::`) and is passed after `--` | A teammate could replace `営業部/顧客` with a symlink in the company repository: the reader's pull silently deleted the ignored clone (unsynced private work lost, no backup) and the next placement followed the link and cloned the private folder outside the company folder (security review of 3b, reproduced). A forged /me/scopes answer must not send the app's credentials elsewhere. |
+| `[RESERVED_PATH]` (a folder named like a private folder the member cannot read) is resolved without a dialog and **the files leave their place**: before staging (`holdBackReservedPaths`: every new folder prefix of a new path — one the company repository does not have — is sent to `POST …/paths/check`, cached 5 minutes, at most 50 per sync (the server allows 60 per member per minute); unknown answers hold nothing back) or after the rejection (`untrackReservedPaths`: squash with the ancestor check, back up from the commit, `rm --cached` + delete, an exact move put back, commit, push once) they go to `.backups/<ts>_reserved_path/` with `_metadata.json`, and the member sees 「『<what they typed>』というフォルダ名は使えません。別の名前にしてください。」 (the server's reason lines verbatim). A second rejection is reported (`errorType: 'reserved_path'`), never retried in a loop, no `PENDING_PUSH` | Left in place, the file is staged again at the next sync and rejected again — the "permanently unable to sync" shape; ignored instead, the member's files would silently never reach anyone (plan §1.3 C). The app's file operations, the file tree's dialogs and the chat guard ask the same checker up front. Salted hashes of every private path were dropped: names were brute-forceable. |
+| Access lost (the folder disappears from `/me/scopes`, the company repository does not have it, and `paths/check` answers "not usable" for it — or `/me/scopes` says "not a member" (404 `Company not found or access denied`) while `/api/me` confirms the session): the clone is deleted **without a backup**, copies in the private backups too, with 「このフォルダを見る権限がなくなったため、手元から削除しました（『…』）。同期していなかった変更も削除されています。」. Only on a fresh, definite answer — offline, a failed fetch or path check, or a transient auth error delete nothing (the folder waits in `pendingPublic`) | Owner decision Q1: someone who may no longer read the folder must not keep it, and nothing can be pushed from there any more (the scope repository answers 404). Unsynced edits are lost by that decision, and the notice says so. |
+| Made public (gone from `/me/scopes`, and the company repository has it): handed over only once `origin/main` of the company has the folder (fetched first); until then it stays excluded (`pendingPublic`). Unsynced edits go to the private backups (`<ts>_made_public`), then the inner `.git` and the scope's files are removed so the company pull checks out the public version | Removing the clone before the company repository has the folder would delete its files with nowhere to get them from; checking the company version out over a nested repository or the member's edits fails or overwrites them. |
 
 ### Backup Structure
 
@@ -496,13 +547,30 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 │       │                          this computer, never shared
 │       └── _metadata.json       ← reason `outside_checkout`, `folders`, `files`,
 │                                  `serverFiles` (paths the server already had)
+│   └── 2026-02-21T14-31-00-000_reserved_path/
+│       ├── 人事/評価/メモ.md     ← a file in a folder named like a private folder
+│       │                          the member cannot read; never shared
+│       └── _metadata.json       ← reason `reserved_path`, `folders`, `files`
+│                                  (+ `reasons`, the server's lines, after a rejection)
 │   └── 2026-02-21T14-31-00-000_write_denied/
 │       ├── 経理部/予算.md        ← member's version of a file in a folder they
 │       │                          may not edit, put back to the server's version
 │       └── _metadata.json       ← reason `write_denied`, `writeDeniedFiles`,
 │                                  restored/removed paths
 └── .git/
+    └── acb-private-backups/         ← private folders' backups: never in the working
+        │                              tree, so no .gitignore edit can share them
+        ├── 2026-02-21T14-30-00-000_private/人事/評価/評価表.md  ← conflict backup
+        │                              (also _protected / _write_denied), paths
+        │                              company-relative
+        ├── …_made_public/            ← unsynced edits of a folder made public
+        ├── …_private_folder_existing/ ← what sat at a private folder's path before
+        │                              it was downloaded
+        └── …_outside_checkout/       ← found at a private folder the member left out
 ```
+
+The app's backup list (`backup:list`) shows both places; ids of the private
+ones start with `private:`.
 
 Backups older than 30 days are pruned at the start of each sync.
 
@@ -555,6 +623,18 @@ Backups older than 30 days are pruned at the start of each sync.
   (no `PENDING_PUSH`, offered again next sync); success reports
   `restoredWriteDeniedFiles` and `writeDeniedBackupPath`. Both sections in one
   push are resolved in one pass.
+- Private folders: the result carries `privateFolders` (one report per
+  readable folder: `path`, `success`, `message` / `error`, `cloned`,
+  `removed`), `newPrivateFolders`, `lostPrivateFolders`, `madePublicFolders`
+  (+ `madePublicBackupPath`) and `reservedPathFiles` / `reservedPathBackupPath`.
+  A failed private folder makes the whole result `success: false` with
+  「非公開フォルダ『…』を同期できませんでした。…その他のフォルダは同期しました」,
+  its `errorType`, and the company's own message kept.
+- `[LOCAL_ONLY_PATH]` (`.backups/` / `.workspace/` content, any depth — only
+  reachable through a commit made outside sync, since sync unstages such paths
+  after every add) is untracked like `.personal/` (kept on disk, no dialog,
+  pushed once more); if that fails, `errorType: 'local_only_path'` with
+  `localOnlyFiles`, no `PENDING_PUSH`.
 - `[PERSONAL_PATH]` (any pusher, `.personal/` content) is handled first and
   without a dialog: the listed paths are untracked and the push retried; the
   result carries `untrackedPersonalFiles`. If that fails it returns
@@ -627,6 +707,21 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   `UPDATE_SYNC_GOLDEN=1` only for an intended behaviour change, and review the
   JSON diff); `findings.test.ts` holds regressions for bugs the harness found;
   `harness-selftest.test.ts` proves each invariant fails when sync misbehaves.
+- Private folders (`private-folders.test.ts`): `world.createPrivateFolder(path,
+  { viewers, editors?, files? })` creates a bare scope repository configured
+  like the company's (real hook) and its scope (`everyone: none` + one user rule
+  per viewer); each member's `/me/scopes` comes from `world.myScopes` and
+  `POST /paths/check` from `world.pathsUsable` (both 404 until the first
+  private folder, like an older server; `member.pathCheckDown`, `pathChecks`);
+  a push from a clone gets a snapshot with `scopePath`. `grantPrivate` /
+  `revokePrivate` / `makePublic` are the owner's actions (the retired scope
+  repository is kept for no-lost-work); `member.scopesApiDown` makes
+  `/me/scopes` fail. `assertPrivacy` (part of `settleAndCheck`): nothing at a
+  private path and no private content (`privateMarker`) in the company
+  repository, and no company commit message or `.gitignore` names a private
+  folder; none on a non-reader's disk or in their `.git`; every reader has
+  a clean clone at the scope server's commit (unless left out). The soak has
+  a private-folder world (`SYNC_SOAK_PRIVATE_SEEDS`, default 201,202).
 - New sync behaviour (more repositories, adoption, new rejection types) gets
   a scenario here, ending with `settleAndCheck(world)`.
   `SYNC_HARNESS_VERBOSE=1` prints every sync log line; `SYNC_HARNESS_KEEP=1`
@@ -664,6 +759,13 @@ member may only read used to be rejected at sync and moved to `.backups/`
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
   Same Bash best-effort limits; sync's outside-checkout hold-back is the
   safety net there.
+- Private folders (`WriteGuard.getPrivateFolders`): a write that would
+  create something at a folder name the member may not use (`decideReservedWrite`,
+  asking `POST …/paths/check` through sync's cached checker; unknown allows)
+  is refused with the server's sentence 「『<what the AI typed>』というフォルダ名は使えません。別の名前にしてください。」;
+  a write into a private folder the member may only read (`canWrite: false`,
+  from the cached `/me/scopes` answer) with the read-only message. Writes into a readable, writable private folder
+  follow `/me/write-access` like everywhere else.
 - Deliberately NOT done: Claude Code permission deny rules
   (`disallowedTools: ['Edit(...)']`). Deny beats allow, so a writable folder
   inside a read-only one cannot be expressed; matching is case/NFD-sensitive;
@@ -856,3 +958,91 @@ branch on the server (permission plan §11). Editing stays local.
 - Not yet: pptx/pdf/xlsx are not searchable (text extraction is on hold).
 - Tests: `server/tests/integration/company-files.test.ts`,
   `client/tests/company-files.test.ts`.
+
+---
+
+## Architecture: Private Folders (client sync, stage 3b)
+
+Builds on 3a's contract (`shared/types/private-folders.ts`). Code:
+`client/electron/sync/private-folders.ts` (cache, excludes, clone checks,
+`safeScopeDir`, `cloneUrlAllowed`, `privateBackupsDir`),
+`sync/private-sync.ts` (prepare / place / read-only sync),
+`sync/path-check.ts` (`POST …/paths/check`), `sync/reserved-path.ts`
+(`[RESERVED_PATH]`), orchestration in `sync/git-sync.ts` `createGitSync`.
+
+- **On disk** a readable private folder is a clone of its scope repository at
+  its path inside the company checkout (a full clone, also for a partial-clone
+  member). The company repository ignores it through `.git/info/exclude` and
+  sync unstages it if a shared `.gitignore` negation ever re-includes it
+  (`git status` may then list it as untracked; it is never committed).
+- **Cache**: the last `/me/scopes` answer — readable folders only, never
+  anything about folders the member cannot read — lives in
+  `.git/acb-private-scopes.json` (companyId, version, scopes, `pendingPublic`).
+  Offline syncs and the chat guard's read-only check use it.
+- **Names the member may not use** are known only per path, from the server:
+  `POST /api/companies/:id/paths/check { paths ≤ 50 }` → `{ results: [{ path,
+  usable }] }` (60 paths per member per minute, 429 beyond; `usable: false` at or under a private folder the caller cannot
+  read). One checker per app (`gitSync.pathChecker`, 5-minute cache) serves
+  sync's hold-back, the app's file operations (`fs:*` backstop for paths that
+  do not exist yet; `privateFolders:reservedPathRefusal` IPC for the file
+  tree's new file / 新しいフォルダ… (公開) / rename / move) and the chat guard
+  (`decideReservedWrite`, after the synchronous checks). All of them ask for
+  every prefix of the path; the first one answered "not usable" is the name
+  shown: 「『<prefix as typed>』というフォルダ名は使えません。別の名前にしてください。」.
+  Unknown answers (offline, error, older server) never block — the server's
+  `[RESERVED_PATH]` and sync's recovery stay the safety net.
+- **Access gained** (a new scope in the answer): cloned at the next sync (the
+  3c dialog starts one right after creating a folder). An empty folder at the
+  path (OS files only) is reused; anything else there goes to the private
+  backups (`<ts>_private_folder_existing`) first — never overwritten.
+- **Access lost / made public**: see the guards table. Q1: deleted without a
+  backup; make-public: unsynced edits saved to the private backups. A folder
+  whose fate is not known yet (fetch or path check failed, or the company
+  repository does not show it yet) waits in `pendingPublic`, still excluded.
+- **Read-only viewer** (`canWrite: false`; git-http answers its push with 403):
+  sync never commits there — it fetches, offers local edits back with the
+  WRITE_DENIED dialog (member's version to the private backups,
+  `<ts>_write_denied`), and resets the clone to the server's version. Cancel →
+  `errorType: 'write_denied'`, nothing changed.
+- **Download choices** (#124): a private folder is downloaded or not as a
+  whole (no exclusions inside it). It is excluded when it lies at or under an
+  excluded folder (a department not picked at first setup included). The
+  settings tree lists readable private folders under their parent (lock,
+  「非公開」, no size: `git:folderSizes` adds them); applying runs
+  `applyPrivateFolderChoices` at once: an excluded clone is synced one last
+  time and removed only when nothing is left unpushed; an included one is
+  cloned. Their exclusions are never dropped as stale (they are not in the
+  company tree).
+- **Backups** of a private folder go to `.git/acb-private-backups/` (see
+  Backup Structure) with the folder's path as prefix, metadata listing
+  company-relative paths; dialogs list company-relative paths too; messages
+  say 「非公開フォルダのバックアップ」.
+- **Names never reach the company repository.** Nothing sync commits there
+  can name a private folder: the large-file scan and nested-repository
+  detection skip readable private paths (a large file inside a private folder
+  is ignored in *that scope repository's* `.gitignore` by the scope's own run
+  — shared only with the folder's readers), a nested repository at a name the
+  member may not use is moved to `.backups/` instead of being offered for
+  exclusion, and the company commit (and its AI-generated message, from the
+  staged `--name-status`) never contains a private path (unstaged after every
+  add + the hold-back). The harness checks every company commit message and
+  `.gitignore` (`assertPrivacy`). Private paths appear only in the member's
+  local console log, which is not sent anywhere.
+- **Without an answer from /me/scopes** (offline, server error) the last
+  cached answer applies: its readable paths stay excluded and nothing is
+  deleted or handed over. With no cache at all (never synced since 3b) a new
+  path at a private folder's name is still checked by `paths/check` when the
+  server answers, and otherwise refused by the server (`[RESERVED_PATH]`) and
+  recovered — it never lands in the company repository. A reader's existing
+  `info/exclude` block is kept when the cache is missing.
+- `shared/package.json` is `"type": "module"`: the client imports the
+  contract (`../../../shared/types/private-folders`) directly, and tsx
+  (harness) could not see named exports of a CommonJS-typed TypeScript file.
+- **Version gate**: `PRIVATE_FOLDERS_CLIENT_COMMIT_DATE` in
+  `server/src/lib/client-version.ts` is the committer date (UTC) of this
+  stage's merge commit on main.
+- Deferred: partial clone / folder exclusions *inside* a private folder;
+  moving a private folder; nested-repository exclusions in
+  `.git/info/exclude` instead of the shared `.gitignore` (owner decision
+  pending — it changes behaviour for every member and the characterization
+  transcript, so it gets its own change).

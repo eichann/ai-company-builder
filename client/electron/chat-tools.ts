@@ -4,7 +4,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { exec } from 'child_process'
 import crypto from 'crypto'
-import { checkWritePath, decideToolWrite, type WriteGuard } from './write-guard'
+import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
 
 // Approval callback type (optional, injected from chat-server)
 export type RequestApproval = (
@@ -107,6 +107,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         // Read-only folder: refuse before asking the member to approve it.
         const guarded = writeGuard ? checkWritePath(writeGuard, validatePath(filePath, workingDirectory)) : undefined
         if (guarded?.deny) throw new Error(guarded.message)
+        const reserved = await decideReservedWrite(writeGuard, 'Write', { file_path: validatePath(filePath, workingDirectory) }, workingDirectory)
+        if (reserved.deny) throw new Error(reserved.message)
         if (requestApproval) {
           const result = await requestApproval('writeFile', { path: filePath }, crypto.randomUUID())
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
@@ -140,7 +142,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Execute a shell command in the working directory. Use for build, test, or inspection tasks. Dangerous commands are blocked.',
       inputSchema: executeCommandSchema,
       execute: async ({ command }) => {
-        const guarded = decideToolWrite(writeGuard, 'Bash', { command }, workingDirectory)
+        let guarded = decideToolWrite(writeGuard, 'Bash', { command }, workingDirectory)
+        if (!guarded.deny) guarded = await decideReservedWrite(writeGuard, 'Bash', { command }, workingDirectory)
         if (guarded.deny) throw new Error(guarded.message)
         if (requestApproval) {
           const result = await requestApproval('executeCommand', { command }, crypto.randomUUID())

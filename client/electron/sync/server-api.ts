@@ -2,6 +2,8 @@
 // cookies. main.ts wires the real session; tests pass a fake fetch.
 
 import type { SyncServerApi } from './types'
+import { parseMyScopes } from './private-folders'
+import { fetchCheckPaths } from './path-check'
 
 export interface FetchSyncServerApiOptions {
   /** Server base URL, read on every call (it can change in settings). */
@@ -46,6 +48,21 @@ export function createFetchSyncServerApi(options: FetchSyncServerApiOptions): Sy
       if (!deptResponse.ok) return null
       const deptResult = await deptResponse.json()
       return deptResult.data || []
+    },
+
+    checkPaths: fetchCheckPaths({ baseUrl: options.baseUrl, cookies: options.cookies, fetch: options.fetch }),
+
+    async getMyScopes(companyId) {
+      const response = await doFetch(`${options.baseUrl()}/api/companies/${encodeURIComponent(companyId)}/me/scopes`, {
+        headers: optionalCookie(),
+      })
+      if (response.status === 404) {
+        const body = await response.json().catch(() => null) as { error?: unknown } | null
+        return body?.error === 'Company not found or access denied' ? 'not-member' : null
+      }
+      if (!response.ok) return null
+      const body = await response.json()
+      return parseMyScopes(body?.data)
     },
   }
 }
