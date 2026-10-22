@@ -127,16 +127,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:pushToServer', repoPath),
 
   // Sparse checkout
-  sparseCheckoutInit: (repoPath: string) =>
-    ipcRenderer.invoke('git:sparseCheckoutInit', repoPath),
-  sparseCheckoutSet: (repoPath: string, paths: string[]) =>
-    ipcRenderer.invoke('git:sparseCheckoutSet', repoPath, paths),
-  sparseCheckoutAdd: (repoPath: string, paths: string[]) =>
-    ipcRenderer.invoke('git:sparseCheckoutAdd', repoPath, paths),
-  sparseCheckoutList: (repoPath: string) =>
-    ipcRenderer.invoke('git:sparseCheckoutList', repoPath),
-  sparseCheckoutDisable: (repoPath: string) =>
-    ipcRenderer.invoke('git:sparseCheckoutDisable', repoPath),
   isSparseCheckout: (repoPath: string) =>
     ipcRenderer.invoke('git:isSparseCheckout', repoPath),
   listRemoteDirectories: (repoPath: string) =>
@@ -145,6 +135,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:sparseGetExclusions', repoPath),
   sparseSetExclusions: (repoPath: string, excluded: string[]) =>
     ipcRenderer.invoke('git:sparseSetExclusions', repoPath, excluded),
+  sparseUncommittedChanges: (repoPath: string, folders: string[]) =>
+    ipcRenderer.invoke('git:sparseUncommittedChanges', repoPath, folders),
+  folderSizes: (repoPath: string, companyId: string, folder: string, measure: string[]) =>
+    ipcRenderer.invoke('git:folderSizes', repoPath, companyId, folder, measure),
+  onSparseProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => {
+    const handler = (_: unknown, data: { repoPath: string; receivedBytes: number }) => callback(data)
+    ipcRenderer.on('sparse:progress', handler)
+    return () => ipcRenderer.removeListener('sparse:progress', handler)
+  },
   gitBinaryStatus: () =>
     ipcRenderer.invoke('git:getBinaryStatus'),
 
@@ -293,6 +292,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('chat-server:info', handler)
   },
 })
+
+/** git:folderSizes — one level of the folder tree with sizes (electron/sync/folder-sizes.ts). */
+type FolderSizesResponse =
+  | {
+      success: true
+      path: string
+      size: number | null
+      folders: Array<{ name: string; path: string; size: number | null; files: number | null; hasChildren: boolean }>
+      measured: Record<string, number | null>
+      offline: boolean
+    }
+  | { success: false; error: string }
 
 interface GitResult {
   success: boolean
@@ -654,15 +665,13 @@ declare global {
       serverCreateRepo: (companyId: string) => Promise<ServerRepoResult>
 
       // Sparse checkout
-      sparseCheckoutInit: (repoPath: string) => Promise<{ success: boolean; error?: string }>
-      sparseCheckoutSet: (repoPath: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
-      sparseCheckoutAdd: (repoPath: string, paths: string[]) => Promise<{ success: boolean; error?: string }>
-      sparseCheckoutList: (repoPath: string) => Promise<{ success: boolean; paths: string[]; error?: string }>
-      sparseCheckoutDisable: (repoPath: string) => Promise<{ success: boolean; error?: string }>
       isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
       listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
       sparseGetExclusions: (repoPath: string) => Promise<{ success: boolean; excluded: string[]; error?: string }>
       sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }>
+      sparseUncommittedChanges: (repoPath: string, folders: string[]) => Promise<{ success: boolean; files: string[]; error?: string }>
+      folderSizes: (repoPath: string, companyId: string, folder: string, measure: string[]) => Promise<FolderSizesResponse>
+      onSparseProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void
       gitBinaryStatus: () => Promise<{ bundled: boolean; binary: string }>
 
       // Backup

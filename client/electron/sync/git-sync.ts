@@ -34,7 +34,8 @@ import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
 import { findNestedGitRepos } from './nested-repos'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
-import { applySparseSelection, readSparseConfig, sparseConfigPath, writeSparseConfig } from './sparse'
+import { appliedExclusions, applySparseSelection, readSparseConfig, sparseConfigPath, staleExclusions, writeSparseConfig } from './sparse'
+import { exclusionsInside, isNotDownloaded } from '../../shared/sparse-paths'
 import { holdBackOutsideCheckout, outsideCheckoutMessage, type OutsideCheckoutResult } from './outside-checkout'
 import type { SyncDeps } from './types'
 
@@ -383,10 +384,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     }
 
     // 1.5. Reconcile sparse checkout to the user's persisted exclusions.
-    //       The cone is always (all root dirs − excluded), so newly created
-    //       folders appear automatically while excluded ones stay excluded
-    //       across every sync. (The old code re-added every DB department
-    //       here, which silently undid the user's exclusions.)
+    //       Everything is checked out except the excluded folders (at any
+    //       depth), so newly created folders appear automatically while
+    //       excluded ones stay excluded across every sync. (The old code
+    //       re-added every DB department here, which silently undid the
+    //       user's exclusions.)
     try {
       const sparseEnabledNow = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
 
@@ -402,7 +404,17 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
 
       const sparseConfig = readSparseConfig(repoPath)
       if (sparseConfig.excluded.length > 0) {
-        await applySparseSelection(git, repoPath, sparseConfig.excluded)
+        // A folder nobody has any more (a teammate deleted or renamed it) is
+        // no longer excluded: otherwise a folder the member creates there
+        // later would be held back as "not downloaded".
+        const stale = await staleExclusions(git, sparseConfig.excluded)
+        const excluded = stale && stale.length > 0
+          ? sparseConfig.excluded.filter(e => !stale.includes(e))
+          : sparseConfig.excluded
+        if (stale && stale.length > 0) log.log('Git sync: Dropping exclusions of folders that no longer exist:', stale)
+        // Patterns `/*` + `!/<folder>/` (non-cone): a repository still on
+        // the old cone mode switches here without downloading anything.
+        await applySparseSelection(git, repoPath, excluded)
       }
     } catch (sparseUpdateError) {
       log.warn('Git sync: Sparse checkout reconcile failed:', sparseUpdateError)
@@ -741,18 +753,9 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     //       Runs AFTER pull so that renames from the server are already applied.
     if (companyId) {
       try {
-        let sparseEnabled = false
-        let sparseCheckedOut: string[] = []
-        try {
-          const sparseConfig = await git.raw(['config', '--get', 'core.sparseCheckout'])
-          sparseEnabled = sparseConfig.trim() === 'true'
-          if (sparseEnabled) {
-            const sparseList = await git.raw(['sparse-checkout', 'list'])
-            sparseCheckedOut = sparseList.split('\n').filter(Boolean)
-          }
-        } catch {
-          // Not a sparse checkout repo — protect all departments
-        }
+        // Folders not downloaded on this computer (sparse exclusions that
+        // are applied): a department among them is absent on purpose.
+        const notDownloaded = await appliedExclusions(git, repoPath).catch(() => [] as string[])
 
         const departments = await deps.api.getDepartments(companyId)
         if (departments) {
@@ -761,12 +764,16 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               log.warn(`Git sync: Skipping invalid department folder: ${dept.folder}`)
               continue
             }
-            if (sparseEnabled && !sparseCheckedOut.includes(dept.folder)) {
+            if (isNotDownloaded(notDownloaded, dept.folder)) {
               continue
             }
 
             const deptPath = path.join(repoPath, dept.folder)
             if (!fs.existsSync(deptPath)) {
+              // Everything in it may be in excluded sub-folders: then the
+              // folder is legitimately absent (a deletion the member made
+              // was already confirmed by the deleted-files warning).
+              if (exclusionsInside(notDownloaded, dept.folder).length > 0) continue
               log.log(`Git sync: Restoring deleted department folder: ${dept.folder}`)
               try {
                 await git.checkout(['origin/main', '--', dept.folder])

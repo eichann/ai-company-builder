@@ -15,14 +15,26 @@
  * writeFile tool, and — best effort — Bash output redirections (`>`, `>>`,
  * `&>`, `tee`) to a literal path. Not covered: other Bash writes (cp, mv,
  * sed -i, scripts, `cd X && … > y`), Codex. Those still meet the server.
+ *
+ * The same check refuses writes into a folder that is not downloaded on
+ * this computer (sparse exclusions, `getNotDownloaded`) — known locally, so
+ * it applies even when the write access is unknown. Sync's outside-checkout
+ * hold-back (sync/outside-checkout.ts) stays the safety net there.
  */
 import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } from '../shared/write-access'
+import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 
 export interface WriteGuard {
   /** The company's checkout root (absolute). */
   root: string
   /** Current write access, read on every call (refreshed by sync); undefined = unknown → allow. */
   getAccess: () => WriteAccess | undefined
+  /**
+   * Folders not downloaded on this computer (repository-relative; read on
+   * every call, see sync/not-downloaded.ts). A write there is refused
+   * whatever the access: sync would hold the file back instead of sharing it.
+   */
+  getNotDownloaded?: () => readonly string[]
 }
 
 export type GuardDecision =
@@ -38,10 +50,19 @@ const FILE_TOOLS: Record<string, string> = {
 
 /** Decide for one absolute-or-relative target path. */
 export function checkWritePath(guard: WriteGuard, target: string, cwd?: string): GuardDecision {
-  const access = guard.getAccess()
-  if (!access || access.all || !target) return { deny: false }
+  if (!target) return { deny: false }
   const rel = repoRelativePath(guard.root, target, cwd)
   if (rel === null) return { deny: false } // outside the company: not ours to judge
+  // Not downloaded: the member (and the AI) cannot see what teammates keep
+  // there, and sync would hold the file back rather than share it.
+  const notDownloaded = guard.getNotDownloaded?.() ?? []
+  const missing = notDownloaded.length > 0 ? excludedFolderOf(notDownloaded, rel) : null
+  if (missing !== null) {
+    const folder = missing.normalize('NFC')
+    return { deny: true, path: rel, folder, message: notDownloadedAgentMessage(folder) }
+  }
+  const access = guard.getAccess()
+  if (!access || access.all) return { deny: false }
   const decision = evaluateWrite(access, rel)
   if (decision.write) return { deny: false }
   const folder = decision.scopePath ?? rel.split('/').slice(0, -1).join('/')

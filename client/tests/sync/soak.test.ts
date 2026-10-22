@@ -18,7 +18,9 @@
 // The mixed world adds partial-clone members (first setup with one
 // department picked, World.addPartialMember). They edit only what they have
 // downloaded, and now and then add the other department in settings
-// (online or not).
+// (online or not). In the mixed world every member also leaves sub-folders
+// out (営業部/顧客, 開発部/資料) or downloads them again, and now and then
+// writes into a folder it does not have (sync must hold that back).
 //
 // A failure prints the seed and the operation log; rerun with that seed.
 
@@ -27,6 +29,7 @@ import assert from 'node:assert/strict'
 import { World, type Member, type Role } from '../sync-harness/world'
 import { assertConverged, assertNoLostWork } from '../sync-harness/invariants'
 import { readSparseConfig } from '../../electron/sync/sparse'
+import { isNotDownloaded } from '../../shared/sparse-paths'
 
 const SEEDS = (process.env.SYNC_SOAK_SEEDS ?? '1,2').split(',').map(s => Number(s.trim())).filter(Number.isFinite)
 const MEMBERS = Number(process.env.SYNC_SOAK_MEMBERS) || 3
@@ -63,9 +66,11 @@ function prng(seed: number) {
 
 const TEXT_PATHS = [
   '営業部/提案書.md', '営業部/顧客/一覧.md', '営業部/週報.md',
-  '開発部/設計.md', '開発部/notes.md', 'shared/readme.md', '総務/規程 2026.md',
+  '開発部/設計.md', '開発部/notes.md', '開発部/資料/仕様.md', 'shared/readme.md', '総務/規程 2026.md',
 ]
 const BINARY_PATHS = ['営業部/図.png', 'shared/logo.png']
+/** Sub-folders members leave out (or download again) in the mixed world. */
+const SUB_FOLDERS = ['営業部/顧客', '開発部/資料']
 
 /** Failure shapes that are expected mid-run; anything else is a bug. */
 function expectedFailure(result: { error?: string; errorType?: string; secretDetected?: boolean }): boolean {
@@ -80,7 +85,7 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
     members: Array.from({ length: MEMBERS }, (_, i) => ({ name: `m${i}`, role: roles[i % roles.length] })),
     departments: ['営業部', '開発部'],
     seed: {
-      '営業部/提案書.md': 'seed\n', '開発部/設計.md': 'seed\n', '営業部/図.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1]),
+      '営業部/提案書.md': 'seed\n', '営業部/顧客/一覧.md': 'seed\n', '開発部/資料/仕様.md': 'seed\n', '開発部/設計.md': 'seed\n', '営業部/図.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 0, 1]),
       '.mcp.json': '{"mcpServers":{}}\n',
     },
   })
@@ -91,10 +96,10 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
   const log = (s: string) => opLog.push(s)
   let counter = 0
 
-  // A partial member only edits what it has downloaded (the folders it did
-  // not pick are not on its disk); a full member has everything.
-  const inCone = (m: Member, p: string) =>
-    !m.partial || !readSparseConfig(m.dir).excluded.some(d => p === d || p.startsWith(`${d}/`))
+  // A member only edits what it has downloaded (the departments a partial
+  // member did not pick and the folders anyone left out in settings are not
+  // on its disk); writes there anyway are a separate operation below.
+  const inCone = (m: Member, p: string) => !isNotDownloaded(readSparseConfig(m.dir).excluded, p)
   const pickIn = (m: Member, xs: readonly string[]): string | null => {
     const allowed = xs.filter(p => inCone(m, p))
     return allowed.length > 0 ? rnd.pick(allowed) : null
@@ -113,6 +118,35 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
         const r = await m.addDepartment(dept)
         log(`${m.name} adds department ${dept} → ${r.success ? 'ok' : r.error}`)
         assert.ok(r.success || r.offline, `adding a department failed: ${JSON.stringify(r)}`)
+      }
+      return
+    }
+    if (partialMembers > 0 && rnd.chance(0.08)) {
+      // Settings → ダウンロードするフォルダ: leave a sub-folder out, or
+      // download it again (fails cleanly offline in a partial clone).
+      const folder = rnd.pick(SUB_FOLDERS)
+      const excluded = readSparseConfig(m.dir).excluded
+      if (isNotDownloaded(excluded, folder)) {
+        if (excluded.includes(folder)) {
+          const r = await m.includeFolder(folder)
+          log(`${m.name} downloads folder ${folder} → ${r.success ? 'ok' : r.error}`)
+          assert.ok(r.success || r.offline, `downloading a folder failed: ${JSON.stringify(r)}`)
+        }
+      } else {
+        const r = await m.excludeFolder(folder)
+        log(`${m.name} leaves out folder ${folder} → ${r.success ? 'ok' : r.error}`)
+        assert.ok(r.success, `leaving out a folder failed: ${JSON.stringify(r)}`)
+      }
+      return
+    }
+    if (partialMembers > 0 && rnd.chance(0.03)) {
+      // A write into a folder that is not downloaded (a Bash `cp`, another
+      // tool): sync holds it back instead of sharing it.
+      const excluded = readSparseConfig(m.dir).excluded
+      if (excluded.length > 0) {
+        const p = `${rnd.pick(excluded)}/stray-${m.name}-${n}.md`
+        m.write(p, `stray ${n}\n`)
+        log(`${m.name} writes into a folder that is not downloaded: ${p}`)
       }
       return
     }
@@ -234,7 +268,11 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
     assertConverged(world)
     assertNoLostWork(world)
     t.diagnostic(`seed ${seed}: ${opLog.length} steps, ${world.members.reduce((n, m) => n + m.results.length, 0)} syncs, ` +
-      `${world.members.reduce((n, m) => n + m.results.filter(r => r.hadConflicts).length, 0)} with conflicts`)
+      `${world.members.reduce((n, m) => n + m.results.filter(r => r.hadConflicts).length, 0)} with conflicts` +
+      (partialMembers > 0
+        ? `, ${opLog.filter(l => / (leaves out|downloads) folder /.test(l)).length} folder choices, ` +
+          `${world.members.reduce((n, m) => n + m.results.filter(r => r.outsideCheckoutFiles).length, 0)} syncs held files back`
+        : ''))
   } catch (error) {
     throw new Error(`soak seed ${seed} failed: ${error instanceof Error ? error.message : String(error)}\n\noperations:\n${opLog.join('\n')}`)
   }

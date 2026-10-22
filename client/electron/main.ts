@@ -30,7 +30,10 @@ import { createGitSync } from './sync/git-sync'
 import { createConfiguredGit } from './sync/git-factory'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
-import { isDownloadFailure, readSparseConfig, setSparseExclusions } from './sync/sparse'
+import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
+import { folderSizesView, serverFolderSizes } from './sync/folder-sizes'
+import { notDownloadedFolderFor, notDownloadedFolders } from './sync/not-downloaded'
+import { notDownloadedUserMessage } from '../shared/sparse-paths'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
@@ -71,6 +74,20 @@ function validatePath(inputPath: string): string {
 function addAllowedRoot(dirPath: string): void {
   const resolved = path.resolve(dirPath)
   allowedRoots.add(resolved)
+}
+
+/**
+ * Refuse an app file operation that would create or change something inside
+ * a folder not downloaded on this computer (sparse exclusions): the member
+ * cannot see the teammates' files there, and sync would hold the file back
+ * instead of sharing it. The renderer disables these actions with the same
+ * explanation; this is the backstop. Returns the message, or null to allow.
+ */
+function notDownloadedRefusal(absPath: string): string | null {
+  const folder = notDownloadedFolderFor(absPath)
+  if (folder === null) return null
+  console.warn(`[fs] Refused a write into a folder that is not downloaded: ${absPath}`)
+  return notDownloadedUserMessage(folder.normalize('NFC'))
 }
 
 // File watchers map for tracking active watchers
@@ -480,7 +497,7 @@ app.whenReady().then(async () => {
         const access = await writeAccessStore.refresh(companyId, { timeoutMs: 3000 })
         if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
         // getAccess reads the live cache, so a refresh during a long chat applies at once.
-        return { root, getAccess: () => writeAccessStore.get(companyId) }
+        return { root, getAccess: () => writeAccessStore.get(companyId), getNotDownloaded: () => notDownloadedFolders(root) }
       },
       createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
       prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
@@ -665,6 +682,7 @@ ipcMain.handle('fs:readFileBinary', async (_, filePath: string) => {
 ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   try {
     const safePath = validatePath(filePath)
+    if (notDownloadedRefusal(safePath)) return false
     await fs.promises.writeFile(safePath, content, 'utf-8')
     return true
   } catch {
@@ -675,6 +693,7 @@ ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
 ipcMain.handle('fs:createDirectory', async (_, dirPath: string) => {
   try {
     const safePath = validatePath(dirPath)
+    if (notDownloadedRefusal(safePath)) return false
     await fs.promises.mkdir(safePath, { recursive: true })
     return true
   } catch {
@@ -713,6 +732,8 @@ ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
   try {
     const safeOld = validatePath(oldPath)
     const safeNew = validatePath(newPath)
+    const refused = notDownloadedRefusal(safeNew)
+    if (refused) return { success: false, error: refused }
     await fs.promises.rename(safeOld, safeNew)
     return { success: true, newPath: safeNew }
   } catch (error) {
@@ -725,6 +746,8 @@ ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string)
   try {
     const safeSrc = validatePath(sourcePath)
     const safeDest = validatePath(destinationPath)
+    const refused = notDownloadedRefusal(safeDest)
+    if (refused) return { success: false, error: refused }
     await fs.promises.rename(safeSrc, safeDest)
     return { success: true }
   } catch (error) {
@@ -738,6 +761,8 @@ ipcMain.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationP
   try {
     const safeDest = validatePath(destinationPath)
     const resolved = path.resolve(sourcePath)
+    const refused = notDownloadedRefusal(safeDest)
+    if (refused) return { success: false, error: refused }
 
     try {
       await fs.promises.rename(resolved, safeDest)
@@ -767,6 +792,8 @@ ipcMain.handle('fs:copy', async (_, sourcePath: string, destinationPath: string)
   try {
     const safeSrc = validatePath(sourcePath)
     const safeDest = validatePath(destinationPath)
+    const refused = notDownloadedRefusal(safeDest)
+    if (refused) return { success: false, error: refused }
     const stat = await fs.promises.stat(safeSrc)
     if (stat.isDirectory()) {
       await fs.promises.cp(safeSrc, safeDest, { recursive: true })
@@ -2073,74 +2100,60 @@ ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
 // Set the exclusion list and reconcile the worktree to match. In a partial
 // clone (first setup with departments picked), adding a department downloads
 // it; offline nothing changes and the result says so (offline: true).
-ipcMain.handle('git:sparseSetExclusions', async (_, repoPath: string, excluded: string[]) => {
+//
+// While it runs, the bytes arriving in .git/objects/pack (a download in a
+// partial clone) are reported to the window as 'sparse:progress' events, so
+// the panel can show the download moving.
+ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, excluded: string[]) => {
+  let timer: NodeJS.Timeout | null = null
   try {
     const safe = validatePath(repoPath)
+    const packDir = path.join(safe, '.git', 'objects', 'pack')
+    const packBytes = () => {
+      let total = 0
+      try {
+        for (const f of fs.readdirSync(packDir)) {
+          try { total += fs.statSync(path.join(packDir, f)).size } catch { /* renamed meanwhile */ }
+        }
+      } catch { /* no pack dir */ }
+      return total
+    }
+    const start = packBytes()
+    timer = setInterval(() => {
+      if (!event.sender.isDestroyed()) event.sender.send('sparse:progress', { repoPath, receivedBytes: Math.max(0, packBytes() - start) })
+    }, 400)
     const result = await setSparseExclusions(createGit(safe), safe, Array.isArray(excluded) ? excluded : [])
     if (!result.success) console.error('Sparse set exclusions error:', result.error)
     return result
   } catch (error) {
     console.error('Sparse set exclusions error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  } finally {
+    if (timer) clearInterval(timer)
   }
 })
 
-// Initialize sparse checkout (cone mode)
-ipcMain.handle('git:sparseCheckoutInit', async (_, repoPath: string) => {
+// Files inside these folders with changes not committed yet: the settings
+// panel asks before leaving such a folder out (the next sync would move them
+// to .backups/ instead of sharing them).
+ipcMain.handle('git:sparseUncommittedChanges', async (_, repoPath: string, folders: string[]) => {
   try {
-    const git = createGit(validatePath(repoPath))
-    await git.raw(['sparse-checkout', 'init', '--cone'])
-    return { success: true }
+    const safe = validatePath(repoPath)
+    return { success: true, files: await uncommittedChangesIn(createGit(safe), Array.isArray(folders) ? folders : []) }
   } catch (error) {
-    console.error('Sparse checkout init error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    return { success: false, files: [], error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-// Set sparse checkout paths (replaces current selection)
-ipcMain.handle('git:sparseCheckoutSet', async (_, repoPath: string, paths: string[]) => {
+// One level of the company's folder tree with sizes, for the settings panel
+// (server sizes; local names only when the server cannot be reached).
+ipcMain.handle('git:folderSizes', async (_, repoPath: string, companyId: string, folder: string, measure: string[]) => {
   try {
-    const git = createGit(validatePath(repoPath))
-    await git.raw(['sparse-checkout', 'set', ...paths])
-    return { success: true }
+    const safe = validatePath(repoPath)
+    const fetchSizes = companyId ? serverFolderSizes({ baseUrl: getServerApiUrl(), companyId, cookies: authCookies }) : null
+    const view = await folderSizesView(createGit(safe), fetchSizes, typeof folder === 'string' ? folder : '', Array.isArray(measure) ? measure : [])
+    return { success: true, ...view }
   } catch (error) {
-    console.error('Sparse checkout set error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Add paths to sparse checkout (keeps existing selection)
-ipcMain.handle('git:sparseCheckoutAdd', async (_, repoPath: string, paths: string[]) => {
-  try {
-    const git = createGit(validatePath(repoPath))
-    await git.raw(['sparse-checkout', 'add', ...paths])
-    return { success: true }
-  } catch (error) {
-    console.error('Sparse checkout add error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Get current sparse checkout paths
-ipcMain.handle('git:sparseCheckoutList', async (_, repoPath: string) => {
-  try {
-    const git = createGit(validatePath(repoPath))
-    const result = await git.raw(['sparse-checkout', 'list'])
-    return { success: true, paths: result.split('\n').filter(Boolean) }
-  } catch (error) {
-    console.error('Sparse checkout list error:', error)
-    return { success: false, paths: [], error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Disable sparse checkout (restore all files)
-ipcMain.handle('git:sparseCheckoutDisable', async (_, repoPath: string) => {
-  try {
-    const git = createGit(validatePath(repoPath))
-    await git.raw(['sparse-checkout', 'disable'])
-    return { success: true }
-  } catch (error) {
-    console.error('Sparse checkout disable error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })

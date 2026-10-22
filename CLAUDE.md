@@ -110,6 +110,7 @@ POST   /api/companies/:companyId/departments       # Create department
 PUT    /api/companies/:companyId/departments/:id   # Update department
 DELETE /api/companies/:companyId/departments/:id   # Delete department
 POST   /api/companies/:companyId/departments/reorder    # Reorder
+GET    /api/companies/:companyId/folder-sizes?path=&measure=  # Folder sizes (download settings)
 ```
 
 ---
@@ -168,7 +169,7 @@ by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), the
 clock and the logger are injected (`sync/types.ts`). `client/electron/main.ts`
 only wires the real implementations into `ipcMain.handle('git:sync', ...)`.
 Helpers: `sync/conflicts.ts`, `sync/nested-repos.ts`, `sync/sparse.ts`,
-`sync/first-setup.ts` (first setup, below), `sync/outside-checkout.ts`, `protected-config.ts`. Every change to sync runs through the multi-member
+`sync/first-setup.ts` (first setup, below), `sync/outside-checkout.ts`, `sync/not-downloaded.ts`, `protected-config.ts`. Every change to sync runs through the multi-member
 harness — see "Testing Sync" below.
 
 ```
@@ -181,10 +182,13 @@ harness — see "Testing Sync" below.
 4. Scan for >100MB files → append to .gitignore
 5. Detect nested Git repositories → ask the user BEFORE modifying anything
 6. git fetch --progress origin
-6.5 Hold back files created inside excluded (not checked out) folders →
-    .backups/<ts>_outside_checkout/ (never staged, never shared)
-7. Reconcile sparse checkout against the user's persisted exclusions
-   (ignored files in excluded folders are kept out of git's reach meanwhile)
+6.5 Hold back files created inside excluded (not downloaded) folders, at any
+    depth → .backups/<ts>_outside_checkout/ (never staged, never shared)
+7. Reconcile sparse checkout against the user's persisted exclusions:
+   non-cone patterns `/*` + `!/<folder>/` (a repository still on the old cone
+   mode switches here, downloading nothing); exclusions of folders that exist
+   neither on origin/main nor in HEAD are dropped (ignored files in excluded
+   folders are kept out of git's reach meanwhile)
 8. Warn if files were deleted locally (sync / restore / cancel)
 9. git add --sparse . → git commit → record localHash
 10. git pull --rebase --progress origin main
@@ -225,11 +229,11 @@ their departments first (`CompanySelector` →
 `git:setupCompanyRemote` then runs `checkoutSelectedDepartments`
 (`client/electron/sync/first-setup.ts`): `fetch --filter=blob:none` (commits
 and trees only) → persist the sparse exclusions (the departments *not*
-picked) and set the cone → check out, which downloads just the cone's blobs
-in one batch. The cone is the usual exclusion model: every root folder
-(dotfolders such as `.claude` included) and root file, minus the unpicked
-departments. Nothing picked → full clone as before. Existing clones are
-never converted (no migration).
+picked) and set the patterns → check out, which downloads just the
+checked-out blobs in one batch. The checkout is the usual exclusion model
+(next section): everything (dotfolders such as `.claude` included) minus the
+unpicked departments. Nothing picked → full clone as before. Existing clones
+are never converted to partial clones.
 
 - Server: `configureBareRepo` sets `uploadpack.allowFilter` and
   `uploadpack.allowReachableSHA1InWant` (`server/src/lib/git-server/repo-config.ts`).
@@ -248,14 +252,81 @@ never converted (no migration).
   authenticate a lazy fetch: that command fails with an auth error and
   changes nothing; files and git commands inside the downloaded departments
   are unaffected.
-- Adding a department in settings (`setSparseExclusions`) downloads it.
-  Offline, `sparse-checkout set` fails and rolls its patterns back, and
-  `applySparseSelection` writes the previous exclusions back, so cone,
-  worktree and config stay as they were and the panel shows
+- Adding a department (or folder) in settings (`setSparseExclusions`)
+  downloads it. Offline, `sparse-checkout set` fails and rolls its patterns
+  back, and `applySparseSelection` writes the previous exclusions back, so
+  patterns, worktree and config stay as they were and the panel shows
   「インターネットにつながっているときにダウンロードできます」. Sync offline
   fails exactly as for a full clone (commit stays local, `PENDING_PUSH`).
 - A department a teammate creates later appears automatically, as for every
-  sparse checkout (cone = all root folders − exclusions).
+  sparse checkout (everything − exclusions).
+
+### Folder-Level Download Choices (sparse exclusions at any depth)
+
+A member can leave out any folder, not only a whole department (request from
+the コンテンツ group, 2026-10-22). Model and code: `client/shared/sparse-paths.ts`
+(pure: normalisation, `excludedFolderOf`, patterns), `client/electron/sync/sparse.ts`
+(apply / reconcile), `client/electron/sync/not-downloaded.ts` (main-process
+reader for the guards).
+
+- **Exclusion list, everything else downloaded.** `.git/acb-sparse-config.json`
+  `{ excluded: ['営業部', 'コンテンツ/動画'] }` — repository-relative folders at
+  any depth, as the tree spells them. Applied as a **non-cone** sparse
+  checkout: `/*` then one `!/<folder>/` per exclusion (wildcards escaped; a
+  Japanese name is also written in NFC and NFD, since git matches the index
+  bytes). A folder a teammate creates anywhere outside an excluded folder
+  downloads automatically, and a folder the member creates is always inside
+  the checkout. Cone mode was rejected: it can only say "everything except
+  コンテンツ/動画" by listing every sibling at every level, which goes stale
+  as soon as a teammate adds a folder (until the next reconcile it would not
+  download, and a member-created folder would lie outside the cone).
+  Performance is not a concern at this size (~6.5k files, a handful of
+  patterns); the sparse index (cone-only) is not used. Non-cone `set` does
+  not delete ignored files (that clean-up is cone-only), and `git add
+  --sparse` / partial clone behave the same in both modes.
+- **No re-including inside an excluded folder.** An exclusion covers its
+  whole subtree; `normalizeExclusions` folds an entry below another into it,
+  and the settings tree disables the children of an unchecked folder. A
+  re-include would make "where may I write" and "what does a new folder do"
+  depend on pattern order, and the outside-checkout / write guards would have
+  to reason about holes inside holes — for no request anyone made.
+- **Migration.** Existing members are on cone mode with department
+  exclusions. The same list as non-cone patterns selects exactly the same
+  files, so sync's reconcile runs `sparse-checkout set --no-cone …` once: no
+  download, no deletion, ignored files untouched (harness: `migration (full
+  clone | partial clone)`). Until then the readers understand the cone file
+  (`appliedExclusions`, `notDownloadedFolders`).
+- **Stale exclusions** (the folder exists neither on origin/main nor in HEAD:
+  a teammate deleted or renamed it) are dropped at the reconcile, so a folder
+  the member creates at that path later is shared normally instead of being
+  held back forever.
+- **Not downloaded = applied.** Every guard asks for the folders that are in
+  the list *and* excluded by the applied patterns (`appliedExclusions` with
+  git, `notDownloadedFolders` from the files under `.git/` alone — git writes
+  `core.sparseCheckout` to `config.worktree`). Paths compare in NFC with A–Z
+  folded, like the push check and the chat write guard.
+- **Writes into a not-downloaded folder are blocked in three layers**:
+  1. the app's file operations (`fs:writeFile`, `fs:createDirectory`,
+     `fs:rename` / `fs:move` / `fs:moveFromExternal` / `fs:copy` targets)
+     refuse in the main process (`notDownloadedRefusal`), and the renderer
+     disables those actions with the same explanation;
+  2. the chat's PreToolUse write guard (see Chat Write Guard below);
+  3. sync's outside-checkout hold-back (guards table), now for any excluded
+     path, not only root folders.
+- Leaving out a folder with uncommitted changes (`uncommittedChangesIn`,
+  IPC `git:sparseUncommittedChanges`) is confirmed first in the settings
+  panel: git leaves edited / new files on disk, and the next sync moves them
+  to `.backups/<ts>_outside_checkout/` (not shared, not lost).
+- **Folder sizes** for the settings tree come from the server,
+  `GET /api/companies/:companyId/folder-sizes?path=<folder>&measure=<folder>…`
+  (`server/src/lib/folder-sizes.ts`: one `ls-tree -r -l` of the shared
+  branch per commit, cached; any member). They cannot be computed in a
+  partial clone: tree entries carry no sizes, and `git ls-tree -l` there
+  lazily downloads every missing blob just to report its size. IPC
+  `git:folderSizes` (`client/electron/sync/folder-sizes.ts`) falls back to
+  the local trees (names only, `offline: true`) when the server cannot be
+  reached. `git:sparseSetExclusions` reports the bytes arriving in
+  `.git/objects/pack` as `sparse:progress` events while it runs.
 
 ### Conflict Resolution Strategy
 
@@ -314,9 +385,9 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | The mac app's bundled git is **universal** (arm64 + x86_64): electron-builder's `beforePack` hook (`client/scripts/universal-git.mjs`) downloads both darwin dugite-native archives pinned in dugite's `embedded-git.json` (sha256 verified), `lipo -create`s every Mach-O, requires every other file to be byte-identical (else the build fails), keeps symlinks/permissions, and replaces `node_modules/dugite/git` with the result. Git Credential Manager (.NET, per-arch assemblies, ~110MB) is left out — the app clears `credential.helper` and never runs it. CI job "Universal bundled git (macOS)" runs the merge and both slices (`arch -x86_64`) | dugite downloads git for the build machine only, so the universal app built on Apple Silicon shipped an arm64-only git: on Intel Macs `resolveGitBinaryWithFallback` (`main.ts`) dropped to `/usr/bin/git` (Apple Git 2.39, known CVEs) and pushes failed (2026-10-21). `@electron/universal` does not merge anything under `app.asar.unpacked`, it just keeps the x64 slice's copy, so the merge has to happen before packing. The system-git fallback stays as a last resort and logs which binary and arch are in use. |
 | The member's own git hooks and templates never run: `core.hooksPath` and `GIT_TEMPLATE_DIR` point at app-owned empty directories (`<userData>/git/hooks`, `<userData>/git/templates`; `appGitDirs` in `client/electron/sync/git-factory.ts`), for the bundled git and the system-git fallback alike. Every app git goes through that factory (main.ts `createGit`; the only other spawn is the `--version` probe) | A developer machine had a global `init.templateDir` (git-secrets) that installs `.git/hooks/pre-commit` into every new repository. In a partial clone that hook lazily fetched thousands of blobs one by one and a commit hung for 10+ minutes (2026-10-22) — the watchdog would have killed sync. Global config applies to the bundled git too, and `GIT_TEMPLATE_DIR` outranks `init.templateDir`. A real directory instead of `/dev/null`, which is not a path on Windows; because the app owns it, hooks the app itself needs later (git-lfs's `pre-push`) can be installed there deliberately. `tests/sync/user-hooks.test.ts` sets a failing global template / `core.hooksPath` / `.git/hooks`. |
 | `merge.stat=false` | A pull that fast-forwards prints a diffstat, which reads every file the teammates changed. In a partial clone those blobs were never downloaded, so every sync silently fetched the teammates' changes in departments the member did not pick (found by the partial-clone harness). Nothing reads the diffstat. |
-| Sparse cone changes use one `sparse-checkout set --cone <dirs>` (never `init --cone` + `set`), and a failed change writes the previous exclusions back (`applySparseSelection`) | In a partial clone, widening the cone is a download. `init --cone` alone narrows the worktree to the root files; if the following `set` then failed offline the member's folders vanished from disk. A single `set` rolls its own patterns back on failure, and restoring the config keeps the next sync from retrying a choice that was never applied. |
-| Files created inside a folder that is **not checked out** (in the persisted sparse exclusions and outside the applied cone — excluded in settings, or not picked at first setup) are never staged: before the sparse reconcile and before `git add --sparse .`, every non-ignored file there that is new or differs from its index entry is moved to `.backups/<ts>_outside_checkout/` (`_metadata.json`: reason `outside_checkout`, `folders`, `files`, `serverFiles` = those the server has), the skip-worktree bit of tracked paths is set again (`update-index --skip-worktree`, so they never read as deleted) and the emptied folders are removed (`holdBackOutsideCheckout`, `client/electron/sync/outside-checkout.ts`). The result carries `outsideCheckoutFiles` / `outsideCheckoutBackupPath` and the message 「ダウンロードしていないフォルダ（営業部）にファイルが作られていたため、共有せずに .backups に保存しました（N件）。必要ならその部署をダウンロードしてから保存し直してください。」. If the check itself fails, sync stops before staging with every file in place. Paths the server does not have are held back too, and so is an edit made before the member excluded the folder (git leaves a modified file behind; it cannot be told apart) | The folder is absent on disk, so the member — and the chat AI working in their checkout — cannot see the teammates' files there. A file written at `営業部/提案書.md` landed on a teammate's path the member never had: git clears the skip-worktree bit of a path whose file appears, `git add --sparse .` staged it, and sync silently replaced the teammate's file on the server — no conflict, no backup for anyone (found by the outside-checkout harness, full and partial clones alike). A new path was shared, and at the next sync the reconcile removed it from the member's disk (tracked, clean, outside the cone): the file vanished right after being "saved". Sync cannot tell whether a teammate has, or is about to push, the same path, so nothing is shared from there; inside the checkout nothing changed. It runs before the reconcile because `sparse-checkout set` with a changed file on a not-checked-out path downloads the teammate's version in a partial clone. |
-| Every `sparse-checkout set` the app runs (`applySparseSelection` → `keepIgnoredOutsideCone` in `client/electron/sync/sparse.ts`) first moves the ignored files of each tracked root folder outside the new cone (`ls-files --others --ignored --exclude-standard --directory`, outermost entries only) to `.git/acb-sparse-keep/` and puts them back afterwards, also when `set` fails; a leftover from a crash is restored before the next `set`, and an entry whose path is occupied again stays there rather than being overwritten | In cone mode `sparse-checkout set` deletes every ignored file in a tracked directory that leaves the cone (documented git behaviour), and sync runs it on every press: a member's `.personal/` notes, `.env` files and auto-ignored large files inside an excluded department — local only, never on the server — were deleted when the department was excluded in settings and at every later sync (found by the outside-checkout harness). |
+| Sparse changes use one `sparse-checkout set --no-cone /* !/<folder>/…` (never `init` + `set`), and a failed change writes the previous exclusions back (`applySparseSelection`) | In a partial clone, widening the checkout is a download. `init --cone` alone narrows the worktree to the root files; if the following `set` then failed offline the member's folders vanished from disk. A single `set` rolls its own patterns back on failure, and restoring the config keeps the next sync from retrying a choice that was never applied. |
+| Files created inside a folder that is **not checked out** (in the persisted sparse exclusions and excluded by the applied patterns — a department or any folder inside one, excluded in settings, or not picked at first setup; paths compared with A–Z folded, `:(literal,icase)` pathspecs) are never staged: before the sparse reconcile and before `git add --sparse .`, every non-ignored file there that is new or differs from its index entry is moved to `.backups/<ts>_outside_checkout/` (`_metadata.json`: reason `outside_checkout`, `folders`, `files`, `serverFiles` = those the server has), the skip-worktree bit of tracked paths is set again (`update-index --skip-worktree`, so they never read as deleted) and the emptied folders are removed (`holdBackOutsideCheckout`, `client/electron/sync/outside-checkout.ts`). The result carries `outsideCheckoutFiles` / `outsideCheckoutBackupPath` and the message 「ダウンロードしていないフォルダ（コンテンツ/動画）にファイルが作られていたため、共有せずに .backups に保存しました（N件）。必要ならそのフォルダをダウンロードしてから保存し直してください。」. If the check itself fails, sync stops before staging with every file in place. Paths the server does not have are held back too, and so is an edit made before the member excluded the folder (git leaves a modified file behind; it cannot be told apart) | The folder is absent on disk, so the member — and the chat AI working in their checkout — cannot see the teammates' files there. A file written at `営業部/提案書.md` landed on a teammate's path the member never had: git clears the skip-worktree bit of a path whose file appears, `git add --sparse .` staged it, and sync silently replaced the teammate's file on the server — no conflict, no backup for anyone (found by the outside-checkout harness, full and partial clones alike). A new path was shared, and at the next sync the reconcile removed it from the member's disk (tracked, clean, outside the cone): the file vanished right after being "saved". Sync cannot tell whether a teammate has, or is about to push, the same path, so nothing is shared from there; inside the checkout nothing changed. It runs before the reconcile because `sparse-checkout set` with a changed file on a not-checked-out path downloads the teammate's version in a partial clone. |
+| Every `sparse-checkout set` the app runs (`applySparseSelection` → `keepIgnoredInExcluded` in `client/electron/sync/sparse.ts`) first moves the ignored files inside every folder it leaves excluded (`ls-files --others --ignored --exclude-standard --directory`, outermost entries only) to `.git/acb-sparse-keep/` and puts them back afterwards, also when `set` fails; a leftover from a crash is restored before the next `set`, and an entry whose path is occupied again stays there rather than being overwritten | In cone mode `sparse-checkout set` deletes every ignored file in a tracked directory that leaves the cone (documented git behaviour), and sync runs it on every press: a member's `.personal/` notes, `.env` files and auto-ignored large files inside an excluded department — local only, never on the server — were deleted when the department was excluded in settings and at every later sync (found by the outside-checkout harness). The non-cone patterns used since folder-level choices do not trigger that clean-up; the move stays as a guard against any git that does. With a folder below one that is untracked and ignored as a whole, `ls-files --directory` fails ("directory entry not superset of prefix", found by the mixed soak): the listing is retried without `--directory`, and if that fails too the `set` runs without the move rather than failing. |
 | Conflict resolution is a **loop**, not a single round | A rebase replays commits one at a time and pauses on *every* conflicting pick. The original single-round code fell back to `rebase --skip`, which silently discarded a whole commit the moment a second pick conflicted. |
 | Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts` in `client/electron/sync/conflicts.ts`) | `git checkout --ours` reads stage 2 of the index, which a modify/delete conflict (server deleted a file the member had edited, status `DU`) does not have — and the command fails **atomically**, so every other path in the same call stays unresolved too. The exception escaped both the conflict loop and its `catch (pullError)`, so sync returned an `unknown` error with the rebase still in progress; every retry aborted the stale rebase and died at the same pick. A pilot user was left permanently unable to sync — commits safe locally, but nothing reaching the team. Triggered whenever the server deletes a file, or moves one while also rewriting it (rename detection misses below the similarity threshold). |
 | `rebase --skip` only when the pick is genuinely empty | Taking the server version can leave a pick with no content of its own — that is the only case where skipping is correct. For any other stall, abort and surface the error. Guessing with `--skip` destroys user commits. |
@@ -462,7 +533,15 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   members (`SYNC_SOAK_MIXED_SEEDS`, `SYNC_SOAK_PARTIAL`);
   `partial-clone.test.ts` runs every guard for a partial member and checks it
   never downloads the departments it did not pick; `outside-checkout.test.ts`
-  covers files created inside excluded departments (full and partial clones); `characterization.test.ts` holds sync
+  covers files created inside excluded departments (full and partial clones);
+  `folder-exclusions.test.ts` covers folder-level choices (a sub-folder left
+  out, teammates' changes inside it, new sibling folders, writes into it,
+  local edits when leaving it out, downloading it again, ignored files,
+  nested choices, migration from the cone mode, first setup, stale and
+  case-variant exclusions; full and partial clones). The mixed soak also
+  leaves sub-folders out, downloads them again and writes into them.
+  `Member.excludeFolder` / `includeFolder` are the settings panel;
+  `characterization.test.ts` holds sync
   to a transcript recorded from the pre-extraction handler (re-record with
   `UPDATE_SYNC_GOLDEN=1` only for an intended behaviour change, and review the
   JSON diff); `findings.test.ts` holds regressions for bugs the harness found;
@@ -498,6 +577,12 @@ member may only read used to be rejected at sync and moved to `.backups/`
   with a Japanese reason telling the AI to ask the member instead of retrying.
   Hooks run in every permission mode (bypass included) and for subagents. The
   api-key mode's `writeFile` / `executeCommand` use the same check.
+- The same hook refuses a write into a folder that is **not downloaded** on
+  this computer (`WriteGuard.getNotDownloaded` → `notDownloadedFolders`,
+  checked first and regardless of write access, which may be unknown):
+  「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
+  Same Bash best-effort limits; sync's outside-checkout hold-back is the
+  safety net there.
 - Deliberately NOT done: Claude Code permission deny rules
   (`disallowedTools: ['Edit(...)']`). Deny beats allow, so a writable folder
   inside a read-only one cannot be expressed; matching is case/NFD-sensitive;

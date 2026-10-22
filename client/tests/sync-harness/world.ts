@@ -611,6 +611,16 @@ export class Member {
     return setSparseExclusions(this.createGit(this.dir), this.dir, next)
   }
 
+  /** Settings → ダウンロードするフォルダ: uncheck a folder at any depth and apply. */
+  excludeFolder(folder: string): Promise<SparseExclusionsResult> {
+    return this.removeDepartment(folder)
+  }
+
+  /** Settings → ダウンロードするフォルダ: check a folder again and apply (downloads it in a partial clone). */
+  includeFolder(folder: string): Promise<SparseExclusionsResult> {
+    return this.addDepartment(folder)
+  }
+
   /** Objects reachable from any ref that this clone has never downloaded. */
   missingObjects(): Set<string> {
     const out = this.world.git(this.dir, ['rev-list', '--objects', '--missing=print', '--all'], NO_LAZY_FETCH)

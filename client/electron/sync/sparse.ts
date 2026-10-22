@@ -1,21 +1,29 @@
-// Sparse checkout exclusions, shared by git:sync's reconcile step and the
-// git:sparse* IPC handlers in main.ts.
+// Sparse checkout exclusions, shared by git:sync's reconcile step, first
+// setup and the git:sparse* IPC handlers in main.ts.
 
 import fs from 'fs'
 import path from 'path'
 import type { SimpleGit } from 'simple-git'
+import { normalizeExclusions, parseSparsePatterns, pathKey, sparsePatterns } from '../../shared/sparse-paths'
 
 // --- Sparse Checkout ---
 //
-// Model: the user's choice is stored as an EXCLUSION list (folders they opted
-// out of), persisted in .git/acb-sparse-config.json (local, never committed).
-// The actual sparse cone is always derived as (all root dirs) minus (excluded).
-// This makes exclusions survive syncs and makes newly-created folders appear
-// automatically — the previous code re-added every DB department on each sync,
-// which silently undid the user's exclusions.
+// Model: the member's choice is stored as an EXCLUSION list — folders they
+// opted out of downloading, at any depth ('営業部', 'コンテンツ/動画') —
+// persisted in .git/acb-sparse-config.json (local, never committed).
+// Everything else is downloaded: the sparse checkout is NON-CONE, `/*` plus
+// one `!/<folder>/` per exclusion (../../shared/sparse-paths.ts), so a folder
+// a teammate creates later downloads automatically wherever it is, and a
+// folder the member creates is always inside the checkout. Cone mode cannot
+// say "everything except コンテンツ/動画" without listing every sibling at
+// every level, a list that goes stale the moment a teammate adds a folder.
+//
+// Existing members were on cone mode with department-level exclusions. The
+// same list as non-cone patterns selects exactly the same files, so the
+// first reconcile switches the mode without downloading or deleting anything.
 
 export interface SparseConfig {
-  /** Top-level folders the user explicitly opted out of syncing locally. */
+  /** Folders (repository-relative, any depth) the member opted out of downloading. */
   excluded: string[]
 }
 
@@ -33,7 +41,7 @@ export function readSparseConfig(repoPath: string): SparseConfig {
   try {
     const raw = fs.readFileSync(sparseConfigPath(repoPath), 'utf-8')
     const parsed = JSON.parse(raw)
-    return { excluded: Array.isArray(parsed.excluded) ? parsed.excluded.filter((x: unknown) => typeof x === 'string') : [] }
+    return { excluded: Array.isArray(parsed.excluded) ? normalizeExclusions(parsed.excluded.filter((x: unknown) => typeof x === 'string')) : [] }
   } catch {
     return { excluded: [] }
   }
@@ -42,15 +50,43 @@ export function readSparseConfig(repoPath: string): SparseConfig {
 export function writeSparseConfig(repoPath: string, cfg: SparseConfig): void {
   const p = sparseConfigPath(repoPath)
   fs.mkdirSync(path.dirname(p), { recursive: true })
-  fs.writeFileSync(p, JSON.stringify(cfg, null, 2))
+  fs.writeFileSync(p, JSON.stringify({ excluded: normalizeExclusions(cfg.excluded) }, null, 2))
 }
 
-// List ALL root-level directories in the tree, INCLUDING dotfolders. Cone-mode
-// `sparse-checkout set` removes every top-level directory not in its argument
-// list, so the cone MUST include dotfolders like .claude (skills!), .agents,
-// and .workspace — otherwise enabling sparse checkout would strip them from
-// the worktree and break skills. Only the user's excluded departments are
-// dropped from the cone.
+/** The sparse-checkout pattern file git reads. */
+function sparseFilePath(repoPath: string): string {
+  return path.join(repoPath, '.git', 'info', 'sparse-checkout')
+}
+
+async function configFlag(git: SimpleGit, key: string): Promise<boolean> {
+  return (await git.raw(['config', '--get', key]).catch(() => '')).trim() === 'true'
+}
+
+/**
+ * The folders that are not checked out right now: in the persisted
+ * exclusion list AND excluded by the applied sparse patterns. Both, so a
+ * reconcile that failed (config rolled back) or a full checkout never counts
+ * as "not downloaded". A repository still on the old cone mode (department
+ * exclusions, before its first reconcile) is read the old way: root folders
+ * of the list that are not in the cone.
+ */
+export async function appliedExclusions(git: SimpleGit, repoPath: string): Promise<string[]> {
+  const excluded = readSparseConfig(repoPath).excluded
+  if (excluded.length === 0) return []
+  if (!(await configFlag(git, 'core.sparseCheckout'))) return []
+  if (await configFlag(git, 'core.sparseCheckoutCone')) {
+    const cone = (await git.raw(['sparse-checkout', 'list']).catch(() => '')).split('\n').map(l => l.trim()).filter(Boolean)
+    return excluded.filter(f => !f.includes('/') && !cone.includes(f))
+  }
+  let applied: string[] | null = null
+  try { applied = parseSparsePatterns(fs.readFileSync(sparseFilePath(repoPath), 'utf-8')) } catch { /* no file */ }
+  if (!applied) return []
+  const appliedKeys = new Set(applied.map(pathKey))
+  return excluded.filter(e => appliedKeys.has(pathKey(e)))
+}
+
+// List ALL root-level directories in the tree, INCLUDING dotfolders (first
+// setup tells the departments apart from what the whole company shares).
 export async function listAllRootDirs(git: SimpleGit): Promise<string[]> {
   try {
     const raw = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
@@ -60,13 +96,35 @@ export async function listAllRootDirs(git: SimpleGit): Promise<string[]> {
   }
 }
 
+/**
+ * Exclusions whose folder exists neither on the server's main nor in HEAD
+ * (a teammate deleted or renamed it). Sync's reconcile drops them: an
+ * exclusion of a path nobody has would otherwise hold back — and block
+ * writes to — a folder the member creates there later. null when no tree
+ * could be read (then nothing is dropped).
+ */
+export async function staleExclusions(git: SimpleGit, excluded: string[]): Promise<string[] | null> {
+  if (excluded.length === 0) return []
+  const dirs = new Set<string>()
+  let readAny = false
+  for (const rev of ['origin/main', 'HEAD']) {
+    try {
+      const raw = await git.raw(['ls-tree', '-r', '-d', '-z', '--name-only', rev])
+      readAny = true
+      for (const d of raw.split('\0')) if (d) dirs.add(pathKey(d))
+    } catch { /* unborn HEAD, no origin/main */ }
+  }
+  if (!readAny) return null
+  return excluded.filter(e => !dirs.has(pathKey(e)))
+}
+
 // --- Partial clone ---
 //
 // A member setting up a company for the first time with departments picked
 // gets a partial clone (--filter=blob:none, ./first-setup.ts): blobs outside
-// the cone were never downloaded, and git fetches them lazily (with the
+// the checkout were never downloaded, and git fetches them lazily (with the
 // app's auth, inherited from createGit's environment) when something needs
-// them. Widening the cone is therefore a download, which needs the network.
+// them. Downloading a folder is therefore a download, which needs the network.
 
 /** True for a partial clone (origin is a promisor remote). */
 export async function isPartialClone(git: SimpleGit): Promise<boolean> {
@@ -84,23 +142,24 @@ export function isDownloadFailure(message: string): boolean {
   return /from promisor remote|could not fetch|unable to access|could not resolve host|failed to connect|could not read from remote repository|does not appear to be a git repository|connection (refused|timed out|reset)|operation timed out|network is unreachable|authentication failed|could not read username/i.test(message)
 }
 
-// Reconcile the on-disk sparse cone to match the persisted exclusion list.
-// excluded empty → full checkout (sparse disabled). Otherwise the cone is
-// (remote root folders − excluded). Safe: sparse-checkout never deletes data
-// from the index/server, only what is materialised in the worktree.
+// Reconcile the on-disk sparse checkout to the persisted exclusion list.
+// excluded empty → full checkout (sparse disabled). Otherwise the non-cone
+// patterns `/*` + `!/<folder>/`. Safe: sparse-checkout never deletes data
+// from the index/server, only what is materialised in the worktree, and it
+// leaves files with local changes in place.
 //
 // If git fails (in a partial clone: a folder that has to be downloaded while
 // offline), the previous exclusion list is written back. `sparse-checkout
-// set` / `disable` roll their own patterns back on failure, so config, cone
-// and worktree stay as they were and the next sync does not retry a choice
-// that was never applied.
+// set` / `disable` roll their own patterns back on failure, so config,
+// patterns and worktree stay as they were and the next sync does not retry a
+// choice that was never applied.
 export async function applySparseSelection(git: SimpleGit, repoPath: string, excluded: string[]): Promise<void> {
-  const cleanExcluded = [...new Set(excluded.filter(Boolean))]
+  const cleanExcluded = normalizeExclusions(excluded)
   const configExisted = fs.existsSync(sparseConfigPath(repoPath))
   const previous = readSparseConfig(repoPath)
   writeSparseConfig(repoPath, { excluded: cleanExcluded })
   try {
-    await reconcileCone(git, repoPath, cleanExcluded)
+    await reconcilePatterns(git, repoPath, cleanExcluded)
   } catch (error) {
     if (configExisted) writeSparseConfig(repoPath, previous)
     else fs.rmSync(sparseConfigPath(repoPath), { force: true })
@@ -108,50 +167,34 @@ export async function applySparseSelection(git: SimpleGit, repoPath: string, exc
   }
 }
 
-async function reconcileCone(git: SimpleGit, repoPath: string, cleanExcluded: string[]): Promise<void> {
+async function reconcilePatterns(git: SimpleGit, repoPath: string, cleanExcluded: string[]): Promise<void> {
   if (cleanExcluded.length === 0) {
     // Nothing excluded → make sure we are on a full checkout.
-    const isSparse = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
-    if (isSparse) await git.raw(['sparse-checkout', 'disable'])
-    return
-  }
-
-  const allDirs = await listAllRootDirs(git)
-  // Cone = every root directory (dotfolders included) minus the user's
-  // excluded departments. If enumeration failed (empty), do NOT touch the
-  // worktree — resetting here is what wiped exclusions before.
-  if (allDirs.length === 0) {
-    console.warn('Git sparse: could not enumerate root dirs; leaving worktree untouched')
-    return
-  }
-  const desired = allDirs.filter(f => !cleanExcluded.includes(f))
-  if (desired.length === 0) {
-    if (await isPartialClone(git)) {
-      // A full checkout of a partial clone downloads every folder — the
-      // opposite of excluding them all. Keep just the root files.
-      await keepIgnoredOutsideCone(git, repoPath, [], () => git.raw(['sparse-checkout', 'set', '--cone']))
-      return
+    if (await configFlag(git, 'core.sparseCheckout')) {
+      restoreKept(repoPath) // a crash between moving out and back
+      await git.raw(['sparse-checkout', 'disable'])
     }
-    // User excluded literally everything → fall back to a full checkout.
-    await git.raw(['sparse-checkout', 'disable']).catch(() => {})
-    writeSparseConfig(repoPath, { excluded: [] })
     return
   }
-  // One command, not `init --cone` + `set`: init alone narrows the cone to
-  // the root files, and if `set` then failed (a download while offline) the
-  // worktree would be left without its folders.
-  await keepIgnoredOutsideCone(git, repoPath, desired, () => git.raw(['sparse-checkout', 'set', '--cone', ...desired]))
+  // One command (never `init` + `set`): a failed `set` rolls its own
+  // patterns back, so the worktree is never left half-narrowed. `--no-cone`
+  // also switches a repository still on the old cone mode (migration): the
+  // same department list selects the same files, nothing is downloaded or
+  // removed.
+  await keepIgnoredInExcluded(git, repoPath, cleanExcluded,
+    () => git.raw(['sparse-checkout', 'set', '--no-cone', ...sparsePatterns(cleanExcluded)]))
 }
 
-// --- Ignored files outside the cone ---
+// --- Ignored files in excluded folders ---
 //
 // In cone mode, `sparse-checkout set` deletes every ignored file in a tracked
-// directory outside the cone that has no tracked or non-ignored untracked
-// file left (documented git behaviour). Sync runs `set` on every press, so a
-// member's .personal/ notes, .env files or auto-ignored large files inside an
-// excluded department — never on the server, local only — were deleted at
-// the next sync, and excluding a department in settings deleted them at once.
-// They are moved into .git/ for the duration of the command and put back.
+// directory that leaves the cone (documented git behaviour): a member's
+// .personal/ notes, .env files or auto-ignored large files inside an
+// excluded department — local only, never on the server — were deleted at
+// every sync. Non-cone patterns do not do that (the clean-up is cone-only),
+// but a git that behaves differently still could, so for the duration of
+// every `set` the ignored files inside the excluded folders are moved into
+// .git/ and put back.
 
 const KEEP_DIR = 'acb-sparse-keep'
 
@@ -184,20 +227,29 @@ function restoreKept(repoPath: string): void {
 }
 
 /**
- * Run a `sparse-checkout set` with the ignored files of every tracked root
- * folder outside `cone` moved out of git's reach, and put them back after.
+ * Run a `sparse-checkout set` with the ignored files inside every folder it
+ * leaves excluded moved out of git's reach, and put them back after — also
+ * when the command fails. (Folders that become downloaded lose nothing.)
  */
-async function keepIgnoredOutsideCone<T>(git: SimpleGit, repoPath: string, cone: string[], fn: () => Promise<T>): Promise<T> {
+async function keepIgnoredInExcluded<T>(git: SimpleGit, repoPath: string, excluded: string[], fn: () => Promise<T>): Promise<T> {
   restoreKept(repoPath) // a crash between moving out and back
-  const tracked = new Set<string>()
-  for (const rev of ['HEAD', 'origin/main']) {
-    const raw = await git.raw(['ls-tree', '-d', '-z', '--name-only', rev]).catch(() => '')
-    for (const d of raw.split('\0')) if (d) tracked.add(d)
+  const present = excluded.filter(d => fs.existsSync(path.join(repoPath, d)))
+  if (present.length === 0) return fn()
+  const args = ['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', ...present.map(d => `:(literal)${d}/`)]
+  let raw: string
+  try {
+    raw = await git.raw([...args.slice(0, 5), '--directory', ...args.slice(5)])
+  } catch (error) {
+    // git refuses `--directory` with a pathspec below a folder that is
+    // ignored as a whole ("directory entry not superset of prefix"; e.g. a
+    // department excluded as a nested repository, found by the soak): list
+    // the files one by one instead, and if even that fails go on without —
+    // non-cone patterns do not delete ignored files.
+    raw = await git.raw(args).catch(() => {
+      console.warn('Git sparse: could not list ignored files in excluded folders:', error)
+      return ''
+    })
   }
-  const outside = [...tracked].filter(d => !cone.includes(d) && fs.existsSync(path.join(repoPath, d)))
-  if (outside.length === 0) return fn()
-  const raw = await git.raw(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory', '--',
-    ...outside.map(d => `:(literal)${d}/`)])
   // --directory can list a folder and files inside it: move the outermost only.
   const listed = [...new Set(raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, '')))].sort()
   const entries = listed.filter(e => !listed.some(o => o !== e && e.startsWith(`${o}/`)))
@@ -217,19 +269,43 @@ async function keepIgnoredOutsideCone<T>(git: SimpleGit, repoPath: string, cone:
   }
 }
 
+/**
+ * Files inside `folders` with changes that are not committed yet (edited,
+ * new, deleted), sorted. Excluding such a folder does not lose them — git
+ * leaves an edited or new file on disk and the next sync moves it to
+ * .backups/<ts>_outside_checkout/ (./outside-checkout.ts) — but they are not
+ * shared, so the settings panel asks first.
+ */
+export async function uncommittedChangesIn(git: SimpleGit, folders: string[]): Promise<string[]> {
+  const clean = normalizeExclusions(folders)
+  if (clean.length === 0) return []
+  const raw = await git.raw(['status', '--porcelain=v1', '-z', '--untracked-files=all', '--',
+    ...clean.map(f => `:(literal,icase)${f}/`)])
+  const records = raw.split('\0')
+  const files = new Set<string>()
+  for (let i = 0; i < records.length; i++) {
+    const rec = records[i]
+    if (rec.length < 4) continue
+    const xy = rec.slice(0, 2)
+    files.add(rec.slice(3))
+    if (xy[0] === 'R' || xy[0] === 'C') i++ // the source path follows
+  }
+  return [...files].sort()
+}
+
 export type SparseExclusionsResult =
   | { success: true; enabled: boolean; excluded: string[] }
   | { success: false; error: string; offline?: boolean }
 
 /**
- * Settings panel: set the exclusion list and reconcile the worktree. Adding a
- * department to a partial clone downloads it; offline, nothing changes and
- * the member is told it can be downloaded once online.
+ * Settings panel: set the exclusion list and reconcile the worktree.
+ * Downloading a folder in a partial clone fetches its files; offline,
+ * nothing changes and the member is told it can be downloaded once online.
  */
 export async function setSparseExclusions(git: SimpleGit, repoPath: string, excluded: string[]): Promise<SparseExclusionsResult> {
   try {
     await applySparseSelection(git, repoPath, excluded)
-    const enabled = (await git.raw(['config', '--get', 'core.sparseCheckout']).catch(() => '')).trim() === 'true'
+    const enabled = await configFlag(git, 'core.sparseCheckout')
     return { success: true, enabled, excluded: readSparseConfig(repoPath).excluded }
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error)
