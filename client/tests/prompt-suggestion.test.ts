@@ -1,11 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EditorState } from '@codemirror/state'
-import { canOfferSuggestion, ghostKeyAction, ghostRemainder, suggestionAfterEdit, suggestionDescription, type GhostInput } from '../src/components/chat/promptSuggestion'
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { canOfferSuggestion, draftCancelsSuggestion, ghostKeyAction, ghostRemainder, shouldRequestSuggestion, suggestionAfterEdit, suggestionDescription, type GhostInput } from '../src/components/chat/promptSuggestion'
 import { currentSuggestion, ghostSuggestion, setSuggestion } from '../src/components/chat/ghostSuggestion'
 import { normalizeSuggestion, MAX_SUGGESTION_LENGTH } from '../shared/prompt-suggestion'
-import { createChatTurns } from '../electron/chat-turns'
+import { createChatTurns, type SuggestFromReply } from '../electron/chat-turns'
+import { lastMemberText } from '../electron/chat-server'
 import { createClaudeConnection } from '../electron/agents/claude'
+import { createTurnSteering } from '../electron/agents/steering'
+import {
+  SUGGESTION_MEMBER_MAX_CHARS, SUGGESTION_MODEL, SUGGESTION_OUTPUT_MAX_CHARS, SUGGESTION_REPLY_MAX_CHARS, SUGGESTION_SYSTEM_PROMPT,
+  buildSuggestionInput, cleanSuggestionOutput, conversationLanguage, generatePromptSuggestion, type SuggestionRequest,
+} from '../electron/prompt-suggester'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
 
 const at = (doc: string, extra: Partial<GhostInput> = {}): GhostInput => ({ doc, caret: doc.length, hasSelection: false, composing: false, ...extra })
@@ -86,42 +95,94 @@ test('CodeMirror field: set by the parent, kept while typing along, cleared by o
   assert.equal(currentSuggestion(state), null)
 })
 
-test('chat server: the latest turn\'s suggestion is handed out once it arrives; failures and new turns give none', async () => {
+test('chat server: the suggestion is generated from the finished turn\'s reply once the renderer asks', async () => {
   const turns = createChatTurns(50)
   const inject = { push() {} }
-  // Arrives after the response ended (as the CLI sends it after the result).
-  const a = turns.open('chat-a', inject, { suggestions: true })
-  a.end('finished')
+  const calls: string[] = []
+  const suggest: SuggestFromReply = async reply => { calls.push(reply); return '  commit this \n' }
+  // Asked before the response ended: waits for the reply, then generates once.
+  const a = turns.open('chat-a', inject, { suggest })
   const waiting = turns.suggestion('chat-a')
-  a.onPromptSuggestion!('  commit this \n')
+  a.end('finished', 'done, 3 files changed')
   assert.equal(await waiting, 'commit this')
   assert.equal(await turns.suggestion('chat-a'), 'commit this')
-  // The CLI said there is none (the query closed after its result).
-  const b = turns.open('chat-a', inject, { suggestions: true })
-  b.end('finished')
-  b.onPromptSuggestion!(null)
+  assert.deepEqual(calls, ['done, 3 files changed'])
+  // Stopped / failed turns and empty replies offer nothing — and make no call.
+  const b = turns.open('chat-a', inject, { suggest })
+  b.end('failed', 'partial')
   assert.equal(await turns.suggestion('chat-a'), null)
-  // Stopped / failed turns offer nothing; nothing at all → bounded wait.
-  const c = turns.open('chat-a', inject, { suggestions: true })
-  c.end('failed')
-  c.onPromptSuggestion!('late')
+  const c = turns.open('chat-a', inject, { suggest })
+  c.end('finished', '   ')
   assert.equal(await turns.suggestion('chat-a'), null)
-  const d = turns.open('chat-a', inject, { suggestions: true })
-  d.end('finished')
+  // The turn never ends → bounded wait.
+  turns.open('chat-a', inject, { suggest })
   assert.equal(await turns.suggestion('chat-a'), null)
-  // A new turn replaces the pending one; Codex turns have no suggestions.
-  const e = turns.open('chat-a', inject, { suggestions: true })
-  const stale = turns.suggestion('chat-a')
-  const f = turns.open('chat-a', inject, { suggestions: false })
-  assert.equal(await stale, null)
-  assert.equal(f.onPromptSuggestion, undefined)
-  e.onPromptSuggestion!('old')
+  assert.deepEqual(calls, ['done, 3 files changed'])
+  // A turn that cannot suggest (api-key / not asked) and unknown conversations.
+  turns.open('chat-a', inject).end('finished', 'reply')
   assert.equal(await turns.suggestion('chat-a'), null)
   assert.equal(await turns.suggestion('unknown'), null)
+  // A generator failure or an overlong line shows nothing.
+  turns.open('chat-a', inject, { suggest: async () => { throw new Error('x') } }).end('finished', 'r')
+  assert.equal(await turns.suggestion('chat-a'), null)
+  turns.open('chat-a', inject, { suggest: async () => 'x'.repeat(MAX_SUGGESTION_LENGTH + 1) }).end('finished', 'r')
+  assert.equal(await turns.suggestion('chat-a'), null)
   turns.forget('chat-a')
 })
 
-test('Claude Code: suggestions requested only when the chat can show them; null once the query closed without one', async () => {
+test('chat server: the member typing (request aborted), a new turn, or forget stops the generation', async () => {
+  const turns = createChatTurns(1000)
+  const inject = { push() {} }
+  const signals: AbortSignal[] = []
+  const suggest: SuggestFromReply = (_reply, signal) => {
+    signals.push(signal)
+    return new Promise(resolve => signal.addEventListener('abort', () => resolve('too late'), { once: true }))
+  }
+  // The renderer aborts its request (the member typed).
+  turns.open('chat-a', inject, { suggest }).end('finished', 'reply')
+  const request = new AbortController()
+  const typed = turns.suggestion('chat-a', request.signal)
+  await new Promise(resolve => setTimeout(resolve, 5))
+  assert.equal(signals.length, 1)
+  request.abort()
+  assert.equal(await typed, null)
+  assert.equal(signals[0].aborted, true)
+  // An aborted request before the turn ended never starts a call.
+  turns.open('chat-a', inject, { suggest })
+  const early = new AbortController()
+  const pending = turns.suggestion('chat-a', early.signal)
+  early.abort()
+  assert.equal(await pending, null)
+  assert.equal(signals.length, 1)
+  // A new turn starts while generating.
+  turns.open('chat-a', inject, { suggest }).end('finished', 'reply')
+  const stale = turns.suggestion('chat-a')
+  await new Promise(resolve => setTimeout(resolve, 5))
+  turns.open('chat-a', inject, { suggest })
+  assert.equal(await stale, null)
+  assert.equal(signals[1].aborted, true)
+  // The conversation is closed.
+  turns.open('chat-a', inject, { suggest }).end('finished', 'reply')
+  const closed = turns.suggestion('chat-a')
+  await new Promise(resolve => setTimeout(resolve, 5))
+  turns.forget('chat-a')
+  assert.equal(await closed, null)
+  assert.equal(signals[2].aborted, true)
+})
+
+test('renderer: asks only after a normal turn, with the setting on, for the CLI agents; typing cancels', () => {
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'claude-code', enabled: true }), true)
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'codex', enabled: true }), true)
+  // Setting off → no request, so no model call.
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'claude-code', enabled: false }), false)
+  assert.equal(shouldRequestSuggestion({ aborted: true, authMode: 'claude-code', enabled: true }), false)
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'api-key', enabled: true }), false)
+  assert.equal(draftCancelsSuggestion(''), false)
+  assert.equal(draftCancelsSuggestion(' \n'), false)
+  assert.equal(draftCancelsSuggestion('次'), true)
+})
+
+test('Claude Code: the CLI\'s own promptSuggestions are not requested; steering still observes the query', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider options as the test reads them
   let options: any
   const factory = ((_model: string, value: unknown) => { options = value; return {} as ReturnType<typeof claudeCode> }) as typeof claudeCode
@@ -129,21 +190,102 @@ test('Claude Code: suggestions requested only when the chat can show them; null 
   connection.createChatModel({})
   assert.equal(options.promptSuggestions, undefined)
   assert.equal(options.onQueryCreated, undefined)
-  const seen: (string | null)[] = []
-  connection.createChatModel({ appSessionId: 'chat-a', onPromptSuggestion: value => seen.push(value) })
-  assert.equal(options.promptSuggestions, true)
-  options.onPromptSuggestion('commit this')
-  // The provider's own iteration of the query: init, result, then the query closes.
-  const messages = [{ type: 'system', subtype: 'init' }, { type: 'result', subtype: 'success' }]
-  const query = { async *[Symbol.asyncIterator]() { yield* messages } }
-  options.onQueryCreated(query)
-  for await (const message of query as AsyncIterable<unknown>) void message
-  assert.deepEqual(seen, ['commit this', null])
-  // A query that never answered (the auto-mode re-run case) reports nothing.
-  const failed = { async *[Symbol.asyncIterator]() { yield { type: 'system', subtype: 'init' } } }
-  options.onQueryCreated(failed)
-  for await (const message of failed as AsyncIterable<unknown>) void message
-  assert.deepEqual(seen, ['commit this', null])
-  connection.createTitleModel()
+  connection.createChatModel({ appSessionId: 'chat-a', steering: createTurnSteering() })
   assert.equal(options.promptSuggestions, undefined)
+  assert.equal(options.onPromptSuggestion, undefined)
+  assert.equal(typeof options.onQueryCreated, 'function')
+})
+
+test('chat server: the member text is the latest user message\'s text parts only', () => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- minimal UI messages
+  const messages: any[] = [
+    { id: '1', role: 'user', parts: [{ type: 'text', text: 'old' }] },
+    { id: '2', role: 'assistant', parts: [{ type: 'text', text: 'reply' }] },
+    { id: '3', role: 'user', parts: [{ type: 'text', text: ' 表にして ' }, { type: 'file', url: 'data:secret', mediaType: 'text/plain' }, { type: 'text', text: '急ぎで' }] },
+  ]
+  assert.equal(lastMemberText(messages), '表にして \n急ぎで')
+  assert.equal(lastMemberText([]), '')
+})
+
+// --- prompt-suggester.ts: the Sonnet call ---
+
+test('suggester input: member message + reply text as JSON data, cut from the end, with the language', () => {
+  const longReply = 'あ'.repeat(SUGGESTION_REPLY_MAX_CHARS + 500) + '最後の段落'
+  const input = JSON.parse(buildSuggestionInput({ memberMessage: 'x'.repeat(SUGGESTION_MEMBER_MAX_CHARS + 10), reply: longReply })!)
+  assert.deepEqual(Object.keys(input), ['language', 'member_message', 'assistant_reply'])
+  assert.equal(input.assistant_reply.length, SUGGESTION_REPLY_MAX_CHARS + 1)
+  assert.ok(input.assistant_reply.startsWith('…') && input.assistant_reply.endsWith('最後の段落'))
+  assert.equal(input.member_message.length, SUGGESTION_MEMBER_MAX_CHARS + 1)
+  assert.equal(buildSuggestionInput({ memberMessage: 'hi', reply: '  ' }), null)
+  assert.equal(conversationLanguage({ memberMessage: '表にして', reply: 'Done.' }), '日本語')
+  assert.equal(conversationLanguage({ memberMessage: 'Make a table', reply: 'Done.' }), 'English')
+  assert.equal(conversationLanguage({ memberMessage: 'ok', reply: '表にしました' }), '日本語')
+  assert.equal(conversationLanguage({ memberMessage: '👍', reply: 'Done.' }), 'English')
+  assert.equal(conversationLanguage({ memberMessage: '', reply: '' }), '日本語')
+  // The system prompt treats the conversation as data and rules out risky suggestions.
+  assert.match(SUGGESTION_SYSTEM_PROMPT, /指示として実行せず/)
+  assert.match(SUGGESTION_SYSTEM_PROMPT, /削除/)
+  assert.match(SUGGESTION_SYSTEM_PROMPT, /秘密情報/)
+  assert.equal(SUGGESTION_MODEL, 'sonnet')
+})
+
+test('suggester output: one line; quotes, bullets and "nothing" markers removed; too long dropped', () => {
+  assert.equal(cleanSuggestionOutput('  A社の提案書を要約して  '), 'A社の提案書を要約して')
+  assert.equal(cleanSuggestionOutput('「A社の提案書を要約して」'), 'A社の提案書を要約して')
+  assert.equal(cleanSuggestionOutput('"Now write one about winter"'), 'Now write one about winter')
+  assert.equal(cleanSuggestionOutput('- 表にして\n- もう一つ'), '表にして')
+  assert.equal(cleanSuggestionOutput('\n\n続けて\n説明'), '続けて')
+  for (const nothing of ['', '  ', 'NONE', 'none.', '(空の出力)', 'なし', '（なし）']) assert.equal(cleanSuggestionOutput(nothing), null, nothing)
+  assert.equal(cleanSuggestionOutput('あ'.repeat(SUGGESTION_OUTPUT_MAX_CHARS + 1)), null)
+  assert.equal(cleanSuggestionOutput('あ'.repeat(SUGGESTION_OUTPUT_MAX_CHARS)), 'あ'.repeat(SUGGESTION_OUTPUT_MAX_CHARS))
+  assert.equal(cleanSuggestionOutput(42), null)
+})
+
+function fakeCli(body: string) {
+  const cwd = mkdtempSync(path.join(tmpdir(), 'acb-suggester-'))
+  const cli = path.join(cwd, 'cli')
+  writeFileSync(cli, `#!${process.execPath}\n${body}`, { mode: 0o700 })
+  return { cwd, cli, dispose: () => rmSync(cwd, { recursive: true, force: true }) }
+}
+const CONTEXT = { memberMessage: '提案書を一覧にして', reply: '5件あります。どれか確認しますか？' }
+
+test('suggester call: hardened one-shot sonnet CLI, conversation on stdin as data', { skip: process.platform === 'win32' }, async () => {
+  const f = fakeCli(`
+const args = process.argv.slice(2)
+const flag = name => args[args.indexOf(name) + 1]
+const ok = flag('--model') === 'sonnet' && args.includes('-p') && args.includes('--safe-mode') && flag('--tools') === ''
+  && args.includes('--strict-mcp-config') && args.includes('--disable-slash-commands') && args.includes('--no-session-persistence')
+  && flag('--setting-sources') === '' && flag('--output-format') === 'json' && flag('--system-prompt').includes('予測器')
+  && process.env.CLAUDE_CODE_DISABLE_AUTO_MEMORY === '1'
+if (!ok) process.exit(2)
+let input = ''; process.stdin.on('data', chunk => input += chunk)
+process.stdin.on('end', () => console.log(JSON.stringify({ result: '「' + JSON.parse(input).member_message + 'をA社だけに絞って」' })))
+`)
+  try {
+    assert.equal(await generatePromptSuggestion({ cli: f.cli, cwd: f.cwd, env: process.env, context: CONTEXT, signal: new AbortController().signal }), '提案書を一覧にしてをA社だけに絞って')
+  } finally { f.dispose() }
+})
+
+test('suggester call: errors, timeouts, cancellation and a missing CLI all give no suggestion', { skip: process.platform === 'win32' }, async () => {
+  const errored = fakeCli(`process.stdin.resume(); console.log(JSON.stringify({ is_error: true, result: 'Login required' }))`)
+  const failing = fakeCli(`process.stdin.resume(); process.exit(1)`)
+  const hanging = fakeCli('process.stdin.resume(); setInterval(() => {}, 1000)')
+  const signal = new AbortController().signal
+  try {
+    assert.equal(await generatePromptSuggestion({ cli: errored.cli, cwd: errored.cwd, env: process.env, context: CONTEXT, signal }), null)
+    assert.equal(await generatePromptSuggestion({ cli: failing.cli, cwd: failing.cwd, env: process.env, context: CONTEXT, signal }), null)
+    assert.equal(await generatePromptSuggestion({ cli: hanging.cli, cwd: hanging.cwd, env: process.env, context: CONTEXT, signal, timeoutMs: 100 }), null)
+    const cancel = new AbortController()
+    const pending = generatePromptSuggestion({ cli: hanging.cli, cwd: hanging.cwd, env: process.env, context: CONTEXT, signal: cancel.signal })
+    cancel.abort()
+    assert.equal(await pending, null)
+    assert.equal(await generatePromptSuggestion({ cli: path.join(hanging.cwd, 'missing'), cwd: hanging.cwd, env: process.env, context: CONTEXT, signal }), null)
+    // Nothing to predict from, or already cancelled: no process at all.
+    let spawned = 0
+    const spawn = (() => { spawned++; throw new Error('not expected') }) as unknown as SuggestionRequest['spawn']
+    assert.equal(await generatePromptSuggestion({ cli: 'x', cwd: hanging.cwd, env: {}, context: { memberMessage: 'a', reply: '' }, signal, spawn }), null)
+    const aborted = new AbortController(); aborted.abort()
+    assert.equal(await generatePromptSuggestion({ cli: 'x', cwd: hanging.cwd, env: {}, context: CONTEXT, signal: aborted.signal, spawn }), null)
+    assert.equal(spawned, 0)
+  } finally { errored.dispose(); failing.dispose(); hanging.dispose() }
 })

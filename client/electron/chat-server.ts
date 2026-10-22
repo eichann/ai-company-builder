@@ -24,10 +24,12 @@ import { createApiConnection } from './agents/anthropic-api'
 import type { ClaudeConnectionConfig } from './agents/claude'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
-import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
+import { forgetPrivateReads, hasReadPrivate, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import { RATE_LIMITS_PART_TYPE, type RateLimitProvider, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
-import { createChatTurns } from './chat-turns'
+import { createChatTurns, type SuggestFromReply } from './chat-turns'
+import { generatePromptSuggestion } from './prompt-suggester'
+import os from 'os'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -51,6 +53,18 @@ export interface ChatServerConfig extends ClaudeConnectionConfig {
    * returns undefined when nothing is known — then nothing is blocked.
    */
   getWriteGuard?: (companyId: string, companyRoot: string) => Promise<WriteGuard | undefined>
+  /** An empty folder of ACB's own for the next-prompt suggestion call (prompt-suggester.ts). */
+  getSuggestionWorkDir?: () => string
+}
+
+/** The text of the member's latest message (no files, no tool parts). */
+export function lastMemberText(messages: UIMessage[]): string {
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const message = messages[i]
+    if (message?.role !== 'user') continue
+    return (message.parts ?? []).flatMap(part => part.type === 'text' ? [part.text] : []).join('\n').trim()
+  }
+  return ''
 }
 
 // ============================================================================
@@ -256,9 +270,23 @@ export async function startChatServer(config: ChatServerConfig) {
     const injector = createChunkInjector()
     const askUser = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
-    // Steering for the CLI agents; next-prompt suggestions for Claude Code.
+    // Steering and next-prompt suggestions for the CLI agents. The suggestion
+    // is one `claude -p --model sonnet` call made after the turn, only when
+    // the renderer asks for it (the member's setting); it gets the member's
+    // last message and the reply text, never tool outputs. A Codex
+    // conversation that read private-folder content is not sent to Anthropic
+    // (a second provider); no Claude Code login → no suggestion.
+    const memberText = lastMemberText(messages)
+    const suggest: SuggestFromReply = (reply, signal) => {
+      if (authMode === 'codex' && hasReadPrivate(privateState)) return Promise.resolve(null)
+      if (!config.isClaudeCodeAuthenticated()) return Promise.resolve(null)
+      return generatePromptSuggestion({
+        cli: config.getClaudeCodeCliPath(), cwd: config.getSuggestionWorkDir?.() ?? os.tmpdir(), env: config.getShellEnv(),
+        context: { memberMessage: memberText, reply }, signal,
+      })
+    }
     const turn = appSessionId && connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
-      ? chatTurns.open(appSessionId, injector, { suggestions: authMode === 'claude-code' }) : undefined
+      ? chatTurns.open(appSessionId, injector, { suggest }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
     const onEvent = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
@@ -272,7 +300,7 @@ export async function startChatServer(config: ChatServerConfig) {
           injector.push({ type: AGENT_PROGRESS_PART_TYPE, data: event.progress, transient: true })
         }
       } : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -366,11 +394,11 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const activityToken = crypto.randomUUID()
     let released = false
-    const release = (outcome: 'finished' | 'failed' = 'failed') => {
+    const release = (outcome: 'finished' | 'failed' = 'failed', reply?: string) => {
       if (released) return
       released = true
       c.req.raw.signal.removeEventListener('abort', abortRelease)
-      turn?.end(outcome)
+      turn?.end(outcome, reply)
       config.onChatActivity?.(activityToken, false)
     }
     function abortRelease() { release('failed') }
@@ -392,7 +420,7 @@ export async function startChatServer(config: ChatServerConfig) {
           agentSessionMap.set(appSessionId, { providerId: authMode, id: metadata.sessionId, modelId })
         }
       },
-      onFinish: () => release('finished'),
+      onFinish: ({ text }) => release('finished', text),
       onAbort: () => release('failed'),
       onError: ({ error }) => {
         release()
@@ -479,9 +507,10 @@ ${transcript}
   })
 
   // GET /api/prompt-suggestion/:appSessionId — the next-prompt suggestion of
-  // the latest turn; waits for it (bounded), since it follows the response.
+  // the latest turn, generated now (prompt-suggester.ts). The renderer aborts
+  // the request when the member types or sends, which stops the generation.
   app.get('/api/prompt-suggestion/:appSessionId', async (c) => {
-    return c.json({ suggestion: await chatTurns.suggestion(c.req.param('appSessionId')) })
+    return c.json({ suggestion: await chatTurns.suggestion(c.req.param('appSessionId'), c.req.raw.signal) })
   })
 
   app.get('/api/session/:appSessionId', (c) => {

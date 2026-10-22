@@ -70,6 +70,20 @@ export function canOfferSuggestion(state: {
   return !state.running && !state.waitingForMember && state.draft.trim() === ''
 }
 
+/**
+ * Whether to ask the chat server for a suggestion after a turn: it then makes
+ * one extra model call (electron/prompt-suggester.ts). Not after a stopped or
+ * failed turn, not in api-key mode, and not when the member turned it off.
+ */
+export function shouldRequestSuggestion(turn: { aborted: boolean; authMode: string; enabled: boolean }): boolean {
+  return turn.enabled && !turn.aborted && (turn.authMode === 'claude-code' || turn.authMode === 'codex')
+}
+
+/** Typing something stops a suggestion that is still being generated. */
+export function draftCancelsSuggestion(draft: string): boolean {
+  return draft.trim() !== ''
+}
+
 /** Screen-reader description while a suggestion is offered. */
 export function suggestionDescription(suggestion: string): string {
   return `入力候補：${suggestion}。→キーまたはTabキーで入力欄に入れます。Escキーで消します。`

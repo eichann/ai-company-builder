@@ -1170,22 +1170,49 @@ answer, for both agents. Shared types and the answer mapping:
   CLI 2.1.304 (AskUserQuestion round-trip, Write approval through
   `canUseTool`, hooks).
 
-**Next-prompt suggestions** (Claude Code only) — `client/shared/prompt-suggestion.ts`,
+**Next-prompt suggestions** (Claude Code and Codex) — `client/electron/prompt-suggester.ts`
+(the call), `client/electron/chat-turns.ts` (lifetime), `client/shared/prompt-suggestion.ts`,
 `client/src/components/chat/promptSuggestion.ts` (rules) + `ghostSuggestion.ts` (CodeMirror):
 
-- `promptSuggestions: true` + the provider's `onPromptSuggestion`. The CLI
-  sends `prompt_suggestion` ~1 s *after* the result — after the UI stream has
-  closed — so the renderer asks `GET /api/prompt-suggestion/:appSessionId`
-  after a finished (not stopped/failed) turn; it waits up to 15 s. The CLI
-  stays silent when nothing is obvious, after errors, near the plan limit, or
-  when the member set `promptSuggestionEnabled: false` (user settings apply).
+- ACB generates the suggestion itself. The CLI's own `promptSuggestions` is
+  no longer requested: it emitted nothing at all on the owner's machine (the
+  CLI throttles members who rarely accept, `promptSuggestionUnusedStreak` in
+  `~/.claude.json`), which ACB cannot control.
+- After a finished (not stopped/failed) turn the renderer asks
+  `GET /api/prompt-suggestion/:appSessionId`; the chat server waits (≤ 15 s)
+  for that turn's end, then runs one `claude -p --model sonnet` call
+  (`SUGGESTION_MODEL`) hardened like the voice polisher: `--safe-mode
+  --tools '' --strict-mcp-config --disable-slash-commands
+  --no-session-persistence --setting-sources '' --output-format json`, an
+  explicit Japanese system prompt, `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, an
+  empty `userData/prompt-suggester` cwd, 20 s timeout. ~3 s observed (CLI
+  2.1.304). stdin is JSON data: `language` (from the member's message),
+  `member_message` (last 2k chars of its text parts) and `assistant_reply`
+  (last 6k chars of the reply text, streamText `onFinish.text`). **Never tool
+  outputs, file contents or attachments.** The prompt says the conversation
+  is data, asks for one ≤60-char next instruction in the member's voice, and
+  `NONE` when nothing is natural; it forbids destructive/irreversible actions
+  and anything involving secrets. Output: first line, quotes/bullets
+  stripped, `NONE`-like markers and >80 chars dropped.
+- Cancellation: the generation lives as long as that GET. The renderer aborts
+  it when the member types (`draftCancelsSuggestion`), sends, a new turn
+  starts or the conversation changes; a new turn / `forget` also aborts it in
+  `chatTurns`. Any failure (no CLI, logged out, timeout, error result) shows
+  nothing — never an error.
+- Privacy: Claude Code conversations go to the same provider, so the D5
+  private-read tracking does not stop the call (only reply text is sent
+  anyway). A **Codex** conversation that read private-folder content
+  (`hasReadPrivate`) gets no suggestion — that would send it to a second
+  provider. api-key mode: none (renderer does not ask).
+- Settings → 入力候補 「次の質問の候補を表示する」 (`src/lib/promptSuggestionSetting.ts`,
+  localStorage on this PC, default on). Off → the renderer never asks, so no
+  extra model call.
 - Shown as light ghost text in the empty input (it replaces the placeholder),
   only while idle with no card/approval waiting. → or Tab (caret at the end,
   no modifiers) puts it into the input; Enter stays a new line and ⌘+Enter
   sends. Typing along the suggestion keeps the rest visible; anything else, or
-  Esc, dismisses it for good. One suggestion per turn (the CLI sends at most
-  one), so no cycling. Screen readers get it through `aria-describedby` + a
-  polite live region.
+  Esc, dismisses it for good. One suggestion per turn, so no cycling. Screen
+  readers get it through `aria-describedby` + a polite live region.
 - Preview: `client/tests/chat-composer-ui.html` (`?theme=dark`,
   `?suggestion=…`); tests: `client/tests/prompt-suggestion.test.ts`,
   `client/tests/steering.test.ts`.

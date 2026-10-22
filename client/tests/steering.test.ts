@@ -133,7 +133,7 @@ test('Claude connection: the running query is attached for steering and detached
   const connection = createClaudeConnection({ getPermissionMode: () => 'bypassPermissions', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', getShellEnv: () => ({}) }, factory)
   const steering = createTurnSteering()
   connection.createChatModel({ appSessionId: 'chat-a', steering })
-  // Streaming input stays on (choice prompts and hooks need it) and suggestions are not requested.
+  // Streaming input stays on (choice prompts and hooks need it); the CLI's own suggestions are never requested (ACB makes them).
   assert.equal(options.streamingInput, 'always')
   assert.equal(options.promptSuggestions, undefined)
   assert.equal(await steering.send('x', () => {}), 'unavailable')
@@ -200,7 +200,7 @@ test('chat server: steering shows the instruction once the agent took it; no tur
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- provider options / chunks as the test reads them
   const pushed: any[] = []
   assert.deepEqual(await turns.steer('chat-a', 'x'), { status: 'unavailable' })
-  const turn = turns.open('chat-a', { push: chunk => pushed.push(chunk) }, { suggestions: false })
+  const turn = turns.open('chat-a', { push: chunk => pushed.push(chunk) })
   assert.equal((await turns.steer('chat-a', 'x')).status, 'unavailable')
   let resolve!: (value: 'delivered') => void
   turn.steering.attach({ send: (_text, accepted) => { accepted(); return new Promise(r => { resolve = r }) } })

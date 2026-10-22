@@ -8,56 +8,66 @@ interface Turn {
   steering: ReturnType<typeof createTurnSteering>
   inject: Pick<ChunkInjector, 'push'>
 }
-interface SuggestionSlot { value: Promise<string | null>; settle: (value: string | null) => void }
+/** Generates the turn's suggestion from its reply text (prompt-suggester.ts); null = none. */
+export type SuggestFromReply = (reply: string, signal: AbortSignal) => Promise<string | null>
+interface SuggestionSlot {
+  suggest: SuggestFromReply
+  /** The reply text once the turn finished; null after a failure/stop/new turn. */
+  ended: Promise<string | null>
+  end: (reply: string | null) => void
+  /** Aborts a waiting or running generation (new turn, forget, the renderer gave up). */
+  abort: AbortController
+  result?: Promise<string | null>
+}
 
 /**
  * The chat server's per-conversation state for a running turn:
  * - steering: `POST /api/steer` pushes the member's extra instruction into the
  *   running agent and shows it in the reply (`data-steer` part) once accepted;
  * - prompt suggestions: `GET /api/prompt-suggestion/:id` waits (bounded) for
- *   the suggestion of the conversation's latest turn, which arrives after
- *   that turn's response stream has closed.
+ *   the conversation's latest turn to finish, then generates one suggestion
+ *   from its reply. The generation lives as long as that request: the
+ *   renderer aborts it when the member types, sends or leaves the
+ *   conversation, and a new turn or `forget` aborts it here.
  */
 export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
   const turns = new Map<string, Turn>()
   const suggestions = new Map<string, SuggestionSlot>()
 
-  const slot = (): SuggestionSlot => {
-    let settle!: (value: string | null) => void
-    let settled = false
-    const value = new Promise<string | null>(resolve => { settle = resolve })
-    return { value, settle: next => { if (!settled) { settled = true; settle(next) } } }
+  const slot = (suggest: SuggestFromReply): SuggestionSlot => {
+    let resolveEnded!: (value: string | null) => void
+    let ended = false
+    const value = new Promise<string | null>(resolve => { resolveEnded = resolve })
+    return { suggest, ended: value, end: next => { if (!ended) { ended = true; resolveEnded(next) } }, abort: new AbortController() }
+  }
+  const drop = (appSessionId: string) => {
+    const current = suggestions.get(appSessionId)
+    if (!current) return
+    current.end(null)
+    current.abort.abort()
+    suggestions.delete(appSessionId)
   }
 
   return {
     /**
      * A turn starts in `appSessionId`. Returns what the agent connection
-     * receives, and `end()` for when the response is over.
+     * receives, and `end()` for when the response is over. `suggest` is
+     * given when this turn may get a next-prompt suggestion.
      */
-    open(appSessionId: string, inject: Pick<ChunkInjector, 'push'>, options: { suggestions: boolean }) {
+    open(appSessionId: string, inject: Pick<ChunkInjector, 'push'>, options: { suggest?: SuggestFromReply } = {}) {
       turns.get(appSessionId)?.steering.close()
       const turn: Turn = { steering: createTurnSteering(), inject }
       turns.set(appSessionId, turn)
-      suggestions.get(appSessionId)?.settle(null)
-      const suggestion = options.suggestions ? slot() : undefined
+      drop(appSessionId)
+      const suggestion = options.suggest ? slot(options.suggest) : undefined
       if (suggestion) suggestions.set(appSessionId, suggestion)
-      else suggestions.delete(appSessionId)
-      let timer: ReturnType<typeof setTimeout> | undefined
       return {
         steering: turn.steering as TurnSteering,
-        onPromptSuggestion: suggestion ? (value: string | null) => {
-          suggestion.settle(normalizeSuggestion(value))
-          clearTimeout(timer)
-        } : undefined,
-        /** The response ended: no more steering; a suggestion may still come (not after a failure/stop). */
-        end(outcome: 'finished' | 'failed') {
+        /** The response ended: no more steering; a finished turn's reply text feeds the suggestion. */
+        end(outcome: 'finished' | 'failed', reply = '') {
           turn.steering.close()
           if (turns.get(appSessionId) === turn) turns.delete(appSessionId)
-          if (!suggestion) return
-          if (outcome === 'failed') { suggestion.settle(null); return }
-          clearTimeout(timer)
-          timer = setTimeout(() => suggestion.settle(null), waitMs)
-          timer.unref?.()
+          suggestion?.end(outcome === 'finished' && reply.trim() ? reply : null)
         },
       }
     },
@@ -72,20 +82,36 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
       return { status, id: record.id }
     },
 
-    /** The latest turn's suggestion (null: none, or none coming). */
-    async suggestion(appSessionId: string): Promise<string | null> {
+    /**
+     * The latest turn's suggestion (null: none, or none coming). `signal` is
+     * the request's: when the renderer gives up, the generation stops.
+     */
+    async suggestion(appSessionId: string, signal?: AbortSignal): Promise<string | null> {
       const current = suggestions.get(appSessionId)
-      if (!current) return null
+      if (!current || signal?.aborted || current.abort.signal.aborted) return null
+      const giveUp = () => current.abort.abort()
+      signal?.addEventListener('abort', giveUp, { once: true })
       let timer: ReturnType<typeof setTimeout> | undefined
-      const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), waitMs) })
-      try { return await Promise.race([current.value, timeout]) } finally { clearTimeout(timer) }
+      try {
+        if (!current.result) {
+          const timeout = new Promise<null>(resolve => { timer = setTimeout(() => resolve(null), waitMs) })
+          const aborted = new Promise<null>(resolve => current.abort.signal.addEventListener('abort', () => resolve(null), { once: true }))
+          const reply = await Promise.race([current.ended, timeout, aborted])
+          if (reply === null || current.abort.signal.aborted) return null
+          current.result ??= current.suggest(reply, current.abort.signal)
+            .then(value => current.abort.signal.aborted ? null : normalizeSuggestion(value), () => null)
+        }
+        return await current.result
+      } finally {
+        clearTimeout(timer)
+        signal?.removeEventListener('abort', giveUp)
+      }
     },
 
     forget(appSessionId: string) {
       turns.get(appSessionId)?.steering.close()
       turns.delete(appSessionId)
-      suggestions.get(appSessionId)?.settle(null)
-      suggestions.delete(appSessionId)
+      drop(appSessionId)
     },
   }
 }

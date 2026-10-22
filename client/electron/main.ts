@@ -3448,6 +3448,12 @@ app.whenReady().then(async () => {
       isClaudeCodeAuthenticated,
       getClaudeCodeCliPath,
       getShellEnv,
+      // Next-prompt suggestions (prompt-suggester.ts) run in an empty folder of ACB's own.
+      getSuggestionWorkDir: () => {
+        const dir = path.join(app.getPath('userData'), 'prompt-suggester')
+        fs.mkdirSync(dir, { recursive: true })
+        return dir
+      },
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
       getWriteGuard: async (companyId, root) => {

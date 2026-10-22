@@ -51,11 +51,6 @@ export interface AgentConnection {
     onEvent?: (event: AgentEvent) => void
     /** Extra instructions while this turn runs (steering.ts); the connection attaches its target. */
     steering?: TurnSteering
-    /**
-     * The agent's predicted next prompt after this turn (Claude Code's
-     * `promptSuggestions`), or null once the turn ended without one.
-     */
-    onPromptSuggestion?: (suggestion: string | null) => void
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

@@ -10,7 +10,8 @@ import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/pe
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { ghostSuggestion, handleGhostKey, setSuggestion } from './ghostSuggestion'
-import { canOfferSuggestion, suggestionDescription } from './promptSuggestion'
+import { canOfferSuggestion, draftCancelsSuggestion, shouldRequestSuggestion, suggestionDescription } from './promptSuggestion'
+import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
 import { normalizeSuggestion } from '../../../shared/prompt-suggestion'
 import { STEER_PART_TYPE, canSteerText, type SteerResponse } from '../../../shared/steer'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
@@ -1641,7 +1642,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     experimental_throttle: 50,
     onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
       lastTurnAbortedRef.current = isAbort || isDisconnect || isError
-      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: !lastTurnAbortedRef.current && authModeRef.current === 'claude-code' }))
+      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: shouldRequestSuggestion({ aborted: lastTurnAbortedRef.current, authMode: authModeRef.current, enabled: promptSuggestionSetting.getSnapshot() }) }))
       const receipt = handoffRequestRef.current
       if (receipt && !isAbort && !isDisconnect && !isError && finishReason === 'stop') {
         const content = uiMessageToSessionMessage(message, new Date()).content
@@ -1746,7 +1747,13 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const saveRef = useRef<(override?: UIMessage[], sync?: boolean, clearDraft?: boolean) => Promise<boolean>>(async () => true)
   // Imperative handle to read/write the chat input value for per-session draft persistence
   const draftInputRef = useRef('')
-  const handleDraftChange = useCallback((text: string) => { draftInputRef.current = text }, [])
+  // The request for the next-prompt suggestion while it is being generated;
+  // typing aborts it, which also stops the model call in the main process.
+  const suggestionRequestRef = useRef<AbortController | null>(null)
+  const handleDraftChange = useCallback((text: string) => {
+    draftInputRef.current = text
+    if (draftCancelsSuggestion(text)) suggestionRequestRef.current?.abort()
+  }, [])
   const chatInputApiRef = useRef<ChatInputApi | null>(null)
   // Tracks whether title auto-generation has been attempted/completed for the current session
   const titleGenerationDoneRef = useRef(false)
@@ -2240,28 +2247,35 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     chatInputApiRef.current?.focus()
   }, [queuedSends])
 
-  // After a reply: ask the chat server for Claude Code's next-prompt
-  // suggestion (it follows the reply by about a second) and offer it in the
-  // input if the member has not started typing.
+  // After a reply: ask the chat server for a next-prompt suggestion (it is
+  // generated now, a few seconds) and offer it in the input if the member has
+  // not started typing. Typing, sending, a new turn or leaving the
+  // conversation aborts the request, and with it the generation.
   useEffect(() => {
     if (!finishedTurn?.suggest) return
     const sessionId = appSessionIdRef.current
-    if (!sessionId) return
-    let cancelled = false
+    if (!sessionId || draftCancelsSuggestion(chatInputApiRef.current?.getValue() ?? '')) return
+    const request = new AbortController()
+    suggestionRequestRef.current = request
     fetch(`http://127.0.0.1:${serverInfo.port}/api/prompt-suggestion/${encodeURIComponent(sessionId)}`, {
       headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+      signal: request.signal,
     })
       .then(res => res.ok ? res.json() : null)
       .then((data: { suggestion?: unknown } | null) => {
-        if (cancelled || appSessionIdRef.current !== sessionId) return
+        if (request.signal.aborted || appSessionIdRef.current !== sessionId) return
         const suggestion = normalizeSuggestion(data?.suggestion)
         if (suggestion && canOfferSuggestion({ running: false, waitingForMember: false, draft: chatInputApiRef.current?.getValue() ?? '' })) setPromptSuggestion(suggestion)
       })
       .catch(() => {})
-    return () => { cancelled = true }
+      .finally(() => { if (suggestionRequestRef.current === request) suggestionRequestRef.current = null })
+    return () => request.abort()
   }, [finishedTurn, serverInfo.port, serverInfo.authToken])
 
-  useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
+  useEffect(() => {
+    suggestionRequestRef.current?.abort()
+    setPromptSuggestion(null)
+  }, [currentSessionId])
   const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
   const running = status === 'submitted' || status === 'streaming'
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? promptSuggestion : null

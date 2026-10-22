@@ -63,7 +63,7 @@ type Settle = (status: 'delivered' | 'not-delivered') => void
  * The CLI usually takes the next queued message the moment the result is
  * out, before the cancel lands (seen with CLI 2.1.304), so when that unseen
  * turn starts it is interrupted at once: it must not run tools while the
- * provider still waits for the prompt suggestion. The text stays in the
+ * provider is still draining the query. The text stays in the
  * CLI's transcript, so the model may see it twice after the re-send.
  * Whether the CLI sends lifecycle frames is read from its init message
  * (`capabilities` has `msg_lifecycle_v1`, CLI 2.1.304). A CLI without them
@@ -150,7 +150,7 @@ export function createClaudeSteer(query: SteerableQuery) {
 /**
  * Observe every message the provider reads from the SDK's Query without
  * changing what it reads: the provider iterates `query[Symbol.asyncIterator]()`
- * (also again for the post-result prompt-suggestion drain), so that returns
+ * (possibly more than once, e.g. for a post-result drain), so that returns
  * one wrapper around the same underlying iterator. `onEnd` runs once, when the
  * iterator finishes, is returned (provider done, stop) or throws.
  */
