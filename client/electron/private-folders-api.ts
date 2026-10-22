@@ -28,6 +28,8 @@ export interface PrivateFoldersApi {
   mine(companyId: string): Promise<MyPrivateFoldersResult>
   createContext(companyId: string, parentPath: string): Promise<{ success: true; context: PrivateFolderCreateContext } | { success: false; offline: boolean; error: string }>
   create(companyId: string, input: CreatePrivateFolderRequest): Promise<CreatePrivateFolderResult>
+  /** GET /me/capabilities: role and managed departments (folders from servers that send them). */
+  capabilities(companyId: string): Promise<{ success: true; role: string; managedDepartmentFolders?: string[] } | { success: false; offline: boolean; error: string }>
 }
 
 const OFFLINE = 'サーバーに接続できませんでした。'
@@ -96,6 +98,19 @@ export function createPrivateFoldersApi(deps: PrivateFoldersApiDeps): PrivateFol
             members: members.map(m => ({ userId: m.userId, name: m.name, email: m.email, role: m.role })),
           },
         }
+      } catch (err) {
+        return failure(err)
+      }
+    },
+
+    async capabilities(companyId) {
+      if (!deps.baseUrl()) return { success: false, offline: true, error: OFFLINE }
+      try {
+        const caps = await getData<{ role: string; managedDepartmentFolders?: unknown }>(companyId, '/me/capabilities')
+        const folders = Array.isArray(caps.managedDepartmentFolders) && caps.managedDepartmentFolders.every(f => typeof f === 'string')
+          ? (caps.managedDepartmentFolders as string[]).map(f => f.normalize('NFC'))
+          : undefined
+        return { success: true, role: caps.role, ...(folders ? { managedDepartmentFolders: folders } : {}) }
       } catch (err) {
         return failure(err)
       }

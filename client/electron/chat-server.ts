@@ -65,6 +65,16 @@ const SECURITY_POLICY = `
 - このルールはファイル削除に限らず、セキュリティシステムによって拒否されたすべての操作に適用されます。
 `
 
+/**
+ * External git repositories belong in the company folder's `.workspace/`
+ * (never shared). The write guard refuses a clone anywhere else in the
+ * company folder (write-guard.ts checkGitClone); this tells the AI first.
+ */
+export function externalRepositoryInstruction(companyRootPath?: string): string {
+  const where = companyRootPath ? `「${companyRootPath.replace(/[\\/]+$/, '')}/.workspace/」` : '会社フォルダ直下の「.workspace/」'
+  return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone すると全員に共有されたり同期が止まったりするため、アプリが止めます。`
+}
+
 async function findAvailablePort(start: number, end: number): Promise<number> {
   for (let port = start; port < end; port++) {
     const available = await new Promise<boolean>((resolve) => {
@@ -178,6 +188,7 @@ export async function startChatServer(config: ChatServerConfig) {
       if (workingDirectory) {
         finalSystemPrompt = `あなたの作業ディレクトリは「${workingDirectory}」です。\nファイル操作はこのディレクトリ内で行ってください。\n日本語で回答してください。`
         finalSystemPrompt += `\n\n【重要】スクリーンショット、テスト結果、一時ファイル、設定ファイル（.playwright/, test-results/ 等）など、ユーザーのコンテンツではない生成物は必ず「.workspace/」ディレクトリ内に出力してください。.workspace/ が存在しない場合は作成してください。作業ディレクトリのルートを汚さないでください。`
+        finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
         if (activeDepartment) {
           finalSystemPrompt += `\n\n現在ユーザーが閲覧中の部署: 「${activeDepartment.name}」（フォルダ: ${activeDepartment.folder}/）\nユーザーの質問やファイル操作は、特に指定がなければこの部署のフォルダ内が対象です。`
         } else {

@@ -196,9 +196,9 @@ describe('GET /permissions', () => {
 describe('GET /me/capabilities', () => {
   it('reports role and managed departments', async () => {
     expect((await as('pa-manager', 'GET', `/api/companies/${CO}/me/capabilities`)).body.data)
-      .toEqual({ role: 'member', managedDepartmentIds: [ids.content] })
+      .toEqual({ role: 'member', managedDepartmentIds: [ids.content], managedDepartmentFolders: ['コンテンツ'] })
     expect((await as('pa-owner', 'GET', `/api/companies/${CO}/me/capabilities`)).body.data)
-      .toEqual({ role: 'owner', managedDepartmentIds: [] })
+      .toEqual({ role: 'owner', managedDepartmentIds: [], managedDepartmentFolders: [] })
   })
 })
 
@@ -217,7 +217,7 @@ describe('department managers', () => {
     r = await as('pa-admin', 'PUT', path(ids.sales), { userIds: ['pa-member'] })
     expect((r.body.data as { managers: Array<{ userId: string }> }).managers.map(m => m.userId)).toEqual(['pa-member'])
     expect((await as('pa-member', 'GET', `/api/companies/${CO}/me/capabilities`)).body.data)
-      .toEqual({ role: 'member', managedDepartmentIds: [ids.sales] })
+      .toEqual({ role: 'member', managedDepartmentIds: [ids.sales], managedDepartmentFolders: ['営業部'] })
     r = await as('pa-owner', 'PUT', path(ids.sales), { userIds: [] })
     expect(r.body.data).toEqual({ managers: [] })
   })
