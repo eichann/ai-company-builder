@@ -7,6 +7,7 @@ import { CompanySelector } from './components/auth/CompanySelector'
 import { ServerSetupScreen } from './components/auth/ServerSetupScreen'
 import { SpinnerGap } from '@phosphor-icons/react'
 import type { Company } from './types'
+import { checkRememberedCompany } from './lib/restore-company'
 
 const LAST_COMPANY_KEY_PREFIX = 'lastCompany:'
 
@@ -97,29 +98,26 @@ function App() {
     const last = safeReadLastCompany(user.id)
     if (!last) return
 
-    let cancelled = false
+    const userId = user.id
     void (async () => {
-      try {
-        const result = await window.electronAPI.getCompanies()
-        if (cancelled || !result?.success || !Array.isArray(result.data)) return
-        const stillAccessible = (result.data as Array<{ id: string }>).some((c) => c.id === last.id)
-        if (!stillAccessible) {
-          safeWriteLastCompany(user.id, null)
-          return
-        }
-        // The persisted rootPath may have been deleted or moved on disk since
-        // the last session. Restoring it anyway bricks the session (no files,
-        // no git, and no UI path back) — fall back to the company selector so
-        // setup can re-clone instead.
-        const folderExists = await window.electronAPI.exists(last.rootPath)
-        if (cancelled) return
-        if (folderExists) setCurrentCompany(last)
-        else safeWriteLastCompany(user.id, null)
-      } catch {
-        // Network/IPC failure: keep the persisted entry and let the user pick this time.
-      }
+      // lib/restore-company.ts: registers the folder before asking whether it
+      // exists (main answers only for registered folders).
+      const outcome = await checkRememberedCompany(last, {
+        accessibleCompanyIds: async () => {
+          const result = await window.electronAPI.getCompanies()
+          if (!result?.success || !Array.isArray(result.data)) return null
+          return (result.data as Array<{ id: string }>).map((c) => c.id)
+        },
+        registerAllowedRoot: (folder) => window.electronAPI.registerAllowedRoot(folder),
+        exists: (target) => window.electronAPI.exists(target),
+      })
+      // Not cancelled by this effect re-running (restore is attempted once per
+      // session, so a cancelled attempt would never be retried): only a
+      // company picked meanwhile or another account wins.
+      if (useAppStore.getState().currentCompany || useAuthStore.getState().user?.id !== userId) return
+      if (outcome === 'open') setCurrentCompany(last)
+      else if (outcome === 'forget') safeWriteLastCompany(userId, null)
     })()
-    return () => { cancelled = true }
   }, [user, currentCompany, setCurrentCompany])
 
   // Show loading spinner while checking server URL

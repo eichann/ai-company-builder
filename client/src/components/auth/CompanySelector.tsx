@@ -3,6 +3,8 @@ import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
 import type { Company, Department } from '../../types'
 import { DEPARTMENT_TEMPLATES } from '../../types'
+import { planFolderSetup, type FolderSetupPlan } from '../../lib/company-folder-plan'
+import { formatBytes } from '../../lib/download-selection'
 import {
   Buildings,
   Plus,
@@ -62,10 +64,22 @@ export function CompanySelector() {
   const [availableDepartments, setAvailableDepartments] = useState<PickableDepartment[]>([])
   const [pickedDepartments, setPickedDepartments] = useState<Set<string>>(new Set())
   const [isPreparing, setIsPreparing] = useState(false)
+  // The company folder the picker is for, and where its 戻る goes.
+  const [setupFolder, setSetupFolder] = useState('')
+  const [pickerBackView, setPickerBackView] = useState<ViewMode>('openExisting')
+  // What the setup screen is doing: a first download says it can take a
+  // while and shows the bytes received; reopening a clone is not "first time".
+  const [setupKind, setSetupKind] = useState<'firstSetup' | 'reopen' | 'upload'>('firstSetup')
+  const [receivedBytes, setReceivedBytes] = useState(0)
 
   useEffect(() => {
     loadCompanies()
   }, [])
+
+  useEffect(() => {
+    if (viewMode !== 'setup') return
+    return window.electronAPI.onSetupProgress(({ receivedBytes }) => setReceivedBytes(receivedBytes))
+  }, [viewMode])
 
   async function loadCompanies() {
     setIsLoading(true)
@@ -114,78 +128,41 @@ export function CompanySelector() {
     }
   }
 
+  // 既存のフォルダを開く: the chosen folder itself is the company folder.
   async function handleOpenExistingFolder() {
     if (!selectedCompany) return
-
     const path = await window.electronAPI.selectDirectory()
     if (!path) return
-
     setLocalPath(path)
-    setViewMode('setup')
-    setSetupStep('folder')
-    setSetupError(null)
-
-    try {
-      // Read existing departments from the folder
-      const entries = await window.electronAPI.readDirectory(path)
-      const departments: Department[] = []
-
-      for (const entry of entries) {
-        if (entry.isDirectory && !entry.name.startsWith('_') && !entry.name.startsWith('.')) {
-          const hasAgentMd = await window.electronAPI.exists(`${entry.path}/AGENT.md`)
-          const template = DEPARTMENT_TEMPLATES.find((t) => t.name === entry.name)
-
-          departments.push({
-            id: template?.id || entry.name.toLowerCase(),
-            name: entry.name,
-            path: entry.path,
-            hasAgent: hasAgentMd,
-          })
-        }
-      }
-
-      // Setup git remote (optional)
-      setSetupStep('git')
-      const gitResult = await window.electronAPI.gitSetupCompanyRemote(path, selectedCompany.id)
-      if (!gitResult.success) {
-        console.warn('Failed to setup git remote:', gitResult.error)
-      }
-
-      // Done!
-      setSetupStep('done')
-      await new Promise(resolve => setTimeout(resolve, 500))
-
-      // Create company object
-      const company: Company = {
-        id: selectedCompany.id,
-        name: selectedCompany.name,
-        rootPath: path,
-        departments,
-        createdAt: new Date(selectedCompany.createdAt),
-      }
-
-      addCompany(company)
-    } catch (e) {
-      setSetupError(e instanceof Error ? e.message : 'Unknown error')
-    }
+    await prepareSetup(path, 'clone')
   }
 
-  // 開始: a folder that is not a clone yet first asks which departments to
-  // download (before anything is downloaded). An existing clone, or a
-  // company without departments, goes straight to setup as before.
+  // 新しく作成 → 開始: the company folder is made inside the chosen folder.
   async function handleStartSetup() {
     if (!selectedCompany || !localPath) return
-    const companyPath = `${localPath}/${selectedCompany.name}`
+    await prepareSetup(`${localPath}/${selectedCompany.name}`, 'openExisting')
+  }
+
+  // Both paths: ask main what the folder is (lib/company-folder-plan.ts).
+  // A folder with nothing downloaded yet asks which departments to download
+  // first; an existing clone of this company opens as before; a folder that
+  // cannot be used is refused before anything in it changes.
+  async function prepareSetup(companyPath: string, backView: ViewMode) {
+    if (!selectedCompany) return
     setIsPreparing(true)
     setError(null)
+    let plan: FolderSetupPlan
     try {
-      const alreadyCloned = await window.electronAPI.exists(`${companyPath}/.git`).catch(() => false)
-      if (!alreadyCloned) {
+      const inspected = await window.electronAPI.gitInspectCompanyFolder(companyPath, selectedCompany.id).catch(() => null)
+      plan = planFolderSetup(inspected)
+      if (plan.kind === 'firstSetup') {
         const result = await window.electronAPI.getDepartments(selectedCompany.id).catch(() => null)
         const departments = (result?.success && result.data ? result.data : [])
           .filter(d => d.folder && !d.folder.includes('/'))
           .map(d => ({ id: d.id, name: d.name, folder: d.folder }))
         if (departments.length > 0) {
+          setSetupFolder(companyPath)
+          setPickerBackView(backView)
           setAvailableDepartments(departments)
           setPickedDepartments(new Set())
           setViewMode('departments')
@@ -195,7 +172,12 @@ export function CompanySelector() {
     } finally {
       setIsPreparing(false)
     }
-    await handleSetupCompany([])
+    if (plan.kind === 'error') {
+      setError(plan.message)
+      setViewMode(backView)
+      return
+    }
+    await handleSetupCompany(companyPath, [], plan.kind)
   }
 
   function togglePickedDepartment(folder: string) {
@@ -207,21 +189,20 @@ export function CompanySelector() {
     })
   }
 
-  async function handleSetupCompany(selectedFolders: string[]) {
-    if (!selectedCompany || !localPath) return
+  async function handleSetupCompany(companyPath: string, selectedFolders: string[], kind: 'firstSetup' | 'reopen' | 'upload') {
+    if (!selectedCompany) return
 
     setViewMode('setup')
+    setSetupKind(kind)
     setSetupStep('folder')
     setSetupError(null)
+    setReceivedBytes(0)
 
     try {
-      // Step 1: Create folder
-      const companyPath = `${localPath}/${selectedCompany.name}`
-
       // Create directory if it doesn't exist
       await window.electronAPI.createDirectory(companyPath)
 
-      // Step 3: Setup git remote — this will clone if remote has content
+      // Setup git remote — this will clone if remote has content
       // (only the picked departments, when some were picked)
       setSetupStep('git')
       const gitResult = await window.electronAPI.gitSetupCompanyRemote(
@@ -231,16 +212,18 @@ export function CompanySelector() {
       )
       if (!gitResult.success) {
         console.warn('Failed to setup git remote:', gitResult.error)
-        if (selectedFolders.length > 0) {
-          // The download itself failed: say so instead of opening an empty
-          // company. Starting again resumes the same setup.
+        if (gitResult.refused || kind === 'firstSetup') {
+          // The folder cannot be used, or the first download failed: say so
+          // instead of opening an empty company. Starting again resumes the
+          // same setup.
           setSetupError(gitResult.error || 'ダウンロードできませんでした。もう一度お試しください。')
           return
         }
-        // Continue anyway - git setup is optional
+        // An existing clone (offline, say) or the owner's first upload:
+        // continue anyway — the next sync retries.
       }
 
-      // Step 4: Read departments from folder (may be cloned from server or empty)
+      // Read departments from folder (may be cloned from server or empty)
       setSetupStep('folder')
       const entries = await window.electronAPI.readDirectory(companyPath)
       const departments: Department[] = []
@@ -473,6 +456,7 @@ export function CompanySelector() {
               {/* Open existing folder option */}
               <button
                 onClick={handleOpenExistingFolder}
+                disabled={isPreparing}
                 className="w-full flex items-center justify-between p-4 rounded-lg border border-border hover:border-accent/50 transition-colors text-left"
               >
                 <div className="flex items-center gap-3">
@@ -645,14 +629,16 @@ export function CompanySelector() {
 
             <div className="flex gap-3">
               <button
-                onClick={() => setViewMode('openExisting')}
+                onClick={() => setViewMode(pickerBackView)}
                 className="flex-1 flex items-center justify-center gap-2 bg-sidebar-bg hover:bg-activitybar-bg text-text-primary rounded-lg px-4 py-3 transition-colors"
               >
                 戻る
               </button>
               <button
                 onClick={() => handleSetupCompany(
+                  setupFolder,
                   availableDepartments.map(d => d.folder).filter(f => pickedDepartments.has(f)),
+                  'firstSetup',
                 )}
                 className="flex-1 flex items-center justify-center gap-2 bg-accent hover:bg-accent/80 text-white rounded-lg px-4 py-3 transition-colors"
               >
@@ -676,10 +662,16 @@ export function CompanySelector() {
                 )}
               </div>
               <h1 className="text-2xl font-bold text-text-primary mb-2">
-                {setupStep === 'done' ? 'セットアップ完了' : 'セットアップ中...'}
+                {setupStep === 'done'
+                  ? (setupKind === 'reopen' ? '準備完了' : 'セットアップ完了')
+                  : (setupKind === 'reopen' ? 'フォルダを開いています...' : 'セットアップ中...')}
               </h1>
               <p className="text-text-secondary">
-                {setupStep === 'done' ? '準備が整いました' : '初回のみ・すぐに完了します'}
+                {setupStep === 'done'
+                  ? '準備が整いました'
+                  : setupKind === 'firstSetup'
+                    ? '初回のみ。会社のファイルが多いと、ダウンロードに数分かかることがあります'
+                    : 'サーバーの最新の内容を確認しています'}
               </p>
             </div>
 
@@ -739,7 +731,11 @@ export function CompanySelector() {
                 </div>
                 <div>
                   <div className="text-text-primary font-medium">同期設定</div>
-                  <div className="text-sm text-text-secondary">サーバーとの接続を確立</div>
+                  <div className="text-sm text-text-secondary">
+                    {setupStep === 'git' && receivedBytes > 0
+                      ? `ダウンロード中… ${formatBytes(receivedBytes)} 受信`
+                      : 'サーバーとの接続を確立'}
+                  </div>
                 </div>
               </div>
             </div>
