@@ -140,3 +140,6 @@ export interface ApiResponse<T> {
     message: string
   }
 }
+
+// Private folders (permission plan stage 3)
+export * from './private-folders'

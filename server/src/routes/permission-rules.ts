@@ -25,11 +25,18 @@
  *   everything inside it, for the departments they manage — nothing else;
  * - other members: nothing (403).
  *
- * What may be stored in Phase 2:
+ * What may be stored:
  * - write: true/false per subject (everyone / the member role / one user);
- * - read is always true. Read restriction arrives with Phase 3 (carve-out of
- *   private folders), so `read: false` is refused with 400 instead of being
- *   stored and silently not enforced.
+ * - read: always true, except on a PRIVATE folder itself (Phase 3,
+ *   lib/private-folders.ts), the only place a read restriction is enforced
+ *   (its own repository). Anywhere else — the company repository, or a folder
+ *   inside a private folder (same repository) — `read: false` is refused
+ *   with 400 instead of being stored and silently not enforced.
+ * - A private folder always keeps rules of its own (never back to
+ *   inheriting, which would make it readable): clearing them, removing the
+ *   last rule or moving them away is refused. Changes inside private folders
+ *   skip the outdated-app guard: only apps that handle private folders ever
+ *   receive them.
  * - Rules for owner/admin (by role or by user) are refused: owners and admins
  *   always read and write everywhere (lib/permissions.ts), so such a rule
  *   would only mislead. That is also why no edit can lock the company out.
@@ -94,6 +101,8 @@ import {
 } from '../lib/permissions'
 import { queryPushRejections } from '../lib/push-rejections'
 import { isValidFolderName, listRepoSubfolders, resolveRepoFolder } from './departments'
+import { findPrivateScope } from '../lib/permissions'
+import { getPrivateFolder, listPrivateFolders, listPrivateSubfolders } from '../lib/private-folders'
 
 export const permissionRulesRoute = new Hono()
 
@@ -181,14 +190,49 @@ async function readJson(c: Ctx): Promise<Record<string, unknown> | null> {
   }
 }
 
-/** canRead must be absent or true in Phase 2; canWrite a boolean. */
-function parseAccess(body: Record<string, unknown>): { canWrite: boolean } | { error: string } {
-  if (body.canRead === false || body.read === false) return { error: READ_RESTRICTION_UNAVAILABLE }
-  if (body.canRead !== undefined && body.canRead !== true) return { error: 'canRead must be true when given' }
+/**
+ * canRead must be absent or true, except on a private folder itself
+ * (`readRestrictable`), where it may be false; canWrite a boolean.
+ */
+function parseAccess(body: Record<string, unknown>, readRestrictable = false): { canRead: boolean; canWrite: boolean } | { error: string } {
+  if ((body.canRead === false || body.read === false) && !readRestrictable) return { error: READ_RESTRICTION_UNAVAILABLE }
+  const read = body.canRead ?? body.read
+  if (read !== undefined && typeof read !== 'boolean') return { error: 'canRead must be a boolean when given' }
   const write = body.canWrite ?? body.write
   if (typeof write !== 'boolean') return { error: 'canWrite must be a boolean' }
-  return { canWrite: write }
+  return { canRead: read !== false, canWrite: write }
 }
+
+/** Where a path is relative to private folders. */
+interface PrivatePlace {
+  /** The private folder at or above the path. */
+  scopeId: string
+  scopePath: string
+  /** The path IS the private folder (read restriction allowed there). */
+  root: boolean
+}
+
+function privatePlaceOf(companyId: string, path: string): PrivatePlace | null {
+  if (path === '') return null
+  const priv = findPrivateScope(listScopesWithRules(db, companyId), path)
+  return priv ? { scopeId: priv.id, scopePath: priv.path, root: priv.path === path } : null
+}
+
+/** Does the folder exist — in the company repository, or inside its private folder's repository? */
+async function folderExists(companyId: string, path: string, place: PrivatePlace | null): Promise<boolean> {
+  if (path === '') return true
+  if (!place) return (await resolveRepoFolder(companyId, path)) !== null
+  if (place.root) return true
+  const folder = getPrivateFolder(db, companyId, place.scopeId)
+  return !!folder && (await listPrivateSubfolders(companyId, folder, path)) !== null
+}
+
+/** A move must not involve a private folder (or anything inside / around one). */
+function touchesPrivate(companyId: string, path: string): boolean {
+  return listScopesWithRules(db, companyId).some(s => s.repoId !== null && (isSameOrAncestorPath(path, s.path) || isSameOrAncestorPath(s.path, path)))
+}
+
+const PRIVATE_RULES_REQUIRED = 'A private folder always keeps its own rules (who can see it); change them instead'
 
 const FULL_ACCESS_SUBJECT =
   'Owners and admins can always read and edit everything; a rule for them would have no effect'
@@ -355,20 +399,22 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
 
   if (!Array.isArray(body.rules)) return replaceError(c, 'rules must be an array')
   if (body.rules.length > MAX_RULES_PER_SCOPE) return replaceError(c, `At most ${MAX_RULES_PER_SCOPE} rules per folder`)
+  const place = privatePlaceOf(actor.companyId, parsed.path)
   const rules: Array<Omit<ScopeRule, 'id'>> = []
   const seen = new Set<string>()
   for (const item of body.rules as unknown[]) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return replaceError(c, 'Each rule must be an object')
     const raw = item as Record<string, unknown>
-    const access = parseAccess(raw)
+    const access = parseAccess(raw, place?.root === true)
     if ('error' in access) return replaceError(c, access.error, access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined)
     const subject = parseSubject(actor, raw)
     if ('error' in subject) return replaceError(c, subject.error)
     const key = `${subject.subjectType}:${subject.subjectId ?? ''}`
     if (seen.has(key)) return replaceError(c, 'Each subject may appear only once', 'DUPLICATE_SUBJECT')
     seen.add(key)
-    rules.push({ ...subject, canRead: true, canWrite: access.canWrite })
+    rules.push({ ...subject, canRead: access.canRead, canWrite: access.canWrite })
   }
+  if (rules.length === 0 && place?.root) return replaceError(c, PRIVATE_RULES_REQUIRED, 'PRIVATE_RULES_REQUIRED')
   if (rules.length === 0 && parsed.path === '') {
     return replaceError(c, 'The company-wide rules cannot be removed; change them instead', 'COMPANY_RULE_REQUIRED')
   }
@@ -376,11 +422,13 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
     return replaceError(c, 'A folder with its own rules needs a rule for everyone (it is what lets everyone else read)', 'EVERYONE_RULE_REQUIRED')
   }
 
-  if (parsed.path !== '' && (await resolveRepoFolder(actor.companyId, parsed.path)) === null) {
+  if (!(await folderExists(actor.companyId, parsed.path, place))) {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
   }
 
-  const scope = guardWrite(c, actor, force, [parsed.path], () => replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId))
+  const scope = place
+    ? replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId)
+    : guardWrite(c, actor, force, [parsed.path], () => replaceScopeRules(db, actor.companyId, parsed.path, rules, actor.userId))
   if (scope instanceof Response) return scope
   if (!scope) return c.json({ success: true, data: { scope: null, rules: [] } })
   return scopeResponse(c, scope.id)
@@ -399,17 +447,18 @@ permissionRulesRoute.post('/permissions/rules', async (c) => {
   if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
-  const access = parseAccess(body)
+  const place = privatePlaceOf(actor.companyId, parsed.path)
+  const access = parseAccess(body, place?.root === true)
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
   const subject = parseSubject(actor, body)
   if ('error' in subject) return c.json({ error: subject.error }, 400)
 
-  if (parsed.path !== '' && (await resolveRepoFolder(actor.companyId, parsed.path)) === null) {
+  if (!(await folderExists(actor.companyId, parsed.path, place))) {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
   }
 
-  const result = guardWrite(c, actor, force, [parsed.path], () =>
-    upsertScopeRule(db, actor.companyId, parsed.path, { ...subject, canRead: true, canWrite: access.canWrite }, actor.userId))
+  const upsert = () => upsertScopeRule(db, actor.companyId, parsed.path, { ...subject, canRead: access.canRead, canWrite: access.canWrite }, actor.userId)
+  const result = place ? upsert() : guardWrite(c, actor, force, [parsed.path], upsert)
   if (result instanceof Response) return result
   return scopeResponse(c, result.scope.id, result.created ? 201 : 200)
 })
@@ -427,13 +476,15 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
-  const access = parseAccess(body)
+  const place = privatePlaceOf(actor.companyId, found.scope.path)
+  const access = parseAccess(body, place?.root === true)
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
 
-  const done = guardWrite(c, actor, force, [found.scope.path], () => {
-    updateRuleAccess(db, found.rule.id, true, access.canWrite)
+  const update = () => {
+    updateRuleAccess(db, found.rule.id, access.canRead, access.canWrite)
     return true
-  })
+  }
+  const done = place ? update() : guardWrite(c, actor, force, [found.scope.path], update)
   if (done instanceof Response) return done
   return scopeResponse(c, found.scope.id)
 })
@@ -450,20 +501,23 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
   if (force instanceof Response) return force
 
   const rules = listScopeRules(db, found.scope.id)
+  const place = privatePlaceOf(actor.companyId, found.scope.path)
   if (rules.length === 1) {
     if (found.scope.path === '') {
       return c.json({ error: 'The company-wide rule cannot be removed; change it instead' }, 400)
     }
+    if (place?.root) return c.json({ error: PRIVATE_RULES_REQUIRED, code: 'PRIVATE_RULES_REQUIRED' }, 400)
   } else if (found.rule.subjectType === 'everyone' && !rules.some(r => r.id !== found.rule.id && r.subjectType === 'everyone')) {
     return c.json({
       error: 'The rule for everyone cannot be removed while other rules exist here (it is what lets everyone else read). Change it, or reset the folder to inherit.',
     }, 400)
   }
 
-  const done = guardWrite(c, actor, force, [found.scope.path], () => {
+  const remove = () => {
     deleteRule(db, found.rule.id, found.scope)
     return true
-  })
+  }
+  const done = place ? remove() : guardWrite(c, actor, force, [found.scope.path], remove)
   if (done instanceof Response) return done
   return scopeResponse(c, found.scope.id)
 })
@@ -477,10 +531,12 @@ permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
   if (!scope) return c.json({ error: 'Scope not found' }, 404)
   if (!canEditPath(actor, scope.path)) return forbiddenEdit(c)
   if (scope.path === '') return c.json({ error: 'The company-wide rule cannot be removed; change it instead' }, 400)
+  const place = privatePlaceOf(actor.companyId, scope.path)
+  if (place?.root) return c.json({ error: PRIVATE_RULES_REQUIRED, code: 'PRIVATE_RULES_REQUIRED' }, 400)
   const force = parseForce(c, actor, await readJson(c))
   if (force instanceof Response) return force
 
-  const removed = guardWrite(c, actor, force, [scope.path], () => clearScopeRules(db, scope))
+  const removed = place ? clearScopeRules(db, scope) : guardWrite(c, actor, force, [scope.path], () => clearScopeRules(db, scope))
   if (removed instanceof Response) return removed
   return c.json({ success: true, data: { removed } })
 })
@@ -506,6 +562,9 @@ permissionRulesRoute.post('/permissions/scopes/:scopeId/move', async (c) => {
   if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
   if (isSameOrAncestorPath(scope.path, parsed.path) || isSameOrAncestorPath(parsed.path, scope.path)) {
     return c.json({ error: 'Rules cannot be moved into or out of their own folder' }, 400)
+  }
+  if (touchesPrivate(actor.companyId, scope.path) || touchesPrivate(actor.companyId, parsed.path)) {
+    return c.json({ error: 'Rules of or inside a private folder cannot be moved', code: 'PRIVATE_FOLDER' }, 400)
   }
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
@@ -570,7 +629,8 @@ permissionRulesRoute.get('/permissions/effective', async (c) => {
     data: {
       path: parsed.path,
       governingScope: governing ? { id: governing.id, path: governing.path, inherited: governing.path !== parsed.path } : null,
-      readRestrictionEnforced: false,
+      // Read restriction is real only for private folders (their own repository).
+      readRestrictionEnforced: privatePlaceOf(companyId, parsed.path) !== null,
       members,
     },
   })
@@ -585,8 +645,24 @@ permissionRulesRoute.get('/permissions/folders', async (c) => {
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
   if (!canEditPath(actor, parsed.path)) return forbiddenEdit(c)
 
-  const names = await listRepoSubfolders(actor.companyId, parsed.path)
+  // Inside a private folder: its own repository. Elsewhere: the company
+  // repository, plus the private folders directly under the path — only
+  // those the actor may edit rules of (canEditPath), so a manager never sees
+  // another department's private folder names.
+  const place = privatePlaceOf(actor.companyId, parsed.path)
+  const privateFolder = place ? getPrivateFolder(db, actor.companyId, place.scopeId) : null
+  let names = privateFolder
+    ? await listPrivateSubfolders(actor.companyId, privateFolder, parsed.path)
+    : await listRepoSubfolders(actor.companyId, parsed.path)
   if (names === null) return c.json({ error: 'Folder not found in the company repository' }, 404)
+  if (!place) {
+    const depth = parsed.path === '' ? 1 : parsed.path.split('/').length + 1
+    const privateChildren = listPrivateFolders(db, actor.companyId)
+      .map(p => p.scope.path)
+      .filter(p => p.split('/').length === depth && isSameOrAncestorPath(parsed.path, p) && canEditPath(actor, p))
+      .map(p => p.split('/').pop()!)
+    names = [...new Set([...names, ...privateChildren])].sort((a, b) => a.localeCompare(b, 'ja'))
+  }
   const scoped = new Map(listScopesWithRules(db, actor.companyId).map(s => [s.path, s]))
   return c.json({
     success: true,
@@ -597,7 +673,7 @@ permissionRulesRoute.get('/permissions/folders', async (c) => {
         .map(name => {
           const path = parsed.path ? `${parsed.path}/${name}` : name
           const scope = scoped.get(path)
-          return { name, path, scopeId: scope?.id ?? null, hasRules: (scope?.rules.length ?? 0) > 0 }
+          return { name, path, scopeId: scope?.id ?? null, hasRules: (scope?.rules.length ?? 0) > 0, private: scope?.repoId != null }
         }),
     },
   })

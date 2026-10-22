@@ -79,7 +79,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 COPY --from=deps /app/node_modules ./node_modules
 COPY server/package.json server/tsconfig.json ./
 COPY server/src ./src
-# The server imports ../../shared/types (type-only today). docker-compose
+# The server imports ../../shared/types (types and the private-folder path
+# hashing helpers). docker-compose
 # bind-mounts ./shared over this; baking it in keeps the image runnable alone.
 COPY shared ./shared
 

@@ -15,6 +15,8 @@ import {
   replaceDepartmentManagers,
   syncCompanyScopes,
 } from '../lib/permission-store'
+import { listPrivateFolders, pathKey } from '../lib/private-folders'
+import { reservedPathMessage } from '../../shared/types/private-folders'
 import type {
   Department,
   CreateDepartmentInput,
@@ -63,6 +65,24 @@ function canEditDepartments(role: string): boolean {
 // Helper: Validate folder name (ASCII + Japanese allowed)
 export function isValidFolderName(folder: string): boolean {
   return /^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/.test(folder)
+}
+
+// Private folders (lib/private-folders.ts) whose path is `folder` or inside
+// it, compared NFC + A–Z folded. Department endpoints are owner/admin only,
+// who may see every private folder.
+function privateFoldersAtOrUnder(companyId: string, folder: string): string[] {
+  const key = pathKey(folder)
+  return listPrivateFolders(db, companyId)
+    .map(p => p.scope.path)
+    .filter(p => {
+      const k = pathKey(p)
+      return k === key || k.startsWith(`${key}/`)
+    })
+}
+
+const privateInsideError = {
+  error: 'This department contains private folders; make them public first',
+  code: 'PRIVATE_FOLDERS_INSIDE',
 }
 
 // Helper: Get bare repo path for a company
@@ -447,6 +467,11 @@ departmentsRoute.post('/', async (c) => {
     }, 400)
   }
 
+  // A private folder's path is reserved in the company repository.
+  if (privateFoldersAtOrUnder(companyId, body.folder).length > 0) {
+    return c.json({ error: reservedPathMessage(body.folder), code: 'FOLDER_NAME_UNAVAILABLE' }, 409)
+  }
+
   try {
     // Working-clone operations, one request per company at a time
     const created = await withCompanyLock(companyId, async () => {
@@ -571,6 +596,14 @@ departmentsRoute.put('/:id', async (c) => {
         }, 400)
       }
       const newFolder = body.folder
+      // Private folders do not move with a rename (their own repositories,
+      // every reader's checkout): refuse; and the new name may not be reserved.
+      if (privateFoldersAtOrUnder(companyId, oldFolder).length > 0) {
+        return c.json(privateInsideError, 409)
+      }
+      if (privateFoldersAtOrUnder(companyId, newFolder).length > 0) {
+        return c.json({ error: reservedPathMessage(newFolder), code: 'FOLDER_NAME_UNAVAILABLE' }, 409)
+      }
 
       const renamed = await withCompanyLock(companyId, async () => {
         const workDir = await getWorkingDir(companyId)
@@ -690,6 +723,10 @@ departmentsRoute.delete('/:id', async (c) => {
   }
 
   const folder = existing.folder as string
+  // Deleting the folder would strand its private folders' repositories.
+  if (privateFoldersAtOrUnder(companyId, folder).length > 0) {
+    return c.json(privateInsideError, 409)
+  }
 
   try {
     const { deletedFiles, deletedFolders } = await withCompanyLock(companyId, async () => {

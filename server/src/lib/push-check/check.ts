@@ -8,6 +8,8 @@
  *   protected config   owner/admin only (role from ACB_PUSHER_ROLE)
  *   auto-run skills    owner/admin only
  *   .personal content  nobody
+ *   reserved paths     nobody — a private folder's path in the company
+ *                      repository (added/modified paths, NFC + A–Z folded)
  *   write permission   resolveAccess(pusher, path).write   (new)
  *   Windows paths      the whole new tree
  *   gitlinks           added/changed mode-160000 entries
@@ -44,7 +46,7 @@ import {
   type RefUpdate,
 } from './rules'
 import { emptyFindings, renderReport, type Findings } from './report'
-import type { WriteGate } from './policy'
+import { reservedPrefixOf, type WriteGate } from './policy'
 
 export interface PushCheckContext {
   /** ACB_PUSHER_ROLE as git-http set it (undefined when absent). */
@@ -57,6 +59,11 @@ export interface PushCheckContext {
    * closed, exactly as when the shell hook's embedded node check could not run.
    */
   contentCheckAvailable: boolean
+  /**
+   * Private-folder paths reserved in this repository (policy.reservedKey
+   * form). Empty for scope repositories and for pushes without a snapshot.
+   */
+  reserved?: string[]
 }
 
 export interface PushCheckResult {
@@ -221,6 +228,25 @@ async function checkWrite(changes: RefChanges, gate: WriteGate): Promise<string>
   return captured(sortUnique(denied.map(p => utf8Bytes(cleanControl(p)))).join('\n'))
 }
 
+/**
+ * "path<TAB>folder" lines (byte strings) for added/modified paths at or under
+ * a reserved private-folder path; `folder` is the pusher's own spelling of
+ * the reserved prefix. Deletions are never refused (nothing to protect, and
+ * refusing them could only leave a member unable to sync).
+ */
+async function checkReserved(changes: RefChanges, reserved: string[]): Promise<string> {
+  if (reserved.length === 0) return ''
+  const added = await changes.nameLists(['--diff-filter=d'])
+  if (!added.ok) return unableToCheck(changes.ref.refname)
+  const out: string[] = []
+  const paths = new Set([added.net, added.perCommit].flatMap(b => b.toString('utf8').split('\0')).filter(x => x.length > 0))
+  for (const p of paths) {
+    const folder = reservedPrefixOf(p, reserved)
+    if (folder !== null) out.push(`${utf8Bytes(cleanControl(p))}\t${utf8Bytes(cleanControl(folder))}`)
+  }
+  return captured(sortUnique(out).join('\n'))
+}
+
 async function checkWindowsPaths(newSha: string): Promise<string> {
   const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', newSha])
   const all = captured(r.stdout.toString('latin1'))
@@ -313,6 +339,9 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
     const added = await changes.nameLists(['--diff-filter=d'])
     const personal = added.ok ? captured(personalPaths(nameListLines(added)).join('\n')) : unableToCheck(ref.refname)
     if (personal) f.personal += personal + '\n'
+
+    const reserved = await checkReserved(changes, ctx.reserved ?? [])
+    if (reserved) f.reserved += reserved + '\n'
 
     const denied = await checkWrite(changes, ctx.writeGate)
     if (denied) f.writeDenied += denied + '\n'

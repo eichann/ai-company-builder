@@ -22,6 +22,8 @@ const SEP = '========================================'
 /** Everything detected for one push, as accumulated byte strings ("\n"-terminated chunks). */
 export interface Findings {
   personal: string
+  /** "path<TAB>reserved folder (pusher's spelling)" lines. */
+  reserved: string
   protected: string
   autorun: string
   writeDenied: string
@@ -31,7 +33,7 @@ export interface Findings {
 }
 
 export function emptyFindings(): Findings {
-  return { personal: '', protected: '', autorun: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
+  return { personal: '', reserved: '', protected: '', autorun: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
 }
 
 class Out {
@@ -63,6 +65,34 @@ export function renderReport(f: Findings): Buffer | null {
     o.line()
     o.line('プッシュをブロックしました。これらのファイルを共有対象から外してから')
     o.line('再度同期してください（ACBクライアントは自動で外します。ファイルはPCに残ります）。')
+    o.line(SEP)
+    o.line()
+    rejected = true
+  }
+
+  if (f.reserved) {
+    // Same path lines as PERSONAL_PATH; each followed by a reason line (not
+    // starting with "- ") naming the folder in the pusher's own spelling.
+    // Says nothing else: not that the folder is private, nor who can see it.
+    o.line()
+    o.line(SEP)
+    o.line('[RESERVED_PATH] 使えない名前のフォルダが含まれています')
+    o.line(SEP)
+    o.line()
+    o.line('以下のファイルは、使えない名前のフォルダの中にあります:')
+    const seen = new Set<string>()
+    for (const l of nonEmptyLines(f.reserved)) {
+      const t = l.indexOf('\t')
+      const p = t >= 0 ? l.slice(0, t) : l
+      const folder = t >= 0 ? l.slice(t + 1) : ''
+      if (seen.has(p)) continue
+      seen.add(p)
+      o.raw(`  - ${p}`)
+      if (folder) o.raw(`      ${utf8Bytes('（『')}${folder}${utf8Bytes('』というフォルダ名は使えません。別の名前にしてください。）')}`)
+    }
+    o.line()
+    o.line('プッシュをブロックしました。フォルダの名前を変えてから再度同期してください')
+    o.line('（ACBクライアントは自動で共有対象から外します。ファイルはPCに残ります）。')
     o.line(SEP)
     o.line()
     rejected = true

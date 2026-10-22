@@ -150,6 +150,16 @@ function withSince(companyId: string, scopes: ScopeWithRules[], ids: string[]): 
     .map(scope => ({ scope, since: since.get(scope.id) ?? now() }))
 }
 
+/**
+ * Scopes judged against the company repository: rules, not the root, and not
+ * a private folder or anything inside one (those live in their own scope
+ * repository and never appear in the company repository).
+ */
+function isCandidate(s: ScopeWithRules, all: ScopeWithRules[]): boolean {
+  if (s.path === '' || s.rules.length === 0 || s.repoId !== null) return false
+  return !all.some(p => p.repoId !== null && (s.path === p.path || s.path.startsWith(`${p.path}/`)))
+}
+
 async function compute(companyId: string): Promise<OrphanedScope[]> {
   const bare = bareRepoPath(companyId)
   if (!existsSync(bare)) return []
@@ -157,7 +167,7 @@ async function compute(companyId: string): Promise<OrphanedScope[]> {
   const scopes = listScopesWithRules(db, companyId)
   // An empty repository has no folders yet; nothing can be judged missing.
   if (!commit) return []
-  const candidates = scopes.filter(s => s.path !== '' && s.rules.length > 0 && s.repoId === null)
+  const candidates = scopes.filter(s => isCandidate(s, scopes))
   const key = `${commit}\u0000${candidates.map(s => `${s.id}=${s.path}`).sort().join('\u0000')}`
 
   const cached = cache.get(companyId)
@@ -166,7 +176,7 @@ async function compute(companyId: string): Promise<OrphanedScope[]> {
   const missing = await missingPaths(bare, commit, candidates.map(s => s.path))
   // The scopes may have changed while git ran; judge only those still current.
   const current = listScopesWithRules(db, companyId)
-  const stillCandidates = new Map(current.filter(s => s.path !== '' && s.rules.length > 0 && s.repoId === null).map(s => [s.id, s.path]))
+  const stillCandidates = new Map(current.filter(s => isCandidate(s, current)).map(s => [s.id, s.path]))
   const orphanIds = candidates.filter(s => missing.has(s.path) && stillCandidates.get(s.id) === s.path).map(s => s.id)
 
   const ts = now()

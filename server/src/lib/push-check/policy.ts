@@ -25,6 +25,8 @@
 import {
   FULL_ACCESS_ROLES,
   applicableRules,
+  findPrivateScope,
+  isSameOrAncestorPath,
   resolveAccess,
   type PermissionRepository,
   type ScopeRule,
@@ -41,6 +43,12 @@ export interface PushPolicy {
   /** The authenticated pusher; null when git-http could not resolve one. */
   pusher: { id: string; role: string | null } | null
   scopes: ScopeWithRules[]
+  /**
+   * Absent: the push goes to the company repository. Set: it goes to the
+   * scope repository of the private folder at this company path (NFC), and
+   * every pushed path is checked as `<scopePath>/<path>`.
+   */
+  scopePath?: string
 }
 
 export type WriteGate =
@@ -100,7 +108,45 @@ export function parsePushPolicy(text: string): PushPolicy {
       rules,
     }
   })
-  return { version: PUSH_POLICY_VERSION, companyId: d.companyId as string, pusher, scopes }
+  let scopePath: string | undefined
+  if (d.scopePath !== undefined) {
+    if (typeof d.scopePath !== 'string' || d.scopePath === '' || !scopes.some(s => s.path === d.scopePath && s.repoId !== null)) {
+      invalid('scopePath')
+    }
+    scopePath = d.scopePath as string
+  }
+  return { version: PUSH_POLICY_VERSION, companyId: d.companyId as string, pusher, scopes, ...(scopePath !== undefined ? { scopePath } : {}) }
+}
+
+/** NFC with A–Z folded: how reserved paths are compared (as the rest of the checker folds case). */
+export function reservedKey(path: string): string {
+  return foldAsciiCase(path.normalize('NFC').split('/').filter(s => s.length > 0).join('/'))
+}
+
+/**
+ * The reserved paths of a push to the COMPANY repository — every private
+ * folder's path, as reservedKey()s. Nothing is reserved inside a scope
+ * repository (private folders do not nest).
+ */
+export function reservedPathsFor(policy: PushPolicy): string[] {
+  if (policy.scopePath !== undefined) return []
+  return policy.scopes.filter(s => s.repoId !== null && s.path !== '').map(s => reservedKey(s.path))
+}
+
+/**
+ * The reserved folder `path` (UTF-8, as pushed) is at or under — returned as
+ * the pusher's own spelling of that prefix — or null.
+ */
+export function reservedPrefixOf(path: string, reserved: string[]): string | null {
+  if (reserved.length === 0) return null
+  const segments = path.split('/')
+  const key = reservedKey(path).split('/')
+  for (const r of reserved) {
+    const rs = r.split('/')
+    if (rs.length > key.length) continue
+    if (rs.every((seg, i) => seg === key[i])) return segments.slice(0, rs.length).join('/')
+  }
+  return null
 }
 
 /**
@@ -124,7 +170,14 @@ function pusherWritesEverywhere(scopes: ScopeWithRules[], userId: string, role: 
 }
 
 export function writeGateFor(policy: PushPolicy): WriteGate {
-  const { pusher, scopes, companyId } = policy
+  const { pusher, companyId, scopePath } = policy
+  // Company repository: private folders are not in it (their paths are
+  // reserved — a separate rule), so their scopes take no part in its write
+  // check. A scope repository: every scope counts, paths are prefixed.
+  const scopes = scopePath === undefined
+    ? policy.scopes.filter(s => !policy.scopes.some(p => p.repoId !== null && isSameOrAncestorPath(p.path, s.path)))
+    : policy.scopes
+  if (scopePath !== undefined) return scopeRepoGate(policy, scopePath)
   if (!pusher || pusher.role === null) {
     // git-http could not tell who is pushing: fail closed, unless writing is
     // open to everyone anyway (then this is today's behaviour).
@@ -145,5 +198,25 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
     canWrite: (path: string) =>
       resolveAccess(companyId, pusher.id, path, exact).write
       && resolveAccess(companyId, pusher.id, foldAsciiCase(path), folded).write,
+  }
+}
+
+/** Write gate for a push to the scope repository of the private folder at `scopePath`. */
+function scopeRepoGate(policy: PushPolicy, scopePath: string): WriteGate {
+  const { pusher, scopes, companyId } = policy
+  if (!pusher || pusher.role === null) return { kind: 'deny-all' }
+  const role = pusher.role
+  if (FULL_ACCESS_ROLES.has(role)) return { kind: 'allow-all' }
+  if (!findPrivateScope(scopes, scopePath)) return { kind: 'deny-all' }
+  const exact: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
+  const foldedScopes = scopes.map(s => ({ ...s, path: foldAsciiCase(s.path) }))
+  const folded: PermissionRepository = { getMemberRole: () => role, listScopes: () => foldedScopes }
+  return {
+    kind: 'check',
+    canWrite: (path: string) => {
+      const full = `${scopePath}/${path}`
+      return resolveAccess(companyId, pusher.id, full, exact).write
+        && resolveAccess(companyId, pusher.id, foldAsciiCase(full), folded).write
+    },
   }
 }

@@ -10,6 +10,14 @@ import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
 import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
+import { canReadPrivateScope, type ScopeWithRules } from '../lib/permissions'
+import {
+  beginScopePush,
+  canWriteInPrivateFolder,
+  endScopePush,
+  isScopeClosing,
+  privateRepoPath,
+} from '../lib/private-folders'
 
 export const gitHttpRoute = new Hono()
 
@@ -459,7 +467,11 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
 // `everyone: read + write` for a company that predates the permission tables
 // (startup seeding normally did it already). If anything here fails, the
 // snapshot is left out and the checker rejects the push (fail closed).
-function pushCheckFor(companyId: string, userId: string): PreparedPushCheck {
+//
+// For a scope repository (`scopePath` set) the checker evaluates every pushed
+// path as `<scopePath>/<path>`; for the company repository it also refuses
+// changes under private folders' paths ([RESERVED_PATH]).
+function pushCheckFor(companyId: string, userId: string, scopePath?: string): PreparedPushCheck {
   try {
     ensureCompanyScope(db, companyId)
     const role = getMemberRole(db, companyId, userId)
@@ -467,6 +479,7 @@ function pushCheckFor(companyId: string, userId: string): PreparedPushCheck {
       companyId,
       pusher: { id: userId, role },
       scopes: listScopesWithRules(db, companyId),
+      ...(scopePath !== undefined ? { scopePath } : {}),
     })
   } catch (err) {
     console.error('[git-http] cannot build the push permission snapshot:', err)
@@ -555,4 +568,108 @@ gitHttpRoute.get('/:repo/HEAD', async (c) => {
   const { user, companyId, role } = result
 
   return handleGitCgi(c, user, role, `/${companyId}.git/HEAD`, 'GET')
+})
+
+// ============================================================================
+// Private folders: scope repositories
+//
+//   /api/git-http/<companyId>/scopes/<scopeId>.git/...
+//
+// On disk <REPOS_DIR>/<companyId>.scopes/<repoId>.git (lib/git-server/
+// scope-repo.ts). Fetch / clone (info/refs?service=git-upload-pack,
+// git-upload-pack, HEAD) need READ of the private folder; push
+// (info/refs?service=git-receive-pack, git-receive-pack) needs WRITE
+// somewhere in it — the hook then checks every pushed path. Anyone who may
+// not read it — or is not a member, or names a scope that does not exist or
+// is not private — gets the same 404, so the URL reveals nothing.
+// ============================================================================
+
+const SCOPE_ID_RE = /^[A-Za-z0-9-]{1,64}$/
+
+interface ScopeRequest {
+  user: AuthUser
+  companyId: string
+  role: string
+  scope: ScopeWithRules
+  scopes: ScopeWithRules[]
+  /** PATH_INFO prefix: /<companyId>.scopes/<repoId>.git */
+  repoPathInfo: string
+}
+
+function authAndAuthorizeScope(c: { req: { raw: Request; header: (name: string) => string | undefined; param: (name: string) => string } }, access: 'read' | 'write'): ScopeRequest | Response {
+  const user = authenticateGitRequest(c)
+  if (!user) {
+    return new Response('Authentication required', {
+      status: 401,
+      headers: { 'WWW-Authenticate': 'Basic realm="AI Company Builder Git"' },
+    })
+  }
+  const notFound = () => new Response('Repository not found', { status: 404 })
+  const companyId = sanitizeCompanyId(c.req.param('company'))
+  const scopeId = c.req.param('repo').replace(/\.git$/, '')
+  if (!companyId || !SCOPE_ID_RE.test(scopeId)) return notFound()
+  const role = authorizeForCompany(user.id, companyId)
+  if (!role) return notFound()
+  const scopes = listScopesWithRules(db, companyId)
+  const scope = scopes.find(s => s.id === scopeId && s.repoId !== null)
+  if (!scope || !canReadPrivateScope(scope, user.id, role)) return notFound()
+  let repoPath: string
+  try {
+    repoPath = privateRepoPath(companyId, scope.repoId!)
+  } catch {
+    return notFound()
+  }
+  if (!existsSync(repoPath)) return notFound()
+  if (access === 'write' && !canWriteInPrivateFolder(scopes, scope, companyId, user.id, role)) {
+    return new Response('Forbidden', { status: 403 })
+  }
+  return { user, companyId, role, scope, scopes, repoPathInfo: `/${companyId}.scopes/${scope.repoId}.git` }
+}
+
+gitHttpRoute.get('/:company/scopes/:repo/info/refs', async (c) => {
+  const service = c.req.query('service')
+  if (!service || !['git-upload-pack', 'git-receive-pack'].includes(service)) {
+    return c.text('Invalid service', 400)
+  }
+  const r = authAndAuthorizeScope(c, service === 'git-receive-pack' ? 'write' : 'read')
+  if (r instanceof Response) return r
+  const observer = trackActivity(c, r.user.id, r.companyId, service === 'git-upload-pack' ? 'fetch' : 'other')
+  return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/info/refs`, 'GET', observer)
+})
+
+gitHttpRoute.post('/:company/scopes/:repo/git-upload-pack', async (c) => {
+  const r = authAndAuthorizeScope(c, 'read')
+  if (r instanceof Response) return r
+  const observer = trackActivity(c, r.user.id, r.companyId, 'fetch')
+  return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/git-upload-pack`, 'POST', observer)
+})
+
+gitHttpRoute.post('/:company/scopes/:repo/git-receive-pack', async (c) => {
+  const r = authAndAuthorizeScope(c, 'write')
+  if (r instanceof Response) return r
+  // Being made public (lib/private-folders.ts): its contents are moving into
+  // the company repository; a push now would be lost.
+  if (isScopeClosing(r.scope.id) || !beginScopePush(r.scope.id)) {
+    return new Response('This folder is being changed; try again shortly', { status: 503 })
+  }
+  const check = pushCheckFor(r.companyId, r.user.id, r.scope.path)
+  let ended = false
+  const pushCheck: PreparedPushCheck = {
+    env: check.env,
+    cleanup: () => {
+      check.cleanup()
+      if (!ended) {
+        ended = true
+        endScopePush(r.scope.id)
+      }
+    },
+  }
+  const observer = trackActivity(c, r.user.id, r.companyId, 'push')
+  return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/git-receive-pack`, 'POST', observer, pushCheck)
+})
+
+gitHttpRoute.get('/:company/scopes/:repo/HEAD', async (c) => {
+  const r = authAndAuthorizeScope(c, 'read')
+  if (r instanceof Response) return r
+  return handleGitCgi(c, r.user, r.role, `${r.repoPathInfo}/HEAD`, 'GET')
 })

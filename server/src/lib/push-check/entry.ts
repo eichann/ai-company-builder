@@ -11,17 +11,24 @@
  */
 import { readFileSync } from 'fs'
 import { isRunnable, runPushCheck } from './check'
-import { parsePushPolicy, writeGateFor, type WriteGate } from './policy'
+import { parsePushPolicy, reservedPathsFor, writeGateFor, type WriteGate } from './policy'
 import { hookErrorLine } from './report'
 
 export const REJECT_EXIT = 10
 
-function writeGateFromEnv(env: NodeJS.ProcessEnv): WriteGate | Buffer {
+interface Gates {
+  write: WriteGate
+  /** Reserved private-folder paths (reservedKey form) — company repository only. */
+  reserved: string[]
+}
+
+function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
   const policyPath = env.ACB_PUSH_POLICY
   if (policyPath !== undefined) {
     // A push through git-http: always checked against its snapshot.
     try {
-      return writeGateFor(parsePushPolicy(readFileSync(policyPath, 'utf8')))
+      const policy = parsePushPolicy(readFileSync(policyPath, 'utf8'))
+      return { write: writeGateFor(policy), reserved: reservedPathsFor(policy) }
     } catch (err) {
       console.error('[push-check] cannot read the push policy:', err instanceof Error ? err.message : err)
       return hookErrorLine('権限情報を読み込めませんでした')
@@ -29,14 +36,15 @@ function writeGateFromEnv(env: NodeJS.ProcessEnv): WriteGate | Buffer {
   }
   // ACB_INTERNAL_PUSH=1 (the server's own pushes) or no request context
   // (local transport on the server host): no pusher to check — see policy.ts.
-  return { kind: 'allow-all' }
+  // The server's own operations validate reserved paths themselves.
+  return { write: { kind: 'allow-all' }, reserved: [] }
 }
 
 async function main(): Promise<number> {
   const env = process.env
-  const gate = writeGateFromEnv(env)
-  if (Buffer.isBuffer(gate)) {
-    process.stderr.write(gate)
+  const gates = gatesFromEnv(env)
+  if (Buffer.isBuffer(gates)) {
+    process.stderr.write(gates)
     return REJECT_EXIT
   }
   // ACB_NODE is the runtime the server expects the content checks to run
@@ -46,7 +54,8 @@ async function main(): Promise<number> {
   const contentCheckAvailable = env.ACB_NODE === undefined || env.ACB_NODE === '' || isRunnable(env.ACB_NODE)
   const result = await runPushCheck(readFileSync(0), {
     pusherRole: env.ACB_PUSHER_ROLE,
-    writeGate: gate,
+    writeGate: gates.write,
+    reserved: gates.reserved,
     contentCheckAvailable,
   })
   if (!result.rejected) return 0
