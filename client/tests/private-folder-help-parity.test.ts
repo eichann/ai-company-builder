@@ -2,14 +2,22 @@
 // (desktop app) and admin/src/lib/private-folder-help.ts (admin console). The admin's
 // Docker build copies admin/ only, so the admin cannot import the client copy and its
 // tests must not reach outside admin/ either — this parity check lives here instead.
+// Both files are plain constants; compare their code with the leading comment removed.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import * as clientHelp from '../shared/private-folder-help'
-import * as adminHelp from '../../admin/src/lib/private-folder-help'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+
+const repo = join(__dirname, '..', '..')
+const code = (rel: string) =>
+  readFileSync(join(repo, rel), 'utf8')
+    .split('\n')
+    .filter((line, i, all) => !(line.startsWith('//') && all.slice(0, i).every((l) => l.startsWith('//'))))
+    .join('\n')
+    .trim()
 
 test('the admin and the desktop app show the same private-folder help text', () => {
-  assert.deepEqual(adminHelp.PRIVATE_FOLDER_HELP, clientHelp.PRIVATE_FOLDER_HELP)
-  assert.equal(adminHelp.PRIVATE_FOLDER_HELP_TITLE, clientHelp.PRIVATE_FOLDER_HELP_TITLE)
-  assert.equal(adminHelp.REMOVED_VIEWER_CAVEAT, clientHelp.REMOVED_VIEWER_CAVEAT)
-  assert.equal(adminHelp.MANAGERS_MAY_CHANGE_VIEWERS, clientHelp.MANAGERS_MAY_CHANGE_VIEWERS)
+  const client = code('client/shared/private-folder-help.ts')
+  assert.match(client, /PRIVATE_FOLDER_HELP/)
+  assert.equal(code('admin/src/lib/private-folder-help.ts'), client)
 })
