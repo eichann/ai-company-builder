@@ -1,5 +1,6 @@
 import type { AgentSession } from './agent'
 import type { ChoicePromptRecord } from './choice-prompt'
+import type { SteerRecord } from './steer'
 export interface ChatSession {
   id: string
   companyId: string
@@ -15,6 +16,8 @@ export interface ChatSession {
     consultationReferences?: Array<{ id: string; title: string }>
     /** Choice prompts in this reply, how the member answered, and where (`at`: offset in `content`). */
     choicePrompts?: Array<ChoicePromptRecord & { at?: number }>
+    /** Extra instructions the member sent while this reply was being written (`at`: offset in `content`). */
+    steerInstructions?: Array<SteerRecord & { at?: number }>
   }>
   createdAt: string
   updatedAt: string

@@ -1,11 +1,17 @@
 import type { UIMessage } from 'ai'
 import type { AgentSession, AuthMode } from '../../shared/agent'
 import { CHOICE_PART_TYPE, choiceAnswerText, choiceCancelLabel, readChoiceRecord } from '../../shared/choice-prompt'
+import { STEER_PART_TYPE, readSteerRecord, steerAsText } from '../../shared/steer'
 
 type Part = UIMessage['parts'][number]
 
-/** A choice prompt's outcome as text, so another agent (or a fresh session) sees what the member chose. */
+/** A choice prompt's outcome (or an extra instruction) as text, so another agent (or a fresh session) sees it. */
 function portableChoice(part: Part): Part | undefined {
+  if (part.type === STEER_PART_TYPE) {
+    // An instruction the member added while the AI worked, where it was read.
+    const record = readSteerRecord((part as { data?: unknown }).data)
+    return record ? { type: 'text', text: steerAsText(record) } : undefined
+  }
   if (part.type !== CHOICE_PART_TYPE) return undefined
   const record = readChoiceRecord((part as { data?: unknown }).data)
   if (!record) return undefined

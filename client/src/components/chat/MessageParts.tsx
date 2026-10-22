@@ -21,6 +21,8 @@ import { MarkdownMessage } from './MarkdownMessage'
 import { ChoicePromptRecordView } from './ChoicePrompt'
 import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../shared/choice-prompt'
 import { useAgentProgress } from './agentStatusStore'
+import { STEER_PART_TYPE, readSteerRecord } from '../../../shared/steer'
+import { SteerInstructionView } from './SteerInstruction'
 import {
   GROUP_PAGE_SIZE,
   getToolDisplayName,
@@ -307,6 +309,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === CHOICE_PART_TYPE) {
           const record = readChoiceRecord((part as { data?: unknown }).data)
           return record ? <ChoicePromptRecordView key={item.key} record={record} /> : null
+        }
+        if (part.type === STEER_PART_TYPE) {
+          const record = readSteerRecord((part as { data?: unknown }).data)
+          return record ? <SteerInstructionView key={item.key} record={record} /> : null
         }
         if (part.type === 'step-start') {
           return <div key={item.key} className="my-2 border-t border-gray-200 dark:border-zinc-700/50" />

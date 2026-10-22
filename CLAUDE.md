@@ -1128,3 +1128,64 @@ answer, for both agents. Shared types and the answer mapping:
   switches (all tabs stay mounted); closing the tab cancels them.
 - Preview: `client/tests/choice-prompt-ui.html` (`?theme=dark`,
   `?state=answered`); tests: `client/tests/choice-prompt.test.ts`.
+
+---
+
+## Architecture: Composer — instructions while the AI works, next-prompt suggestions
+
+**Extra instructions while the AI works (steering)** — `client/shared/steer.ts`,
+`client/electron/agents/steering.ts`, `client/electron/chat-turns.ts`:
+
+- While a turn runs the input stays enabled and sending no longer stops the
+  AI. The renderer posts `POST /api/steer { appSessionId, text }`; the chat
+  server hands it to the turn's `TurnSteering`, the agent takes it, and the
+  instruction is shown at that point of the reply as the member's bubble
+  labelled 「作業中に追加した指示」 (`data-steer` part; history
+  `steerInstructions` with `at`; `agentInputMessages` turns it into text).
+- **Claude Code**: the app already runs with `streamingInput: 'always'`;
+  `onQueryCreated` gives the SDK `Query`, and each instruction is a streamed
+  user message with its own uuid (`query.streamInput`, started lazily — when
+  that iterable ends the SDK closes the CLI's stdin, so it ends only with the
+  query). The CLI folds it in at the next step boundary. Whether it was read
+  comes from `command_lifecycle` frames (`started`) and `result.user_message_uuids`
+  (CLI advertises `msg_lifecycle_v1` in init `capabilities`; without it the
+  instruction counts as delivered). The provider stops at the first `result`,
+  so a too-late instruction is `not-delivered`: `cancelAsyncMessage`, and when
+  the CLI already started it as its own turn (it does, right after the
+  result) that unseen turn is `interrupt`ed so it runs no tools; the renderer
+  removes the bubble and sends the text as the next normal message (the CLI
+  transcript then holds it twice — harmless). The SDK `Query` is observed by
+  `tapQuery` (wraps `[Symbol.asyncIterator]`, the provider's own iteration),
+  composed with the usage/progress tap (`tapSdkMessages`) in one
+  `onQueryCreated` — never let one replace the other.
+- **Codex**: `turn/steer { threadId, expectedTurnId, input }` while the turn
+  is active; an error = `not-delivered`.
+- **Fallback**: api-key mode, attachments/images, slash commands (`/…`), no
+  attached turn yet, or `unavailable`/`not-delivered` → the message waits
+  (「応答が終わったら送ります：…」 above the input, 取り消す puts it back in
+  the input) and all waiting messages go out together as one message when the
+  turn ends. After a stop or an error they go back into the input instead.
+- Choice prompts, D5 approvals, the write guard and the private-read guard
+  are unchanged (they already ran under streaming input); verified live with
+  CLI 2.1.304 (AskUserQuestion round-trip, Write approval through
+  `canUseTool`, hooks).
+
+**Next-prompt suggestions** (Claude Code only) — `client/shared/prompt-suggestion.ts`,
+`client/src/components/chat/promptSuggestion.ts` (rules) + `ghostSuggestion.ts` (CodeMirror):
+
+- `promptSuggestions: true` + the provider's `onPromptSuggestion`. The CLI
+  sends `prompt_suggestion` ~1 s *after* the result — after the UI stream has
+  closed — so the renderer asks `GET /api/prompt-suggestion/:appSessionId`
+  after a finished (not stopped/failed) turn; it waits up to 15 s. The CLI
+  stays silent when nothing is obvious, after errors, near the plan limit, or
+  when the member set `promptSuggestionEnabled: false` (user settings apply).
+- Shown as light ghost text in the empty input (it replaces the placeholder),
+  only while idle with no card/approval waiting. → or Tab (caret at the end,
+  no modifiers) puts it into the input; Enter stays a new line and ⌘+Enter
+  sends. Typing along the suggestion keeps the rest visible; anything else, or
+  Esc, dismisses it for good. One suggestion per turn (the CLI sends at most
+  one), so no cycling. Screen readers get it through `aria-describedby` + a
+  polite live region.
+- Preview: `client/tests/chat-composer-ui.html` (`?theme=dark`,
+  `?suggestion=…`); tests: `client/tests/prompt-suggestion.test.ts`,
+  `client/tests/steering.test.ts`.

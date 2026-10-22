@@ -1,6 +1,6 @@
 import { OpenConsultationContext } from './consultation-context'
 import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
-import { restoreTextWithChoices, storedChoiceFromPart, type StoredChoicePrompt } from './choiceHistory'
+import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
@@ -9,7 +9,11 @@ import type { AgentSession, CodexStatus } from '../../../shared/agent'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
-import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo } from 'react'
+import { ghostSuggestion, handleGhostKey, setSuggestion } from './ghostSuggestion'
+import { canOfferSuggestion, suggestionDescription } from './promptSuggestion'
+import { normalizeSuggestion } from '../../../shared/prompt-suggestion'
+import { STEER_PART_TYPE, canSteerText, type SteerResponse } from '../../../shared/steer'
+import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
 import { DefaultChatTransport, type UIMessage } from 'ai'
@@ -33,6 +37,7 @@ import {
   MarkdownLogo,
   ArrowCounterClockwise,
   ShieldWarning,
+  ClockCountdown,
 } from '@phosphor-icons/react'
 import { useAppStore, MODEL_EFFORT_OPTIONS, MODEL_LABELS, type AIModel, type AIEffort } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
@@ -53,6 +58,30 @@ import type { ChatSession } from '../../../shared/chat-history'
 // ============================================================================
 
 type AuthMode = 'claude-code' | 'codex' | 'api-key'
+
+/** A message that waits for the running turn to end (see handleSend). */
+interface QueuedSend {
+  text: string
+  files?: File[]
+  filePaths?: string[]
+  /** Its `data-steer` part, when the agent took it but did not read it in time. */
+  steerPartId?: string
+}
+
+/** Push an extra instruction into the conversation's running turn (chat-server `/api/steer`). */
+async function steerRunningTurn(server: { port: number; authToken: string }, appSessionId: string, text: string): Promise<SteerResponse> {
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/steer`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ appSessionId, text }),
+    })
+    const data = res.ok ? await res.json() as Partial<SteerResponse> : null
+    return data?.status === 'delivered' || data?.status === 'not-delivered' ? { status: data.status, id: data.id } : { status: 'unavailable' }
+  } catch {
+    return { status: 'unavailable' }
+  }
+}
 
 // ============================================================================
 // Hooks
@@ -86,9 +115,12 @@ function uiMessageToSessionMessage(
   let thinking: string | undefined
   const consultationReferences: ConsultationReference[] = []
   const choicePrompts: StoredChoicePrompt[] = []
+  const steerInstructions: StoredSteer[] = []
   for (const part of msg.parts) {
     const choice = storedChoiceFromPart(part as { type: string; data?: unknown }, content.length, choicePrompts)
     if (choice) { choicePrompts.push(choice); continue }
+    const steer = storedSteerFromPart(part as { type: string; data?: unknown }, content.length, steerInstructions)
+    if (steer) { steerInstructions.push(steer); continue }
     const p = part as { type: string; toolName?: string; output?: unknown; data?: ConsultationReference }
     const ref = p.type === 'data-consultation-reference' ? p.data : referenceFromTool(p.toolName || p.type.replace(/^tool-/, ''), p.output)
     if (ref && !consultationReferences.some(r => r.id === ref.id)) consultationReferences.push(ref)
@@ -112,6 +144,7 @@ function uiMessageToSessionMessage(
     thinking,
     ...(consultationReferences.length ? { consultationReferences } : {}),
     ...(choicePrompts.length ? { choicePrompts } : {}),
+    ...(steerInstructions.length ? { steerInstructions } : {}),
   }
 }
 
@@ -123,7 +156,7 @@ function sessionMessageToUIMessage(
     parts.push({ type: 'reasoning' as const, text: msg.thinking })
   }
   // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
-  parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts))
+  parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions))
   for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
   return {
     id: msg.id,
@@ -472,6 +505,10 @@ interface ChatInputProps {
   onPendingTextConsumed?: () => void
   slashCommands?: SlashCommandItem[]
   apiRef?: React.MutableRefObject<ChatInputApi | null>
+  /** Next-prompt suggestion shown as ghost text (promptSuggestion.ts). */
+  suggestion?: string | null
+  /** The input dropped the suggestion (typed past it, accepted, Esc). */
+  onSuggestionCleared?: () => void
 }
 
 const chatInputCodeMirrorTheme = EditorView.theme({
@@ -527,8 +564,14 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
   onPendingTextConsumed,
   slashCommands,
   apiRef,
+  suggestion = null,
+  onSuggestionCleared,
 }: ChatInputProps) {
   const draftBufferRef = useRef(initialDraft ?? '')
+  const onSuggestionClearedRef = useRef(onSuggestionCleared)
+  onSuggestionClearedRef.current = onSuggestionCleared
+  const suggestionId = useId()
+  const describedByCompartmentRef = useRef(new Compartment())
   const onDraftChangeRef = useRef(onDraftChange)
   onDraftChangeRef.current = onDraftChange
   const editorHostRef = useRef<HTMLDivElement>(null)
@@ -656,11 +699,16 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
           EditorState.readOnly.of(disabledRef.current),
         ]),
         placeholderCompartment.of(codeMirrorPlaceholder(placeholder)),
+        ghostSuggestion(() => onSuggestionClearedRef.current?.()),
+        describedByCompartmentRef.current.of([]),
         EditorView.domEventHandlers({
-          keydown: (event) => {
+          keydown: (event, view) => {
             onInputActivityRef.current?.()
             perfMark('chat.input.keydown')
             markDispatchDelay('chat.input.keydown.dispatch_delay.ms', event.timeStamp)
+
+            // Next-prompt suggestion: → / Tab accept, Esc dismisses (Enter stays a new line).
+            if (handleGhostKey(view, event)) return true
 
             // Intercept keys when slash command dropdown is open
             if (slashQueryRef.current !== null && filteredSlashCommandsRef.current.length > 0) {
@@ -863,14 +911,26 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
     if (keepCursor) view.focus()
   }, [disabled, keepCursor])
 
+  // The suggestion replaces the placeholder while it is offered.
   useEffect(() => {
     const view = editorViewRef.current
     if (!view) return
 
     view.dispatch({
-      effects: placeholderCompartmentRef.current.reconfigure(codeMirrorPlaceholder(placeholder)),
+      effects: placeholderCompartmentRef.current.reconfigure(codeMirrorPlaceholder(suggestion ? '' : placeholder)),
     })
-  }, [placeholder])
+  }, [placeholder, suggestion])
+
+  useEffect(() => {
+    const view = editorViewRef.current
+    if (!view) return
+    view.dispatch({
+      effects: [
+        setSuggestion.of(suggestion),
+        describedByCompartmentRef.current.reconfigure(suggestion ? EditorView.contentAttributes.of({ 'aria-describedby': suggestionId }) : []),
+      ],
+    })
+  }, [suggestion, suggestionId])
 
   return (
     <div className="relative">
@@ -890,6 +950,7 @@ const CodeMirrorChatInput = memo(function CodeMirrorChatInput({
       <div className="relative flex items-end gap-2 p-2 rounded-xl bg-gray-50 dark:bg-zinc-800 border border-gray-200 dark:border-zinc-700 shadow-glass group focus-within:border-accent/50 transition-colors">
         <div className="flex-1 text-gray-900 dark:text-zinc-100 min-h-[40px] max-h-[200px] overflow-hidden">
           <div ref={editorHostRef} />
+          <div id={suggestionId} className="sr-only" aria-live="polite">{suggestion ? suggestionDescription(suggestion) : ''}</div>
         </div>
 
         <button
@@ -1063,7 +1124,8 @@ function ImagePreview({ file, onRemove }: { file: File; onRemove: () => void }) 
   )
 }
 
-const ChatInput = memo(function ChatInput({
+// Exported for the composer preview page (tests/chat-composer-ui.tsx).
+export const ChatInput = memo(function ChatInput({
   initialDraft,
   onDraftChange,
   voiceActive = false,
@@ -1078,6 +1140,8 @@ const ChatInput = memo(function ChatInput({
   onPendingTextConsumed,
   slashCommands,
   apiRef,
+  suggestion,
+  onSuggestionCleared,
 }: ChatInputProps) {
   const [voiceBusy, setVoiceBusy] = useState(false)
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
@@ -1198,6 +1262,8 @@ const ChatInput = memo(function ChatInput({
       onPendingTextConsumed={onPendingTextConsumed}
       slashCommands={slashCommands}
       apiRef={apiRef}
+      suggestion={voiceBusy ? null : suggestion}
+      onSuggestionCleared={onSuggestionCleared}
     />
   )
 
@@ -1558,11 +1624,24 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   // Declared before useChat: its onFinish reports handoff failures here.
   const [historyError, setHistoryError] = useState<string | null>(null)
 
+  // Next-prompt suggestion (promptSuggestion.ts) and messages sent while the
+  // AI works (shared/steer.ts). Declared before useChat: its onFinish records
+  // how the turn ended.
+  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null)
+  const [finishedTurn, setFinishedTurn] = useState<{ n: number; suggest: boolean } | null>(null)
+  // Sends that wait for the running turn to end: no steering available, or
+  // the agent did not read the instruction before the turn ended.
+  const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([])
+  // The last turn was stopped or failed: waiting sends go back into the input.
+  const lastTurnAbortedRef = useRef(false)
+
   // useChat hook
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport,
     experimental_throttle: 50,
     onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
+      lastTurnAbortedRef.current = isAbort || isDisconnect || isError
+      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: !lastTurnAbortedRef.current && authModeRef.current === 'claude-code' }))
       const receipt = handoffRequestRef.current
       if (receipt && !isAbort && !isDisconnect && !isError && finishReason === 'stop') {
         const content = uiMessageToSessionMessage(message, new Date()).content
@@ -2075,11 +2154,24 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       appSessionIdRef.current = newId
     }
 
+    setPromptSuggestion(null)
+    setFinishedTurn(null)
+    // While the AI works the message goes into the running turn (steering),
+    // or waits for the turn to end; it no longer stops the AI.
     if (status === 'streaming' || status === 'submitted') {
-      stop()
-      // Small delay for stream to settle before sending new message
-      await new Promise(r => setTimeout(r, 150))
+      const item: QueuedSend = { text, files, filePaths }
+      const sessionId = appSessionIdRef.current
+      if (authModeRef.current !== 'api-key' && sessionId && !files?.length && !filePaths?.length && canSteerText(text)) {
+        void steerRunningTurn(serverInfo, sessionId, text).then(response => {
+          if (response.status === 'delivered') return
+          setQueuedSends(queue => [...queue, { ...item, ...(response.id ? { steerPartId: `steer-${response.id}` } : {}) }])
+        })
+      } else {
+        setQueuedSends(queue => [...queue, item])
+      }
+      return
     }
+    lastTurnAbortedRef.current = false
 
     // Convert images to base64 and store in ref for transport body
     if (files && files.length > 0) {
@@ -2115,7 +2207,64 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     }
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, stop, currentSessionId])
+  }, [status, sendMessage, currentSessionId, serverInfo])
+
+  // The turn ended: waiting sends go out together as the next message — or,
+  // after a stop or an error, back into the input. An instruction the agent did not
+  // read leaves the reply first (it is sent again as a normal message).
+  useEffect(() => {
+    if ((status !== 'ready' && status !== 'error') || queuedSends.length === 0) return
+    const unread = new Set(queuedSends.flatMap(item => item.steerPartId ? [item.steerPartId] : []))
+    if (unread.size) {
+      setMessages(current => current.map(m => m.role !== 'assistant' ? m : { ...m, parts: m.parts.filter(p => !(p.type === STEER_PART_TYPE && unread.has((p as { id?: string }).id ?? ''))) }))
+    }
+    if (status === 'error' || lastTurnAbortedRef.current) {
+      const draft = chatInputApiRef.current?.getValue() ?? ''
+      chatInputApiRef.current?.setValue([draft, ...queuedSends.map(item => item.text)].filter(text => text.trim()).join('\n\n'))
+      setQueuedSends([])
+      return
+    }
+    // All of them as one message: one more turn, not a race of several.
+    const files = queuedSends.flatMap(item => item.files ?? [])
+    const filePaths = [...new Set(queuedSends.flatMap(item => item.filePaths ?? []))]
+    setQueuedSends([])
+    void handleSend(queuedSends.map(item => item.text).join('\n\n'), files.length ? files : undefined, filePaths.length ? filePaths : undefined)
+  }, [status, queuedSends, handleSend, setMessages])
+
+  const cancelQueuedSend = useCallback((index: number) => {
+    const item = queuedSends[index]
+    if (!item) return
+    setQueuedSends(queue => queue.filter((_, i) => i !== index))
+    const draft = chatInputApiRef.current?.getValue() ?? ''
+    chatInputApiRef.current?.setValue([draft, item.text].filter(text => text.trim()).join('\n\n'))
+    chatInputApiRef.current?.focus()
+  }, [queuedSends])
+
+  // After a reply: ask the chat server for Claude Code's next-prompt
+  // suggestion (it follows the reply by about a second) and offer it in the
+  // input if the member has not started typing.
+  useEffect(() => {
+    if (!finishedTurn?.suggest) return
+    const sessionId = appSessionIdRef.current
+    if (!sessionId) return
+    let cancelled = false
+    fetch(`http://127.0.0.1:${serverInfo.port}/api/prompt-suggestion/${encodeURIComponent(sessionId)}`, {
+      headers: { Authorization: `Bearer ${serverInfo.authToken}` },
+    })
+      .then(res => res.ok ? res.json() : null)
+      .then((data: { suggestion?: unknown } | null) => {
+        if (cancelled || appSessionIdRef.current !== sessionId) return
+        const suggestion = normalizeSuggestion(data?.suggestion)
+        if (suggestion && canOfferSuggestion({ running: false, waitingForMember: false, draft: chatInputApiRef.current?.getValue() ?? '' })) setPromptSuggestion(suggestion)
+      })
+      .catch(() => {})
+    return () => { cancelled = true }
+  }, [finishedTurn, serverInfo.port, serverInfo.authToken])
+
+  useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
+  const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
+  const running = status === 'submitted' || status === 'streaming'
+  const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? promptSuggestion : null
 
   // Start new chat and auto-send when skill execution is triggered (only active tab)
   useEffect(() => {
@@ -2346,6 +2495,18 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
 
       {/* Input Area */}
       <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
+        {queuedSends.length > 0 && (
+          <ul aria-live="polite" className="px-4 pt-3 space-y-1">
+            {queuedSends.map((item, index) => (
+              <li key={index} className="flex items-center gap-2 text-xs text-gray-500 dark:text-zinc-400">
+                <ClockCountdown size={14} aria-hidden="true" className="flex-shrink-0" />
+                <span className="flex-shrink-0">{t('chat.queuedSend')}</span>
+                <span className="min-w-0 truncate text-gray-700 dark:text-zinc-300">{item.text}</span>
+                <button type="button" onClick={() => cancelQueuedSend(index)} className="ml-auto flex-shrink-0 px-1.5 py-0.5 rounded hover:bg-gray-100 dark:hover:bg-zinc-800">{t('chat.queuedCancel')}</button>
+              </li>
+            ))}
+          </ul>
+        )}
         <div className="p-4 pb-7">
           <ChatInput
             initialDraft={draftInputRef.current}
@@ -2354,14 +2515,16 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
             voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || (authMode === 'codex' && (!codexStatus.authenticated || !codexModel))}
-            placeholder={t('chat.inputPlaceholder')}
-            hint={t('chat.inputHint')}
+            placeholder={running ? t(authMode === 'api-key' ? 'chat.inputPlaceholderQueued' : 'chat.inputPlaceholderWorking') : t('chat.inputPlaceholder')}
+            hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
             pendingText={pendingChatNewSession ? null : (isActive ? pendingChatInput : null)}
             onPendingTextConsumed={handlePendingTextConsumed}
             slashCommands={slashCommands}
             apiRef={chatInputApiRef}
+            suggestion={offeredSuggestion}
+            onSuggestionCleared={clearPromptSuggestion}
           />
         </div>
       </div>
