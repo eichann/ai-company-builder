@@ -49,6 +49,8 @@ import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
+import { createPrivateFoldersApi } from './private-folders-api'
+import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 
 // Allowed directory roots for file system access control
 // Paths are added when the user selects a directory via dialog or sets up a company folder
@@ -1885,6 +1887,30 @@ ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean
   const cached = writeAccessStore.get(companyId)
   if (cached && !refresh) return cached
   return (await writeAccessStore.refresh(companyId)) ?? null
+})
+
+// Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
+// icons. Only the person's dialog creates them — never the chat (no tool).
+const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: () => authCookies })
+ipcMain.handle('privateFolders:mine', async (_, companyId: string) => {
+  if (typeof companyId !== 'string' || !companyId) return { success: false, offline: false, error: 'companyId is required' }
+  return privateFoldersApi.mine(companyId)
+})
+ipcMain.handle('privateFolders:createContext', async (_, companyId: string, parentPath: string) => {
+  if (typeof companyId !== 'string' || !companyId || typeof parentPath !== 'string') return { success: false, offline: false, error: 'Invalid arguments' }
+  return privateFoldersApi.createContext(companyId, parentPath)
+})
+ipcMain.handle('privateFolders:create', async (_, companyId: string, input: CreatePrivateFolderRequest) => {
+  if (typeof companyId !== 'string' || !companyId || !input || typeof input.name !== 'string' || typeof input.parentPath !== 'string') {
+    return { success: false, offline: false, error: 'Invalid arguments' }
+  }
+  return privateFoldersApi.create(companyId, {
+    parentPath: input.parentPath,
+    name: input.name,
+    ...(Array.isArray(input.viewers) ? { viewers: input.viewers.filter(v => typeof v === 'string') } : {}),
+    ...(Array.isArray(input.editors) ? { editors: input.editors.filter(v => typeof v === 'string') } : {}),
+    ...(input.force === true ? { force: true } : {}),
+  })
 })
 
 const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。'

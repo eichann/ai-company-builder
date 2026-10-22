@@ -11,6 +11,9 @@
  *   GET  /private-folders/:scopeId                one, with who can read/edit
  *   PUT  /private-folders/:scopeId/members        replace viewers / editors
  *   POST /private-folders/:scopeId/make-public    公開に戻す (owner/admin)
+ *   GET  /me/private-folders                      any member: the private
+ *                                                 folders they may read, with
+ *                                                 who else can (app lock icons)
  *   GET  /me/scopes                               any member: the private
  *                                                 folders they may read (+ clone
  *                                                 URL) and every private
@@ -57,7 +60,9 @@ import {
 import { isValidFolderName, resolveRepoFolder, withCompanyLock } from './departments'
 import { parseScopePath, type OutdatedMember } from './permission-rules'
 import {
+  MY_PRIVATE_FOLDER_VIEWERS_LIMIT,
   reservedPathMessage,
+  type MyPrivateFolder,
   type MyScopesResponse,
   type PrivateFolderDetail,
   type PrivateFolderSummary,
@@ -360,6 +365,34 @@ function publicBaseUrl(c: Ctx): string {
   const proto = c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.replace(':', '')
   return process.env.PUBLIC_URL || `${proto}://${c.req.header('host') || 'localhost:3001'}`
 }
+
+// GET /me/private-folders — the readable ones, with who can read them
+privateFoldersRoute.get('/me/private-folders', async (c) => {
+  const actor = await authAndAuthorize(c)
+  if (actor instanceof Response) return actor
+  const scopes = listScopesWithRules(db, actor.companyId)
+  const readable = readablePrivateFolders(db, actor.companyId, actor.userId, actor.role, scopes)
+  const access = new Map(readable.map(p => [p.scope.id, folderAccess(db, actor.companyId, p.scope.path, scopes).filter(a => a.read)]))
+  const users = getUsersByIds([...new Set([...access.values()].flat().map(a => a.userId))])
+  const data: MyPrivateFolder[] = readable.map(p => {
+    const readers = access.get(p.scope.id) ?? []
+    // Named viewers first: owners/admins read everything and say little here.
+    const ordered = [...readers.filter(a => !FULL_ACCESS_ROLES.has(a.role)), ...readers.filter(a => FULL_ACCESS_ROLES.has(a.role))]
+    return {
+      scopeId: p.scope.id,
+      path: p.scope.path,
+      canWrite: canWriteInPrivateFolder(scopes, p.scope, actor.companyId, actor.userId, actor.role),
+      viewerCount: readers.length,
+      viewers: ordered.slice(0, MY_PRIVATE_FOLDER_VIEWERS_LIMIT).map(a => ({
+        userId: a.userId,
+        name: users.get(a.userId)?.name ?? users.get(a.userId)?.email ?? null,
+        role: a.role,
+      })),
+    }
+  })
+  c.header('Cache-Control', 'private, no-cache')
+  return c.json({ success: true, data })
+})
 
 // GET /me/scopes — ETag / If-None-Match → 304
 privateFoldersRoute.get('/me/scopes', async (c) => {

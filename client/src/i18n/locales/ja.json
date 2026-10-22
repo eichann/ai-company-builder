@@ -32,7 +32,7 @@
   "fileTree": {
     "title": "ファイル",
     "newFile": "新規ファイル",
-    "newFolder": "新規フォルダ",
+    "newFolder": "新しいフォルダ…",
     "rename": "名前を変更",
     "copyPath": "パスをコピー",
     "refresh": "更新",

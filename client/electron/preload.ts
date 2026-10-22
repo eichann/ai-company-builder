@@ -4,6 +4,7 @@ import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { WriteAccess } from '../shared/write-access'
+import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from '../shared/private-folder-ui'
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
@@ -103,6 +104,12 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('writeAccess:changed', wrapped)
     return () => ipcRenderer.off('writeAccess:changed', wrapped)
   },
+  // Private folders (lock icons, 「新しいフォルダ…」 dialog). Human-only: no chat tool.
+  getMyPrivateFolders: (companyId: string) => ipcRenderer.invoke('privateFolders:mine', companyId),
+  getPrivateFolderCreateContext: (companyId: string, parentPath: string) =>
+    ipcRenderer.invoke('privateFolders:createContext', companyId, parentPath),
+  createPrivateFolder: (companyId: string, input: CreatePrivateFolderRequest) =>
+    ipcRenderer.invoke('privateFolders:create', companyId, input),
   gitPreview: (repoPath: string) =>
     ipcRenderer.invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>
@@ -614,6 +621,9 @@ declare global {
       gitSync: (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
       getWriteAccess: (companyId: string, refresh?: boolean) => Promise<WriteAccess | null>
       onWriteAccessChanged: (callback: (data: { companyId: string; access: WriteAccess }) => void) => () => void
+      getMyPrivateFolders: (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[] } | { success: false; offline: boolean; error: string }>
+      getPrivateFolderCreateContext: (companyId: string, parentPath: string) => Promise<{ success: true; context: PrivateFolderCreateContext } | { success: false; offline: boolean; error: string }>
+      createPrivateFolder: (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
       gitPreview: (repoPath: string) => Promise<{
         success: boolean
         hasChanges: boolean

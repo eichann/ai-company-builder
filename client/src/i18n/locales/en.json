@@ -32,7 +32,7 @@
   "fileTree": {
     "title": "Files",
     "newFile": "New File",
-    "newFolder": "New Folder",
+    "newFolder": "New Folder…",
     "rename": "Rename",
     "copyPath": "Copy Path",
     "refresh": "Refresh",

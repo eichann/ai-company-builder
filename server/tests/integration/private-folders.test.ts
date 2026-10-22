@@ -318,6 +318,24 @@ describe('GET /me/scopes', () => {
   })
 })
 
+describe('GET /me/private-folders', () => {
+  it('lists only readable folders, with how many (and who) can read them', async () => {
+    const v = await as('viewer', 'GET', `${base}/me/private-folders`)
+    expect(v.status).toBe(200)
+    expect(v.body.data).toHaveLength(1)
+    const [folder] = v.body.data
+    expect(folder).toMatchObject({ scopeId: evalId, path: '人事/評価', canWrite: false })
+    expect(folder.viewerCount).toBe(folder.viewers.length)
+    expect(folder.viewers.map((u: Loose) => u.userId)).toContain('u-viewer')
+    // Named viewers come before owners/admins.
+    expect(folder.viewers.findIndex((u: Loose) => u.role === 'owner')).toBeGreaterThan(folder.viewers.findIndex((u: Loose) => u.userId === 'u-viewer'))
+    const o = await as('other', 'GET', `${base}/me/private-folders`)
+    expect(o.body.data).toEqual([])
+    expect(o.text).not.toContain('評価')
+    expect((await as('owner', 'GET', `${base}/me/private-folders`)).body.data.length).toBeGreaterThanOrEqual(3)
+  })
+})
+
 describe('scope repositories over git-http', () => {
   let editorClone: string
 
