@@ -35,6 +35,7 @@ import { folderSizesView, serverFolderSizes } from './sync/folder-sizes'
 import { notDownloadedFolderFor, notDownloadedFolders } from './sync/not-downloaded'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
 import { checkoutSelectedDepartments } from './sync/first-setup'
+import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
 import net from 'net'
@@ -1886,29 +1887,100 @@ ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean
   return (await writeAccessStore.refresh(companyId)) ?? null
 })
 
-// Setup Git remote for a company
-ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: string, selectedPaths?: string[]) => {
+const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。'
+
+// The company's repository URL on the server (null when the server cannot say).
+async function companyRemoteUrl(companyId: string): Promise<string | null> {
+  const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${companyId}`, {
+    headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+  })
+  if (!repoInfoResponse.ok) return null
+  const repoInfo = await repoInfoResponse.json()
+  return typeof repoInfo.data?.httpsUrl === 'string' && repoInfo.data.httpsUrl ? repoInfo.data.httpsUrl : null
+}
+
+// Which setup a chosen company folder gets (./sync/company-folder.ts). Reads
+// only: nothing in the folder is created or changed. Throws when the server
+// cannot be reached (the remote's state is part of the decision).
+async function companyFolderDecision(folder: string, remoteUrl: string): Promise<{ decision: CompanyFolderDecision; remoteHasCommits: boolean }> {
+  const local = await inspectLocalFolder(folder, args => createGit(folder).raw(args))
+  // ls-remote by URL needs no repository; run it from the app's own folder.
+  const heads = await createGit(app.getPath('userData')).raw(['ls-remote', '--heads', remoteUrl])
+  const remoteHasCommits = heads.trim().length > 0
+  return { decision: decideCompanyFolder({ ...local, remoteHasCommits }, remoteUrl), remoteHasCommits }
+}
+
+// CompanySelector asks before setting a folder up: 'firstSetup' shows the
+// department picker, 'refuse' explains why the folder cannot be used.
+// Offline, only a clone of this company (recognised by its origin's path,
+// /api/git-http/<companyId>) can be opened — work goes on without the server;
+// everything else needs it for the first download.
+ipcMain.handle('git:inspectCompanyFolder', async (_, folder: string, companyId: string) => {
+  let safe: string
   try {
+    safe = validatePath(folder)
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) }
+  }
+  try {
+    const remoteUrl = await companyRemoteUrl(companyId)
+    if (remoteUrl) return { success: true, decision: (await companyFolderDecision(safe, remoteUrl)).decision }
+  } catch (error) {
+    console.warn('Git setup: Could not inspect the folder online:', error)
+  }
+  try {
+    const local = await inspectLocalFolder(safe, args => createGit(safe).raw(args))
+    const expected = `${getServerApiUrl()}/api/git-http/${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git` // as server/src/routes/git.ts builds it
+    if (local.hasGitDir && local.originUrl && local.hasLocalCommits && sameCompanyRemote(local.originUrl, expected)) {
+      return { success: true, offline: true, decision: { action: 'existingClone' } satisfies CompanyFolderDecision }
+    }
+  } catch (error) {
+    console.warn('Git setup: Could not inspect the folder:', error)
+  }
+  return { success: false, error: SETUP_OFFLINE_MESSAGE }
+})
+
+// Setup Git remote for a company
+//
+// While it runs, the bytes arriving in .git/objects/pack are reported to the
+// window as 'setup:progress' events: a first download of a large company
+// takes minutes, and the setup screen shows it moving.
+ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, companyId: string, selectedPaths?: string[]) => {
+  let stopProgress: (() => void) | null = null
+  try {
+    repoPath = validatePath(repoPath)
     // Fetch HTTPS URL from server API
-    const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${companyId}`, {
-      headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
-    })
-    if (!repoInfoResponse.ok) {
+    const remoteUrl = await companyRemoteUrl(companyId)
+    if (!remoteUrl) {
       return { success: false, error: 'Failed to get repository info from server' }
     }
-    const repoInfo = await repoInfoResponse.json()
-    const remoteUrl = repoInfo.data?.httpsUrl
-    if (!remoteUrl) {
-      return { success: false, error: 'Server did not return repository URL' }
+
+    // Backstop for the selector's own check: never re-point another
+    // remote's clone at this company, and never check the company out over
+    // the member's own files (./sync/company-folder.ts).
+    let decision: CompanyFolderDecision
+    let remoteHasCommits: boolean
+    try {
+      ({ decision, remoteHasCommits } = await companyFolderDecision(repoPath, remoteUrl))
+    } catch (inspectError) {
+      console.warn('Git setup: ls-remote failed:', inspectError)
+      return { success: false, error: SETUP_OFFLINE_MESSAGE }
+    }
+    if (decision.action === 'refuse') {
+      return { success: false, refused: true, error: decision.message }
     }
 
     const git: SimpleGit = createGit(repoPath)
 
-    // Check if it's already a git repo
-    const isRepo = await git.checkIsRepo()
-    if (!isRepo) {
+    // A repository of its own, even when the folder sits inside another
+    // repository (checkIsRepo would answer for the parent, whose origin
+    // would then be replaced below).
+    if (!fs.existsSync(path.join(repoPath, '.git'))) {
       await git.init()
     }
+    stopProgress = watchPackBytes(repoPath, receivedBytes => {
+      if (!event.sender.isDestroyed()) event.sender.send('setup:progress', { repoPath, receivedBytes })
+    })
 
     // Configure git user from authenticated session (local to this repo)
     try {
@@ -1944,15 +2016,6 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
       await git.removeRemote('origin')
     }
     await git.addRemote('origin', remoteUrl)
-
-    // Check if remote has any branches (i.e. commits exist)
-    let remoteHasCommits = false
-    try {
-      const lsRemote = await git.listRemote(['--heads', 'origin'])
-      remoteHasCommits = lsRemote.trim().length > 0
-    } catch (lsError) {
-      console.warn('Git setup: ls-remote failed:', lsError)
-    }
 
     if (remoteHasCommits) {
       // Check if we have local commits
@@ -2081,6 +2144,8 @@ ipcMain.handle('git:setupCompanyRemote', async (_, repoPath: string, companyId: 
   } catch (error) {
     console.error('Git setup error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  } finally {
+    stopProgress?.()
   }
 })
 
@@ -2105,23 +2170,12 @@ ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
 // partial clone) are reported to the window as 'sparse:progress' events, so
 // the panel can show the download moving.
 ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, excluded: string[]) => {
-  let timer: NodeJS.Timeout | null = null
+  let stopProgress: (() => void) | null = null
   try {
     const safe = validatePath(repoPath)
-    const packDir = path.join(safe, '.git', 'objects', 'pack')
-    const packBytes = () => {
-      let total = 0
-      try {
-        for (const f of fs.readdirSync(packDir)) {
-          try { total += fs.statSync(path.join(packDir, f)).size } catch { /* renamed meanwhile */ }
-        }
-      } catch { /* no pack dir */ }
-      return total
-    }
-    const start = packBytes()
-    timer = setInterval(() => {
-      if (!event.sender.isDestroyed()) event.sender.send('sparse:progress', { repoPath, receivedBytes: Math.max(0, packBytes() - start) })
-    }, 400)
+    stopProgress = watchPackBytes(safe, receivedBytes => {
+      if (!event.sender.isDestroyed()) event.sender.send('sparse:progress', { repoPath, receivedBytes })
+    })
     const result = await setSparseExclusions(createGit(safe), safe, Array.isArray(excluded) ? excluded : [])
     if (!result.success) console.error('Sparse set exclusions error:', result.error)
     return result
@@ -2129,7 +2183,7 @@ ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, exclud
     console.error('Sparse set exclusions error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   } finally {
-    if (timer) clearInterval(timer)
+    stopProgress?.()
   }
 })
 

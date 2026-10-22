@@ -123,6 +123,13 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:showCommit', repoPath, commitHash, folderPath),
   gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) =>
     ipcRenderer.invoke('git:setupCompanyRemote', repoPath, companyId, selectedPaths),
+  gitInspectCompanyFolder: (folder: string, companyId: string) =>
+    ipcRenderer.invoke('git:inspectCompanyFolder', folder, companyId),
+  onSetupProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => {
+    const handler = (_: unknown, data: { repoPath: string; receivedBytes: number }) => callback(data)
+    ipcRenderer.on('setup:progress', handler)
+    return () => ipcRenderer.removeListener('setup:progress', handler)
+  },
   gitPushToServer: (repoPath: string) =>
     ipcRenderer.invoke('git:pushToServer', repoPath),
 
@@ -660,7 +667,16 @@ declare global {
         files: Array<{ status: string; path: string }>
         error?: string
       }>
-      gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) => Promise<GitResult>
+      gitSetupCompanyRemote: (repoPath: string, companyId: string, selectedPaths?: string[]) => Promise<GitResult & { refused?: boolean }>
+      // electron/sync/company-folder.ts (CompanyFolderDecision)
+      gitInspectCompanyFolder: (folder: string, companyId: string) => Promise<{
+        success: boolean
+        decision?:
+          | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' }
+          | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string }
+        error?: string
+      }>
+      onSetupProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void
       gitPushToServer: (repoPath: string) => Promise<GitResult>
       serverCreateRepo: (companyId: string) => Promise<ServerRepoResult>
 

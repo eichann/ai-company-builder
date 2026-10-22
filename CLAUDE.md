@@ -235,6 +235,30 @@ checked-out blobs in one batch. The checkout is the usual exclusion model
 unpicked departments. Nothing picked → full clone as before. Existing clones
 are never converted to partial clones.
 
+- Both selector paths (「既存のフォルダを開く」 = the folder itself,
+  「新しく作成」 = `<folder>/<company>`) first ask `git:inspectCompanyFolder`
+  (`client/electron/sync/company-folder.ts`, read-only; renderer side
+  `src/lib/company-folder-plan.ts`): empty folder (OS files such as
+  `.DS_Store` ignored, or this company's origin with nothing checked out
+  yet) → picker + partial setup; clone of this company with commits → opens
+  as before; clone of another remote (origin compared by path,
+  `/api/git-http/<id>`, so a moved server address still matches) → refused;
+  member's own files, or a repo with its own history, while the company has
+  content → refused (checkout would stop on a shared name or mix unrelated
+  files into what sync shares; nothing is deleted). Company without content
+  yet → the folder becomes its first commit (owner), as before.
+  `git:setupCompanyRemote` repeats the check as a backstop (`refused: true`)
+  and inits a repository at the folder itself, never re-pointing a parent
+  repository's origin. Offline only a clone of this company opens.
+- The setup screen shows bytes received (`setup:progress`, the same
+  pack-size watcher as `sparse:progress`); reopening a clone does not say
+  「初回」.
+- After login the remembered company (`localStorage lastCompany:<userId>`,
+  per `--user-data-dir`) opens directly: `src/lib/restore-company.ts`
+  registers its folder **before** `fs:exists` — main answers file questions
+  only for registered roots, so checking first always said "missing", forgot
+  the company and sent every login through the selector and setup screen.
+
 - Server: `configureBareRepo` sets `uploadpack.allowFilter` and
   `uploadpack.allowReachableSHA1InWant` (`server/src/lib/git-server/repo-config.ts`).
   git-http does not forward `Git-Protocol`, so upload-pack speaks v0, which
