@@ -5,7 +5,7 @@
  *   GET /overview           owner/admin
  *   GET /permissions        owner/admin (all scopes); department managers
  *                           (the subtrees of the departments they manage)
- *   GET /me/capabilities    any member
+ *   GET /me/capabilities    any member: role, managed departments (ids and folders)
  *   GET /me/write-access    any member: where they may write (for the desktop
  *                           app's AI guard; ETag / If-None-Match → 304)
  *
@@ -203,11 +203,19 @@ permissionsRoute.get('/me/capabilities', async (c) => {
   const auth = await authenticateMember(c)
   if (auth instanceof Response) return auth
   const companyId = c.req.param('companyId')!
+  const managed = managedDepartmentIds(db, companyId, auth.userId)
+  // Folders too: the desktop app's chat guard decides by path (who may change
+  // CLAUDE.md / AGENTS.md inside a department) without another round trip.
+  const folders = managed.length === 0 ? [] : (db.prepare(
+    `SELECT id, folder FROM departments WHERE company_id = ? AND id IN (${managed.map(() => '?').join(',')})`,
+  ).all(companyId, ...managed) as Array<{ id: string; folder: string }>)
+  const folderOf = new Map(folders.map(d => [d.id, d.folder.normalize('NFC')]))
   return c.json({
     success: true,
     data: {
       role: auth.role,
-      managedDepartmentIds: managedDepartmentIds(db, companyId, auth.userId),
+      managedDepartmentIds: managed,
+      managedDepartmentFolders: managed.map(id => folderOf.get(id)).filter((f): f is string => typeof f === 'string'),
     },
   })
 })

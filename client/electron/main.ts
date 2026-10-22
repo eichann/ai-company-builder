@@ -52,6 +52,7 @@ import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
+import type { InstructionAuthority } from './write-guard'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 
 // Allowed directory roots for file system access control
@@ -502,6 +503,7 @@ app.whenReady().then(async () => {
         const [access] = await Promise.all([
           writeAccessStore.refresh(companyId, { timeoutMs: 3000 }),
           refreshReadablePrivateFolders(companyId, 3000),
+          refreshInstructionAuthority(companyId, 3000),
         ])
         if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
         // getAccess reads the live cache, so a refresh during a long chat applies at once.
@@ -510,6 +512,7 @@ app.whenReady().then(async () => {
           getAccess: () => writeAccessStore.get(companyId),
           getNotDownloaded: () => notDownloadedFolders(root),
           getPrivateFolders: () => readablePrivateFolders.get(companyId),
+          getInstructionAuthority: () => instructionAuthority.get(companyId),
         }
       },
       createCompanyFiles: (companyId, root, signal) => {
@@ -1928,6 +1931,30 @@ function refreshReadablePrivateFolders(companyId: string, timeoutMs: number): Pr
       .finally(() => privateFolderRefreshes.delete(companyId))
     privateFolderRefreshes.set(companyId, pending)
   }
+  return waitAtMost(pending, timeoutMs)
+}
+// Who may change CLAUDE.md / AGENTS.md (write-guard.ts): role + managed
+// department folders from /me/capabilities. A server without the folders
+// leaves a non-admin's authority unknown (never blocks; the push check stays).
+const instructionAuthority = new Map<string, InstructionAuthority>()
+const authorityRefreshes = new Map<string, Promise<void>>()
+function refreshInstructionAuthority(companyId: string, timeoutMs: number): Promise<void> {
+  let pending = authorityRefreshes.get(companyId)
+  if (!pending) {
+    pending = privateFoldersApi.capabilities(companyId)
+      .then(result => {
+        if (!result.success) return
+        if (result.role === 'owner' || result.role === 'admin' || result.managedDepartmentFolders) {
+          instructionAuthority.set(companyId, { role: result.role, managedFolders: result.managedDepartmentFolders ?? [] })
+        } else instructionAuthority.delete(companyId)
+      })
+      .catch(() => {})
+      .finally(() => authorityRefreshes.delete(companyId))
+    authorityRefreshes.set(companyId, pending)
+  }
+  return waitAtMost(pending, timeoutMs)
+}
+function waitAtMost(pending: Promise<void>, timeoutMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs) })]).finally(() => clearTimeout(timer))
 }

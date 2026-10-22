@@ -1,6 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { bashWriteTargets, decideToolWrite, type WriteGuard } from '../electron/write-guard'
+import { bashWriteTargets, decideToolWrite, defaultCloneDir, gitCloneTargets, isInstructionFile, mayChangeInstructionFile, type InstructionAuthority, type WriteGuard } from '../electron/write-guard'
+import { externalRepositoryInstruction } from '../electron/chat-server'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
 import type { WriteAccess } from '../shared/write-access'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -125,4 +126,71 @@ test('a folder that is not downloaded refuses writes — even with full or unkno
   }
   // Nothing excluded → only the access decides.
   assert.equal(decideToolWrite({ root: ROOT, getAccess: () => undefined, getNotDownloaded: () => [] }, 'Write', { file_path: `${ROOT}/コンテンツ/動画/a.md` }, ROOT).deny, false)
+})
+
+test('AI instruction files: owners/admins anywhere, managers inside their department, nobody else; unknown never blocks', () => {
+  const withAuthority = (authority: InstructionAuthority | undefined): WriteGuard => ({ root: ROOT, getAccess: () => undefined, getInstructionAuthority: () => authority })
+  const member = withAuthority({ role: 'member', managedFolders: [] })
+  const d = decideToolWrite(member, 'Edit', { file_path: `${ROOT}/CLAUDE.md` }, ROOT)
+  assert.equal(d.deny, true)
+  if (d.deny) assert.equal(d.message, 'このファイル（CLAUDE.md）はAIへの指示ファイルのため、管理者（部署内は部署の責任者）だけが変更できます。変更が必要な場合は、管理者か部署の責任者に依頼してください。')
+  for (const p of ['営業部/CLAUDE.md', '営業部/sub/agents.md', 'Claude.md', 'x/AGENTS.MD']) {
+    assert.equal(decideToolWrite(member, 'Write', { file_path: `${ROOT}/${p}` }, ROOT).deny, true, p)
+  }
+  assert.equal(decideToolWrite(member, 'Bash', { command: 'echo x >> CLAUDE.md' }, ROOT).deny, true)
+  // Not instruction files, unshared places, outside the company.
+  for (const p of ['営業部/README.md', '営業部/CLAUDE.md.bak', '.workspace/repo/CLAUDE.md', '営業部/.personal/CLAUDE.md']) {
+    assert.equal(decideToolWrite(member, 'Write', { file_path: `${ROOT}/${p}` }, ROOT).deny, false, p)
+  }
+  assert.equal(decideToolWrite(member, 'Write', { file_path: '/tmp/CLAUDE.md' }, ROOT).deny, false)
+
+  const manager = withAuthority({ role: 'member', managedFolders: ['営業部'] })
+  assert.equal(decideToolWrite(manager, 'Write', { file_path: `${ROOT}/営業部/CLAUDE.md` }, ROOT).deny, false)
+  assert.equal(decideToolWrite(manager, 'Write', { file_path: `${ROOT}/営業部/提案/AGENTS.md`.normalize('NFD') }, ROOT).deny, false)
+  assert.equal(decideToolWrite(manager, 'Write', { file_path: `${ROOT}/CLAUDE.md` }, ROOT).deny, true)
+  assert.equal(decideToolWrite(manager, 'Write', { file_path: `${ROOT}/営業部2/CLAUDE.md` }, ROOT).deny, true)
+  assert.equal(decideToolWrite(manager, 'Write', { file_path: `${ROOT}/総務/CLAUDE.md` }, ROOT).deny, true)
+
+  for (const role of ['owner', 'admin']) {
+    assert.equal(decideToolWrite(withAuthority({ role, managedFolders: [] }), 'Write', { file_path: `${ROOT}/CLAUDE.md` }, ROOT).deny, false)
+  }
+  assert.equal(decideToolWrite(withAuthority(undefined), 'Write', { file_path: `${ROOT}/CLAUDE.md` }, ROOT).deny, false)
+  assert.equal(isInstructionFile('a/claude.md'), true)
+  assert.equal(mayChangeInstructionFile({ role: 'member', managedFolders: ['Sales'] }, 'sales/CLAUDE.md'), true)
+})
+
+test('cloning a repository into the company folder outside .workspace/ is refused with a .workspace/<name> suggestion', () => {
+  const g = guard(undefined)
+  const deny = (command: string, cwd = ROOT) => decideToolWrite(g, 'Bash', { command }, cwd)
+  const G = 'git'
+  const d = deny(`${G} clone https://github.com/acme/tool.git`)
+  assert.equal(d.deny, true)
+  if (d.deny) {
+    assert.equal(d.path, 'tool')
+    assert.equal(d.message, `外部のGitリポジトリは、会社フォルダ直下の「.workspace/」の中に置いてください（.workspace/ は共有されません）。会社フォルダの他の場所に置くと、会社の全員に共有されたり、同期が止まったりします。例: ${G} clone <URL> .workspace/tool`)
+  }
+  assert.equal(deny(`${G} clone --depth 1 -b main git@github.com:acme/lib.git 営業部/lib`).deny, true)
+  assert.equal(deny(`${G} clone https://x/y.git`, `${ROOT}/営業部`).deny, true)
+  assert.equal(deny(`cd 営業部 && ${G} clone https://x/y.git`).deny, true)
+  assert.equal(deny(`${G} -C 営業部 clone https://x/y`).deny, true)
+  assert.equal(deny('gh repo clone acme/tool').deny, true)
+  assert.equal(deny('gh repo clone acme/tool 総務/tool -- --depth 1').deny, true)
+  assert.equal(deny(`${G} clone https://x/y.git .workspace`).deny, true) // .workspace itself would become the repository
+  // Allowed: under .workspace/, outside the company, nothing to clone, unknown targets.
+  assert.equal(deny(`${G} clone https://x/y.git .workspace/y`).deny, false)
+  assert.equal(deny(`mkdir -p .workspace && cd .workspace && ${G} clone https://x/y.git`).deny, false)
+  assert.equal(deny(`${G} clone https://x/y.git`, `${ROOT}/.workspace`).deny, false)
+  assert.equal(deny(`${G} clone https://x/y.git ../../elsewhere/y`).deny, false)
+  assert.equal(deny(`${G} clone https://x/y.git /tmp/y`).deny, false)
+  assert.equal(deny(`${G} clone https://x/y.git "$TARGET"`).deny, false)
+  assert.equal(deny(`cd "$D" && ${G} clone https://x/y.git`).deny, false)
+  assert.equal(deny(`${G} status && echo clone`).deny, false)
+  assert.equal(deny(`${G} clone`).deny, false)
+  assert.deepEqual(gitCloneTargets(`${G} clone -c a=b --origin up https://h/o/r.git/`, '/w'), [{ target: 'r', cwd: '/w', name: 'r' }])
+  assert.equal(defaultCloneDir('host:path/to/z.git'), 'z')
+})
+
+test('the chat instructions tell the AI where external repositories go', () => {
+  assert.match(externalRepositoryInstruction('/Users/me/会社/'), /「\/Users\/me\/会社\/\.workspace\/」の中に置いてください/)
+  assert.match(externalRepositoryInstruction(), /会社フォルダ直下の「\.workspace\/」/)
 })
