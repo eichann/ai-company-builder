@@ -39,6 +39,7 @@ import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
 import { findNestedGitRepos } from './nested-repos'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
+import { ensurePromisorConfig, setRemoteUrl } from './remote'
 import { appliedExclusions, applySparseSelection, readSparseConfig, sparseConfigPath, staleExclusions, writeSparseConfig } from './sparse'
 import { exclusionsInside, isNotDownloaded } from '../../shared/sparse-paths'
 import { holdBackOutsideCheckout, outsideCheckoutMessage, type OutsideCheckoutResult } from './outside-checkout'
@@ -162,6 +163,15 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     // company's (the two syncs run within the same millisecond at times).
     const backupPath = path.join(backupsDir, isScope ? `${timestamp}_private` : timestamp)
 
+    // A partial clone that lost its promisor config (an older app removed
+    // and re-added origin) cannot fetch the blobs it never downloaded, so a
+    // rebase or sparse change that needs one fails. Repair it first.
+    try {
+      await ensurePromisorConfig(git, log)
+    } catch (promisorError) {
+      log.warn('Git sync: Could not check the partial clone config:', promisorError)
+    }
+
     // Recover from stale rebase/merge state (e.g., app crashed mid-sync).
     // A rebase in progress is signalled by the rebase-merge / rebase-apply
     // directory — REBASE_HEAD is just a ref that can linger after a rebase
@@ -249,8 +259,8 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         log.log('Git sync: Detected SSH remote URL, migrating to HTTPS...')
         const httpsUrl = await deps.api.getRepoHttpsUrl(companyId)
         if (httpsUrl) {
-          await git.removeRemote('origin')
-          await git.addRemote('origin', httpsUrl)
+          // set-url, never remove + add (keeps a partial clone's promisor config, ./remote.ts)
+          await setRemoteUrl(git, httpsUrl)
           log.log(`Git sync: Migrated remote URL to ${httpsUrl}`)
         }
       }

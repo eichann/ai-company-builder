@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info, ChatCircle, CaretLeft } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info, ChatCircle, CaretLeft, WarningCircle, WifiSlash } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -96,6 +96,7 @@ export function SkillCentricLayout() {
   const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
 
   const [isDownloading, setIsDownloading] = useState(false)
+  const [downloadError, setDownloadError] = useState<{ offline: boolean; message: string } | null>(null)
 
   const toggleLanguage = useCallback(() => {
     setLanguage(language === 'ja' ? 'en' : 'ja')
@@ -308,16 +309,24 @@ export function SkillCentricLayout() {
   const handleDownloadDepartment = useCallback(async () => {
     if (!selectedDept?.folder) return
     setIsDownloading(true)
+    setDownloadError(null)
     try {
-      const success = await sparseCheckout.addPath(selectedDept.folder)
-      if (success) {
+      const folder = selectedDept.folder
+      const result = await sparseCheckout.apply(sparseCheckout.excludedPaths.filter(p => p !== folder))
+      if (result.success) {
         setDeptFolderExists(true)
         refreshSkills()
+      } else {
+        // Say why instead of silently showing the button again.
+        setDownloadError({ offline: !!result.offline, message: result.error || 'ダウンロードできませんでした' })
       }
+    } catch (err) {
+      setDownloadError({ offline: false, message: err instanceof Error ? err.message : 'ダウンロードできませんでした' })
     } finally {
       setIsDownloading(false)
     }
   }, [selectedDept?.folder, sparseCheckout, refreshSkills])
+  useEffect(() => { setDownloadError(null) }, [selectedDept?.folder])
 
   const pendingSkillsRefreshRef = useRef(false)
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)
@@ -1037,6 +1046,21 @@ ${promptContent}
                 )}
                 {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
               </button>
+              {downloadError && !isDownloading && (
+                <p
+                  role="alert"
+                  className={`mt-4 inline-flex items-start gap-2 text-left text-sm ${downloadError.offline ? 'text-zinc-700 dark:text-zinc-200' : 'text-red-600 dark:text-red-300'}`}
+                >
+                  {downloadError.offline
+                    ? <WifiSlash size={16} className="mt-0.5 shrink-0 text-zinc-500" />
+                    : <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0" />}
+                  <span className="break-words">
+                    {downloadError.offline
+                      ? 'インターネットにつながっているときにダウンロードできます。何も変更していません。'
+                      : `ダウンロードできませんでした：${downloadError.message}`}
+                  </span>
+                </p>
+              )}
             </div>
           </div>
         ) : (
