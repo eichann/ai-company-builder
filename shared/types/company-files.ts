@@ -7,7 +7,12 @@
  *
  *   GET /api/companies/:companyId/files/tree?path=&depth=
  *   GET /api/companies/:companyId/files/content?path=&offset=&limit=&maxBytes=
- *   GET /api/companies/:companyId/files/search?q=&path=&regex=&caseSensitive=&limit=
+ *   GET /api/companies/:companyId/files/search?q=&path=&regex=&caseSensitive=&limit=&includePrivate=
+ *
+ * Search leaves out the private folders below `path` unless
+ * `includePrivate=true` (a `path` inside a private folder is searched either
+ * way): a company-wide search must not pull private content into a chat by
+ * accident — owners and admins can read every private folder.
  *
  * Paths are company-relative ('' = the root), '/'-separated, matched in NFC
  * with A–Z folded (a Mac commits Japanese names in NFD). Responses spell

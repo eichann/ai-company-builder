@@ -501,6 +501,14 @@ export interface SearchOptions {
   caseSensitive: boolean
   limit: number
   timeoutMs?: number
+  /**
+   * Also search the private folders below the searched path (default false).
+   * A search whose path is itself inside a private folder names it
+   * explicitly and is served either way. Owners/admins can read every
+   * private folder, so without this a company-wide search pulled private
+   * content into the chat by accident.
+   */
+  includePrivate?: boolean
 }
 
 interface GrepTarget {
@@ -718,7 +726,7 @@ export async function searchFiles(view: CompanyFilesView, segments: string[], op
     if (!base || base.source) {
       targets.push({ repo: view.companyRepo, commit: view.commit, prefix: '', pathspec: base ? base.repoPath : null })
     }
-    for (const p of view.privateFolders) {
+    for (const p of opts.includePrivate ? view.privateFolders : []) {
       if (p.key !== baseKey && isSameOrAncestorPath(baseKey, p.key)) {
         targets.push({ repo: p.source.repo, commit: p.source.commit, prefix: p.path, pathspec: null })
       }

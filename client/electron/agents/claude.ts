@@ -9,6 +9,7 @@ import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
 import type { AgentConnection, AgentHostConfig } from './connection'
 import type { PermissionMode } from '../../shared/permission-mode'
 import { decideToolWrite } from '../write-guard'
+import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -127,7 +128,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -173,6 +174,33 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             },
           }
         }
+        // Private content → public places (private-read-guard.ts): once this
+        // conversation has read a private folder, the member confirms every
+        // write to a public place and every send-out — in every permission
+        // mode, so the question is asked here and not left to canUseTool.
+        let confirmedPrivate = false
+        if (privateReads) {
+          const toolCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory
+          noteToolInput(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
+          const decision = decidePrivateWrite(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
+          if (decision.ask) {
+            const answer = config.requestToolApproval
+              ? await config.requestToolApproval(String(input.tool_name), input.tool_input ?? {}, input.tool_use_id || crypto.randomUUID(), appSessionId, decision.message)
+              : { approved: false }
+            if (!answer.approved) {
+              console.log(`[hooks] Member declined a write after private reads: ${input.tool_name}`)
+              return {
+                continue: true,
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: `${decision.message}ユーザーが許可しなかったため実行していません。別の方法で同じ操作をせず、ユーザーに確認してください。`,
+                },
+              }
+            }
+            confirmedPrivate = true
+          }
+        }
         if (input.tool_name === 'Bash') {
           const cmd = String(input.tool_input?.command || '')
           for (const pattern of DANGEROUS_PATTERNS) {
@@ -213,9 +241,21 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             }
           }
         }
+        // The member just confirmed this very call: do not ask twice.
+        if (confirmedPrivate) {
+          return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: input.tool_input ?? {} } }
+        }
         // No decision: leave it to the permission mode. Returning 'allow' here
         // skipped both the auto-mode classifier and the 'default' approval
         // prompt for every tool.
+        return { continue: true }
+      }
+      // PostToolUse: what a Grep / shell command printed can be private content.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const postToolUseHook = async (input: any) => {
+        if (privateReads && input.hook_event_name === 'PostToolUse') {
+          noteToolResult(privateReads.context, privateReads.state, String(input.tool_name), input.tool_response)
+        }
         return { continue: true }
       }
 
@@ -311,6 +351,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           },
           hooks: {
             PreToolUse: [{ hooks: [preToolUseHook] }],
+            ...(privateReads ? { PostToolUse: [{ hooks: [postToolUseHook] }] } : {}),
           },
           ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
         })

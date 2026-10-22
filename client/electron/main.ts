@@ -499,10 +499,18 @@ app.whenReady().then(async () => {
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
       getWriteGuard: async (companyId, root) => {
-        const access = await writeAccessStore.refresh(companyId, { timeoutMs: 3000 })
+        const [access] = await Promise.all([
+          writeAccessStore.refresh(companyId, { timeoutMs: 3000 }),
+          refreshReadablePrivateFolders(companyId, 3000),
+        ])
         if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
         // getAccess reads the live cache, so a refresh during a long chat applies at once.
-        return { root, getAccess: () => writeAccessStore.get(companyId), getNotDownloaded: () => notDownloadedFolders(root) }
+        return {
+          root,
+          getAccess: () => writeAccessStore.get(companyId),
+          getNotDownloaded: () => notDownloadedFolders(root),
+          getPrivateFolders: () => readablePrivateFolders.get(companyId),
+        }
       },
       createCompanyFiles: (companyId, root, signal) => {
         let notDownloaded: string[] = []
@@ -531,11 +539,11 @@ app.whenReady().then(async () => {
           owner.removeListener('did-start-navigation', close)
         })
       },
-      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId) => {
+      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => {
         return new Promise((resolve) => {
           pendingApprovals.set(toolUseId, { resolve })
           mainWindow?.webContents.send('tool-approval-request', {
-            toolUseId, toolName, toolInput, appSessionId,
+            toolUseId, toolName, toolInput, appSessionId, ...(reason ? { reason } : {}),
           })
           // 60s timeout → auto-deny
           setTimeout(() => {
@@ -1906,6 +1914,23 @@ ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean
 // Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
 // icons. Only the person's dialog creates them — never the chat (no tool).
 const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: () => authCookies })
+// The private folders this member may read, per company, for the chat's
+// private-read guard (private-read-guard.ts). Refreshed at every chat turn;
+// a failed refresh keeps the last answer (unknown = local reads are not recognised).
+const readablePrivateFolders = new Map<string, string[]>()
+const privateFolderRefreshes = new Map<string, Promise<void>>()
+function refreshReadablePrivateFolders(companyId: string, timeoutMs: number): Promise<void> {
+  let pending = privateFolderRefreshes.get(companyId)
+  if (!pending) {
+    pending = privateFoldersApi.mine(companyId)
+      .then(result => { if (result.success) readablePrivateFolders.set(companyId, result.folders.map(f => f.path.normalize('NFC'))) })
+      .catch(() => {})
+      .finally(() => privateFolderRefreshes.delete(companyId))
+    privateFolderRefreshes.set(companyId, pending)
+  }
+  let timer: ReturnType<typeof setTimeout> | undefined
+  return Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs) })]).finally(() => clearTimeout(timer))
+}
 ipcMain.handle('privateFolders:mine', async (_, companyId: string) => {
   if (typeof companyId !== 'string' || !companyId) return { success: false, offline: false, error: 'companyId is required' }
   return privateFoldersApi.mine(companyId)

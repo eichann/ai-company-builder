@@ -113,6 +113,11 @@ test('tools: map to the API, cap reads, report errors as JSON (never throw at th
   assert.equal(sq.get('q'), 'カリキュラム') // NFC
   assert.equal(sq.get('caseSensitive'), 'true')
   assert.equal(sq.get('limit'), '50')
+  assert.equal(sq.get('includePrivate'), null) // private folders only on request
+  await tools.execute('company_search', { query: '評価', includePrivate: true })
+  assert.equal(server.requests.at(-1)!.url.searchParams.get('includePrivate'), 'true')
+  await tools.execute('company_search', { query: '評価', includePrivate: false })
+  assert.equal(server.requests.at(-1)!.url.searchParams.get('includePrivate'), null)
 
   assert.match(JSON.parse(await tools.execute('company_read_file', { path: '/etc/passwd' })).error, /会社フォルダの外/)
   assert.equal(JSON.parse(await tools.execute('company_read_file', {})).code, 'INVALID_INPUT')

@@ -35,6 +35,12 @@ export interface WriteGuard {
    * whatever the access: sync would hold the file back instead of sharing it.
    */
   getNotDownloaded?: () => readonly string[]
+  /**
+   * Private folders the member may read (company-relative; read on every
+   * call; undefined = unknown). Not used by this guard: the private-read
+   * guard (private-read-guard.ts) asks before their content goes public.
+   */
+  getPrivateFolders?: () => readonly string[] | undefined
 }
 
 export type GuardDecision =

@@ -227,9 +227,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   respondAgentInteraction: (id: string, response: AgentInteractionResponse): Promise<boolean> => ipcRenderer.invoke('agent-interaction:respond', id, response),
 
   // Tool approval
-  onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => {
+  onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string; reason?: string }) => void) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const handler = (_: any, data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => callback(data)
+    const handler = (_: any, data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string; reason?: string }) => callback(data)
     ipcRenderer.on('tool-approval-request', handler)
     return () => { ipcRenderer.removeListener('tool-approval-request', handler) }
   },
@@ -598,7 +598,7 @@ declare global {
       respondAgentInteraction: (id: string, response: AgentInteractionResponse) => Promise<boolean>
 
       // Tool approval
-      onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string }) => void) => () => void
+      onToolApprovalRequest: (callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string; reason?: string }) => void) => () => void
       respondToolApproval: (toolUseId: string, approved: boolean) => Promise<boolean>
 
       getHandoff: (company: string, id: string) => Promise<HandoffView>
