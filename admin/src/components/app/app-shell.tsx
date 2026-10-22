@@ -12,6 +12,7 @@ import {
   Gear,
   List,
   LockKey,
+  LockSimple,
   Moon,
   Plus,
   ShieldCheck,
@@ -57,6 +58,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'members', label: 'メンバー', icon: Users },
   { segment: 'departments', label: '部署', icon: TreeStructure },
   { segment: 'permissions', label: '権限', icon: ShieldCheck, visible: (c) => c.isAdmin || c.isManager },
+  { segment: 'private-folders', label: '非公開フォルダ', icon: LockSimple, visible: (c) => c.isAdmin || c.isManager },
   { segment: 'security', label: 'セキュリティ', icon: LockKey, visible: (c) => c.isAdmin },
   { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]

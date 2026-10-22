@@ -28,15 +28,24 @@ export const OUTDATED_CLIENTS_MESSAGE =
  * and admins get a secondary 「それでも保存する」 that resends with force;
  * managers only get the list and the way to the members screen.
  */
+export const PRIVATE_FOLDER_OUTDATED_MESSAGE =
+  '次のメンバーは古いアプリを使っているため、非公開フォルダを扱えません。会社で最初の非公開フォルダを作る前に、アプリを更新してもらってください。'
+
 export function OutdatedClientsDialog({
   state,
   onClose,
   onForce,
+  description = OUTDATED_CLIENTS_MESSAGE,
+  forceLabel = 'それでも保存する',
+  backLabel = '保存せずに戻る',
 }: {
   state: OutdatedClients | null
   onClose: () => void
   /** Resend with force. May throw: the dialog then stays open. */
   onForce: () => Promise<void>
+  description?: string
+  forceLabel?: string
+  backLabel?: string
 }) {
   const { companyId, isAdmin } = useCompany()
   const [busy, setBusy] = useState(false)
@@ -62,7 +71,7 @@ export function OutdatedClientsDialog({
             <Warning size={20} weight="fill" className="shrink-0 text-warning" aria-hidden="true" />
             アプリの更新が必要なメンバーがいます
           </DialogTitle>
-          <DialogDescription>{OUTDATED_CLIENTS_MESSAGE}</DialogDescription>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <ul className="max-h-64 divide-y overflow-y-auto rounded-lg border" aria-label="古いアプリを使っているメンバー">
@@ -96,11 +105,11 @@ export function OutdatedClientsDialog({
         <DialogFooter>
           {canForce && (
             <Button type="button" variant="destructive" onClick={force} disabled={busy}>
-              {busy ? '保存しています…' : 'それでも保存する'}
+              {busy ? '処理しています…' : forceLabel}
             </Button>
           )}
           <Button type="button" onClick={onClose} disabled={busy}>
-            保存せずに戻る
+            {backLabel}
           </Button>
         </DialogFooter>
       </DialogContent>

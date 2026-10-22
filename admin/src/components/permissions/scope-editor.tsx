@@ -94,6 +94,7 @@ function draftLabel(draft: AccessDraft, members: Member[]): string {
 export function ScopeEditor({
   companyId,
   node,
+  privateRoot,
   scopes,
   members,
   departments,
@@ -104,6 +105,8 @@ export function ScopeEditor({
 }: {
   companyId: string
   node: EditorNode
+  /** The private folder this place is inside, if any: only its viewers can read, and 全員 means them. */
+  privateRoot?: PermissionScope
   scopes: PermissionScope[]
   members: Member[]
   departments: Department[]
@@ -292,7 +295,7 @@ export function ScopeEditor({
             checked={draft.mode === 'everyone'}
             onSelect={setMode}
             title="全員"
-            detail="この会社の全員が編集できます"
+            detail={privateRoot ? '非公開フォルダを見られる人全員が編集できます' : 'この会社の全員が編集できます'}
           />
           <div
             className={cn(
@@ -366,10 +369,21 @@ export function ScopeEditor({
         <div className="flex items-start gap-3 rounded-lg bg-muted/40 px-3 py-2.5">
           <Eye size={18} className="mt-0.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <div className="text-sm">
-            <div>
-              <span className="font-medium">閲覧できる人：</span>全員
-            </div>
-            <p className="text-xs text-muted-foreground">見せない設定は今後のアップデートで対応予定です。</p>
+            {privateRoot ? (
+              <>
+                <div>
+                  <span className="font-medium">閲覧できる人：</span>非公開フォルダ「{nameOf(privateRoot.path)}」を見られる人だけ
+                </div>
+                <p className="text-xs text-muted-foreground">見られる人は、権限の一覧で非公開フォルダを選んで変更します。</p>
+              </>
+            ) : (
+              <>
+                <div>
+                  <span className="font-medium">閲覧できる人：</span>全員
+                </div>
+                <p className="text-xs text-muted-foreground">一部の人にだけ見せたいときは、非公開フォルダを作ってそこに置きます。</p>
+              </>
+            )}
           </div>
         </div>
       </section>

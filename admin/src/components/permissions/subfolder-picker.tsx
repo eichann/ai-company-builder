@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { FolderPlus, Folder } from '@phosphor-icons/react'
+import { FolderPlus, Folder, LockSimple } from '@phosphor-icons/react'
 
 import { Button } from '@/components/ui/button'
 import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from '@/components/ui/command'
@@ -59,9 +59,17 @@ export function SubfolderPicker({
                       setOpen(false)
                     }}
                   >
-                    <Folder size={16} className="text-muted-foreground" />
+                    {f.private ? (
+                      <LockSimple size={16} weight="fill" className="text-brand" aria-label="非公開" />
+                    ) : (
+                      <Folder size={16} className="text-muted-foreground" />
+                    )}
                     <span className="min-w-0 flex-1 truncate">{f.name}</span>
-                    {f.hasRules && <span className="text-xs text-muted-foreground">個別ルールあり</span>}
+                    {f.private ? (
+                      <span className="text-xs text-muted-foreground">非公開</span>
+                    ) : (
+                      f.hasRules && <span className="text-xs text-muted-foreground">個別ルールあり</span>
+                    )}
                   </CommandItem>
                 ))}
               </CommandGroup>

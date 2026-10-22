@@ -326,6 +326,8 @@ export interface RepoFolder {
   path: string
   scopeId: string | null
   hasRules: boolean
+  /** A private folder (its own repository); absent from older servers. */
+  private?: boolean
 }
 
 export interface OrphanedScope {
@@ -414,6 +416,71 @@ export const permissionsApi = {
 
   folders: (companyId: string, path: string) =>
     getData<{ path: string; folders: RepoFolder[] }>(`${permBase(companyId)}/folders?path=${enc(path)}`),
+}
+
+// ---------------------------------------------------------------------------
+// Private folders (permission plan stage 3; shared/types/private-folders.ts)
+// ---------------------------------------------------------------------------
+
+export interface PrivateFolderSummary {
+  scopeId: string
+  path: string
+  /** Department whose folder contains it, or null (company root). */
+  departmentId: string | null
+  /** Members who can read it (owners/admins included). */
+  viewerCount: number
+  /** Members who can edit it (owners/admins included). */
+  editorCount: number
+  createdAt: string
+  createdBy: string | null
+  createdByName: string | null
+}
+
+export interface PrivateFolderMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: string
+  canWrite: boolean
+  /** 'role' = owner/admin (always), 'rule' = named on the folder. */
+  via: 'role' | 'rule'
+}
+
+export interface PrivateFolderDetail extends PrivateFolderSummary {
+  members: PrivateFolderMember[]
+}
+
+export interface CreatePrivateFolderInput {
+  /** Existing folder; '' = the company root (owner/admin only). */
+  parentPath: string
+  name: string
+  /** Omitted = the creator + the department's managers. */
+  viewers?: string[]
+  /** Subset of viewers; omitted = every viewer. */
+  editors?: string[]
+}
+
+const privBase = (companyId: string) => `/api/companies/${enc(companyId)}/private-folders`
+
+export const privateFoldersApi = {
+  /** owner/admin: all; managers: their departments'. */
+  list: (companyId: string) => getData<PrivateFolderSummary[]>(privBase(companyId)),
+
+  get: (companyId: string, scopeId: string) => getData<PrivateFolderDetail>(`${privBase(companyId)}/${enc(scopeId)}`),
+
+  /** 409 FOLDER_NAME_UNAVAILABLE / OUTDATED_CLIENTS, 400 PARENT_NOT_FOUND / ALREADY_PRIVATE / INVALID_MEMBERS. */
+  create: (companyId: string, input: CreatePrivateFolderInput, { force = false }: ForceOption = {}) =>
+    getData<PrivateFolderDetail>(privBase(companyId), { method: 'POST', body: force ? { ...input, force } : input }),
+
+  updateMembers: (companyId: string, scopeId: string, viewers: string[], editors?: string[]) =>
+    getData<PrivateFolderDetail>(`${privBase(companyId)}/${enc(scopeId)}/members`, {
+      method: 'PUT',
+      body: editors ? { viewers, editors } : { viewers },
+    }),
+
+  /** 公開に戻す (owner/admin): the contents go to everyone. */
+  makePublic: (companyId: string, scopeId: string) =>
+    getData<{ path: string; commit: string }>(`${privBase(companyId)}/${enc(scopeId)}/make-public`, { method: 'POST', body: {} }),
 }
 
 // ---------------------------------------------------------------------------
