@@ -173,6 +173,75 @@ describe('git:sync partial-clone members', { concurrency: CONCURRENCY }, () => {
     assert.equal(p.exists('開発部'), false, 'a removed department stays removed across syncs')
   })
 
+  scenario('reopening the company keeps the partial clone: a department added afterwards downloads just that department', async t => {
+    const { world, a, p } = await create(t)
+    a.write('開発部/設計.md', 'dev v1\n').write('経理部/予算.md', '予算 v1\n')
+    ok(await a.sync(), 'a')
+    const url = p.git(['config', 'remote.origin.url']).trim()
+    // Company selector → the same folder again (the URL unchanged, changed, back).
+    const warnings = [...await p.reopen()]
+    // Reopening pulled a's commit; the excluded departments stayed excluded.
+    assert.equal(p.head(), world.serverHead())
+    warnings.push(...await p.reopen(`${url}/`))
+    assert.equal(p.git(['config', 'remote.origin.url']).trim(), `${url}/`)
+    warnings.push(...await p.reopen(url))
+    // Kept, not repaired: nothing had to be restored.
+    assert.deepEqual(warnings.filter(w => /promisor/.test(w)), [])
+    assert.equal(p.git(['config', 'remote.origin.promisor']).trim(), 'true')
+    assert.equal(p.git(['config', 'remote.origin.partialclonefilter']).trim(), 'blob:none')
+    assertNotDownloaded(world, p, '開発部/')
+    assertNotDownloaded(world, p, '経理部/')
+
+    // ダウンロードして同期を開始 on 開発部 (the bug: "unable to read sha1 file").
+    const added = await p.addDepartment('開発部')
+    assert.deepEqual(added, { success: true, enabled: true, excluded: ['経理部'] })
+    assert.equal(p.readText('開発部/設計.md'), 'dev v1\n')
+    assert.ok(p.read('開発部/demo.mp4').equals(BIG))
+    assertNotDownloaded(world, p, '経理部/')
+    ok(await p.sync(), 'p')
+    await settleAndCheck(world)
+    assertNotDownloaded(world, p, '経理部/')
+  })
+
+  scenario('a partial clone that lost its promisor config (old remote remove + add) heals itself', async t => {
+    const { world, a, p } = await create(t)
+    const config = (key: string) => { try { return p.git(['config', '--get', key]).trim() } catch { return '' } }
+    const breakIt = () => {
+      // What git:setupCompanyRemote did on every reopen before the fix.
+      const url = p.git(['config', 'remote.origin.url']).trim()
+      p.git(['remote', 'remove', 'origin'])
+      p.git(['remote', 'add', 'origin', url])
+      p.git(['fetch', '-q', 'origin'])
+      assert.equal(config('remote.origin.promisor'), '')
+      assert.equal(config('remote.origin.partialclonefilter'), '')
+    }
+    a.write('開発部/設計.md', 'dev v1\n')
+    ok(await a.sync(), 'a')
+
+    // Before a sparse change (settings panel / download button).
+    breakIt()
+    assert.throws(() => world.git(p.dir, ['sparse-checkout', 'set', '--no-cone', '/*', '!/経理部/']),
+      /unable to read|invalid object|missing/i, 'the broken state: missing blobs cannot be fetched')
+    const added = await p.addDepartment('開発部')
+    assert.deepEqual(added, { success: true, enabled: true, excluded: ['経理部'] })
+    assert.equal(config('remote.origin.promisor'), 'true')
+    assert.equal(config('remote.origin.partialclonefilter'), 'blob:none')
+    assert.equal(p.readText('開発部/設計.md'), 'dev v0\n') // HEAD; a's v1 arrives with the next sync
+    assertNotDownloaded(world, p, '経理部/')
+
+    // Before sync: a teammate's rename outside the cone needs a blob p never had.
+    breakIt()
+    a.rename('経理部/予算.md', '経理部/予算2026.md').append('開発部/設計.md', 'a again\n')
+    ok(await a.sync(), 'a')
+    p.write('営業部/提案書.md', 'p after heal\n')
+    ok(await p.sync(), 'p')
+    assert.equal(config('remote.origin.promisor'), 'true')
+    assert.equal(config('remote.origin.partialclonefilter'), 'blob:none')
+    assert.equal(world.serverFile('営業部/提案書.md')?.toString(), 'p after heal\n')
+    await settleAndCheck(world)
+    assertNotDownloaded(world, p, '経理部/')
+  })
+
   scenario('offline: adding a department changes nothing and says why; sync fails like a full clone\'s', async t => {
     const { world, a, p } = await create(t)
     p.offline()

@@ -41,6 +41,7 @@ import { createFetchSyncServerApi } from '../../electron/sync/server-api'
 import { renderPreReceiveHook } from '../../../server/src/lib/git-server/hook'
 import { BARE_REPO_CONFIG } from '../../../server/src/lib/git-server/repo-config'
 import { checkoutSelectedDepartments } from '../../electron/sync/first-setup'
+import { configureOrigin } from '../../electron/sync/remote'
 import { readSparseConfig, setSparseExclusions, type SparseExclusionsResult } from '../../electron/sync/sparse'
 import { SCOPE_REPO_GITIGNORE } from '../../../server/src/lib/git-server/scope-repo'
 import { pathKey } from '../../shared/sparse-paths'
@@ -818,7 +819,7 @@ export class Member {
     // app's git: an empty repository with origin and the member's identity.
     const git = this.createGit(this.dir)
     await git.raw(['init', '-q', '-b', 'main'])
-    await git.addRemote('origin', this.remoteUrl)
+    await configureOrigin(git, this.remoteUrl, this.logger)
     await git.addConfig('user.name', this.name, false, 'local')
     await git.addConfig('user.email', this.email, false, 'local')
     await checkoutSelectedDepartments({
@@ -827,12 +828,34 @@ export class Member {
       branch: 'main',
       departments: this.world.departments,
       selected,
-      log: {
-        log: (...args: unknown[]) => this.capture('log', args),
-        warn: (...args: unknown[]) => this.capture('warn', args),
-        error: (...args: unknown[]) => this.capture('error', args),
-      },
+      log: this.logger,
     })
+  }
+
+  /**
+   * Open the company again (company selector → existing folder): what
+   * git:setupCompanyRemote does for a clone that already has commits —
+   * origin set to the server's URL (`url`, default the current one), then
+   * fetch and, with a clean tree, pull --rebase. Returns its warnings.
+   */
+  async reopen(url = this.remoteUrl): Promise<string[]> {
+    const git = this.createGit(this.dir)
+    const warnings: string[] = []
+    await configureOrigin(git, url, {
+      ...this.logger,
+      warn: (...args: unknown[]) => { warnings.push(args.map(String).join(' ')); this.capture('warn', args) },
+    })
+    await git.fetch(['--progress', 'origin'])
+    if ((await git.status()).isClean()) await git.pull('origin', 'main', ['--rebase', '--progress'])
+    return warnings
+  }
+
+  private get logger() {
+    return {
+      log: (...args: unknown[]) => this.capture('log', args),
+      warn: (...args: unknown[]) => this.capture('warn', args),
+      error: (...args: unknown[]) => this.capture('error', args),
+    }
   }
 
   /** Settings panel → 追加する: stop excluding a department (downloads it in a partial clone). */

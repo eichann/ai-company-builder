@@ -5,6 +5,7 @@ import fs from 'fs'
 import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import { normalizeExclusions, parseSparsePatterns, pathKey, sparsePatterns } from '../../shared/sparse-paths'
+import { ensurePromisorConfig } from './remote'
 
 // --- Sparse Checkout ---
 //
@@ -154,6 +155,9 @@ export function isDownloadFailure(message: string): boolean {
 // patterns and worktree stay as they were and the next sync does not retry a
 // choice that was never applied.
 export async function applySparseSelection(git: SimpleGit, repoPath: string, excluded: string[]): Promise<void> {
+  // Downloading a folder in a partial clone needs origin to be a promisor
+  // remote: repair a clone that lost the config (./remote.ts).
+  await ensurePromisorConfig(git).catch(e => console.warn('Git sparse: promisor config check failed:', e))
   const cleanExcluded = normalizeExclusions(excluded)
   const configExisted = fs.existsSync(sparseConfigPath(repoPath))
   const previous = readSparseConfig(repoPath)

@@ -42,6 +42,7 @@ import { companyPathOf, privateBackupsDir, readPrivateScopesCache, readableScope
 const PRIVATE_BACKUP_ID_PREFIX = 'private:'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
+import { configureOrigin, setRemoteUrl } from './sync/remote'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
@@ -1630,14 +1631,9 @@ ipcMain.handle('git:isRepo', async (_, repoPath: string) => {
 ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, remoteUrl: string) => {
   try {
     const git: SimpleGit = createGit(repoPath)
-    const remotes = await git.getRemotes()
-    const existingRemote = remotes.find(r => r.name === remoteName)
-
-    if (existingRemote) {
-      // Update existing remote
-      await git.removeRemote(remoteName)
-    }
-    await git.addRemote(remoteName, remoteUrl)
+    // set-url, never remove + add: removing drops a partial clone's
+    // promisor config (./sync/remote.ts).
+    await setRemoteUrl(git, remoteUrl, remoteName)
     return { success: true }
   } catch (error) {
     console.error('Git addRemote error:', error)
@@ -2157,13 +2153,11 @@ ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, company
       }
     }
 
-    // Add/update origin remote
-    const remotes = await git.getRemotes()
-    const existingOrigin = remotes.find(r => r.name === 'origin')
-    if (existingOrigin) {
-      await git.removeRemote('origin')
-    }
-    await git.addRemote('origin', remoteUrl)
+    // Add/update origin remote. set-url, never remove + add: this runs
+    // again whenever a company is reopened, and `remote remove` deleted a
+    // partial clone's promisor config, so downloading a department later
+    // failed (./sync/remote.ts). Repair a clone that already lost it.
+    await configureOrigin(git, remoteUrl, console)
 
     if (remoteHasCommits) {
       // Check if we have local commits
