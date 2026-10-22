@@ -1177,8 +1177,15 @@ answer, for both agents. Shared types and the answer mapping:
   sends `prompt_suggestion` ~1 s *after* the result — after the UI stream has
   closed — so the renderer asks `GET /api/prompt-suggestion/:appSessionId`
   after a finished (not stopped/failed) turn; it waits up to 15 s. The CLI
-  stays silent when nothing is obvious, after errors, near the plan limit, or
-  when the member set `promptSuggestionEnabled: false` (user settings apply).
+  stays silent on a conversation's first reply without tool use (it needs two
+  assistant messages), when nothing is obvious, after errors, or when the
+  member set `promptSuggestionEnabled: false` (user settings apply). The app
+  spawns it with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true`: otherwise it
+  also stops near the plan's usage limit (`allowed_warning`), which made
+  suggestions never appear for a heavy user. The terminal CLI's "unused
+  streak" back-off does not apply to SDK sessions. The chat server logs
+  whether a suggestion came (`[chat-server] Prompt suggestion: …`, never its
+  text).
 - Shown as light ghost text in the empty input (it replaces the placeholder),
   only while idle with no card/approval waiting. → or Tab (caret at the end,
   no modifiers) puts it into the input; Enter stays a new line and ⌘+Enter

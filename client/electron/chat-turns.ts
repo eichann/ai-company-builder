@@ -46,6 +46,8 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
       return {
         steering: turn.steering as TurnSteering,
         onPromptSuggestion: suggestion ? (value: string | null) => {
+          // Content stays out of the log; whether one came is what we need.
+          console.log(`[chat-server] Prompt suggestion: ${normalizeSuggestion(value) ? 'received' : 'none from the CLI'}`)
           suggestion.settle(normalizeSuggestion(value))
           clearTimeout(timer)
         } : undefined,
@@ -56,7 +58,10 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
           if (!suggestion) return
           if (outcome === 'failed') { suggestion.settle(null); return }
           clearTimeout(timer)
-          timer = setTimeout(() => suggestion.settle(null), waitMs)
+          timer = setTimeout(() => {
+            console.log('[chat-server] Prompt suggestion: none (timed out)')
+            suggestion.settle(null)
+          }, waitMs)
           timer.unref?.()
         },
       }
