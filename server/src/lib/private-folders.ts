@@ -27,8 +27,7 @@
  * stays private), the rules become readable for everyone (editors keep
  * editing; nobody gains write), and the scope repository is deleted.
  */
-import { createHash, randomBytes } from 'crypto'
-import { existsSync, mkdtempSync, rmSync } from 'fs'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import type Database from 'better-sqlite3'
@@ -50,16 +49,21 @@ import {
   type ScopeWithRules,
 } from './permissions'
 import { foldAsciiCase } from './push-check/rules'
-import {
-  RESERVED_PATH_ALGORITHM,
-  reservedPathKeyInput,
-  type ReservedPathHashes,
-} from '../../shared/types/private-folders'
 
 type Conn = Database.Database
 
 const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
+
+/**
+ * Where a private folder's repository is archived (git bundle) before it is
+ * deleted or made public. Server-side only: never served by any route, the
+ * directories are 0700 and the files 0600. PRIVATE_FOLDER_ARCHIVE_DIR
+ * overrides the default <DATA_DIR>/backups/private-folders.
+ */
+export function privateFolderArchiveDir(): string {
+  return process.env.PRIVATE_FOLDER_ARCHIVE_DIR || join(DATA_DIR, 'backups', 'private-folders')
+}
 
 export function companyRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)
@@ -109,25 +113,24 @@ export function getPrivateFolder(conn: Conn, companyId: string, scopeId: string)
   return listPrivateFolders(conn, companyId).find(p => p.scope.id === scopeId) ?? null
 }
 
-/** The company's salt for reserved-path hashes (created on first use). */
-export function companyPathSalt(conn: Conn, companyId: string): string {
-  const row = conn.prepare(`SELECT salt FROM company_path_salts WHERE company_id = ?`).get(companyId) as { salt: string } | undefined
-  if (row) return row.salt
-  const salt = randomBytes(24).toString('base64url')
-  conn.prepare(`INSERT OR IGNORE INTO company_path_salts (company_id, salt, created_at) VALUES (?, ?, ?)`)
-    .run(companyId, salt, new Date().toISOString())
-  return (conn.prepare(`SELECT salt FROM company_path_salts WHERE company_id = ?`).get(companyId) as { salt: string }).salt
-}
-
-export function reservedPathHash(salt: string, path: string): string {
-  return createHash('sha256').update(reservedPathKeyInput(salt, path), 'utf8').digest('hex')
-}
-
-/** Every private folder of the company as a salted hash (shared/types/private-folders.ts). */
-export function reservedHashes(conn: Conn, companyId: string, scopes = listScopesWithRules(conn, companyId)): ReservedPathHashes {
-  const salt = companyPathSalt(conn, companyId)
-  const hashes = scopes.filter(s => s.repoId !== null).map(s => reservedPathHash(salt, s.path)).sort()
-  return { algorithm: RESERVED_PATH_ALGORITHM, salt, hashes }
+/**
+ * May this member put something at `path` (POST /paths/check)? false exactly
+ * when the path is at or under a private folder they cannot read — what a
+ * push of theirs there would be refused with ([RESERVED_PATH]). A reader's
+ * paths inside a private folder are usable (they go to its own repository).
+ * Every private folder is compared, whatever the outcome, so the answer
+ * takes the same work for every path.
+ */
+export function isPathUsable(scopes: ScopeWithRules[], userId: string, role: string, path: string): boolean {
+  const key = pathKey(path)
+  let usable = true
+  for (const s of scopes) {
+    if (s.repoId === null) continue
+    const inside = isSameOrAncestorPath(pathKey(s.path), key)
+    const readable = canReadPrivateScope(s, userId, role)
+    if (inside && !readable) usable = false
+  }
+  return usable
 }
 
 // ----------------------------------------------------------------------------
@@ -373,6 +376,8 @@ export class MakePublicError extends Error {
  *
  * Order (each step safe to repeat if a later one fails):
  *   1. refuse new pushes to the scope repository, wait for running ones;
+ *      archive the scope repository (archivePrivateFolder: its whole
+ *      history, which the company repository will not receive);
  *   2. write the scope's tree into the company repository's main as one
  *      commit (no history), with a compare-and-swap ref update — retried when
  *      a member pushed meanwhile; if the path already holds exactly that tree
@@ -381,7 +386,7 @@ export class MakePublicError extends Error {
  *      repo_id cleared, scope_repos row removed;
  *   4. delete the scope repository.
  */
-export async function makePrivateFolderPublic(conn: Conn, companyId: string, folder: PrivateFolderRecord): Promise<{ path: string; commit: string }> {
+export async function makePrivateFolderPublic(conn: Conn, companyId: string, folder: PrivateFolderRecord, by: string | null = null): Promise<{ path: string; commit: string }> {
   const scopeId = folder.scope.id
   const scopeRepo = privateRepoPath(companyId, folder.repoId)
   const bare = companyRepoPath(companyId)
@@ -390,6 +395,7 @@ export async function makePrivateFolderPublic(conn: Conn, companyId: string, fol
     if (!(await waitForPushes(scopeId, 30_000))) {
       throw new MakePublicError('BUSY', 'A push to this folder is still running; try again in a moment')
     }
+    await archivePrivateFolder(conn, companyId, folder, 'make-public', by)
     const tree = (await gitAsync(['-C', scopeRepo, 'rev-parse', 'refs/heads/main^{tree}'])).trim()
     // Carry only that tree over (a parentless commit), never the scope's history.
     const exportCommit = (await gitAsync(['-C', scopeRepo, 'commit-tree', tree, '-m', 'export'], { env: SERVER_GIT_IDENTITY })).trim()
@@ -450,6 +456,98 @@ export async function makePrivateFolderPublic(conn: Conn, companyId: string, fol
     })()
     await removeScopeRepo(scopeRepo)
     return { path: folder.scope.path, commit }
+  } finally {
+    closing.delete(scopeId)
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Archive and delete
+// ----------------------------------------------------------------------------
+
+export type PrivateFolderArchiveAction = 'delete' | 'make-public'
+
+/**
+ * Write the scope repository — every ref, whole history — as a git bundle
+ * into the archive directory (privateFolderArchiveDir()/<companyId>/, 0700;
+ * files 0600), with a JSON sidecar saying what it was, who removed it and
+ * when, and record it in `private_folder_archives`. Restoring is an
+ * operator's job (`git clone <bundle>`); nothing serves these files.
+ * Throws when the archive cannot be written: the caller must then not
+ * delete anything.
+ */
+export async function archivePrivateFolder(
+  conn: Conn,
+  companyId: string,
+  folder: PrivateFolderRecord,
+  action: PrivateFolderArchiveAction,
+  by: string | null,
+): Promise<{ id: string; file: string }> {
+  const scopeRepo = privateRepoPath(companyId, folder.repoId)
+  const base = privateFolderArchiveDir()
+  const dir = join(base, companyId.replace(/[^a-zA-Z0-9_-]/g, ''))
+  mkdirSync(dir, { recursive: true, mode: 0o700 })
+  chmodSync(base, 0o700)
+  chmodSync(dir, 0o700)
+  const at = new Date().toISOString()
+  const id = crypto.randomUUID()
+  const name = `${at.replace(/[:.]/g, '-')}_${action}_${folder.scope.id}`
+  const file = join(dir, `${name}.bundle`)
+  const head = (await gitAsync(['-C', scopeRepo, 'rev-parse', 'refs/heads/main'])).trim()
+  await gitAsync(['-C', scopeRepo, 'bundle', 'create', '--quiet', file, '--all'])
+  chmodSync(file, 0o600)
+  writeFileSync(join(dir, `${name}.json`), JSON.stringify({
+    id,
+    action,
+    companyId,
+    scopeId: folder.scope.id,
+    repoId: folder.repoId,
+    path: folder.scope.path,
+    head,
+    rules: folder.scope.rules,
+    createdAt: folder.createdAt,
+    createdBy: folder.createdBy,
+    archivedAt: at,
+    archivedBy: by,
+  }, null, 2) + '\n', { mode: 0o600 })
+  conn.prepare(`
+    INSERT INTO private_folder_archives (id, company_id, scope_id, path, action, file, head, created_at, created_by)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(id, companyId, folder.scope.id, folder.scope.path, action, `${name}.bundle`, head, at, by)
+  return { id, file }
+}
+
+/**
+ * Delete a private folder for good (owner/admin, after typing its name).
+ * Call under the company lock. Order:
+ *   1. refuse new pushes to its repository and wait for running ones;
+ *   2. archive the repository (archivePrivateFolder) — nothing is deleted
+ *      if that fails;
+ *   3. in one transaction: the rules and scopes at and under its path, the
+ *      scope_repos row (= the reservation in the company repository);
+ *   4. delete the scope repository.
+ * Members who could read it see it disappear like losing access (their app
+ * keeps nothing it can still sync to).
+ */
+export async function deletePrivateFolder(conn: Conn, companyId: string, folder: PrivateFolderRecord, by: string): Promise<{ path: string }> {
+  const scopeId = folder.scope.id
+  closing.add(scopeId)
+  try {
+    if (!(await waitForPushes(scopeId, 30_000))) {
+      throw new MakePublicError('BUSY', 'A push to this folder is still running; try again in a moment')
+    }
+    await archivePrivateFolder(conn, companyId, folder, 'delete', by)
+    conn.transaction(() => {
+      const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
+        .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
+      for (const s of subtree) {
+        conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(s.id)
+        conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(s.id)
+      }
+      conn.prepare(`DELETE FROM scope_repos WHERE id = ?`).run(folder.repoId)
+    })()
+    await removeScopeRepo(privateRepoPath(companyId, folder.repoId))
+    return { path: folder.scope.path }
   } finally {
     closing.delete(scopeId)
   }

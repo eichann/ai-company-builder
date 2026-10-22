@@ -2,6 +2,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import fs from 'fs'
 import { seedPermissionScopes } from '../lib/permission-store'
+import { migrateInvitationClaims } from '../lib/invitation-signup'
 
 // Ensure data directory exists
 const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
@@ -182,12 +183,30 @@ export function initDatabase(conn: Database.Database = sqlite) {
       created_by TEXT
     );
 
-    -- Per-company salt for the reserved-path hashes handed to members who may
-    -- not learn private folders' names (GET /me/scopes). Not rotated.
+    -- UNUSED since 2026-10-22: per-company salts for the reserved-path hashes
+    -- GET /me/scopes used to hand out (salted hashes of short Japanese folder
+    -- names can be brute-forced, so the server no longer sends them; the app
+    -- asks POST /paths/check instead). Kept so existing databases need no
+    -- destructive migration; nothing reads or writes it.
     CREATE TABLE IF NOT EXISTS company_path_salts (
       company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
       salt TEXT NOT NULL,
       created_at TEXT NOT NULL
+    );
+
+    -- Private folders archived (git bundle, lib/private-folders.ts
+    -- archivePrivateFolder) before being deleted or made public: who, when,
+    -- and the bundle's file name inside the archive directory (never served).
+    CREATE TABLE IF NOT EXISTS private_folder_archives (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL,
+      scope_id TEXT NOT NULL,
+      path TEXT NOT NULL,
+      action TEXT NOT NULL CHECK (action IN ('delete', 'make-public')),
+      file TEXT NOT NULL,
+      head TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      created_by TEXT
     );
 
     -- Indexes
@@ -207,6 +226,9 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_departments_parent_id ON departments(parent_id);
     CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_company_folder ON departments(company_id, folder);
   `)
+
+  // Single-use invitation links (lib/invitation-signup.ts).
+  migrateInvitationClaims(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.

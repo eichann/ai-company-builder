@@ -32,9 +32,9 @@ export interface MyPrivateScope {
 }
 
 /**
- * Every private folder of the company — readable or not — as salted hashes,
- * so the app can tell "this path is at or under a private folder" without
- * learning names it may not see. See reservedPathKeyInput for the algorithm.
+ * @deprecated Never sent since 2026-10-22 (owner decision): salted hashes of
+ * short folder names can be brute-forced. Use POST /paths/check. Kept one
+ * release so older builds still compile against this file.
  */
 export interface ReservedPathHashes {
   algorithm: typeof RESERVED_PATH_ALGORITHM
@@ -48,20 +48,53 @@ export interface MyScopesResponse {
   /** Changes whenever anything below changes; also sent as the ETag (If-None-Match → 304). */
   version: string
   scopes: MyPrivateScope[]
-  reserved: ReservedPathHashes
+  /** @deprecated Never sent any more (see ReservedPathHashes); always absent. */
+  reserved?: ReservedPathHashes
 }
 
 // ----------------------------------------------------------------------------
-// Reserved-path hashing (the client MUST implement exactly this)
+// POST /api/companies/:companyId/paths/check
 // ----------------------------------------------------------------------------
 
+/** At most this many paths per request. */
+export const PATHS_CHECK_MAX_PATHS = 50
+/** Per member and company: more paths than this within a minute → 429 RATE_LIMITED (Retry-After: 60). */
+export const PATHS_CHECK_PATHS_PER_MINUTE = 60
+
+/** Body: company-relative paths, any spelling (compared as normalizeReservedPath). */
+export interface PathCheckRequest {
+  paths: string[]
+}
+
+export interface PathCheckResult {
+  /** As sent. */
+  path: string
+  /**
+   * false: the member cannot put anything there — it is at or under a
+   * private folder they cannot read, so a push would be refused with
+   * [RESERVED_PATH]. Show reservedPathMessage(<the path or the folder the
+   * member typed>). Paths inside a private folder the member CAN read are
+   * usable (they go to its own repository). The answer never says why.
+   */
+  usable: boolean
+}
+
+export interface PathCheckResponse {
+  results: PathCheckResult[]
+}
+
+// ----------------------------------------------------------------------------
+// Path normalisation (and the retired hashing scheme)
+// ----------------------------------------------------------------------------
+
+/** @deprecated The hashes are no longer sent; kept for one release. */
 export const RESERVED_PATH_ALGORITHM = 'sha256-salt-nfc-asciilower-v1' as const
 
 /**
- * The normalised form a path is hashed in: split on '/' (and '\\'), empty
- * segments dropped, each segment Unicode NFC with ASCII A–Z lowered to a–z
- * (nothing else is case-folded: not full-width Ａ, not É — exactly the
- * comparison the server's push check uses), joined with '/'.
+ * How reserved paths are compared: split on '/' (and '\\'), empty segments
+ * dropped, each segment Unicode NFC with ASCII A–Z lowered to a–z (nothing
+ * else is case-folded: not full-width Ａ, not É — exactly the comparison the
+ * server's push check uses), joined with '/'.
  */
 export function normalizeReservedPath(path: string): string {
   return path
@@ -72,20 +105,16 @@ export function normalizeReservedPath(path: string): string {
     .join('/')
 }
 
-/**
- * The string whose SHA-256 (of its UTF-8 bytes, lowercase hex) is a key:
- *
- *     key(path) = hex(sha256(utf8(salt + "\u0000" + normalizeReservedPath(path))))
- */
+/** @deprecated The hashes are no longer sent; kept for one release. */
 export function reservedPathKeyInput(salt: string, path: string): string {
   return `${salt}\u0000${normalizeReservedPath(path)}`
 }
 
 /**
- * The prefixes of `path` to hash, shortest first ('a/b/c' → 'a', 'a/b',
- * 'a/b/c'). A path is reserved when the key of ANY of them is in
- * `reserved.hashes`; the matching prefix — in the member's own spelling — is
- * the folder name to show:
+ * The prefixes of `path`, shortest first ('a/b/c' → 'a', 'a/b', 'a/b/c').
+ * To name the folder that makes a path unusable (in the member's own
+ * spelling), check the prefixes with POST /paths/check: the shortest
+ * unusable one is it:
  * 「『<prefix>』というフォルダ名は使えません。別の名前にしてください。」
  */
 export function reservedPathCandidates(path: string): string[] {
@@ -183,6 +212,21 @@ export interface MakePublicResult {
   commit: string
 }
 
+/**
+ * DELETE /private-folders/:scopeId?confirm=<the folder's name> (owner/admin).
+ * The server first archives the folder's repository (a git bundle kept on
+ * the server, never downloadable), then removes it, its rules and its
+ * reservation. Members who could read it lose it as if their access had
+ * been taken away.
+ */
+export interface DeletePrivateFolderResult {
+  path: string
+  archived: true
+}
+
+/** 409 PRIVATE_FOLDERS_UNAVAILABLE: no released app syncs private folders yet (force does not help). */
+export const PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE = '非公開フォルダは、全員のアプリが対応版になってから作成できます'
+
 /** Error codes of these endpoints (body: { error, code, ... }). */
 export type PrivateFolderErrorCode =
   /** 409: the path is taken (a folder/file in the company repository or a private folder). `error` is reservedPathMessage(path). */
@@ -197,3 +241,11 @@ export type PrivateFolderErrorCode =
   | 'FORCE_NOT_ALLOWED'
   /** 400: an editor who is not a viewer, a non-member, … */
   | 'INVALID_MEMBERS'
+  /** 409: creation is closed until a released app syncs private folders (PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE). */
+  | 'PRIVATE_FOLDERS_UNAVAILABLE'
+  /** 400 (DELETE): `confirm` is not the folder's name. */
+  | 'CONFIRMATION_REQUIRED'
+  /** 503: a push to the folder is still running. */
+  | 'BUSY'
+  /** 429 (POST /paths/check): too many paths this minute. */
+  | 'RATE_LIMITED'

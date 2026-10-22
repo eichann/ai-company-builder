@@ -94,6 +94,30 @@ import { ... } from '../../shared/types'  // Path inside container
 - SQLite (`data/app.sqlite` for app, `data/auth.sqlite` for auth)
 - Migrations use `CREATE TABLE IF NOT EXISTS` (auto-applied)
 
+### Accounts and roles (server)
+
+- **Only owners grant owner/admin**: `PUT /companies/:id/members/:userId/role`,
+  `POST /companies/:id/members` with role owner/admin, and admin invitations
+  are owner-only (an admin adding a second account of their own as owner
+  could take the company over). `POST …/members` also requires the account
+  to exist (404 otherwise).
+- **Rules follow the membership**: removing a member deletes every rule
+  naming them in that company (`deleteUserRules`, private folders
+  included), so re-adding them starts from nothing; a promotion to
+  owner/admin deletes them too (moot while they have full access, stale
+  after a demotion). `everyone` rules are untouched, so nothing starts
+  inheriting.
+- **Invitations are single-use** (`lib/invitation-signup.ts`): a sign-up
+  with `X-Invitation-Token` claims the invitation atomically
+  (`signup_claimed_at`, released if the sign-up fails) and records the new
+  account (`signup_user_id`); a second sign-up with the link is refused;
+  accepting is a compare-and-set on `used_by` and, for a claimed link, only
+  by that account. `expiresInDays`: integer 1–30 (default 7).
+- **`/api/git`** has only `GET /repos/:companyId` (members of that company;
+  others 404) → `{ companyId, httpsUrl }` — no server path, no legacy
+  `sshUrl`. Repository administration is not an API: companies create their
+  repository, startup configures every repository and hook.
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
@@ -692,26 +716,63 @@ Client sync (3b) and the UIs (3c) build on the contract in
     (`PARENT_NOT_FOUND`), one they can read `ALREADY_PRIVATE`. Under the
     company lock; the company repository is re-checked after the rows are
     written and everything is rolled back if a push landed at the path.
+    **Closed until 3b ships**: while `PRIVATE_FOLDERS_CLIENT_COMMIT_DATE`
+    (`lib/client-version.ts`) is null, every create answers 409
+    `PRIVATE_FOLDERS_UNAVAILABLE`
+    「非公開フォルダは、全員のアプリが対応版になってから作成できます」 — `force`
+    included (no released app could sync one). Tests use
+    `setPrivateFoldersClientCutoffForTests`.
   - `GET /private-folders` (owner/admin: all; managers: their
     departments'), `GET /private-folders/:scopeId`, `PUT …/members`
     `{ viewers, editors? }` (owner/admin, the department's managers — Q2;
     anyone else 404). Viewer/editor counts include owners/admins.
   - `POST /private-folders/:scopeId/make-public` (owner/admin, 公開に戻す):
     refuses new pushes to the scope repository and waits for running ones,
-    writes its current tree into the company repository's `main` at the same
+    archives it (below), writes its current tree into the company repository's `main` at the same
     path as ONE commit (no scope history) with a compare-and-swap
     `update-ref` (retried if a member pushed meanwhile; idempotent if the tree
     is already there), then in one transaction makes every rule there
     readable (write unchanged: nobody gains write) and clears `repo_id`, then
     deletes the scope repository.
+  - `DELETE /private-folders/:scopeId?confirm=<folder name>` (owner/admin;
+    `confirm` = the last path segment, NFC, else 400
+    `CONFIRMATION_REQUIRED`): stops pushes like make-public, archives the
+    scope repository, then in one transaction removes the rules and scopes at
+    and under its path and the `scope_repos` row (= the reservation), then
+    the repository. Readers lose it like losing access (Q1). → `{ path,
+    archived: true }`.
+  - **Archive** (`archivePrivateFolder`, before delete and make-public; if it
+    fails nothing is removed): `git bundle create --all` of the scope
+    repository into `PRIVATE_FOLDER_ARCHIVE_DIR` (default
+    `<DATA_DIR>/backups/private-folders`) `/<companyId>/<time>_<action>_<scopeId>.bundle`
+    + a `.json` sidecar (path, rules, head, who/when); directories 0700,
+    files 0600; one `private_folder_archives` row per archive. Never served
+    by any route, never named in a response; restore = `git clone <bundle>`.
   - `GET /me/scopes` (any member, ETag/304) → `{ version, scopes:
-    [{ scopeId, path, cloneUrl, clonePath, canWrite }], reserved: { algorithm,
-    salt, hashes } }`: real paths only for folders the caller may read; every
-    private folder (readable or not) as `sha256(salt NUL normalised path)`,
-    normalised = NFC, A–Z lowered, `/`-joined (`normalizeReservedPath`). The
-    app tests a path by hashing it and each of its prefixes.
+    [{ scopeId, path, cloneUrl, clonePath, canWrite }] }`: only the folders
+    the caller may read. Since 2026-10-22 (owner decision) nothing about the
+    others — the salted hashes (`reserved`) are no longer sent: short
+    Japanese folder names are cheap to brute-force against a known salt.
+    `company_path_salts` is left in the schema, unused.
+  - `POST /paths/check` `{ paths: string[] }` (any member, ≤50 paths,
+    ≤60 paths per member per minute → 429 `RATE_LIMITED` + `Retry-After`)
+    → `{ results: [{ path, usable }] }`: `usable: false` exactly when the path
+    (any case/NFC — `normalizeReservedPath`) is at or under a private folder
+    the caller cannot read, i.e. where a push would get `[RESERVED_PATH]`; a
+    reader's paths inside it are usable. Same shape and work for every path,
+    never says which folder or why; paths are not logged. The app checks a
+    path and its prefixes to name the folder it shows in
+    `reservedPathMessage`. The push-time `[RESERVED_PATH]` check stays the
+    enforcement.
   - The permission editor (`PUT /permissions/scopes/by-path` etc.) accepts
-    `read: false` on a private folder, edits inside one against its scope
+    `read: false` on a private folder — and on the folder ITSELF requires it:
+    `everyone` / role rules there must be `read: false, write: false`
+    (400 `PRIVATE_FOLDER_RULE`; also POST rules / PATCH a rule), only user
+    rules grant access (and an editor must also read) — the same set
+    `PUT …/members` stores, so a department manager cannot open their
+    private folder to the company. Rules deeper inside need no check:
+    `resolveAccess` gives them nothing for anyone who cannot read the
+    folder itself (narrow only). It edits inside one against its scope
     repository, skips the outdated-app guard there (only new apps receive
     them) and refuses moving rules into/out of one; `GET
     /permissions/folders` lists private folders only to those who may edit
@@ -758,6 +819,11 @@ branch on the server (permission plan §11). Editing stays local.
   A–Z folded with `-i`; case-insensitive search in a UTF-8 locale took ~14 s
   per 2 MB with macOS's regex library); `regex: true` uses a UTF-8 locale so
   `.` is one character. The query is also tried in NFD (fixed strings).
+- **The query never runs in the server process.** Snippets of long lines are
+  cut around the match position git reports (`git grep --column`, a byte
+  offset). Building the snippet with `new RegExp(q)` let one member block the
+  event loop — every request of every company — for minutes with a
+  catastrophic-backtracking pattern (git grep has a time limit, JS does not).
 - **Client** (`client/electron/company-files/`): `api.ts` calls the server
   with the member's session from the main process (never visible to the
   model), caches answers 30 s per member (cleared at sign-out), and turns

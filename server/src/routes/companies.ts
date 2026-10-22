@@ -4,7 +4,7 @@ import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { initBareRepo, internalGitEnv } from '../lib/git-server'
 import { getClientActivityForCompany } from '../lib/client-activity'
 import { parseClientVersion } from '../lib/client-version'
-import { ensureCompanyScope, removeManagerFromCompany, syncCompanyScopes } from '../lib/permission-store'
+import { deleteUserRules, ensureCompanyScope, removeManagerFromCompany, syncCompanyScopes } from '../lib/permission-store'
 import { execFileSync } from 'child_process'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { join } from 'path'
@@ -405,15 +405,29 @@ companiesRoute.post('/:id/members', async (c) => {
     return c.json({ error: 'Only owners and admins can invite members' }, 403)
   }
 
-  const body = await c.req.json()
-  const { userId, role = 'member' } = body
+  const body = await c.req.json().catch(() => null) as { userId?: unknown; role?: unknown } | null
+  const userId = body?.userId
+  const role = body?.role ?? 'member'
 
-  if (!userId) {
+  if (typeof userId !== 'string' || userId.length === 0 || userId.length > 200) {
     return c.json({ error: 'userId is required' }, 400)
   }
 
-  if (!['owner', 'admin', 'member'].includes(role)) {
+  if (typeof role !== 'string' || !['owner', 'admin', 'member'].includes(role)) {
     return c.json({ error: 'Invalid role' }, 400)
+  }
+
+  // Only owners may hand out owner/admin (as with PUT …/role): an admin who
+  // could add an owner could add a second account of their own as owner and
+  // take the company over.
+  if (role !== 'member' && userMembership.role !== 'owner') {
+    return c.json({ error: 'Only owners can add owners or admins' }, 403)
+  }
+
+  // The account must exist (a membership for an unknown id would be claimed
+  // by whoever later signs up with that id).
+  if (!getUsersByIds([userId]).has(userId)) {
+    return c.json({ error: 'User not found' }, 404)
   }
 
   // Check if already a member
@@ -533,6 +547,9 @@ companiesRoute.put('/:id/members/:userId/role', async (c) => {
       }
       db.prepare('UPDATE memberships SET role = ?, updated_at = ? WHERE user_id = ? AND company_id = ?')
         .run(role, now(), targetUserId, companyId)
+      // Owner/admin read and write everything; rules naming them are moot
+      // and must not come back unnoticed if they are demoted later.
+      if (role === 'owner' || role === 'admin') deleteUserRules(db, companyId, targetUserId)
       return true
     })()
     if (!changed) {
@@ -571,10 +588,16 @@ companiesRoute.delete('/:id/members/:userId', async (c) => {
     return c.json({ error: 'Cannot remove the owner' }, 403)
   }
 
-  db.prepare(`
-    DELETE FROM memberships WHERE user_id = ? AND company_id = ?
-  `).run(targetUserId, companyId)
-  removeManagerFromCompany(db, companyId, targetUserId)
+  // Membership, management rights and every rule naming them (private
+  // folders included) go together: re-adding the account later starts from
+  // nothing instead of silently restoring their old access.
+  db.transaction(() => {
+    db.prepare(`
+      DELETE FROM memberships WHERE user_id = ? AND company_id = ?
+    `).run(targetUserId, companyId)
+    removeManagerFromCompany(db, companyId, targetUserId)
+    deleteUserRules(db, companyId, targetUserId)
+  })()
 
   return c.json({
     success: true,

@@ -1,16 +1,29 @@
 import { Hono } from 'hono'
-import { execFileSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync } from 'fs'
-import { rm } from 'fs/promises'
+import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
+import { db } from '../db'
 import { getUserFromRequest } from '../lib/auth'
 import {
   configureAllBareRepos as configureAllBareReposIn,
   configureBareRepo,
-  initBareRepo,
   installPreReceiveHook,
 } from '../lib/git-server'
 
+/**
+ * /api/git — what the desktop app needs to find its company's repository.
+ *
+ *   GET /api/git/repos/:companyId   members of that company only (anyone
+ *                                   else: 404) → { companyId, httpsUrl }.
+ *                                   Never a server filesystem path.
+ *
+ * Repository administration is not an API: the server creates a company's
+ * repository with the company (routes/companies.ts) and configures every
+ * repository and hook at startup (configureAllBareRepos). The former
+ * endpoints — list every repository with its server path, create a bare
+ * repository for any id, reinstall hooks, run the http.receivepack
+ * migration, delete a repository — were callable by any signed-in user of
+ * any company and were removed (2026-10-22 security review).
+ */
 export const gitRoute = new Hono()
 
 // Base directory for Git repositories
@@ -31,95 +44,7 @@ export function configureAllBareRepos(): { total: number; failed: number } {
   return configureAllBareReposIn(REPOS_DIR)
 }
 
-// List all repositories
-gitRoute.get('/repos', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  try {
-    // Ensure directory exists
-    if (!existsSync(REPOS_DIR)) {
-      mkdirSync(REPOS_DIR, { recursive: true })
-    }
-
-    const files = readdirSync(REPOS_DIR)
-    const repos = files
-      .filter((name: string) => name.endsWith('.git'))
-      .map((name: string) => ({
-        id: name.replace('.git', ''),
-        path: join(REPOS_DIR, name),
-      }))
-
-    return c.json({
-      success: true,
-      data: repos,
-    })
-  } catch (error) {
-    console.error('Failed to list repositories:', error)
-    return c.json({
-      success: false,
-      error: `Failed to list repositories: ${error instanceof Error ? error.message : 'Unknown error'}`,
-    }, 500)
-  }
-})
-
-// Create a bare repository for a company
-gitRoute.post('/repos', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  try {
-    const body = await c.req.json()
-    const { companyId } = body
-
-    if (!companyId) {
-      return c.json({
-        success: false,
-        error: 'companyId is required',
-      }, 400)
-    }
-
-    // Sanitize companyId to prevent path traversal
-    const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
-    const repoPath = join(REPOS_DIR, `${sanitizedId}.git`)
-
-    if (existsSync(repoPath)) {
-      return c.json({
-        success: true,
-        data: {
-          companyId: sanitizedId,
-          path: repoPath,
-          message: 'Repository already exists',
-        },
-      })
-    }
-
-    // Bare repository on main + standard config (HTTP push, force-push
-    // protection) + pre-receive hook
-    initBareRepo(repoPath)
-
-    return c.json({
-      success: true,
-      data: {
-        companyId: sanitizedId,
-        path: repoPath,
-        message: 'Repository created successfully',
-      },
-    })
-  } catch (error) {
-    console.error('Failed to create repository:', error)
-    return c.json({
-      success: false,
-      error: 'Failed to create repository',
-    }, 500)
-  }
-})
-
-// Get repository info
+// Get repository info (members of the company)
 gitRoute.get('/repos/:companyId', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {
@@ -128,14 +53,15 @@ gitRoute.get('/repos/:companyId', async (c) => {
 
   const companyId = c.req.param('companyId')
   const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
-  const repoPath = join(REPOS_DIR, `${sanitizedId}.git`)
+  const notFound = () => c.json({ success: false, error: 'Repository not found' }, 404)
 
-  if (!existsSync(repoPath)) {
-    return c.json({
-      success: false,
-      error: 'Repository not found',
-    }, 404)
-  }
+  // Not a member: the same answer as for a repository that does not exist.
+  const membership = db.prepare('SELECT role FROM memberships WHERE user_id = ? AND company_id = ?')
+    .get(user.id, companyId)
+  if (!membership || sanitizedId !== companyId) return notFound()
+
+  const repoPath = join(REPOS_DIR, `${sanitizedId}.git`)
+  if (!existsSync(repoPath)) return notFound()
 
   // Build the git remote URL. Without PUBLIC_URL, mirror the scheme the
   // client actually reached us with — hardcoding https breaks plain-HTTP
@@ -147,147 +73,13 @@ gitRoute.get('/repos/:companyId', async (c) => {
     process.env.PUBLIC_URL || `${requestProto}://${c.req.header('host') || 'localhost:3001'}`
   const httpsUrl = `${publicUrl}/api/git-http/${sanitizedId}.git`
 
-  // Build SSH URL (legacy, for backwards compatibility)
-  const serverHost = process.env.SERVER_HOST
-  const serverUser = process.env.SERVER_USER
-  const hostRepoPath = process.env.HOST_REPOS_DIR
-  const sshUrl = serverHost && serverUser && hostRepoPath
-    ? `${serverUser}@${serverHost}:${hostRepoPath}/${sanitizedId}.git`
-    : null
-
+  // The legacy sshUrl (user@host:<HOST_REPOS_DIR>/<id>.git) is no longer
+  // sent: it carried the server's filesystem path, and no app uses SSH.
   return c.json({
     success: true,
     data: {
       companyId: sanitizedId,
-      path: repoPath,
       httpsUrl,
-      sshUrl, // legacy: will be removed in a future version
     },
   })
-})
-
-// Install pre-receive hooks to all existing repositories
-gitRoute.post('/hooks/install', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  try {
-    if (!existsSync(REPOS_DIR)) {
-      return c.json({ success: true, data: { installed: 0, failed: 0, repos: [] } })
-    }
-
-    const files = readdirSync(REPOS_DIR)
-    const repos = files.filter((name: string) => name.endsWith('.git'))
-
-    const results: { repo: string; success: boolean }[] = []
-    let installed = 0
-    let failed = 0
-
-    for (const repoName of repos) {
-      const repoPath = join(REPOS_DIR, repoName)
-      const ok = installPreReceiveHook(repoPath)
-      results.push({ repo: repoName, success: ok })
-      if (ok) installed++
-      else failed++
-    }
-
-    return c.json({
-      success: true,
-      data: { installed, failed, repos: results },
-    })
-  } catch (error) {
-    console.error('Failed to install hooks:', error)
-    return c.json({
-      success: false,
-      error: 'Failed to install hooks',
-    }, 500)
-  }
-})
-
-// Enable http.receivepack on all existing bare repos (migration)
-gitRoute.post('/repos/migrate-http', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  try {
-    if (!existsSync(REPOS_DIR)) {
-      return c.json({ success: true, data: { migrated: 0, repos: [] } })
-    }
-
-    const files = readdirSync(REPOS_DIR)
-    const repos = files.filter((name: string) => name.endsWith('.git'))
-    const results: { repo: string; success: boolean }[] = []
-
-    for (const repoName of repos) {
-      const repoPath = join(REPOS_DIR, repoName)
-      try {
-        execFileSync('git', ['-C', repoPath, 'config', 'http.receivepack', 'true'], { stdio: 'pipe' })
-        results.push({ repo: repoName, success: true })
-      } catch (err) {
-        console.error(`Failed to enable http.receivepack for ${repoName}:`, err)
-        results.push({ repo: repoName, success: false })
-      }
-    }
-
-    return c.json({
-      success: true,
-      data: { migrated: results.filter(r => r.success).length, repos: results },
-    })
-  } catch (error) {
-    console.error('Failed to migrate repos:', error)
-    return c.json({ success: false, error: 'Failed to migrate repositories' }, 500)
-  }
-})
-
-// Delete a repository (owner only)
-gitRoute.delete('/repos/:companyId', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  const companyId = c.req.param('companyId')
-  const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
-
-  // Check if user is owner of this company
-  const { db } = await import('../db')
-  const membership = db.prepare(
-    'SELECT role FROM memberships WHERE user_id = ? AND company_id = ?'
-  ).get(user.id, companyId) as { role: string } | undefined
-
-  if (!membership || membership.role !== 'owner') {
-    return c.json({ error: 'Only the company owner can delete repositories' }, 403)
-  }
-
-  const repoPath = join(REPOS_DIR, `${sanitizedId}.git`)
-
-  if (!existsSync(repoPath)) {
-    return c.json({
-      success: false,
-      error: 'Repository not found',
-    }, 404)
-  }
-
-  try {
-    // Async: a company repo can be gigabytes, and a synchronous delete would
-    // stall every other request (and all git-http traffic) meanwhile
-    await rm(repoPath, { recursive: true, force: true })
-
-    return c.json({
-      success: true,
-      data: {
-        companyId: sanitizedId,
-        message: 'Repository deleted successfully',
-      },
-    })
-  } catch {
-    return c.json({
-      success: false,
-      error: 'Failed to delete repository',
-    }, 500)
-  }
 })

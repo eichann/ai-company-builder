@@ -2,8 +2,13 @@ import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { randomBytes } from 'crypto'
+import { consumeInvitation } from '../lib/invitation-signup'
 
 export const invitationsRoute = new Hono()
+
+/** An invitation link is valid for an integer number of days in this range (default 7). */
+export const MIN_INVITATION_DAYS = 1
+export const MAX_INVITATION_DAYS = 30
 
 // Helper: Convert snake_case object to camelCase
 function toCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
@@ -95,10 +100,18 @@ invitationsRoute.post('/companies/:companyId/invitations', async (c) => {
   }
 
   const body = await c.req.json().catch(() => ({}))
-  const { role = 'member', expiresInDays = 7 } = body
+  const { role = 'member', expiresInDays = 7 } = (body ?? {}) as { role?: unknown; expiresInDays?: unknown }
 
-  if (!['admin', 'member'].includes(role)) {
+  if (typeof role !== 'string' || !['admin', 'member'].includes(role)) {
     return c.json({ error: 'Invalid role. Must be "admin" or "member"' }, 400)
+  }
+  // Only owners hand out admin (as everywhere else roles are granted).
+  if (role === 'admin' && userMembership.role !== 'owner') {
+    return c.json({ error: 'Only owners can invite admins' }, 403)
+  }
+  if (typeof expiresInDays !== 'number' || !Number.isInteger(expiresInDays)
+    || expiresInDays < MIN_INVITATION_DAYS || expiresInDays > MAX_INVITATION_DAYS) {
+    return c.json({ error: `expiresInDays must be an integer from ${MIN_INVITATION_DAYS} to ${MAX_INVITATION_DAYS}` }, 400)
   }
 
   const id = generateId()
@@ -231,19 +244,21 @@ invitationsRoute.post('/invitations/:token/accept', async (c) => {
     return c.json({ error: 'You are already a member of this company' }, 409)
   }
 
-  // Add user as member
+  // Use the invitation (compare-and-set: once, and — if a sign-up claimed
+  // it — only by that account) and add the member, together.
   const membershipId = generateId()
   const timestamp = now()
-
-  db.prepare(`
-    INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(membershipId, user.id, invitation.company_id, invitation.role, timestamp, timestamp)
-
-  // Mark invitation as used
-  db.prepare(`
-    UPDATE invitations SET used_by = ?, used_at = ? WHERE id = ?
-  `).run(user.id, timestamp, invitation.id)
+  const joined = db.transaction(() => {
+    if (!consumeInvitation(db, invitation.id as string, user.id)) return false
+    db.prepare(`
+      INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?)
+    `).run(membershipId, user.id, invitation.company_id, invitation.role, timestamp, timestamp)
+    return true
+  })()
+  if (!joined) {
+    return c.json({ error: 'This invitation has already been used' }, 410)
+  }
 
   return c.json({
     success: true,
