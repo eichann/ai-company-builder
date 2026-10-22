@@ -93,4 +93,48 @@ describe('push checker performance', () => {
     expect(output.match(/^remote: {3}- sales\//gm)).toHaveLength(2500)
     expect(ms).toBeLessThan(30_000)
   })
+
+  it('checks a 200-commit push (every commit secret-scanned) in about a second', () => {
+    const bare = join(workDir, 'commits.git')
+    git(['init', '-q', '--bare', '--initial-branch=main', bare])
+    configureBareRepo(bare)
+    const clone = join(workDir, 'commits')
+    git(['clone', '-q', bare, clone])
+    git(['config', 'user.name', 'test'], clone)
+    git(['config', 'user.email', 'test@example.com'], clone)
+    git(['checkout', '-q', '-B', 'main'], clone)
+    writeFileSync(join(clone, 'README.md'), 'hi\n')
+    git(['add', '-A'], clone)
+    git(['commit', '-q', '--no-verify', '-m', 'base'], clone)
+    expect(spawnSync('git', ['push', '-q', 'origin', 'main'], { cwd: clone, env: { ...process.env, ACB_PUSHER_ROLE: 'owner' } }).status).toBe(0)
+
+    // 200 commits of 250 added lines each (50,000 lines), built in one
+    // fast-import. Commit 100 adds a secret, commit 150 removes it again:
+    // the net diff is clean, only the per-commit scan can see it.
+    const base = git(['rev-parse', 'HEAD'], clone).trim()
+    const data = (s: string) => `data ${Buffer.byteLength(s)}\n${s}\n`
+    let stream = ''
+    for (let c = 1; c <= 200; c++) {
+      const lines: string[] = []
+      for (let i = 0; i < 250; i++) lines.push(`commit ${c} line ${i}: <p class="c${i}">filler text</p>`)
+      stream += `commit refs/heads/main\ncommitter t <t@e> ${1_700_000_000 + c} +0000\n${data(`c${c}`)}`
+      if (c === 1) stream += `from ${base}\n`
+      stream += `M 100644 inline notes/c${c}.md\n${data(lines.join('\n') + '\n')}`
+      if (c === 100) stream += `M 100644 inline notes/key.md\n${data(`key = "${AWS_KEY}"\n`)}`
+      if (c === 150) stream += `M 100644 inline notes/key.md\n${data('key = (see the vault)\n')}`
+    }
+    execFileSync('git', ['fast-import', '--quiet'], { cwd: clone, input: stream, stdio: ['pipe', 'pipe', 'pipe'] })
+    expect(git(['rev-list', '--count', 'origin/main..main'], clone).trim()).toBe('200')
+
+    const env = { ...process.env, ACB_PUSHER_ROLE: 'member', ACB_NODE: process.execPath }
+    const start = Date.now()
+    const r = spawnSync('git', ['push', 'origin', 'main'], { cwd: clone, env, encoding: 'utf-8', maxBuffer: 1 << 28 })
+    const ms = Date.now() - start
+    console.log(`[push-check performance] 200 commits / 50,000 lines: ${ms} ms`)
+    const output = `${r.stdout}${r.stderr}`
+    expect(r.status).not.toBe(0)
+    expect(output).toContain('[SECRET_DETECTED]')
+    expect(output.match(/^remote: {3}- notes\/key\.md \(AWS Access Key ID\) *$/gm)).toHaveLength(1)
+    expect(ms).toBeLessThan(30_000)
+  })
 })

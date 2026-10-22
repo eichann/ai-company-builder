@@ -11,7 +11,8 @@
  *   write permission   resolveAccess(pusher, path).write   (new)
  *   Windows paths      the whole new tree
  *   gitlinks           added/changed mode-160000 entries
- *   secrets            added lines (existing branch) / tip-commit files (new branch)
+ *   secrets            added lines of the net diff and of every new commit
+ *                      (existing branch) / tip-commit files (new branch)
  *
  * "Changed in this push" for the path rules = every commit that is new to
  * the server (`rev-list <new> --not --all`; merges as combined diffs, so
@@ -233,7 +234,26 @@ async function checkGitlinks(ref: RefUpdate): Promise<string> {
   return captured(addedGitlinks(r.stdout.toString('latin1')).join('\n'))
 }
 
-async function checkSecrets(ref: RefUpdate): Promise<string> {
+/**
+ * Secrets: the lines a push adds.
+ *
+ * Existing branch: the net <old>..<new> diff AND the diff of every commit new
+ * to the server (`rev-list <new> --not --all`, each against its first parent
+ * — merges as combined diffs, counting only lines added relative to every
+ * parent; root commits against the empty tree) — in one `diff-tree --stdin`
+ * stream, so a 200-commit push is still two git processes. The net diff alone
+ * let a secret added in one commit and removed in a later one through,
+ * although the intermediate commit — secret included — then lands in the
+ * shared history on every member's machine. One entry per file × pattern
+ * across both. When the push is a single commit on top of <old>, its own
+ * diff is the net diff and is not read twice.
+ *
+ * New branch: unchanged — the whole content of the files the tip commit
+ * added or changed. Sync never creates branches (it pushes main, which the
+ * server itself creates with the company), and the root commit the server
+ * seeds a repository with must stay unscanned.
+ */
+async function checkSecrets(ref: RefUpdate, changes: RefChanges): Promise<string> {
   const diffArgs = ['-c', 'core.quotePath=false', 'diff', '--no-color', '--no-ext-diff', '--no-textconv']
   if (ref.oldSha === ZERO_SHA) {
     // New branch: the whole content of the files the tip commit added or
@@ -250,7 +270,26 @@ async function checkSecrets(ref: RefUpdate): Promise<string> {
     return captured(scanner.entries().join('\n'))
   }
   const scanner = new SecretScanner('line')
-  await streamGitLines([...diffArgs, '--src-prefix=a/', '--dst-prefix=b/', ref.oldSha, ref.newSha], l => scanner.push(l))
+  const netOk = await streamGitLines([...diffArgs, '--src-prefix=a/', '--dst-prefix=b/', ref.oldSha, ref.newSha], l => scanner.push(l))
+  // A net diff git cannot read (an <old> the server does not have — never
+  // sent by receive-pack) is already rejected by the other rules as
+  // "unable to check"; the report stays as it was.
+  const rl = netOk ? await changes.commits() : { ok: false, commits: '' }
+  if (rl.ok && rl.commits.length > 0) {
+    const commits = rl.commits.split('\n')
+    let onlyNetDiff = false
+    if (commits.length === 1 && commits[0] === ref.newSha) {
+      const parents = await runGit(['rev-list', '--parents', '-n', '1', ref.newSha])
+      onlyNetDiff = parents.ok && captured(parents.stdout.toString('latin1')) === `${ref.newSha} ${ref.oldSha}`
+    }
+    if (!onlyNetDiff) {
+      await streamGitLines(
+        ['-c', 'core.quotePath=false', 'diff-tree', '--stdin', '-r', '--root', '-c', '-M', '-p', '--no-color', '--no-ext-diff',
+          '--no-textconv', '--no-commit-id', '--src-prefix=a/', '--dst-prefix=b/'],
+        l => scanner.push(l),
+        { input: rl.commits + '\n' })
+    }
+  }
   return captured(scanner.entries().join('\n'))
 }
 
@@ -284,7 +323,7 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
     const gitlinks = await checkGitlinks(ref)
     if (gitlinks) f.gitlinks += gitlinks + '\n'
 
-    const secrets = await checkSecrets(ref)
+    const secrets = await checkSecrets(ref, changes)
     if (secrets) f.secrets += secrets + '\n'
   }
 

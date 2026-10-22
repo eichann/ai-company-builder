@@ -180,6 +180,42 @@ describe('pre-receive hook: secret scan', () => {
     ])
   })
 
+  it('rejects a secret added in one commit and removed in a later one (every new commit is scanned)', () => {
+    const { bare, clone } = setup({ 'README.md': 'hi\n', 'notes.md': 'one\n' })
+    writeFile(clone, 'notes.md', `one\n${AWS_KEY}\n`)
+    commitAll(clone, 'add secret')
+    writeFile(clone, 'notes.md', 'one\n(see the vault)\n')
+    commitAll(clone, 'remove secret')
+    const r = push(clone)
+    // The net diff holds no secret, but the first commit would land in shared history.
+    expect(r.ok).toBe(false)
+    expect(secretEntries(r.output)).toEqual(['notes.md (AWS Access Key ID)'])
+    expect(git(['rev-parse', 'main'], bare).trim()).not.toBe(git(['rev-parse', 'HEAD'], clone).trim())
+
+    // Squashed into one commit with the final content, the same change goes through.
+    git(['reset', '-q', '--soft', 'origin/main'], clone)
+    commitAll(clone, 'squashed')
+    const squashed = push(clone)
+    expect(squashed.output).not.toContain('[SECRET_DETECTED]')
+    expect(squashed.ok).toBe(true)
+  })
+
+  it('a merge counts only what it adds itself; merged commits are scanned on their own', () => {
+    const { clone } = setup({ 'README.md': 'hi\n', 'm.md': 'a\nb\n' })
+    git(['checkout', '-q', '-b', 'side'], clone)
+    writeFile(clone, 'm.md', `a\nb\n${GITHUB_PAT}\n`)
+    commitAll(clone, 'side adds a secret')
+    writeFile(clone, 'm.md', 'a\nb\nside\n')
+    commitAll(clone, 'side removes it')
+    git(['checkout', '-q', 'main'], clone)
+    writeFile(clone, 'm.md', 'top\na\nb\n')
+    commitAll(clone, 'main edit')
+    git(['merge', '-q', '--no-edit', 'side'], clone)
+    const r = push(clone)
+    expect(r.ok).toBe(false)
+    expect(secretEntries(r.output)).toEqual(['m.md (GitHub Personal Access Token)'])
+  })
+
   it('scans only added lines, and skips binary files', () => {
     const { clone } = setup({ 'README.md': 'hi\n', 'old.txt': `${AWS_KEY}\nkeep\n` })
     // The secret already on the server is not re-reported when the file changes elsewhere.

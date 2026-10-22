@@ -22,6 +22,8 @@ import type { ScopeWithRules } from '../../src/lib/permissions'
 
 const AWS = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('')
 const PAT = ['ghp_', 'a'.repeat(36)].join('')
+const OAUTH = ['gho_', 'b'.repeat(36)].join('')
+const SK = ['sk-', 'd'.repeat(24)].join('')
 
 describe('path rules (bytewise, A–Z case-insensitive)', () => {
   it('protected config at any depth and case, sorted and unique', () => {
@@ -89,6 +91,21 @@ describe('secret scan', () => {
     const s = new SecretScanner('file')
     diff.forEach(l => s.push(l))
     expect(s.entries()).toEqual(['  - b.txt (AWS Access Key ID)', '  - with space.md (AWS Access Key ID)'])
+  })
+  it('combined diff (merge): only lines added relative to every parent count; several diffs share one dedupe', () => {
+    const s = new SecretScanner('line')
+    ;[
+      'diff --combined m.txt', 'index 1,2..3', '--- a/m.txt', '+++ b/m.txt', '@@@ -1,1 -1,1 +1,3 @@@',
+      ` +${AWS}`, `+ ${PAT}`, `++${OAUTH}`, '-  gone',
+      // The next diff (a new commit's own) repeats a file × pattern already reported.
+      'diff --git a/m.txt b/m.txt', '--- a/m.txt', '+++ b/m.txt', '@@ -1 +1,2 @@', `+${OAUTH}`, `+${AWS}`,
+      '@@ -9 +10 @@', `+${SK}`,
+    ].forEach(l => s.push(l))
+    expect(s.entries()).toEqual([
+      '  - m.txt (GitHub OAuth Token)',
+      '  - m.txt (AWS Access Key ID)',
+      '  - m.txt (OpenAI/Anthropic API Key)',
+    ])
   })
 })
 

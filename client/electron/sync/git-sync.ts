@@ -40,6 +40,25 @@ import type { SyncDeps } from './types'
 
 export type { SyncDeps, SyncDialog, SyncServerApi, SyncLogger } from './types'
 
+/**
+ * The result for a push the server refused with SECRET_DETECTED: the files
+ * from the hook's list ("remote:   - <file> (<pattern>)"). No PENDING_PUSH —
+ * the same push would be refused again until the member removes the secret.
+ */
+function secretDetectedResult(errorMessage: string) {
+  // git prefixes pre-receive hook stderr with "remote: "
+  const fileLines = errorMessage
+    .split('\n')
+    .map((line: string) => line.replace(/^remote:\s*/, '').trim())
+    .filter((line: string) => line.startsWith('- '))
+  const fileList = fileLines.length > 0 ? fileLines.join('\n') : '（詳細不明）'
+  return {
+    success: false as const,
+    error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${fileList}`,
+    secretDetected: true as const
+  }
+}
+
 /** Filled in by runSync once files outside the checkout were held back (reported on every later outcome). */
 interface SyncSideEffects { outsideCheckout: OutsideCheckoutResult | null }
 
@@ -803,6 +822,12 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       }
     }
 
+    // Set when a SECRET_DETECTED rejection was resolved by squashing: the
+    // secret was only in an earlier, unpushed version.
+    let secretSquashed = false
+    const secretNote = () => secretSquashed
+      ? '前回検出されたシークレットは最新の版から削除されていたため、途中の版をまとめて共有しました（シークレットは共有されていません）。'
+      : ''
     // Set when a PERSONAL_PATH rejection was resolved by untracking files.
     let personalUntrack = null as PersonalUntrackResult | null // widened: assigned inside nested try
     const personalNote = () => personalUntrack && personalUntrack.untracked.length > 0
@@ -959,11 +984,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
               writeDeniedToRestore = []
             }
           } else if (squashMsg.includes('SECRET_DETECTED')) {
-            return {
-              success: false,
-              error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${squashMsg.split('\n').map(l => l.replace(/^remote:\s*/, '').trim()).filter(l => l.startsWith('- ')).join('\n') || '（詳細不明）'}`,
-              secretDetected: true
-            }
+            return secretDetectedResult(squashMsg)
           } else {
             // Ordinary push failure (network, a teammate pushed in between):
             // the squashed commit stays local and the next sync retries it.
@@ -1037,13 +1058,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
                 error: rejectionError(againProtected, againWriteDenied, remainingProtected, remainingWriteDenied),
               }
             }
-            if (retryMsg.includes('SECRET_DETECTED')) {
-              return {
-                success: false,
-                error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${retryMsg.split('\n').map(l => l.replace(/^remote:\s*/, '').trim()).filter(l => l.startsWith('- ')).join('\n') || '（詳細不明）'}`,
-                secretDetected: true
-              }
-            }
+            if (retryMsg.includes('SECRET_DETECTED')) return secretDetectedResult(retryMsg)
             // The local history is clean now; an ordinary push failure (network,
             // a teammate pushed in between) is retried by the next sync.
             log.error(hasProtected ? 'Git sync: Push after protected config recovery failed:' : 'Git sync: Push after write-denied recovery failed:', retryMsg)
@@ -1095,61 +1110,74 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         }
       }
 
-      // Check if push was rejected due to secret detection
+      // SECRET_DETECTED: the hook scans every commit in the push, not just
+      // the final state. A secret the member has since removed (the first
+      // rejection told them to) still blocks the push through the commit
+      // that added it — a plain retry would be refused forever. So, like
+      // the first step of PROTECTED_CONFIG: squash the unpushed commits into
+      // one with the files as they are now (only onto an origin/main that
+      // is an ancestor of HEAD) and push once more. If the secret is still
+      // in the files, that push is refused too: report it, no PENDING_PUSH.
+      // The secret is never removed on the member's behalf.
       if (pushErrorMsg.includes('SECRET_DETECTED')) {
-        // Extract file list from error message
-        // git prefixes pre-receive hook stderr with "remote: "
-        const fileLines = pushErrorMsg
-          .split('\n')
-          .map((line: string) => line.replace(/^remote:\s*/, '').trim())
-          .filter((line: string) => line.startsWith('- '))
-        const fileList = fileLines.length > 0
-          ? fileLines.join('\n')
-          : '（詳細不明）'
-        return {
-          success: false,
-          error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${fileList}`,
-          secretDetected: true
-        }
-      }
-
-      log.error('Git sync: Push to main failed:', pushErrorMsg)
-      // Try master branch if main fails
-      try {
-        await pushToServer('master')
-      } catch (masterPushError) {
-        // Check secret detection on master push too
-        const masterErrorMsg = masterPushError instanceof Error ? masterPushError.message : String(masterPushError)
-        if (masterErrorMsg.includes('SECRET_DETECTED')) {
-          const fileLines = masterErrorMsg
-            .split('\n')
-            .map((line: string) => line.replace(/^remote:\s*/, '').trim())
-            .filter((line: string) => line.startsWith('- '))
-          const fileList = fileLines.length > 0
-            ? fileLines.join('\n')
-            : '（詳細不明）'
+        log.warn('Git sync: Push rejected — secret detected')
+        try {
+          const squash = await squashUnpushedCommits({ git })
+          // Zero or one unpushed commit: the secret is in the current files.
+          if (!squash.squashed) return secretDetectedResult(pushErrorMsg)
+          if (squash.committed) await pushToServer()
+          secretSquashed = true
+          log.log('Git sync: Pushed the unpushed commits squashed into one — the secret was only in an earlier version')
+        } catch (squashError) {
+          const squashMsg = squashError instanceof Error ? squashError.message : String(squashError)
+          if (squashMsg.includes('SECRET_DETECTED')) return secretDetectedResult(squashMsg)
+          // origin/main is not an ancestor (should not happen right after the
+          // rebase): nothing was changed — report the rejection as it was.
+          if (squashError instanceof ProtectedConfigRecoveryError) return secretDetectedResult(pushErrorMsg)
+          // Ordinary push failure (network, a teammate pushed in between):
+          // the squashed commit holds no secret, the next sync retries it.
+          log.error('Git sync: Push after squashing unpushed commits failed:', squashMsg)
+          fs.writeFileSync(pendingPushFile, deps.now().toISOString())
           return {
             success: false,
-            error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${fileList}`,
-            secretDetected: true
+            error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+            errorType: 'push_failed' as const,
+            pushFailed: true,
+            hadConflicts,
+            conflictFiles,
+            deletedConflictFiles,
+            backupPath: hadConflicts ? backupPath : undefined,
+            restoredFolders,
+            ignoredLargeFiles,
+            excludedNestedRepos: newlyExcludedNestedRepos
           }
         }
-        log.error('Git sync: Push to master also failed:', masterErrorMsg)
-        // Record pending push for retry on next sync
-        const pendingPushFile = path.join(repoPath, '.git', 'PENDING_PUSH')
-        fs.writeFileSync(pendingPushFile, deps.now().toISOString())
-        return {
-          success: false,
-          error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
-          errorType: 'push_failed' as const,
-          pushFailed: true,
-          hadConflicts,
-          conflictFiles,
-          deletedConflictFiles,
-          backupPath: hadConflicts ? backupPath : undefined,
-          restoredFolders,
-          ignoredLargeFiles,
-          excludedNestedRepos: newlyExcludedNestedRepos
+      } else {
+        log.error('Git sync: Push to main failed:', pushErrorMsg)
+        // Try master branch if main fails
+        try {
+          await pushToServer('master')
+        } catch (masterPushError) {
+          // Check secret detection on master push too
+          const masterErrorMsg = masterPushError instanceof Error ? masterPushError.message : String(masterPushError)
+          if (masterErrorMsg.includes('SECRET_DETECTED')) return secretDetectedResult(masterErrorMsg)
+          log.error('Git sync: Push to master also failed:', masterErrorMsg)
+          // Record pending push for retry on next sync
+          const pendingPushFile = path.join(repoPath, '.git', 'PENDING_PUSH')
+          fs.writeFileSync(pendingPushFile, deps.now().toISOString())
+          return {
+            success: false,
+            error: 'ローカルにコミットしましたが、プッシュに失敗しました。次回の同期で再試行します。',
+            errorType: 'push_failed' as const,
+            pushFailed: true,
+            hadConflicts,
+            conflictFiles,
+            deletedConflictFiles,
+            backupPath: hadConflicts ? backupPath : undefined,
+            restoredFolders,
+            ignoredLargeFiles,
+            excludedNestedRepos: newlyExcludedNestedRepos
+          }
         }
       }
     }
@@ -1171,7 +1199,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       }
       return {
         success: true,
-        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。${personalNote()}その他の変更は正常に反映されました。`,
+        message: `同期完了。${conflictFiles.length}ファイルが競合しました（${outcomes.join('、')}）。競合前のローカル版は .backups/ に保存してあります。${personalNote()}${secretNote()}その他の変更は正常に反映されました。`,
         untrackedPersonalFiles: personalUntrack?.untracked,
         hadConflicts: true,
         conflictFiles,
@@ -1188,6 +1216,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       successMessage += `（${ignoredLargeFiles.length}個の大容量ファイルを同期対象外にしました）`
     }
     if (personalNote()) successMessage += `。${personalNote()}`
+    if (secretNote()) successMessage += `。${secretNote()}`
 
     return {
       success: true,

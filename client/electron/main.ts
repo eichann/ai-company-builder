@@ -1474,7 +1474,8 @@ function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<
       binary: dugiteBinary,
       envOverrides: {
         GIT_EXEC_PATH: path.join(gitDir, 'libexec', 'git-core'),
-        GIT_TEMPLATE_DIR: path.join(gitDir, 'share', 'git-core', 'templates'),
+        // GIT_TEMPLATE_DIR is set by the git factory for every binary: an
+        // empty app-owned directory, so init/clone copy no templates.
       },
       fallback: false,
     }
@@ -1509,6 +1510,9 @@ function createGit(repoPath: string): SimpleGit {
     binary,
     askPassPath: getGitAskPassPath(),
     token: extractSessionToken(authCookies),
+    // App-owned hooks/ and templates/ (empty): the member's git hooks and
+    // init.templateDir never run in the app (sync/git-factory.ts appGitDirs).
+    appGitDir: path.join(app.getPath('userData'), 'git'),
     envOverrides,
     // X-ACB-Client-Version / X-ACB-Client-Platform on git's HTTP requests,
     // so the server records which build synced (electron/client-identity.ts).

@@ -1338,14 +1338,15 @@
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
           "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pushing to origin..."
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — secret detected"
         ]
       },
       {
         "member": "a",
         "result": {
           "success": true,
-          "message": "同期が完了しました",
+          "message": "同期が完了しました。前回検出されたシークレットは最新の版から削除されていたため、途中の版をまとめて共有しました（シークレットは共有されていません）。",
           "restoredFolders": [],
           "ignoredLargeFiles": [],
           "excludedNestedRepos": []
@@ -1356,7 +1357,9 @@
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
           "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pushing to origin..."
+          "log: Git sync: Pushing to origin...",
+          "warn: Git sync: Push rejected — secret detected",
+          "log: Git sync: Pushed the unpushed commits squashed into one — the secret was only in an earlier version"
         ]
       }
     ],
@@ -1368,7 +1371,6 @@
         "s.md": "286c5f5776916d7d7d5849988ca9d83e722cf9c2"
       },
       "serverSubjects": [
-        "Sync from AI Company Builder",
         "Sync from AI Company Builder",
         "Sync from AI Company Builder",
         "seed"

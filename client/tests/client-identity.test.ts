@@ -84,7 +84,8 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
   const body = main.slice(start, main.indexOf('\n}\n', start))
   assert.match(body, /createConfiguredGit\(/)
   assert.match(body, /extraConfig: gitIdentityConfig\(\)/)
-  const git = createConfiguredGit(root, { binary: 'git', askPassPath: '/nonexistent', token: '', extraConfig: config })
+  const appGitDir = mkdtempSync(path.join(tmpdir(), 'acb-app-git-'))
+  const git = createConfiguredGit(root, { binary: 'git', askPassPath: '/nonexistent', token: '', appGitDir, extraConfig: config })
   assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
   assert.equal((await git.raw(['config', '--get', 'http.postBuffer'])).trim(), '524288000')
   // No diffstat after a fast-forward pull: it would download, in a partial
@@ -92,6 +93,9 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
   assert.equal((await git.raw(['config', '--get', 'merge.stat'])).trim(), 'false')
   assert.equal((await git.raw(['config', '--get', 'credential.helper'])).trim(), '') // last value wins
   assert.equal((await git.raw(['var', 'GIT_EDITOR'])).trim(), 'true')
+  // The member's own hooks and templates never apply (git-factory appGitDirs).
+  assert.equal((await git.raw(['config', '--get', 'core.hooksPath'])).trim(), path.join(appGitDir, 'hooks').split(path.sep).join('/'))
+  rmSync(appGitDir, { recursive: true, force: true })
 })
 
 test('fetches to the server origin carry the identity headers, others are untouched', async () => {
