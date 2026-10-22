@@ -18,6 +18,7 @@ export type VoiceEvent = { requestId: string } & (
   | { type: 'result'; text: string }
   | { type: 'error'; message: string; rawText?: string }
 )
+import type { VoicePromptSettings } from './voice-prompt'
 export interface VoiceInputAPI {
   capabilities: () => Promise<VoiceCapabilities>
   devices: () => Promise<VoiceDeviceList>
@@ -25,4 +26,9 @@ export interface VoiceInputAPI {
   stop: (requestId: string) => Promise<void>
   cancel: (requestId: string) => Promise<void>
   onEvent: (callback: (event: VoiceEvent) => void) => () => void
+  /** The member's 「整え方の指示」 (this PC only). */
+  getPrompt: () => Promise<VoicePromptSettings>
+  /** Saves edited instructions (at most 8,000 characters); rejects with a member-facing message. */
+  setPrompt: (instructions: string) => Promise<VoicePromptSettings>
+  resetPrompt: () => Promise<VoicePromptSettings>
 }

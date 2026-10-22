@@ -1,4 +1,5 @@
 import { VoiceShortcutSettings } from './VoiceShortcutSettings'
+import { VoicePromptSettings } from './VoicePromptSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
@@ -337,6 +338,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
                 <Card className="p-5"><VoiceShortcutSettings /></Card>
+                <Card className="p-5"><VoicePromptSettings /></Card>
               </div>
             ) : loading ? loadingState : activeTab === 'apikeys' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">

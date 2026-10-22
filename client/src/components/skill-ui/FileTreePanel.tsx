@@ -17,6 +17,7 @@ import {
 } from '@phosphor-icons/react'
 import { ContextMenu, type ContextMenuItem } from '../common/ContextMenu'
 import { normalizePathSeparators } from '../../utils/path'
+import { isPathWithin } from '../../lib/editorTabs'
 import { InputDialog } from '../common/InputDialog'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { getFileIcon, FolderIcon } from './FileIcons'
@@ -232,7 +233,9 @@ export function FileTreePanel({
 
   // Determine the target directory for new file/folder creation based on current selection
   const activeParentPath = (() => {
-    if (!selectedFilePath) return departmentPath
+    // The active editor tab may belong to another department (tabs survive
+    // department switches): new files then go to this department's folder.
+    if (!selectedFilePath || !isPathWithin(selectedFilePath, departmentPath)) return departmentPath
     // Find if the selected path is a directory (check in expanded dirs or files)
     const isDir = expandedDirs.has(selectedFilePath) ||
       files.some(f => f.path === selectedFilePath && f.isDirectory) ||
