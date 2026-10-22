@@ -345,6 +345,8 @@ interface TabbedEditorPanelProps {
   openFiles: string[]
   activeFilePath: string | null
   previewFilePath?: string | null
+  /** Department label for tabs whose file is outside the selected department. */
+  tabLabels?: Record<string, string>
   onSelectFile: (path: string) => void
   onCloseFile: (path: string) => void
   onPinFile?: (path: string) => void
@@ -355,6 +357,7 @@ export function TabbedEditorPanel({
   openFiles,
   activeFilePath,
   previewFilePath,
+  tabLabels,
   onSelectFile,
   onCloseFile,
   onPinFile,
@@ -707,6 +710,7 @@ export function TabbedEditorPanel({
             const isModified = file && file.content !== file.originalContent
             const isPreview = filePath === previewFilePath
             const FileIcon = getFileIcon(fileName, false)
+            const deptLabel = tabLabels?.[filePath]
 
             return (
               <div
@@ -715,7 +719,7 @@ export function TabbedEditorPanel({
                 onDoubleClick={() => { if (isPreview && onPinFile) onPinFile(filePath) }}
                 className={`
                   group flex items-center gap-2 px-3 py-2 cursor-pointer
-                  border-r border-gray-200 dark:border-zinc-800/50 min-w-0 max-w-[200px]
+                  border-r border-gray-200 dark:border-zinc-800/50 min-w-0 ${deptLabel ? 'max-w-[260px]' : 'max-w-[200px]'}
                   ${isActive
                     ? 'bg-white dark:bg-zinc-900/80 text-gray-800 dark:text-zinc-200'
                     : 'bg-gray-50 dark:bg-zinc-900/30 text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-900/50'
@@ -723,7 +727,12 @@ export function TabbedEditorPanel({
                 `}
               >
                 <FileIcon size={14} className="flex-shrink-0" />
-                <span className={`text-xs truncate ${isPreview ? 'italic' : ''}`} title={filePath}>{fileName}</span>
+                {deptLabel && (
+                  <span data-tab-dept className="text-[11px] text-gray-400 dark:text-zinc-500 truncate max-w-[96px] flex-shrink-[2]" title={`${deptLabel} のファイル`}>
+                    {deptLabel} /
+                  </span>
+                )}
+                <span className={`text-xs truncate ${isPreview ? 'italic' : ''} ${deptLabel ? '-ml-1' : ''}`} title={filePath}>{fileName}</span>
                 {isModified && (
                   <span className="w-1.5 h-1.5 rounded-full bg-amber-400 flex-shrink-0" />
                 )}

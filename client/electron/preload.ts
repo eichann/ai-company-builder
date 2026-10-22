@@ -33,6 +33,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     start: (id: string, deviceId?: string) => ipcRenderer.invoke('voice:start', id, deviceId),
     stop: (id: string) => ipcRenderer.invoke('voice:stop', id),
     cancel: (id: string) => ipcRenderer.invoke('voice:cancel', id),
+    getPrompt: () => ipcRenderer.invoke('voice:getPrompt'),
+    setPrompt: (instructions: string) => ipcRenderer.invoke('voice:setPrompt', instructions),
+    resetPrompt: () => ipcRenderer.invoke('voice:resetPrompt'),
     onEvent: (callback: (event: VoiceEvent) => void) => {
       const listener = (_event: unknown, value: VoiceEvent) => callback(value)
       ipcRenderer.on('voice:event', listener)

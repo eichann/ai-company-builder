@@ -28,11 +28,15 @@ import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { normalizePathSeparators } from '../../utils/path'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
+import { dragWidth, leftPanelDrag } from '../../lib/panelResize'
+import { tabDepartmentLabels } from '../../lib/editorTabs'
 
 // Panel width constraints
 const MIN_LEFT_PANEL_WIDTH = 300
 const MAX_LEFT_PANEL_WIDTH = 1200
 const MIN_CHAT_WIDTH = 280
+const MIN_FILE_TREE_WIDTH = 120
+const MAX_FILE_TREE_WIDTH = 400
 
 type LeftPanelTab = 'skills' | 'files' | 'search' | 'history'
 
@@ -210,7 +214,8 @@ export function SkillCentricLayout() {
   const [fileTreeWidth, setFileTreeWidth] = useState(200)
   const [chatCollapsed, setChatCollapsed] = useState(false)
   const leftPanelWidthBeforeCollapseRef = useRef(550)
-  const overDragRef = useRef(0)
+  const fileTreeWidthRef = useRef(fileTreeWidth)
+  useEffect(() => { fileTreeWidthRef.current = fileTreeWidth }, [fileTreeWidth])
 
   // Modals
   const [showNewSkillWizard, setShowNewSkillWizard] = useState(false)
@@ -434,14 +439,20 @@ export function SkillCentricLayout() {
   const handleSelectDept = (id: string) => {
     setSelectedDeptIdWithSave(id)
     setSelectedSkillId(null)
-    setOpenFiles([])
-    setActiveFilePath(null)
+    // Open file tabs (and the active one) stay: they are one strip for the
+    // whole company, labelled with their department when it is not this one.
     // Prefetch commit history for this department
     const dept = departments.find(d => d.id === id)
     if (dept && currentCompany?.rootPath) {
       prefetchCommits(currentCompany.rootPath, dept.folder)
     }
   }
+
+  const tabLabels = useMemo(() => tabDepartmentLabels(openFiles, {
+    rootPath: currentCompany?.rootPath || '',
+    departments,
+    selectedDeptId: isCompanyWide ? null : selectedDeptId,
+  }), [openFiles, currentCompany?.rootPath, departments, isCompanyWide, selectedDeptId])
 
   const handleSelectSkill = (id: string) => {
     setSelectedSkillId(id)
@@ -664,37 +675,33 @@ ${promptContent}
     refreshSkills()
   }, [refreshSkills])
 
-  const handleFileTreeResize = useCallback((delta: number) => {
-    setFileTreeWidth(prev => Math.min(400, Math.max(120, prev + delta)))
+  // Resizing: each drag snapshots the width at pointerdown and derives the
+  // width from the pointer's total offset (see lib/panelResize).
+  const fileTreeDragStartRef = useRef(fileTreeWidth)
+  const handleFileTreeResizeStart = useCallback(() => {
+    fileTreeDragStartRef.current = fileTreeWidthRef.current
+  }, [])
+  const handleFileTreeResize = useCallback((offset: number) => {
+    setFileTreeWidth(dragWidth(fileTreeDragStartRef.current, offset, MIN_FILE_TREE_WIDTH, MAX_FILE_TREE_WIDTH))
   }, [])
 
   const OVER_DRAG_COLLAPSE = 60 // collapse after dragging 60px past max
 
-  const handleLeftPanelResize = useCallback((delta: number) => {
-    setLeftPanelWidth(prev => {
-      const windowWidth = window.innerWidth
-      const dynamicMaxWidth = Math.min(MAX_LEFT_PANEL_WIDTH, windowWidth - MIN_CHAT_WIDTH - 10)
-      const newWidth = prev + delta
-
-      // Track over-drag when at max and still pushing right
-      if (prev >= dynamicMaxWidth - 2 && delta > 0) {
-        overDragRef.current += delta
-        if (overDragRef.current >= OVER_DRAG_COLLAPSE) {
-          overDragRef.current = 0
-          leftPanelWidthBeforeCollapseRef.current = prev
-          setChatCollapsed(true)
-          return prev // keep width as-is, chat panel will hide
-        }
-        return prev // stay clamped while accumulating
-      }
-
-      // Reset over-drag when moving left
-      if (delta < 0) {
-        overDragRef.current = 0
-      }
-
-      return Math.min(dynamicMaxWidth, Math.max(MIN_LEFT_PANEL_WIDTH, newWidth))
+  const leftPanelDragStartRef = useRef(leftPanelWidth)
+  const handleLeftPanelResizeStart = useCallback(() => {
+    leftPanelDragStartRef.current = leftPanelWidthRef.current
+  }, [])
+  const handleLeftPanelResize = useCallback((offset: number) => {
+    const dynamicMaxWidth = Math.min(MAX_LEFT_PANEL_WIDTH, window.innerWidth - MIN_CHAT_WIDTH - 10)
+    const { width, collapse } = leftPanelDrag(leftPanelDragStartRef.current, offset, {
+      min: MIN_LEFT_PANEL_WIDTH, max: dynamicMaxWidth, collapseAfter: OVER_DRAG_COLLAPSE,
     })
+    setLeftPanelWidth(width)
+    if (collapse) {
+      // The divider unmounts with the chat, which ends this drag.
+      leftPanelWidthBeforeCollapseRef.current = width
+      setChatCollapsed(true)
+    }
   }, [])
 
   const toggleChat = useCallback(() => {
@@ -1162,12 +1169,13 @@ ${promptContent}
                   onPrivateFolderCreated={() => { void handleSync() }}
                 />
               </div>
-              <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />
+              <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" />
               <div className="flex-1 min-w-0">
                 <TabbedEditorPanel
                   openFiles={openFiles}
                   activeFilePath={activeFilePath}
                   previewFilePath={previewFilePath}
+                  tabLabels={tabLabels}
                   onSelectFile={handleSelectOpenFile}
                   onCloseFile={handleCloseFile}
                   onPinFile={handlePinFile}
@@ -1178,7 +1186,7 @@ ${promptContent}
         </div>
 
         {/* Resize Handle (hidden when chat is collapsed) */}
-        {!chatCollapsed && <ResizeHandle onResize={handleLeftPanelResize} direction="horizontal" />}
+        {!chatCollapsed && <ResizeHandle onResizeStart={handleLeftPanelResizeStart} onResize={handleLeftPanelResize} direction="horizontal" />}
           </>
         )}
 

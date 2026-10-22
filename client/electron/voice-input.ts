@@ -5,6 +5,7 @@ import path from 'node:path'
 import type { VoiceCapabilities, VoiceDeviceList } from '../shared/voice-input'
 import { listDevices, probeCapabilities } from './voice-probe'
 import { createVoiceFormatter } from './voice-formatter'
+import { createVoicePromptStore } from './voice-prompt-store'
 import type { AuthMode } from '../shared/agent'
 
 import { VoiceInputSession, type SpeechRecognitionProvider, type RecognitionEvent } from './voice-session'
@@ -54,6 +55,11 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => Record<st
     },
   )
   const cancel = () => session.cancel()
+  // 「整え方の指示」: per member on this PC, read at the start of each voice input.
+  const prompts = createVoicePromptStore(path.join(app.getPath('userData'), 'voice-prompt.json'))
+  ipcMain.handle('voice:getPrompt', () => prompts.get())
+  ipcMain.handle('voice:setPrompt', (_event, instructions: unknown) => prompts.set(instructions))
+  ipcMain.handle('voice:resetPrompt', () => prompts.reset())
   ipcMain.handle('voice:capabilities', capabilities)
   ipcMain.handle('voice:devices', () => provider.devices())
   ipcMain.handle('voice:start', async (event, id: unknown, deviceId?: unknown) => {
@@ -70,7 +76,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => Record<st
     requestedAt = Date.now()
     const cwd = path.join(app.getPath('userData'), 'voice-polisher')
     mkdirSync(cwd, { recursive: true })
-    const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd })
+    const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd, systemPrompt: prompts.systemPrompt() })
     await session.start(id, deviceId as string | undefined, formatter)
   })
   ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
