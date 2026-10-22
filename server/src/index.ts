@@ -8,6 +8,7 @@ import Database from 'better-sqlite3'
 import path from 'path'
 import { auth } from './lib/auth'
 import { db, initDatabase } from './db'
+import { signUpWithInvitation } from './lib/invitation-signup'
 import { meRoute } from './routes/me'
 import { sshKeysRoute } from './routes/ssh-keys'
 import { companiesRoute } from './routes/companies'
@@ -138,14 +139,11 @@ app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
 
     if (result.count > 0) {
       // Allow signup only with valid invitation token
+      // (single-use: the sign-up claims it — lib/invitation-signup.ts)
       const invitationToken = c.req.header('X-Invitation-Token')
       if (invitationToken) {
-        const invitation = db.prepare(
-          "SELECT id FROM invitations WHERE token = ? AND used_by IS NULL AND expires_at > datetime('now')"
-        ).get(invitationToken)
-        if (invitation) {
-          return auth.handler(c.req.raw)
-        }
+        const res = await signUpWithInvitation(db, invitationToken, () => auth.handler(c.req.raw))
+        if (res) return res
       }
       return c.json({ error: 'Signup is disabled. Please use an invitation link.' }, 403)
     }

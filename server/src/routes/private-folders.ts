@@ -11,13 +11,17 @@
  *   GET  /private-folders/:scopeId                one, with who can read/edit
  *   PUT  /private-folders/:scopeId/members        replace viewers / editors
  *   POST /private-folders/:scopeId/make-public    公開に戻す (owner/admin)
+ *   DELETE /private-folders/:scopeId?confirm=     delete (owner/admin, type
+ *                                                 the name; archived first)
+ *   POST /paths/check                             any member: may I put
+ *                                                 something at these paths?
  *   GET  /me/private-folders                      any member: the private
  *                                                 folders they may read, with
  *                                                 who else can (app lock icons)
  *   GET  /me/scopes                               any member: the private
  *                                                 folders they may read (+ clone
- *                                                 URL) and every private
- *                                                 folder as a salted hash
+ *                                                 URL) — nothing about the
+ *                                                 others
  *
  * Names never reach members who may not read a folder: anything that is not
  * theirs to see answers exactly as if nothing were there (404 for a scope
@@ -32,7 +36,9 @@
  * OUTDATED_CLIENTS, same shape as the write-restriction guard) while any
  * member's app cannot handle private folders (lib/client-version.ts
  * supportsPrivateFolders; unknown = not ready). An owner/admin may pass
- * `force: true`; a manager gets 403 FORCE_NOT_ALLOWED.
+ * `force: true`; a manager gets 403 FORCE_NOT_ALLOWED. While no released app
+ * handles them at all (PRIVATE_FOLDERS_CLIENT_COMMIT_DATE null), creation is
+ * refused outright — 409 PRIVATE_FOLDERS_UNAVAILABLE, force or not.
  */
 import { createHash } from 'crypto'
 import { Hono } from 'hono'
@@ -40,7 +46,7 @@ import type { Context } from 'hono'
 import { db } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { getClientActivityForCompany } from '../lib/client-activity'
-import { supportsPrivateFolders } from '../lib/client-version'
+import { privateFoldersClientCutoff, supportsPrivateFolders } from '../lib/client-version'
 import { getMemberRole, listDepartmentManagerIds, listScopesWithRules, managedDepartmentIds } from '../lib/permission-store'
 import { FULL_ACCESS_ROLES, findPrivateScope, isSameOrAncestorPath, type ScopeWithRules } from '../lib/permissions'
 import {
@@ -53,16 +59,23 @@ import {
   PathUnavailableError,
   readablePrivateFolders,
   replacePrivateFolderRules,
-  reservedHashes,
   canWriteInPrivateFolder,
+  deletePrivateFolder,
+  isPathUsable,
   type PrivateFolderRecord,
 } from '../lib/private-folders'
 import { isValidFolderName, resolveRepoFolder, withCompanyLock } from './departments'
 import { parseScopePath, type OutdatedMember } from './permission-rules'
 import {
   MY_PRIVATE_FOLDER_VIEWERS_LIMIT,
+  PATHS_CHECK_MAX_PATHS,
+  PATHS_CHECK_PATHS_PER_MINUTE,
+  PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE,
+  normalizeReservedPath,
   reservedPathMessage,
+  type DeletePrivateFolderResult,
   type MyPrivateFolder,
+  type PathCheckResponse,
   type MyScopesResponse,
   type PrivateFolderDetail,
   type PrivateFolderSummary,
@@ -221,6 +234,10 @@ export const PRIVATE_FOLDERS_OUTDATED_ERROR =
 privateFoldersRoute.post('/private-folders', async (c) => {
   const actor = await authAndAuthorize(c)
   if (actor instanceof Response) return actor
+  // No released app syncs private folders yet: refuse outright, force or not.
+  if (privateFoldersClientCutoff() === null) {
+    return c.json({ error: PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE, code: 'PRIVATE_FOLDERS_UNAVAILABLE' }, 409)
+  }
   const body = await readJson(c)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
 
@@ -347,7 +364,7 @@ privateFoldersRoute.post('/private-folders/:scopeId/make-public', async (c) => {
     const result = await withCompanyLock(actor.companyId, async () => {
       const current = getPrivateFolder(db, actor.companyId, folder.scope.id)
       if (!current) return null
-      return makePrivateFolderPublic(db, actor.companyId, current)
+      return makePrivateFolderPublic(db, actor.companyId, current, actor.userId)
     })
     if (!result) return c.json({ error: 'Not found' }, 404)
     return c.json({ success: true, data: result })
@@ -410,13 +427,120 @@ privateFoldersRoute.get('/me/scopes', async (c) => {
       canWrite: canWriteInPrivateFolder(scopes, p.scope, actor.companyId, actor.userId, actor.role),
     }
   })
-  const reserved = reservedHashes(db, actor.companyId, scopes)
-  const version = createHash('sha256').update(JSON.stringify({ readable, reserved })).digest('hex').slice(0, 32)
+  // Nothing about private folders the caller cannot read — not even a salted
+  // hash of the path (short Japanese folder names are cheap to brute-force).
+  // The app asks POST /paths/check instead.
+  const version = createHash('sha256').update(JSON.stringify({ readable })).digest('hex').slice(0, 32)
   const etag = `"${version}"`
   c.header('ETag', etag)
   c.header('Cache-Control', 'private, no-cache')
   const inm = c.req.header('If-None-Match')
   if (inm && inm.split(',').some(t => t.trim() === etag)) return c.body(null, 304)
-  const data: MyScopesResponse = { version, scopes: readable, reserved }
+  const data: MyScopesResponse = { version, scopes: readable }
   return c.json({ success: true, data })
+})
+
+// ----------------------------------------------------------------------------
+// POST /paths/check — may the caller put something at these paths?
+// ----------------------------------------------------------------------------
+
+const MAX_CHECK_PATH_LENGTH = 1024
+const CHECK_WINDOW_MS = 60_000
+const checkBudget = new Map<string, { windowStart: number; used: number }>()
+
+/**
+ * Take `n` paths from the member's per-minute budget (per company). False
+ * when that would exceed PATHS_CHECK_PATHS_PER_MINUTE: guessing private
+ * folder names one request at a time stays slow.
+ */
+function takeCheckBudget(companyId: string, userId: string, n: number, now = Date.now()): boolean {
+  const key = `${companyId}\u0000${userId}`
+  let b = checkBudget.get(key)
+  if (!b || now - b.windowStart >= CHECK_WINDOW_MS) {
+    b = { windowStart: now, used: 0 }
+    checkBudget.set(key, b)
+  }
+  if (b.used + n > PATHS_CHECK_PATHS_PER_MINUTE) return false
+  b.used += n
+  // Forget idle members now and then (bounded memory).
+  if (checkBudget.size > 10_000) {
+    for (const [k, v] of checkBudget) if (now - v.windowStart >= CHECK_WINDOW_MS) checkBudget.delete(k)
+  }
+  return true
+}
+
+/** Tests only. */
+export function resetPathCheckBudgetForTests(): void {
+  checkBudget.clear()
+}
+
+// { paths: string[] } → { results: [{ path, usable }] }
+//
+// usable: false exactly when the path is at or under a private folder the
+// caller cannot read (a push there is refused with [RESERVED_PATH]); one
+// they can read answers true (its contents go to its own repository). The
+// answer is the same shape, wording and work whatever makes a path unusable,
+// says nothing about which folder, and the paths are never logged.
+privateFoldersRoute.post('/paths/check', async (c) => {
+  const actor = await authAndAuthorize(c)
+  if (actor instanceof Response) return actor
+  const body = await readJson(c)
+  const raw = body?.paths
+  if (!Array.isArray(raw) || raw.length === 0 || raw.length > PATHS_CHECK_MAX_PATHS) {
+    return c.json({ error: `paths must be an array of 1-${PATHS_CHECK_MAX_PATHS} paths` }, 400)
+  }
+  for (const p of raw) {
+    // eslint-disable-next-line no-control-regex
+    if (typeof p !== 'string' || p.length === 0 || p.length > MAX_CHECK_PATH_LENGTH || /[\u0000-\u001f\u007f]/.test(p)
+      || normalizeReservedPath(p) === '' || normalizeReservedPath(p).split('/').some(s => s === '.' || s === '..')) {
+      return c.json({ error: 'Each path must be a relative path inside the company folder' }, 400)
+    }
+  }
+  if (!takeCheckBudget(actor.companyId, actor.userId, raw.length)) {
+    c.header('Retry-After', '60')
+    return c.json({ error: 'Too many paths checked; try again in a minute', code: 'RATE_LIMITED' }, 429)
+  }
+  const scopes = listScopesWithRules(db, actor.companyId)
+  const data: PathCheckResponse = {
+    results: (raw as string[]).map(path => ({ path, usable: isPathUsable(scopes, actor.userId, actor.role, normalizeReservedPath(path)) })),
+  }
+  c.header('Cache-Control', 'no-store')
+  return c.json({ success: true, data })
+})
+
+// ----------------------------------------------------------------------------
+// DELETE /private-folders/:scopeId?confirm=<folder name>  (owner/admin)
+// ----------------------------------------------------------------------------
+
+privateFoldersRoute.delete('/private-folders/:scopeId', async (c) => {
+  const actor = await authAndAuthorize(c)
+  if (actor instanceof Response) return actor
+  if (!FULL_ACCESS_ROLES.has(actor.role)) {
+    return c.json({ error: 'Only owners and admins can delete a private folder' }, 403)
+  }
+  const folder = getPrivateFolder(db, actor.companyId, c.req.param('scopeId'))
+  if (!folder) return c.json({ error: 'Not found' }, 404)
+  // Type-the-name confirmation: the folder's own name (last segment), NFC.
+  const body = await readJson(c)
+  const confirm = c.req.query('confirm') ?? (typeof body?.confirm === 'string' ? body.confirm : undefined)
+  const name = folder.scope.path.split('/').pop()!
+  if (typeof confirm !== 'string' || confirm.normalize('NFC') !== name.normalize('NFC')) {
+    return c.json({ error: 'Type the folder name to confirm the deletion', code: 'CONFIRMATION_REQUIRED' }, 400)
+  }
+  try {
+    const result = await withCompanyLock(actor.companyId, async () => {
+      const current = getPrivateFolder(db, actor.companyId, folder.scope.id)
+      if (!current) return null
+      return deletePrivateFolder(db, actor.companyId, current, actor.userId)
+    })
+    if (!result) return c.json({ error: 'Not found' }, 404)
+    const data: DeletePrivateFolderResult = { path: result.path, archived: true }
+    return c.json({ success: true, data })
+  } catch (err) {
+    if (err instanceof MakePublicError) {
+      return c.json({ error: err.message, code: err.code }, err.code === 'BUSY' ? 503 : 409)
+    }
+    console.error('Failed to delete a private folder:', err instanceof Error ? err.message : err)
+    return c.json({ error: 'Failed to delete the private folder' }, 500)
+  }
 })

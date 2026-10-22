@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
@@ -214,6 +214,19 @@ let evalId: string
 let secretId: string
 
 describe('creating private folders', () => {
+  it('is closed (even with force) while no released app syncs private folders', async () => {
+    const cv = await import('../../src/lib/client-version')
+    expect(cv.PRIVATE_FOLDERS_CLIENT_COMMIT_DATE).toBeNull()
+    for (const force of [false, true]) {
+      const r = await create('owner', { parentPath: '人事', name: '評価', force })
+      expect(r.status).toBe(409)
+      expect(r.body).toEqual({ error: '非公開フォルダは、全員のアプリが対応版になってから作成できます', code: 'PRIVATE_FOLDERS_UNAVAILABLE' })
+    }
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scope_repos`).get()).toEqual({ n: 0 })
+    // From here on: as if stage 3b had shipped (nobody here runs that app yet).
+    cv.setPrivateFoldersClientCutoffForTests('20260101000000')
+  })
+
   it('the first one waits for every member\'s app (409 OUTDATED_CLIENTS); a manager cannot force', async () => {
     const r = await create('owner', { parentPath: '人事', name: '評価', viewers: ['u-viewer', 'u-editor'], editors: ['u-editor'] })
     expect(r.status).toBe(409)
@@ -292,7 +305,7 @@ describe('creating private folders', () => {
 })
 
 describe('GET /me/scopes', () => {
-  it('a reader gets the path and clone URL; everyone gets only salted hashes', async () => {
+  it('a reader gets the path and clone URL; nobody gets anything about the others (no hashes, no salt)', async () => {
     const v = await as('viewer', 'GET', `${base}/me/scopes`)
     expect(v.status).toBe(200)
     expect(v.body.data.scopes).toEqual([{
@@ -307,12 +320,10 @@ describe('GET /me/scopes', () => {
     expect(o.text).not.toContain('評価')
     expect(o.text).not.toContain('面談')
     expect(o.text).not.toContain('Secret')
-    const { reservedPathHash } = await import('../../src/lib/private-folders')
-    const { salt, hashes, algorithm } = o.body.data.reserved
-    expect(algorithm).toBe('sha256-salt-nfc-asciilower-v1')
-    expect(hashes).toHaveLength(3)
-    expect(hashes).toContain(reservedPathHash(salt, '人事/評価'))
-    expect(hashes).toContain(reservedPathHash(salt, 'SALES/secret'))
+    expect(Object.keys(o.body.data).sort()).toEqual(['scopes', 'version'])
+    expect(Object.keys(v.body.data).sort()).toEqual(['scopes', 'version'])
+    // The version (ETag) does not move when someone else's private folder appears.
+    expect(o.body.data.version).toBe((await as('salesmgr', 'GET', `${base}/me/scopes`)).body.data.version)
     const again = await as('other', 'GET', `${base}/me/scopes`, undefined, { 'If-None-Match': o.headers.get('ETag') })
     expect(again.status).toBe(304)
   })
@@ -575,7 +586,15 @@ describe('make-public (公開に戻す)', () => {
       { subject_type: 'everyone', can_read: 1, can_write: 0 },
       { subject_type: 'user', can_read: 1, can_write: 1 },
     ])
-    expect((await as('other', 'GET', `${base}/me/scopes`)).body.data.reserved.hashes).toHaveLength(2)
+    expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['sales/Secret/x.md', '人事/評価'] })).body.data.results)
+      .toEqual([{ path: 'sales/Secret/x.md', usable: true }, { path: '人事/評価', usable: false }])
+    // archived first (git bundle with the whole history, 0600 in a 0700 directory)
+    const archive = db.prepare(`SELECT action, file, created_by FROM private_folder_archives WHERE scope_id = ?`).get(secretId) as Loose
+    expect(archive).toMatchObject({ action: 'make-public', created_by: 'u-owner' })
+    const bundle = join(process.env.DATA_DIR!, 'backups', 'private-folders', CO, archive.file)
+    expect(statSync(bundle).mode & 0o777).toBe(0o600)
+    expect(statSync(dirname(bundle)).mode & 0o777).toBe(0o700)
+    expect(git(['bundle', 'list-heads', bundle])).toContain('refs/heads/main')
 
     // no longer reserved: the editor may push there through the company repository
     const p = await cloneAs(companyUrl(), 'editor')
@@ -583,5 +602,139 @@ describe('make-public (公開に戻す)', () => {
     commitAll(p.dir, 'next')
     expect((await pushAs(p.dir, companyUrl(), 'editor')).ok).toBe(true)
     expect((await as('owner', 'POST', `${base}/private-folders/${secretId}/make-public`)).status).toBe(404)
+  })
+})
+
+describe('the permission editor cannot open a private folder to everyone', () => {
+  it('on the folder itself, everyone / role rules must deny read and write; only user rules grant', async () => {
+    const put = (rules: Loose[]) => as('hrmgr', 'PUT', `${base}/permissions/scopes/by-path`, { path: '人事/評価', rules })
+    const viewers = [
+      { subjectType: 'user', subjectId: 'u-viewer', canRead: true, canWrite: false },
+      { subjectType: 'user', subjectId: 'u-editor', canRead: true, canWrite: true },
+    ]
+    for (const everyone of [{ canRead: true, canWrite: false }, { canWrite: false }, { canRead: false, canWrite: true }]) {
+      const r = await put([{ subjectType: 'everyone', ...everyone }, ...viewers])
+      expect(r.status).toBe(400)
+      expect(r.body.code).toBe('PRIVATE_FOLDER_RULE')
+    }
+    const role = await put([{ subjectType: 'everyone', canRead: false, canWrite: false }, { subjectType: 'role', subjectId: 'member', canRead: true, canWrite: false }, ...viewers])
+    expect(role.body.code).toBe('PRIVATE_FOLDER_RULE')
+    const writeOnly = await put([{ subjectType: 'everyone', canRead: false, canWrite: false }, { subjectType: 'user', subjectId: 'u-viewer', canRead: false, canWrite: true }])
+    expect(writeOnly.body.code).toBe('PRIVATE_FOLDER_RULE')
+
+    // POST / PATCH of a single rule
+    const post = await as('hrmgr', 'POST', `${base}/permissions/rules`, { path: '人事/評価', subjectType: 'role', subjectId: 'member', canRead: true, canWrite: false })
+    expect(post.body.code).toBe('PRIVATE_FOLDER_RULE')
+    const everyoneRule = db.prepare(`SELECT id FROM scope_rules WHERE scope_id = ? AND subject_type = 'everyone'`).get(evalId) as { id: string }
+    const patch = await as('hrmgr', 'PATCH', `${base}/permissions/rules/${everyoneRule.id}`, { canRead: true, canWrite: false })
+    expect(patch.status).toBe(400)
+    expect(patch.body.code).toBe('PRIVATE_FOLDER_RULE')
+
+    // nothing changed: other still cannot read it
+    const o = await as('other', 'GET', `${base}/me/scopes`)
+    expect(o.body.data.scopes).toEqual([])
+    expect(db.prepare(`SELECT can_read, can_write FROM scope_rules WHERE id = ?`).get(everyoneRule.id)).toEqual({ can_read: 0, can_write: 0 })
+  })
+})
+
+describe('POST /paths/check', () => {
+  const check = (user: User, paths: unknown) => as(user, 'POST', `${base}/paths/check`, { paths })
+
+  it('answers usable: false at or under a private folder the member cannot read — any case / NFC — and nothing more', async () => {
+    const { resetPathCheckBudgetForTests } = await import('../../src/routes/private-folders')
+    resetPathCheckBudgetForTests()
+    const paths = ['人事/評価', `人事/${'評価'.normalize('NFD')}/a.md`, '人事/面談/x', '人事/存在しない/x', '人事', 'sales/a.md', 'SALES/新規']
+    const o = await check('other', paths)
+    expect(o.status).toBe(200)
+    expect(o.body.data.results).toEqual([
+      { path: '人事/評価', usable: false },
+      { path: `人事/${'評価'.normalize('NFD')}/a.md`, usable: false },
+      { path: '人事/面談/x', usable: false },
+      { path: '人事/存在しない/x', usable: true },
+      { path: '人事', usable: true },
+      { path: 'sales/a.md', usable: true },
+      { path: 'SALES/新規', usable: true },
+    ])
+    // The answer for a private path has exactly the shape of any other.
+    expect(Object.keys(o.body.data.results[0]).sort()).toEqual(Object.keys(o.body.data.results[3]).sort())
+    expect(o.text).not.toMatch(/private|非公開|scope/i)
+    // A reader may put things inside (they go to its own repository); the owner everywhere.
+    expect((await check('viewer', ['人事/評価/new.md', '人事/面談/x'])).body.data.results.map((r: Loose) => r.usable)).toEqual([true, false])
+    expect((await check('owner', ['人事/評価/new.md', '人事/面談/x'])).body.data.results.map((r: Loose) => r.usable)).toEqual([true, true])
+  })
+
+  it('validates the request', async () => {
+    expect((await check('other', [])).status).toBe(400)
+    expect((await check('other', 'x')).status).toBe(400)
+    expect((await check('other', Array.from({ length: 51 }, (_, i) => `a${i}`))).status).toBe(400)
+    expect((await check('other', ['../x'])).status).toBe(400)
+    expect((await check('other', ['a\u0000b'])).status).toBe(400)
+    expect((await as(null, 'POST', `${base}/paths/check`, { paths: ['a'] })).status).toBe(401)
+  })
+
+  it('limits each member to 60 paths a minute (enumeration stays slow)', async () => {
+    const { resetPathCheckBudgetForTests } = await import('../../src/routes/private-folders')
+    resetPathCheckBudgetForTests()
+    const batch = Array.from({ length: 50 }, (_, i) => `guess${i}`)
+    expect((await check('salesmgr', batch)).status).toBe(200)
+    const over = await check('salesmgr', batch.slice(0, 11))
+    expect(over.status).toBe(429)
+    expect(over.body.code).toBe('RATE_LIMITED')
+    expect(over.headers.get('Retry-After')).toBe('60')
+    expect((await check('salesmgr', batch.slice(0, 10))).status).toBe(200)
+    // per member: someone else is not affected
+    expect((await check('editor', batch)).status).toBe(200)
+  })
+})
+
+describe('deleting a private folder (owner/admin, type the name, archived first)', () => {
+  let tempId: string
+  let repoId: string
+
+  it('setup: a private folder with some history', async () => {
+    const r = await create('owner', { parentPath: 'sales', name: '一時', viewers: ['u-editor'] })
+    expect(r.status).toBe(201)
+    tempId = r.body.data.scopeId
+    repoId = (db.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(tempId) as { repo_id: string }).repo_id
+    const c = await cloneAs(scopeUrl(tempId), 'editor')
+    writeFile(c.dir, 'memo.md', 'secret memo\n')
+    commitAll(c.dir, 'memo')
+    expect((await pushAs(c.dir, scopeUrl(tempId), 'editor')).ok).toBe(true)
+  })
+
+  it('managers and members cannot; the name must be typed', async () => {
+    expect((await as('salesmgr', 'DELETE', `${base}/private-folders/${tempId}?confirm=一時`)).status).toBe(403)
+    expect((await as('editor', 'DELETE', `${base}/private-folders/${tempId}?confirm=一時`)).status).toBe(403)
+    const none = await as('owner', 'DELETE', `${base}/private-folders/${tempId}`)
+    expect(none.status).toBe(400)
+    expect(none.body.code).toBe('CONFIRMATION_REQUIRED')
+    expect((await as('owner', 'DELETE', `${base}/private-folders/${tempId}?confirm=${encodeURIComponent('sales/一時')}`)).body.code).toBe('CONFIRMATION_REQUIRED')
+    expect(existsSync(join(process.env.REPOS_DIR!, `${CO}.scopes`, `${repoId}.git`))).toBe(true)
+  })
+
+  it('archives the repository, then removes it, its rules and its reservation', async () => {
+    const r = await as('admin', 'DELETE', `${base}/private-folders/${tempId}?confirm=${encodeURIComponent('一時'.normalize('NFD'))}`)
+    expect(r.status).toBe(200)
+    expect(r.body.data).toEqual({ path: 'sales/一時', archived: true })
+    expect(r.text).not.toContain(process.env.DATA_DIR!)
+    expect(existsSync(join(process.env.REPOS_DIR!, `${CO}.scopes`, `${repoId}.git`))).toBe(false)
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scopes WHERE id = ?`).get(tempId)).toEqual({ n: 0 })
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scope_rules WHERE scope_id = ?`).get(tempId)).toEqual({ n: 0 })
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scope_repos WHERE id = ?`).get(repoId)).toEqual({ n: 0 })
+
+    const archive = db.prepare(`SELECT action, file, path, created_by FROM private_folder_archives WHERE scope_id = ?`).get(tempId) as Loose
+    expect(archive).toMatchObject({ action: 'delete', path: 'sales/一時', created_by: 'u-admin' })
+    const bundle = join(process.env.DATA_DIR!, 'backups', 'private-folders', CO, archive.file)
+    expect(statSync(bundle).mode & 0o777).toBe(0o600)
+    // the whole history can be restored from it
+    const restored = join(workDir, 'restored')
+    git(['clone', '-q', bundle, restored])
+    expect(git(['-C', restored, 'show', 'HEAD:memo.md'])).toBe('secret memo\n')
+
+    // the editor lost it like losing access; the path is free again
+    expect((await as('editor', 'GET', `${base}/me/scopes`)).body.data.scopes.map((s: Loose) => s.scopeId)).not.toContain(tempId)
+    expect((await cloneAs(scopeUrl(tempId), 'editor')).ok).toBe(false)
+    expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['sales/一時/a.md'] })).body.data.results[0].usable).toBe(true)
+    expect((await as('owner', 'DELETE', `${base}/private-folders/${tempId}?confirm=一時`)).status).toBe(404)
   })
 })

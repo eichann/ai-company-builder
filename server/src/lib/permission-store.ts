@@ -278,6 +278,23 @@ export function removeManagerFromCompany(conn: Conn, companyId: string, userId: 
   `).run(userId, companyId)
 }
 
+/**
+ * Remove every rule naming this user (subject_type 'user') anywhere in the
+ * company — private folders' viewer/editor rules included. Called when they
+ * leave the company (re-adding them later must not silently restore their
+ * old access) and when they become owner/admin (the rules are moot then and
+ * would come back unnoticed on a later demotion). Returns how many rules
+ * were removed. Every scope keeps its `everyone` rule, so nothing starts
+ * inheriting because of this.
+ */
+export function deleteUserRules(conn: Conn, companyId: string, userId: string): number {
+  return conn.prepare(`
+    DELETE FROM scope_rules
+    WHERE subject_type = 'user' AND subject_id = ?
+      AND scope_id IN (SELECT id FROM scopes WHERE company_id = ?)
+  `).run(userId, companyId).changes
+}
+
 /** Replace the department's managers with `userIds` (kept rows keep their created_at/by). */
 export function replaceDepartmentManagers(conn: Conn, departmentId: string, userIds: string[], createdBy: string): void {
   conn.transaction(() => {

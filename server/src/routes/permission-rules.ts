@@ -234,6 +234,24 @@ function touchesPrivate(companyId: string, path: string): boolean {
 
 const PRIVATE_RULES_REQUIRED = 'A private folder always keeps its own rules (who can see it); change them instead'
 
+export const PRIVATE_SUBJECT_ERROR =
+  'On a private folder, everyone and roles can neither read nor edit; add members as viewers or editors instead'
+
+/**
+ * A rule on a private folder ITSELF: `everyone` and role rules must deny
+ * both read and write — only user rules (viewers / editors) grant access,
+ * exactly what PUT /private-folders/:id/members stores. Without this a
+ * department manager could open their department's private folder to the
+ * whole company from the permission editor. A user who may edit must also
+ * read. Rules deeper inside need no check: resolveAccess lets them grant
+ * nothing to anyone who cannot read the private folder itself (narrow only).
+ */
+function privateRootRuleError(place: PrivatePlace | null, rule: { subjectType: SubjectType; canRead: boolean; canWrite: boolean }): string | null {
+  if (!place?.root) return null
+  if (rule.subjectType !== 'user') return rule.canRead || rule.canWrite ? PRIVATE_SUBJECT_ERROR : null
+  return rule.canWrite && !rule.canRead ? 'An editor of a private folder must also be able to read it' : null
+}
+
 const FULL_ACCESS_SUBJECT =
   'Owners and admins can always read and edit everything; a rule for them would have no effect'
 
@@ -412,6 +430,8 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
     const key = `${subject.subjectType}:${subject.subjectId ?? ''}`
     if (seen.has(key)) return replaceError(c, 'Each subject may appear only once', 'DUPLICATE_SUBJECT')
     seen.add(key)
+    const privateError = privateRootRuleError(place, { ...subject, ...access })
+    if (privateError) return replaceError(c, privateError, 'PRIVATE_FOLDER_RULE')
     rules.push({ ...subject, canRead: access.canRead, canWrite: access.canWrite })
   }
   if (rules.length === 0 && place?.root) return replaceError(c, PRIVATE_RULES_REQUIRED, 'PRIVATE_RULES_REQUIRED')
@@ -452,6 +472,8 @@ permissionRulesRoute.post('/permissions/rules', async (c) => {
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
   const subject = parseSubject(actor, body)
   if ('error' in subject) return c.json({ error: subject.error }, 400)
+  const privateError = privateRootRuleError(place, { ...subject, ...access })
+  if (privateError) return c.json({ error: privateError, code: 'PRIVATE_FOLDER_RULE' }, 400)
 
   if (!(await folderExists(actor.companyId, parsed.path, place))) {
     return c.json({ error: 'Folder not found in the company repository' }, 400)
@@ -479,6 +501,8 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
   const place = privatePlaceOf(actor.companyId, found.scope.path)
   const access = parseAccess(body, place?.root === true)
   if ('error' in access) return c.json({ error: access.error, code: access.error === READ_RESTRICTION_UNAVAILABLE ? 'READ_RESTRICTION_UNAVAILABLE' : undefined }, 400)
+  const privateError = privateRootRuleError(place, { subjectType: found.rule.subjectType, ...access })
+  if (privateError) return c.json({ error: privateError, code: 'PRIVATE_FOLDER_RULE' }, 400)
 
   const update = () => {
     updateRuleAccess(db, found.rule.id, access.canRead, access.canWrite)

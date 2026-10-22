@@ -8,10 +8,9 @@
  *   folding, the pusher's own spelling of the reserved prefix; the scope
  *   repository's write gate prefixes paths; the company repository's write
  *   gate ignores private scopes.
- * - The reserved-path hash algorithm in shared/ (what 3b implements).
+ * - Path normalisation in shared/ and isPathUsable (POST /paths/check).
  */
 import { describe, it, expect } from 'vitest'
-import { createHash } from 'crypto'
 import {
   resolveAccess,
   writeAccessSummary,
@@ -20,11 +19,10 @@ import {
   type ScopeWithRules,
 } from '../../src/lib/permissions'
 import { reservedPathsFor, reservedPrefixOf, writeGateFor, parsePushPolicy, type PushPolicy } from '../../src/lib/push-check/policy'
-import { reservedPathHash } from '../../src/lib/private-folders'
+import { isPathUsable } from '../../src/lib/private-folders'
 import {
   normalizeReservedPath,
   reservedPathCandidates,
-  reservedPathKeyInput,
   reservedPathMessage,
 } from '../../shared/types/private-folders'
 
@@ -119,19 +117,24 @@ describe('push-check policy: reserved paths and scope repositories', () => {
   })
 })
 
-describe('reserved-path hashing (shared/types/private-folders.ts)', () => {
+describe('reserved paths (shared/types/private-folders.ts, isPathUsable)', () => {
   it('normalises NFC, A–Z only, slashes', () => {
     expect(normalizeReservedPath('/Sales//Secret/')).toBe('sales/secret')
     expect(normalizeReservedPath('人事/評価'.normalize('NFD'))).toBe('人事/評価')
     expect(normalizeReservedPath('ＡＢ/É')).toBe('ＡＢ/É')
   })
 
-  it('key = sha256(salt NUL normalised), the same for every spelling', () => {
-    const expected = createHash('sha256').update('salt\u0000sales/secret', 'utf8').digest('hex')
-    expect(reservedPathKeyInput('salt', 'Sales/Secret')).toBe('salt\u0000sales/secret')
-    expect(reservedPathHash('salt', 'Sales/Secret')).toBe(expected)
-    expect(reservedPathHash('salt', 'sales/SECRET')).toBe(expected)
-    expect(reservedPathHash('other', 'sales/secret')).not.toBe(expected)
+  it('a path is unusable at or under a private folder the member cannot read (any spelling), usable for a reader', () => {
+    const priv: ScopeWithRules = { id: 'p', path: 'Sales/評価', kind: 'folder', departmentId: null, repoId: 'r', rules: [rule('everyone', null, false, false), rule('user', 'u-v', true, false)] }
+    const scopes = [ROOT, priv]
+    for (const p of ['sales/評価', 'SALES/評価/x.md', `sales/${'評価'.normalize('NFD')}/a`]) {
+      expect(isPathUsable(scopes, 'u-x', 'member', p)).toBe(false)
+      expect(isPathUsable(scopes, 'u-v', 'member', p)).toBe(true)
+      expect(isPathUsable(scopes, 'u-o', 'owner', p)).toBe(true)
+    }
+    // above it, next to it: usable
+    expect(isPathUsable(scopes, 'u-x', 'member', 'sales')).toBe(true)
+    expect(isPathUsable(scopes, 'u-x', 'member', 'sales/評価2')).toBe(true)
   })
 
   it('candidates are every prefix, shortest first; the message names only the folder', () => {

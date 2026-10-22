@@ -137,34 +137,21 @@ describe('Auth rejection (401) — unauthenticated requests', () => {
 
   // --- /api/git ---
   describe('gitRoute', () => {
-    it('GET /api/git/repos', async () => {
-      const res = await jsonReq('GET', '/api/git/repos')
-      expect(res.status).toBe(401)
-    })
-
-    it('POST /api/git/repos', async () => {
-      const res = await jsonReq('POST', '/api/git/repos', { companyId: 'c1' })
-      expect(res.status).toBe(401)
-    })
-
     it('GET /api/git/repos/:companyId', async () => {
       const res = await jsonReq('GET', '/api/git/repos/fake-id')
       expect(res.status).toBe(401)
     })
 
-    it('POST /api/git/hooks/install', async () => {
-      const res = await jsonReq('POST', '/api/git/hooks/install')
-      expect(res.status).toBe(401)
-    })
-
-    it('POST /api/git/repos/migrate-http', async () => {
-      const res = await jsonReq('POST', '/api/git/repos/migrate-http')
-      expect(res.status).toBe(401)
-    })
-
-    it('DELETE /api/git/repos/:companyId', async () => {
-      const res = await jsonReq('DELETE', '/api/git/repos/fake-id')
-      expect(res.status).toBe(401)
+    // Repository administration is no longer an API (2026-10-22 review).
+    it.each([
+      ['GET', '/api/git/repos'],
+      ['POST', '/api/git/repos'],
+      ['POST', '/api/git/hooks/install'],
+      ['POST', '/api/git/repos/migrate-http'],
+      ['DELETE', '/api/git/repos/fake-id'],
+    ])('%s %s no longer exists', async (method, path) => {
+      const res = await jsonReq(method, path, method === 'POST' ? { companyId: 'c1' } : undefined)
+      expect(res.status).toBe(404)
     })
   })
 

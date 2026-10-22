@@ -152,11 +152,11 @@ describe('Authorization rejection (403) — member user without owner/admin role
     })
   })
 
-  // --- Git repo deletion (owner only) ---
-  describe('git repo deletion', () => {
-    it('DELETE /api/git/repos/:companyId → 403 for member', async () => {
+  // --- Git repo administration is not an API any more ---
+  describe('git repo administration', () => {
+    it('DELETE /api/git/repos/:companyId no longer exists (404)', async () => {
       const res = await jsonReq('DELETE', `/api/git/repos/${TEST_COMPANY_ID}`)
-      expect(res.status).toBe(403)
+      expect(res.status).toBe(404)
     })
   })
 

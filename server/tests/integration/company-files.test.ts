@@ -126,6 +126,9 @@ beforeAll(async () => {
     'notes/binary.txt': Buffer.concat([Buffer.from('looks like text'), Buffer.from([0, 1, 2]), Buffer.from(' 共通キーワード')]),
     'big.txt': bigText,
     'noeol.txt': 'one\ntwo\nthree',
+    // A long line where a backtracking engine (JavaScript's) explodes on
+    // (x+x+)+y before reaching the real match at the end.
+    'redos.txt': `${'x'.repeat(40)}z ${'あ'.repeat(400)} xxy\n`,
   }, 'seed')
 
   // Two private folders: one inside an existing department, one whose parent
@@ -352,6 +355,26 @@ describe('search', () => {
     expect(bad.body.code).toBe('INVALID_QUERY')
     expect((await get('u-other', CO, 'search', { q: '' })).status).toBe(400)
     expect((await get('u-other', CO, 'search', { q: 'x'.repeat(501) })).status).toBe(400)
+  })
+
+  it('never runs the member\'s regular expression in the server process (ReDoS)', async () => {
+    let ticks = 0
+    const timer = setInterval(() => { ticks++ }, 10)
+    const started = Date.now()
+    try {
+      const r = await get('u-other', CO, 'search', { q: '(x+x+)+y', regex: 'true', path: 'redos.txt' })
+      expect(r.status).toBe(200)
+      expect(r.body.data.matches).toHaveLength(1)
+      // The snippet is cut around git's match position (byte column → characters).
+      const text: string = r.body.data.matches[0].text
+      expect(text.startsWith('…')).toBe(true)
+      expect(text.endsWith('xxy')).toBe(true)
+    } finally {
+      clearInterval(timer)
+    }
+    expect(Date.now() - started).toBeLessThan(5_000)
+    // The event loop kept running meanwhile.
+    expect(ticks).toBeGreaterThan(0)
   })
 
   it('bounds matches (total and per file) and reports truncation', async () => {

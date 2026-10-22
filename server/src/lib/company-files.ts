@@ -576,19 +576,20 @@ export function searchLoad(companyId: string): { running: number; queued: number
   return { running: s?.running ?? 0, queued: s?.queue.length ?? 0 }
 }
 
-function snippet(text: string, opts: SearchOptions): string {
+/**
+ * Cut a long matching line around the match. `column` is the 1-based BYTE
+ * offset of the first match, as `git grep --column` reports it. The query is
+ * never evaluated here: a member's regular expression run in this process
+ * (no time limit, unlike git grep's) could block the event loop — every
+ * request of every company — for minutes on a pathological pattern.
+ */
+export function snippet(text: string, column: number): string {
   const max = LIMITS.snippetMaxChars
   if (text.length <= max) return text
   let at = -1
-  try {
-    if (opts.regex) {
-      const m = new RegExp(opts.query, opts.caseSensitive ? 'u' : 'iu').exec(text)
-      at = m ? m.index : -1
-    } else {
-      at = opts.caseSensitive ? text.indexOf(opts.query) : text.toLowerCase().indexOf(opts.query.toLowerCase())
-    }
-  } catch {
-    at = -1
+  if (Number.isInteger(column) && column >= 1) {
+    const bytes = Buffer.from(text, 'utf8')
+    if (column - 1 <= bytes.length) at = bytes.subarray(0, column - 1).toString('utf8').length
   }
   const start = Math.max(0, Math.min(at === -1 ? 0 : at - Math.floor(max / 3), text.length - max))
   return `${start > 0 ? '…' : ''}${text.slice(start, start + max)}${start + max < text.length ? '…' : ''}`
@@ -618,7 +619,7 @@ function grepTarget(view: CompanyFilesView, target: GrepTarget, opts: SearchOpti
       '-C', target.repo,
       '-c', 'grep.threads=2',
       '-c', 'grep.fallbackToNoIndex=false',
-      'grep', '-I', '-n', '-z', '--no-color',
+      'grep', '-I', '-n', '--column', '-z', '--no-color',
       '-m', String(LIMITS.searchMaxMatchesPerFile),
       ...(opts.caseSensitive ? [] : ['-i']),
       opts.regex ? '-E' : '-F',
@@ -648,7 +649,9 @@ function grepTarget(view: CompanyFilesView, target: GrepTarget, opts: SearchOpti
     const record = (line: string): boolean => {
       const a = line.indexOf('\0')
       const b = a === -1 ? -1 : line.indexOf('\0', a + 1)
-      if (a === -1 || b === -1) return true
+      // <rev>:<path> NUL <line> NUL <column> NUL <text>
+      const col = b === -1 ? -1 : line.indexOf('\0', b + 1)
+      if (a === -1 || b === -1 || col === -1) return true
       let name = line.slice(0, a)
       if (name.startsWith(revPrefix)) name = name.slice(revPrefix.length)
       const path = target.prefix ? `${target.prefix}/${name}` : name
@@ -664,9 +667,9 @@ function grepTarget(view: CompanyFilesView, target: GrepTarget, opts: SearchOpti
         }
         state.files.add(path)
       }
-      let text = line.slice(b + 1)
+      let text = line.slice(col + 1)
       if (text.endsWith('\r')) text = text.slice(0, -1)
-      state.matches.push({ path, line: Number(line.slice(a + 1, b)), text: snippet(text, opts) })
+      state.matches.push({ path, line: Number(line.slice(a + 1, b)), text: snippet(text, Number(line.slice(b + 1, col))) })
       if (state.matches.length >= opts.limit) {
         state.truncated = true
         return false

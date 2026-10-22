@@ -11,21 +11,13 @@ import { join } from 'path'
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
 describe('Role-based authorization', () => {
-  it('DELETE /repos/:companyId must require owner role', () => {
+  it('/api/git has no repository administration endpoints; repo info checks membership and returns no path', () => {
     const content = readFileSync(join(ROUTES_DIR, 'git.ts'), 'utf-8')
-
-    // Find the DELETE handler
-    const deleteIndex = content.indexOf(".delete('/repos/:companyId'")
-    expect(deleteIndex, 'DELETE /repos/:companyId handler must exist').toBeGreaterThan(-1)
-
-    // Extract the handler body (rough: next 40 lines)
-    const handlerBody = content.slice(deleteIndex, deleteIndex + 2000)
-
-    // Must check role
-    expect(handlerBody).toMatch(/membership.*role/)
-    expect(handlerBody).toMatch(/owner/)
-    // Must return 403 for non-owners
-    expect(handlerBody).toMatch(/403/)
+    const handlers = [...content.matchAll(/gitRoute\.(get|post|put|patch|delete)\('([^']+)'/g)].map(m => `${m[1]} ${m[2]}`)
+    expect(handlers).toEqual(['get /repos/:companyId'])
+    const body = content.slice(content.indexOf("gitRoute.get('/repos/:companyId'"))
+    expect(body).toMatch(/FROM memberships WHERE user_id = \? AND company_id = \?/)
+    expect(body).not.toMatch(/\bpath: repoPath\b|sshUrl,/)
   })
 
   it('department mutations must check owner/admin role', () => {

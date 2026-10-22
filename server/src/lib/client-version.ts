@@ -159,6 +159,24 @@ export function supportsWriteDeniedRecovery(version: string | null | undefined):
  */
 export const PRIVATE_FOLDERS_CLIENT_COMMIT_DATE: string | null = null
 
+let privateFoldersCutoffOverride: { value: string | null } | null = null
+
+/**
+ * The cutoff in effect: PRIVATE_FOLDERS_CLIENT_COMMIT_DATE unless a test
+ * overrode it. While it is null no released app can sync a private folder,
+ * so POST /private-folders refuses to create one at all — `force` included
+ * (a member's app would otherwise push the folder's contents into the
+ * company repository's reserved path, or not see it at all).
+ */
+export function privateFoldersClientCutoff(): string | null {
+  return privateFoldersCutoffOverride ? privateFoldersCutoffOverride.value : PRIVATE_FOLDERS_CLIENT_COMMIT_DATE
+}
+
+/** Tests only: pretend a released app supports private folders (undefined = back to the constant). */
+export function setPrivateFoldersClientCutoffForTests(value: string | null | undefined): void {
+  privateFoldersCutoffOverride = value === undefined ? null : { value }
+}
+
 /**
  * Can this desktop-app build work with private folders? Same rules as
  * supportsWriteDeniedRecovery: decided by the build's commit date alone,
@@ -166,7 +184,7 @@ export const PRIVATE_FOLDERS_CLIENT_COMMIT_DATE: string | null = null
  */
 export function supportsPrivateFolders(
   version: string | null | undefined,
-  cutoff: string | null = PRIVATE_FOLDERS_CLIENT_COMMIT_DATE,
+  cutoff: string | null = privateFoldersClientCutoff(),
 ): boolean {
   if (cutoff === null) return false
   const parsed = parseClientVersion(version)
