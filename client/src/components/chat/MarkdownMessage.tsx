@@ -1,6 +1,5 @@
 import React, { memo, useMemo } from 'react'
 import Markdown from 'react-markdown'
-import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighterRaw } from 'react-syntax-highlighter'
 import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 
@@ -13,6 +12,7 @@ const SyntaxHighlighter = SyntaxHighlighterRaw as unknown as React.FC<{
   children: string
 }>
 import { useAppStore } from '../../stores/appStore'
+import { chatMarkdownSafety } from './chatMarkdownSafety'
 
 interface MarkdownMessageProps {
   content: string
@@ -20,11 +20,13 @@ interface MarkdownMessageProps {
 
 // Renders assistant message text as decorated markdown with GFM and async-loaded Prism syntax highlighting.
 // Links open in new windows; code blocks get themed syntax colors.
+// Images are never loaded (see chatMarkdownImages.tsx) and raw HTML is skipped.
 export const MarkdownMessage = memo(function MarkdownMessage({ content }: MarkdownMessageProps) {
   const theme = useAppStore((s) => s.theme)
   const isDark = theme === 'dark'
 
   const components = useMemo(() => ({
+    ...chatMarkdownSafety.components,
     a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
       <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:opacity-80">
         {children}
@@ -83,7 +85,7 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: Markdo
         break-words"
     >
       {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <Markdown remarkPlugins={[remarkGfm]} components={components as any}>
+      <Markdown remarkPlugins={[...chatMarkdownSafety.remarkPlugins]} skipHtml={chatMarkdownSafety.skipHtml} components={components as any}>
         {content}
       </Markdown>
     </div>
