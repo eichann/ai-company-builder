@@ -12,13 +12,14 @@ export class AgentInteractions {
     if (signal.aborted) return Promise.resolve({ cancelled: true, reason: 'aborted' })
     const request = { ...interaction, id: crypto.randomUUID(), appSessionId }
     return new Promise(resolve => {
-      const abort = () => finish({ cancelled: true, reason: 'aborted' })
-      const timer = setTimeout(() => finish({ cancelled: true, reason: 'timeout' }), interaction.kind === 'choices' ? this.choiceTimeoutMs : this.timeoutMs)
+      let timer: ReturnType<typeof setTimeout> | undefined
       const finish = (value: AgentInteractionResponse) => {
         if (!this.pending.delete(request.id)) return
         clearTimeout(timer); signal.removeEventListener('abort', abort)
         this.emit(owner, 'closed', request); resolve(value)
       }
+      function abort() { finish({ cancelled: true, reason: 'aborted' }) }
+      timer = setTimeout(() => finish({ cancelled: true, reason: 'timeout' }), interaction.kind === 'choices' ? this.choiceTimeoutMs : this.timeoutMs)
       this.pending.set(request.id, { owner, request, finish })
       signal.addEventListener('abort', abort, { once: true })
       this.emit(owner, 'request', request)

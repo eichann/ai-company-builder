@@ -42,6 +42,7 @@ export function generateCodexText(request: CodexTextRequest, createRpc: (env: Re
     let output = ''
     let streamedCharacters = 0
     let usage: { inputTokens?: number; outputTokens?: number } = {}
+    let timer: ReturnType<typeof setTimeout> | undefined
     const finish = (error?: Error) => {
       if (done) return
       if (error && /429|usage limit|rate.?limit/i.test(error.message)) error = new Error('Codexの利用上限または一時的な制限により整形できませんでした。しばらく待って再度お試しください。原文は保持されます。')
@@ -57,8 +58,8 @@ export function generateCodexText(request: CodexTextRequest, createRpc: (env: Re
         resolve(output.trim())
       }
     }
-    const cancel = () => finish(new Error('キャンセルしました'))
-    const timer = setTimeout(() => finish(new Error('文章の整形がタイムアウトしました')), 60_000)
+    function cancel() { finish(new Error('キャンセルしました')) }
+    timer = setTimeout(() => finish(new Error('文章の整形がタイムアウトしました')), 60_000)
     request.signal.addEventListener('abort', cancel, { once: true })
     void (async () => {
       rpc = createRpc(request.env, CODEX_TEXT_OVERRIDES)

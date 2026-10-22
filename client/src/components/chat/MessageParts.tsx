@@ -127,12 +127,6 @@ function ToolCountLabel({ count, running }: { count: number; running: number }) 
   )
 }
 
-function renderToolItem(item: ToolOrAgent) {
-  return item.kind === 'agent'
-    ? <AgentToolGroup key={item.key} item={item} />
-    : <ToolInvocationPartView key={item.key} row={item.row} />
-}
-
 /** A subagent's own row: collapsed by default; expands to its inner calls. */
 const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem }) {
   const { t } = useTranslation()
@@ -178,6 +172,12 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
     </div>
   )
 }, signaturePropsEqual)
+
+function renderToolItem(item: ToolOrAgent) {
+  return item.kind === 'agent'
+    ? <AgentToolGroup key={item.key} item={item} />
+    : <ToolInvocationPartView key={item.key} row={item.row} />
+}
 
 /**
  * A run of consecutive top-level tool rows. Short runs render their rows

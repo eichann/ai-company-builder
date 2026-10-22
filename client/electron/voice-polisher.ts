@@ -12,6 +12,7 @@ export function polishVoice(cli: string, cwd: string, transcript: string, signal
     })
     let output = ''
     let settled = false
+    let timeout: ReturnType<typeof setTimeout> | undefined
     const finish = (error?: Error, text?: string) => {
       if (settled) return
       settled = true
@@ -19,8 +20,8 @@ export function polishVoice(cli: string, cwd: string, transcript: string, signal
       signal.removeEventListener('abort', cancel)
       if (error) { child.kill('SIGKILL'); reject(error) } else resolve(text!)
     }
-    const cancel = () => finish(new Error('キャンセルしました'))
-    const timeout = setTimeout(() => finish(new Error('文章の整形がタイムアウトしました')), 60_000)
+    function cancel() { finish(new Error('キャンセルしました')) }
+    timeout = setTimeout(() => finish(new Error('文章の整形がタイムアウトしました')), 60_000)
     signal.addEventListener('abort', cancel, { once: true })
     child.on('error', () => finish(new Error('Claude Codeを起動できません。インストール状況をご確認ください')))
     child.stdin.on('error', () => finish(new Error('Claude Codeへの入力に失敗しました')))

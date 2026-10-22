@@ -525,37 +525,6 @@ export function TabbedEditorPanel({
     return () => unsubscribe()
   }, [])
 
-  // Load file content when a new file is opened
-  useEffect(() => {
-    for (const filePath of openFiles) {
-      if (!fileContents.has(filePath) && !loadingRef.current.has(filePath)) {
-        // Skip loading for binary files (displayed via local-file:// URL)
-        if (isBinaryFile(filePath)) {
-          setFileContents(prev => {
-            const newMap = new Map(prev)
-            newMap.set(filePath, { path: filePath, content: '', originalContent: '', isLoading: false })
-            return newMap
-          })
-          continue
-        }
-        loadingRef.current.add(filePath)
-        loadFile(filePath)
-      }
-    }
-
-    // Clean up closed files from state
-    const openFilesSet = new Set(openFiles)
-    setFileContents(prev => {
-      const newMap = new Map(prev)
-      for (const path of newMap.keys()) {
-        if (!openFilesSet.has(path)) {
-          newMap.delete(path)
-        }
-      }
-      return newMap
-    })
-  }, [openFiles])
-
   const loadFile = async (filePath: string) => {
     setFileContents(prev => {
       const newMap = new Map(prev)
@@ -586,6 +555,37 @@ export function TabbedEditorPanel({
       loadingRef.current.delete(filePath)
     }
   }
+
+  // Load file content when a new file is opened
+  useEffect(() => {
+    for (const filePath of openFiles) {
+      if (!fileContents.has(filePath) && !loadingRef.current.has(filePath)) {
+        // Skip loading for binary files (displayed via local-file:// URL)
+        if (isBinaryFile(filePath)) {
+          setFileContents(prev => {
+            const newMap = new Map(prev)
+            newMap.set(filePath, { path: filePath, content: '', originalContent: '', isLoading: false })
+            return newMap
+          })
+          continue
+        }
+        loadingRef.current.add(filePath)
+        loadFile(filePath)
+      }
+    }
+
+    // Clean up closed files from state
+    const openFilesSet = new Set(openFiles)
+    setFileContents(prev => {
+      const newMap = new Map(prev)
+      for (const path of newMap.keys()) {
+        if (!openFilesSet.has(path)) {
+          newMap.delete(path)
+        }
+      }
+      return newMap
+    })
+  }, [openFiles])
 
   const handleContentChange = useCallback((newContent: string) => {
     if (!activeFilePath) return

@@ -18,6 +18,7 @@ export function writeCodexHandoff(request: HandoffRequest, createRpc: Factory = 
     let done = false
     let saved = false
     let textItems = 0
+    let timer: ReturnType<typeof setTimeout> | undefined
     const finish = (error?: Error) => {
       if (done) return
       done = true
@@ -29,8 +30,8 @@ export function writeCodexHandoff(request: HandoffRequest, createRpc: Factory = 
       else if (!saved) reject(new Error('専用ツールによる保存を確認できませんでした'))
       else resolve({ ...metrics, totalMs: Date.now() - startedAt })
     }
-    const cancel = () => finish(new Error('引き継ぎメモの生成を中止しました'))
-    const timer = setTimeout(() => finish(new Error('引き継ぎメモの生成がタイムアウトしました')), HANDOFF_TIMEOUT_MS)
+    function cancel() { finish(new Error('引き継ぎメモの生成を中止しました')) }
+    timer = setTimeout(() => finish(new Error('引き継ぎメモの生成がタイムアウトしました')), HANDOFF_TIMEOUT_MS)
     request.signal.addEventListener('abort', cancel, { once: true })
     void (async () => {
       rpc = createRpc(request.env, CODEX_TEXT_OVERRIDES)

@@ -62,6 +62,14 @@ interface FileTreePanelProps {
   onPrivateFolderCreated?: () => void
 }
 
+// Sort entries: directories first, then files, alphabetically
+const sortEntries = (entries: FileEntry[]): FileEntry[] =>
+  entries.sort((a, b) => {
+    if (a.isDirectory && !b.isDirectory) return -1
+    if (!a.isDirectory && b.isDirectory) return 1
+    return a.name.localeCompare(b.name)
+  })
+
 export function FileTreePanel({
   rootPath,
   departmentFolder,
@@ -123,48 +131,6 @@ export function FileTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoRel, sparse.excludedPaths, sparse.notDownloadedFolderOf])
 
-  const downloadFolder = useCallback(async (entry: FileEntry) => {
-    const folder = notDownloadedOf(entry.path)
-    if (!folder) return
-    setDownloading(prev => new Set(prev).add(entry.path))
-    try {
-      const result = await sparse.apply(sparse.excludedPaths.filter(e => pathKey(e) !== pathKey(folder)))
-      if (!result.success) {
-        setDropWarning(result.offline ? 'インターネットにつながっているときにダウンロードできます' : `ダウンロードできませんでした：${result.error ?? ''}`)
-        setTimeout(() => setDropWarning(null), 5000)
-      } else {
-        childrenCache.current.delete(entry.path)
-        setLoadedDirs(prev => { const n = new Set(prev); n.delete(entry.path); return n })
-        void loadFiles(true)
-      }
-    } finally {
-      setDownloading(prev => { const n = new Set(prev); n.delete(entry.path); return n })
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notDownloadedOf, sparse])
-
-  /** Refuse an action that would write into a folder that is not downloaded (the main process refuses too). */
-  const refuseNotDownloaded = useCallback((absTarget: string): boolean => {
-    const folder = notDownloadedOf(absTarget)
-    if (!folder) return false
-    setDropWarning(notDownloadedUserMessage(folder.normalize('NFC')))
-    setTimeout(() => setDropWarning(null), 6000)
-    return true
-  }, [notDownloadedOf])
-
-  /**
-   * Refuse a folder name that a private folder the member cannot read already
-   * uses (known to the main process only as a salted hash). The sentence names
-   * only what the member typed. The main process refuses the write too.
-   */
-  const refuseReserved = useCallback(async (absTarget: string): Promise<boolean> => {
-    let message: string | null = null
-    try { message = await window.electronAPI.reservedPathRefusal(absTarget) } catch { /* older preload / preview: allow */ }
-    if (!message) return false
-    setDropWarning(message)
-    setTimeout(() => setDropWarning(null), 6000)
-    return true
-  }, [])
   const [files, setFiles] = useState<FileEntry[]>([])
   const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
   const [loadedDirs, setLoadedDirs] = useState<Set<string>>(new Set())
@@ -258,14 +224,6 @@ export function FileTreePanel({
     // It's a file — use its parent directory
     return selectedFilePath.substring(0, selectedFilePath.lastIndexOf('/'))
   })()
-
-  // Sort entries: directories first, then files, alphabetically
-  const sortEntries = (entries: FileEntry[]): FileEntry[] =>
-    entries.sort((a, b) => {
-      if (a.isDirectory && !b.isDirectory) return -1
-      if (!a.isDirectory && b.isDirectory) return 1
-      return a.name.localeCompare(b.name)
-    })
 
   // Filter and convert raw tree data from IPC into FileEntry[], populating childrenCache
   // Only populates cache (loadedDirs) — does NOT set expandedDirs (that's UI state)
@@ -433,6 +391,49 @@ export function FileTreePanel({
       }
     }
   }, [departmentPath, showDotFiles, processTree])
+
+  const downloadFolder = useCallback(async (entry: FileEntry) => {
+    const folder = notDownloadedOf(entry.path)
+    if (!folder) return
+    setDownloading(prev => new Set(prev).add(entry.path))
+    try {
+      const result = await sparse.apply(sparse.excludedPaths.filter(e => pathKey(e) !== pathKey(folder)))
+      if (!result.success) {
+        setDropWarning(result.offline ? 'インターネットにつながっているときにダウンロードできます' : `ダウンロードできませんでした：${result.error ?? ''}`)
+        setTimeout(() => setDropWarning(null), 5000)
+      } else {
+        childrenCache.current.delete(entry.path)
+        setLoadedDirs(prev => { const n = new Set(prev); n.delete(entry.path); return n })
+        void loadFiles(true)
+      }
+    } finally {
+      setDownloading(prev => { const n = new Set(prev); n.delete(entry.path); return n })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [notDownloadedOf, sparse])
+
+  /** Refuse an action that would write into a folder that is not downloaded (the main process refuses too). */
+  const refuseNotDownloaded = useCallback((absTarget: string): boolean => {
+    const folder = notDownloadedOf(absTarget)
+    if (!folder) return false
+    setDropWarning(notDownloadedUserMessage(folder.normalize('NFC')))
+    setTimeout(() => setDropWarning(null), 6000)
+    return true
+  }, [notDownloadedOf])
+
+  /**
+   * Refuse a folder name that a private folder the member cannot read already
+   * uses (known to the main process only as a salted hash). The sentence names
+   * only what the member typed. The main process refuses the write too.
+   */
+  const refuseReserved = useCallback(async (absTarget: string): Promise<boolean> => {
+    let message: string | null = null
+    try { message = await window.electronAPI.reservedPathRefusal(absTarget) } catch { /* older preload / preview: allow */ }
+    if (!message) return false
+    setDropWarning(message)
+    setTimeout(() => setDropWarning(null), 6000)
+    return true
+  }, [])
 
   // Resolve a unique destination path (appends " (1)", " (2)" etc. if name already exists)
   const resolveUniquePath = useCallback(async (destDir: string, fileName: string): Promise<string> => {

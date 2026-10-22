@@ -33,6 +33,7 @@ function runHelper(binary: string, args: string[], timeoutMs: number, onMessage:
     const startedAt = Date.now()
     let launchMs: number | undefined
     let settled = false
+    let timer: ReturnType<typeof setTimeout> | undefined
     const finish = (outcome: Outcome) => {
       if (settled) return
       settled = true
@@ -44,7 +45,7 @@ function runHelper(binary: string, args: string[], timeoutMs: number, onMessage:
       resolve(outcome)
     }
     const child = spawnVoiceProcess(binary, args)
-    const timer = setTimeout(() => { child.kill('SIGKILL'); finish({ kind: 'timeout' }) }, timeoutMs)
+    timer = setTimeout(() => { child.kill('SIGKILL'); finish({ kind: 'timeout' }) }, timeoutMs)
     createInterface({ input: child.stdout }).on('line', line => {
       try {
         const data = JSON.parse(line)
