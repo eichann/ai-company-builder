@@ -327,6 +327,28 @@ reader for the guards).
   the local trees (names only, `offline: true`) when the server cannot be
   reached. `git:sparseSetExclusions` reports the bytes arriving in
   `.git/objects/pack` as `sparse:progress` events while it runs.
+- **Settings UI** (`client/src/components/settings/DownloadFoldersSection.tsx`,
+  logic in `client/src/lib/download-selection.ts`): a tree of tri-state
+  checkboxes (department → sub-folders, one level loaded per expand) with
+  sizes, a summary (「6.5 GB をダウンロード済み（全体 10.4 GB）」 + usage bar,
+  and the size after applying), search over the loaded folders, and a sticky
+  footer: changes are a draft until 適用 (取り消す drops it). Applying checks
+  `git:sparseUncommittedChanges` for the folders being left out and asks
+  first; while it runs the footer shows the bytes received against the
+  folders' size. Children of an unchecked folder are shown unchecked and
+  disabled. Offline: sizes are 「—」 and a download fails with
+  「インターネットにつながっているときにダウンロードできます」, draft kept. The
+  settings panel has a left section nav and shares its building blocks
+  (`settings/ui.tsx`: neutral zinc, one indigo accent, light and dark).
+- **File tree** (`FileTreePanel`): a not-downloaded folder stays visible as a
+  muted placeholder (dashed folder icon, 「未ダウンロード」; on hover / focus
+  「ダウンロード」, also in its context menu) — so nobody thinks it does not
+  exist and recreates it. It does not expand and is not a drop target; new
+  file / folder / rename into it is refused with `notDownloadedUserMessage`.
+  `useSparseCheckout` instances refresh each other through the
+  `acb:sparse-changed` window event. Preview page with the preload API
+  mocked: `client/tests/download-folders-ui.html?view=settings|filetree&theme=light|dark&state=normal|offline|slow|confirm|applyOffline`
+  (serve with a renderer-only Vite config, without the Electron plugin).
 
 ### Conflict Resolution Strategy
 

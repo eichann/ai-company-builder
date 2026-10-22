@@ -1,8 +1,9 @@
 import { VoiceShortcutSettings } from './VoiceShortcutSettings'
-import { useState, useEffect, useCallback } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, FloppyDisk, Check, FileText, Cloud, CloudArrowDown, ArrowCounterClockwise, SpinnerGap, FolderSimple } from '@phosphor-icons/react'
+import { DownloadFoldersSection } from './DownloadFoldersSection'
+import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
+import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
+import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
-import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import { useDepartments } from '../../hooks/useDepartments'
 
 // Common API key definitions
@@ -15,17 +16,42 @@ const COMMON_API_KEYS = [
 
 interface SettingsPanelProps {
   onClose: () => void
+  /** Section to open first (default: ダウンロードするフォルダ). */
+  initialTab?: TabType
 }
 
-type TabType = 'apikeys' | 'sync' | 'gitignore' | 'advanced' | 'voice'
+export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'voice'
 
-export function SettingsPanel({ onClose }: SettingsPanelProps) {
+const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
+  {
+    group: '同期',
+    items: [
+      { id: 'sync', label: 'ダウンロードするフォルダ', icon: <CloudArrowDown size={16} /> },
+      { id: 'gitignore', label: '同期しないファイル', icon: <FileX size={16} /> },
+    ],
+  },
+  {
+    group: 'AI と連携',
+    items: [
+      { id: 'apikeys', label: 'APIキー', icon: <Key size={16} /> },
+      { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
+    ],
+  },
+  {
+    group: '入力',
+    items: [{ id: 'voice', label: '音声入力', icon: <Microphone size={16} /> }],
+  },
+]
+
+const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] text-zinc-900 placeholder:text-zinc-400 transition-colors focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500 dark:focus:border-indigo-400/60'
+const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
+const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
+
+export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
-  const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
   const { departments } = useDepartments(currentCompany?.id)
-  const [syncActionInProgress, setSyncActionInProgress] = useState<string | null>(null)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
-  const [activeTab, setActiveTab] = useState<TabType>('apikeys')
+  const [activeTab, setActiveTab] = useState<TabType>(initialTab)
   const [envVars, setEnvVars] = useState<Record<string, string>>({})
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
   const [customKeys, setCustomKeys] = useState<Array<{ key: string; value: string }>>([])
@@ -36,11 +62,20 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
 
   // Check which git binary is in use (warn when on the system git fallback)
   useEffect(() => {
     window.electronAPI.gitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
   }, [])
+
+  // Escape closes; focus starts inside the dialog.
+  useEffect(() => {
+    dialogRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && !e.defaultPrevented) onClose() }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onClose])
 
   // Load .env and .gitignore files on mount
   useEffect(() => {
@@ -219,410 +254,255 @@ export function SettingsPanel({ onClose }: SettingsPanelProps) {
     return null
   }
 
+  const hasSaveFooter = activeTab === 'apikeys' || activeTab === 'gitignore' || activeTab === 'advanced'
+
+  const loadingState = (
+    <div className="flex items-center justify-center gap-2 py-16 text-[13px] text-zinc-500 dark:text-zinc-400">
+      <SpinnerGap size={16} className="animate-spin" />読み込み中…
+    </div>
+  )
+
   return (
     <div
-      role="dialog" aria-label="設定"
-      className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-zinc-950/40 p-6 backdrop-blur-[2px] dark:bg-black/60"
       onClick={handleBackdropClick}
     >
-      <div className="bg-zinc-900 border border-zinc-700 rounded-2xl shadow-2xl w-[600px] max-h-[80vh] flex flex-col overflow-hidden">
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800">
-          <h2 className="text-lg font-semibold text-zinc-100">設定</h2>
+      <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-label="設定"
+        tabIndex={-1}
+        className="flex h-[min(760px,92vh)] w-[min(1040px,96vw)] overflow-hidden rounded-2xl border border-zinc-200 bg-white text-zinc-900 shadow-2xl outline-none dark:border-white/10 dark:bg-zinc-900 dark:text-zinc-100"
+      >
+        {/* Section nav */}
+        <nav aria-label="設定の項目" className="flex w-60 shrink-0 flex-col border-r border-zinc-200 bg-zinc-50/80 px-3 py-5 dark:border-white/[0.06] dark:bg-zinc-950/40">
+          <div className="px-2.5 pb-4">
+            <p className="text-[15px] font-semibold tracking-tight">設定</p>
+            <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
+          </div>
+          <div className="space-y-5 overflow-y-auto">
+            {NAV.map(group => (
+              <div key={group.group}>
+                <p className="px-2.5 pb-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">{group.group}</p>
+                <ul className="space-y-0.5">
+                  {group.items.map(item => {
+                    const active = activeTab === item.id
+                    return (
+                      <li key={item.id}>
+                        <button
+                          type="button"
+                          aria-current={active ? 'page' : undefined}
+                          onClick={() => { setActiveTab(item.id); setSaved(false); setError(null) }}
+                          className={`flex h-8 w-full items-center gap-2.5 rounded-lg px-2.5 text-left text-[13px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 ${active
+                            ? 'bg-white font-medium text-zinc-900 shadow-[0_1px_2px_rgba(0,0,0,0.06)] ring-1 ring-zinc-200 dark:bg-white/[0.08] dark:text-zinc-50 dark:shadow-none dark:ring-white/[0.06]'
+                            : 'text-zinc-600 hover:bg-zinc-100 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-white/[0.04] dark:hover:text-zinc-100'}`}
+                        >
+                          <span className={active ? 'text-indigo-600 dark:text-indigo-300' : 'text-zinc-400 dark:text-zinc-500'}>{item.icon}</span>
+                          {item.label}
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            ))}
+          </div>
+        </nav>
+
+        {/* Section content */}
+        <div className="relative flex min-w-0 flex-1 flex-col">
           <button
+            type="button"
             onClick={onClose}
-            className="p-2 rounded-lg hover:bg-white/[0.05] text-zinc-400 hover:text-zinc-200 transition-colors"
+            aria-label="閉じる"
+            className="absolute right-4 top-4 z-10 rounded-lg p-1.5 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/50 dark:hover:bg-white/[0.06] dark:hover:text-zinc-200"
           >
-            <X size={20} />
+            <X size={18} />
           </button>
-        </div>
 
-        {/* Tab Switcher */}
-        <div className="flex border-b border-zinc-800 overflow-x-auto shrink-0">
-          <button
-            onClick={() => setActiveTab('apikeys')}
-            className={`
-              flex items-center gap-2 px-6 py-3 text-sm font-medium
-              border-b-2 transition-colors
-              ${activeTab === 'apikeys'
-                ? 'border-amber-500 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }
-            `}
-          >
-            <Key size={16} />
-            APIキー
-          </button>
-          <button
-            onClick={() => setActiveTab('sync')}
-            className={`
-              flex items-center gap-2 px-6 py-3 text-sm font-medium
-              border-b-2 transition-colors
-              ${activeTab === 'sync'
-                ? 'border-amber-500 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }
-            `}
-          >
-            <FolderSimple size={16} />
-            同期フォルダ
-          </button>
-          <button
-            onClick={() => setActiveTab('gitignore')}
-            className={`
-              flex items-center gap-2 px-6 py-3 text-sm font-medium
-              border-b-2 transition-colors
-              ${activeTab === 'gitignore'
-                ? 'border-amber-500 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }
-            `}
-          >
-            <FileText size={16} />
-            同期除外
-          </button>
-          <button
-            onClick={() => setActiveTab('advanced')}
-            className={`
-              flex items-center gap-2 px-6 py-3 text-sm font-medium
-              border-b-2 transition-colors
-              ${activeTab === 'advanced'
-                ? 'border-amber-500 text-zinc-100'
-                : 'border-transparent text-zinc-500 hover:text-zinc-300'
-              }
-            `}
-          >
-            <Code size={16} />
-            詳細設定
-          </button>
-          <button onClick={() => setActiveTab('voice')} className={`shrink-0 px-4 py-3 text-sm border-b-2 ${activeTab === 'voice' ? 'border-amber-500 text-zinc-100' : 'border-transparent text-zinc-500'}`}>音声入力</button>
-        </div>
-
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto p-6">
-          {activeTab === 'voice' ? <div className="dark"><VoiceShortcutSettings /></div> : loading ? (
-            <div className="flex items-center justify-center py-12">
-              <div className="text-zinc-500">読み込み中...</div>
-            </div>
-          ) : activeTab === 'apikeys' ? (
-            <div className="space-y-6">
-              {/* Common API Keys */}
-              <div>
-                <h3 className="text-sm font-medium text-zinc-400 mb-4">よく使うAPIキー</h3>
-                <div className="space-y-3">
-                  {COMMON_API_KEYS.map(({ key, label, placeholder }) => (
-                    <div key={key} className="flex items-center gap-3">
-                      <label className="w-32 text-sm text-zinc-300 shrink-0">{label}</label>
-                      <div className="flex-1 relative">
-                        <input
-                          type={visibleKeys.has(key) ? 'text' : 'password'}
-                          value={envVars[key] || ''}
-                          onChange={(e) => updateCommonKey(key, e.target.value)}
-                          placeholder={placeholder}
-                          className="w-full px-3 py-2 pr-10 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-                        />
-                        <button
-                          onClick={() => toggleVisibility(key)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
-                        >
-                          {visibleKeys.has(key) ? <EyeSlash size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Custom Keys */}
-              <div>
-                <h3 className="text-sm font-medium text-zinc-400 mb-4">カスタム環境変数</h3>
-                <div className="space-y-3">
-                  {customKeys.map((item, index) => (
-                    <div key={index} className="flex items-center gap-3">
-                      <input
-                        type="text"
-                        value={item.key}
-                        onChange={(e) => updateCustomKey(index, 'key', e.target.value.toUpperCase())}
-                        placeholder="KEY_NAME"
-                        className="w-32 px-3 py-2 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
-                      />
-                      <div className="flex-1 relative">
-                        <input
-                          type={visibleKeys.has(`custom-${index}`) ? 'text' : 'password'}
-                          value={item.value}
-                          onChange={(e) => updateCustomKey(index, 'value', e.target.value)}
-                          placeholder="value"
-                          className="w-full px-3 py-2 pr-10 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500"
-                        />
-                        <button
-                          onClick={() => toggleVisibility(`custom-${index}`)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 p-1 text-zinc-500 hover:text-zinc-300"
-                        >
-                          {visibleKeys.has(`custom-${index}`) ? <EyeSlash size={16} /> : <Eye size={16} />}
-                        </button>
-                      </div>
-                      <button
-                        onClick={() => removeCustomKey(index)}
-                        className="p-2 text-zinc-500 hover:text-red-400 transition-colors"
-                      >
-                        <Trash size={16} />
-                      </button>
-                    </div>
-                  ))}
-
-                  {/* Add new key */}
-                  <div className="flex items-center gap-3 pt-2">
-                    <input
-                      type="text"
-                      value={newKeyName}
-                      onChange={(e) => setNewKeyName(e.target.value.toUpperCase())}
-                      placeholder="新しいキー名"
-                      onKeyDown={(e) => e.key === 'Enter' && addCustomKey()}
-                      className="w-32 px-3 py-2 bg-zinc-800/50 border border-zinc-700/50 border-dashed rounded-lg text-sm text-zinc-100 placeholder-zinc-600 focus:outline-none focus:border-zinc-500 font-mono"
-                    />
-                    <button
-                      onClick={addCustomKey}
-                      disabled={!newKeyName.trim()}
-                      className="flex items-center gap-2 px-3 py-2 text-sm text-zinc-400 hover:text-zinc-200 disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Plus size={16} />
-                      追加
-                    </button>
+          <div className="flex-1 overflow-y-auto">
+            {activeTab === 'sync' ? (
+              <>
+                {gitBinaryStatus && !gitBinaryStatus.bundled && (
+                  <div className="px-8 pt-7">
+                    <Callout tone="warning" title={`同梱のGitが使用できないため、システムのGitで動作しています（${gitBinaryStatus.binary}）`}>
+                      古いGitでは大きなファイルの同期に失敗することがあるため、保護設定（http.postBuffer）を自動適用しています。
+                    </Callout>
                   </div>
-                </div>
+                )}
+                <DownloadFoldersSection rootPath={currentCompany.rootPath} companyId={currentCompany.id} departments={departments} />
+              </>
+            ) : activeTab === 'voice' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
+                <Card className="p-5"><VoiceShortcutSettings /></Card>
               </div>
-
-              {/* Info */}
-              <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3">
-                <p>APIキーは <code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> ファイルに保存されます。</p>
-                <p className="mt-1">スクリプトから <code className="px-1 py-0.5 bg-zinc-700 rounded">process.env.OPENAI_API_KEY</code> などで参照できます。</p>
-                <p className="mt-1 text-amber-500/90">入力したキーを含む <code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> は同期されません（このPCにのみ保存されます）。</p>
-              </div>
-            </div>
-          ) : activeTab === 'sync' ? (
-            /* Sync Folders Tab */
-            <div className="space-y-6">
-              {gitBinaryStatus && !gitBinaryStatus.bundled && (
-                <div className="text-xs bg-amber-950/40 border border-amber-800/40 rounded-lg p-3 space-y-1">
-                  <p className="text-amber-400 font-medium">
-                    同梱のGitが使用できないため、システムのGitで動作しています（{gitBinaryStatus.binary}）
-                  </p>
-                  <p className="text-amber-400/70">
-                    古いGitでは大きなファイルの同期に失敗することがあるため、保護設定（http.postBuffer）を自動適用しています。
-                  </p>
-                </div>
-              )}
-              {sparseCheckout.isLoading ? (
-                <div className="flex items-center justify-center py-12">
-                  <SpinnerGap size={20} className="animate-spin text-zinc-500" />
-                </div>
-              ) : (
-                /* Show synced/unsynced departments */
-                <div className="space-y-6">
-                  {sparseCheckout.error && (
-                    <div role="alert" className="text-xs bg-amber-950/40 border border-amber-800/40 rounded-lg p-3 text-amber-400">
-                      {sparseCheckout.error}
-                    </div>
-                  )}
-
-                  {/* Synced departments */}
-                  <div>
-                    <h3 className="text-sm font-medium text-zinc-400 mb-3">ダウンロード済み</h3>
-                    <div className="space-y-2">
-                      {departments
-                        .filter(d => sparseCheckout.isCheckedOut(d.folder))
-                        .map(dept => (
-                          <div key={dept.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-800/50 rounded-lg">
-                            <Check size={16} className="text-emerald-500 flex-shrink-0" />
-                            <span className="text-sm text-zinc-200 flex-1">{dept.name}</span>
-                            <span className="text-xs text-zinc-500 font-mono">{dept.folder}/</span>
+            ) : loading ? loadingState : activeTab === 'apikeys' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="APIキー" description="スキルやスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
+                <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
+                  <div className="p-5">
+                    <SubHeading>よく使うAPIキー</SubHeading>
+                    <div className="mt-4 space-y-3">
+                      {COMMON_API_KEYS.map(({ key, label, placeholder }) => (
+                        <div key={key} className="flex items-center gap-4">
+                          <label htmlFor={`env-${key}`} className="w-32 shrink-0 text-[13px] text-zinc-600 dark:text-zinc-300">{label}</label>
+                          <div className="relative flex-1">
+                            <input
+                              id={`env-${key}`}
+                              type={visibleKeys.has(key) ? 'text' : 'password'}
+                              value={envVars[key] || ''}
+                              onChange={(e) => updateCommonKey(key, e.target.value)}
+                              placeholder={placeholder}
+                              className={`${INPUT} w-full pr-10 font-mono`}
+                            />
                             <button
-                              onClick={async () => {
-                                setSyncActionInProgress(dept.folder)
-                                try {
-                                  await sparseCheckout.removePath(dept.folder)
-                                } finally {
-                                  setSyncActionInProgress(null)
-                                }
-                              }}
-                              disabled={syncActionInProgress !== null}
-                              className="text-xs text-zinc-500 hover:text-red-400 transition-colors disabled:opacity-50"
+                              type="button"
+                              onClick={() => toggleVisibility(key)}
+                              aria-label={visibleKeys.has(key) ? '隠す' : '表示する'}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
                             >
-                              {syncActionInProgress === dept.folder ? (
-                                <SpinnerGap size={14} className="animate-spin" />
-                              ) : '除外する'}
+                              {visibleKeys.has(key) ? <EyeSlash size={16} /> : <Eye size={16} />}
                             </button>
                           </div>
-                        ))}
-                      {departments.filter(d => sparseCheckout.isCheckedOut(d.folder)).length === 0 && (
-                        <div className="text-sm text-zinc-500 py-2">なし</div>
-                      )}
+                        </div>
+                      ))}
                     </div>
                   </div>
 
-                  {/* Unsynced departments */}
-                  {departments.filter(d => !sparseCheckout.isCheckedOut(d.folder)).length > 0 && (
-                    <div>
-                      <h3 className="text-sm font-medium text-zinc-400 mb-3">未ダウンロード</h3>
-                      <div className="space-y-2">
-                        {departments
-                          .filter(d => !sparseCheckout.isCheckedOut(d.folder))
-                          .map(dept => (
-                            <div key={dept.id} className="flex items-center gap-3 px-4 py-3 bg-zinc-800/30 rounded-lg">
-                              <Cloud size={16} className="text-zinc-600 flex-shrink-0" />
-                              <span className="text-sm text-zinc-400 flex-1">{dept.name}</span>
-                              <span className="text-xs text-zinc-600 font-mono">{dept.folder}/</span>
-                              <button
-                                onClick={async () => {
-                                  setSyncActionInProgress(dept.folder)
-                                  try {
-                                    await sparseCheckout.addPath(dept.folder)
-                                  } finally {
-                                    setSyncActionInProgress(null)
-                                  }
-                                }}
-                                disabled={syncActionInProgress !== null}
-                                className="flex items-center gap-1 text-xs text-indigo-400 hover:text-indigo-300 transition-colors disabled:opacity-50"
-                              >
-                                {syncActionInProgress === dept.folder ? (
-                                  <>
-                                    <SpinnerGap size={14} className="animate-spin" />
-                                    ダウンロード中…
-                                  </>
-                                ) : (
-                                  <>
-                                    <CloudArrowDown size={14} />
-                                    追加する
-                                  </>
-                                )}
-                              </button>
-                            </div>
-                          ))}
+                  <div className="p-5">
+                    <SubHeading>カスタム環境変数</SubHeading>
+                    <div className="mt-4 space-y-3">
+                      {customKeys.map((item, index) => (
+                        <div key={index} className="flex items-center gap-3">
+                          <input
+                            type="text"
+                            value={item.key}
+                            onChange={(e) => updateCustomKey(index, 'key', e.target.value.toUpperCase())}
+                            placeholder="KEY_NAME"
+                            aria-label="キー名"
+                            className={`${INPUT} w-44 shrink-0 font-mono`}
+                          />
+                          <div className="relative flex-1">
+                            <input
+                              type={visibleKeys.has(`custom-${index}`) ? 'text' : 'password'}
+                              value={item.value}
+                              onChange={(e) => updateCustomKey(index, 'value', e.target.value)}
+                              placeholder="value"
+                              aria-label={`${item.key || 'キー'} の値`}
+                              className={`${INPUT} w-full pr-10 font-mono`}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => toggleVisibility(`custom-${index}`)}
+                              aria-label={visibleKeys.has(`custom-${index}`) ? '隠す' : '表示する'}
+                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+                            >
+                              {visibleKeys.has(`custom-${index}`) ? <EyeSlash size={16} /> : <Eye size={16} />}
+                            </button>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeCustomKey(index)}
+                            aria-label={`${item.key || 'キー'} を削除`}
+                            className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
+                          >
+                            <Trash size={16} />
+                          </button>
+                        </div>
+                      ))}
+
+                      <div className="flex items-center gap-3">
+                        <input
+                          type="text"
+                          value={newKeyName}
+                          onChange={(e) => setNewKeyName(e.target.value.toUpperCase())}
+                          placeholder="新しいキー名"
+                          aria-label="新しいキー名"
+                          onKeyDown={(e) => e.key === 'Enter' && addCustomKey()}
+                          className={`${INPUT} w-44 shrink-0 border-dashed font-mono`}
+                        />
+                        <Button variant="ghost" className="shrink-0 whitespace-nowrap" onClick={addCustomKey} disabled={!newKeyName.trim()}>
+                          <Plus size={14} />追加
+                        </Button>
                       </div>
                     </div>
-                  )}
-
-                  {/* Restore all */}
-                  <button
-                    onClick={async () => {
-                      setSyncActionInProgress('__all__')
-                      try {
-                        await sparseCheckout.disable()
-                      } finally {
-                        setSyncActionInProgress(null)
-                      }
-                    }}
-                    disabled={syncActionInProgress !== null}
-                    className="flex items-center gap-2 text-sm text-zinc-400 hover:text-zinc-200 transition-colors disabled:opacity-50"
-                  >
-                    <ArrowCounterClockwise size={16} />
-                    すべて同期に戻す
-                  </button>
-
-                  <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3">
-                    部署を除外すると、そのフォルダのファイルがローカルから削除されます。
-                    サーバーには残るので、いつでも再追加できます。
-                    未ダウンロードの部署は、追加したときにサーバーからダウンロードされます（インターネット接続が必要です）。
                   </div>
-                </div>
-              )}
-            </div>
-          ) : activeTab === 'gitignore' ? (
-            /* Gitignore Tab */
-            <div className="space-y-4">
-              <div className="text-sm text-zinc-400 mb-2">
-                同期対象外ファイル (.gitignore)
-              </div>
-              <textarea
-                value={gitignoreContent}
-                onChange={(e) => {
-                  setGitignoreContent(e.target.value)
-                  setSaved(false)
-                }}
-                placeholder="# 同期対象外にするファイル/フォルダ&#10;.DS_Store&#10;node_modules/&#10;*.log"
-                className="w-full h-80 px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 font-mono placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
-                spellCheck={false}
-              />
-              <div className="text-xs text-zinc-500 bg-zinc-800/50 rounded-lg p-3 space-y-2">
-                <p><strong>自動追加されるエントリ:</strong></p>
-                <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">.backups/</code> - バックアップフォルダ</li>
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">.env</code> / <code className="px-1 py-0.5 bg-zinc-700 rounded">.env.*</code> - APIキー等の秘密情報（同期されず、このPCにのみ保存）</li>
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">100MB以上のファイル</code> - 大容量ファイル</li>
-                </ul>
-                <p className="mt-2"><strong>書き方:</strong></p>
-                <ul className="list-disc list-inside space-y-1 ml-2">
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">*.log</code> - すべての.logファイル</li>
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded">folder/</code> - フォルダ全体</li>
-                  <li><code className="px-1 py-0.5 bg-zinc-700 rounded"># comment</code> - コメント</li>
-                </ul>
-              </div>
-            </div>
-          ) : (
-            /* Advanced Tab - Raw .env Editor */
-            <div className="space-y-4">
-              <div className="text-sm text-zinc-400 mb-2">
-                .envファイルを直接編集
-              </div>
-              <textarea
-                value={rawEnvContent}
-                onChange={(e) => {
-                  setRawEnvContent(e.target.value)
-                  setSaved(false)
-                }}
-                placeholder="OPENAI_API_KEY=sk-...&#10;ANTHROPIC_API_KEY=sk-ant-..."
-                className="w-full h-80 px-4 py-3 bg-zinc-800 border border-zinc-700 rounded-lg text-sm text-zinc-100 font-mono placeholder-zinc-600 focus:outline-none focus:border-zinc-500 resize-none"
-                spellCheck={false}
-              />
-              <div className="text-xs text-zinc-500">
-                <p>形式: <code className="px-1 py-0.5 bg-zinc-700 rounded">KEY=value</code> (1行に1つ)</p>
-                <p className="mt-1">コメント行は <code className="px-1 py-0.5 bg-zinc-700 rounded">#</code> で始めてください。</p>
-              </div>
-            </div>
-          )}
-        </div>
+                </Card>
 
-        {/* Footer (hidden for sync tab — actions are inline) */}
-        {activeTab !== 'sync' && activeTab !== 'voice' && (
-        <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
-          {error ? (
-            <div className="text-sm text-red-400">{error}</div>
-          ) : (
-            <div className="text-sm text-zinc-500">
-              保存先: <code className="px-1 py-0.5 bg-zinc-800 rounded">
-                {currentCompany.rootPath}/{activeTab === 'gitignore' ? '.gitignore' : '.env'}
-              </code>
+                <Callout tone="info">
+                  <p>APIキーは <code className={CODE}>.env</code> ファイルに保存されます。スクリプトから <code className={CODE}>process.env.OPENAI_API_KEY</code> などで参照できます。</p>
+                  <p className="mt-1">入力したキーを含む <code className={CODE}>.env</code> は同期されません（このPCにのみ保存されます）。</p>
+                </Callout>
+              </div>
+            ) : activeTab === 'gitignore' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="同期しないファイル" description={<>ここに書いたファイルやフォルダは、チームと共有されません（<code className={CODE}>.gitignore</code>）。</>} />
+                <textarea
+                  value={gitignoreContent}
+                  onChange={(e) => {
+                    setGitignoreContent(e.target.value)
+                    setSaved(false)
+                  }}
+                  aria-label=".gitignore の内容"
+                  placeholder="# 同期対象外にするファイル/フォルダ&#10;.DS_Store&#10;node_modules/&#10;*.log"
+                  className={TEXTAREA}
+                  spellCheck={false}
+                />
+                <div className="grid grid-cols-2 gap-4">
+                  <Card className="p-4 text-[13px] text-zinc-600 dark:text-zinc-300">
+                    <SubHeading>自動で追加される項目</SubHeading>
+                    <ul className="mt-2 space-y-1.5">
+                      <li><code className={CODE}>.backups/</code> バックアップフォルダ</li>
+                      <li><code className={CODE}>.env</code> / <code className={CODE}>.env.*</code> APIキーなどの秘密情報</li>
+                      <li><code className={CODE}>100MB以上のファイル</code> 大容量ファイル</li>
+                    </ul>
+                  </Card>
+                  <Card className="p-4 text-[13px] text-zinc-600 dark:text-zinc-300">
+                    <SubHeading>書き方</SubHeading>
+                    <ul className="mt-2 space-y-1.5">
+                      <li><code className={CODE}>*.log</code> すべての .log ファイル</li>
+                      <li><code className={CODE}>folder/</code> フォルダ全体</li>
+                      <li><code className={CODE}># comment</code> コメント</li>
+                    </ul>
+                  </Card>
+                </div>
+              </div>
+            ) : (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="環境変数（.env）" description={<>このPCの <code className={CODE}>.env</code> を直接編集します。1行に1つ、<code className={CODE}>KEY=value</code> の形式で書きます。</>} />
+                <textarea
+                  value={rawEnvContent}
+                  onChange={(e) => {
+                    setRawEnvContent(e.target.value)
+                    setSaved(false)
+                  }}
+                  aria-label=".env の内容"
+                  placeholder="OPENAI_API_KEY=sk-...&#10;ANTHROPIC_API_KEY=sk-ant-..."
+                  className={TEXTAREA}
+                  spellCheck={false}
+                />
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">コメント行は <code className={CODE}>#</code> で始めてください。</p>
+              </div>
+            )}
+          </div>
+
+          {hasSaveFooter && (
+            <div className="flex items-center justify-between gap-4 border-t border-zinc-200 bg-white px-8 py-3 dark:border-white/[0.08] dark:bg-zinc-900">
+              {error ? (
+                <p role="alert" className="text-[13px] text-red-600 dark:text-red-300">{error}</p>
+              ) : (
+                <p className="min-w-0 truncate text-xs text-zinc-500 dark:text-zinc-400">
+                  保存先: <code className={CODE}>{currentCompany.rootPath}/{activeTab === 'gitignore' ? '.gitignore' : '.env'}</code>
+                </p>
+              )}
+              <Button variant="primary" onClick={saveChanges} disabled={saving} className="shrink-0">
+                {saving ? <><SpinnerGap size={14} className="animate-spin" />保存中…</> : saved ? <><Check size={14} />保存しました</> : '保存'}
+              </Button>
             </div>
           )}
-          <button
-            onClick={saveChanges}
-            disabled={saving}
-            className={`
-              flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium
-              transition-all
-              ${saved
-                ? 'bg-emerald-600 text-white'
-                : 'bg-amber-600 hover:bg-amber-500 text-white'
-              }
-              disabled:opacity-50 disabled:cursor-not-allowed
-            `}
-          >
-            {saving ? (
-              <>保存中...</>
-            ) : saved ? (
-              <>
-                <Check size={16} />
-                保存完了
-              </>
-            ) : (
-              <>
-                <FloppyDisk size={16} />
-                保存
-              </>
-            )}
-          </button>
         </div>
-        )}
       </div>
     </div>
   )
