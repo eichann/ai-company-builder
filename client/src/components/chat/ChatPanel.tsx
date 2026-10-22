@@ -10,7 +10,8 @@ import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/pe
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { ghostSuggestion, handleGhostKey, setSuggestion } from './ghostSuggestion'
-import { canOfferSuggestion, suggestionDescription } from './promptSuggestion'
+import { canOfferSuggestion, shouldRequestSuggestion, suggestionDescription } from './promptSuggestion'
+import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
 import { normalizeSuggestion } from '../../../shared/prompt-suggestion'
 import { STEER_PART_TYPE, canSteerText, type SteerResponse } from '../../../shared/steer'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
@@ -1584,6 +1585,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           activeDepartment: activeDepartmentRef.current || undefined,
           modelId: aiModelRef.current,
           effort: aiEffortRef.current,
+          // Settings → 入力候補; off → the CLI is not asked for a suggestion.
+          promptSuggestions: promptSuggestionSetting.getSnapshot(),
         }
         // Ensure app session ID exists (eagerly create on first request)
         if (!appSessionIdRef.current) {
@@ -1641,7 +1644,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     experimental_throttle: 50,
     onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
       lastTurnAbortedRef.current = isAbort || isDisconnect || isError
-      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: !lastTurnAbortedRef.current && authModeRef.current === 'claude-code' }))
+      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: shouldRequestSuggestion({ aborted: lastTurnAbortedRef.current, authMode: authModeRef.current, enabled: promptSuggestionSetting.getSnapshot() }) }))
       const receipt = handoffRequestRef.current
       if (receipt && !isAbort && !isDisconnect && !isError && finishReason === 'stop') {
         const content = uiMessageToSessionMessage(message, new Date()).content

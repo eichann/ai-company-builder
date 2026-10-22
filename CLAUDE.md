@@ -1177,8 +1177,24 @@ answer, for both agents. Shared types and the answer mapping:
   sends `prompt_suggestion` ~1 s *after* the result — after the UI stream has
   closed — so the renderer asks `GET /api/prompt-suggestion/:appSessionId`
   after a finished (not stopped/failed) turn; it waits up to 15 s. The CLI
-  stays silent when nothing is obvious, after errors, near the plan limit, or
-  when the member set `promptSuggestionEnabled: false` (user settings apply).
+  stays silent on a conversation's first reply without tool use (it needs two
+  assistant messages), when nothing is obvious, after errors, or when the
+  member set `promptSuggestionEnabled: false` (user settings apply). The app
+  spawns it with `CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION=true`: otherwise it
+  also stops near the plan's usage limit (`allowed_warning`), which made
+  suggestions never appear for a heavy user. The terminal CLI's "unused
+  streak" back-off does not apply to SDK sessions. The chat server logs
+  whether a suggestion came (`[chat-server] Prompt suggestion: …`, never its
+  text).
+  The session-recovery wrapper (`agents/recovery.ts`) must not abort the
+  native model when its stream ends normally: the provider keeps reading
+  after closing the stream, and that abort killed the CLI before the
+  suggestion — every resumed turn (2nd reply on) silently had none.
+- Settings → 入力候補 「次の質問の候補を表示する」 (`src/lib/promptSuggestionSetting.ts`,
+  localStorage, on by default): off → the renderer sends
+  `promptSuggestions: false` with each chat request, the chat server opens
+  the turn without a suggestion slot, and the CLI is not asked to make one
+  (no extra request against the plan's usage).
 - Shown as light ghost text in the empty input (it replaces the placeholder),
   only while idle with no card/approval waiting. → or Tab (caret at the end,
   no modifiers) puts it into the input; Enter stays a new line and ⌘+Enter

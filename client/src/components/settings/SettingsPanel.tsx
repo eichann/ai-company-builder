@@ -1,9 +1,10 @@
 import { VoiceShortcutSettings } from './VoiceShortcutSettings'
 import { VoicePromptSettings } from './VoicePromptSettings'
+import { PromptSuggestionSettings } from './PromptSuggestionSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
 
@@ -21,7 +22,7 @@ interface SettingsPanelProps {
   initialTab?: TabType
 }
 
-export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'voice'
+export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'voice' | 'suggestions'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -40,7 +41,10 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
   },
   {
     group: '入力',
-    items: [{ id: 'voice', label: '音声入力', icon: <Microphone size={16} /> }],
+    items: [
+      { id: 'voice', label: '音声入力', icon: <Microphone size={16} /> },
+      { id: 'suggestions', label: '入力候補', icon: <Lightbulb size={16} /> },
+    ],
   },
 ]
 
@@ -339,6 +343,11 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                 <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
                 <Card className="p-5"><VoiceShortcutSettings /></Card>
                 <Card className="p-5"><VoicePromptSettings /></Card>
+              </div>
+            ) : activeTab === 'suggestions' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="入力候補" description="相談画面の入力欄に表示する候補の設定です。" />
+                <Card className="p-5"><PromptSuggestionSettings /></Card>
               </div>
             ) : loading ? loadingState : activeTab === 'apikeys' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">

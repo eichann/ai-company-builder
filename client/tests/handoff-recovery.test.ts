@@ -90,6 +90,21 @@ test('cancelling the recovery stream aborts the underlying native agent', async 
   await reader.read(); await reader.cancel()
   assert.equal(signal?.aborted, true)
 })
+test('a stream that ends normally leaves the native agent running (post-result prompt suggestion)', async () => {
+  let signal: AbortSignal | undefined
+  const native: Model = { specificationVersion: 'v3', provider: 'test', modelId: 'test', supportedUrls: {}, doGenerate: async () => { throw new Error('unused') }, doStream: async options => {
+    signal = options.abortSignal
+    return { stream: new ReadableStream<Part>({ start(c) { c.enqueue({ type: 'stream-start', warnings: [] }); c.close() } }) }
+  } }
+  const connection: AgentConnection = { id: 'test', ownsConversation: true, authenticationError: () => undefined, readMetadata: () => ({}), createChatModel: () => native, createTitleModel: () => native }
+  const outer = new AbortController()
+  const model = recoverSessionModel(connection, { resumeId: 'old' }, { prepare: () => { throw new Error('unused') }, started: () => {}, session: () => {}, finished: () => {}, failed: () => {} }) as Model
+  const result = await model.doStream({ prompt: [], abortSignal: outer.signal }); const reader = result.stream.getReader()
+  while (!(await reader.read()).done) { /* drain */ }
+  assert.equal(signal?.aborted, false)
+  outer.abort()
+  assert.equal(signal?.aborted, true)
+})
 test('a partially summarized message resumes from the exact remaining offset', () => {
   const f = contextFixture(); const cursor = { index: 0, offset: 4 }
   f.state.memo = { ...f.state.memo!, cursor, hash: fingerprint(f.session.messages, cursor) }

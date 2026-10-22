@@ -389,7 +389,10 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           pathToClaudeCodeExecutable: claudePath,
           permissionMode: mode,
           cwd: workingDirectory,
-          env: config.getShellEnv(),
+          // CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: without it the CLI stops
+          // suggesting once the plan is near its usage limit
+          // (status `allowed_warning`), which heavy members hit most days.
+          env: onPromptSuggestion ? { ...config.getShellEnv(), CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : config.getShellEnv(),
           settingSources: ['user', 'project'],
           streamingInput: 'always',
           // One-line progress for running subagents (task_progress.summary),

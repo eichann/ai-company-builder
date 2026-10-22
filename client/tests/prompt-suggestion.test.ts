@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { EditorState } from '@codemirror/state'
-import { canOfferSuggestion, ghostKeyAction, ghostRemainder, suggestionAfterEdit, suggestionDescription, type GhostInput } from '../src/components/chat/promptSuggestion'
+import { canOfferSuggestion, shouldRequestSuggestion, ghostKeyAction, ghostRemainder, suggestionAfterEdit, suggestionDescription, type GhostInput } from '../src/components/chat/promptSuggestion'
 import { currentSuggestion, ghostSuggestion, setSuggestion } from '../src/components/chat/ghostSuggestion'
 import { normalizeSuggestion, MAX_SUGGESTION_LENGTH } from '../shared/prompt-suggestion'
 import { createChatTurns } from '../electron/chat-turns'
@@ -146,4 +146,12 @@ test('Claude Code: suggestions requested only when the chat can show them; null 
   assert.deepEqual(seen, ['commit this', null])
   connection.createTitleModel()
   assert.equal(options.promptSuggestions, undefined)
+})
+
+test('a suggestion is asked for only after a finished Claude Code turn with the setting on', () => {
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'claude-code', enabled: true }), true)
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'claude-code', enabled: false }), false)
+  assert.equal(shouldRequestSuggestion({ aborted: true, authMode: 'claude-code', enabled: true }), false)
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'codex', enabled: true }), false)
+  assert.equal(shouldRequestSuggestion({ aborted: false, authMode: 'api-key', enabled: true }), false)
 })
