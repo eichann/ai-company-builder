@@ -358,9 +358,13 @@ describe('search', () => {
   })
 
   it('never runs the member\'s regular expression in the server process (ReDoS)', async () => {
-    let ticks = 0
-    const timer = setInterval(() => { ticks++ }, 10)
+    // Record when the event loop gets to run: a regex evaluated in-process would
+    // stall it for seconds. (Counting ticks alone was flaky — a fast search can
+    // finish before the first 10 ms tick.)
     const started = Date.now()
+    let last = started
+    let maxGap = 0
+    const timer = setInterval(() => { const now = Date.now(); maxGap = Math.max(maxGap, now - last); last = now }, 10)
     try {
       const r = await get('u-other', CO, 'search', { q: '(x+x+)+y', regex: 'true', path: 'redos.txt' })
       expect(r.status).toBe(200)
@@ -372,9 +376,11 @@ describe('search', () => {
     } finally {
       clearInterval(timer)
     }
-    expect(Date.now() - started).toBeLessThan(5_000)
-    // The event loop kept running meanwhile.
-    expect(ticks).toBeGreaterThan(0)
+    const ended = Date.now()
+    maxGap = Math.max(maxGap, ended - last)
+    expect(ended - started).toBeLessThan(5_000)
+    // The event loop was never blocked for long meanwhile.
+    expect(maxGap).toBeLessThan(1_000)
   })
 
   it('bounds matches (total and per file) and reports truncation', async () => {

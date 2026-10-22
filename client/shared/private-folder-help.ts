@@ -3,7 +3,7 @@
 // The same text is in the admin: admin/src/lib/private-folder-help.ts.
 // The admin cannot import from client/ or the repo-root shared/ (its Docker
 // build copies admin/ only), so the two files are kept identical by hand and
-// admin/tests/private-folder-help.test.ts fails when they drift.
+// client/tests/private-folder-help-parity.test.ts fails when they drift.
 
 export interface PrivateFolderHelpItem {
   title: string

@@ -20,7 +20,6 @@ import { audienceCounts, audienceFromDetail, audienceRequest, defaultViewers, di
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { COMPANY_ID, departments, effectiveAt, managerCapabilities, members, ok, permissionScopes } from './fixtures'
 import { mockApi, type Call } from './mock-api'
-import * as clientHelp from '../../client/shared/private-folder-help'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -324,13 +323,6 @@ describe('非公開フォルダ: 非公開フォルダについて', () => {
     expect(dialog).toHaveTextContent('この部署の責任者は、見られる人をあとから変更でき、自分を加えることもできます。')
     await userEvent.click(within(dialog).getByRole('button', { name: '非公開フォルダについて' }))
     expect(await screen.findByRole('dialog', { name: '非公開フォルダについて' })).toBeInTheDocument()
-  })
-
-  it('is the same text as the desktop app (client/shared/private-folder-help.ts)', () => {
-    expect(clientHelp.PRIVATE_FOLDER_HELP).toEqual(PRIVATE_FOLDER_HELP)
-    expect(clientHelp.PRIVATE_FOLDER_HELP_TITLE).toBe(PRIVATE_FOLDER_HELP_TITLE)
-    expect(clientHelp.REMOVED_VIEWER_CAVEAT).toBe(REMOVED_VIEWER_CAVEAT)
-    expect(clientHelp.MANAGERS_MAY_CHANGE_VIEWERS).toBe(MANAGERS_MAY_CHANGE_VIEWERS)
   })
 })
 
