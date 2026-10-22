@@ -20,6 +20,9 @@ interface Gates {
   write: WriteGate
   /** Reserved private-folder paths (reservedKey form) — company repository only. */
   reserved: string[]
+  /** Department folders the pusher manages (instruction files). */
+  managedFolders?: string[]
+  scopePath?: string
 }
 
 function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
@@ -28,7 +31,12 @@ function gatesFromEnv(env: NodeJS.ProcessEnv): Gates | Buffer {
     // A push through git-http: always checked against its snapshot.
     try {
       const policy = parsePushPolicy(readFileSync(policyPath, 'utf8'))
-      return { write: writeGateFor(policy), reserved: reservedPathsFor(policy) }
+      return {
+        write: writeGateFor(policy),
+        reserved: reservedPathsFor(policy),
+        managedFolders: policy.managedFolders ?? [],
+        ...(policy.scopePath !== undefined ? { scopePath: policy.scopePath } : {}),
+      }
     } catch (err) {
       console.error('[push-check] cannot read the push policy:', err instanceof Error ? err.message : err)
       return hookErrorLine('権限情報を読み込めませんでした')
@@ -56,6 +64,8 @@ async function main(): Promise<number> {
     pusherRole: env.ACB_PUSHER_ROLE,
     writeGate: gates.write,
     reserved: gates.reserved,
+    managedFolders: gates.managedFolders ?? [],
+    ...(gates.scopePath !== undefined ? { scopePath: gates.scopePath } : {}),
     contentCheckAvailable,
   })
   if (!result.rejected) return 0

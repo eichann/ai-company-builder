@@ -123,6 +123,8 @@ export interface PushCheckRequest {
   scopes: ScopeWithRules[]
   /** Set for a push to a private folder's scope repository: its company path. */
   scopePath?: string
+  /** Department folders (NFC) the pusher manages: instruction files inside are theirs to change. */
+  managedFolders?: string[]
 }
 
 export interface PreparedPushCheck {
@@ -145,6 +147,7 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     pusher: req.pusher,
     scopes: req.scopes,
     ...(req.scopePath !== undefined ? { scopePath: req.scopePath } : {}),
+    ...(req.managedFolders !== undefined ? { managedFolders: req.managedFolders } : {}),
   }
   let dir: string | null = null
   try {

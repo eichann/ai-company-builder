@@ -6,10 +6,14 @@
  * order:
  *
  *   protected config   owner/admin only (role from ACB_PUSHER_ROLE)
+ *   instruction files  CLAUDE.md / CLAUDE.local.md / AGENTS.md: owner/admin,
+ *                      or a manager inside their department   (new)
  *   auto-run skills    owner/admin only
  *   .personal content  nobody
+ *   .backups/.workspace nobody (added/modified)   (new)
  *   reserved paths     nobody — a private folder's path in the company
- *                      repository (added/modified paths, NFC + A–Z folded)
+ *                      repository (added/modified paths, NFC + A–Z folded),
+ *                      and any non-folder at a path above one   (new)
  *   write permission   resolveAccess(pusher, path).write   (new)
  *   Windows paths      the whole new tree
  *   gitlinks           added/changed mode-160000 entries
@@ -38,6 +42,8 @@ import {
   autorunUnavailable,
   cleanControl,
   parseRefUpdates,
+  instructionFilePaths,
+  localOnlyPaths,
   personalPaths,
   protectedPaths,
   sortUnique,
@@ -46,7 +52,7 @@ import {
   type RefUpdate,
 } from './rules'
 import { emptyFindings, renderReport, type Findings } from './report'
-import { reservedPrefixOf, type WriteGate } from './policy'
+import { instructionFileAllowed, reservedAncestorOf, reservedPrefixOf, type WriteGate } from './policy'
 
 export interface PushCheckContext {
   /** ACB_PUSHER_ROLE as git-http set it (undefined when absent). */
@@ -64,6 +70,10 @@ export interface PushCheckContext {
    * form). Empty for scope repositories and for pushes without a snapshot.
    */
   reserved?: string[]
+  /** Department folders (NFC company paths) the pusher manages — instruction files inside them are theirs to change. */
+  managedFolders?: string[]
+  /** Set for a scope repository: the private folder's company path (pushed paths are relative to it). */
+  scopePath?: string
 }
 
 export interface PushCheckResult {
@@ -241,7 +251,9 @@ async function checkReserved(changes: RefChanges, reserved: string[]): Promise<s
   const out: string[] = []
   const paths = new Set([added.net, added.perCommit].flatMap(b => b.toString('utf8').split('\0')).filter(x => x.length > 0))
   for (const p of paths) {
-    const folder = reservedPrefixOf(p, reserved)
+    // At or under a private folder — or a file / symlink / gitlink where one
+    // of the folders above it must stay a folder.
+    const folder = reservedPrefixOf(p, reserved) ?? reservedAncestorOf(p, reserved)
     if (folder !== null) out.push(`${utf8Bytes(cleanControl(p))}\t${utf8Bytes(cleanControl(folder))}`)
   }
   return captured(sortUnique(out).join('\n'))
@@ -332,6 +344,14 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
       const found = lists.ok ? captured(protectedPaths(nameListLines(lists)).join('\n')) : unableToCheck(ref.refname)
       if (found) f.protected += found + '\n'
 
+      // CLAUDE.md / AGENTS.md: also a department manager's inside their department.
+      const instructions = lists.ok
+        ? captured(instructionFilePaths(nameListLines(lists))
+          .filter(l => !instructionFileAllowed(Buffer.from(l, 'latin1').toString('utf8'), ctx.managedFolders ?? [], ctx.scopePath))
+          .join('\n'))
+        : ''
+      if (instructions) f.instructions += instructions + '\n'
+
       const autorun = await checkAutorun(changes, ctx.contentCheckAvailable)
       if (autorun) f.autorun += autorun + '\n'
     }
@@ -339,6 +359,9 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
     const added = await changes.nameLists(['--diff-filter=d'])
     const personal = added.ok ? captured(personalPaths(nameListLines(added)).join('\n')) : unableToCheck(ref.refname)
     if (personal) f.personal += personal + '\n'
+
+    const localOnly = added.ok ? captured(localOnlyPaths(nameListLines(added)).join('\n')) : ''
+    if (localOnly) f.localOnly += localOnly + '\n'
 
     const reserved = await checkReserved(changes, ctx.reserved ?? [])
     if (reserved) f.reserved += reserved + '\n'

@@ -57,6 +57,7 @@ import {
   makePrivateFolderPublic,
   MakePublicError,
   PathUnavailableError,
+  PrivateFolderBusyError,
   readablePrivateFolders,
   replacePrivateFolderRules,
   canWriteInPrivateFolder,
@@ -302,6 +303,9 @@ privateFoldersRoute.post('/private-folders', async (c) => {
     return c.json({ success: true, data: detail(actor.companyId, folder) }, 201)
   } catch (err) {
     if (err instanceof PathUnavailableError) return unavailable(c, path)
+    if (err instanceof PrivateFolderBusyError) {
+      return c.json({ error: 'Someone is still pushing to the company repository; try again in a moment', code: 'BUSY' }, 503)
+    }
     console.error('Failed to create private folder:', err)
     return c.json({ error: 'Failed to create the private folder' }, 500)
   }
