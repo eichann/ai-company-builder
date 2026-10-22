@@ -70,6 +70,15 @@ export function canOfferSuggestion(state: {
   return !state.running && !state.waitingForMember && state.draft.trim() === ''
 }
 
+/**
+ * Whether a turn should come with a suggestion: Claude Code only (the CLI
+ * makes it), not after a stopped or failed turn, and not when the member
+ * turned it off in settings (then the CLI is not asked to make one at all).
+ */
+export function shouldRequestSuggestion(turn: { aborted: boolean; authMode: string; enabled: boolean }): boolean {
+  return turn.enabled && !turn.aborted && turn.authMode === 'claude-code'
+}
+
 /** Screen-reader description while a suggestion is offered. */
 export function suggestionDescription(suggestion: string): string {
   return `入力候補：${suggestion}。→キーまたはTabキーで入力欄に入れます。Escキーで消します。`

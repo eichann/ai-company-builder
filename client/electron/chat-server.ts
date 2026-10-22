@@ -175,6 +175,7 @@ export async function startChatServer(config: ChatServerConfig) {
       claudeSessionId: bodyClaudeSessionId,
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
+      promptSuggestions,
     }: {
       messages: UIMessage[]
       systemPrompt?: string
@@ -191,6 +192,8 @@ export async function startChatServer(config: ChatServerConfig) {
       claudeSessionId?: string
       agentSession?: AgentSession | null
       authMode?: AuthMode
+      /** The member's setting (Settings → 入力候補); absent = on. */
+      promptSuggestions?: boolean
     } = body
 
     const authMode = requestedAuthMode || config.getAuthMode()
@@ -258,7 +261,7 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering for the CLI agents; next-prompt suggestions for Claude Code.
     const turn = appSessionId && connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
-      ? chatTurns.open(appSessionId, injector, { suggestions: authMode === 'claude-code' }) : undefined
+      ? chatTurns.open(appSessionId, injector, { suggestions: authMode === 'claude-code' && promptSuggestions !== false }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
     const onEvent = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
