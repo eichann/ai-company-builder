@@ -788,6 +788,13 @@ ${promptContent}
             message: result.message || `個人用フォルダ（.personal）のファイルを共有対象から外しました: ${result.untrackedPersonalFiles.join(', ')}`,
             backupPath: result.backupPath
           })
+        } else if (result.outsideCheckoutFiles && result.outsideCheckoutFiles.length > 0) {
+          // Files created in a folder this computer has not downloaded were set aside, not shared
+          setSyncNotification({
+            type: 'warning',
+            message: result.message || `ダウンロードしていないフォルダに作られたファイルを .backups に保存しました: ${result.outsideCheckoutFiles.join(', ')}`,
+            backupPath: result.outsideCheckoutBackupPath || result.backupPath
+          })
         } else if (result.hadConflicts) {
           setSyncNotification({
             type: 'warning',
@@ -827,6 +834,7 @@ ${promptContent}
         (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
         (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) ||
         (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) ||
+        (result.outsideCheckoutFiles && result.outsideCheckoutFiles.length > 0) ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
         (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
         (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)

@@ -129,7 +129,7 @@ async function reconcileCone(git: SimpleGit, repoPath: string, cleanExcluded: st
     if (await isPartialClone(git)) {
       // A full checkout of a partial clone downloads every folder — the
       // opposite of excluding them all. Keep just the root files.
-      await git.raw(['sparse-checkout', 'set', '--cone'])
+      await keepIgnoredOutsideCone(git, repoPath, [], () => git.raw(['sparse-checkout', 'set', '--cone']))
       return
     }
     // User excluded literally everything → fall back to a full checkout.
@@ -140,7 +140,81 @@ async function reconcileCone(git: SimpleGit, repoPath: string, cleanExcluded: st
   // One command, not `init --cone` + `set`: init alone narrows the cone to
   // the root files, and if `set` then failed (a download while offline) the
   // worktree would be left without its folders.
-  await git.raw(['sparse-checkout', 'set', '--cone', ...desired])
+  await keepIgnoredOutsideCone(git, repoPath, desired, () => git.raw(['sparse-checkout', 'set', '--cone', ...desired]))
+}
+
+// --- Ignored files outside the cone ---
+//
+// In cone mode, `sparse-checkout set` deletes every ignored file in a tracked
+// directory outside the cone that has no tracked or non-ignored untracked
+// file left (documented git behaviour). Sync runs `set` on every press, so a
+// member's .personal/ notes, .env files or auto-ignored large files inside an
+// excluded department — never on the server, local only — were deleted at
+// the next sync, and excluding a department in settings deleted them at once.
+// They are moved into .git/ for the duration of the command and put back.
+
+const KEEP_DIR = 'acb-sparse-keep'
+
+function keepPaths(repoPath: string) {
+  const root = path.join(repoPath, '.git', KEEP_DIR)
+  return { root, files: path.join(root, 'files'), manifest: path.join(root, 'manifest.json') }
+}
+
+/** Move kept entries back. Left in place (never deleted) when something now occupies the path. */
+function restoreKept(repoPath: string): void {
+  const keep = keepPaths(repoPath)
+  if (!fs.existsSync(keep.manifest)) return
+  let entries: string[] = []
+  try { entries = JSON.parse(fs.readFileSync(keep.manifest, 'utf-8')) } catch { return }
+  const leftOver: string[] = []
+  for (const entry of entries) {
+    const src = path.join(keep.files, entry)
+    const dest = path.join(repoPath, entry)
+    if (!fs.existsSync(src)) continue
+    if (fs.existsSync(dest)) {
+      console.warn(`Git sparse: ${entry} exists again; the kept copy stays in .git/${KEEP_DIR}/files`)
+      leftOver.push(entry)
+      continue
+    }
+    fs.mkdirSync(path.dirname(dest), { recursive: true })
+    fs.renameSync(src, dest)
+  }
+  if (leftOver.length > 0) fs.writeFileSync(keep.manifest, JSON.stringify(leftOver))
+  else fs.rmSync(keep.root, { recursive: true, force: true })
+}
+
+/**
+ * Run a `sparse-checkout set` with the ignored files of every tracked root
+ * folder outside `cone` moved out of git's reach, and put them back after.
+ */
+async function keepIgnoredOutsideCone<T>(git: SimpleGit, repoPath: string, cone: string[], fn: () => Promise<T>): Promise<T> {
+  restoreKept(repoPath) // a crash between moving out and back
+  const tracked = new Set<string>()
+  for (const rev of ['HEAD', 'origin/main']) {
+    const raw = await git.raw(['ls-tree', '-d', '-z', '--name-only', rev]).catch(() => '')
+    for (const d of raw.split('\0')) if (d) tracked.add(d)
+  }
+  const outside = [...tracked].filter(d => !cone.includes(d) && fs.existsSync(path.join(repoPath, d)))
+  if (outside.length === 0) return fn()
+  const raw = await git.raw(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--directory', '--',
+    ...outside.map(d => `:(literal)${d}/`)])
+  // --directory can list a folder and files inside it: move the outermost only.
+  const listed = [...new Set(raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, '')))].sort()
+  const entries = listed.filter(e => !listed.some(o => o !== e && e.startsWith(`${o}/`)))
+  if (entries.length === 0) return fn()
+  const keep = keepPaths(repoPath)
+  fs.mkdirSync(keep.files, { recursive: true })
+  fs.writeFileSync(keep.manifest, JSON.stringify(entries))
+  try {
+    for (const entry of entries) {
+      const dest = path.join(keep.files, entry)
+      fs.mkdirSync(path.dirname(dest), { recursive: true })
+      fs.renameSync(path.join(repoPath, entry), dest)
+    }
+    return await fn()
+  } finally {
+    restoreKept(repoPath)
+  }
 }
 
 export type SparseExclusionsResult =
