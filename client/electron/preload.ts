@@ -153,6 +153,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('git:sparseUncommittedChanges', repoPath, folders),
   folderSizes: (repoPath: string, companyId: string, folder: string, measure: string[]) =>
     ipcRenderer.invoke('git:folderSizes', repoPath, companyId, folder, measure),
+  /** The 「『…』というフォルダ名は使えません」 sentence when a path would write into a private folder the member cannot read (else null). */
+  reservedPathRefusal: (targetPath: string) =>
+    ipcRenderer.invoke('privateFolders:reservedPathRefusal', targetPath),
   onSparseProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => {
     const handler = (_: unknown, data: { repoPath: string; receivedBytes: number }) => callback(data)
     ipcRenderer.on('sparse:progress', handler)
@@ -313,7 +316,7 @@ type FolderSizesResponse =
       success: true
       path: string
       size: number | null
-      folders: Array<{ name: string; path: string; size: number | null; files: number | null; hasChildren: boolean }>
+      folders: Array<{ name: string; path: string; size: number | null; files: number | null; hasChildren: boolean; private?: boolean }>
       measured: Record<string, number | null>
       offline: boolean
     }
@@ -697,6 +700,7 @@ declare global {
       sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }>
       sparseUncommittedChanges: (repoPath: string, folders: string[]) => Promise<{ success: boolean; files: string[]; error?: string }>
       folderSizes: (repoPath: string, companyId: string, folder: string, measure: string[]) => Promise<FolderSizesResponse>
+      reservedPathRefusal: (targetPath: string) => Promise<string | null>
       onSparseProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void
       gitBinaryStatus: () => Promise<{ bundled: boolean; binary: string }>
 

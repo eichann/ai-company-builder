@@ -32,7 +32,8 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import type { SimpleGit } from 'simple-git'
-import { createGitSync, type GitSync, type GitSyncResult } from '../../electron/sync/git-sync'
+import { createGitSync, type GitSyncResult, type PrivateFolderSyncReport } from '../../electron/sync/git-sync'
+import type { PathChecker } from '../../electron/sync/path-check'
 import type { SyncDeps } from '../../electron/sync/types'
 import { createConfiguredGit } from '../../electron/sync/git-factory'
 import { createMessageBoxSyncDialog, type MessageBoxHost, type SyncMessageBoxOptions } from '../../electron/sync/message-box-dialog'
@@ -41,6 +42,9 @@ import { renderPreReceiveHook } from '../../../server/src/lib/git-server/hook'
 import { BARE_REPO_CONFIG } from '../../../server/src/lib/git-server/repo-config'
 import { checkoutSelectedDepartments } from '../../electron/sync/first-setup'
 import { readSparseConfig, setSparseExclusions, type SparseExclusionsResult } from '../../electron/sync/sparse'
+import { SCOPE_REPO_GITIGNORE } from '../../../server/src/lib/git-server/scope-repo'
+import { pathKey } from '../../shared/sparse-paths'
+import { privateBackupsDir } from '../../electron/sync/private-folders'
 
 const HERE = path.dirname(fileURLToPath(import.meta.url))
 export const HOOK_PATH = path.resolve(HERE, '../../../server/src/templates/pre-receive-hook.sh')
@@ -176,7 +180,33 @@ export interface HarnessHost {
   cookies: string[]
 }
 
-export type SyncImplFactory = (deps: SyncDeps, host: HarnessHost) => GitSync
+/** What a member presses: the sync function (createGitSync's, or a test double). */
+export type SyncFn = ((repoPath: string, companyId: string, commitMessage: string) => Promise<GitSyncResult>) & {
+  applyPrivateFolderChoices?: (repoPath: string, companyId: string) => Promise<PrivateFolderSyncReport[]>
+  pathChecker?: PathChecker
+}
+
+export type SyncImplFactory = (deps: SyncDeps, host: HarnessHost) => SyncFn
+
+/**
+ * A private folder on the harness's server: its own bare scope repository
+ * (configured like the company's, created like scope-repo.ts createScopeRepo)
+ * and a permission scope at its path — `everyone: none` plus one user rule
+ * per viewer — exactly what the server's snapshot carries.
+ */
+export interface HarnessPrivateFolder {
+  scopeId: string
+  repoId: string
+  path: string
+  bare: string
+  /** Viewer name → may edit. Owners/admins are implicit. */
+  viewers: Map<string, { write: boolean }>
+}
+
+/** The marker scenarios write into private content, so a leak can be found byte-wise. */
+export function privateMarker(folder: HarnessPrivateFolder | string): string {
+  return `PRIVATE-CONTENT:${typeof folder === 'string' ? folder : folder.scopeId}`
+}
 
 export interface WorldOptions {
   members: Array<{ name: string; role?: Role }>
@@ -210,6 +240,15 @@ export class World {
   readonly locale: string
   private readonly gitconfig: string
   private scopes: HarnessScope[] = DEFAULT_SCOPES
+  /** Private folders by scope id (the server's scope repositories). */
+  readonly privateFolders = new Map<string, HarnessPrivateFolder>()
+  /** Private folders made public (scope id → path); their content may be anywhere now. */
+  readonly madePublic = new Map<string, string>()
+  /** Set once a private folder was ever created: /me/scopes answers from then on (404 before, like an older server). */
+  privateFoldersEnabled = false
+  private privateCounter = 0
+  /** Scope repositories retired by makePublic (kept for no-lost-work). */
+  readonly retiredBares: string[] = []
 
   private constructor(root: string, options: WorldOptions) {
     this.root = root
@@ -326,12 +365,19 @@ export class World {
     for (const spec of options.members) this.members.push(new Member(this, spec.name, spec.role ?? 'member'))
   }
 
-  /** The permission snapshot git-http would write for this member's pushes. */
-  policyFile(userId: string, role: Role): string {
+  /**
+   * The permission snapshot git-http would write for this member's pushes —
+   * to the company repository, or (scopePath) to that private folder's scope
+   * repository.
+   */
+  policyFile(userId: string, role: Role, scopePath?: string): string {
     const dir = path.join(this.root, 'policies')
     fs.mkdirSync(dir, { recursive: true })
-    const file = path.join(dir, `${userId}.json`)
-    fs.writeFileSync(file, JSON.stringify({ version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.scopes }))
+    const file = path.join(dir, scopePath ? `${userId}--${crypto.createHash('sha1').update(scopePath).digest('hex').slice(0, 10)}.json` : `${userId}.json`)
+    fs.writeFileSync(file, JSON.stringify({
+      version: 1, companyId: 'company', pusher: { id: userId, role }, scopes: this.allScopes(),
+      ...(scopePath ? { scopePath } : {}),
+    }))
     return file
   }
 
@@ -339,6 +385,177 @@ export class World {
   setScopes(scopes: HarnessScope[]): void {
     this.scopes = scopes
     for (const m of this.members) this.policyFile(`user-${m.name}`, m.role)
+  }
+
+  /** The company's scopes plus one per private folder (as listScopesWithRules returns them). */
+  allScopes(): HarnessScope[] {
+    const privateScopes = [...this.privateFolders.values()].map((f): HarnessScope => ({
+      id: f.scopeId, path: f.path, kind: 'folder', departmentId: null, repoId: f.repoId,
+      rules: [
+        { id: `${f.scopeId}-everyone`, subjectType: 'everyone', subjectId: null, canRead: false, canWrite: false },
+        ...[...f.viewers].map(([name, v]) => ({ id: `${f.scopeId}-${name}`, subjectType: 'user' as const, subjectId: `user-${name}`, canRead: true, canWrite: v.write })),
+      ],
+    }))
+    return [...this.scopes, ...privateScopes]
+  }
+
+  // --- private folders (the server's side, stage 3a) --------------------------
+
+  /**
+   * Create a private folder at `folderPath` (as POST /private-folders): a
+   * bare scope repository configured like the company's (BARE_REPO_CONFIG +
+   * the real hook) with one commit holding the essential .gitignore, and a
+   * scope readable by `viewers` (`editors` may also write; default: every
+   * viewer). Owners/admins always read and write. `files` seeds content.
+   */
+  createPrivateFolder(folderPath: string, options: { viewers: string[]; editors?: string[]; files?: Record<string, string | Buffer> }): HarnessPrivateFolder {
+    const n = ++this.privateCounter
+    const scopeId = `scope-private-${n}`
+    const repoId = `repo-${n}`
+    const bare = path.join(this.root, 'server', 'company.scopes', `${repoId}.git`)
+    fs.mkdirSync(path.dirname(bare), { recursive: true })
+    this.git(this.root, ['init', '-q', '--bare', '--initial-branch=main', bare])
+    for (const [key, value] of BARE_REPO_CONFIG) this.git(bare, ['config', key, value])
+    const work = path.join(this.root, `scope-seed-${n}`)
+    this.git(this.root, ['clone', '-q', bare, work])
+    const id = ['-c', 'user.name=AI Company Builder', '-c', 'user.email=system@ai-company-builder.local']
+    fs.writeFileSync(path.join(work, '.gitignore'), SCOPE_REPO_GITIGNORE)
+    for (const [rel, content] of Object.entries(options.files ?? {})) {
+      fs.mkdirSync(path.dirname(path.join(work, rel)), { recursive: true })
+      fs.writeFileSync(path.join(work, rel), content)
+    }
+    this.git(work, ['add', '-A', '-f', '.'])
+    this.git(work, [...id, 'commit', '-q', '-m', `Create private folder ${folderPath}`])
+    this.git(work, ['push', '-q', 'origin', 'main'])
+    fs.rmSync(work, { recursive: true, force: true })
+    const hookDest = path.join(bare, 'hooks', 'pre-receive')
+    fs.writeFileSync(hookDest, renderPreReceiveHook({ node: process.execPath }))
+    fs.chmodSync(hookDest, 0o755)
+    const editors = new Set(options.editors ?? options.viewers)
+    const folder: HarnessPrivateFolder = {
+      scopeId, repoId, path: folderPath.normalize('NFC'), bare,
+      viewers: new Map(options.viewers.map(v => [v, { write: editors.has(v) }])),
+    }
+    this.privateFolders.set(scopeId, folder)
+    this.privateFoldersEnabled = true
+    return folder
+  }
+
+  privateFolder(folderPath: string): HarnessPrivateFolder {
+    const f = [...this.privateFolders.values()].find(x => pathKey(x.path) === pathKey(folderPath))
+    if (!f) throw new Error(`no private folder ${folderPath}`)
+    return f
+  }
+
+  /** PUT …/members: let `name` read (and, by default, edit) the folder. */
+  grantPrivate(folderPath: string, name: string, options: { write?: boolean } = {}): void {
+    this.privateFolder(folderPath).viewers.set(name, { write: options.write ?? true })
+  }
+
+  /**
+   * PUT …/members without `name`. Their next sync deletes the folder without
+   * a backup (owner decision Q1), so what they had not pushed is gone by
+   * design: the harness releases those obligations.
+   */
+  revokePrivate(folderPath: string, name: string): void {
+    const f = this.privateFolder(folderPath)
+    f.viewers.delete(name)
+    this.member(name).releaseObligationsUnder(f.path)
+  }
+
+  /** Whether `name` may read the private folder (owner/admin always). */
+  canRead(folder: HarnessPrivateFolder, name: string): boolean {
+    const m = this.member(name)
+    return m.role === 'owner' || m.role === 'admin' || folder.viewers.has(name)
+  }
+
+  canWrite(folder: HarnessPrivateFolder, name: string): boolean {
+    const m = this.member(name)
+    return m.role === 'owner' || m.role === 'admin' || !!folder.viewers.get(name)?.write
+  }
+
+  /**
+   * POST …/make-public: the scope repository's current tree becomes ONE
+   * commit in the company repository at the same path (the server's own
+   * push: no reserved-path or write check), the rules there become readable
+   * (write unchanged), and the scope repository is retired. The harness
+   * keeps the retired repository (outside every URL a member knows) so
+   * no-lost-work can still find what was pushed to it.
+   */
+  makePublic(folderPath: string): void {
+    const f = this.privateFolder(folderPath)
+    const work = path.join(this.root, `make-public-${f.repoId}`)
+    this.git(this.root, ['clone', '-q', this.bare, work])
+    this.git(work, ['fetch', '-q', f.bare, 'main'])
+    this.git(work, ['read-tree', `--prefix=${f.path}/`, '-u', 'FETCH_HEAD'])
+    this.git(work, ['-c', 'user.name=AI Company Builder', '-c', 'user.email=system@ai-company-builder.local', 'commit', '-q', '-m', `Make private folder public: ${f.path}`])
+    this.git(work, ['push', '-q', 'origin', 'main'], { ACB_INTERNAL_PUSH: '1', ACB_NODE: process.execPath })
+    fs.rmSync(work, { recursive: true, force: true })
+    this.privateFolders.delete(f.scopeId)
+    this.madePublic.set(f.scopeId, f.path)
+    this.scopes = [...this.scopes, {
+      id: f.scopeId, path: f.path, kind: 'folder', departmentId: null, repoId: null,
+      rules: [
+        { id: `${f.scopeId}-everyone`, subjectType: 'everyone', subjectId: null, canRead: true, canWrite: false },
+        ...[...f.viewers].map(([name, v]) => ({ id: `${f.scopeId}-${name}`, subjectType: 'user' as const, subjectId: `user-${name}`, canRead: true, canWrite: v.write })),
+      ],
+    }]
+    const retired = path.join(this.root, 'server', 'retired', `${f.repoId}.git`)
+    fs.mkdirSync(path.dirname(retired), { recursive: true })
+    fs.renameSync(f.bare, retired)
+    this.retiredBares.push(retired)
+  }
+
+  /** Every server repository: the company's, each scope repository, the retired ones. */
+  serverRepos(): string[] {
+    return [this.bare, ...[...this.privateFolders.values()].map(f => f.bare), ...this.retiredBares]
+  }
+
+  /** The /me/scopes answer for one member (server: GET /me/scopes). */
+  myScopes(name: string) {
+    const all = [...this.privateFolders.values()]
+    const scopes = all.filter(f => this.canRead(f, name)).map(f => ({
+      scopeId: f.scopeId,
+      path: f.path,
+      cloneUrl: f.bare,
+      clonePath: `/api/git-http/company/scopes/${f.scopeId}.git`,
+      canWrite: this.canWrite(f, name),
+    }))
+    const version = crypto.createHash('sha256').update(JSON.stringify({ scopes })).digest('hex').slice(0, 32)
+    return { version, scopes }
+  }
+
+  /** POST /paths/check for one member: false at or under a private folder they cannot read. */
+  pathsUsable(name: string, paths: string[]): Array<{ path: string; usable: boolean }> {
+    const blocked = [...this.privateFolders.values()].filter(f => !this.canRead(f, name)).map(f => pathKey(f.path))
+    return paths.map(p => {
+      const k = pathKey(p.normalize('NFC').split('/').filter(Boolean).join('/'))
+      return { path: p, usable: !blocked.some(b => k === b || k.startsWith(`${b}/`)) }
+    })
+  }
+
+  /** Server main tree of a private folder's scope repository: path → blob id. */
+  scopeTree(folderPath: string): Map<string, string> {
+    const out = this.git(this.privateFolder(folderPath).bare, ['ls-tree', '-r', '-z', 'main'])
+    const map = new Map<string, string>()
+    for (const entry of out.split('\0')) {
+      if (!entry) continue
+      const [meta, file] = entry.split('\t')
+      map.set(file, meta.split(' ')[2])
+    }
+    return map
+  }
+
+  scopeFile(folderPath: string, rel: string): Buffer | null {
+    try {
+      return execFileSync('git', ['cat-file', '-p', `main:${rel}`], { cwd: this.privateFolder(folderPath).bare, env: this.env(), stdio: 'pipe' })
+    } catch {
+      return null
+    }
+  }
+
+  scopeHead(folderPath: string): string {
+    return this.git(this.privateFolder(folderPath).bare, ['rev-parse', 'main']).trim()
   }
 
   member(name: string): Member {
@@ -384,8 +601,13 @@ export class World {
     return this.git(this.bare, ['rev-parse', 'main']).trim()
   }
 
-  /** Text of every blob reachable from any server ref (binary blobs skipped). */
+  /** Text of every blob reachable from any server ref, in every server repository (binary blobs skipped). */
   serverTexts(): string[] {
+    return this.serverRepos().flatMap(repo => this.texts(repo, ['--all']))
+  }
+
+  /** Text of every blob in the company repository only. */
+  companyTexts(): string[] {
     return this.texts(this.bare, ['--all'])
   }
 
@@ -411,10 +633,14 @@ export class World {
     return texts
   }
 
-  /** Every object reachable from any server ref. */
+  /** Every object reachable from any server ref, in every server repository. */
   serverObjects(): Set<string> {
-    const out = this.git(this.bare, ['rev-list', '--objects', '--all'])
-    return new Set(out.split('\n').filter(Boolean).map(l => l.slice(0, 40)))
+    const set = new Set<string>()
+    for (const repo of this.serverRepos()) {
+      const out = this.git(repo, ['rev-list', '--objects', '--all'])
+      for (const l of out.split('\n')) if (l) set.add(l.slice(0, 40))
+    }
+    return set
   }
 
   serverBranches(): string[] {
@@ -489,7 +715,17 @@ export class Member {
   readonly results: SyncResultView[] = []
 
   private readonly answers = new Map<QuestionKind, string[]>()
-  private readonly sync_: GitSync
+  private readonly sync_: SyncFn
+  /** offline() was called: the server API (and every remote) is unreachable. */
+  private isOffline = false
+  /** GET /me/scopes fails (server trouble) while git still works. */
+  scopesApiDown = false
+  /** POST /paths/check fails (server trouble, rate limit) while git still works. */
+  pathCheckDown = false
+  /** Requests made to POST /paths/check. */
+  pathChecks = 0
+  /** The server says this account is no longer a member of the company (/me/scopes 404). */
+  removedFromCompany = false
   private readonly remoteUrl: string
   private currentDialogs: DialogRecord[] = []
   private currentLogs: Array<[string, ...unknown[]]> = []
@@ -551,7 +787,7 @@ export class Member {
           ACB_PUSHER_ID: `user-${name}`,
           ACB_PUSHER_EMAIL: this.email,
           ACB_NODE: process.execPath,
-          ACB_PUSH_POLICY: world.policyFile(`user-${name}`, role),
+          ACB_PUSH_POLICY: world.policyFile(`user-${name}`, role, this.scopePathOf(repoPath)),
         },
       }))
     const deps: SyncDeps = {
@@ -629,12 +865,27 @@ export class Member {
 
   // --- the fake server API ---------------------------------------------------
 
-  private fakeFetch = async (input: string | URL | Request): Promise<Response> => {
+  private fakeFetch = async (input: string | URL | Request, init?: RequestInit): Promise<Response> => {
     const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input.href : input.url)
     const json = (body: unknown, status = 200) =>
       new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } })
     if (url.pathname === '/api/me') {
       return json({ success: true, data: { id: `user-${this.name}`, name: this.name, email: this.email } })
+    }
+    if (/^\/api\/companies\/[^/]+\/paths\/check$/.test(url.pathname)) {
+      if (!this.world.privateFoldersEnabled) return json({ success: false, error: 'not found' }, 404)
+      if (this.isOffline || this.pathCheckDown) throw new TypeError('fetch failed')
+      this.pathChecks++
+      const paths = (JSON.parse(String(init?.body ?? '{}')) as { paths?: string[] }).paths ?? []
+      if (paths.length > 50) return json({ success: false, error: 'too many paths' }, 400)
+      return json({ success: true, data: { results: this.world.pathsUsable(this.name, paths) } })
+    }
+    if (/^\/api\/companies\/[^/]+\/me\/scopes$/.test(url.pathname)) {
+      // Like an older server until the company's first private folder.
+      if (!this.world.privateFoldersEnabled) return json({ success: false, error: 'not found' }, 404)
+      if (this.isOffline || this.scopesApiDown) throw new TypeError('fetch failed')
+      if (this.removedFromCompany) return json({ error: 'Company not found or access denied' }, 404)
+      return json({ success: true, data: this.world.myScopes(this.name) })
     }
     if (/^\/api\/companies\/[^/]+\/departments$/.test(url.pathname)) {
       return json({ success: true, data: this.world.departments.map((folder, i) => ({ id: `d${i}`, folder })) })
@@ -720,13 +971,63 @@ export class Member {
 
   /** Lose the connection to the server (fetch/pull/push fail). */
   offline(): this {
+    this.isOffline = true
     this.git(['remote', 'set-url', 'origin', path.join(this.world.root, 'unreachable.git')])
+    // A clone keeps its origin URL (sync recognises its clones by it); the
+    // connection is cut with insteadOf instead.
+    for (const f of this.privateClones()) this.world.git(this.path(f.path), ['config', `url.${path.join(this.world.root, 'unreachable.git')}.insteadOf`, f.bare])
     return this
   }
 
   online(): this {
+    this.isOffline = false
     this.git(['remote', 'set-url', 'origin', this.remoteUrl])
+    for (const f of this.privateClones()) {
+      try { this.world.git(this.path(f.path), ['config', '--unset-all', `url.${path.join(this.world.root, 'unreachable.git')}.insteadOf`]) } catch { /* not offline */ }
+    }
     return this
+  }
+
+  // --- private folders ---------------------------------------------------------
+
+  /** The private folders this member has a clone of right now. */
+  privateClones(): HarnessPrivateFolder[] {
+    return [...this.world.privateFolders.values()].filter(f => fs.existsSync(path.join(this.path(f.path), '.git')))
+  }
+
+  /** The private folder whose clone `repoPath` is (its company path), for the push snapshot. */
+  private scopePathOf(repoPath: string): string | undefined {
+    const rel = path.relative(this.dir, path.resolve(repoPath)).split(path.sep).join('/')
+    if (!rel || rel.startsWith('..')) return undefined
+    return [...this.world.privateFolders.values()].find(f => pathKey(f.path) === pathKey(rel))?.path
+  }
+
+  /** The repository a member-relative path belongs to: a private folder's clone, or the company checkout. */
+  repoOf(rel: string): { dir: string; rel: string } {
+    const key = pathKey(rel)
+    for (const f of this.privateClones()) {
+      const k = pathKey(f.path)
+      if (key.startsWith(`${k}/`)) return { dir: this.path(f.path), rel: rel.split('/').slice(f.path.split('/').length).join('/') }
+    }
+    return { dir: this.dir, rel }
+  }
+
+  /** Release what this member wrote under `folder` (deleted by design, e.g. access lost). */
+  releaseObligationsUnder(folder: string): void {
+    const k = pathKey(folder)
+    const under = (p: string) => pathKey(p) === k || pathKey(p).startsWith(`${k}/`)
+    for (const p of [...this.pending]) if (under(p)) this.pending.delete(p)
+    for (const p of [...this.obligations.keys()]) if (under(p)) this.obligations.delete(p)
+  }
+
+  /** What the app's file operations and chat guard ask (sync's shared checker): the folder name `rel` may not use, or null. */
+  async reservedFolderOf(rel: string): Promise<string | null> {
+    return (await this.sync_.pathChecker?.reservedFolderOf('company', rel)) ?? null
+  }
+
+  /** Settings → ダウンロードするフォルダ, for a private folder: apply right away like the app (main.ts). */
+  async applyPrivateFolderChoices(): Promise<PrivateFolderSyncReport[]> {
+    return (await this.sync_.applyPrivateFolderChoices?.(this.dir, 'company')) ?? []
   }
 
   // --- file operations (what a member does in the app) -----------------------
@@ -852,8 +1153,9 @@ export class Member {
         if (!st.isFile()) continue
         const bytes = this.read(rel)
         let base: Buffer | null = null
+        const repo = this.repoOf(rel)
         try {
-          base = execFileSync('git', ['cat-file', '-p', `HEAD:${rel}`], { cwd: this.dir, env: this.world.env(NO_LAZY_FETCH), stdio: 'pipe' })
+          base = execFileSync('git', ['cat-file', '-p', `HEAD:${repo.rel}`], { cwd: repo.dir, env: this.world.env(NO_LAZY_FETCH), stdio: 'pipe' })
         } catch { /* new file */ }
         snap.set(rel, { blob: blobId(bytes), bytes, added: addedLines(bytes, base) })
       } catch { /* deleted since */ }
@@ -864,14 +1166,13 @@ export class Member {
   /** Content sync staged ends up in the member's object database. */
   private recordCommitted(snap: Map<string, Obligation>): void {
     if (snap.size === 0) return
-    const blobs = [...snap.values()].map(o => o.blob)
-    const out = execFileSync('git', ['cat-file', '--batch-check'], {
-      cwd: this.dir, env: this.world.env(NO_LAZY_FETCH), input: blobs.join('\n') + '\n',
-    }).toString().split('\n')
-    let i = 0
+    // A private folder's content is committed in its own clone.
+    const committedIn = (dir: string, blob: string) => !execFileSync('git', ['cat-file', '--batch-check'], {
+      cwd: dir, env: this.world.env(NO_LAZY_FETCH), input: `${blob}\n`,
+    }).toString().trim().endsWith('missing')
     for (const [rel, ob] of snap) {
-      const line = out[i++] ?? ''
-      if (line.endsWith('missing')) continue
+      const repo = this.repoOf(rel)
+      if (!fs.existsSync(repo.dir) || !committedIn(repo.dir, ob.blob)) continue
       this.obligations.set(rel, ob)
       // Still pending only if it changed again after this snapshot.
       try {
@@ -885,8 +1186,8 @@ export class Member {
   /** Blob ids under every .backups/<folder>/ that has its _metadata.json. */
   backupBlobs(): Set<string> {
     const set = new Set<string>()
-    const root = this.path('.backups')
-    if (!fs.existsSync(root)) return set
+    for (const root of [this.path('.backups'), privateBackupsDir(this.dir)]) {
+    if (!fs.existsSync(root)) continue
     for (const folder of fs.readdirSync(root)) {
       const dir = path.join(root, folder)
       if (!fs.existsSync(path.join(dir, '_metadata.json'))) continue
@@ -895,27 +1196,29 @@ export class Member {
         set.add(blobId(fs.readFileSync(path.join(dir, f))))
       }
     }
+    }
     return set
   }
 
   /** Parsed _metadata.json of every backup folder, oldest first. */
   backups(): Array<{ folder: string; metadata: Record<string, unknown>; files: string[] }> {
-    const root = this.path('.backups')
-    if (!fs.existsSync(root)) return []
-    return fs.readdirSync(root).sort().map(folder => {
-      const dir = path.join(root, folder)
-      const metaPath = path.join(dir, '_metadata.json')
-      return {
-        folder,
-        metadata: fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf-8')) : {},
-        files: walkFiles(dir).filter(f => f !== '_metadata.json').sort(),
-      }
-    })
+    // .backups/, then the private folders' backups kept in .git ('private:' + name, as backup:list).
+    return [{ root: this.path('.backups'), prefix: '' }, { root: privateBackupsDir(this.dir), prefix: 'private:' }].flatMap(({ root, prefix }) =>
+      !fs.existsSync(root) ? [] : fs.readdirSync(root).sort().map(folder => {
+        const dir = path.join(root, folder)
+        const metaPath = path.join(dir, '_metadata.json')
+        return {
+          folder: `${prefix}${folder}`,
+          metadata: fs.existsSync(metaPath) ? JSON.parse(fs.readFileSync(metaPath, 'utf-8')) : {},
+          files: walkFiles(dir).filter(f => f !== '_metadata.json').sort(),
+        }
+      }))
   }
 
   isIgnored(rel: string): boolean {
+    const repo = this.repoOf(rel)
     try {
-      this.git(['check-ignore', '-q', '--', rel])
+      this.world.git(repo.dir, ['check-ignore', '-q', '--', repo.rel], NO_LAZY_FETCH)
       return true
     } catch {
       return false

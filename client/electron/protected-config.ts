@@ -204,8 +204,16 @@ export async function restoreProtectedPaths(options: {
    * to the path it came from instead of vanishing from both places.
    */
   reason?: RestoreReason
+  /**
+   * A private folder's clone backs up into the company's .backups/: its
+   * files go under this company-relative prefix, and the metadata lists
+   * company-relative paths.
+   */
+  backupPrefix?: string
 }): Promise<ProtectedConfigRecoveryResult> {
   const { git, repoPath, paths, backupPath } = options
+  const prefix = options.backupPrefix ? `${options.backupPrefix}/` : ''
+  const shown = (files: string[]) => files.map(f => `${prefix}${f}`)
   const upstream = options.upstream ?? 'origin/main'
   const reason = options.reason ?? 'protected_config'
   if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
@@ -230,7 +238,7 @@ export async function restoreProtectedPaths(options: {
   const backedUp: string[] = []
   for (const { file, local, server } of plan) {
     if (local.type !== 'blob' || local.oid === server.oid) continue
-    const dest = path.join(backupPath, file)
+    const dest = path.join(backupPath, prefix, file)
     fs.mkdirSync(path.dirname(dest), { recursive: true })
     const content: Buffer = await git.binaryCatFile(['-p', `${localHead}:${file}`])
     fs.writeFileSync(dest, content)
@@ -252,10 +260,10 @@ export async function restoreProtectedPaths(options: {
     fs.writeFileSync(path.join(backupPath, '_metadata.json'), JSON.stringify({
       timestamp: new Date().toISOString(),
       reason,
-      ...(reason === 'write_denied' ? { writeDeniedFiles: paths } : { protectedFiles: paths }),
-      backedUpFiles: backedUp,
-      restoredFiles: restored,
-      removedFiles: removed,
+      ...(reason === 'write_denied' ? { writeDeniedFiles: shown(paths) } : { protectedFiles: shown(paths) }),
+      backedUpFiles: shown(backedUp),
+      restoredFiles: shown(restored),
+      removedFiles: shown(removed),
       localHead,
     }, null, 2))
   }
@@ -362,14 +370,30 @@ export async function untrackPersonalPaths(options: {
   paths: string[]
   upstream?: string
 }): Promise<PersonalUntrackResult> {
+  return untrackPaths({
+    ...options,
+    accept: p => /(^|\/)\.personal\//i.test(p),
+    refusal: p => `個人用フォルダのファイルではありません: ${p}`,
+    note: '（個人用フォルダ .personal のファイルは共有対象から外しました）',
+  })
+}
+
+/** Squash the unpushed commits and take `paths` out of them (index only — the files stay on disk). */
+async function untrackPaths(options: {
+  git: SimpleGit
+  repoPath: string
+  paths: string[]
+  upstream?: string
+  accept: (path: string) => boolean
+  refusal: (path: string) => string
+  note: string
+}): Promise<PersonalUntrackResult> {
   const { git, repoPath, paths } = options
   const upstream = options.upstream ?? 'origin/main'
   if (paths.length === 0) throw new ProtectedConfigRecoveryError('対象のファイルが特定できませんでした')
   for (const p of paths) {
     assertInsideRepo(repoPath, p)
-    if (!/(^|\/)\.personal\//i.test(p)) {
-      throw new ProtectedConfigRecoveryError(`個人用フォルダのファイルではありません: ${p}`)
-    }
+    if (!options.accept(p)) throw new ProtectedConfigRecoveryError(options.refusal(p))
   }
 
   const localHead = (await git.revparse(['HEAD'])).trim()
@@ -397,10 +421,53 @@ export async function untrackPersonalPaths(options: {
   if (remaining) {
     const subject = squashedMessages.length === 1 ? squashedMessages[0] : 'Sync from AI Company Builder'
     const body = squashedMessages.length > 1 ? `\n\n${squashedMessages.map(m => `- ${m}`).join('\n')}` : ''
-    await git.commit(`${subject}${body}\n\n（個人用フォルダ .personal のファイルは共有対象から外しました）`)
+    await git.commit(`${subject}${body}\n\n${options.note}`)
     committed = true
   }
   return { untracked, committed }
+}
+
+// ---------------------------------------------------------------------------
+// .backups/ and .workspace/ — local only, for anyone ([LOCAL_ONLY_PATH])
+// ---------------------------------------------------------------------------
+//
+// The server rejects any push adding or changing a path inside a directory
+// named .backups or .workspace (any depth, case-insensitive): sync's backups
+// (private content included) and the AI's scratch area. Recovered exactly
+// like PERSONAL_PATH: squash, untrack (kept on disk), push once more.
+
+export const LOCAL_ONLY_PATH_MARKER = '[LOCAL_ONLY_PATH]'
+
+export function isLocalOnlyPathRejection(errorMessage: string): boolean {
+  return errorMessage.includes(LOCAL_ONLY_PATH_MARKER)
+}
+
+export function parseLocalOnlyPaths(errorMessage: string): string[] {
+  return parseRejectionPaths(errorMessage, LOCAL_ONLY_PATH_MARKER)
+}
+
+/** A path inside a directory named .backups or .workspace (any depth, A–Z case folded). */
+export function isLocalOnlyPath(p: string): boolean {
+  return p.split('/').slice(0, -1).some(seg => /^\.(backups|workspace)$/i.test(seg))
+}
+
+export async function untrackLocalOnlyPaths(options: {
+  git: SimpleGit
+  repoPath: string
+  paths: string[]
+  upstream?: string
+}): Promise<PersonalUntrackResult> {
+  return untrackPaths({
+    ...options,
+    accept: isLocalOnlyPath,
+    refusal: p => `バックアップ・作業用フォルダのファイルではありません: ${p}`,
+    note: '（.backups / .workspace のファイルは共有対象から外しました）',
+  })
+}
+
+export function localOnlyPathMessage(paths: string[]): string {
+  const list = paths.length > 0 ? paths.map(p => `・${p}`).join('\n') : '（詳細不明）'
+  return `バックアップ（.backups）とAIの作業用フォルダ（.workspace）のファイルは、誰であっても共有できません。\n\n${list}`
 }
 
 /** Plain-words explanation for the member (Japanese UI). */

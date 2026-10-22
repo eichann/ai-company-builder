@@ -3,6 +3,8 @@
 // client/electron/sync/ imports electron.
 
 import type { SimpleGit } from 'simple-git'
+import type { MyScopesResponse } from '../../../shared/types/private-folders'
+import type { PathCheckResult } from './path-check'
 
 /** The questions sync asks the member. */
 export interface SyncDialog {
@@ -33,6 +35,20 @@ export interface SyncServerApi {
   getCurrentUser(): Promise<{ name?: string | null; email?: string } | null>
   /** GET /api/companies/:companyId/departments → data (null when the response was not ok). */
   getDepartments(companyId: string): Promise<Array<{ folder?: string }> | null>
+  /**
+   * GET /api/companies/:companyId/me/scopes → data: the private folders the
+   * member may read (path, clone URL, canWrite). 'not-member'
+   * when the server says the account is not a member of the company (404
+   * "Company not found or access denied"); null when it gives no usable
+   * answer (an older server, other errors); throws offline.
+   */
+  getMyScopes(companyId: string): Promise<MyScopesResponse | 'not-member' | null>
+  /**
+   * POST /api/companies/:companyId/paths/check { paths } → data: whether each
+   * path may be used in the company folder (false: at or under a private
+   * folder the member cannot read). null when there is no usable answer.
+   */
+  checkPaths(companyId: string, paths: string[]): Promise<PathCheckResult[] | null>
 }
 
 export type SyncLogger = Pick<Console, 'log' | 'warn' | 'error'>

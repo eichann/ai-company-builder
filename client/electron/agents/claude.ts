@@ -8,7 +8,7 @@ import crypto from 'crypto'
 import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
 import type { AgentConnection, AgentHostConfig } from './connection'
 import type { PermissionMode } from '../../shared/permission-mode'
-import { decideToolWrite } from '../write-guard'
+import { decideReservedWrite, decideToolWrite } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -162,7 +162,9 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // Read-only folders (per-folder write rules): refuse before the tool
         // runs, with a reason the model relays to the member instead of
         // retrying. Unknown access never blocks (the server still checks).
-        const guarded = decideToolWrite(writeGuard, String(input.tool_name), input.tool_input, typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory)
+        const toolCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory
+        let guarded = decideToolWrite(writeGuard, String(input.tool_name), input.tool_input, toolCwd)
+        if (!guarded.deny) guarded = await decideReservedWrite(writeGuard, String(input.tool_name), input.tool_input, toolCwd)
         if (guarded.deny) {
           console.log(`[hooks] Blocked write to read-only folder: ${input.tool_name} ${guarded.path}`)
           return {
@@ -180,7 +182,6 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // mode, so the question is asked here and not left to canUseTool.
         let confirmedPrivate = false
         if (privateReads) {
-          const toolCwd = typeof input.cwd === 'string' && input.cwd ? input.cwd : workingDirectory
           noteToolInput(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           const decision = decidePrivateWrite(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           if (decision.ask) {
