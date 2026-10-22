@@ -13,6 +13,7 @@ import {
   SpinnerGap,
   CloudArrowDown,
   FolderSimpleDashed,
+  LockSimple,
 } from '@phosphor-icons/react'
 import { ContextMenu, type ContextMenuItem } from '../common/ContextMenu'
 import { normalizePathSeparators } from '../../utils/path'
@@ -26,6 +27,11 @@ import { ReadOnlyBadge } from './ReadOnlyBadge'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import { notDownloadedUserMessage, pathKey } from '../../../shared/sparse-paths'
+import { NewFolderDialog } from './NewFolderDialog'
+import { usePrivateFolders } from '../../hooks/usePrivateFolders'
+import { useAppStore } from '../../stores/appStore'
+import { useAuthStore } from '../../stores/authStore'
+import { boundaryCrossing, crossingMessage, lastSegment, viewersLabel } from '../../../shared/private-folder-ui'
 
 interface FileEntry {
   name: string
@@ -51,6 +57,8 @@ interface FileTreePanelProps {
   onSelectFile: (path: string) => void
   onDoubleClickFile?: (path: string) => void
   onCreateFile?: () => void
+  /** A private folder was created on the server: sync so it reaches this computer. */
+  onPrivateFolderCreated?: () => void
 }
 
 export function FileTreePanel({
@@ -59,9 +67,17 @@ export function FileTreePanel({
   selectedFilePath,
   onSelectFile,
   onDoubleClickFile,
+  onPrivateFolderCreated,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
+  // Private folders this member can read: lock icons, the banner, move confirmations.
+  const privateFolders = usePrivateFolders()
+  const companyId = useAppStore(s => s.currentCompany?.id)
+  const meId = useAuthStore(s => s.user?.id)
+  const [newFolder, setNewFolder] = useState<{ parentPath: string } | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [moveConfirm, setMoveConfirm] = useState<{ title: string; message: string; confirm: string; run: () => Promise<void> } | null>(null)
   // Folders not downloaded on this computer: shown as greyed placeholders
   // (so nobody thinks they do not exist and recreates them), never written to.
   const sparse = useSparseCheckout({ rootPath })
@@ -629,18 +645,26 @@ export function FileTreePanel({
 
   const handleNewFolder = useCallback((parentPath: string) => {
     if (refuseNotDownloaded(`${parentPath}/_`)) { closeContextMenu(); return }
-    setInputDialog({
-      isOpen: true,
-      title: t('fileTree.newFolder'),
-      defaultValue: '',
-      mode: 'newFolder',
-      targetPath: '',
-      parentPath,
-    })
+    setNewFolder({ parentPath })
     closeContextMenu()
-  }, [closeContextMenu, t, refuseNotDownloaded])
+  }, [closeContextMenu, refuseNotDownloaded])
+
+  const showNotice = useCallback((message: string) => {
+    setNotice(message)
+    setTimeout(() => setNotice(null), 6000)
+  }, [])
+
+  /** A private folder itself cannot be moved or renamed here (it is its own repository on the server). */
+  const refusePrivateRoot = useCallback((absPath: string, action: '移動' | '名前の変更'): boolean => {
+    const root = privateFolders.privateRootAt(absPath)
+    if (!root) return false
+    setDropWarning(`非公開フォルダ「${lastSegment(root.path)}」そのものは、${action}ができません。必要なときは管理者に相談してください。`)
+    setTimeout(() => setDropWarning(null), 6000)
+    return true
+  }, [privateFolders])
 
   const handleRename = useCallback((entry: FileEntry) => {
+    if (refusePrivateRoot(entry.path, '名前の変更')) { closeContextMenu(); return }
     setInputDialog({
       isOpen: true,
       title: t('fileTree.rename'),
@@ -650,7 +674,7 @@ export function FileTreePanel({
       parentPath: entry.path.substring(0, entry.path.lastIndexOf('/')),
     })
     closeContextMenu()
-  }, [closeContextMenu, t])
+  }, [closeContextMenu, t, refusePrivateRoot])
 
   const handleDelete = useCallback((entry: FileEntry) => {
     const message = t('fileTree.deleteMessage', { name: entry.name }) +
@@ -728,6 +752,49 @@ export function FileTreePanel({
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
   }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded])
+
+  /** 公開 (or inside a private folder) from 「新しいフォルダ…」: on disk, as before. */
+  const createPlainFolder = useCallback(async (parentPath: string, name: string) => {
+    if (refuseNotDownloaded(`${parentPath}/${name}`)) { setNewFolder(null); return }
+    await window.electronAPI.createDirectory(`${parentPath}/${name}`)
+    childrenCache.current.delete(parentPath)
+    setLoadedDirs(prev => { const next = new Set(prev); next.delete(parentPath); return next })
+    if (parentPath !== departmentPath && !expandedDirs.has(parentPath)) {
+      setExpandedDirs(prev => new Set(prev).add(parentPath))
+    }
+    if (parentPath === departmentPath) loadFiles(true)
+    else await loadChildren(parentPath)
+    setNewFolder(null)
+  }, [departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded])
+
+  // Internal drag & drop: confirm when files cross a private folder's edge
+  // (public → private: their past versions stay in everyone's history;
+  // private → public: everyone gets them). A private folder itself never moves.
+  const requestMove = useCallback(async (sourcePaths: string[], destDir: string) => {
+    const sources = sourcePaths.filter(src => destDir !== src && !destDir.startsWith(src + '/'))
+    if (sources.some(src => refusePrivateRoot(src, '移動'))) return
+    const run = async () => {
+      for (const sourcePath of sources) {
+        const fileName = sourcePath.split('/').pop()
+        if (!fileName) continue
+        const destPath = await resolveUniquePath(destDir, fileName)
+        if (sourcePath === destPath) continue
+        await window.electronAPI.moveItem(sourcePath, destPath)
+      }
+      setSelectedPaths(new Set())
+      loadFiles(true)
+    }
+    const destRel = privateFolders.relativePath(`${destDir}/_`)
+    const crossing = destRel === null ? null : sources
+      .map(src => {
+        const srcRel = privateFolders.relativePath(src)
+        return srcRel === null ? null : boundaryCrossing(srcRel, destRel, privateFolders.folders)
+      })
+      .find(c => c !== null) ?? null
+    if (!crossing) { await run(); return }
+    const msg = crossingMessage(crossing, sources.length, '移動')
+    setMoveConfirm({ ...msg, run })
+  }, [privateFolders, refusePrivateRoot, resolveUniquePath, loadFiles, setSelectedPaths])
 
   const handleDeleteConfirm = useCallback(async () => {
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
@@ -913,6 +980,7 @@ export function FileTreePanel({
     // 閲覧のみ: badge where read-only starts (a top-level entry, or the parent is writable).
     const showReadOnly = entry.isDirectory && isReadOnly(entry.path)
       && (depth === 0 || !isReadOnly(entry.path.substring(0, entry.path.lastIndexOf('/'))))
+    const privateRoot = entry.isDirectory ? privateFolders.privateRootAt(entry.path) : null
 
     const handleKeyDown = (e: React.KeyboardEvent) => {
       if (e.key === 'F2') {
@@ -989,17 +1057,7 @@ export function FileTreePanel({
             const raw = e.dataTransfer.getData('application/x-file-paths')
             if (!raw) return
             const sourcePaths: string[] = JSON.parse(raw)
-
-            for (const sourcePath of sourcePaths) {
-              if (entry.path === sourcePath || entry.path.startsWith(sourcePath + '/')) continue
-              const fileName = sourcePath.split('/').pop()
-              if (!fileName) continue
-              const destPath = await resolveUniquePath(entry.path, fileName)
-              if (sourcePath === destPath) continue
-              await window.electronAPI.moveItem(sourcePath, destPath)
-            }
-            setSelectedPaths(new Set())
-            loadFiles(true)
+            await requestMove(sourcePaths, entry.path)
           }}
           onClick={(e) => {
             if (e.shiftKey && lastClickedPath) {
@@ -1074,6 +1132,16 @@ export function FileTreePanel({
           </span>
           {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
           <span className="truncate" title={entry.name}>{entry.name}</span>
+          {privateRoot && (
+            <span
+              className="flex-shrink-0 text-indigo-500 dark:text-indigo-400"
+              title={viewersLabel(privateRoot)}
+              aria-label={`非公開（${privateRoot.viewerCount}人だけが見られます）`}
+              data-private-folder
+            >
+              <LockSimple size={12} weight="fill" />
+            </span>
+          )}
           {showReadOnly && <ReadOnlyBadge compact />}
           {(() => {
             if (entry.isDirectory) return null
@@ -1115,6 +1183,9 @@ export function FileTreePanel({
   }
 
   const visibleFiles = withPlaceholders(departmentPath, files)
+  // 「🔒 非公開：N人だけが見られます」 while the selection (or the department) is inside a private folder.
+  const currentPrivate = privateFolders.privateOf(`${activeParentPath}/_`) ?? privateFolders.privateOf(`${departmentPath}/_`)
+  const newFolderParentRel = newFolder ? privateFolders.relativePath(newFolder.parentPath) ?? '' : ''
   // New file / folder from the header goes into the selection's folder: not into a placeholder.
   const parentNotDownloaded = notDownloadedOf(`${activeParentPath}/_`) !== null
 
@@ -1165,6 +1236,20 @@ export function FileTreePanel({
         </div>
       </div>
 
+      {currentPrivate && (
+        <div
+          role="note"
+          title={viewersLabel(currentPrivate)}
+          className="flex items-center gap-1.5 border-b border-indigo-100 bg-indigo-50 px-3 py-1.5 text-[11px] text-indigo-900 dark:border-indigo-400/15 dark:bg-indigo-400/[0.08] dark:text-indigo-100"
+        >
+          <LockSimple size={12} weight="fill" className="flex-shrink-0 text-indigo-500 dark:text-indigo-400" />
+          <span className="truncate">
+            <span className="font-medium">非公開：{currentPrivate.viewerCount}人だけが見られます</span>
+            <span className="text-indigo-900/60 dark:text-indigo-200/60">（{lastSegment(currentPrivate.path)}）</span>
+          </span>
+        </div>
+      )}
+
       {/* Tree */}
       <div
         className="flex-1 overflow-auto py-2 px-1"
@@ -1187,15 +1272,7 @@ export function FileTreePanel({
           const raw = e.dataTransfer.getData('application/x-file-paths')
           if (!raw) return
           const sourcePaths: string[] = JSON.parse(raw)
-          for (const sourcePath of sourcePaths) {
-            const fileName = sourcePath.split('/').pop()
-            if (!fileName) continue
-            const destPath = await resolveUniquePath(departmentPath, fileName)
-            if (sourcePath === destPath) continue
-            await window.electronAPI.moveItem(sourcePath, destPath)
-          }
-          setSelectedPaths(new Set())
-          loadFiles(true)
+          await requestMove(sourcePaths, departmentPath)
         }}
       >
         {visibleFiles.length === 0 && !isLoading ? (
@@ -1236,6 +1313,44 @@ export function FileTreePanel({
         onConfirm={handleDeleteConfirm}
         onCancel={() => setConfirmDialog(prev => ({ ...prev, isOpen: false }))}
       />
+
+      <NewFolderDialog
+        isOpen={newFolder !== null}
+        companyId={companyId}
+        meId={meId}
+        parentRel={newFolderParentRel}
+        placeLabel={newFolderParentRel ? newFolderParentRel.split('/').join(' / ') : '会社のフォルダ'}
+        insidePrivate={newFolder ? privateFolders.privateOf(`${newFolder.parentPath}/_`) : null}
+        onCancel={() => setNewFolder(null)}
+        onCreatePlain={name => newFolder ? createPlainFolder(newFolder.parentPath, name) : undefined}
+        onCreatedPrivate={(_result, name) => {
+          setNewFolder(null)
+          showNotice(`「${name}」を非公開フォルダとして作成しました。同期すると、あなたの手元に届きます。`)
+          void privateFolders.reload()
+          onPrivateFolderCreated?.()
+        }}
+      />
+
+      {/* Crossing a private folder's edge */}
+      <ConfirmDialog
+        isOpen={moveConfirm !== null}
+        title={moveConfirm?.title ?? ''}
+        message={moveConfirm?.message ?? ''}
+        confirmText={moveConfirm?.confirm}
+        onConfirm={() => {
+          const pending = moveConfirm
+          setMoveConfirm(null)
+          void pending?.run()
+        }}
+        onCancel={() => setMoveConfirm(null)}
+      />
+
+      {notice && (
+        <div role="status" className="absolute bottom-2 left-2 right-2 flex items-start gap-1.5 px-3 py-2 rounded-md bg-indigo-50 border border-indigo-200 text-xs text-indigo-900 dark:bg-indigo-400/10 dark:border-indigo-400/25 dark:text-indigo-100">
+          <LockSimple size={12} weight="fill" className="mt-0.5 flex-shrink-0 text-indigo-500" />
+          <span>{notice}</span>
+        </div>
+      )}
 
       {/* Drop warning toast */}
       {dropWarning && (

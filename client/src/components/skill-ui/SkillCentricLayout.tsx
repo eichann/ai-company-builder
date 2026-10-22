@@ -27,6 +27,7 @@ import type { SlashCommandItem } from '../chat/SlashCommandDropdown'
 import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { normalizePathSeparators } from '../../utils/path'
+import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
 
 // Panel width constraints
 const MIN_LEFT_PANEL_WIDTH = 300
@@ -762,7 +763,8 @@ ${promptContent}
       )
 
       if (result.success) {
-        // Refresh departments, skills, and commit history after successful sync
+        // Refresh departments, skills, private folders and commit history after successful sync
+        void usePrivateFolderStore.getState().load(currentCompany.id)
         await refreshDepartments()
         refreshSkills()
         invalidateCommitCache()
@@ -1157,6 +1159,7 @@ ${promptContent}
                   selectedFilePath={activeFilePath}
                   onSelectFile={handleOpenFile}
                   onDoubleClickFile={handlePinFile}
+                  onPrivateFolderCreated={() => { void handleSync() }}
                 />
               </div>
               <ResizeHandle onResize={handleFileTreeResize} direction="horizontal" />

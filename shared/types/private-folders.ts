@@ -99,6 +99,27 @@ export function reservedPathMessage(folder: string): string {
 }
 
 // ----------------------------------------------------------------------------
+// GET /api/companies/:companyId/me/private-folders (the app's lock icons)
+// ----------------------------------------------------------------------------
+
+/**
+ * A private folder the caller may read, with who else can: for the desktop
+ * app's lock icon tooltip and the 「🔒 非公開：N人だけが見られます」 banner.
+ * Only folders the caller may read are listed (names never leak).
+ */
+export interface MyPrivateFolder {
+  scopeId: string
+  path: string
+  canWrite: boolean
+  /** Members who can read it, owners/admins included. */
+  viewerCount: number
+  /** Up to MY_PRIVATE_FOLDER_VIEWERS_LIMIT of them, named rules first. */
+  viewers: Array<{ userId: string; name: string | null; role: string }>
+}
+
+export const MY_PRIVATE_FOLDER_VIEWERS_LIMIT = 20
+
+// ----------------------------------------------------------------------------
 // Admin / app management API (/api/companies/:companyId/private-folders)
 // ----------------------------------------------------------------------------
 
