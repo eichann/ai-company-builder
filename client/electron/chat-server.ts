@@ -17,7 +17,7 @@ import {
   type UIMessage,
 } from 'ai'
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
-import type { AgentHostConfig, AskUser } from './agents/connection'
+import type { AgentEvent, AgentHostConfig, AskUser } from './agents/connection'
 import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
 import { createClaudeConnection } from './agents/claude'
 import { createApiConnection } from './agents/anthropic-api'
@@ -25,6 +25,8 @@ import type { ClaudeConnectionConfig } from './agents/claude'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
+import { RATE_LIMITS_PART_TYPE, type RateLimitProvider, type RateLimitSnapshot } from '../shared/rate-limits'
+import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -127,30 +129,9 @@ export async function startChatServer(config: ChatServerConfig) {
   const authToken = crypto.randomUUID()
   const app = new Hono()
 
-  // Per-session usage and context tracking
-  interface SessionUsage {
-    latestUsage: {
-      inputTokens: number
-      outputTokens: number
-      totalTokens: number
-      cacheReadTokens: number
-      cacheWriteTokens: number
-      noCacheTokens: number
-    } | null
-    accumulatedInputTokens: number
-    accumulatedOutputTokens: number
-    contextWindowSize: number
-  }
-  const sessionUsageMap = new Map<string, SessionUsage>()
-
-  function getSessionUsage(sessionId: string): SessionUsage {
-    let usage = sessionUsageMap.get(sessionId)
-    if (!usage) {
-      usage = { latestUsage: null, accumulatedInputTokens: 0, accumulatedOutputTokens: 0, contextWindowSize: 0 }
-      sessionUsageMap.set(sessionId, usage)
-    }
-    return usage
-  }
+  // Plan usage limits per agent (shared/rate-limits.ts): the account's, not a
+  // conversation's, so every tab's header meter shows the latest one.
+  const rateLimitSnapshots = new Map<RateLimitProvider, RateLimitSnapshot>()
 
   // Current native session for each ACB conversation (provider-tagged).
   const agentSessionMap = new Map<string, AgentSession>()
@@ -272,7 +253,20 @@ export async function startChatServer(config: ChatServerConfig) {
     const injector = createChunkInjector()
     const askUser = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser }
+    // Usage limits and subagent progress reach the renderer as transient data
+    // parts (useChat onData), never stored in the transcript.
+    const onEvent = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
+      ? (event: AgentEvent) => {
+        if (event.type === 'rate-limits') {
+          const snapshot = event.update(rateLimitSnapshots.get(authMode))
+          if (!snapshot) return
+          rateLimitSnapshots.set(authMode, snapshot)
+          injector.push({ type: RATE_LIMITS_PART_TYPE, data: snapshot, transient: true })
+        } else {
+          injector.push({ type: AGENT_PROGRESS_PART_TYPE, data: event.progress, transient: true })
+        }
+      } : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -384,28 +378,10 @@ export async function startChatServer(config: ChatServerConfig) {
       ...(tools ? { tools, stopWhen: stepCountIs(10) } : {}),
       onStepFinish: ({ finishReason, usage, toolCalls, providerMetadata }) => {
         console.log(`[chat-server] Step finished: reason=${finishReason}, tokens=${usage.totalTokens}, tools=${toolCalls.length}`)
-        // Update per-session usage
-        const sid = appSessionId || '__default__'
-        const su = getSessionUsage(sid)
-        if (usage.totalTokens != null) {
-          su.latestUsage = {
-            inputTokens: usage.inputTokens ?? 0,
-            outputTokens: usage.outputTokens ?? 0,
-            totalTokens: usage.totalTokens ?? 0,
-            cacheReadTokens: usage.inputTokenDetails?.cacheReadTokens ?? 0,
-            cacheWriteTokens: usage.inputTokenDetails?.cacheWriteTokens ?? 0,
-            noCacheTokens: usage.inputTokenDetails?.noCacheTokens ?? 0,
-          }
-        }
         if (!connection.ownsConversation && appSessionId) agentSessionMap.set(appSessionId, { providerId: authMode, id: appSessionId, modelId })
         const metadata = connection.readMetadata(providerMetadata)
         if (metadata.sessionId && appSessionId) {
           agentSessionMap.set(appSessionId, { providerId: authMode, id: metadata.sessionId, modelId })
-        }
-        if (metadata.contextUsage) {
-          su.accumulatedInputTokens = metadata.contextUsage.inputTokens
-          su.accumulatedOutputTokens = metadata.contextUsage.outputTokens
-          if (metadata.contextUsage.contextWindow) su.contextWindowSize = metadata.contextUsage.contextWindow
         }
       },
       onFinish: release,
@@ -498,32 +474,16 @@ ${transcript}
     const id = c.req.param('appSessionId')
     const deleted = agentSessionMap.delete(id)
     forgetPrivateReads(id)
-    // Clean up per-session usage tracking
-    sessionUsageMap.delete(id)
     console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)
     return c.json({ success: true })
   })
 
-  // GET /api/usage?sessionId=xxx — returns latest token usage for a specific session
-  app.get('/api/usage', (c) => {
-    const sessionId = c.req.query('sessionId') || '__default__'
-    const su = sessionUsageMap.get(sessionId)
-    return c.json({ usage: su?.latestUsage || null })
-  })
-
-  // GET /api/context?sessionId=xxx — returns context usage for a specific session
-  app.get('/api/context', (c) => {
-    const sessionId = c.req.query('sessionId') || '__default__'
-    const su = sessionUsageMap.get(sessionId)
-    if (!su || (su.accumulatedInputTokens === 0 && su.contextWindowSize === 0)) {
-      return c.json({ context: null })
-    }
-    const maxTokens = su.contextWindowSize > 0 ? su.contextWindowSize : 200_000
-    const usedTokens = su.accumulatedInputTokens + su.accumulatedOutputTokens
-    const percentage = Math.min(100, Math.round((usedTokens / maxTokens) * 100))
-    return c.json({
-      context: { usedTokens, maxTokens, percentage },
-    })
+  // GET /api/rate-limits?provider=claude-code|codex — the last known plan usage
+  // (null until an agent reported one since the app started).
+  app.get('/api/rate-limits', (c) => {
+    const provider = c.req.query('provider')
+    const snapshot = provider === 'claude-code' || provider === 'codex' ? rateLimitSnapshots.get(provider) : undefined
+    return c.json({ rateLimits: snapshot ?? null })
   })
 
   // Find port in 3300-3400 range (distinct from tool ports 3100-3200)

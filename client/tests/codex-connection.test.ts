@@ -19,6 +19,7 @@ class FakeRpc implements CodexTransport {
     const results: Record<string, unknown> = {
       'account/read': { account: { type: this.auth } },
       'model/list': { data: [{ model: 'test-model', displayName: 'Test', isDefault: true, supportedReasoningEfforts: [{ reasoningEffort: 'low' }, { reasoningEffort: 'high' }], defaultReasoningEffort: 'low' }] },
+      'account/rateLimits/read': { rateLimits: { limitId: 'codex', primary: { usedPercent: 60, windowDurationMins: 10080, resetsAt: 1793082877 }, secondary: null, rateLimitReachedType: null } },
       'thread/start': { thread: { id: 'thread-a' } }, 'thread/resume': { thread: { id: 'thread-a' } }, 'turn/start': { turn: { id: 'turn-a' } },
     }
     if (method === 'turn/start') this.onMessage({ method: 'turn/started', params: { threadId: 'thread-a', turn: { id: 'turn-a' } } })
@@ -64,6 +65,29 @@ test('ChatGPT auth, exact model/effort, resume and one-copy text output', async 
   assert.deepEqual(result.content, [{ type: 'text', text: '回答' }])
   assert.equal(connection.readMetadata(result.providerMetadata).sessionId, 'thread-a')
   assert.ok(rpc.closed)
+})
+
+test('plan usage: read once per turn, then sparse updates; titles never ask', async () => {
+  const { rpc, connection } = setup()
+  const events: { type: string; update?: (p: unknown) => unknown }[] = []
+  const model = connection.createChatModel({ modelId: 'test-model', onEvent: event => events.push(event as never) }) as Model
+  const response = model.doGenerate({ prompt })
+  await tick()
+  rpc.onMessage({ method: 'account/rateLimits/updated', params: { rateLimits: { primary: { usedPercent: 20, windowDurationMins: 300, resetsAt: 1792690000 }, secondary: null } } })
+  rpc.complete()
+  await response
+  assert.equal(rpc.calls.filter(c => c.method === 'account/rateLimits/read').length, 1)
+  let snapshot: unknown
+  for (const event of events) { assert.equal(event.type, 'rate-limits'); snapshot = event.update!(snapshot) }
+  assert.deepEqual((snapshot as { windows: { label: string; usedPercent: number }[] }).windows.map(w => [w.label, w.usedPercent]), [['5時間', 20], ['1週間', 60]])
+
+  const title = setup()
+  const titleModel = title.connection.createTitleModel({ modelId: 'test-model' }) as Model
+  const titled = titleModel.doGenerate({ prompt })
+  await tick()
+  title.rpc.complete()
+  await titled
+  assert.equal(title.rpc.calls.some(c => c.method === 'account/rateLimits/read'), false)
 })
 
 test('API-key auth and unavailable effort fail before generation', async () => {

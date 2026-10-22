@@ -13,6 +13,7 @@ import { CodexRpc, type RpcMessage } from './codex-rpc'
 import { startLoopbackMcp } from './loopback-mcp'
 import { CODEX_ASK_USER_INSTRUCTIONS, codexAskUserTool } from './choice-tools'
 import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../../shared/choice-prompt'
+import { fromCodexRateLimits } from '../../shared/rate-limits'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -96,6 +97,10 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       let tokenUsage: TokenUsage | undefined
       let timeout: ReturnType<typeof setTimeout> | undefined
       const emit = (part: Part) => { if (!ended) controller.enqueue(part) }
+      // Plan usage for the header meter (shared/rate-limits.ts). Updates are sparse.
+      const reportRateLimits = (snapshot: unknown) => {
+        if (!title && request.onEvent) request.onEvent({ type: 'rate-limits', update: previous => fromCodexRateLimits(snapshot, previous) })
+      }
       const finish = (error?: Error) => {
         if (ended) return
         if (error) emit({ type: 'error', error })
@@ -186,6 +191,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               if (message.method === 'serverRequest/resolved') pendingInteractions.get(String(p.requestId))?.abort()
               if (message.method === 'turn/started') turnId = (p.turn as { id: string }).id
               if (message.method === 'thread/tokenUsage/updated') tokenUsage = p.tokenUsage as TokenUsage
+              if (message.method === 'account/rateLimits/updated') reportRateLimits(p.rateLimits)
               if (message.method === 'item/agentMessage/delta') {
                 const id = String(p.itemId)
                 if (!openText.has(id)) { openText.add(id); emit({ type: 'text-start', id }) }
@@ -238,6 +244,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); askMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
+            // The full snapshot once per turn; `account/rateLimits/updated` follows as usage changes.
+            if (!title && request.onEvent) void rpc.request<{ rateLimits?: unknown }>('account/rateLimits/read').then(r => reportRateLimits(r?.rateLimits), () => {})
             const models = await readCodexModels(rpc)
             const selected = request.modelId ? models.find(m => m.id === request.modelId) : models.find(m => m.isDefault) || models[0]
             if (!selected) throw new Error('選択したCodexモデルが利用できません。モデルを選び直してください。')
@@ -287,9 +295,8 @@ export function createCodexConnection(config: Config, createRpc: RpcFactory = de
     createChatModel: request => createModel(config, request, false, createRpc),
     createTitleModel: request => createModel(config, request || {}, true, createRpc),
     readMetadata(metadata) {
-      const value = metadata?.codex as { sessionId?: string; tokenUsage?: TokenUsage } | undefined
-      const usage = value?.tokenUsage
-      return { sessionId: value?.sessionId, contextUsage: usage ? { inputTokens: usage.last.inputTokens, outputTokens: usage.last.outputTokens, contextWindow: usage.modelContextWindow } : undefined }
+      const value = metadata?.codex as { sessionId?: string } | undefined
+      return { sessionId: value?.sessionId }
     },
   }
 }

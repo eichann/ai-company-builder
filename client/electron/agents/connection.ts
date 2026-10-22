@@ -5,6 +5,17 @@ import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
 import type { PrivateReadContext, PrivateReadState } from '../private-read-guard'
 import type { ChoiceQuestion, ChoiceResult } from '../../shared/choice-prompt'
+import type { RateLimitSnapshot } from '../../shared/rate-limits'
+import type { AgentProgressEvent } from '../../shared/agent-progress'
+
+/**
+ * Side information an agent reports while a turn runs (not part of the
+ * transcript): plan usage limits for the header meter, and subagent progress
+ * lines. `update` merges the agent's payload into the last known snapshot.
+ */
+export type AgentEvent =
+  | { type: 'rate-limits'; update: (previous: RateLimitSnapshot | undefined) => RateLimitSnapshot | undefined }
+  | { type: 'agent-progress'; progress: AgentProgressEvent }
 
 /**
  * Ask the member a choice prompt in this conversation (choice-prompt.ts) and
@@ -35,11 +46,12 @@ export interface AgentConnection {
     privateReads?: { context: PrivateReadContext; state: PrivateReadState }
     /** Choice prompts for this turn; absent → the agent is told to ask in plain text. */
     askUser?: AskUser
+    /** Usage limits and subagent progress while the turn runs. */
+    onEvent?: (event: AgentEvent) => void
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {
     sessionId?: string
-    contextUsage?: { inputTokens: number; outputTokens: number; contextWindow?: number }
   }
 }
 

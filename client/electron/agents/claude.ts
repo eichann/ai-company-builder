@@ -6,7 +6,9 @@ import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
 import crypto from 'crypto'
 import { spawnAgentProcess as spawnClaudeCodeProcess } from './process'
-import type { AgentConnection, AgentHostConfig } from './connection'
+import type { AgentConnection, AgentEvent, AgentHostConfig } from './connection'
+import { fromClaudeRateLimitInfo } from '../../shared/rate-limits'
+import { agentProgressFromSdkMessage } from '../../shared/agent-progress'
 import type { PermissionMode } from '../../shared/permission-mode'
 import { decideReservedWrite, decideToolWrite } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
@@ -90,6 +92,50 @@ function noticeParts(text: string): StreamPart[] {
   return [{ type: 'text-start', id }, { type: 'text-delta', id, delta: `※ ${text}\n\n` }, { type: 'text-end', id }]
 }
 
+/**
+ * The provider (ai-sdk-provider-claude-code 3.6.1) drops `rate_limit_event`
+ * and `system/task_progress` messages, and has no per-message callback. Its
+ * `onQueryCreated` hands over the SDK Query before the provider iterates it,
+ * so wrap the Query's iterator to see every message on the way through. The
+ * Query's own iterator is its internal message generator, which the wrapper
+ * delegates to unchanged (next / return / throw).
+ */
+export function tapSdkMessages(query: unknown, onMessage: (message: unknown) => void): void {
+  const target = query as { [Symbol.asyncIterator]?: () => AsyncIterator<unknown> } | null
+  if (!target || typeof target[Symbol.asyncIterator] !== 'function') return
+  const inner = target[Symbol.asyncIterator]!.bind(target)
+  Object.defineProperty(target, Symbol.asyncIterator, {
+    configurable: true,
+    value: () => {
+      const iterator = inner()
+      const wrapped: AsyncIterableIterator<unknown> = {
+        async next(...args: [] | [unknown]) {
+          const result = await iterator.next(...args)
+          if (!result.done) {
+            try { onMessage(result.value) } catch { /* side information only */ }
+          }
+          return result
+        },
+        return: (value?: unknown) => iterator.return ? iterator.return(value) : Promise.resolve({ done: true as const, value }),
+        throw: (error?: unknown) => iterator.throw ? iterator.throw(error) : Promise.reject(error),
+        [Symbol.asyncIterator]() { return wrapped },
+      }
+      return wrapped
+    },
+  })
+}
+
+/** SDK message → app event (usage limits, subagent progress), or undefined. */
+export function claudeAgentEvent(message: unknown): AgentEvent | undefined {
+  const value = message as { type?: unknown; rate_limit_info?: unknown } | null
+  if (value?.type === 'rate_limit_event') {
+    const info = value.rate_limit_info
+    return { type: 'rate-limits', update: previous => fromClaudeRateLimitInfo(info, previous) }
+  }
+  const progress = agentProgressFromSdkMessage(message)
+  return progress ? { type: 'agent-progress', progress } : undefined
+}
+
 function resolveClaudeModel(modelId?: string): string {
   if (!modelId) return DEFAULT_CLI_MODEL
   return MODEL_CLI_MAP[modelId] ?? modelId
@@ -129,7 +175,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -327,6 +373,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           env: config.getShellEnv(),
           settingSources: ['user', 'project'],
           streamingInput: 'always',
+          // One-line progress for running subagents (task_progress.summary),
+          // shown in the subagent row; see shared/agent-progress.ts.
+          ...(onEvent ? {
+            agentProgressSummaries: true,
+            onQueryCreated: (query: unknown) => tapSdkMessages(query, message => {
+              const event = claudeAgentEvent(message)
+              if (event) onEvent(event)
+            }),
+          } : {}),
           ...(allowedTools.length > 0 ? { mcpServers, allowedTools } : {}),
           ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
           // Passed straight to the CLI as `--effort` (xhigh needs CLI v2.1.111+).
@@ -450,20 +505,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       })
     },
     readMetadata(metadata) {
-      const value = metadata?.['claude-code'] as {
-        sessionId?: string
-        modelUsage?: Record<string, { inputTokens?: number; outputTokens?: number; contextWindow?: number }>
-      } | undefined
-      let contextUsage: { inputTokens: number; outputTokens: number; contextWindow?: number } | undefined
-      if (value?.modelUsage) {
-        contextUsage = { inputTokens: 0, outputTokens: 0 }
-        for (const usage of Object.values(value.modelUsage)) {
-          contextUsage.inputTokens += usage.inputTokens ?? 0
-          contextUsage.outputTokens += usage.outputTokens ?? 0
-          if (usage.contextWindow && usage.contextWindow > 0) contextUsage.contextWindow = usage.contextWindow
-        }
-      }
-      return { sessionId: value?.sessionId, contextUsage }
+      const value = metadata?.['claude-code'] as { sessionId?: string } | undefined
+      return { sessionId: value?.sessionId }
     },
   }
 }
