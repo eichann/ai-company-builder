@@ -20,6 +20,7 @@ import { ConsultationReferenceLink } from './ConsultationReference'
 import { MarkdownMessage } from './MarkdownMessage'
 import { ChoicePromptRecordView } from './ChoicePrompt'
 import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../shared/choice-prompt'
+import { useAgentProgress } from './agentStatusStore'
 import {
   GROUP_PAGE_SIZE,
   getToolDisplayName,
@@ -127,6 +128,20 @@ function ToolCountLabel({ count, running }: { count: number; running: number }) 
   )
 }
 
+/**
+ * The running subagent's latest one-line progress (agentProgressSummaries,
+ * shared/agent-progress.ts) under its row. Gone once the subagent finishes.
+ */
+function AgentProgressLine({ toolCallId }: { toolCallId: string }) {
+  const summary = useAgentProgress(toolCallId)
+  if (!summary) return null
+  return (
+    <div className="ml-[3.25rem] -mt-0.5 mb-1 pr-2 text-[11px] text-gray-500 dark:text-zinc-400 truncate animate-fade-in" title={summary}>
+      {summary}
+    </div>
+  )
+}
+
 /** A subagent's own row: collapsed by default; expands to its inner calls. */
 const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem }) {
   const { t } = useTranslation()
@@ -155,6 +170,7 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
           className={`text-gray-400 ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`}
         />
       </button>
+      {isRunningState(row.state) && <AgentProgressLine toolCallId={row.toolCallId} />}
       {isExpanded && (
         <div className="ml-4 pl-2 border-l border-gray-200 dark:border-zinc-700/60">
           {hidden > 0 && (

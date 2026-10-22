@@ -12,6 +12,7 @@ const config: ClaudeConnectionConfig = {
 }
 
 function capture(overrides: Partial<ClaudeConnectionConfig> = {}) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- the factory's options are inspected loosely
   let captured: { model: string; options: any }
   const factory = ((model: string, options: unknown) => {
     captured = { model, options }
@@ -35,6 +36,27 @@ test('resume, effort and spawn are confined to Claude connection; title has no r
   assert.equal(read().options.resume, undefined)
   assert.equal(typeof read().options.spawnClaudeCodeProcess, 'function')
   assert.equal(typeof chat.options.spawnClaudeCodeProcess, 'function')
+})
+
+test('progress summaries and the SDK message tap are on only when the chat server listens', async () => {
+  const { connection, read } = capture()
+  connection.createChatModel({ workingDirectory: '/project' })
+  assert.equal(read().options.agentProgressSummaries, undefined)
+  assert.equal(read().options.onQueryCreated, undefined)
+  const events: unknown[] = []
+  connection.createChatModel({ workingDirectory: '/project', onEvent: event => events.push(event) })
+  assert.equal(read().options.agentProgressSummaries, true)
+  async function* messages() {
+    yield { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'five_hour', unifiedWindows: { five_hour: { utilization: 0.5, resetsAt: 1 } } } }
+    yield { type: 'system', subtype: 'task_progress', tool_use_id: 'toolu_a', summary: '資料を読んでいます' }
+    yield { type: 'assistant' }
+  }
+  const query = { [Symbol.asyncIterator]: messages }
+  read().options.onQueryCreated(query)
+  const seen: unknown[] = []
+  for await (const message of query as AsyncIterable<unknown>) seen.push(message) // the provider's loop
+  assert.equal(seen.length, 3)
+  assert.deepEqual(events.map(e => (e as { type: string }).type), ['rate-limits', 'agent-progress'])
 })
 
 test('dangerous commands require scoped approval even with bypassPermissions', async () => {
@@ -65,10 +87,10 @@ test('read-only tools bypass approval; writes preserve denial', async () => {
 
 test('normalizes native metadata without retaining provider payload', () => {
   const connection = createClaudeConnection(config)
-  assert.deepEqual(connection.readMetadata(undefined), { sessionId: undefined, contextUsage: undefined })
+  assert.deepEqual(connection.readMetadata(undefined), { sessionId: undefined })
   assert.deepEqual(connection.readMetadata({ 'claude-code': { sessionId: 's', modelUsage: {
-    a: { inputTokens: 10, outputTokens: 3, contextWindow: 200000 }, b: { inputTokens: 4, outputTokens: 2 },
-  } } }), { sessionId: 's', contextUsage: { inputTokens: 14, outputTokens: 5, contextWindow: 200000 } })
+    a: { inputTokens: 10, outputTokens: 3, contextWindow: 200000 },
+  } } }), { sessionId: 's' })
   const api = createApiConnection({ getApiKey: () => undefined })
   assert.equal(api.ownsConversation, false)
   assert.ok(api.authenticationError())

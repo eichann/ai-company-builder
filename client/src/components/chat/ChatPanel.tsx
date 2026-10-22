@@ -39,6 +39,10 @@ import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } fro
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
 import { AssistantMessageParts } from './MessageParts'
+import { RateLimitMeter } from './RateLimitMeter'
+import { reportAgentProgress, setRateLimits } from './agentStatusStore'
+import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../../../shared/rate-limits'
+import { AGENT_PROGRESS_PART_TYPE, readAgentProgress } from '../../../shared/agent-progress'
 import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
 import { useAuthStore } from '../../stores/authStore'
@@ -143,61 +147,6 @@ function ThinkingIndicator() {
 }
 
 // Tool rows, subagent groups, thinking and text parts: see MessageParts.tsx.
-
-// ============================================================================
-// Context Usage Gauge
-// ============================================================================
-
-interface ContextGaugeProps {
-  context: {
-    usedTokens: number
-    maxTokens: number
-    percentage: number
-  }
-}
-
-function ContextGauge({ context }: ContextGaugeProps) {
-  const { usedTokens, maxTokens, percentage } = context
-  const displayPct = Math.min(100, percentage)
-
-  const formatTokens = (n: number) => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`
-    if (n >= 1000) return `${(n / 1000).toFixed(1)}K`
-    return String(n)
-  }
-
-  // Color based on context fill level
-  const barColor = percentage >= 80
-    ? 'bg-red-500 dark:bg-red-400'
-    : percentage >= 50
-      ? 'bg-amber-500 dark:bg-amber-400'
-      : 'bg-emerald-500 dark:bg-emerald-400'
-
-  const textColor = percentage >= 80
-    ? 'text-red-600 dark:text-red-400'
-    : percentage >= 50
-      ? 'text-amber-600 dark:text-amber-400'
-      : 'text-gray-400 dark:text-zinc-500'
-
-  return (
-    <div className="px-4 pb-3">
-      {/* Progress bar */}
-      <div className="h-1 rounded-full bg-gray-100 dark:bg-zinc-800 overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${barColor}`}
-          style={{ width: `${displayPct}%` }}
-        />
-      </div>
-      {/* Label */}
-      <div className={`mt-1 text-[10px] ${textColor}`}>
-        <span>
-          {formatTokens(usedTokens)} / {formatTokens(maxTokens)} tokens
-          {percentage > 100 ? ' (compacting)' : ` (${percentage}%)`}
-        </span>
-      </div>
-    </div>
-  )
-}
 
 // ============================================================================
 // Tool Approval Banner
@@ -447,7 +396,9 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 
   return (
     <div className={`animate-slide-up ${isUser ? 'flex justify-end' : ''}`}>
-      <div className={`max-w-[85%] ${isUser ? 'ml-auto' : ''}`}>
+      {/* Assistant replies use the full row (the list's px-4 gutter on both
+          sides); only the member's own bubbles stay narrower, aligned right. */}
+      <div className={isUser ? 'max-w-[85%] ml-auto' : 'min-w-0'}>
         {/* Role indicator for assistant */}
         {!isUser && (
           <div className="flex items-center gap-2 mb-2">
@@ -1591,41 +1542,16 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     })
   }, [serverInfo.port, serverInfo.authToken])
 
-  // Context usage state for gauge (from /context command, with /api/usage fallback)
-  const [contextInfo, setContextInfo] = useState<{
-    usedTokens: number
-    maxTokens: number
-    percentage: number
-  } | null>(null)
-
-  const fetchContext = useCallback(async () => {
-    const headers = { Authorization: `Bearer ${serverInfo.authToken}` }
-    const base = `http://127.0.0.1:${serverInfo.port}`
-    const sid = appSessionIdRef.current || ''
+  // Plan usage for the header meter (shared/rate-limits.ts): streamed live as
+  // transient data parts, and fetched here for a tab that has not streamed yet.
+  const fetchRateLimits = useCallback(async () => {
+    if (authModeRef.current !== 'claude-code' && authModeRef.current !== 'codex') return
     try {
-      const res = await fetch(`${base}/api/context?sessionId=${encodeURIComponent(sid)}`, { headers })
-      const data = await res.json()
-      if (data.context) {
-        setContextInfo(data.context)
-        return
-      }
+      const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/rate-limits?provider=${authModeRef.current}`, { headers: { Authorization: `Bearer ${serverInfo.authToken}` } })
+      const data = await res.json() as { rateLimits?: RateLimitSnapshot | null }
+      setRateLimits(data.rateLimits)
     } catch {
-      // /context failed, try fallback
-    }
-    try {
-      const res = await fetch(`${base}/api/usage?sessionId=${encodeURIComponent(sid)}`, { headers })
-      const data = await res.json()
-      if (data.usage) {
-        const maxTokens = aiModelRef.current === 'haiku' ? 200_000 : 1_000_000
-        const pct = Math.min(100, Math.round((data.usage.inputTokens / maxTokens) * 100))
-        setContextInfo({
-          usedTokens: data.usage.inputTokens,
-          maxTokens,
-          percentage: pct,
-        })
-      }
-    } catch {
-      // Silently ignore
+      // The meter keeps what it has.
     }
   }, [serverInfo.port, serverInfo.authToken])
 
@@ -1648,8 +1574,6 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       }
       // Refresh file tree in case AI created/modified files
       window.dispatchEvent(new Event('refresh-file-tree'))
-      // Fetch context window usage
-      fetchContext()
       // Fetch and store Claude CLI session ID for resume persistence
       const finishedSessionId = appSessionIdRef.current
       const finishedCompanyId = currentCompany?.id
@@ -1674,7 +1598,16 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     onError: (err) => {
       console.error('[useChat] Error:', err)
     },
+    onData: (part) => {
+      if (part.type === RATE_LIMITS_PART_TYPE) setRateLimits(part.data as RateLimitSnapshot)
+      else if (part.type === AGENT_PROGRESS_PART_TYPE) {
+        const progress = readAgentProgress(part.data)
+        if (progress) reportAgentProgress(progress)
+      }
+    },
   })
+
+  useEffect(() => { void fetchRateLimits() }, [authMode, fetchRateLimits])
 
   useEffect(() => {
     if (status === 'ready' || status === 'error') setPendingApprovals([])
@@ -2207,6 +2140,17 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     sendMessage({ text: newText })
   }, [setMessages, sendMessage])
 
+  // The usage meter shows only its fullest window when the header is narrow.
+  const headerRef = useRef<HTMLElement>(null)
+  const [narrowHeader, setNarrowHeader] = useState(false)
+  useEffect(() => {
+    const header = headerRef.current
+    if (!header) return
+    const observer = new ResizeObserver(([entry]) => setNarrowHeader(entry.contentRect.width < 600))
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [])
+
   // ============================================================================
   // Render
   // ============================================================================
@@ -2214,48 +2158,51 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   return (
     <div className="h-full flex flex-col bg-white dark:bg-zinc-900">
       {/* Header */}
-      <header className="flex-shrink-0 h-12 flex items-center justify-between px-4 border-b border-gray-200 dark:border-zinc-800">
-        <div className="flex items-center gap-3">
+      <header ref={headerRef} className="flex-shrink-0 h-12 flex items-center justify-between gap-2 px-4 border-b border-gray-200 dark:border-zinc-800">
+        <div className="flex items-center gap-3 flex-shrink-0">
           <div className="w-6 h-6 rounded-lg bg-gradient-to-br from-accent to-accent/70 flex items-center justify-center">
             <Sparkle size={12} weight="fill" className="text-white" />
           </div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-medium text-gray-900 dark:text-zinc-100">{t('chat.assistant')}</span>
-            <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
-              {authMode === 'codex' ? 'Codex' : authMode === 'claude-code' ? 'Claude' : 'API'}
-            </span>
+            {/* The model selector already names the agent when space is short. */}
+            {(!narrowHeader || authMode === 'api-key') && (
+              <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
+                {authMode === 'codex' ? 'Codex' : authMode === 'claude-code' ? 'Claude' : 'API'}
+              </span>
+            )}
+            {(authMode === 'claude-code' || authMode === 'codex') && <RateLimitMeter provider={authMode} compact={narrowHeader} />}
             {/* Status indicator */}
             {status === 'submitted' && (
-              <span className="flex items-center gap-1 text-[10px] text-accent animate-fade-in">
+              <span className="flex items-center gap-1 text-[10px] text-accent animate-fade-in whitespace-nowrap" title={t('chat.statusSubmitted')}>
                 <CircleNotch size={10} className="animate-spin" />
-                {t('chat.statusSubmitted')}
+                {!narrowHeader && t('chat.statusSubmitted')}
               </span>
             )}
             {status === 'streaming' && (
-              <span className="flex items-center gap-1 text-[10px] text-green-500 dark:text-green-400 animate-fade-in">
+              <span className="flex items-center gap-1 text-[10px] text-green-500 dark:text-green-400 animate-fade-in whitespace-nowrap" title={t('chat.statusStreaming')}>
                 <span className="w-1.5 h-1.5 rounded-full bg-green-500 dark:bg-green-400 animate-pulse-soft" />
-                {t('chat.statusStreaming')}
+                {!narrowHeader && t('chat.statusStreaming')}
               </span>
             )}
             {status === 'error' && (
-              <span className="flex items-center gap-1 text-[10px] text-red-500 dark:text-red-400 animate-fade-in">
+              <span className="flex items-center gap-1 text-[10px] text-red-500 dark:text-red-400 animate-fade-in whitespace-nowrap" title={t('chat.statusError')}>
                 <span className="w-1.5 h-1.5 rounded-full bg-red-500 dark:bg-red-400" />
-                {t('chat.statusError')}
+                {!narrowHeader && t('chat.statusError')}
               </span>
             )}
           </div>
         </div>
 
-        <div className="flex items-center gap-1">
+        <div className="flex items-center justify-end gap-1 min-w-0">
           {authMode === 'codex' && <>
             <select aria-label="Codexモデル" value={codexModel?.id || ''} disabled={modelLocked || !codexModel}
               onChange={e => { setCodexModelId(e.target.value); localStorage.setItem('acb-codex-model', e.target.value) }}
-              className="h-7 max-w-44 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+              className="h-7 max-w-44 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
               {codexStatus.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
             <select aria-label="Codex思考の強さ" value={selectedCodexEffort} disabled={modelLocked || !codexModel}
               onChange={e => { setCodexEffort(e.target.value); localStorage.setItem('acb-codex-effort', e.target.value) }}
-              className="h-7 text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
+              className="h-7 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
               {codexModel?.efforts.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
           </>}
@@ -2266,7 +2213,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
               disabled={modelLocked}
               title={modelLocked ? '応答中はモデルを変更できません' : undefined}
               onChange={(e) => setAIModel(e.target.value as AIModel)}
-              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
+              className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
               <option value="fable-5">{MODEL_LABELS['fable-5']}</option>
@@ -2284,7 +2231,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
             <select
               value={aiEffort}
               onChange={(e) => setAIEffort(e.target.value as AIEffort)}
-              className="h-7 text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
+              className="h-7 min-w-[4.75rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
               {MODEL_EFFORT_OPTIONS[aiModel].map((eff) => (
@@ -2299,7 +2246,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           {(status === 'submitted' || status === 'streaming') && (
             <button
               onClick={() => stop()}
-              className="w-8 h-8 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors"
+              className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-red-100 dark:hover:bg-red-900/30 flex items-center justify-center transition-colors"
               title={t('chat.stop')}
             >
               <X size={16} className="text-red-500" />
@@ -2309,7 +2256,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           {/* Markdown Render Toggle: ON = decorated rendering, OFF = raw text */}
           <button
             onClick={() => setChatMarkdownRender(!chatMarkdownRender)}
-            className={`w-8 h-8 rounded-lg flex items-center justify-center transition-colors ${
+            className={`w-8 h-8 flex-shrink-0 rounded-lg flex items-center justify-center transition-colors ${
               chatMarkdownRender
                 ? 'bg-accent/15 text-accent hover:bg-accent/20'
                 : 'hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400'
@@ -2322,20 +2269,20 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           {/* New Chat/Tab Button */}
           <button
             onClick={onNewTab || (() => startNewChat())}
-            className="w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
+            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
             title={t('chat.newChat')}
           >
             <Plus size={16} className="text-gray-500 dark:text-zinc-400" />
           </button>
 
-          <button onClick={onToggleSidebar} aria-label="相談一覧を開閉" aria-expanded={sidebarOpen} title="相談一覧" className="w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
+          <button onClick={onToggleSidebar} aria-label="相談一覧を開閉" aria-expanded={sidebarOpen} title="相談一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
             <SidebarSimple size={16} />
           </button>
 
           {/* Settings Button */}
           <button
             onClick={onShowSettings}
-            className="w-8 h-8 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
+            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
           >
             <GearSix size={16} className="text-gray-500 dark:text-zinc-400" />
           </button>
@@ -2417,8 +2364,6 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
             apiRef={chatInputApiRef}
           />
         </div>
-        {/* Context Usage Gauge */}
-        {contextInfo && <ContextGauge context={contextInfo} />}
       </div>
     </div>
   )

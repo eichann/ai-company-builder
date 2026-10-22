@@ -136,6 +136,25 @@ import { ... } from '../../shared/types'  // Path inside container
 - The SDK prints `[CLAUDE_SDK_CAN_USE_TOOL_SHADOWED]` process warnings for
   the app's `allowedTools` MCP tools and for bypassPermissions. They are
   informational: AskUserQuestion still reaches `canUseTool` in bypass.
+- The provider drops `rate_limit_event` and `system/task_progress`, so
+  `claude.ts` wraps the SDK Query's iterator in `onQueryCreated`
+  (`tapSdkMessages`) to see them. Agents report them through the
+  `onEvent` callback; the chat server sends them to the renderer as
+  *transient* data parts (`data-rate-limits`, `data-agent-progress`, read in
+  `useChat` `onData`, never stored in history) and keeps the latest usage per
+  agent for `GET /api/rate-limits`.
+- Header usage meter (`shared/rate-limits.ts`, `RateLimitMeter.tsx`): Claude's
+  real payload carries both windows in the undocumented
+  `rate_limit_info.unifiedWindows` with `utilization` as a fraction (0.24 =
+  24%); Codex comes from `account/rateLimits/read` once per turn plus sparse
+  `account/rateLimits/updated` (`usedPercent` 0–100, windows by
+  `windowDurationMins`). No event (API-key login, older CLI) → "unknown".
+  No cost display (owner's decision).
+- `agentProgressSummaries: true`: the running subagent row shows the latest
+  `task_progress.summary` (`tool_use_id` = the Agent call). Codex has no
+  subagent rows, so nothing is shown there.
+- Defaults for members who never chose: Opus 5.5 + effort medium
+  (`src/lib/aiModels.ts`); only an explicit choice is saved.
 
 ### File Naming Rules
 
