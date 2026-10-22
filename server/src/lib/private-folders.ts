@@ -222,6 +222,55 @@ export class PathUnavailableError extends Error {
   }
 }
 
+/** A push to the company repository did not finish in time; nothing was created. */
+export class PrivateFolderBusyError extends Error {
+  constructor() {
+    super('BUSY')
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Pushes in flight to the company repository (creation waits for them)
+// ----------------------------------------------------------------------------
+
+const COMPANY_PUSH_WAIT_MS = 60_000
+const companyPushes = new Map<string, Set<symbol>>()
+
+/**
+ * git-http: a receive-pack to the company repository starts — call BEFORE
+ * taking its permission snapshot. Returns the function to call when the
+ * request has ended (idempotent).
+ */
+export function beginCompanyPush(companyId: string): () => void {
+  const token = Symbol('push')
+  let set = companyPushes.get(companyId)
+  if (!set) {
+    set = new Set()
+    companyPushes.set(companyId, set)
+  }
+  set.add(token)
+  return () => {
+    const s = companyPushes.get(companyId)
+    if (!s) return
+    s.delete(token)
+    if (s.size === 0) companyPushes.delete(companyId)
+  }
+}
+
+/** For tests: receive-packs to the company repository running now. */
+export function companyPushesInFlight(companyId: string): number {
+  return companyPushes.get(companyId)?.size ?? 0
+}
+
+async function waitForCompanyPushes(companyId: string, tokens: symbol[], timeoutMs: number): Promise<boolean> {
+  const until = Date.now() + timeoutMs
+  while (tokens.some(t => companyPushes.get(companyId)?.has(t))) {
+    if (Date.now() > until) return false
+    await new Promise(r => setTimeout(r, 50))
+  }
+  return true
+}
+
 /**
  * Create the scope repository, scope, rules and reservation. Call under the
  * company lock, after validation and authorisation. Throws
@@ -258,9 +307,18 @@ export async function createPrivateFolder(
     await removeScopeRepo(repo)
     throw err
   }
-  // A push that took its permission snapshot before the reservation existed
-  // may have landed at the path meanwhile: undo rather than leave public
-  // content inside a "private" folder.
+  // A push to the company repository that took its permission snapshot
+  // before the reservation existed is checked against that snapshot, so it
+  // could still land at the path — even after the check below, if its hook
+  // ran before and its ref update after it. Wait for every such push to end
+  // (pushes starting from now on see the reservation), then check: undo
+  // rather than leave public content inside a "private" folder.
+  const before = [...(companyPushes.get(companyId) ?? [])]
+  if (!(await waitForCompanyPushes(companyId, before, COMPANY_PUSH_WAIT_MS))) {
+    deletePrivateFolderRows(conn, scopeId, repoId)
+    await removeScopeRepo(repo)
+    throw new PrivateFolderBusyError()
+  }
   if (await existsInCompanyRepo(companyId, path)) {
     deletePrivateFolderRows(conn, scopeId, repoId)
     await removeScopeRepo(repo)

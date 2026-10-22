@@ -13,7 +13,8 @@
  *
  * The "- " lines between the marker and the second separator after it are
  * the paths. Every text below is byte-for-byte what the shell hook printed;
- * [WRITE_DENIED] is new and follows the same shape as [PERSONAL_PATH].
+ * [WRITE_DENIED] and [LOCAL_ONLY_PATH] are new and follow the same shape as
+ * [PERSONAL_PATH]; instruction files are a new sub-list of [PROTECTED_CONFIG].
  */
 import { dedupe, nonEmptyLines, utf8Bytes } from './rules'
 
@@ -22,9 +23,13 @@ const SEP = '========================================'
 /** Everything detected for one push, as accumulated byte strings ("\n"-terminated chunks). */
 export interface Findings {
   personal: string
+  /** Added/modified paths inside .backups/ or .workspace/. */
+  localOnly: string
   /** "path<TAB>reserved folder (pusher's spelling)" lines. */
   reserved: string
   protected: string
+  /** Instruction files (CLAUDE.md, AGENTS.md ...) the pusher may not change. */
+  instructions: string
   autorun: string
   writeDenied: string
   secrets: string
@@ -33,7 +38,7 @@ export interface Findings {
 }
 
 export function emptyFindings(): Findings {
-  return { personal: '', reserved: '', protected: '', autorun: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
+  return { personal: '', localOnly: '', reserved: '', protected: '', instructions: '', autorun: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
 }
 
 class Out {
@@ -70,6 +75,25 @@ export function renderReport(f: Findings): Buffer | null {
     rejected = true
   }
 
+  if (f.localOnly) {
+    // Same shape as PERSONAL_PATH (a separate marker: apps that untrack
+    // PERSONAL_PATH paths accept only .personal ones).
+    o.line()
+    o.line(SEP)
+    o.line('[LOCAL_ONLY_PATH] PCの中だけで使うフォルダ(.backups / .workspace)のファイルが含まれています')
+    o.line(SEP)
+    o.line()
+    o.line('以下は、同期のバックアップ(.backups)やAIの作業用(.workspace)のフォルダの中のファイルです。')
+    o.line('これらのフォルダの中身は、誰であっても共有できません:')
+    o.list(f.localOnly)
+    o.line()
+    o.line('プッシュをブロックしました。これらのファイルを共有対象から外してから')
+    o.line('再度同期してください（ファイルはPCに残したままで構いません）。')
+    o.line(SEP)
+    o.line()
+    rejected = true
+  }
+
   if (f.reserved) {
     // Same path lines as PERSONAL_PATH; each followed by a reason line (not
     // starting with "- ") naming the folder in the pusher's own spelling.
@@ -98,7 +122,7 @@ export function renderReport(f: Findings): Buffer | null {
     rejected = true
   }
 
-  if (f.protected || f.autorun) {
+  if (f.protected || f.instructions || f.autorun) {
     o.line()
     o.line(SEP)
     o.line('[PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています')
@@ -108,6 +132,12 @@ export function renderReport(f: Findings): Buffer | null {
       o.line('以下のファイルは、チャットのAIが確認なしにコマンドを実行する設定です。')
       o.line('会社のオーナー・管理者だけが追加・変更・削除できます:')
       o.list(f.protected)
+    }
+    if (f.instructions) {
+      o.line()
+      o.line('以下は、チャットのAIが毎回読み込む指示のファイル(CLAUDE.md / AGENTS.md)です。')
+      o.line('会社のオーナー・管理者と、その部署の責任者だけが追加・変更・削除できます:')
+      o.list(f.instructions)
     }
     if (f.autorun) {
       o.line()

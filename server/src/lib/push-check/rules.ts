@@ -63,6 +63,43 @@ export function protectedPaths(changedLines: string[]): string[] {
   return sortUnique(changedLines.filter(l => PROTECTED_RE.test(l)))
 }
 
+/**
+ * Instruction files Claude Code (CLAUDE.md, CLAUDE.local.md) and Codex
+ * (AGENTS.md) load into every chat in or below their folder, at any depth,
+ * case-insensitive. Whoever writes one steers every teammate's AI there (a
+ * prompt injection that runs with the member's permissions), so they are
+ * protected like agent config — with one difference (owner decision 案B):
+ * a department manager may change the ones inside their own department
+ * folder. CLAUDE.local.md is personal by convention (normally gitignored),
+ * but once committed it is loaded exactly like CLAUDE.md for everyone, so it
+ * gets the same protection — not a blanket refusal, which current apps
+ * could not recover from (PROTECTED_CONFIG they can: restore the server's
+ * version).
+ */
+export const INSTRUCTION_FILE_RE = /(^|\/)(CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md)$/i
+
+export function instructionFilePaths(changedLines: string[]): string[] {
+  return sortUnique(changedLines.filter(l => INSTRUCTION_FILE_RE.test(l)))
+}
+
+// ----------------------------------------------------------------------------
+// Local-only folders (.backups, .workspace — never shared)
+// ----------------------------------------------------------------------------
+
+/**
+ * Sync keeps conflict backups in `.backups/` and the AI's scratch files in
+ * `.workspace/` (both in the essential .gitignore patterns, any depth). A
+ * commit that adds or changes something inside one — made by hand, or by
+ * another tool — would share a member's backups (the very versions they
+ * lost a conflict with) or scratch files with the whole company.
+ */
+export const LOCAL_ONLY_RE = /(^|\/)\.(backups|workspace)\//i
+
+/** `addedLines`: paths added or modified (deletions are allowed: that is how one gets unshared). */
+export function localOnlyPaths(addedLines: string[]): string[] {
+  return sortUnique(addedLines.filter(l => LOCAL_ONLY_RE.test(l)))
+}
+
 // ----------------------------------------------------------------------------
 // Personal folders (.personal, never shared)
 // ----------------------------------------------------------------------------

@@ -9,9 +9,10 @@ import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity }
 import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
-import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
+import { ensureCompanyScope, getMemberRole, listScopesWithRules, managedDepartmentIds } from '../lib/permission-store'
 import { canReadPrivateScope, type ScopeWithRules } from '../lib/permissions'
 import {
+  beginCompanyPush,
   beginScopePush,
   canWriteInPrivateFolder,
   endScopePush,
@@ -475,11 +476,19 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
   try {
     ensureCompanyScope(db, companyId)
     const role = getMemberRole(db, companyId, userId)
+    // Department folders this pusher manages: instruction files (CLAUDE.md,
+    // AGENTS.md ...) inside them are theirs to change.
+    const managed = new Set(managedDepartmentIds(db, companyId, userId))
+    const managedFolders = managed.size === 0 ? [] : (db.prepare(`SELECT id, folder FROM departments WHERE company_id = ?`)
+      .all(companyId) as Array<{ id: string; folder: string }>)
+      .filter(d => managed.has(d.id))
+      .map(d => d.folder.normalize('NFC'))
     return preparePushCheck({
       companyId,
       pusher: { id: userId, role },
       scopes: listScopesWithRules(db, companyId),
       ...(scopePath !== undefined ? { scopePath } : {}),
+      managedFolders,
     })
   } catch (err) {
     console.error('[git-http] cannot build the push permission snapshot:', err)
@@ -558,7 +567,23 @@ gitHttpRoute.post('/:repo/git-receive-pack', async (c) => {
   const { user, companyId, role } = result
 
   const observer = trackActivity(c, user.id, companyId, 'push')
-  return handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST', observer, pushCheckFor(companyId, user.id))
+  // Registered BEFORE the snapshot: creating a private folder waits for every
+  // push whose snapshot may predate its reservation (lib/private-folders.ts).
+  const endPush = beginCompanyPush(companyId)
+  const check = pushCheckFor(companyId, user.id)
+  const pushCheck: PreparedPushCheck = {
+    env: check.env,
+    cleanup: () => {
+      check.cleanup()
+      endPush()
+    },
+  }
+  try {
+    return await handleGitCgi(c, user, role, `/${companyId}.git/git-receive-pack`, 'POST', observer, pushCheck)
+  } catch (err) {
+    pushCheck.cleanup()
+    throw err
+  }
 })
 
 // GET /:repo/HEAD

@@ -11,12 +11,14 @@ import {
   autorunTargets,
   autorunUnavailable,
   parseRefUpdates,
+  instructionFilePaths,
+  localOnlyPaths,
   personalPaths,
   protectedPaths,
   utf8Bytes,
   windowsPathProblems,
 } from '../../src/lib/push-check/rules'
-import { everyoneWritesEverywhere, parsePushPolicy, writeGateFor, type PushPolicy } from '../../src/lib/push-check/policy'
+import { everyoneWritesEverywhere, instructionFileAllowed, parsePushPolicy, reservedAncestorOf, writeGateFor, type PushPolicy } from '../../src/lib/push-check/policy'
 import { emptyFindings, renderReport } from '../../src/lib/push-check/report'
 import type { ScopeWithRules } from '../../src/lib/permissions'
 
@@ -30,6 +32,41 @@ describe('path rules (bytewise, A–Z case-insensitive)', () => {
     expect(protectedPaths(['a/.Claude/Settings.json', '.mcp.json', 'x.mcp.json', '.claude', '.claude/hooks/x.sh', '.claude/hooksx', '.mcp.json', ''])).toEqual([
       '.claude', '.claude/hooks/x.sh', '.mcp.json', 'a/.Claude/Settings.json',
     ])
+  })
+
+  it('instruction files: CLAUDE.md, CLAUDE.local.md, AGENTS.md at any depth and case', () => {
+    expect(instructionFilePaths(['CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD', 'notCLAUDE.md', 'CLAUDE.md.bak', 'e/CLAUDE.md/x'])).toEqual([
+      'CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD',
+    ])
+  })
+
+  it('local-only folders: .backups/ and .workspace/ content at any depth and case', () => {
+    expect(localOnlyPaths(['.backups/2026/x.md', 'a/.Workspace/tmp.txt', '.backupsx/a', 'b/.backups', 'c/backups/a'])).toEqual([
+      '.backups/2026/x.md', 'a/.Workspace/tmp.txt',
+    ])
+  })
+
+  it('a manager may change instruction files inside their department only (NFC, A–Z folded; scope repositories prefixed)', () => {
+    const managed = ['人事', 'Sales']
+    expect(instructionFileAllowed('人事/CLAUDE.md', managed)).toBe(true)
+    expect(instructionFileAllowed(`${'人事'.normalize('NFD')}/sub/AGENTS.md`, managed)).toBe(true)
+    expect(instructionFileAllowed('sales/deep/x/CLAUDE.md', managed)).toBe(true)
+    expect(instructionFileAllowed('CLAUDE.md', managed)).toBe(false)
+    expect(instructionFileAllowed('人事2/CLAUDE.md', managed)).toBe(false)
+    expect(instructionFileAllowed('経理/CLAUDE.md', managed)).toBe(false)
+    expect(instructionFileAllowed('CLAUDE.md', managed, '人事/評価')).toBe(true)
+    expect(instructionFileAllowed('CLAUDE.md', managed, '経理/秘密')).toBe(false)
+    expect(instructionFileAllowed('人事/CLAUDE.md', [])).toBe(false)
+  })
+
+  it('a non-folder above a reserved path is reported in the pusher\'s spelling', () => {
+    const reserved = ['sales/secret', '人事/評価']
+    expect(reservedAncestorOf('Sales', reserved)).toBe('Sales')
+    expect(reservedAncestorOf('人事', reserved)).toBe('人事')
+    expect(reservedAncestorOf('sales/secret', reserved)).toBeNull() // at the path: reservedPrefixOf's case
+    expect(reservedAncestorOf('sales2', reserved)).toBeNull()
+    expect(reservedAncestorOf('sal', reserved)).toBeNull()
+    expect(reservedAncestorOf('x', [])).toBeNull()
   })
 
   it('.personal content except the .gitignore directly inside', () => {
@@ -169,5 +206,25 @@ describe('report', () => {
     expect(out.filter(l => l.startsWith('  - '))).toEqual(['  - sales/a.md', '  - sales/b.md'])
     expect(out.filter(l => l.trim().startsWith('- ') && !l.startsWith('  - '))).toEqual([])
     expect(renderReport(emptyFindings())).toBeNull()
+  })
+
+  it('prints LOCAL_ONLY_PATH like PERSONAL_PATH, and instruction files inside the PROTECTED_CONFIG section', () => {
+    const out = renderReport({ ...emptyFindings(), localOnly: '.backups/a.md\n', instructions: 'CLAUDE.md\n' })!.toString('utf8').split('\n')
+    const local = out.findIndex(l => l.startsWith('[LOCAL_ONLY_PATH]'))
+    const prot = out.findIndex(l => l.startsWith('[PROTECTED_CONFIG]'))
+    expect(local).toBeGreaterThan(0)
+    expect(prot).toBeGreaterThan(local)
+    // each path inside its own section (what the apps parse: "- " lines up to the second separator)
+    const section = (start: number) => {
+      const lines: string[] = []
+      let seps = 0
+      for (const l of out.slice(start + 1)) {
+        if (/^=+$/.test(l)) { if (++seps === 2) break; continue }
+        if (l.trim().startsWith('- ')) lines.push(l.trim().slice(2))
+      }
+      return lines
+    }
+    expect(section(local)).toEqual(['.backups/a.md'])
+    expect(section(prot)).toEqual(['CLAUDE.md'])
   })
 })

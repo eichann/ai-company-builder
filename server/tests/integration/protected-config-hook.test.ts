@@ -155,12 +155,26 @@ describe('pre-receive hook: protected agent config', () => {
     })
     writeFile(clone, 'sales/proposal.md', 'draft\n')
     writeFile(clone, '.claude/skills/report/SKILL.md', '---\nname: report\n---\n')
-    writeFile(clone, '.claude/CLAUDE.md', 'notes\n')
+    writeFile(clone, '.claude/notes.md', 'notes\n')
     writeFile(clone, 'docs/settings.json', '{}\n')
     commitAll(clone, 'normal work')
     const r = pushAs(clone, 'member')
     expect(r.output).not.toContain('PROTECTED_CONFIG')
     expect(r.ok).toBe(true)
+  })
+
+  // Intended change (2026-10-22): AI instruction files are protected too.
+  // Without a git-http snapshot nobody is a department manager, so only
+  // owner/admin pass here (manager cases: private-folders.test.ts).
+  it('AI instruction files (CLAUDE.md, CLAUDE.local.md, AGENTS.md, any depth/case): owner/admin only', () => {
+    const files = { '.claude/CLAUDE.md': 'n\n', 'sales/claude.md': 's\n', 'CLAUDE.local.md': 'l\n', 'x/y/AGENTS.md': 'a\n' }
+    const m = setup({ 'README.md': 'hi\n' })
+    for (const [p, c] of Object.entries(files)) writeFile(m.clone, p, c)
+    commitAll(m.clone, 'instructions')
+    const rejected = pushAs(m.clone, 'member')
+    expect(rejected.ok).toBe(false)
+    expect(protectedPathsIn(rejected.output)).toEqual(['.claude/CLAUDE.md', 'CLAUDE.local.md', 'sales/claude.md', 'x/y/AGENTS.md'])
+    expect(pushAs(m.clone, 'owner').ok).toBe(true)
   })
 
   it('initial push (zero old SHA): member with protected file rejected, without accepted', () => {

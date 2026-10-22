@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn } from 'child_process'
-import { existsSync, mkdtempSync, rmSync, statSync, writeFileSync, mkdirSync } from 'fs'
+import { existsSync, mkdtempSync, rmSync, statSync, symlinkSync, writeFileSync, mkdirSync } from 'fs'
 import { join, dirname } from 'path'
 import { tmpdir } from 'os'
 import type { AddressInfo } from 'net'
@@ -736,5 +736,150 @@ describe('deleting a private folder (owner/admin, type the name, archived first)
     expect((await cloneAs(scopeUrl(tempId), 'editor')).ok).toBe(false)
     expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['sales/一時/a.md'] })).body.data.results[0].usable).toBe(true)
     expect((await as('owner', 'DELETE', `${base}/private-folders/${tempId}?confirm=一時`)).status).toBe(404)
+  })
+})
+
+describe('push checks added by the 2026-10-22 review', () => {
+  async function pushFiles(user: User, files: Record<string, string>, prepare?: (dir: string) => void) {
+    const c = await cloneAs(companyUrl(), user)
+    for (const [rel, content] of Object.entries(files)) writeFile(c.dir, rel, content)
+    prepare?.(c.dir)
+    commitAll(c.dir, 'try')
+    return pushAs(c.dir, companyUrl(), user)
+  }
+
+  it('a file or symlink where a folder above a private folder must stay a folder is refused (owner too)', async () => {
+    // 人事 holds the private 人事/評価: it cannot become a symlink …
+    for (const user of ['other', 'owner'] as const) {
+      const link = await pushFiles(user, {}, (dir) => {
+        git(['rm', '-r', '-q', '人事'], dir)
+        symlinkSync('/tmp', join(dir, '人事'))
+      })
+      expect(link.ok).toBe(false)
+      expect(sectionPaths(link.output, 'RESERVED_PATH')).toEqual(['人事'])
+      expect(link.output).toContain('『人事』というフォルダ名は使えません。')
+      expect(link.output).not.toContain('評価')
+    }
+    // … nor a file (any case), nor a gitlink
+    const file = await pushFiles('other', {}, (dir) => {
+      git(['rm', '-r', '-q', '人事'], dir)
+      writeFileSync(join(dir, '人事'), 'not a folder\n')
+    })
+    expect(sectionPaths(file.output, 'RESERVED_PATH')).toEqual(['人事'])
+    // a symlink AT the private folder's path is refused as before
+    const at = await pushFiles('other', {}, (dir) => symlinkSync('/etc', join(dir, '人事', '面談')))
+    expect(sectionPaths(at.output, 'RESERVED_PATH')).toEqual(['人事/面談'])
+    // folders elsewhere may still become files
+    const fine = await pushFiles('other', { 'docs2/a.md': 'a\n' })
+    expect(fine.ok).toBe(true)
+  })
+
+  it('.backups/ and .workspace/ content is never shared, for anyone ([LOCAL_ONLY_PATH]); deleting it is fine', async () => {
+    const r = await pushFiles('owner', { '.backups/2026-10-22/sales/a.md': 'mine\n', 'sales/.Workspace/tmp.txt': 't\n', 'sales/ok.md': 'ok\n' })
+    expect(r.ok).toBe(false)
+    expect(sectionPaths(r.output, 'LOCAL_ONLY_PATH')).toEqual(['.backups/2026-10-22/sales/a.md', 'sales/.Workspace/tmp.txt'])
+    expect(r.output).not.toContain('PERSONAL_PATH')
+    // already shared before the rule (server-side commit): it can be removed
+    const seed = join(workDir, 'local-only-seed')
+    git(['clone', '-q', bare, seed])
+    writeFile(seed, '.workspace/old.txt', 'old\n')
+    git(['add', '-f', '.workspace/old.txt'], seed)
+    git(['-c', 'user.name=s', '-c', 'user.email=s@e', 'commit', '-q', '-m', 'old'], seed)
+    git(['-C', bare, 'fetch', '-q', seed, 'HEAD:refs/heads/main'])  // no hook: as if shared before the rule
+    const del = await pushFiles('other', {}, (dir) => git(['rm', '-q', '.workspace/old.txt'], dir))
+    expect(del.ok).toBe(true)
+  })
+
+  it('CLAUDE.md / AGENTS.md / CLAUDE.local.md: owner/admin anywhere, a manager inside their department, nobody else', async () => {
+    const member = await pushFiles('other', { 'sales/CLAUDE.md': 'x\n', '人事/sub/AGENTS.md': 'x\n', 'CLAUDE.local.md': 'x\n', 'sales/notes.md': 'fine\n' })
+    expect(member.ok).toBe(false)
+    expect(sectionPaths(member.output, 'PROTECTED_CONFIG')).toEqual(['CLAUDE.local.md', 'sales/CLAUDE.md', '人事/sub/AGENTS.md'])
+
+    // hrmgr manages 人事: theirs inside it (any depth, any case), not elsewhere, not the root
+    const outside = await pushFiles('hrmgr', { '人事/claude.md': 'hr\n', '人事/a/b/AGENTS.md': 'hr\n', 'sales/CLAUDE.md': 'x\n', 'CLAUDE.md': 'x\n' })
+    expect(sectionPaths(outside.output, 'PROTECTED_CONFIG')).toEqual(['CLAUDE.md', 'sales/CLAUDE.md'])
+    const inside = await pushFiles('hrmgr', { '人事/claude.md': 'hr\n', '人事/a/b/AGENTS.md': 'hr\n' })
+    expect(inside.ok).toBe(true)
+
+    const admin = await pushFiles('admin', { 'CLAUDE.md': 'company\n', 'sales/AGENTS.md': 's\n' })
+    expect(admin.ok).toBe(true)
+    // a member deleting one is a change too
+    const del = await pushFiles('other', {}, (dir) => git(['rm', '-q', 'CLAUDE.md'], dir))
+    expect(sectionPaths(del.output, 'PROTECTED_CONFIG')).toEqual(['CLAUDE.md'])
+  })
+})
+
+describe('a push racing the creation of a private folder at its path', () => {
+  /**
+   * A proxy in front of git-http that forwards the push's request headers at
+   * once (so the server registers the push and takes its permission
+   * snapshot) but holds its body until released.
+   */
+  async function delayedProxy(): Promise<{ url: string; release: () => void; held: Promise<void>; close: () => void }> {
+    const http = await import('http')
+    const target = new URL(gitBase)
+    let release!: () => void
+    const gate = new Promise<void>(r => { release = r })
+    let markHeld!: () => void
+    const held = new Promise<void>(r => { markHeld = r })
+    let holding = true
+    const proxy = http.createServer((req, res) => {
+      const up = http.request({ host: target.hostname, port: target.port, method: req.method, path: req.url, headers: req.headers }, (upRes) => {
+        res.writeHead(upRes.statusCode ?? 502, upRes.headers)
+        upRes.pipe(res)
+      })
+      up.on('error', () => res.destroy())
+      if (holding && req.method === 'POST' && req.url?.endsWith('/git-receive-pack')) {
+        holding = false
+        up.flushHeaders()
+        markHeld()
+        void gate.then(() => req.pipe(up))
+      } else {
+        req.pipe(up)
+      }
+    })
+    await new Promise<void>(r => proxy.listen(0, '127.0.0.1', () => r()))
+    const port = (proxy.address() as AddressInfo).port
+    return { url: `http://127.0.0.1:${port}${target.pathname}/${CO}.git`, release, held, close: () => proxy.close() }
+  }
+
+  it('the push that started first wins: creation waits for it, sees its files and refuses', async () => {
+    const { companyPushesInFlight } = await import('../../src/lib/private-folders')
+    const proxy = await delayedProxy()
+    try {
+      const c = await cloneAs(companyUrl(), 'owner')
+      writeFile(c.dir, 'sales/Race/plan.md', 'public plan\n')
+      commitAll(c.dir, 'race')
+      const push = pushAs(c.dir, proxy.url, 'owner')
+      await proxy.held
+      for (let i = 0; i < 200 && companyPushesInFlight(CO) === 0; i++) await new Promise(r => setTimeout(r, 25))
+      expect(companyPushesInFlight(CO)).toBeGreaterThan(0)
+
+      const creating = create('owner', { parentPath: 'sales', name: 'Race', viewers: ['u-editor'] })
+      // Creation must not finish while the push that predates it is still running.
+      const early = await Promise.race([creating.then(() => 'done'), new Promise(r => setTimeout(() => r('waiting'), 1500))])
+      expect(early).toBe('waiting')
+      proxy.release()
+
+      const [p, r] = await Promise.all([push, creating])
+      expect(p.ok).toBe(true)
+      expect(r.status).toBe(409)
+      expect(r.body.code).toBe('FOLDER_NAME_UNAVAILABLE')
+      expect(git(['-C', bare, 'show', 'main:sales/Race/plan.md'])).toBe('public plan\n')
+      expect(db.prepare(`SELECT COUNT(*) AS n FROM scopes WHERE company_id = ? AND path = ?`).get(CO, 'sales/Race')).toEqual({ n: 0 })
+      expect(companyPushesInFlight(CO)).toBe(0)
+    } finally {
+      proxy.close()
+    }
+  })
+
+  it('without a push in flight creation does not wait; a push starting afterwards is refused', async () => {
+    const r = await create('owner', { parentPath: 'sales', name: 'Race2', viewers: ['u-editor'] })
+    expect(r.status).toBe(201)
+    const c = await cloneAs(companyUrl(), 'owner')
+    writeFile(c.dir, 'sales/Race2/plan.md', 'x\n')
+    commitAll(c.dir, 'late')
+    const p = await pushAs(c.dir, companyUrl(), 'owner')
+    expect(sectionPaths(p.output, 'RESERVED_PATH')).toEqual(['sales/Race2/plan.md'])
   })
 })
