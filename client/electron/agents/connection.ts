@@ -4,6 +4,15 @@ import type { AgentInteraction, AgentInteractionResponse } from '../../shared/ag
 import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
 import type { PrivateReadContext, PrivateReadState } from '../private-read-guard'
+import type { ChoiceQuestion, ChoiceResult } from '../../shared/choice-prompt'
+
+/**
+ * Ask the member a choice prompt in this conversation (choice-prompt.ts) and
+ * wait for the answer. Resolves `{ cancelled }` on cancel, timeout, a stopped
+ * turn, or when the conversation cannot show it. The chat server also records
+ * the outcome in the transcript.
+ */
+export type AskUser = (questions: ChoiceQuestion[], toolCallId: string | undefined, signal: AbortSignal) => Promise<ChoiceResult>
 
 /** The Vercel model interface remains the streaming boundary; no second agent loop. */
 export interface AgentConnection {
@@ -24,6 +33,8 @@ export interface AgentConnection {
     writeGuard?: WriteGuard
     /** What this conversation read from private folders, and where they are (private-read-guard.ts). */
     privateReads?: { context: PrivateReadContext; state: PrivateReadState }
+    /** Choice prompts for this turn; absent → the agent is told to ask in plain text. */
+    askUser?: AskUser
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

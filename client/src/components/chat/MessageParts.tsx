@@ -9,6 +9,7 @@ import {
   CircleNotch,
   File,
   FolderOpen,
+  ListChecks,
   PencilSimple,
   Robot,
   Terminal,
@@ -17,6 +18,8 @@ import {
 import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
 import { ConsultationReferenceLink } from './ConsultationReference'
 import { MarkdownMessage } from './MarkdownMessage'
+import { ChoicePromptRecordView } from './ChoicePrompt'
+import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../shared/choice-prompt'
 import {
   GROUP_PAGE_SIZE,
   getToolDisplayName,
@@ -51,6 +54,8 @@ const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
   readSkillFile: File,
   Agent: Robot,
   Task: Robot,
+  AskUserQuestion: ListChecks,
+  mcp__acb_ask__ask_user: ListChecks,
 }
 
 function StatusIcon({ state }: { state: string }) {
@@ -282,6 +287,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         if (part.type === 'data-consultation-reference') {
           return <ConsultationReferenceLink key={item.key} reference={part.data as ConsultationReference} />
+        }
+        if (part.type === CHOICE_PART_TYPE) {
+          const record = readChoiceRecord((part as { data?: unknown }).data)
+          return record ? <ChoicePromptRecordView key={item.key} record={record} /> : null
         }
         if (part.type === 'step-start') {
           return <div key={item.key} className="my-2 border-t border-gray-200 dark:border-zinc-700/50" />

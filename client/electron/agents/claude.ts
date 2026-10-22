@@ -10,6 +10,8 @@ import type { AgentConnection, AgentHostConfig } from './connection'
 import type { PermissionMode } from '../../shared/permission-mode'
 import { decideReservedWrite, decideToolWrite } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
+import { answerAskUserQuestion } from './choice-tools'
+import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -128,7 +130,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -264,10 +266,17 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       // calls outright (no prompt); calls reach canUseTool when the CLI falls
       // back to asking — auto unavailable (it starts in 'default') or the
       // classifier's denial limit — so 'auto' needs it as much as 'default'.
+      // AskUserQuestion (choice prompts) always comes here, in every mode —
+      // bypassPermissions too — so canUseTool is installed whenever the turn
+      // can show a choice card; in bypassPermissions nothing else reaches it
+      // except an explicit `ask` rule, which stays refused as before.
+      const approvals = permissionMode !== 'bypassPermissions' && !!config.requestToolApproval
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const canUseToolFn: any = permissionMode !== 'bypassPermissions' && config.requestToolApproval
+      const canUseToolFn: any = approvals || askUser
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
+            if (toolName === CLAUDE_CHOICE_TOOL) return answerAskUserQuestion(askUser, toolInput, options?.toolUseID, options?.signal)
+            if (!approvals) return { behavior: 'deny' as const, message: 'この操作は確認が必要なため実行していません。' }
             // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
             // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
             const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']

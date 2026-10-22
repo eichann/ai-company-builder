@@ -1,5 +1,6 @@
 import { OpenConsultationContext } from './consultation-context'
 import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
+import { restoreTextWithChoices, storedChoiceFromPart, type StoredChoicePrompt } from './choiceHistory'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
@@ -80,7 +81,10 @@ function uiMessageToSessionMessage(
   let content = ''
   let thinking: string | undefined
   const consultationReferences: ConsultationReference[] = []
+  const choicePrompts: StoredChoicePrompt[] = []
   for (const part of msg.parts) {
+    const choice = storedChoiceFromPart(part as { type: string; data?: unknown }, content.length, choicePrompts)
+    if (choice) { choicePrompts.push(choice); continue }
     const p = part as { type: string; toolName?: string; output?: unknown; data?: ConsultationReference }
     const ref = p.type === 'data-consultation-reference' ? p.data : referenceFromTool(p.toolName || p.type.replace(/^tool-/, ''), p.output)
     if (ref && !consultationReferences.some(r => r.id === ref.id)) consultationReferences.push(ref)
@@ -103,6 +107,7 @@ function uiMessageToSessionMessage(
     timestamp: timestamp.toISOString(),
     thinking,
     ...(consultationReferences.length ? { consultationReferences } : {}),
+    ...(choicePrompts.length ? { choicePrompts } : {}),
   }
 }
 
@@ -113,7 +118,8 @@ function sessionMessageToUIMessage(
   if (msg.thinking) {
     parts.push({ type: 'reasoning' as const, text: msg.thinking })
   }
-  parts.push({ type: 'text' as const, text: msg.content })
+  // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
+  parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts))
   for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
   return {
     id: msg.id,
@@ -1443,8 +1449,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   useEffect(() => {
     let active = true
     const closed = new Set<string>()
+    // Kept for every conversation (shown only for the one on screen), so a
+    // question asked while this tab shows another conversation is still
+    // there when the member comes back to it.
     const add = (request: AgentInteractionRequest) => {
-      if (!active || closed.has(request.id) || request.appSessionId !== appSessionIdRef.current) return
+      if (!active || closed.has(request.id)) return
       setInteractions(queue => queue.some(item => item.id === request.id) ? queue : [...queue, request])
     }
     const unsubscribe = window.electronAPI.onAgentInteraction(add)

@@ -1,4 +1,5 @@
 import type { AgentSession } from './agent'
+import type { ChoicePromptRecord } from './choice-prompt'
 export interface ChatSession {
   id: string
   companyId: string
@@ -12,6 +13,8 @@ export interface ChatSession {
     images?: string[]
     referenceFiles?: string[]
     consultationReferences?: Array<{ id: string; title: string }>
+    /** Choice prompts in this reply, how the member answered, and where (`at`: offset in `content`). */
+    choicePrompts?: Array<ChoicePromptRecord & { at?: number }>
   }>
   createdAt: string
   updatedAt: string

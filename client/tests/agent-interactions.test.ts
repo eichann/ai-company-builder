@@ -21,10 +21,10 @@ test('abort, renderer closure and timeout settle pending requests and remove car
   const broker = new AgentInteractions(() => {}, 10)
   const abort = new AbortController()
   const p = broker.request(1, 'a', { kind: 'questions', questions }, abort.signal)
-  abort.abort(); assert.deepEqual(await p, { cancelled: true })
+  abort.abort(); assert.deepEqual(await p, { cancelled: true, reason: 'aborted' })
   const q = broker.request(1, 'b', { kind: 'questions', questions }, new AbortController().signal)
-  broker.closeOwner(1); assert.deepEqual(await q, { cancelled: true })
-  assert.deepEqual(await broker.request(1, 'c', { kind: 'questions', questions }, new AbortController().signal), { cancelled: true })
+  broker.closeOwner(1); assert.deepEqual(await q, { cancelled: true, reason: 'aborted' })
+  assert.deepEqual(await broker.request(1, 'c', { kind: 'questions', questions }, new AbortController().signal), { cancelled: true, reason: 'timeout' })
   assert.deepEqual(broker.list(1), [])
 })
 test('permission UI only enables known, completely displayed grants', async () => {

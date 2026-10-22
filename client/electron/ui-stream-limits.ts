@@ -333,10 +333,45 @@ export function limitToolPayloads(limits: StreamLimits = AGENT_STREAM_LIMITS): T
  */
 export function limitedUIMessageStreamResponse(
   result: { toUIMessageStream(options?: UIMessageStreamOptions<UIMessage>): ReadableStream<UIMessageChunk> },
-  options: { ownsConversation: boolean; onError: (error: unknown) => string },
+  options: { ownsConversation: boolean; onError: (error: unknown) => string; inject?: ChunkInjector },
 ): Response {
   const stream = result.toUIMessageStream({ sendReasoning: true, onError: options.onError })
-  return createUIMessageStreamResponse({
-    stream: stream.pipeThrough(limitToolPayloads(options.ownsConversation ? AGENT_STREAM_LIMITS : API_KEY_STREAM_LIMITS)),
-  })
+    .pipeThrough(limitToolPayloads(options.ownsConversation ? AGENT_STREAM_LIMITS : API_KEY_STREAM_LIMITS))
+  return createUIMessageStreamResponse({ stream: options.inject ? stream.pipeThrough(options.inject.transform) : stream })
+}
+
+/**
+ * Lets the chat server add its own chunks (data parts such as a choice
+ * prompt's outcome) to the response while the model stream is idle — e.g.
+ * while a tool call waits for the member. Chunks pushed before the stream
+ * starts wait for its `start` chunk; after it ends they are dropped.
+ */
+export interface ChunkInjector {
+  transform: TransformStream<UIMessageChunk, UIMessageChunk>
+  push(chunk: UIMessageChunk): void
+}
+
+export function createChunkInjector(): ChunkInjector {
+  let controller: TransformStreamDefaultController<UIMessageChunk> | undefined
+  let started = false
+  let ended = false
+  const queued: UIMessageChunk[] = []
+  return {
+    transform: new TransformStream<UIMessageChunk, UIMessageChunk>({
+      start(c) { controller = c },
+      transform(chunk, c) {
+        c.enqueue(chunk)
+        if (!started && chunk.type === 'start') {
+          started = true
+          for (const extra of queued.splice(0)) c.enqueue(extra)
+        }
+      },
+      flush() { ended = true },
+    }),
+    push(chunk) {
+      if (ended) return
+      if (!started || !controller) { queued.push(chunk); return }
+      try { controller.enqueue(chunk) } catch { ended = true }
+    },
+  }
 }

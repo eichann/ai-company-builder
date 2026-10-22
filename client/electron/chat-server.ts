@@ -16,7 +16,9 @@ import {
   stepCountIs,
   type UIMessage,
 } from 'ai'
-import { limitedUIMessageStreamResponse } from './ui-stream-limits'
+import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
+import type { AgentHostConfig, AskUser } from './agents/connection'
+import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
 import { createClaudeConnection } from './agents/claude'
 import { createApiConnection } from './agents/anthropic-api'
 import type { ClaudeConnectionConfig } from './agents/claude'
@@ -73,6 +75,36 @@ const SECURITY_POLICY = `
 export function externalRepositoryInstruction(companyRootPath?: string): string {
   const where = companyRootPath ? `「${companyRootPath.replace(/[\\/]+$/, '')}/.workspace/」` : '会社フォルダ直下の「.workspace/」'
   return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone すると全員に共有されたり同期が止まったりするため、アプリが止めます。`
+}
+
+/**
+ * Choice prompts for one turn (choice-prompt.ts): shows the card in this
+ * conversation through `requestInteraction`, waits for the member, and adds
+ * the outcome to the response as a `data-choice-prompt` part — the transcript
+ * shows it, and chat history keeps it (`choicePrompts`).
+ */
+export function createAskUser(
+  requestInteraction: AgentHostConfig['requestInteraction'],
+  appSessionId: string | undefined,
+  agent: 'claude-code' | 'codex',
+  inject: Pick<ChunkInjector, 'push'>,
+): AskUser | undefined {
+  if (!requestInteraction || !appSessionId) return undefined
+  return async (questions, toolCallId, signal) => {
+    const id = toolCallId || crypto.randomUUID()
+    let result: ChoiceResult
+    try {
+      const response = await requestInteraction({ kind: 'choices', agent, ...(toolCallId ? { toolCallId } : {}), questions }, appSessionId, signal)
+      result = 'choices' in response ? { answers: response.choices }
+        : { cancelled: 'cancelled' in response && response.reason ? response.reason : signal.aborted ? 'aborted' : 'cancelled' }
+    } catch (error) {
+      console.warn('[chat-server] choice prompt failed:', error instanceof Error ? error.message : 'unknown')
+      result = { cancelled: 'unavailable' }
+    }
+    const record: ChoicePromptRecord = { id, questions, ...('answers' in result ? { answers: result.answers } : { cancelled: result.cancelled }) }
+    inject.push({ type: CHOICE_PART_TYPE, id: `choice-${id}`, data: record })
+    return result
+  }
 }
 
 async function findAvailablePort(start: number, end: number): Promise<number> {
@@ -236,7 +268,11 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads }
+    // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user): CLI agents only.
+    const injector = createChunkInjector()
+    const askUser = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
+      ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -388,6 +424,7 @@ export async function startChatServer(config: ChatServerConfig) {
     // keeps its already-bounded outputs verbatim.
     return limitedUIMessageStreamResponse(result, {
       ownsConversation: connection.ownsConversation,
+      inject: injector,
       onError: error => error instanceof Error ? error.message : 'AIとの接続でエラーが発生しました。',
     })
   })

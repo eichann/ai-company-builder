@@ -22,7 +22,7 @@
  * hold-back (sync/outside-checkout.ts) stays the safety net there.
  *
  * Two more refusals share the hook:
- * - AI instruction files (CLAUDE.md / AGENTS.md, any depth, A–Z case
+ * - AI instruction files (CLAUDE.md / CLAUDE.local.md / AGENTS.md, any depth, A–Z case
  *   folded) for a member who may not change them: owners/admins anywhere,
  *   department managers inside their own department — the server's push
  *   check enforces the same rule; unknown authority never blocks.
@@ -86,10 +86,12 @@ export interface InstructionAuthority {
   managedFolders: readonly string[]
 }
 
-const INSTRUCTION_FILES = new Set(['claude.md', 'agents.md'])
+// CLAUDE.local.md is personal by convention, but once shared it is loaded like
+// CLAUDE.md for everyone, so the server protects it the same way.
+const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md'])
 const FULL_ACCESS_ROLES = new Set(['owner', 'admin'])
 
-/** CLAUDE.md / AGENTS.md at any depth, A–Z case-insensitive (the server's push check folds the same way). */
+/** CLAUDE.md / CLAUDE.local.md / AGENTS.md at any depth, A–Z case-insensitive (the server's push check folds the same way). */
 export function isInstructionFile(repoPath: string): boolean {
   const name = repoPath.normalize('NFC').split('/').pop() ?? ''
   return INSTRUCTION_FILES.has(name.replace(/[A-Z]+/g, m => m.toLowerCase()))
