@@ -449,6 +449,8 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | `.personal/` content is never shared, for anyone (owner/admin included): the pre-receive hook rejects with `PERSONAL_PATH` any push in which a commit (or the net `old..new` diff) adds or modifies a file inside a directory named `.personal` at any depth, case-insensitively. Exceptions: the `.gitignore` directly inside a `.personal/` (the server writes it when creating a company or department, and its own local-transport push must keep working), and deletions (how an already-shared file gets unshared). Sync also adds `**/.personal/*` + `!**/.personal/.gitignore` to the root `.gitignore` (`**/` because a pattern with a slash is anchored to the `.gitignore`'s directory) | Department `.personal/` folders were protected only by the `.gitignore` inside them, so a `.personal/` created by hand anywhere else synced like a normal folder and its files were shared with the whole company. Recovery differs from `PROTECTED_CONFIG`: the file is the member's private file, so sync untracks it (`git rm --cached`, kept on disk) instead of restoring a server version, after squashing the unpushed commits for the same every-commit reason. No dialog — nothing is lost. A file the server already had is deleted from the server by that commit. |
 | The secret scan reads every commit new to the server, not only the net `old..new` diff: added lines of each commit in `rev-list <new> --not --all` (against its first parent; merges as combined diffs counting only lines added relative to every parent; root commits against the empty tree) plus the net diff, in one `diff-tree --stdin -p` stream, deduplicated per file × pattern. A single commit on top of `old` is read once. New branches keep the old rule (whole content of the tip commit's files). Sync recovers like the first step of `PROTECTED_CONFIG`: on `SECRET_DETECTED` it squashes the unpushed commits (`squashUnpushedCommits`, same ancestor check) and pushes once more; if the files still hold the secret it reports them (`secretDetected`, no `PENDING_PUSH`). The secret is never removed for the member | A secret added in one commit and removed in a later one passed the net-diff scan, yet the intermediate commit — secret included — landed in shared history on every member's machine. Scanning every commit alone would have made "remove the secret and sync again" fail forever (the rejected commit is still in the range), so the client squashes it away; the secret never reaches the server. 200 commits / 50,000 lines check in under a second (`push-check-performance.test.ts`). |
 | Write permission is enforced on push: for every path a push changes (adds, edits, deletes, both sides of a rename; every new commit plus the net diff, as above) the checker evaluates `resolveAccess(pusher, path).write` (`lib/permissions.ts`; owner/admin always pass; also checked with A–Z case folded, since macOS/Windows check `Sales/x` out into `sales/`). Denied paths reject the push with `[WRITE_DENIED]` + `  - <path>` lines (same shape as `PERSONAL_PATH`). The rules reach the checker as a **snapshot** git-http writes per receive-pack request (pusher + the company's scopes and rules, 0600 temp file, path in `ACB_PUSH_POLICY`, removed when the request ends; `lib/git-server` `preparePushCheck`). A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable pusher denies every changed path unless writing is open to everyone. The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1` (`internalGitEnv`) and skip only the write check; git-http strips both variables from what it inherits, so a client cannot select either. A push with neither (local transport on the server host: tests, an operator) is not write-checked | The checker runs as a child of `git receive-pack` and also in the client's sync harness, where no API or database exists, so it reads no database: git-http — the code that authenticated the pusher — decides who is pushing and what the rules were at that moment. With the default seed (`everyone: read + write` on the company scope) nothing changes and no paths are even listed. Rejections are recorded in `push_rejections` from the response like every other marker (`lib/push-rejections.ts`). |
+| A private folder's path is **reserved** in the company repository, for everyone (owner/admin included): the push checker rejects with `[RESERVED_PATH]` any push in which a commit (or the net diff) adds or modifies a path at or under a private folder's path — compared NFC + A–Z folded, so `sales/secret/` hits `sales/Secret`, an NFD `人事/評価` hits the NFC one, a rename into it counts on its new side, a file named exactly like the folder counts. Deletions are never refused. Same shape as `PERSONAL_PATH` (`  - <path>` lines), each path followed by a reason line `      （『<prefix as the pusher spelled it>』というフォルダ名は使えません。別の名前にしてください。）`. The reserved paths reach the checker only through the git-http snapshot (`reservedPathsFor`, private scopes = `repo_id` set); pushes without one (the server's own, local transport) are not checked — the server validates its own operations (department create/rename refuse a reserved name). The company repository's write check ignores private scopes, so a non-reader sees only this marker, never `[WRITE_DENIED]` there | Without it a member who cannot see `人事/評価` (or their chat AI) creates that folder: with the client's exclusion their files would silently never sync; without it they would be shared with the whole company inside a folder its owners believe private — and a reader's next sync could stage the private checkout into the company repository if the exclusion were ever lost (plan §1.3 D1/D2). The message names only what the pusher typed: by the owner's decision (option B) a private folder's name, its existence as *private* and its viewers are never revealed to someone who cannot read it. |
+| The company's **first** private folder is refused (409 `OUTDATED_CLIENTS`, the #119 shape: `members`, `canForce`) while any member's app is not known to handle private folders (`supportsPrivateFolders` in `server/src/lib/client-version.ts`: build commit date ≥ `PRIVATE_FOLDERS_CLIENT_COMMIT_DATE`; unknown/never-seen = not ready). The constant is `null` until stage 3b (client sync) merges — **set it to that merge commit's date then** — so until then only an owner/admin's `force: true` creates one; a manager sending `force` gets 403 `FORCE_NOT_ALLOWED` | An app older than 3b syncs only the company repository: a reader never receives the folder, and the `[RESERVED_PATH]` rejection is a generic push failure it retries on every sync forever — the "permanently unable to sync" shape again. Later private folders do not re-check: by then the owner has accepted the risk once. |
 
 ### Backup Structure
 
@@ -640,3 +642,90 @@ member may only read used to be rejected at sync and moved to `.backups/`
   stay the safety net. Paths are judged lexically (no symlink resolution).
 - Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in
   the file tree (where read-only starts) and above the open file.
+
+---
+
+## Architecture: Private Folders (server, stage 3a)
+
+Read restriction is real only for **private folders**, which are private from
+the start (no carve-out of existing folders: move files into a new private
+folder instead). Each one is its own bare repository ("scope repository");
+its path inside the company tree is reserved in the company repository.
+Client sync (3b) and the UIs (3c) build on the contract in
+`shared/types/private-folders.ts`.
+
+- **Data**: a private folder = a `scopes` row (`kind 'folder'`) whose
+  `repo_id` points at `scope_repos.id` (company, scope, created_at/by).
+  Rules on it: `everyone: no read, no write` + one user rule per viewer
+  (`read`, `write` for editors). Owners/admins always read and write. A
+  private scope never inherits (clearing / removing its last rule is
+  refused); a rule deeper inside can only narrow it (`resolveAccess`: inside a
+  private folder, read/write also need read of the folder itself; a private
+  scope without rules denies). `read: false` is accepted on a private folder
+  itself only. `company_path_salts` holds the per-company salt for hashes.
+- **Repositories** (`server/src/lib/git-server/scope-repo.ts`):
+  `<REPOS_DIR>/<companyId>.scopes/<repoId>.git`, configured exactly like the
+  company repository (`BARE_REPO_CONFIG` + the same hook; startup
+  re-configures them too), created with one commit holding a `.gitignore`
+  with sync's essential patterns. The `.scopes` directory is not `*.git`, so
+  the company route can never reach it.
+- **git-http**: `/api/git-http/<companyId>/scopes/<scopeId>.git` (scope id,
+  not repo id). Fetch/clone need READ of the folder, push needs WRITE
+  somewhere in it (403 otherwise); a non-member, a non-reader, an unknown or
+  non-private scope all get the same 404. The push snapshot carries
+  `scopePath`: every pushed path is write-checked as `<scopePath>/<path>`, and
+  every other rule (secrets, protected config, skills, `.personal`, Windows
+  paths, gitlinks) runs as in the company repository. The company repository
+  stays readable by every member.
+- **API** (`server/src/routes/private-folders.ts`, under
+  `/api/companies/:companyId`):
+  - `POST /private-folders` `{ parentPath, name, viewers?, editors?, force? }`
+    → 201 `PrivateFolderDetail`. Owner/admin anywhere (root included); a
+    department manager only inside their department (Q9); others 403. Name:
+    department folder-name rule. Default viewers: creator + that department's
+    managers; the creator is always added; owners/admins are implicit.
+    A taken path — a file/folder in the company repository (any case/NFC) or a
+    private folder at, above or below it — answers 409
+    `FOLDER_NAME_UNAVAILABLE` with exactly
+    「『<path>』というフォルダ名は使えません。別の名前にしてください。」; a parent inside a
+    private folder the caller cannot read answers like a missing parent
+    (`PARENT_NOT_FOUND`), one they can read `ALREADY_PRIVATE`. Under the
+    company lock; the company repository is re-checked after the rows are
+    written and everything is rolled back if a push landed at the path.
+  - `GET /private-folders` (owner/admin: all; managers: their
+    departments'), `GET /private-folders/:scopeId`, `PUT …/members`
+    `{ viewers, editors? }` (owner/admin, the department's managers — Q2;
+    anyone else 404). Viewer/editor counts include owners/admins.
+  - `POST /private-folders/:scopeId/make-public` (owner/admin, 公開に戻す):
+    refuses new pushes to the scope repository and waits for running ones,
+    writes its current tree into the company repository's `main` at the same
+    path as ONE commit (no scope history) with a compare-and-swap
+    `update-ref` (retried if a member pushed meanwhile; idempotent if the tree
+    is already there), then in one transaction makes every rule there
+    readable (write unchanged: nobody gains write) and clears `repo_id`, then
+    deletes the scope repository.
+  - `GET /me/scopes` (any member, ETag/304) → `{ version, scopes:
+    [{ scopeId, path, cloneUrl, clonePath, canWrite }], reserved: { algorithm,
+    salt, hashes } }`: real paths only for folders the caller may read; every
+    private folder (readable or not) as `sha256(salt NUL normalised path)`,
+    normalised = NFC, A–Z lowered, `/`-joined (`normalizeReservedPath`). The
+    app tests a path by hashing it and each of its prefixes.
+  - The permission editor (`PUT /permissions/scopes/by-path` etc.) accepts
+    `read: false` on a private folder, edits inside one against its scope
+    repository, skips the outdated-app guard there (only new apps receive
+    them) and refuses moving rules into/out of one; `GET
+    /permissions/folders` lists private folders only to those who may edit
+    them (`private: true`).
+- **Names never leak** to a member who cannot read a private folder:
+  departments/stats/folder-sizes read the company repository (which never
+  holds private content); `/me/write-access` omits unreadable private
+  folders; `/permissions*`, `/overview`, `/push-rejections`,
+  `/private-folders*` are owner/admin/manager-only and managers see only their
+  departments'; orphan warnings never consider private folders or rules
+  inside them (they are not in the company repository by design).
+- Departments containing a private folder cannot be deleted or renamed (409
+  `PRIVATE_FOLDERS_INSIDE`); a department cannot take a reserved name.
+- There is deliberately no MCP/tool to create private folders: only humans,
+  through the admin panel or the app's dialog.
+- Tests: `server/tests/unit/private-folders.test.ts`,
+  `server/tests/integration/private-folders.test.ts` (real git-http).

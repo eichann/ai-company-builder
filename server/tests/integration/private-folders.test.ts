@@ -1,0 +1,569 @@
+/**
+ * Integration Test: private folders (permission plan stage 3a — server).
+ *
+ * Real HTTP for git (git-http served on a loopback port, real hook, real
+ * push checker, real git); the JSON APIs through app.request with a mocked
+ * session.
+ *
+ * - creation: owner/admin anywhere, a manager only inside their department,
+ *   members never; the company's first private folder waits for every app
+ *   (409 OUTDATED_CLIENTS, force for owner/admin only);
+ * - taken names answer the same for a public folder and a private one, and
+ *   an unreadable private parent answers like a missing one;
+ * - scope repositories: clone/fetch need READ, push needs WRITE; every push
+ *   rule runs there (secrets, protected config, write permission by path);
+ * - the company repository refuses anything under a private folder's path
+ *   ([RESERVED_PATH]) for everyone — case and NFC variants, renames, nesting;
+ * - make-public moves the contents back and removes the scope repository;
+ * - no API hands a private folder's name to a member who cannot read it.
+ */
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
+import { execFileSync, spawn } from 'child_process'
+import { existsSync, mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
+import { join, dirname } from 'path'
+import { tmpdir } from 'os'
+import type { AddressInfo } from 'net'
+
+const currentUser = vi.hoisted(() => ({ id: 'u-owner' as string | null }))
+
+vi.mock('../../src/lib/auth', () => ({
+  getUserFromRequest: vi.fn().mockImplementation(async () =>
+    currentUser.id
+      ? { id: currentUser.id, email: `${currentUser.id}@example.com`, name: currentUser.id, image: null, emailVerified: true }
+      : null),
+  getUsersByIds: vi.fn().mockImplementation((ids: string[]) =>
+    new Map(ids.map(id => [id, { email: `${id}@example.com`, name: `Name ${id}` }]))),
+  auth: {
+    handler: vi.fn().mockResolvedValue(new Response('', { status: 200 })),
+    api: { getSession: vi.fn().mockResolvedValue(null) },
+  },
+}))
+
+import { configureBareRepo } from '../../src/routes/git'
+
+vi.setConfig({ testTimeout: 120_000, hookTimeout: 120_000 })
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type Loose = any
+
+const CO = 'pfco'
+const USERS = ['owner', 'admin', 'hrmgr', 'salesmgr', 'viewer', 'editor', 'other'] as const
+type User = typeof USERS[number]
+const ROLE: Record<User, string> = { owner: 'owner', admin: 'admin', hrmgr: 'member', salesmgr: 'member', viewer: 'member', editor: 'member', other: 'member' }
+const base = `/api/companies/${CO}`
+
+let workDir: string
+let bare: string
+let gitBase: string
+let server: { close: () => void }
+let db: import('better-sqlite3').Database
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let app: any
+
+const git = (args: string[], cwd?: string) => execFileSync('git', args, { stdio: 'pipe', ...(cwd ? { cwd } : {}) }).toString()
+
+function writeFile(root: string, rel: string, content: string) {
+  const full = join(root, rel)
+  mkdirSync(dirname(full), { recursive: true })
+  writeFileSync(full, content)
+}
+
+function commitAll(clone: string, message: string) {
+  git(['add', '-A'], clone)
+  git(['commit', '-q', '--no-verify', '--allow-empty', '-m', message], clone)
+}
+
+function authUrl(url: string, user: User) {
+  return url.replace('http://', `http://git:tok-${user}@`)
+}
+
+function run(args: string[], cwd?: string): Promise<{ ok: boolean; output: string }> {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  for (const k of Object.keys(env)) if (k.startsWith('ACB_')) delete env[k]
+  return new Promise((resolve) => {
+    const p = spawn('git', args, { cwd, env })
+    let output = ''
+    p.stdout.on('data', (d: Buffer) => { output += d.toString() })
+    p.stderr.on('data', (d: Buffer) => { output += d.toString() })
+    p.on('close', (code) => resolve({ ok: code === 0, output }))
+  })
+}
+
+const companyUrl = () => `${gitBase}/${CO}.git`
+const scopeUrl = (scopeId: string) => `${gitBase}/${CO}/scopes/${scopeId}.git`
+
+let cloneCount = 0
+async function cloneAs(url: string, user: User): Promise<{ ok: boolean; output: string; dir: string }> {
+  const dir = join(workDir, `clone${++cloneCount}`)
+  const r = await run(['clone', '-q', authUrl(url, user), dir])
+  if (r.ok) {
+    git(['config', 'user.name', 'test'], dir)
+    git(['config', 'user.email', 'test@example.com'], dir)
+  }
+  return { ...r, dir }
+}
+
+const pushAs = (dir: string, url: string, user: User) => run(['push', authUrl(url, user), 'HEAD:main'], dir)
+
+/** "- " lines of a section (the client's parsing). */
+function sectionPaths(output: string, marker: string): string[] {
+  const lines = output.split('\n').map(l => l.replace(/^remote:\s?/, '').trim())
+  const start = lines.findIndex(l => l.startsWith(`[${marker}]`))
+  if (start === -1) return []
+  const paths: string[] = []
+  let separators = 0
+  for (const line of lines.slice(start + 1)) {
+    if (/^=+$/.test(line)) {
+      if (++separators === 2) break
+      continue
+    }
+    if (line.startsWith('- ')) paths.push(line.slice(2))
+  }
+  return paths
+}
+
+async function as(userId: User | null, method: string, path: string, body?: unknown, headers: Record<string, string> = {}) {
+  currentUser.id = userId ? `u-${userId}` : null
+  const init: RequestInit = { method, headers: { ...headers } }
+  if (body !== undefined) {
+    init.body = JSON.stringify(body)
+    ;(init.headers as Record<string, string>)['Content-Type'] = 'application/json'
+  }
+  const res = await app.request(path, init)
+  const text = await res.text()
+  let json: Loose = null
+  try { json = JSON.parse(text) } catch { /* 304 etc. */ }
+  return { status: res.status, body: json, text, headers: res.headers }
+}
+
+const create = (user: User, input: Record<string, unknown>) => as(user, 'POST', `${base}/private-folders`, input)
+
+beforeAll(async () => {
+  workDir = mkdtempSync(join(tmpdir(), 'acb-private-folders-'))
+  const Database = (await import('better-sqlite3')).default
+  const dbModule = await import('../../src/db')
+  dbModule.initDatabase()
+  db = dbModule.db
+  const now = new Date().toISOString()
+  const expires = new Date(Date.now() + 3600_000).toISOString()
+  db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(CO, 'PF', 'pf-co', 'u-owner', now, now)
+  const authDb = new Database(join(process.env.DATA_DIR!, 'auth.sqlite'))
+  for (const u of USERS) {
+    authDb.prepare('INSERT INTO user (id, email, name) VALUES (?, ?, ?)').run(`u-${u}`, `${u}@example.com`, u)
+    authDb.prepare('INSERT INTO session (id, userId, token, expiresAt) VALUES (?, ?, ?, ?)').run(`s-${u}`, `u-${u}`, `tok-${u}`, expires)
+    db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(`m-${u}`, `u-${u}`, CO, ROLE[u], now, now)
+  }
+  authDb.close()
+  const { ensureCompanyScope, ensureDepartmentScope } = await import('../../src/lib/permission-store')
+  ensureCompanyScope(db, CO)
+  for (const [id, name, folder] of [['d-hr', '人事', '人事'], ['d-sales', '営業', 'sales']]) {
+    db.prepare(`INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(id, CO, name, folder, now, now)
+    ensureDepartmentScope(db, CO, id, folder)
+  }
+  db.prepare(`INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)`).run('d-hr', 'u-hrmgr', now)
+  db.prepare(`INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)`).run('d-sales', 'u-salesmgr', now)
+
+  bare = join(process.env.REPOS_DIR!, `${CO}.git`)
+  git(['init', '-q', '--bare', '--initial-branch=main', bare])
+  configureBareRepo(bare)
+
+  const { Hono } = await import('hono')
+  const { serve } = await import('@hono/node-server')
+  const { gitHttpRoute } = await import('../../src/routes/git-http')
+  const { departmentsRoute } = await import('../../src/routes/departments')
+  const { folderSizesRoute } = await import('../../src/routes/folder-sizes')
+  const { permissionsRoute } = await import('../../src/routes/permissions')
+  const { permissionRulesRoute } = await import('../../src/routes/permission-rules')
+  const { privateFoldersRoute } = await import('../../src/routes/private-folders')
+  app = new Hono()
+  app.route('/api/git-http', gitHttpRoute)
+  app.route('/api/companies/:companyId/departments', departmentsRoute)
+  app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)
+  app.route('/api/companies/:companyId', permissionsRoute)
+  app.route('/api/companies/:companyId', permissionRulesRoute)
+  app.route('/api/companies/:companyId', privateFoldersRoute)
+  await new Promise<void>((resolve) => {
+    server = serve({ fetch: app.fetch, port: 0, hostname: '127.0.0.1' }, (info: AddressInfo) => {
+      gitBase = `http://127.0.0.1:${info.port}/api/git-http`
+      resolve()
+    })
+  })
+
+  // Seed the company repository as the owner.
+  const seed = join(workDir, 'seed')
+  git(['init', '-q', '--initial-branch=main', seed])
+  git(['config', 'user.name', 'seed'], seed)
+  git(['config', 'user.email', 'seed@example.com'], seed)
+  writeFile(seed, '人事/README.md', 'hr\n')
+  writeFile(seed, 'sales/a.md', 'a\n')
+  writeFile(seed, 'sales/Docs/x.md', 'x\n')
+  commitAll(seed, 'seed')
+  const r = await pushAs(seed, companyUrl(), 'owner')
+  if (!r.ok) throw new Error(`seed failed: ${r.output}`)
+})
+
+afterAll(() => {
+  server?.close()
+  rmSync(workDir, { recursive: true, force: true })
+})
+
+let evalId: string
+let secretId: string
+
+describe('creating private folders', () => {
+  it('the first one waits for every member\'s app (409 OUTDATED_CLIENTS); a manager cannot force', async () => {
+    const r = await create('owner', { parentPath: '人事', name: '評価', viewers: ['u-viewer', 'u-editor'], editors: ['u-editor'] })
+    expect(r.status).toBe(409)
+    expect(r.body.code).toBe('OUTDATED_CLIENTS')
+    expect(r.body.canForce).toBe(true)
+    expect(r.body.members.map((m: Loose) => m.userId)).toContain('u-other')
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scope_repos`).get()).toEqual({ n: 0 })
+
+    const m = await create('hrmgr', { parentPath: '人事', name: '評価', force: true })
+    expect(m.status).toBe(403)
+    expect(m.body.code).toBe('FORCE_NOT_ALLOWED')
+  })
+
+  it('an owner creates one with force: repository, scope, rules', async () => {
+    const r = await create('owner', { parentPath: '人事', name: '評価', viewers: ['u-viewer', 'u-editor', 'u-admin'], editors: ['u-editor'], force: true })
+    expect(r.status).toBe(201)
+    const d = r.body.data
+    evalId = d.scopeId
+    expect(d.path).toBe('人事/評価')
+    expect(d.departmentId).toBe('d-hr')
+    // owner + admin (always) + viewer + editor
+    expect(d.viewerCount).toBe(4)
+    expect(d.editorCount).toBe(3)
+    expect(d.members.find((x: Loose) => x.userId === 'u-viewer')).toMatchObject({ canWrite: false, via: 'rule' })
+    expect(d.members.find((x: Loose) => x.userId === 'u-admin')).toMatchObject({ canWrite: true, via: 'role' })
+    expect(d.members.some((x: Loose) => x.userId === 'u-other')).toBe(false)
+    const row = db.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(evalId) as { repo_id: string }
+    expect(existsSync(join(process.env.REPOS_DIR!, `${CO}.scopes`, `${row.repo_id}.git`))).toBe(true)
+    const cfg = git(['-C', join(process.env.REPOS_DIR!, `${CO}.scopes`, `${row.repo_id}.git`), 'config', 'receive.denyNonFastForwards']).trim()
+    expect(cfg).toBe('true')
+  })
+
+  it('a department manager creates one inside their department without force (not the first); defaults to creator + managers', async () => {
+    const r = await create('hrmgr', { parentPath: '人事', name: '面談' })
+    expect(r.status).toBe(201)
+    expect(r.body.data.members.map((x: Loose) => x.userId).sort()).toEqual(['u-admin', 'u-hrmgr', 'u-owner'])
+  })
+
+  it('a manager cannot create outside their department or at the root; members cannot create', async () => {
+    expect((await create('salesmgr', { parentPath: '人事', name: 'x' })).status).toBe(403)
+    expect((await create('hrmgr', { parentPath: '', name: 'x' })).status).toBe(403)
+    expect((await create('other', { parentPath: 'sales', name: 'x' })).status).toBe(403)
+  })
+
+  it('an editor must be a viewer; viewers must be members', async () => {
+    expect((await create('owner', { parentPath: 'sales', name: 'y', viewers: ['u-viewer'], editors: ['u-other'] })).body.code).toBe('INVALID_MEMBERS')
+    expect((await create('owner', { parentPath: 'sales', name: 'y', viewers: ['u-nobody'] })).body.code).toBe('INVALID_MEMBERS')
+  })
+
+  it('a taken name answers the same for a public folder (any case) and a private one', async () => {
+    const pub = await create('owner', { parentPath: 'sales', name: 'docs' })
+    const priv = await create('owner', { parentPath: '人事', name: '評価' })
+    expect(pub.status).toBe(409)
+    expect(priv.status).toBe(409)
+    expect(pub.body).toEqual({ error: '『sales/docs』というフォルダ名は使えません。別の名前にしてください。', code: 'FOLDER_NAME_UNAVAILABLE' })
+    expect(priv.body).toEqual({ error: '『人事/評価』というフォルダ名は使えません。別の名前にしてください。', code: 'FOLDER_NAME_UNAVAILABLE' })
+    // NFD spelling of the private one
+    const nfd = await create('owner', { parentPath: '人事', name: '評価'.normalize('NFD') })
+    expect(nfd.body.code).toBe('FOLDER_NAME_UNAVAILABLE')
+  })
+
+  it('inside an unreadable private folder answers like a missing parent; a reader is told it is private already', async () => {
+    // hrmgr manages 人事 but is not a viewer of 人事/評価
+    const hidden = await create('hrmgr', { parentPath: '人事/評価', name: '2026' })
+    const missing = await create('hrmgr', { parentPath: '人事/存在しない', name: '2026' })
+    expect(hidden.status).toBe(400)
+    expect(hidden.body).toEqual(missing.body)
+    expect((await create('owner', { parentPath: '人事/評価', name: '2026' })).body.code).toBe('ALREADY_PRIVATE')
+  })
+
+  it('an ASCII-named one for the case tests', async () => {
+    const r = await create('owner', { parentPath: 'sales', name: 'Secret', viewers: ['u-editor'] })
+    expect(r.status).toBe(201)
+    secretId = r.body.data.scopeId
+  })
+})
+
+describe('GET /me/scopes', () => {
+  it('a reader gets the path and clone URL; everyone gets only salted hashes', async () => {
+    const v = await as('viewer', 'GET', `${base}/me/scopes`)
+    expect(v.status).toBe(200)
+    expect(v.body.data.scopes).toEqual([{
+      scopeId: evalId,
+      path: '人事/評価',
+      cloneUrl: expect.stringMatching(new RegExp(`/api/git-http/${CO}/scopes/${evalId}\\.git$`)),
+      clonePath: `/api/git-http/${CO}/scopes/${evalId}.git`,
+      canWrite: false,
+    }])
+    const o = await as('other', 'GET', `${base}/me/scopes`)
+    expect(o.body.data.scopes).toEqual([])
+    expect(o.text).not.toContain('評価')
+    expect(o.text).not.toContain('面談')
+    expect(o.text).not.toContain('Secret')
+    const { reservedPathHash } = await import('../../src/lib/private-folders')
+    const { salt, hashes, algorithm } = o.body.data.reserved
+    expect(algorithm).toBe('sha256-salt-nfc-asciilower-v1')
+    expect(hashes).toHaveLength(3)
+    expect(hashes).toContain(reservedPathHash(salt, '人事/評価'))
+    expect(hashes).toContain(reservedPathHash(salt, 'SALES/secret'))
+    const again = await as('other', 'GET', `${base}/me/scopes`, undefined, { 'If-None-Match': o.headers.get('ETag') })
+    expect(again.status).toBe(304)
+  })
+})
+
+describe('scope repositories over git-http', () => {
+  let editorClone: string
+
+  it('a viewer clones; a non-viewer gets 404 (as for a repository that does not exist)', async () => {
+    const v = await cloneAs(scopeUrl(evalId), 'viewer')
+    expect(v.ok).toBe(true)
+    expect(existsSync(join(v.dir, '.gitignore'))).toBe(true)
+    const o = await cloneAs(scopeUrl(evalId), 'other')
+    expect(o.ok).toBe(false)
+    const none = await cloneAs(scopeUrl('00000000-0000-0000-0000-000000000000'), 'other')
+    expect(o.output.replace(/clone\d+/g, '')).toContain('not found')
+    expect(none.ok).toBe(false)
+    const res = await fetch(`${scopeUrl(evalId)}/info/refs?service=git-upload-pack`, { headers: { Authorization: `Basic ${Buffer.from('git:tok-other').toString('base64')}` } })
+    expect(res.status).toBe(404)
+  })
+
+  it('an editor pushes; a read-only viewer is refused', async () => {
+    const e = await cloneAs(scopeUrl(evalId), 'editor')
+    editorClone = e.dir
+    writeFile(editorClone, '2026/山田.md', 'A\n')
+    writeFile(editorClone, '閲覧のみ/規程.md', 'r\n')
+    commitAll(editorClone, 'eval')
+    expect((await pushAs(editorClone, scopeUrl(evalId), 'editor')).ok).toBe(true)
+
+    const v = await cloneAs(scopeUrl(evalId), 'viewer')
+    writeFile(v.dir, 'x.md', 'x\n')
+    commitAll(v.dir, 'viewer')
+    const r = await pushAs(v.dir, scopeUrl(evalId), 'viewer')
+    expect(r.ok).toBe(false)
+  })
+
+  it('every push rule runs in a scope repository: secrets, protected config', async () => {
+    const c = await cloneAs(scopeUrl(evalId), 'editor')
+    writeFile(c.dir, 'key.txt', 'AKIAIOSFODNN7EXAMPLE\n')
+    writeFile(c.dir, '.mcp.json', '{}\n')
+    commitAll(c.dir, 'bad')
+    const r = await pushAs(c.dir, scopeUrl(evalId), 'editor')
+    expect(r.ok).toBe(false)
+    expect(r.output).toContain('[PROTECTED_CONFIG]')
+    expect(r.output).toContain('[SECRET_DETECTED]')
+  })
+
+  it('write permission is checked by the path inside the company tree', async () => {
+    const put = await as('owner', 'PUT', `${base}/permissions/scopes/by-path`, {
+      path: '人事/評価/閲覧のみ',
+      rules: [{ subjectType: 'everyone', canWrite: false }],
+    })
+    expect(put.status).toBe(200)
+    const c = await cloneAs(scopeUrl(evalId), 'editor')
+    writeFile(c.dir, '閲覧のみ/規程.md', 'changed\n')
+    writeFile(c.dir, '2026/佐藤.md', 'B\n')
+    commitAll(c.dir, 'mixed')
+    const r = await pushAs(c.dir, scopeUrl(evalId), 'editor')
+    expect(r.ok).toBe(false)
+    expect(sectionPaths(r.output, 'WRITE_DENIED')).toEqual(['閲覧のみ/規程.md'])
+  })
+
+  it('a read restriction is accepted on a private folder only', async () => {
+    const onPrivate = await as('hrmgr', 'PUT', `${base}/permissions/scopes/by-path`, {
+      path: '人事/評価',
+      rules: [
+        { subjectType: 'everyone', canRead: false, canWrite: false },
+        { subjectType: 'user', subjectId: 'u-viewer', canRead: true, canWrite: false },
+        { subjectType: 'user', subjectId: 'u-editor', canRead: true, canWrite: true },
+        { subjectType: 'user', subjectId: 'u-hrmgr', canRead: true, canWrite: false },
+      ],
+    })
+    expect(onPrivate.status).toBe(200)
+    const inside = await as('owner', 'PUT', `${base}/permissions/scopes/by-path`, {
+      path: '人事/評価/2026', rules: [{ subjectType: 'everyone', canRead: false, canWrite: false }],
+    })
+    expect(inside.body.code).toBe('READ_RESTRICTION_UNAVAILABLE')
+    const publicFolder = await as('owner', 'PUT', `${base}/permissions/scopes/by-path`, {
+      path: 'sales', rules: [{ subjectType: 'everyone', canRead: false, canWrite: false }],
+    })
+    expect(publicFolder.body.code).toBe('READ_RESTRICTION_UNAVAILABLE')
+    const cleared = await as('owner', 'PUT', `${base}/permissions/scopes/by-path`, { path: '人事/評価', rules: [] })
+    expect(cleared.body.code).toBe('PRIVATE_RULES_REQUIRED')
+    expect((await as('owner', 'DELETE', `${base}/permissions/scopes/${evalId}/rules`)).body.code).toBe('PRIVATE_RULES_REQUIRED')
+    // the manager now reads it
+    expect((await as('hrmgr', 'GET', `${base}/me/scopes`)).body.data.scopes.map((s: Loose) => s.path)).toContain('人事/評価')
+  })
+})
+
+describe('[RESERVED_PATH] in the company repository', () => {
+  async function pushFiles(user: User, files: Record<string, string>) {
+    const c = await cloneAs(companyUrl(), user)
+    for (const [rel, content] of Object.entries(files)) writeFile(c.dir, rel, content)
+    commitAll(c.dir, 'try')
+    return pushAs(c.dir, companyUrl(), user)
+  }
+
+  it('refuses a new file under a private folder\'s path, for members and the owner, naming only the folder they typed', async () => {
+    for (const user of ['other', 'owner'] as const) {
+      const r = await pushFiles(user, { '人事/評価/メモ.md': 'm\n', '人事/ok.md': 'ok\n' })
+      expect(r.ok).toBe(false)
+      expect(sectionPaths(r.output, 'RESERVED_PATH')).toEqual(['人事/評価/メモ.md'])
+      expect(r.output).toContain('『人事/評価』というフォルダ名は使えません。別の名前にしてください。')
+      expect(r.output).not.toMatch(/非公開|private|見られる/i)
+      expect(r.output).not.toContain('WRITE_DENIED')
+    }
+  })
+
+  it('case and NFC variants, deep nesting, a file at the path itself', async () => {
+    const lower = await pushFiles('other', { 'sales/secret/a.md': 'a\n' })
+    expect(sectionPaths(lower.output, 'RESERVED_PATH')).toEqual(['sales/secret/a.md'])
+    expect(lower.output).toContain('『sales/secret』')
+    const nfd = '人事/評価'.normalize('NFD')
+    const n = await pushFiles('other', { [`${nfd}/a/b/c.md`]: 'c\n' })
+    expect(n.ok).toBe(false)
+    expect(sectionPaths(n.output, 'RESERVED_PATH')).toHaveLength(1)
+    const file = await pushFiles('other', { 'sales/SECRET': 'file\n' })
+    expect(sectionPaths(file.output, 'RESERVED_PATH')).toEqual(['sales/SECRET'])
+  })
+
+  it('a rename into the path is refused; neighbouring names are fine', async () => {
+    const c = await cloneAs(companyUrl(), 'other')
+    writeFile(c.dir, 'tmp/a.md', 'a\n')
+    commitAll(c.dir, 'tmp')
+    expect((await pushAs(c.dir, companyUrl(), 'other')).ok).toBe(true)
+    git(['mv', 'tmp', '人事/評価'], c.dir)
+    commitAll(c.dir, 'rename')
+    const r = await pushAs(c.dir, companyUrl(), 'other')
+    expect(sectionPaths(r.output, 'RESERVED_PATH')).toEqual(['人事/評価/a.md'])
+
+    const ok = await pushFiles('other', { '人事/評定/a.md': 'a\n', 'sales/Secrets/a.md': 'b\n' })
+    expect(ok.output).not.toContain('RESERVED_PATH')
+    expect(ok.ok).toBe(true)
+  })
+
+  it('is recorded like other rejections', async () => {
+    const rows = db.prepare(`SELECT marker, paths FROM push_rejections WHERE company_id = ? AND marker = 'RESERVED_PATH'`).all(CO) as Array<{ paths: string }>
+    expect(rows.length).toBeGreaterThan(0)
+  })
+})
+
+describe('no API reveals a private folder\'s name to a member who cannot read it', () => {
+  const NAMES = ['評価', '面談', 'Secret"', 'Secret/', 'secret"', 'secret/']
+  const clean = (text: string) => NAMES.every(n => !text.includes(n))
+
+  it('a plain member', async () => {
+    const urls = [
+      `${base}/departments`,
+      `${base}/departments/d-hr`,
+      `${base}/departments/d-hr/stats`,
+      `${base}/folder-sizes?path=人事`,
+      `${base}/me/write-access`,
+      `${base}/me/capabilities`,
+      `${base}/me/scopes`,
+      `${base}/permissions`,
+      `${base}/permissions/folders?path=人事`,
+      `${base}/permissions/effective?path=人事`,
+      `${base}/overview`,
+      `${base}/push-rejections`,
+      `${base}/private-folders`,
+      `${base}/private-folders/${evalId}`,
+    ]
+    for (const url of urls) {
+      const r = await as('other', 'GET', url)
+      expect(clean(r.text), `${url}: ${r.text}`).toBe(true)
+    }
+    // a private folder's path measures exactly like one that never existed
+    const sizes = await as('other', 'GET', `${base}/folder-sizes?path=sales&measure=sales/Secret&measure=sales/nothing`)
+    expect(sizes.body.data.measured['sales/Secret']).toBe(sizes.body.data.measured['sales/nothing'])
+    // stats of a department holding private folders count only the company repository
+    expect((await as('other', 'GET', `${base}/departments/d-hr/stats`)).body.data).toMatchObject({ files: 2, folders: 1 }) // README.md + 評定/a.md
+  })
+
+  it('a manager of another department (who may use the permission screens)', async () => {
+    for (const url of [
+      `${base}/permissions`,
+      `${base}/permissions/folders?path=`,
+      `${base}/permissions/folders?path=sales`,
+      `${base}/private-folders`,
+      `${base}/me/write-access`,
+    ]) {
+      const r = await as('salesmgr', 'GET', url)
+      expect(['評価', '面談'].every(n => !r.text.includes(n)), `${url}: ${r.text}`).toBe(true)
+    }
+    expect((await as('salesmgr', 'GET', `${base}/private-folders/${evalId}`)).status).toBe(404)
+    expect((await as('salesmgr', 'GET', `${base}/permissions/folders?path=人事`)).status).toBe(403)
+  })
+
+  it('the department\'s manager and owners see them in the permission browser and overview list', async () => {
+    const folders = await as('hrmgr', 'GET', `${base}/permissions/folders?path=人事`)
+    expect(folders.body.data.folders.filter((f: Loose) => f.private).map((f: Loose) => f.name).sort()).toEqual(['評価', '面談'])
+    const inside = await as('owner', 'GET', `${base}/permissions/folders?path=人事/評価`)
+    expect(inside.body.data.folders.map((f: Loose) => f.name).sort()).toEqual(['2026', '閲覧のみ'])
+    const list = await as('owner', 'GET', `${base}/private-folders`)
+    expect(list.body.data.map((p: Loose) => p.path)).toEqual(['sales/Secret', '人事/評価', '人事/面談'])
+  })
+
+  it('orphan warnings never list private folders or rules inside them', async () => {
+    const o = await as('owner', 'GET', `${base}/overview`)
+    expect(o.body.data.attention.orphanedScopes).toEqual([])
+    const p = await as('owner', 'GET', `${base}/permissions`)
+    expect(p.body.data.orphanedScopes).toEqual([])
+  })
+})
+
+describe('departments containing private folders', () => {
+  it('cannot be deleted or renamed; a department cannot take a private folder\'s name', async () => {
+    expect((await as('owner', 'DELETE', `${base}/departments/d-hr`)).body.code).toBe('PRIVATE_FOLDERS_INSIDE')
+    expect((await as('owner', 'PUT', `${base}/departments/d-hr`, { folder: '人事部' })).body.code).toBe('PRIVATE_FOLDERS_INSIDE')
+  })
+})
+
+describe('make-public (公開に戻す)', () => {
+  it('owner/admin only', async () => {
+    expect((await as('hrmgr', 'POST', `${base}/private-folders/${secretId}/make-public`)).status).toBe(403)
+    expect((await as('other', 'POST', `${base}/private-folders/${secretId}/make-public`)).status).toBe(403)
+  })
+
+  it('moves the contents into the company repository at the same path and removes the scope repository', async () => {
+    const c = await cloneAs(scopeUrl(secretId), 'editor')
+    writeFile(c.dir, 'plan.md', 'plan\n')
+    commitAll(c.dir, 'plan')
+    writeFile(c.dir, 'plan.md', 'plan v2\n')
+    commitAll(c.dir, 'plan v2')
+    expect((await pushAs(c.dir, scopeUrl(secretId), 'editor')).ok).toBe(true)
+    const repoId = (db.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(secretId) as { repo_id: string }).repo_id
+
+    const r = await as('owner', 'POST', `${base}/private-folders/${secretId}/make-public`)
+    expect(r.status).toBe(200)
+    expect(r.body.data.path).toBe('sales/Secret')
+    expect(git(['-C', bare, 'show', 'main:sales/Secret/plan.md'])).toBe('plan v2\n')
+    // one commit, none of the scope's history
+    expect(git(['-C', bare, 'log', '--format=%s', '-1', 'main']).trim()).toBe('Make private folder public: sales/Secret')
+    expect(git(['-C', bare, 'log', '--format=%s', 'main']).includes('plan v2')).toBe(false)
+    expect(existsSync(join(process.env.REPOS_DIR!, `${CO}.scopes`, `${repoId}.git`))).toBe(false)
+    expect(db.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(secretId)).toEqual({ repo_id: null })
+    expect(db.prepare(`SELECT COUNT(*) AS n FROM scope_repos WHERE id = ?`).get(repoId)).toEqual({ n: 0 })
+
+    // everyone reads it now; editing stays with its editors
+    const rules = db.prepare(`SELECT subject_type, can_read, can_write FROM scope_rules WHERE scope_id = ? ORDER BY subject_type`).all(secretId)
+    expect(rules).toEqual([
+      { subject_type: 'everyone', can_read: 1, can_write: 0 },
+      { subject_type: 'user', can_read: 1, can_write: 1 },
+    ])
+    expect((await as('other', 'GET', `${base}/me/scopes`)).body.data.reserved.hashes).toHaveLength(2)
+
+    // no longer reserved: the editor may push there through the company repository
+    const p = await cloneAs(companyUrl(), 'editor')
+    writeFile(p.dir, 'sales/Secret/next.md', 'n\n')
+    commitAll(p.dir, 'next')
+    expect((await pushAs(p.dir, companyUrl(), 'editor')).ok).toBe(true)
+    expect((await as('owner', 'POST', `${base}/private-folders/${secretId}/make-public`)).status).toBe(404)
+  })
+})

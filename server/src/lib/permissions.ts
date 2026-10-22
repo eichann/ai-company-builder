@@ -51,7 +51,11 @@ export interface ScopeWithRules {
   path: string
   kind: ScopeKind
   departmentId: string | null
-  /** null = lives in the company's main repository (carve-out comes in Phase 3). */
+  /**
+   * null = lives in the company's main repository. Set = a PRIVATE folder:
+   * its own scope repository (lib/private-folders.ts), served only to members
+   * who may read this scope; the path is reserved in the main repository.
+   */
   repoId: string | null
   rules: ScopeRule[]
 }
@@ -144,18 +148,49 @@ export function resolveAccess(
     return { read: true, write: true, source: { scopeId: null, path: normalized, reason: 'role' } }
   }
 
-  const scope = findGoverningScope(repo.listScopes(companyId), normalized)
+  const scopes = repo.listScopes(companyId)
+  const scope = findGoverningScope(scopes, normalized)
   if (!scope) {
     return { read: false, write: false, source: { scopeId: null, path: normalized, reason: 'no-rule' } }
   }
   const rules = applicableRules(scope.rules, userId, role)
-  const read = rules.some(r => r.canRead)
-  const write = rules.some(r => r.canWrite)
+  let read = rules.some(r => r.canRead)
+  let write = rules.some(r => r.canWrite)
+  // Inside a private folder, its own rules decide who gets the repository at
+  // all: a rule deeper inside can narrow access, never widen it past them.
+  // A private scope without rules (never stored, but never inherit) denies.
+  const priv = findPrivateScope(scopes, normalized)
+  if (priv && priv.id !== scope.id) {
+    const rootRead = priv.rules.length > 0 && applicableRules(priv.rules, userId, role).some(r => r.canRead)
+    read = read && rootRead
+    write = write && rootRead
+  }
   return {
     read,
     write,
     source: { scopeId: scope.id, path: scope.path, reason: read || write ? 'rule' : 'no-rule' },
   }
+}
+
+/** True for a private folder's scope (its own scope repository). */
+export function isPrivateScope(scope: { repoId: string | null }): boolean {
+  return scope.repoId !== null
+}
+
+/** The private scope at or above `path`, or null (private folders do not nest). */
+export function findPrivateScope<T extends { path: string; repoId: string | null }>(scopes: T[], path: string): T | null {
+  let best: T | null = null
+  for (const s of scopes) {
+    if (s.repoId === null || !isSameOrAncestorPath(s.path, path)) continue
+    if (!best || s.path.length > best.path.length) best = s
+  }
+  return best
+}
+
+/** May this member read the private scope (owner/admin always)? */
+export function canReadPrivateScope(scope: ScopeWithRules, userId: string, role: string): boolean {
+  if (FULL_ACCESS_ROLES.has(role)) return true
+  return scope.rules.length > 0 && applicableRules(scope.rules, userId, role).some(r => r.canRead)
 }
 
 export type EffectiveSummary = 'everyone-rw' | 'everyone-r' | 'restricted'
@@ -200,8 +235,14 @@ export interface WriteAccessSummary {
 
 export function writeAccessSummary(scopes: ScopeWithRules[], userId: string, role: string): WriteAccessSummary {
   if (FULL_ACCESS_ROLES.has(role)) return { all: true, scopes: [] }
+  // Private folders the member cannot read are left out entirely — their
+  // names are not to be revealed (the member's push there is refused as
+  // [RESERVED_PATH] anyway). Inside a readable one, write also needs read of
+  // the private folder itself (resolveAccess).
+  const readablePrivate = scopes.filter(s => s.repoId !== null && canReadPrivateScope(s, userId, role))
+  const hidden = scopes.filter(s => s.repoId !== null && !readablePrivate.includes(s))
   const decided = scopes
-    .filter(s => s.rules.length > 0)
+    .filter(s => s.rules.length > 0 && !hidden.some(h => isSameOrAncestorPath(h.path, s.path)))
     .map(s => ({ path: s.path, write: applicableRules(s.rules, userId, role).some(r => r.canWrite) }))
     .sort((a, b) => compareScopePaths(a.path, b.path))
   const hasRoot = decided.some(s => s.path === '')

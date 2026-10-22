@@ -19,6 +19,7 @@ import { gitHttpRoute } from './routes/git-http'
 import { invitationsRoute } from './routes/invitations'
 import { permissionsRoute } from './routes/permissions'
 import { permissionRulesRoute } from './routes/permission-rules'
+import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './lib/client-activity-middleware'
 
 // Initialize database
@@ -160,6 +161,7 @@ app.route('/api/companies/:companyId/departments', departmentsRoute)
 app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)
 app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/companies/:companyId', permissionRulesRoute)
+app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/sync', syncRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)

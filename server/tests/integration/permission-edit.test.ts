@@ -340,8 +340,8 @@ describe('rule semantics', () => {
     await as('pe-owner', 'POST', `${base}/permissions/rules`, { path: '営業部/契約書', subjectType: 'everyone', canWrite: false })
     const r = await as('pe-owner', 'GET', `${base}/permissions/folders?path=${encodeURIComponent('営業部')}`)
     expect(r.body.data.folders).toEqual([
-      { name: '2026 提案', path: '営業部/2026 提案', scopeId: null, hasRules: false },
-      { name: '契約書', path: '営業部/契約書', scopeId: expect.any(String), hasRules: true },
+      { name: '2026 提案', path: '営業部/2026 提案', scopeId: null, hasRules: false, private: false },
+      { name: '契約書', path: '営業部/契約書', scopeId: expect.any(String), hasRules: true, private: false },
     ])
     const root = await as('pe-owner', 'GET', `${base}/permissions/folders?path=`)
     expect(root.body.data.folders.map((f: Loose) => f.name).sort()).toEqual(['コンテンツ', '営業部'].sort())

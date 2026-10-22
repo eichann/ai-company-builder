@@ -108,8 +108,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (user_id, company_id)
     );
 
-    -- Permission model (lib/permissions.ts). Phase 1 stores and exposes it;
-    -- nothing is enforced from these tables yet.
+    -- Permission model (lib/permissions.ts): write rules are enforced on push
+    -- (Phase 2), read rules on private folders' scope repositories (Phase 3).
     -- A scope is a node rules attach to: path '' = the whole company, otherwise
     -- a repo-relative folder ('コンテンツ', 'コンテンツ/受講生情報'), NFC, no
     -- leading/trailing slash. repo_id NULL = in the company's main repository.
@@ -167,7 +167,31 @@ export function initDatabase(conn: Database.Database = sqlite) {
       commit_id TEXT NOT NULL
     );
 
+    -- Private folders (lib/private-folders.ts). A private folder is a scope
+    -- whose repo_id points here: its own bare repository
+    -- (<REPOS_DIR>/<company_id>.scopes/<id>.git), served only to members who
+    -- may read the scope; its path is reserved in the company repository.
+    -- No FOREIGN KEY to scopes: a scope row must never take its repository's
+    -- record with it silently (deleting a department that contains one is
+    -- refused; only make-public removes both).
+    CREATE TABLE IF NOT EXISTS scope_repos (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      scope_id TEXT NOT NULL UNIQUE,
+      created_at TEXT NOT NULL,
+      created_by TEXT
+    );
+
+    -- Per-company salt for the reserved-path hashes handed to members who may
+    -- not learn private folders' names (GET /me/scopes). Not rotated.
+    CREATE TABLE IF NOT EXISTS company_path_salts (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      salt TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);
     CREATE INDEX IF NOT EXISTS idx_department_managers_user_id ON department_managers(user_id);

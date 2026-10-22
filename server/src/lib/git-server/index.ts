@@ -8,6 +8,9 @@
  *                       clone — ./repo-config.ts — and the hook)
  *   installPreReceiveHook / renderPreReceiveHook   (./hook.ts)
  *                       the hook, a thin caller of lib/push-check
+ *   createScopeRepo / scopeRepoPath / removeScopeRepo   (./scope-repo.ts)
+ *                       one bare repository per private folder, configured
+ *                       like the company repository
  *   preparePushCheck    the environment one git-http receive-pack request
  *                       hands the hook: pusher + permission snapshot
  *   internalGitEnv      the marker for the server's own pushes
@@ -28,11 +31,21 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { installPreReceiveHook } from './hook'
 import { BARE_REPO_CONFIG } from './repo-config'
+import { listAllScopeRepos } from './scope-repo'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
 import type { ScopeWithRules } from '../permissions'
 
 export { installPreReceiveHook, renderPreReceiveHook, PUSH_CHECK_ENTRY, HOOK_TEMPLATE_PATH } from './hook'
 export { BARE_REPO_CONFIG } from './repo-config'
+export {
+  createScopeRepo,
+  gitAsync,
+  removeScopeRepo,
+  scopeRepoPath,
+  scopeReposDir,
+  SCOPE_REPO_GITIGNORE,
+  SERVER_GIT_IDENTITY,
+} from './scope-repo'
 export type { PushPolicy } from '../push-check/policy'
 
 /** Create a bare repository (branch pinned to main: the client hardcodes origin/main) and configure it. */
@@ -73,6 +86,16 @@ export function configureAllBareRepos(reposDir: string): { total: number; failed
       console.error(`Failed to configure repository ${name}:`, error)
     }
   }
+  // Private folders' scope repositories (<companyId>.scopes/<repoId>.git)
+  for (const repo of listAllScopeRepos(reposDir)) {
+    total++
+    try {
+      configureBareRepo(repo)
+    } catch (error) {
+      failed++
+      console.error(`Failed to configure scope repository ${repo}:`, error)
+    }
+  }
   return { total, failed }
 }
 
@@ -98,6 +121,8 @@ export interface PushCheckRequest {
   /** null when the pusher could not be resolved (the checker then fails closed unless writing is open). */
   pusher: { id: string; role: string | null } | null
   scopes: ScopeWithRules[]
+  /** Set for a push to a private folder's scope repository: its company path. */
+  scopePath?: string
 }
 
 export interface PreparedPushCheck {
@@ -119,6 +144,7 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
     companyId: req.companyId,
     pusher: req.pusher,
     scopes: req.scopes,
+    ...(req.scopePath !== undefined ? { scopePath: req.scopePath } : {}),
   }
   let dir: string | null = null
   try {

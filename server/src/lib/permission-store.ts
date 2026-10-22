@@ -173,8 +173,11 @@ export function moveScopeSubtree(conn: Conn, companyId: string, fromPath: string
       conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(s.id)
     }
     const moving = conn.prepare(`
-      SELECT id, path FROM scopes WHERE company_id = ? AND (path = ? OR substr(path, 1, ?) = ?)
-    `).all(companyId, from, from.length + 1, `${from}/`) as Array<{ id: string; path: string }>
+      SELECT id, path, repo_id FROM scopes WHERE company_id = ? AND (path = ? OR substr(path, 1, ?) = ?)
+    `).all(companyId, from, from.length + 1, `${from}/`) as Array<{ id: string; path: string; repo_id: string | null }>
+    if (moving.some(m => m.repo_id !== null)) {
+      throw new Error(`A private folder is inside ${from}; it cannot be moved`)
+    }
     for (const m of moving) {
       conn.prepare(`UPDATE scopes SET path = ? WHERE id = ?`).run(to + m.path.slice(from.length), m.id)
     }
@@ -188,6 +191,9 @@ export function deleteDepartmentScopes(conn: Conn, companyId: string, department
     const ids = (conn.prepare(`SELECT id, path, department_id FROM scopes WHERE company_id = ?`)
       .all(companyId) as Array<{ id: string; path: string; department_id: string | null }>)
       .filter(s => s.department_id === departmentId || (!!path && (s.path === path || s.path.startsWith(`${path}/`))))
+    const privateInside = conn.prepare(`SELECT COUNT(*) AS n FROM scopes WHERE company_id = ? AND repo_id IS NOT NULL AND id IN (${ids.map(() => '?').join(',') || "''"})`)
+      .get(companyId, ...ids.map(i => i.id)) as { n: number }
+    if (privateInside.n > 0) throw new Error('A private folder is inside this department; make it public first')
     for (const { id } of ids) {
       conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(id)
       conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(id)
@@ -425,6 +431,10 @@ export function updateRuleAccess(conn: Conn, ruleId: string, canRead: boolean, c
 /** Remove a folder scope that has no rules left (company/department scopes stay). */
 function dropEmptyFolderScope(conn: Conn, scope: ScopeRecord): void {
   if (scope.kind !== 'folder') return
+  // A private folder's scope is never dropped (lib/private-folders.ts): it
+  // must not fall back to inheriting, which would make it readable.
+  const row = conn.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(scope.id) as { repo_id: string | null } | undefined
+  if (row?.repo_id) return
   if (listScopeRules(conn, scope.id).length > 0) return
   conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(scope.id)
 }

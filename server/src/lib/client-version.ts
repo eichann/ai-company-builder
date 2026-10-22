@@ -142,3 +142,34 @@ export function supportsWriteDeniedRecovery(version: string | null | undefined):
   if (!parsed || !parsed.commitDate) return false
   return parsed.commitDate >= WRITE_DENIED_RECOVERY_COMMIT_DATE
 }
+
+/**
+ * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop
+ * app handles private folders: several repositories per company (the
+ * company repository plus one scope repository per readable private
+ * folder), the `[RESERVED_PATH]` rejection, and GET /me/scopes.
+ *
+ * null while no released app does (stage 3b — client sync — has not been
+ * merged). **Update this when stage 3b merges**, computed like
+ * WRITE_DENIED_RECOVERY_COMMIT_DATE from that merge commit:
+ *   TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S <sha>
+ *
+ * Until then every member counts as not ready, so creating a company's first
+ * private folder needs an owner/admin's `force: true`.
+ */
+export const PRIVATE_FOLDERS_CLIENT_COMMIT_DATE: string | null = null
+
+/**
+ * Can this desktop-app build work with private folders? Same rules as
+ * supportsWriteDeniedRecovery: decided by the build's commit date alone,
+ * unknown (no version, unparsable, no commit date) = not ready.
+ */
+export function supportsPrivateFolders(
+  version: string | null | undefined,
+  cutoff: string | null = PRIVATE_FOLDERS_CLIENT_COMMIT_DATE,
+): boolean {
+  if (cutoff === null) return false
+  const parsed = parseClientVersion(version)
+  if (!parsed || !parsed.commitDate) return false
+  return parsed.commitDate >= cutoff
+}
