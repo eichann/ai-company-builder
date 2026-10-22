@@ -35,11 +35,15 @@ import { pushLandedDespiteError } from './push-landed'
 import { findNestedGitRepos } from './nested-repos'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { applySparseSelection, readSparseConfig, sparseConfigPath, writeSparseConfig } from './sparse'
+import { holdBackOutsideCheckout, outsideCheckoutMessage, type OutsideCheckoutResult } from './outside-checkout'
 import type { SyncDeps } from './types'
 
 export type { SyncDeps, SyncDialog, SyncServerApi, SyncLogger } from './types'
 
-async function runSync(deps: SyncDeps, repoPath: string, companyId: string, commitMessage: string) {
+/** Filled in by runSync once files outside the checkout were held back (reported on every later outcome). */
+interface SyncSideEffects { outsideCheckout: OutsideCheckoutResult | null }
+
+async function runSync(deps: SyncDeps, repoPath: string, companyId: string, commitMessage: string, effects: SyncSideEffects) {
   const log = deps.log
   try {
     const git: SimpleGit = deps.createGit(repoPath)
@@ -334,6 +338,29 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       await git.fetch(['--progress', 'origin'])
     } catch (fetchError) {
       log.warn('Git sync: Fetch failed (may be offline):', fetchError)
+    }
+
+    // 1.4. Files created inside a folder that is not checked out (excluded in
+    //      settings / not picked at first setup) are never shared: the member
+    //      cannot see the teammates' files there, and staging one would
+    //      silently replace a teammate's file on the server. Moved to
+    //      .backups/<ts>_outside_checkout/ before anything is staged — and
+    //      before the reconcile: `sparse-checkout set` with a changed file on
+    //      a not-checked-out path downloads the teammate's version in a
+    //      partial clone. See ./outside-checkout.ts.
+    try {
+      effects.outsideCheckout = await holdBackOutsideCheckout({
+        git, repoPath, backupPath: `${backupPath}_outside_checkout`, now: deps.now(), log,
+      })
+    } catch (holdBackError) {
+      // Staging such a file is exactly what this step prevents: stop here,
+      // with every file still where the member left it.
+      log.error('Git sync: Could not set aside files created outside the checkout:', holdBackError)
+      const msg = holdBackError instanceof Error ? holdBackError.message : String(holdBackError)
+      return {
+        success: false,
+        error: `ダウンロードしていないフォルダに作られたファイルを確認できなかったため、同期を中止しました。ファイルはこのPCに残っています。\n${msg}`,
+      }
     }
 
     // 1.5. Reconcile sparse checkout to the user's persisted exclusions.
@@ -1189,7 +1216,26 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
 }
 
 
-export type GitSyncResult = Awaited<ReturnType<typeof runSync>>
+export type GitSyncResult = Awaited<ReturnType<typeof runSync>> & {
+  /** Files created inside a folder that is not checked out, moved to outsideCheckoutBackupPath instead of being shared. */
+  outsideCheckoutFiles?: string[]
+  outsideCheckoutBackupPath?: string
+}
+
+/** Report held-back files on whatever the sync ended with. */
+function withSideEffects(result: Awaited<ReturnType<typeof runSync>>, effects: SyncSideEffects): GitSyncResult {
+  const held = effects.outsideCheckout
+  if (!held) return result
+  const note = outsideCheckoutMessage(held)
+  const fields = { outsideCheckoutFiles: held.files, outsideCheckoutBackupPath: held.backupPath }
+  if (result.success) {
+    const message = 'message' in result && typeof result.message === 'string' ? result.message : '同期が完了しました'
+    // Every result shape gets the note in its own text field; the union cannot express that per member.
+    return { ...result, ...fields, message: `${message}${message.endsWith('。') ? '' : '。'}${note}` } as GitSyncResult
+  }
+  const error = 'error' in result && typeof result.error === 'string' ? result.error : ''
+  return { ...result, ...fields, error: error ? `${error}\n\n${note}` : note } as GitSyncResult
+}
 export type GitSync = (repoPath: string, companyId: string, commitMessage: string) => Promise<GitSyncResult>
 
 /**
@@ -1212,7 +1258,8 @@ export function createGitSync(deps: SyncDeps): GitSync {
         deps.log.log('Git sync: Already syncing, waiting for previous sync to complete...')
         try { await previous } catch { /* previous sync errors belong to its caller */ }
       }
-      return runSync(deps, repoPath, companyId, commitMessage)
+      const effects: SyncSideEffects = { outsideCheckout: null }
+      return withSideEffects(await runSync(deps, repoPath, companyId, commitMessage, effects), effects)
     })()
 
     syncLocks.set(repoPath, syncPromise)

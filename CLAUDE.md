@@ -168,7 +168,7 @@ by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), the
 clock and the logger are injected (`sync/types.ts`). `client/electron/main.ts`
 only wires the real implementations into `ipcMain.handle('git:sync', ...)`.
 Helpers: `sync/conflicts.ts`, `sync/nested-repos.ts`, `sync/sparse.ts`,
-`sync/first-setup.ts` (first setup, below), `protected-config.ts`. Every change to sync runs through the multi-member
+`sync/first-setup.ts` (first setup, below), `sync/outside-checkout.ts`, `protected-config.ts`. Every change to sync runs through the multi-member
 harness — see "Testing Sync" below.
 
 ```
@@ -181,7 +181,10 @@ harness — see "Testing Sync" below.
 4. Scan for >100MB files → append to .gitignore
 5. Detect nested Git repositories → ask the user BEFORE modifying anything
 6. git fetch --progress origin
+6.5 Hold back files created inside excluded (not checked out) folders →
+    .backups/<ts>_outside_checkout/ (never staged, never shared)
 7. Reconcile sparse checkout against the user's persisted exclusions
+   (ignored files in excluded folders are kept out of git's reach meanwhile)
 8. Warn if files were deleted locally (sync / restore / cancel)
 9. git add --sparse . → git commit → record localHash
 10. git pull --rebase --progress origin main
@@ -308,6 +311,8 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | The mac app's bundled git is **universal** (arm64 + x86_64): electron-builder's `beforePack` hook (`client/scripts/universal-git.mjs`) downloads both darwin dugite-native archives pinned in dugite's `embedded-git.json` (sha256 verified), `lipo -create`s every Mach-O, requires every other file to be byte-identical (else the build fails), keeps symlinks/permissions, and replaces `node_modules/dugite/git` with the result. Git Credential Manager (.NET, per-arch assemblies, ~110MB) is left out — the app clears `credential.helper` and never runs it. CI job "Universal bundled git (macOS)" runs the merge and both slices (`arch -x86_64`) | dugite downloads git for the build machine only, so the universal app built on Apple Silicon shipped an arm64-only git: on Intel Macs `resolveGitBinaryWithFallback` (`main.ts`) dropped to `/usr/bin/git` (Apple Git 2.39, known CVEs) and pushes failed (2026-10-21). `@electron/universal` does not merge anything under `app.asar.unpacked`, it just keeps the x64 slice's copy, so the merge has to happen before packing. The system-git fallback stays as a last resort and logs which binary and arch are in use. |
 | `merge.stat=false` | A pull that fast-forwards prints a diffstat, which reads every file the teammates changed. In a partial clone those blobs were never downloaded, so every sync silently fetched the teammates' changes in departments the member did not pick (found by the partial-clone harness). Nothing reads the diffstat. |
 | Sparse cone changes use one `sparse-checkout set --cone <dirs>` (never `init --cone` + `set`), and a failed change writes the previous exclusions back (`applySparseSelection`) | In a partial clone, widening the cone is a download. `init --cone` alone narrows the worktree to the root files; if the following `set` then failed offline the member's folders vanished from disk. A single `set` rolls its own patterns back on failure, and restoring the config keeps the next sync from retrying a choice that was never applied. |
+| Files created inside a folder that is **not checked out** (in the persisted sparse exclusions and outside the applied cone — excluded in settings, or not picked at first setup) are never staged: before the sparse reconcile and before `git add --sparse .`, every non-ignored file there that is new or differs from its index entry is moved to `.backups/<ts>_outside_checkout/` (`_metadata.json`: reason `outside_checkout`, `folders`, `files`, `serverFiles` = those the server has), the skip-worktree bit of tracked paths is set again (`update-index --skip-worktree`, so they never read as deleted) and the emptied folders are removed (`holdBackOutsideCheckout`, `client/electron/sync/outside-checkout.ts`). The result carries `outsideCheckoutFiles` / `outsideCheckoutBackupPath` and the message 「ダウンロードしていないフォルダ（営業部）にファイルが作られていたため、共有せずに .backups に保存しました（N件）。必要ならその部署をダウンロードしてから保存し直してください。」. If the check itself fails, sync stops before staging with every file in place. Paths the server does not have are held back too, and so is an edit made before the member excluded the folder (git leaves a modified file behind; it cannot be told apart) | The folder is absent on disk, so the member — and the chat AI working in their checkout — cannot see the teammates' files there. A file written at `営業部/提案書.md` landed on a teammate's path the member never had: git clears the skip-worktree bit of a path whose file appears, `git add --sparse .` staged it, and sync silently replaced the teammate's file on the server — no conflict, no backup for anyone (found by the outside-checkout harness, full and partial clones alike). A new path was shared, and at the next sync the reconcile removed it from the member's disk (tracked, clean, outside the cone): the file vanished right after being "saved". Sync cannot tell whether a teammate has, or is about to push, the same path, so nothing is shared from there; inside the checkout nothing changed. It runs before the reconcile because `sparse-checkout set` with a changed file on a not-checked-out path downloads the teammate's version in a partial clone. |
+| Every `sparse-checkout set` the app runs (`applySparseSelection` → `keepIgnoredOutsideCone` in `client/electron/sync/sparse.ts`) first moves the ignored files of each tracked root folder outside the new cone (`ls-files --others --ignored --exclude-standard --directory`, outermost entries only) to `.git/acb-sparse-keep/` and puts them back afterwards, also when `set` fails; a leftover from a crash is restored before the next `set`, and an entry whose path is occupied again stays there rather than being overwritten | In cone mode `sparse-checkout set` deletes every ignored file in a tracked directory that leaves the cone (documented git behaviour), and sync runs it on every press: a member's `.personal/` notes, `.env` files and auto-ignored large files inside an excluded department — local only, never on the server — were deleted when the department was excluded in settings and at every later sync (found by the outside-checkout harness). |
 | Conflict resolution is a **loop**, not a single round | A rebase replays commits one at a time and pauses on *every* conflicting pick. The original single-round code fell back to `rebase --skip`, which silently discarded a whole commit the moment a second pick conflicted. |
 | Conflicts are classified by stage-2 presence before anything is resolved (`classifyConflicts` in `client/electron/sync/conflicts.ts`) | `git checkout --ours` reads stage 2 of the index, which a modify/delete conflict (server deleted a file the member had edited, status `DU`) does not have — and the command fails **atomically**, so every other path in the same call stays unresolved too. The exception escaped both the conflict loop and its `catch (pullError)`, so sync returned an `unknown` error with the rebase still in progress; every retry aborted the stale rebase and died at the same pick. A pilot user was left permanently unable to sync — commits safe locally, but nothing reaching the team. Triggered whenever the server deletes a file, or moves one while also rewriting it (rename detection misses below the similarity threshold). |
 | `rebase --skip` only when the pick is genuinely empty | Taking the server version can leave a pick with no content of its own — that is the only case where skipping is correct. For any other stall, abort and surface the error. Guessing with `--skip` destroys user commits. |
@@ -336,6 +341,11 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 │       ├── .mcp.json            ← member's version of a protected file that
 │       │                          sync put back to the server's version
 │       └── _metadata.json       ← reason `protected_config`, restored/removed paths
+│   └── 2026-02-21T14-31-00-000_outside_checkout/
+│       ├── 営業部/提案書.md      ← a file created in a folder not downloaded on
+│       │                          this computer, never shared
+│       └── _metadata.json       ← reason `outside_checkout`, `folders`, `files`,
+│                                  `serverFiles` (paths the server already had)
 │   └── 2026-02-21T14-31-00-000_write_denied/
 │       ├── 経理部/予算.md        ← member's version of a file in a folder they
 │       │                          may not edit, put back to the server's version
@@ -440,7 +450,8 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   prints its seed and operation log), plus a mixed world with partial-clone
   members (`SYNC_SOAK_MIXED_SEEDS`, `SYNC_SOAK_PARTIAL`);
   `partial-clone.test.ts` runs every guard for a partial member and checks it
-  never downloads the departments it did not pick; `characterization.test.ts` holds sync
+  never downloads the departments it did not pick; `outside-checkout.test.ts`
+  covers files created inside excluded departments (full and partial clones); `characterization.test.ts` holds sync
   to a transcript recorded from the pre-extraction handler (re-record with
   `UPDATE_SYNC_GOLDEN=1` only for an intended behaviour change, and review the
   JSON diff); `findings.test.ts` holds regressions for bugs the harness found;

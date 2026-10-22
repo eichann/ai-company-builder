@@ -330,6 +330,10 @@ interface GitResult {
   personalFiles?: string[]
   // .personal/ paths sync untracked so the rest could be shared (kept on disk)
   untrackedPersonalFiles?: string[]
+  // Files created inside a folder not downloaded on this computer: not
+  // shared, moved to outsideCheckoutBackupPath (.backups/<ts>_outside_checkout)
+  outsideCheckoutFiles?: string[]
+  outsideCheckoutBackupPath?: string
 }
 
 interface GitRepoResult {
