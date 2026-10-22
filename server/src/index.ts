@@ -12,6 +12,7 @@ import { meRoute } from './routes/me'
 import { sshKeysRoute } from './routes/ssh-keys'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
+import { folderSizesRoute } from './routes/folder-sizes'
 import { syncRoute } from './routes/sync'
 import { gitRoute, configureAllBareRepos } from './routes/git'
 import { gitHttpRoute } from './routes/git-http'
@@ -156,6 +157,7 @@ app.route('/api/me', meRoute)
 app.route('/api/users/me/ssh-keys', sshKeysRoute)
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
+app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)
 app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/sync', syncRoute)

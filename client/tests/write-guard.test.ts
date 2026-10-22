@@ -106,3 +106,23 @@ test('the Claude Code PreToolUse hook denies a read-only write before the tool r
   createClaudeConnection(base, factory).createChatModel({ workingDirectory: CWD })
   assert.deepEqual(await calls[1].hooks.PreToolUse[0].hooks[0]({ hook_event_name: 'PreToolUse', tool_name: 'Write', tool_input: { file_path: `${ROOT}/営業部/a.md` }, cwd: CWD }), { continue: true })
 })
+
+test('a folder that is not downloaded refuses writes — even with full or unknown access — with its own message', () => {
+  const notDownloaded = ['コンテンツ/動画', 'Media/Raw']
+  for (const access of [undefined, { version: 'v', role: 'owner', all: true, scopes: [] }, ACCESS] as Array<WriteAccess | undefined>) {
+    const g: WriteGuard = { root: ROOT, getAccess: () => access, getNotDownloaded: () => notDownloaded }
+    const d = decideToolWrite(g, 'Write', { file_path: `${ROOT}/コンテンツ/動画/編集/a.md` }, ROOT)
+    assert.equal(d.deny, true)
+    if (d.deny) {
+      assert.equal(d.folder, 'コンテンツ/動画')
+      assert.equal(d.message, 'このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。')
+    }
+    assert.equal(decideToolWrite(g, 'Edit', { file_path: 'media/raw/take.md' }, ROOT).deny, true) // A–Z case variant
+    assert.equal(decideToolWrite(g, 'NotebookEdit', { notebook_path: '動画/x.ipynb' }, `${ROOT}/コンテンツ`).deny, true)
+    assert.equal(decideToolWrite(g, 'Bash', { command: `cat a > ${ROOT}/コンテンツ/動画/out.md` }, ROOT).deny, true)
+    assert.equal(decideToolWrite(g, 'Write', { file_path: `${ROOT}/コンテンツ/動画編集/a.md` }, ROOT).deny, false) // sibling
+    assert.equal(decideToolWrite(g, 'Write', { file_path: `${ROOT}/コンテンツ/top.md` }, ROOT).deny, false)
+  }
+  // Nothing excluded → only the access decides.
+  assert.equal(decideToolWrite({ root: ROOT, getAccess: () => undefined, getNotDownloaded: () => [] }, 'Write', { file_path: `${ROOT}/コンテンツ/動画/a.md` }, ROOT).deny, false)
+})

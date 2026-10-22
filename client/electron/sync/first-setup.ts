@@ -7,15 +7,15 @@
 // through here.
 //
 //   1. fetch --filter=blob:none   commits and trees only, no file contents
-//   2. persist the exclusions and set the sparse cone  (./sparse.ts)
-//   3. check out                  git downloads just the blobs in the cone,
+//   2. persist the exclusions and set the sparse patterns  (./sparse.ts)
+//   3. check out                  git downloads just the blobs it checks out,
 //                                 in one batch
 //
-// The cone is the persisted-exclusions model every sparse checkout uses:
+// The checkout is the persisted-exclusions model every sparse checkout uses:
 // (all root folders, dotfolders such as .claude included) − (the departments
 // not picked). Root-level files and non-department folders stay in. A folder
 // added later in settings is downloaded then (git fetches the missing blobs
-// lazily, with the app's auth); anything outside the cone that git needs
+// lazily, with the app's auth); anything outside the checkout that git needs
 // meanwhile — a teammate's rename during a rebase, `git log -p` — is fetched
 // the same way.
 
@@ -63,11 +63,11 @@ export async function checkoutSelectedDepartments(options: FirstSetupOptions): P
   const included = [...new Set(options.selected)].filter(d => rootDirs.includes(d))
   const excluded = [...new Set(departments)].filter(d => !included.includes(d))
 
-  // 2. The cone, before anything is checked out. Persisting the exclusions
+  // 2. The patterns, before anything is checked out. Persisting the exclusions
   //    is what keeps the choice across syncs (sync's step 7 reconciles to it).
   await applySparseSelection(git, repoPath, excluded)
 
-  // 3. Checkout fetches the cone's blobs in one batch before writing files,
+  // 3. Checkout fetches the checked-out blobs in one batch before writing files,
   //    so a dropped connection leaves nothing half-written: retrying setup
   //    resumes from here.
   await git.checkout(['-b', branch, `origin/${branch}`])
