@@ -255,6 +255,21 @@ export class World {
     }
   }
 
+  /**
+   * Append to the members' global git config (the world's stand-in for
+   * ~/.gitconfig): e.g. an init.templateDir or core.hooksPath of the
+   * member's own, which the app's git must ignore. Applies to the harness's
+   * own git commands too, so set it after the members exist.
+   */
+  appendGlobalConfig(text: string): void {
+    fs.appendFileSync(this.gitconfig, text.endsWith('\n') ? text : `${text}\n`)
+  }
+
+  /** The app's own git directory (git-factory appGitDirs): main.ts uses <userData>/git. */
+  get appGitDir(): string {
+    return path.join(this.root, 'app-git')
+  }
+
   /** Run git synchronously with the world's environment. */
   git(cwd: string, args: string[], extra: Record<string, string> = {}): string {
     return execFileSync('git', args, { cwd, env: this.env(extra), stdio: 'pipe', maxBuffer: 1 << 28 }).toString()
@@ -500,19 +515,17 @@ export class Member {
     this.dir = path.join(world.root, 'members', name)
     fs.mkdirSync(path.dirname(this.dir), { recursive: true })
     if (this.partial) {
-      // What git:setupCompanyRemote does before the first setup: an empty
-      // repository with origin. A file:// URL, because git ignores --filter
-      // for a plain local path (it copies the object store instead).
+      // The repository is created by setupPartial, with the app's git (as
+      // git:setupCompanyRemote does). A file:// URL, because git ignores
+      // --filter for a plain local path (it copies the object store instead).
       fs.mkdirSync(this.dir)
       this.remoteUrl = `file://${world.bare}`
-      world.git(this.dir, ['init', '-q', '-b', 'main'])
-      world.git(this.dir, ['remote', 'add', 'origin', this.remoteUrl])
     } else {
       world.git(world.root, ['clone', '-q', world.bare, this.dir])
       this.remoteUrl = world.bare
+      this.git(['config', 'user.name', name])
+      this.git(['config', 'user.email', this.email])
     }
-    this.git(['config', 'user.name', name])
-    this.git(['config', 'user.email', this.email])
 
     const askPass = path.join(world.root, 'askpass.sh')
     if (!fs.existsSync(askPass)) fs.writeFileSync(askPass, '#!/bin/sh\necho "$GIT_TOKEN"\n', { mode: 0o755 })
@@ -530,6 +543,7 @@ export class Member {
         binary: 'git',
         askPassPath: askPass,
         token: '',
+        appGitDir: world.appGitDir,
         baseEnv: world.env(),
         envOverrides: {
           // What git-http.ts sets for the hook from the authenticated session.
@@ -564,8 +578,15 @@ export class Member {
 
   /** The app's first setup with these departments picked (sync/first-setup.ts). */
   async setupPartial(selected: string[]): Promise<void> {
+    // What git:setupCompanyRemote does before the first setup, with the
+    // app's git: an empty repository with origin and the member's identity.
+    const git = this.createGit(this.dir)
+    await git.raw(['init', '-q', '-b', 'main'])
+    await git.addRemote('origin', this.remoteUrl)
+    await git.addConfig('user.name', this.name, false, 'local')
+    await git.addConfig('user.email', this.email, false, 'local')
     await checkoutSelectedDepartments({
-      git: this.createGit(this.dir),
+      git,
       repoPath: this.dir,
       branch: 'main',
       departments: this.world.departments,

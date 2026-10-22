@@ -275,16 +275,31 @@ export const SECRET_PATTERNS: ReadonlyArray<{ name: string; re: RegExp }> = [
  *
  * Only added lines ("+...") are scanned; file names come from the "+++ b/"
  * headers (a trailing tab that git adds to names with spaces is removed;
- * quoted names stay quoted) and are never scanned themselves.
+ * quoted names stay quoted) and are never scanned themselves. Combined diffs
+ * of merge commits (`diff --cc` / `diff --combined`, N marker columns) count
+ * a line only when it is added relative to every parent ("++"): content the
+ * merge brings in from one side is that side's commit's business — new
+ * commits are scanned on their own, and the server's are already there.
+ * Several diffs can be fed to one scanner; entries stay deduplicated.
  * - 'line': each added line counts for the first pattern it matches; one
- *   entry per file × pattern, in diff order (existing branches: old..new);
+ *   entry per file × pattern, in diff order (existing branches: the net
+ *   old..new diff, then every new commit's own diff);
  * - 'file': one entry per file, with the lowest-numbered pattern found
  *   anywhere in it, files in order of their first hit (new branches: the
  *   whole content of the files the tip commit changed).
  */
+/** "@@ ..." → 1, "@@@ ..." (combined diff, two parents) → 2, … */
+function hunkColumns(line: string): number {
+  let n = 0
+  while (line.charCodeAt(n) === 64 /* @ */) n++
+  return Math.max(1, n - 1)
+}
+
 export class SecretScanner {
   private header = false
   private file = ''
+  /** Marker columns of the current hunk: 1, or the parent count of a combined diff. */
+  private columns = 1
   private readonly seen = new Set<string>()
   private readonly lineEntries: string[] = []
   private readonly fileOrder: string[] = []
@@ -293,9 +308,10 @@ export class SecretScanner {
   constructor(private readonly mode: 'line' | 'file') {}
 
   push(line: string): void {
-    if (line.startsWith('diff --git ')) {
+    if (line.startsWith('diff --git ') || line.startsWith('diff --cc ') || line.startsWith('diff --combined ')) {
       this.header = true
       this.file = ''
+      this.columns = 1
       return
     }
     if (this.header) {
@@ -307,11 +323,18 @@ export class SecretScanner {
           if (p.endsWith('\t')) p = p.slice(0, -1)
           this.file = p
         }
-      } else if (line.startsWith('@@')) this.header = false
+      } else if (line.startsWith('@@')) {
+        this.header = false
+        this.columns = hunkColumns(line)
+      }
       return
     }
-    if (!line.startsWith('+')) return
-    const content = line.slice(1)
+    if (line.startsWith('@@')) {
+      this.columns = hunkColumns(line)
+      return
+    }
+    for (let c = 0; c < this.columns; c++) if (line.charCodeAt(c) !== 43 /* + */) return
+    const content = line.slice(this.columns)
     let best = -1
     for (let i = 0; i < SECRET_PATTERNS.length; i++) {
       if (SECRET_PATTERNS[i].re.test(content)) { best = i; break }

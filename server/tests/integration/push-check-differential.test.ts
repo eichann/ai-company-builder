@@ -195,6 +195,31 @@ function attempt(repo: Repo, a: Attempt, envs = ROLE_ENVS): void {
   }
 }
 
+/**
+ * The one intended difference from the legacy hook: the secret scan also
+ * reads every commit new to the server, not only the net <old>..<new> diff.
+ * A secret added in one commit and removed in a later one passed the legacy
+ * hook (and the intermediate commit landed in shared history); the push
+ * checker rejects it, naming the file. Everything else about the attempt —
+ * other sections, other refs — must still match, so the expected output is
+ * the legacy output with that SECRET_DETECTED section added. Never applied.
+ */
+function attemptSecretOnlyInIntermediateCommit(repo: Repo, a: Attempt, expectedEntries: string[]): void {
+  const stdin = a.updates.map(([ref, sha]) => `${repo.ref(ref)} ${sha} ${ref}\n`).join('')
+  for (const { label, env } of ROLE_ENVS) {
+    const legacy = runHook(legacyHook, repo.bare, stdin, env)
+    const next = runHook(newHook, repo.bare, stdin, env)
+    const what = `${a.label} [${label}]`
+    expect({ what, status: legacy.status, secret: legacy.stderr.includes('[SECRET_DETECTED]') }).toEqual({ what, status: 0, secret: false })
+    expect({ what, status: next.status }).toEqual({ what, status: 1 })
+    expect(next.stdout).toBe(legacy.stdout)
+    const entries = next.stderr.split('\n').filter(l => l.startsWith('  - ')).map(l => l.slice(4).trimEnd())
+    expect({ what, entries }).toEqual({ what, entries: expectedEntries })
+    expect(next.stderr).toContain('[SECRET_DETECTED]')
+    compared++
+  }
+}
+
 function tree(base: Tree, changes: Record<string, Entry | null>): Tree {
   const t = new Map(base)
   for (const [k, v] of Object.entries(changes)) {
@@ -368,6 +393,13 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
     const nb1 = repo.commit(tree(base, { 'n1.md': `${PAT}\n` }), [c0])
     const nb2 = repo.commit(tree(base, { 'n1.md': `${PAT}\n`, 'n2.md': `x\n${AWS}\n${PEM}\n`, 'n3.md': `${SK}\n${AWS}\n`, '開発部/設定.md': `${SK}\n`, 'old.txt': `${AWS}\nkeep\n!\n` }), [nb1])
     attempt(repo, { label: 'new branch: whole content of the tip commit files', updates: [['refs/heads/feature', nb2]] })
+
+    // Intended difference (see attemptSecretOnlyInIntermediateCommit):
+    // added in one commit, removed in the next — the net diff is clean.
+    const added = repo.commit(tree(base, { 'edit.txt': `one\n${PAT}\ntwo\n`, 'tmp.md': `${AWS}\n` }), [c0])
+    const removed = repo.commit(tree(base, { 'edit.txt': 'one\nthree\ntwo\n' }), [added])
+    attemptSecretOnlyInIntermediateCommit(repo, { label: 'secret added then removed in a later commit', updates: [['refs/heads/main', removed]] },
+      ['edit.txt (GitHub Personal Access Token)', 'tmp.md (AWS Access Key ID)'])
 
     const merge = repo.commit(tree(base, { 'm.md': `${AWS}\n` }), [c0, nb1])
     attempt(repo, { label: 'new branch whose tip is a merge (not scanned, as before)', updates: [['refs/heads/merged', merge]] })

@@ -465,18 +465,77 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
-  test('secret detected: rejected, then removing the secret lets the next sync through', async t => {
+  // The server scans every commit of a push for secrets, not only the net
+  // diff: a removed secret still blocks the push through the commit that
+  // added it, so sync squashes the unpushed commits and pushes once more.
+  const serverHasSecret = (world: World) => world.serverTexts().some(t => t.includes(FAKE_AWS_KEY))
+
+  test('secret detected: rejected (no PENDING_PUSH), then removing it lets the next sync through — the secret never reaches the server', async t => {
     const world = World.create(t, { members: [{ name: 'a' }] })
     const [a] = world.members
-    a.write('config/aws.md', `key: ${FAKE_AWS_KEY}\n`)
+    a.write('config/aws.md', `key: ${FAKE_AWS_KEY}\n`).write('notes.md', 'kept\n')
     const rejected = await a.sync()
     assert.equal(rejected.result.secretDetected, true)
+    assert.match(rejected.result.error ?? '', /config\/aws\.md \(AWS Access Key ID\)/)
+    assert.equal(a.hasPendingPush(), false, 'never PENDING_PUSH for a secret rejection')
+    // Pressing sync again without removing it: the same clear failure, nothing pushed.
+    const again = await a.sync()
+    assert.equal(again.result.secretDetected, true)
+    assert.equal(serverHasSecret(world), false)
+
     a.write('config/aws.md', 'key: (see the vault)\n')
-    ok(await a.sync(), 'a')
+    const out = ok(await a.sync(), 'a')
+    assert.match(out.result.message ?? '', /シークレットは共有されていません/)
     assert.equal(world.serverFile('config/aws.md')?.toString(), 'key: (see the vault)\n')
-    // The rejected version stays only in the member's local history.
-    a.obligations.delete('config/aws.md')
+    assert.equal(world.serverFile('notes.md')?.toString(), 'kept\n')
+    assert.equal(serverHasSecret(world), false, 'the commit that added the secret was pushed')
     await settleAndCheck(world)
+    assert.equal(serverHasSecret(world), false)
+  })
+
+  test('secret added and removed again before the push: the commits are squashed, the secret never reaches the server', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    // Committed while offline (PENDING_PUSH), removed before the next sync.
+    a.offline().write('config/aws.md', `key: ${FAKE_AWS_KEY}\n`).write('x.md', 'a\n')
+    assert.equal((await a.sync()).result.errorType, 'push_failed')
+    a.write('config/aws.md', 'key: (see the vault)\n')
+    b.write('b.md', 'b\n')
+    ok(await b.sync(), 'b')
+    a.online()
+    ok(await a.sync(), 'a')
+    assert.equal(a.hasPendingPush(), false)
+    assert.equal(world.serverFile('config/aws.md')?.toString(), 'key: (see the vault)\n')
+    assert.equal(world.serverFile('x.md')?.toString(), 'a\n')
+    assert.equal(serverHasSecret(world), false)
+    await settleAndCheck(world)
+    assert.equal(serverHasSecret(world), false)
+  })
+
+  test('secret removed again, and a teammate pushes right before the squashed push: retried by the next sync', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { 'x.md': '0\n' } })
+    const [a, b] = world.members
+    a.offline().write('config/aws.md', `key: ${FAKE_AWS_KEY}\n`)
+    assert.equal((await a.sync()).result.errorType, 'push_failed')
+    a.write('config/aws.md', 'key: (see the vault)\n').write('a.md', 'a\n')
+    a.online()
+    // Pushes of this sync: the PENDING_PUSH retry and the main push are
+    // refused for the secret; the teammate lands right before the third,
+    // the squashed push, which is then not a fast-forward.
+    a.beforeNextPush(() => {}).beforeNextPush(() => {}).beforeNextPush(async () => {
+      b.write('x.md', 'b\n')
+      ok(await b.sync(), 'b')
+    })
+    const out = await a.sync()
+    assert.equal(out.result.errorType, 'push_failed', JSON.stringify(out.result))
+    assert.equal(a.hasPendingPush(), true)
+    assert.equal(serverHasSecret(world), false)
+    ok(await a.sync(), 'a')
+    assert.equal(world.serverFile('a.md')?.toString(), 'a\n')
+    assert.equal(world.serverFile('x.md')?.toString(), 'b\n')
+    assert.equal(serverHasSecret(world), false)
+    await settleAndCheck(world)
+    assert.equal(serverHasSecret(world), false)
   })
 
   test('deleted files: restore, cancel and sync-deletions; department folders are protected', async t => {
