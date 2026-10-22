@@ -5,7 +5,8 @@
  *
  *   GET /tree?path=&depth=                          entries of a folder (depth 1–10)
  *   GET /content?path=&offset=&limit=&maxBytes=     text of a file, by lines
- *   GET /search?q=&path=&regex=&caseSensitive=&limit=   git grep of main
+ *   GET /search?q=&path=&regex=&caseSensitive=&limit=&includePrivate=   git grep of main
+ *       (the private folders below `path` only with includePrivate=true)
  *
  * Any member of the company. Everything is filtered by READ permission
  * (resolveAccess); a private folder the member cannot read answers exactly
@@ -102,11 +103,12 @@ companyFilesRoute.get('/search', async (c) => {
   }
   const regex = boolParam(c.req.query('regex'))
   const caseSensitive = boolParam(c.req.query('caseSensitive'))
+  const includePrivate = boolParam(c.req.query('includePrivate'))
   const limit = intParam(c.req.query('limit'), LIMITS.searchDefaultMatches, 1, LIMITS.searchMaxMatches)
-  if (regex === null || caseSensitive === null || limit === null) return invalid(c, 'INVALID_QUERY', 'Invalid regex, caseSensitive or limit')
+  if (regex === null || caseSensitive === null || includePrivate === null || limit === null) return invalid(c, 'INVALID_QUERY', 'Invalid regex, caseSensitive, includePrivate or limit')
   try {
     return await withSearchSlot(m.companyId, () =>
-      respond(c, m, view => searchFiles(view, segments, { query, regex, caseSensitive, limit })))
+      respond(c, m, view => searchFiles(view, segments, { query, regex, caseSensitive, limit, includePrivate })))
   } catch (error) {
     if (error instanceof CompanyFilesError) return c.json({ error: error.message, code: error.code }, error.status)
     throw error

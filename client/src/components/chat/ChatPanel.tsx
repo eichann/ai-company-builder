@@ -201,6 +201,8 @@ interface ToolApprovalRequest {
   toolUseId: string
   toolName: string
   toolInput: Record<string, unknown>
+  /** Why the app asks (e.g. private content read in this conversation). */
+  reason?: string
 }
 
 function ToolApprovalBanner({
@@ -215,8 +217,9 @@ function ToolApprovalBanner({
   const displayName = getToolDisplayName(request.toolName) || request.toolName
   let inputSummary = ''
   if (request.toolInput) {
-    if (request.toolInput.command) inputSummary = String(request.toolInput.command)
-    else if (request.toolInput.path) inputSummary = String(request.toolInput.path)
+    const input = request.toolInput
+    const first = [input.command, input.file_path, input.notebook_path, input.path, input.url, input.query].find(v => typeof v === 'string' && v)
+    if (first) inputSummary = String(first)
   }
 
   return (
@@ -227,6 +230,11 @@ function ToolApprovalBanner({
           <div className="text-sm font-medium text-amber-300 mb-1">
             {t('chat.toolApprovalTitle')}
           </div>
+          {request.reason && (
+            <div className="text-xs text-amber-700 dark:text-amber-200 mb-1 whitespace-pre-wrap">
+              {request.reason}
+            </div>
+          )}
           <div className="text-xs text-gray-600 dark:text-zinc-300 font-medium">
             {displayName}
           </div>

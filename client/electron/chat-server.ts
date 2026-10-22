@@ -22,6 +22,7 @@ import { createApiConnection } from './agents/anthropic-api'
 import type { ClaudeConnectionConfig } from './agents/claude'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
+import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -201,10 +202,30 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authenticationError) return c.json({ error: authenticationError }, 401)
     const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
-    const companyFiles = connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
-    if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard }
+    // What this conversation has read from private folders (private-read-guard.ts).
+    // Kept per conversation across turns; a conversation the app no longer
+    // remembers (restart, reopened from history) is re-marked from its visible tool calls.
+    const privateContext: PrivateReadContext | undefined = writeGuard ? { root: writeGuard.root, getPrivateFolders: () => writeGuard.getPrivateFolders?.() } : undefined
+    const privateState = appSessionId ? privateReadStateFor(appSessionId) : createPrivateReadState()
+    if (!privateState.seeded) {
+      privateState.seeded = true
+      try { seedFromMessages(privateContext, privateState, messages, workingDirectory) } catch { /* best effort */ }
+    }
+    const createdCompanyFiles = connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
+    const companyFiles = createdCompanyFiles && {
+      ...createdCompanyFiles,
+      tools: {
+        async execute(name: string, input: unknown) {
+          const output = await createdCompanyFiles.tools.execute(name, input)
+          noteCompanyFileResult(privateState, name, output)
+          return output
+        },
+      },
+    }
+    if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
+    const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -428,6 +449,7 @@ ${transcript}
   app.delete('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const deleted = agentSessionMap.delete(id)
+    forgetPrivateReads(id)
     // Clean up per-session usage tracking
     sessionUsageMap.delete(id)
     console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)

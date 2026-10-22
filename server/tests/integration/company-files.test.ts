@@ -302,7 +302,7 @@ describe('search', () => {
   })
 
   it('a reader also finds private matches; a non-reader finds nothing of them, even inside them', async () => {
-    const r = await get('u-viewer', CO, 'search', { q: '共通キーワード' })
+    const r = await get('u-viewer', CO, 'search', { q: '共通キーワード', includePrivate: 'true' })
     const paths = r.body.data.matches.map((m: Loose) => m.path)
     expect(paths).toEqual(expect.arrayContaining(['人事/評価/査定.md', '役員/会議/議事録.md']))
     expect(r.body.data.privateFolders).toEqual({ '人事/評価': hrCommit, '役員/会議': execCommit })
@@ -316,8 +316,25 @@ describe('search', () => {
       expect(hidden.status).toBe(404)
       expect(hidden.body).toEqual(missing.body)
     }
-    const scoped = await get('u-viewer', CO, 'search', { q: '給与', path: '人事' })
+    const scoped = await get('u-viewer', CO, 'search', { q: '給与', path: '人事', includePrivate: 'true' })
     expect(scoped.body.data.matches).toEqual([{ path: '人事/評価/査定.md', line: 1, text: '査定: 共通キーワード 給与テーブル' }])
+  })
+
+  it('leaves private folders out unless includePrivate is set — for owners too; a path inside one is explicit', async () => {
+    for (const user of ['u-owner', 'u-viewer']) {
+      const plain = await get(user, CO, 'search', { q: '共通キーワード' })
+      expect(plain.status).toBe(200)
+      expect(plain.body.data.privateFolders).toBeUndefined()
+      expect(plain.body.data.matches.map((m: Loose) => m.path).filter((p: string) => p.startsWith('人事/評価') || p.startsWith('役員/会議'))).toEqual([])
+      const opted = await get(user, CO, 'search', { q: '共通キーワード', includePrivate: 'true' })
+      expect(opted.body.data.privateFolders).toEqual({ '人事/評価': hrCommit, '役員/会議': execCommit })
+      const below = await get(user, CO, 'search', { q: '給与', path: '人事' })
+      expect(below.body.data.matches).toEqual([])
+      const inside = await get(user, CO, 'search', { q: '給与', path: '人事/評価' })
+      expect(inside.body.data.matches).toEqual([{ path: '人事/評価/査定.md', line: 1, text: '査定: 共通キーワード 給与テーブル' }])
+      expect(inside.body.data.privateFolders).toEqual({ '人事/評価': hrCommit })
+    }
+    expect((await get('u-owner', CO, 'search', { q: 'x', includePrivate: 'maybe' })).status).toBe(400)
   })
 
   it('a path limits the search; case-insensitive by default, sensitive on request; regex', async () => {

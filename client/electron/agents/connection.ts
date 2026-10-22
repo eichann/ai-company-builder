@@ -3,6 +3,7 @@ import type { CompanyFileTools } from '../company-files/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
+import type { PrivateReadContext, PrivateReadState } from '../private-read-guard'
 
 /** The Vercel model interface remains the streaming boundary; no second agent loop. */
 export interface AgentConnection {
@@ -21,6 +22,8 @@ export interface AgentConnection {
     resumeId?: string
     /** Refuse edits to read-only folders before they happen (write-guard.ts). */
     writeGuard?: WriteGuard
+    /** What this conversation read from private folders, and where they are (private-read-guard.ts). */
+    privateReads?: { context: PrivateReadContext; state: PrivateReadState }
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {
@@ -37,5 +40,7 @@ export interface AgentHostConfig {
     toolInput: Record<string, unknown>,
     toolUseId: string,
     appSessionId?: string,
+    /** Why the app asks (shown to the member), when it is not the tool's own risk. */
+    reason?: string,
   ) => Promise<{ approved: boolean }>
 }
