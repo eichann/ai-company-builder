@@ -1445,6 +1445,12 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   }, [setPendingChatInput])
 
   const [interactions, setInteractions] = useState<AgentInteractionRequest[]>([])
+  // App session ID ref (for Claude CLI session resume). Declared before the
+  // interaction lookup below, which reads it during render: declared later, the
+  // first agent question (AskUserQuestion / ask_user / Codex approval) hit the
+  // temporal dead zone and crashed the window.
+  // Eagerly assigned on first message send so the server can track the CLI session from the start
+  const appSessionIdRef = useRef<string | null>(initialSessionId || crypto.randomUUID())
   const currentInteraction = interactions.find(item => item.appSessionId === appSessionIdRef.current)
   useEffect(() => {
     let active = true
@@ -1536,9 +1542,6 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
   const pendingDisplayFilePathsRef = useRef<string[]>([])
 
-  // App session ID ref (for Claude CLI session resume)
-  // Eagerly assigned on first message send so the server can track the CLI session from the start
-  const appSessionIdRef = useRef<string | null>(initialSessionId || crypto.randomUUID())
   const lastNotifiedTitleRef = useRef<string | null>(null)
   // Claude CLI session ID (persisted across app restarts via ChatSession)
   const claudeSessionIdRef = useRef<string | null>(null)
