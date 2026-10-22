@@ -76,8 +76,7 @@ const DEFAULT_CLI_MODEL = 'claude-opus-5-5[1m]'
 // 2. The CLI knows `auto` but this account / plan / model / settings cannot use
 //    it: the CLI itself runs in 'default'. The init message is not reliable for
 //    this (it can still say 'auto'); the PreToolUse hook's permission_mode is.
-// ai-sdk-provider-claude-code 3.4.2 only accepts `auto` through
-// patches/ai-sdk-provider-claude-code@3.4.2.patch (drop it with the AI SDK major upgrade).
+// ai-sdk-provider-claude-code accepts `auto` natively since 3.5 (no patch).
 const AUTO_REJECTED = /--permission-mode[^\n]*'auto' is invalid/
 const autoUnsupportedClis = new Set<string>()
 const notifiedConversations = new Set<string>()
@@ -330,10 +329,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           streamingInput: 'always',
           ...(allowedTools.length > 0 ? { mcpServers, allowedTools } : {}),
           ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
-          // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
-          // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the
-          // CLI via `--effort`, so we cast to bypass the stale SDK type.
-          ...(resolvedEffort ? { sdkOptions: { effort: resolvedEffort as 'low' | 'medium' | 'high' | 'max' } } : {}),
+          // Passed straight to the CLI as `--effort` (xhigh needs CLI v2.1.111+).
+          ...(resolvedEffort ? { sdkOptions: { effort: resolvedEffort } } : {}),
           // Custom spawn to avoid EBADF in Electron's main process.
           //
           // Problem: Electron's main process has many open FDs from Chromium

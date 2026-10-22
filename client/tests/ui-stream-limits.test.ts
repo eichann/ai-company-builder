@@ -19,7 +19,7 @@ function fakeBase64(bytes: number): string {
   return out
 }
 
-/** Exactly what ai-sdk-provider-claude-code 3.4.2 emits for a `Read` of a page JPG. */
+/** Exactly what ai-sdk-provider-claude-code (3.4.2 through 3.6.1, unchanged) emits for a `Read` of a page JPG. */
 function claudeImageReadResult(bytes = 390 * 1024) {
   return [{ type: 'image', source: { type: 'base64', data: fakeBase64(bytes), media_type: 'image/jpeg' } }]
 }
