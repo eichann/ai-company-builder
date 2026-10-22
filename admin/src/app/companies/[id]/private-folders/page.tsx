@@ -5,6 +5,8 @@ import { DotsThree, Eye, Info, LockSimple, MagnifyingGlass, PencilSimple, Plus, 
 
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { CreatePrivateFolderDialog } from '@/components/private-folders/create-dialog'
+import { DeletePrivateFolderDialog } from '@/components/private-folders/delete-dialog'
+import { PrivateFolderHelpButton } from '@/components/private-folders/help-dialog'
 import { MakePublicDialog } from '@/components/private-folders/make-public-dialog'
 import { PrivateFolderMembersDialog } from '@/components/private-folders/members-dialog'
 import { Button } from '@/components/ui/button'
@@ -13,6 +15,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
 import { Input } from '@/components/ui/input'
@@ -34,6 +37,7 @@ export default function PrivateFoldersPage() {
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
   const [publishing, setPublishing] = useState<PrivateFolderSummary | null>(null)
+  const [deleting, setDeleting] = useState<PrivateFolderSummary | null>(null)
   const [query, setQuery] = useState('')
 
   const depts = useMemo(() => departments.data ?? [], [departments.data])
@@ -57,7 +61,12 @@ export default function PrivateFoldersPage() {
       <PageHeader
         title="非公開フォルダ"
         description="選んだ人だけに届くフォルダです。見られない人の手元には、名前も中身も届きません。"
-        actions={createButton}
+        actions={
+          <>
+            <PrivateFolderHelpButton />
+            {createButton}
+          </>
+        }
       />
 
       <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
@@ -142,6 +151,10 @@ export default function PrivateFoldersPage() {
                           <DropdownMenuItem variant="destructive" onSelect={() => setPublishing(f)}>
                             公開に戻す…
                           </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem variant="destructive" onSelect={() => setDeleting(f)}>
+                            削除…
+                          </DropdownMenuItem>
                         </DropdownMenuContent>
                       </DropdownMenu>
                     )}
@@ -173,6 +186,12 @@ export default function PrivateFoldersPage() {
         folder={publishing}
         label={publishing ? label(publishing.path) : ''}
         onOpenChange={(o) => !o && setPublishing(null)}
+        onDone={() => folders.reload()}
+      />
+      <DeletePrivateFolderDialog
+        folder={deleting}
+        label={deleting ? label(deleting.path) : ''}
+        onOpenChange={(o) => !o && setDeleting(null)}
         onDone={() => folders.reload()}
       />
     </>

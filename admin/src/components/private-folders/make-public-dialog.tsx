@@ -36,10 +36,12 @@ export function MakePublicDialog({
       description={
         <div className="space-y-2">
           <p>
-            <strong className="font-medium text-foreground">このフォルダの中身が、会社の全員に届きます。</strong>
-            次に同期したときに、全員の手元に配られます。
+            <strong className="font-medium text-foreground">このフォルダの中身がすべて、会社の全員に届きます。取り消せません。</strong>
+            次に同期したときに、全員のPCに配られます。一度配られた中身は全員のPCに残るため、あとから非公開のフォルダを作り直しても戻せません。
           </p>
-          <p>一度配られた中身は全員の手元に残るため、あとから非公開に戻しても取り消せません。</p>
+          <p>
+            配られるのはいまの中身だけです。非公開だったあいだの変更の履歴はサーバーに控えとして保管され、誰にも配られません。
+          </p>
           <p>編集できる人は変わりません（閲覧だけが全員に広がります）。</p>
         </div>
       }

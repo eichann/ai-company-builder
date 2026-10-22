@@ -4,15 +4,23 @@
 import type { ReactNode } from 'react'
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
 import PermissionsPage from '@/app/companies/[id]/permissions/page'
 import PrivateFoldersPage from '@/app/companies/[id]/private-folders/page'
 import type { PermissionScope, PrivateFolderDetail, PrivateFolderSummary } from '@/lib/api'
+import {
+  MANAGERS_MAY_CHANGE_VIEWERS,
+  PRIVATE_FOLDER_HELP,
+  PRIVATE_FOLDER_HELP_TITLE,
+  REMOVED_VIEWER_CAVEAT,
+} from '@/lib/private-folder-help'
 import { audienceCounts, audienceFromDetail, audienceRequest, defaultViewers, displayPath } from '@/lib/private-folders'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { COMPANY_ID, departments, effectiveAt, managerCapabilities, members, ok, permissionScopes } from './fixtures'
 import { mockApi, type Call } from './mock-api'
+import * as clientHelp from '../../client/shared/private-folder-help'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -225,12 +233,104 @@ describe('非公開フォルダ: 公開に戻す', () => {
     await userEvent.click(await screen.findByRole('button', { name: '人事部 / 評価 のその他の操作' }))
     await userEvent.click(await screen.findByRole('menuitem', { name: '公開に戻す…' }))
     const dialog = await screen.findByRole('dialog')
-    expect(dialog).toHaveTextContent('このフォルダの中身が、会社の全員に届きます。')
+    expect(dialog).toHaveTextContent('このフォルダの中身がすべて、会社の全員に届きます。取り消せません。')
+    expect(dialog).toHaveTextContent('非公開だったあいだの変更の履歴はサーバーに控えとして保管され、誰にも配られません。')
     const confirm = within(dialog).getByRole('button', { name: '公開に戻す' })
     expect(confirm).toBeDisabled()
     await userEvent.type(within(dialog).getByRole('textbox'), '評価')
     await userEvent.click(confirm)
     await waitFor(() => expect(posted(api.calls, '/make-public')).toHaveLength(1))
+  })
+})
+
+describe('非公開フォルダ: 削除', () => {
+  it('asks for the folder name, explains the archive, sends DELETE and reloads the list', async () => {
+    const success = vi.spyOn(toast, 'success')
+    let listed = [evaluation]
+    const api = mockApi(
+      routes({
+        [`GET ${base}/private-folders`]: () => ({ body: ok(listed) }),
+        [`DELETE ${base}/private-folders/s_eval?confirm=評価`]: () => {
+          listed = []
+          return { body: ok({ path: '人事部/評価', archived: true }) }
+        },
+      })
+    )
+    renderInCompany(<PrivateFoldersPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '人事部 / 評価 のその他の操作' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '削除…' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(dialog).toHaveTextContent('このフォルダとその中身が、見られる人全員のPCから消えます。')
+    expect(dialog).toHaveTextContent('サーバーには控え（アーカイブ）が残り')
+    const confirm = within(dialog).getByRole('button', { name: '削除' })
+    expect(confirm).toBeDisabled()
+    await userEvent.type(within(dialog).getByRole('textbox'), '評価')
+    await userEvent.click(confirm)
+    await waitFor(() => expect(api.calls.filter((c) => c.method === 'DELETE')).toHaveLength(1))
+    await waitFor(() => expect(success).toHaveBeenCalledWith('「人事部 / 評価」を削除しました', expect.anything()))
+    expect(await screen.findByText('非公開フォルダはまだありません')).toBeInTheDocument()
+  })
+
+  it('keeps the dialog open and says what to do when the server refuses', async () => {
+    const error = vi.spyOn(toast, 'error')
+    mockApi(
+      routes({
+        [`DELETE ${base}/private-folders/s_eval?confirm=評価`]: {
+          status: 503,
+          body: { error: 'A push to this folder is still running; try again in a moment', code: 'BUSY' },
+        },
+      })
+    )
+    renderInCompany(<PrivateFoldersPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '人事部 / 評価 のその他の操作' }))
+    await userEvent.click(await screen.findByRole('menuitem', { name: '削除…' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByRole('textbox'), '評価')
+    await userEvent.click(within(dialog).getByRole('button', { name: '削除' }))
+    await waitFor(() =>
+      expect(error).toHaveBeenCalledWith('削除できませんでした', {
+        description: 'いま誰かがこのフォルダを同期しています。少し待ってからもう一度お試しください。',
+      })
+    )
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('is not offered to department managers', async () => {
+    mockApi(routes({}, companyRoutes(managerCapabilities)))
+    renderInCompany(<PrivateFoldersPage />)
+    await screen.findByRole('list', { name: '非公開フォルダ' })
+    expect(screen.queryByRole('button', { name: /のその他の操作/ })).not.toBeInTheDocument()
+    expect(screen.queryByRole('menuitem', { name: '削除…' })).not.toBeInTheDocument()
+  })
+})
+
+describe('非公開フォルダ: 非公開フォルダについて', () => {
+  it('opens the help from the page header with every point', async () => {
+    mockApi(routes())
+    renderInCompany(<PrivateFoldersPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '非公開フォルダについて' }))
+    const dialog = await screen.findByRole('dialog', { name: '非公開フォルダについて' })
+    const items = within(dialog).getAllByRole('listitem')
+    expect(items).toHaveLength(PRIVATE_FOLDER_HELP.length)
+    expect(dialog).toHaveTextContent('パスワードやAPIキーは、非公開フォルダにも置かないでください。')
+    expect(dialog).toHaveTextContent('AIに送った内容は、各自のAIサービスのアカウントにも送られます。')
+  })
+
+  it('is linked from the create dialog, which says who else can see and manage the folder', async () => {
+    mockApi(routes())
+    renderInCompany(<PrivateFoldersPage />)
+    const dialog = await openCreateAndPickSales()
+    expect(dialog).toHaveTextContent('オーナーと管理者は常に見られます。')
+    expect(dialog).toHaveTextContent('この部署の責任者は、見られる人をあとから変更でき、自分を加えることもできます。')
+    await userEvent.click(within(dialog).getByRole('button', { name: '非公開フォルダについて' }))
+    expect(await screen.findByRole('dialog', { name: '非公開フォルダについて' })).toBeInTheDocument()
+  })
+
+  it('is the same text as the desktop app (client/shared/private-folder-help.ts)', () => {
+    expect(clientHelp.PRIVATE_FOLDER_HELP).toEqual(PRIVATE_FOLDER_HELP)
+    expect(clientHelp.PRIVATE_FOLDER_HELP_TITLE).toBe(PRIVATE_FOLDER_HELP_TITLE)
+    expect(clientHelp.REMOVED_VIEWER_CAVEAT).toBe(REMOVED_VIEWER_CAVEAT)
+    expect(clientHelp.MANAGERS_MAY_CHANGE_VIEWERS).toBe(MANAGERS_MAY_CHANGE_VIEWERS)
   })
 })
 
@@ -241,7 +341,9 @@ describe('非公開フォルダ: 見られる人を変更', () => {
     await userEvent.click(await screen.findByRole('button', { name: '見られる人' }))
     const dialog = await screen.findByRole('dialog')
     await userEvent.click(await within(dialog).findByRole('button', { name: '田中 太郎を外す' }))
-    expect(within(dialog).getByText(/田中 太郎の手元からは、次の同期でこのフォルダが削除されます/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/田中 太郎の手元からは、次の同期でこのフォルダが削除されます/)).toHaveTextContent(
+      'ただし、それまでにその人のPCに届いた内容（コピー、バックアップ、AIとの会話の記録）は取り消せません。'
+    )
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(api.calls.some((c) => c.method === 'PUT' && c.url.endsWith('/members'))).toBe(true))
     expect(api.calls.find((c) => c.method === 'PUT')?.body).toEqual({ viewers: [] })

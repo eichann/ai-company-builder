@@ -5,6 +5,7 @@ import { toast } from 'sonner'
 import { Warning } from '@phosphor-icons/react'
 
 import { AudienceFields } from '@/components/private-folders/audience-fields'
+import { PrivateFolderHelpButton } from '@/components/private-folders/help-dialog'
 import { ErrorState } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
@@ -12,6 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { departmentsApi, privateFoldersApi, type Department, type Member, type PrivateFolderDetail } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
 import { describeError } from '@/lib/errors'
+import { REMOVED_VIEWER_CAVEAT } from '@/lib/private-folder-help'
 import { audienceFromDetail, audienceRequest, departmentOfPath, displayPath, sameAudience, type Audience } from '@/lib/private-folders'
 import { useQuery } from '@/lib/use-query'
 
@@ -89,7 +91,8 @@ function MembersForm({
       const req = audienceRequest(audience)
       const folder = await privateFoldersApi.updateMembers(companyId, scopeId, req.viewers, req.editors)
       toast.success('見られる人を更新しました', {
-        description: removed.length > 0 ? '外した人の手元からは、次の同期でこのフォルダが削除されます。' : '次の同期から反映されます。',
+        description:
+          removed.length > 0 ? `外した人の手元からは、次の同期でこのフォルダが削除されます。${REMOVED_VIEWER_CAVEAT}` : '次の同期から反映されます。',
       })
       onSaved(folder)
     } catch (err) {
@@ -121,20 +124,24 @@ function MembersForm({
             value={audience}
             onChange={setEdited}
             disabled={busy}
+            inDepartment={!!department}
           />
           {removed.length > 0 && (
             <p className="flex gap-2 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-xs">
               <Warning size={16} className="mt-px shrink-0 text-warning" aria-hidden="true" />
               <span>
                 {removed.map(nameOf).join('、')}
-                の手元からは、次の同期でこのフォルダが削除されます。同期していない変更も一緒に消えます。
+                の手元からは、次の同期でこのフォルダが削除されます。同期していない変更も一緒に消えます。{REMOVED_VIEWER_CAVEAT}
               </span>
             </p>
           )}
         </>
       )}
 
-      <DialogFooter>
+      <DialogFooter className="sm:items-center">
+        <div className="mr-auto">
+          <PrivateFolderHelpButton variant="link" />
+        </div>
         <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
           キャンセル
         </Button>

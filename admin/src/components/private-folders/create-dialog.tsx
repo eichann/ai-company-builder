@@ -4,6 +4,7 @@ import { useId, useMemo, useState } from 'react'
 import { toast } from 'sonner'
 
 import { AudienceFields } from '@/components/private-folders/audience-fields'
+import { PrivateFolderHelpButton } from '@/components/private-folders/help-dialog'
 import { PlacePicker, type PlaceRoot } from '@/components/private-folders/place-picker'
 import {
   OutdatedClientsDialog,
@@ -150,7 +151,7 @@ function CreateForm({
       <DialogHeader>
         <DialogTitle>非公開フォルダを作成</DialogTitle>
         <DialogDescription>
-          選んだ人だけに届く、新しいフォルダを作ります。いまあるフォルダを非公開にはできないため、守りたいファイルは作成後にこのフォルダへ移してください。
+          選んだ人だけに届く、新しいフォルダを作ります。オーナーと管理者は常に見られます。部署の中に作ると、その部署の責任者が見られる人を変更でき、自分を加えることもできます。
         </DialogDescription>
       </DialogHeader>
 
@@ -192,9 +193,13 @@ function CreateForm({
         disabled={busy}
         lockedViewerId={user?.id}
         meId={user?.id}
+        inDepartment={!!department}
       />
 
-      <DialogFooter>
+      <DialogFooter className="sm:items-center">
+        <div className="mr-auto">
+          <PrivateFolderHelpButton variant="link" />
+        </div>
         <Button type="button" variant="outline" onClick={onCancel} disabled={busy}>
           キャンセル
         </Button>
