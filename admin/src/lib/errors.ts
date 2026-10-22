@@ -19,6 +19,7 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/^not a member of this company$/i, '選んだ人の中に、この会社のメンバーではない人がいます。ページを再読み込みしてから選び直してください。'],
   [/only owners and admins can make a private folder public/i, '公開に戻せるのは、オーナーと管理者だけです。'],
   [/only owners and admins can delete a private folder/i, '非公開フォルダを削除できるのは、オーナーと管理者だけです。'],
+  [/type the folder name to confirm the deletion/i, '確認のフォルダ名が一致しませんでした。ページを再読み込みしてから、もう一度フォルダ名を入力してください。'],
   [/a push to this folder is still running/i, 'いま誰かがこのフォルダを同期しています。少し待ってからもう一度お試しください。'],
   [/something already exists at this path in the company repository/i, '会社の共有フォルダの同じ場所に、すでにフォルダかファイルがあります。そちらの名前を変えてからやり直してください。'],
   [/the company repository kept changing/i, '共有フォルダが同期され続けていて完了できませんでした。少し待ってからもう一度お試しください。'],

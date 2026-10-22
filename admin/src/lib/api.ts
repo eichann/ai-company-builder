@@ -485,14 +485,16 @@ export const privateFoldersApi = {
   /**
    * 削除 (owner/admin): the folder disappears from its viewers' PCs at their
    * next sync; the server keeps an archive of its repository for the operator.
+   * `confirm` is the folder's name as typed (400 CONFIRMATION_REQUIRED otherwise).
    */
-  remove: (companyId: string, scopeId: string) =>
-    getData<DeletePrivateFolderResult>(`${privBase(companyId)}/${enc(scopeId)}`, { method: 'DELETE' }),
+  remove: (companyId: string, scopeId: string, confirm: string) =>
+    getData<DeletePrivateFolderResult>(`${privBase(companyId)}/${enc(scopeId)}?confirm=${enc(confirm)}`, { method: 'DELETE' }),
 }
 
-/** DELETE /private-folders/:scopeId — only `path` is relied on. */
+/** DELETE /private-folders/:scopeId?confirm=<name> (shared/types/private-folders.ts). */
 export interface DeletePrivateFolderResult {
   path: string
+  archived: true
 }
 
 // ---------------------------------------------------------------------------

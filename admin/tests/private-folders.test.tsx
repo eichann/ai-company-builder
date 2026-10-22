@@ -250,9 +250,9 @@ describe('非公開フォルダ: 削除', () => {
     const api = mockApi(
       routes({
         [`GET ${base}/private-folders`]: () => ({ body: ok(listed) }),
-        [`DELETE ${base}/private-folders/s_eval`]: () => {
+        [`DELETE ${base}/private-folders/s_eval?confirm=評価`]: () => {
           listed = []
-          return { body: ok({ path: '人事部/評価' }) }
+          return { body: ok({ path: '人事部/評価', archived: true }) }
         },
       })
     )
@@ -275,7 +275,7 @@ describe('非公開フォルダ: 削除', () => {
     const error = vi.spyOn(toast, 'error')
     mockApi(
       routes({
-        [`DELETE ${base}/private-folders/s_eval`]: {
+        [`DELETE ${base}/private-folders/s_eval?confirm=評価`]: {
           status: 503,
           body: { error: 'A push to this folder is still running; try again in a moment', code: 'BUSY' },
         },

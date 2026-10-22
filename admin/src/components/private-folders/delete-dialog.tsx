@@ -51,7 +51,7 @@ export function DeletePrivateFolderDialog({
       onConfirm={async () => {
         if (!folder) return
         try {
-          await privateFoldersApi.remove(companyId, folder.scopeId)
+          await privateFoldersApi.remove(companyId, folder.scopeId, name)
           toast.success(`「${label}」を削除しました`, {
             description: '見られる人のPCからは、次に同期したときに消えます。サーバーには控えが残っています。',
           })
