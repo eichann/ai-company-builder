@@ -1,12 +1,15 @@
 'use client'
 
 import { useMemo, useRef, useState } from 'react'
-import { Buildings, CaretDown, CaretRight, Folder, Info, LockSimple, ShieldCheck } from '@phosphor-icons/react'
+import { Buildings, CaretDown, CaretRight, Folder, Info, LockSimple, Plus, ShieldCheck } from '@phosphor-icons/react'
 
 import { DepartmentIcon } from '@/components/app/department-icon'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { OrphanedScopesCard } from '@/components/permissions/orphaned-scopes'
 import { ScopeEditor, type EditorNode } from '@/components/permissions/scope-editor'
+import { CreatePrivateFolderDialog } from '@/components/private-folders/create-dialog'
+import { PrivateFolderPanel } from '@/components/private-folders/private-folder-panel'
+import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
@@ -44,6 +47,8 @@ interface Node extends EditorNode {
   summary: EffectiveSummary
   /** Has rules, but the folder is gone from the server (orphanedScopes). */
   missing: boolean
+  /** The private folder at or above this place (its own repository), if any. */
+  privateRoot: PermissionScope | undefined
 }
 
 function depthOf(path: string): number {
@@ -59,6 +64,7 @@ export default function PermissionsPage() {
   /** Sub-folders picked in the editor that have no scope (yet). */
   const [extraPaths, setExtraPaths] = useState<string[]>([])
   const [selectedPath, setSelectedPath] = useState<string | null>(null)
+  const [creating, setCreating] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const treeRef = useRef<HTMLUListElement>(null)
 
@@ -75,6 +81,7 @@ export default function PermissionsPage() {
     const deptById = new Map((departments.data ?? []).map((d) => [d.id, d]))
     const deptByFolder = new Map((departments.data ?? []).map((d) => [d.folder.normalize('NFC'), d]))
     const scopePaths = scopes.map((s) => s.path)
+    const privateScopes = scopes.filter((s) => s.repoId)
     const paths = [...new Set([...scopePaths, ...extraPaths])].sort(compareScopePaths)
     // Managers receive only their departments' subtrees: indent from the top
     // of what was returned rather than from the company root.
@@ -100,6 +107,7 @@ export default function PermissionsPage() {
         hasChildren: !!next && isSameOrAncestorPath(path, next) && next !== path,
         summary: (scope ?? nearest)?.effectiveSummary ?? 'restricted',
         missing: missingPaths.has(path),
+        privateRoot: privateScopes.find((s) => isSameOrAncestorPath(s.path, path)),
       }
     })
   }, [scopes, extraPaths, departments.data, company.data, missingPaths])
@@ -155,13 +163,24 @@ export default function PermissionsPage() {
 
   return (
     <>
-      <PageHeader title="権限" description="会社・部署・フォルダごとに、編集できる人を選びます。" />
+      <PageHeader
+        title="権限"
+        description="会社・部署・フォルダごとに、編集できる人を選びます。"
+        actions={
+          (isAdmin || managedDepartmentIds.length > 0) && (
+            <Button variant="outline" onClick={() => setCreating(true)} disabled={!departments.data || !members.data}>
+              <Plus />
+              非公開フォルダを作成
+            </Button>
+          )
+        }
+      />
 
       <div className="mb-6 flex gap-3 rounded-xl border bg-muted/40 px-4 py-3 text-sm">
         <Info size={18} className="mt-0.5 shrink-0 text-brand" />
         <div className="space-y-1">
           <p>
-            場所ごとに<strong className="font-medium">「上の階層と同じ」「全員」「指定した人だけ」</strong>から編集できる人を選べます。選ばれなかった人は閲覧のみになります。閲覧そのものを制限する（見せない）設定は、今後のアップデートで対応予定です。
+            場所ごとに<strong className="font-medium">「上の階層と同じ」「全員」「指定した人だけ」</strong>から編集できる人を選べます。選ばれなかった人は閲覧のみになります。一部の人にだけ見せたいファイルは、<LockSimple size={14} weight="fill" className="inline align-[-2px] text-brand" aria-hidden="true" />非公開フォルダを作ってそこに置きます。
           </p>
           <p className="text-muted-foreground">オーナーと管理者は、ルールに関係なく常にすべての場所を閲覧・編集できます。</p>
           {!isAdmin && <p className="text-muted-foreground">あなたが責任者を務める部署と、その中のフォルダだけを表示・変更できます。</p>}
@@ -236,31 +255,60 @@ export default function PermissionsPage() {
             </Card>
 
             <div ref={editorRef} className="scroll-mt-16">
-              <ScopeEditor
-                // A fresh draft whenever the saved rules of this place change.
-                key={`${selected.path}\u0000${JSON.stringify(selected.scope?.rules ?? [])}`}
-                companyId={companyId}
-                node={selected}
-                scopes={scopes}
-                members={members.data ?? []}
-                departments={departments.data ?? []}
-                editable={canEdit(selected.path)}
-                nameOf={nameOf}
-                onChanged={permissions.reload}
-                onPickSubfolder={(path) => {
-                  setExtraPaths((prev) => (prev.includes(path) ? prev : [...prev, path]))
-                  setCollapsed((prev) => {
-                    const next = new Set(prev)
-                    next.delete(selected.path)
-                    return next
-                  })
-                  select(path)
-                }}
-              />
+              {selected.scope?.repoId ? (
+                <PrivateFolderPanel
+                  key={selected.path}
+                  scope={selected.scope}
+                  name={selected.name}
+                  departments={departments.data ?? []}
+                  members={members.data ?? []}
+                  editable={canEdit(selected.path)}
+                  onChanged={permissions.reload}
+                  onPickSubfolder={(path) => {
+                    setExtraPaths((prev) => (prev.includes(path) ? prev : [...prev, path]))
+                    select(path)
+                  }}
+                />
+              ) : (
+                <ScopeEditor
+                  // A fresh draft whenever the saved rules of this place change.
+                  key={`${selected.path}\u0000${JSON.stringify(selected.scope?.rules ?? [])}`}
+                  companyId={companyId}
+                  node={selected}
+                  privateRoot={selected.privateRoot}
+                  scopes={scopes}
+                  members={members.data ?? []}
+                  departments={departments.data ?? []}
+                  editable={canEdit(selected.path)}
+                  nameOf={nameOf}
+                  onChanged={permissions.reload}
+                  onPickSubfolder={(path) => {
+                    setExtraPaths((prev) => (prev.includes(path) ? prev : [...prev, path]))
+                    setCollapsed((prev) => {
+                      const next = new Set(prev)
+                      next.delete(selected.path)
+                      return next
+                    })
+                    select(path)
+                  }}
+                />
+              )}
             </div>
           </div>
         </div>
       )}
+
+      <CreatePrivateFolderDialog
+        open={creating}
+        onOpenChange={setCreating}
+        departments={departments.data ?? []}
+        members={members.data ?? []}
+        initialPath={selected && !selected.privateRoot ? selected.path : undefined}
+        onCreated={(folder) => {
+          permissions.reload()
+          setSelectedPath(folder.path)
+        }}
+      />
     </>
   )
 }
@@ -280,6 +328,7 @@ function TreeRow({
 }) {
   const { scope, depth, name, department, hasChildren, path, kind } = node
   const inherited = !scope || scope.inherited
+  const isPrivate = !!scope?.repoId
 
   return (
     <li
@@ -324,6 +373,10 @@ function TreeRow({
               </span>
             ) : department && (kind === 'department' || !scope) && department.folder.normalize('NFC') === path ? (
               <DepartmentIcon icon={department.icon} color={department.color} size="sm" />
+            ) : isPrivate ? (
+              <span className="flex size-6 items-center justify-center text-brand">
+                <LockSimple size={18} weight="fill" aria-label="非公開" />
+              </span>
             ) : (
               <span className="flex size-6 items-center justify-center text-muted-foreground">
                 <Folder size={18} />
@@ -332,7 +385,11 @@ function TreeRow({
           </span>
           <span className={cn('min-w-0 flex-1 truncate text-sm', kind !== 'folder' && 'font-medium')}>{name}</span>
           {node.missing && <span className="shrink-0 text-xs text-warning">見つかりません</span>}
-          {inherited ? (
+          {isPrivate ? (
+            <Badge variant="brand" className="shrink-0">
+              非公開
+            </Badge>
+          ) : inherited ? (
             <span className="shrink-0 text-xs text-muted-foreground">継承</span>
           ) : (
             <Badge variant={SUMMARY_BADGE[node.summary]} className="shrink-0">

@@ -11,6 +11,18 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/signup is disabled/i, '新規登録は招待リンクからのみ行えます。管理者に招待リンクを依頼してください。'],
   [/user already exists|already registered/i, 'このメールアドレスはすでに登録されています。ログインしてから招待を受け入れてください。'],
   [/password too short/i, 'パスワードは8文字以上にしてください。'],
+  [/parent folder not found/i, '作成する場所のフォルダが見つかりません。ページを再読み込みしてから選び直してください。'],
+  [/folders inside a private folder are private already/i, '非公開フォルダの中には、非公開フォルダを作れません。中に作るフォルダは自動的に非公開になります。'],
+  [/only owners, admins and department managers can (create|list) private folders/i, '非公開のフォルダを扱えるのは、オーナー・管理者と部署の責任者です。'],
+  [/managers can create private folders only inside their own department/i, '部署の責任者が非公開のフォルダを作れるのは、自分の部署の中だけです。'],
+  [/every editor must also be a viewer/i, '編集できる人は、見られる人の中から選んでください。'],
+  [/^not a member of this company$/i, '選んだ人の中に、この会社のメンバーではない人がいます。ページを再読み込みしてから選び直してください。'],
+  [/only owners and admins can make a private folder public/i, '公開に戻せるのは、オーナーと管理者だけです。'],
+  [/a push to this folder is still running/i, 'いま誰かがこのフォルダを同期しています。少し待ってからもう一度お試しください。'],
+  [/something already exists at this path in the company repository/i, '会社の共有フォルダの同じ場所に、すでにフォルダかファイルがあります。そちらの名前を変えてからやり直してください。'],
+  [/the company repository kept changing/i, '共有フォルダが同期され続けていて完了できませんでした。少し待ってからもう一度お試しください。'],
+  [/private folder always keeps its own rules/i, '非公開フォルダには、見られる人の設定が必ず必要です。「非公開フォルダ」画面で見られる人を変更してください。'],
+  [/cannot handle private folders yet/i, '古いアプリを使っているメンバーがいるため作成できませんでした。先にアプリを更新してもらってください。'],
   [/not members of this company/i, '選んだ人の中に、この会社のメンバーではない人がいます。ページを再読み込みしてから選び直してください。'],
   [/at most \d+ managers/i, '1つの部署に設定できる責任者は50人までです。'],
   [/already a member/i, 'すでにこの会社のメンバーです。'],
@@ -38,6 +50,8 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
 /** A Japanese sentence explaining a failed request and the next step. */
 export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
+    // Already Japanese and exact (shared/types/private-folders.ts reservedPathMessage).
+    if (err.code === 'FOLDER_NAME_UNAVAILABLE' && err.message) return err.message
     for (const [re, msg] of KNOWN_MESSAGES) {
       if (re.test(err.message)) return msg
     }
