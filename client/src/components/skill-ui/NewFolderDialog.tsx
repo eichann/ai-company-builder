@@ -22,6 +22,8 @@ import {
   type PrivateFolderCreateContext,
   type PrivateFolderMemberOption,
 } from '../../../shared/private-folder-ui'
+import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../shared/private-folder-help'
+import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHelp'
 
 // The server's department folder-name rule (server/src/routes/departments.ts isValidFolderName).
 const FOLDER_RE = /^[\w぀-ゟ゠-ヿ一-鿿][\w぀-ゟ゠-ヿ一-鿿._-]*$/
@@ -68,6 +70,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
   const [nameError, setNameError] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [outdated, setOutdated] = useState<{ members: string[]; canForce: boolean } | null>(null)
+  const [helpOpen, setHelpOpen] = useState(false)
 
   useEffect(() => { setTimeout(() => inputRef.current?.focus(), 30) }, [])
 
@@ -243,6 +246,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                 </ul>
                 <p className="text-[12px] text-zinc-500 dark:text-zinc-400">
                   オーナー・管理者{admins.length > 0 ? `（${admins.length}人）` : ''}は常に見られます。
+                  {context.department && MANAGERS_MAY_CHANGE_VIEWERS}
                 </p>
               </div>
 
@@ -274,6 +278,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
                     {editorReach === reach ? '全員が編集できます。' : `編集できるのは ${editorReach} 人です。`}
                     作成すると同期が始まり、あなたの手元に空のフォルダが現れます。
                   </p>
+                  <div className="mt-1.5"><PrivateFolderHelpLink onOpen={() => setHelpOpen(true)} /></div>
                 </div>
               </div>
             </>
@@ -300,6 +305,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
           </Button>
         </div>
       </form>
+      {helpOpen && <PrivateFolderHelpPanel onClose={() => setHelpOpen(false)} />}
     </div>
   )
 }

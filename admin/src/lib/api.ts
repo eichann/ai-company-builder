@@ -481,6 +481,18 @@ export const privateFoldersApi = {
   /** 公開に戻す (owner/admin): the contents go to everyone. */
   makePublic: (companyId: string, scopeId: string) =>
     getData<{ path: string; commit: string }>(`${privBase(companyId)}/${enc(scopeId)}/make-public`, { method: 'POST', body: {} }),
+
+  /**
+   * 削除 (owner/admin): the folder disappears from its viewers' PCs at their
+   * next sync; the server keeps an archive of its repository for the operator.
+   */
+  remove: (companyId: string, scopeId: string) =>
+    getData<DeletePrivateFolderResult>(`${privBase(companyId)}/${enc(scopeId)}`, { method: 'DELETE' }),
+}
+
+/** DELETE /private-folders/:scopeId — only `path` is relied on. */
+export interface DeletePrivateFolderResult {
+  path: string
 }
 
 // ---------------------------------------------------------------------------

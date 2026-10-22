@@ -9,6 +9,7 @@ import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, Command
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import type { Member } from '@/lib/api'
 import { isAdminRole } from '@/lib/format'
+import { MANAGERS_MAY_CHANGE_VIEWERS } from '@/lib/private-folder-help'
 import { audienceCounts, type Audience } from '@/lib/private-folders'
 import { cn } from '@/lib/utils'
 
@@ -27,6 +28,7 @@ export function AudienceFields({
   disabled,
   lockedViewerId,
   meId,
+  inDepartment,
 }: {
   members: Member[]
   managerIds: string[]
@@ -36,6 +38,8 @@ export function AudienceFields({
   /** A viewer who cannot be removed (the creator: the server always adds them). */
   lockedViewerId?: string | null
   meId?: string | null
+  /** The folder is inside a department, whose managers may change the viewers (and add themselves). */
+  inDepartment?: boolean
 }) {
   const byId = new Map(members.map((m) => [m.userId, m]))
   const managers = new Set(managerIds)
@@ -85,6 +89,7 @@ export function AudienceFields({
         </ul>
         <p className="text-xs text-muted-foreground">
           {counts.admins > 0 ? `オーナー・管理者（${counts.admins}人）は常に見られます。` : 'オーナーと管理者は常に見られます。'}
+          {inDepartment && MANAGERS_MAY_CHANGE_VIEWERS}
           選ばれていない人には、フォルダの名前も表示されません。
         </p>
       </fieldset>
