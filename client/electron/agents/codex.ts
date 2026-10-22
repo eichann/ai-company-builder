@@ -14,6 +14,7 @@ import { startLoopbackMcp } from './loopback-mcp'
 import { CODEX_ASK_USER_INSTRUCTIONS, codexAskUserTool } from './choice-tools'
 import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { fromCodexRateLimits } from '../../shared/rate-limits'
+import type { SteerTarget } from './steering'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -101,8 +102,25 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       const reportRateLimits = (snapshot: unknown) => {
         if (!title && request.onEvent) request.onEvent({ type: 'rate-limits', update: previous => fromCodexRateLimits(snapshot, previous) })
       }
+      // Extra instructions while the turn runs: `turn/steer` adds input to the
+      // active turn (it fails once that turn is over → sent as a new message).
+      const steerTarget: SteerTarget | undefined = !title && request.steering ? {
+        async send(text, accepted) {
+          if (ended || !rpc || !threadId || !turnId) return 'not-delivered'
+          try {
+            await rpc.request('turn/steer', { threadId, expectedTurnId: turnId, input: [{ type: 'text', text, text_elements: [] }] })
+          } catch (error) {
+            console.warn('[codex] turn/steer failed:', error instanceof Error ? error.message : 'unknown')
+            return 'not-delivered'
+          }
+          accepted()
+          return 'delivered'
+        },
+      } : undefined
+      const steerable = () => { if (steerTarget && turnId && !ended) request.steering!.attach(steerTarget) }
       const finish = (error?: Error) => {
         if (ended) return
+        if (steerTarget) request.steering!.detach(steerTarget)
         if (error) emit({ type: 'error', error })
         ended = true
         interactionAbort.abort()
@@ -189,7 +207,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               const p = message.params || {}
               if (p.threadId && threadId && p.threadId !== threadId) return
               if (message.method === 'serverRequest/resolved') pendingInteractions.get(String(p.requestId))?.abort()
-              if (message.method === 'turn/started') turnId = (p.turn as { id: string }).id
+              if (message.method === 'turn/started') { turnId = (p.turn as { id: string }).id; steerable() }
               if (message.method === 'thread/tokenUsage/updated') tokenUsage = p.tokenUsage as TokenUsage
               if (message.method === 'account/rateLimits/updated') reportRateLimits(p.rateLimits)
               if (message.method === 'item/agentMessage/delta') {
@@ -279,6 +297,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (ended) return
             const started = await rpc.request<{ turn: { id: string } }>('turn/start', { threadId, input, model: selected.id, effort })
             turnId = started.turn.id
+            steerable()
           })().catch(error => finish(error instanceof Error ? error : new Error(String(error))))
         },
         cancel() { abort() },

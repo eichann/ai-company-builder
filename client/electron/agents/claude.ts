@@ -14,6 +14,7 @@ import { decideReservedWrite, decideToolWrite } from '../write-guard'
 import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
+import { createClaudeSteer, tapQuery } from './steering'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -175,7 +176,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -366,6 +367,24 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           ...(companyFilesServer ? COMPANY_FILE_TOOL_NAMES.map(companyFileToolId) : []),
         ]
         const state = { missingSession: false, autoRejected: false }
+        // Steering + prompt suggestions (steering.ts): watch the query the
+        // provider runs. A suggestion arrives after the turn's result, once
+        // the UI stream has already closed, so it goes out through
+        // onPromptSuggestion (the chat server hands it to the renderer).
+        const onQueryCreated = steering || onPromptSuggestion ? (query: object) => {
+          const steer = steering ? createClaudeSteer(query as Parameters<typeof createClaudeSteer>[0]) : undefined
+          if (steer) steering!.attach(steer.target)
+          let answered = false
+          tapQuery(query, message => {
+            steer?.observe(message)
+            if ((message as { type?: string }).type === 'result') answered = true
+          }, () => {
+            if (steer) { steer.close(); steering!.detach(steer.target) }
+            // No suggestion came (suppressed, or the drain timed out). A query
+            // that never answered (e.g. the auto-mode re-run) says nothing.
+            if (answered) onPromptSuggestion?.(null)
+          })
+        } : undefined
         const model = createModel(resolvedModel, {
           pathToClaudeCodeExecutable: claudePath,
           permissionMode: mode,
@@ -375,13 +394,21 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           streamingInput: 'always',
           // One-line progress for running subagents (task_progress.summary),
           // shown in the subagent row; see shared/agent-progress.ts.
-          ...(onEvent ? {
-            agentProgressSummaries: true,
-            onQueryCreated: (query: unknown) => tapSdkMessages(query, message => {
-              const event = claudeAgentEvent(message)
-              if (event) onEvent(event)
-            }),
+          ...(onEvent ? { agentProgressSummaries: true } : {}),
+          // Both observers watch the same Query: usage/progress events, and
+          // steering + prompt suggestions (each wraps the iterator the provider reads).
+          ...(onEvent || onQueryCreated ? {
+            onQueryCreated: (query: unknown) => {
+              if (onEvent) tapSdkMessages(query, message => {
+                const event = claudeAgentEvent(message)
+                if (event) onEvent(event)
+              })
+              onQueryCreated?.(query as object)
+            },
           } : {}),
+          // Off unless the renderer can show it; the member's own
+          // `promptSuggestionEnabled: false` (user settings) still wins in the CLI.
+          ...(onPromptSuggestion ? { promptSuggestions: true, onPromptSuggestion: (suggestion: string) => onPromptSuggestion(suggestion) } : {}),
           ...(allowedTools.length > 0 ? { mcpServers, allowedTools } : {}),
           ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
           // Passed straight to the CLI as `--effort` (xhigh needs CLI v2.1.111+).

@@ -27,6 +27,7 @@ import type { WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
 import { RATE_LIMITS_PART_TYPE, type RateLimitProvider, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
+import { createChatTurns } from './chat-turns'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -135,6 +136,8 @@ export async function startChatServer(config: ChatServerConfig) {
 
   // Current native session for each ACB conversation (provider-tagged).
   const agentSessionMap = new Map<string, AgentSession>()
+  // Running turns: steering (extra instructions) and next-prompt suggestions.
+  const chatTurns = createChatTurns()
 
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
@@ -253,6 +256,9 @@ export async function startChatServer(config: ChatServerConfig) {
     const injector = createChunkInjector()
     const askUser = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
+    // Steering for the CLI agents; next-prompt suggestions for Claude Code.
+    const turn = appSessionId && connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
+      ? chatTurns.open(appSessionId, injector, { suggestions: authMode === 'claude-code' }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
     const onEvent = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
@@ -266,7 +272,7 @@ export async function startChatServer(config: ChatServerConfig) {
           injector.push({ type: AGENT_PROGRESS_PART_TYPE, data: event.progress, transient: true })
         }
       } : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -297,7 +303,7 @@ export async function startChatServer(config: ChatServerConfig) {
     try {
       if (connection.ownsConversation) inputMessages = agentInputMessages(messages, existingCliSessionId)
       else if (candidate && candidate.providerId !== authMode) inputMessages = agentInputMessages(messages)
-    } catch (error) { return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
+    } catch (error) { turn?.end('failed'); return c.json({ error: error instanceof Error ? error.message : String(error) }, 400) }
     const modelMessages = await convertToModelMessages(inputMessages)
 
     // Claude Code CLI mode with resume: send only the latest user message
@@ -360,14 +366,16 @@ export async function startChatServer(config: ChatServerConfig) {
 
     const activityToken = crypto.randomUUID()
     let released = false
-    const release = () => {
+    const release = (outcome: 'finished' | 'failed' = 'failed') => {
       if (released) return
       released = true
-      c.req.raw.signal.removeEventListener('abort', release)
+      c.req.raw.signal.removeEventListener('abort', abortRelease)
+      turn?.end(outcome)
       config.onChatActivity?.(activityToken, false)
     }
+    function abortRelease() { release('failed') }
     config.onChatActivity?.(activityToken, true)
-    c.req.raw.signal.addEventListener('abort', release, { once: true })
+    c.req.raw.signal.addEventListener('abort', abortRelease, { once: true })
     let result
     try { result = streamText({
       abortSignal: c.req.raw.signal,
@@ -384,8 +392,8 @@ export async function startChatServer(config: ChatServerConfig) {
           agentSessionMap.set(appSessionId, { providerId: authMode, id: metadata.sessionId, modelId })
         }
       },
-      onFinish: release,
-      onAbort: release,
+      onFinish: () => release('finished'),
+      onAbort: () => release('failed'),
       onError: ({ error }) => {
         release()
         console.error('[chat-server] Stream error:', error instanceof Error ? error.message : 'unknown')
@@ -462,6 +470,20 @@ ${transcript}
     }
   })
 
+  // POST /api/steer — an extra instruction for the conversation's running turn.
+  // Answers once it is known whether the agent read it (shared/steer.ts).
+  app.post('/api/steer', async (c) => {
+    const body = await c.req.json().catch(() => null) as { appSessionId?: unknown; text?: unknown } | null
+    if (typeof body?.appSessionId !== 'string' || typeof body.text !== 'string') return c.json({ error: 'invalid request' }, 400)
+    return c.json(await chatTurns.steer(body.appSessionId, body.text))
+  })
+
+  // GET /api/prompt-suggestion/:appSessionId — the next-prompt suggestion of
+  // the latest turn; waits for it (bounded), since it follows the response.
+  app.get('/api/prompt-suggestion/:appSessionId', async (c) => {
+    return c.json({ suggestion: await chatTurns.suggestion(c.req.param('appSessionId')) })
+  })
+
   app.get('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const session = agentSessionMap.get(id)
@@ -474,6 +496,7 @@ ${transcript}
     const id = c.req.param('appSessionId')
     const deleted = agentSessionMap.delete(id)
     forgetPrivateReads(id)
+    chatTurns.forget(id)
     console.log(`[chat-server] Session cleared: ${id} (found: ${deleted})`)
     return c.json({ success: true })
   })
