@@ -149,15 +149,13 @@ export function supportsWriteDeniedRecovery(version: string | null | undefined):
  * company repository plus one scope repository per readable private
  * folder), the `[RESERVED_PATH]` rejection, and GET /me/scopes.
  *
- * null while no released app does (stage 3b — client sync — has not been
- * merged). **Update this when stage 3b merges**, computed like
+ * Stage 3b (client sync) merged as b8c5a8e (#137); computed like
  * WRITE_DENIED_RECOVERY_COMMIT_DATE from that merge commit:
- *   TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S <sha>
+ *   TZ=UTC git log -1 --format=%cd --date=format-local:%Y%m%d%H%M%S b8c5a8e
  *
- * Until then every member counts as not ready, so creating a company's first
- * private folder needs an owner/admin's `force: true`.
+ * (null would mean no released app handles them: every create is refused.)
  */
-export const PRIVATE_FOLDERS_CLIENT_COMMIT_DATE: string | null = null
+export const PRIVATE_FOLDERS_CLIENT_COMMIT_DATE: string | null = '20261022085300'
 
 let privateFoldersCutoffOverride: { value: string | null } | null = null
 
