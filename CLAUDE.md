@@ -1046,3 +1046,42 @@ Builds on 3a's contract (`shared/types/private-folders.ts`). Code:
   `.git/info/exclude` instead of the shared `.gitignore` (owner decision
   pending — it changes behaviour for every member and the characterization
   transcript, so it gets its own change).
+
+---
+
+## Architecture: Choice prompts (the AI asks, the member picks)
+
+The chat can ask the member a multiple-choice question and continue with the
+answer, for both agents. Shared types and the answer mapping:
+`client/shared/choice-prompt.ts`; agent glue: `client/electron/agents/choice-tools.ts`.
+
+- **Claude Code**: the built-in `AskUserQuestion` (input `questions[]` of
+  `{ question, header, options[{ label, description }], multiSelect }`). The
+  CLI routes it through `canUseTool` in **every** permission mode —
+  bypassPermissions too (`requiresUserInteraction`), even after a PreToolUse
+  allow — so `claude.ts` installs `canUseTool` whenever the turn can show a
+  card (in bypass it refuses everything else, as before). Answer = `allow`
+  with `updatedInput: { ...input, answers }`, `answers` keyed by **question
+  text**, multiSelect labels and 「その他」 text joined with `", "` (verified
+  against CLI 2.1.304). No answer = `deny` with a message telling the model not
+  to guess or re-ask.
+- **Codex**: no native equivalent we can drive, so the app serves `ask_user`
+  (same input shape) from a request-scoped loopback MCP server `acb_ask`
+  (`tool_timeout_sec` 660), and the developer instructions tell Codex to use
+  it. The turn's 15-minute limit is paused while the member answers.
+  (Codex's own `item/tool/requestUserInput` keeps its older card.)
+- Flow: `chat-server.ts` `createAskUser` → `requestInteraction`
+  (`AgentInteractions`, kind `choices`, per renderer + conversation; 10-minute
+  timeout; a stopped turn or closed window → cancelled with a reason) → the
+  card above the composer (`ChoicePrompt.tsx`: radio / checkboxes, 「その他」
+  with text, 「回答する」, ⌘/Ctrl+Enter). The outcome is also pushed into the
+  response as a `data-choice-prompt` part (`createChunkInjector`): the
+  transcript renders it collapsed with the answer as the member's bubble, chat
+  history stores it as `choicePrompts` (with `at`, the offset in `content`, so
+  it is restored in place), and `agentInputMessages` turns it into text when
+  the conversation moves to another agent.
+- The D5 / dangerous-command approval banner (`tool-approval-request`) is a
+  separate channel; both can be on screen at once. Pending cards survive tab
+  switches (all tabs stay mounted); closing the tab cancels them.
+- Preview: `client/tests/choice-prompt-ui.html` (`?theme=dark`,
+  `?state=answered`); tests: `client/tests/choice-prompt.test.ts`.

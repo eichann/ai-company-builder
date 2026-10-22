@@ -159,6 +159,25 @@ test('AI instruction files: owners/admins anywhere, managers inside their depart
   assert.equal(mayChangeInstructionFile({ role: 'member', managedFolders: ['Sales'] }, 'sales/CLAUDE.md'), true)
 })
 
+test('CLAUDE.local.md follows the same rules as CLAUDE.md (the server protects it too)', () => {
+  const withAuthority = (authority: InstructionAuthority | undefined): WriteGuard => ({ root: ROOT, getAccess: () => undefined, getInstructionAuthority: () => authority })
+  const member = withAuthority({ role: 'member', managedFolders: [] })
+  for (const p of ['CLAUDE.local.md', '営業部/claude.local.md', 'x/y/Claude.Local.MD']) {
+    const d = decideToolWrite(member, 'Write', { file_path: `${ROOT}/${p}` }, ROOT)
+    assert.equal(d.deny, true, p)
+    if (d.deny) assert.match(d.message, /AIへの指示ファイル/)
+  }
+  assert.equal(decideToolWrite(member, 'Bash', { command: 'echo x > 営業部/CLAUDE.local.md' }, ROOT).deny, true)
+  for (const p of ['CLAUDE.local.md.bak', 'CLAUDE.locals.md', '.workspace/r/CLAUDE.local.md', '営業部/.personal/CLAUDE.local.md']) {
+    assert.equal(decideToolWrite(member, 'Write', { file_path: `${ROOT}/${p}` }, ROOT).deny, false, p)
+  }
+  assert.equal(decideToolWrite(withAuthority({ role: 'member', managedFolders: ['営業部'] }), 'Edit', { file_path: `${ROOT}/営業部/CLAUDE.local.md` }, ROOT).deny, false)
+  assert.equal(decideToolWrite(withAuthority({ role: 'member', managedFolders: ['営業部'] }), 'Edit', { file_path: `${ROOT}/CLAUDE.local.md` }, ROOT).deny, true)
+  assert.equal(decideToolWrite(withAuthority({ role: 'admin', managedFolders: [] }), 'Write', { file_path: `${ROOT}/CLAUDE.local.md` }, ROOT).deny, false)
+  assert.equal(decideToolWrite(withAuthority(undefined), 'Write', { file_path: `${ROOT}/CLAUDE.local.md` }, ROOT).deny, false)
+  assert.equal(isInstructionFile('CLAUDE.local.md'), true)
+})
+
 test('cloning a repository into the company folder outside .workspace/ is refused with a .workspace/<name> suggestion', () => {
   const g = guard(undefined)
   const deny = (command: string, cwd = ROOT) => decideToolWrite(g, 'Bash', { command }, cwd)

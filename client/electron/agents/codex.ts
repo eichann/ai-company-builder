@@ -10,6 +10,9 @@ import os from 'node:os'
 import type { CodexModel, CodexStatus } from '../../shared/agent'
 import type { AgentConnection, AgentHostConfig } from './connection'
 import { CodexRpc, type RpcMessage } from './codex-rpc'
+import { startLoopbackMcp } from './loopback-mcp'
+import { CODEX_ASK_USER_INSTRUCTIONS, codexAskUserTool } from './choice-tools'
+import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../../shared/choice-prompt'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -76,6 +79,11 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       if (process.platform === 'win32') throw new Error(CODEX_WINDOWS_UNSUPPORTED)
       let referenceMcp: Awaited<ReturnType<typeof startReferenceMcp>> | undefined
       let companyFilesMcp: Awaited<ReturnType<typeof startCompanyFilesMcp>> | undefined
+      let askMcp: Awaited<ReturnType<typeof startLoopbackMcp>> | undefined
+      // ask_user calls Codex has started and not yet asked (oldest first): links the card to its tool row.
+      const askItems: string[] = []
+      // While the member answers, the turn's own time limit is paused.
+      let waitingForMember = 0
       let rpc: CodexTransport | undefined
       const interactionAbort = new AbortController()
       const pendingInteractions = new Map<string, AbortController>()
@@ -97,8 +105,17 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         options.abortSignal?.removeEventListener('abort', abort)
         referenceMcp?.close()
         companyFilesMcp?.close()
+        askMcp?.close()
         rpc?.close()
         controller.close()
+      }
+      const armTimeout = () => {
+        clearTimeout(timeout)
+        if (!ended && waitingForMember === 0) timeout = setTimeout(() => finish(new Error('Codexの応答がタイムアウトしました。')), title ? 90_000 : 15 * 60_000)
+      }
+      const whileMemberAnswers = async <T>(wait: () => Promise<T>): Promise<T> => {
+        waitingForMember++; clearTimeout(timeout)
+        try { return await wait() } finally { waitingForMember--; armTimeout() }
       }
       const abort = () => {
         if (threadId && turnId) rpc?.send({ id: `interrupt-${turnId}`, method: 'turn/interrupt', params: { threadId, turnId } })
@@ -111,7 +128,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         pendingInteractions.set(id, controller)
         interactionAbort.signal.addEventListener('abort', cancel, { once: true })
         try {
-          const answer = await config.requestInteraction!(body, request.appSessionId!, controller.signal)
+          const answer = await whileMemberAnswers(() => config.requestInteraction!(body, request.appSessionId!, controller.signal))
           return { answer, closed: controller.signal.aborted }
         } finally {
           pendingInteractions.delete(id)
@@ -157,7 +174,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
           emit({ type: 'stream-start', warnings: [] })
           options.abortSignal?.addEventListener('abort', abort, { once: true })
           if (options.abortSignal?.aborted) { abort(); return }
-          timeout = setTimeout(() => finish(new Error('Codexの応答がタイムアウトしました。')), title ? 90_000 : 15 * 60_000)
+          armTimeout()
           void (async () => {
             rpc = createRpc(config.getShellEnv())
             rpc.onFailure = error => finish(error)
@@ -182,7 +199,11 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                   }
                   emit({ type: 'text-end', id: item.id }); openText.delete(item.id)
                 }
-                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER)
+                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === CODEX_CHOICE_SERVER)
+                if (appTool && item.server === CODEX_CHOICE_SERVER && item.tool === CODEX_CHOICE_TOOL) {
+                  if (message.method === 'item/started' && !tools.has(item.id)) askItems.push(item.id)
+                  else if (message.method === 'item/completed') { const at = askItems.indexOf(item.id); if (at >= 0) askItems.splice(at, 1) }
+                }
                 const name = appTool ? `mcp__${item.server}__${item.tool}` : ({ commandExecution: 'Bash', fileChange: 'Write', mcpToolCall: 'MCP', webSearch: 'WebSearch' } as Record<string, string>)[item.type]
                 if (name) {
                   if (!tools.has(item.id)) {
@@ -206,7 +227,15 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             }
             if (!title && request.references) referenceMcp = await startReferenceMcp(request.references)
             if (!title && request.companyFiles && !ended) companyFilesMcp = await startCompanyFilesMcp(request.companyFiles)
-            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); return }
+            const askUser = request.askUser
+            if (!title && askUser && !ended) {
+              askMcp = await startLoopbackMcp(CODEX_CHOICE_SERVER, [codexAskUserTool(
+                (questions, toolCallId, signal) => whileMemberAnswers(() => askUser(questions, toolCallId, signal)),
+                () => askItems.shift(),
+                interactionAbort.signal,
+              )], { toolTimeoutSec: Math.ceil(CHOICE_TIMEOUT_MS / 1000) + 60 })
+            }
+            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); askMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
             const models = await readCodexModels(rpc)
@@ -214,11 +243,12 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!selected) throw new Error('選択したCodexモデルが利用できません。モデルを選び直してください。')
             const effort = title ? (selected.efforts.includes('low') ? 'low' : selected.defaultEffort) : request.effort || selected.defaultEffort
             if (!selected.efforts.includes(effort)) throw new Error('このCodexモデルは選択したeffortに対応していません。')
-            const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n')
+            const system = options.prompt.filter(m => m.role === 'system').map(m => m.content).join('\n') + (askMcp ? CODEX_ASK_USER_INSTRUCTIONS : '')
             // Normal chats work within their company workspace; no directory means no write grant.
             const mcpServers = {
               ...(referenceMcp ? { acb_consultations: referenceMcp.config } : {}),
               ...(companyFilesMcp ? { [COMPANY_FILES_SERVER]: companyFilesMcp.config } : {}),
+              ...(askMcp ? { [CODEX_CHOICE_SERVER]: askMcp.config } : {}),
             }
             const params = { ...(Object.keys(mcpServers).length > 0 ? { config: { mcp_servers: mcpServers } } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: !title && request.workingDirectory ? 'workspace-write' : 'read-only', approvalPolicy: title ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: system || undefined }
             const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {

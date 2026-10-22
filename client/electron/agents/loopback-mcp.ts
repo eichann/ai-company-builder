@@ -15,8 +15,9 @@ export interface LoopbackTool {
  * Request-scoped loopback MCP endpoint for Codex (it takes MCP servers as
  * config, not in-process objects): read-only tools, a random bearer token,
  * 127.0.0.1 only, no persistent process or global configuration.
+ * `toolTimeoutSec`: Codex's per-call limit (ask_user waits for the member).
  */
-export async function startLoopbackMcp(serverName: string, tools: LoopbackTool[]) {
+export async function startLoopbackMcp(serverName: string, tools: LoopbackTool[], options: { toolTimeoutSec?: number } = {}) {
   const token = randomBytes(32).toString('hex')
   const active = new Set<McpServer>()
   const server = createServer(async (req, res) => {
@@ -37,7 +38,7 @@ export async function startLoopbackMcp(serverName: string, tools: LoopbackTool[]
   const address = server.address()
   if (!address || typeof address === 'string') throw new Error('参照ツールを起動できません')
   return {
-    config: { url: `http://127.0.0.1:${address.port}/mcp`, http_headers: { Authorization: `Bearer ${token}` }, startup_timeout_sec: 10, tool_timeout_sec: 30 },
+    config: { url: `http://127.0.0.1:${address.port}/mcp`, http_headers: { Authorization: `Bearer ${token}` }, startup_timeout_sec: 10, tool_timeout_sec: options.toolTimeoutSec ?? 30 },
     close: () => { server.closeAllConnections(); server.close(); for (const mcp of active) void mcp.close(); active.clear() },
   }
 }

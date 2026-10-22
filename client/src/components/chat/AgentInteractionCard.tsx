@@ -1,7 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../shared/agent-interaction'
+import { ChoicePromptCard } from './ChoicePrompt'
 
 export function AgentInteractionCard({ request, onRespond }: { request: AgentInteractionRequest; onRespond: (response: AgentInteractionResponse) => Promise<boolean> }) {
+  if (request.kind === 'choices') return <ChoicePromptCard request={request} onRespond={onRespond} />
+  return <CodexInteractionCard request={request} onRespond={onRespond} />
+}
+
+function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentInteractionRequest, { kind: 'choices' }>; onRespond: (response: AgentInteractionResponse) => Promise<boolean> }) {
   const [answers, setAnswers] = useState<Record<string, string>>({})
   const [other, setOther] = useState<Record<string, boolean>>({})
   const [sending, setSending] = useState(false)
