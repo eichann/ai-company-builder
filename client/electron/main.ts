@@ -33,6 +33,8 @@ import { createFetchSyncServerApi } from './sync/server-api'
 import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
 import { folderSizesView, serverFolderSizes } from './sync/folder-sizes'
 import { notDownloadedFolderFor, notDownloadedFolders } from './sync/not-downloaded'
+import { createCompanyFilesApi } from './company-files/api'
+import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
@@ -501,6 +503,14 @@ app.whenReady().then(async () => {
         if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
         // getAccess reads the live cache, so a refresh during a long chat applies at once.
         return { root, getAccess: () => writeAccessStore.get(companyId), getNotDownloaded: () => notDownloadedFolders(root) }
+      },
+      createCompanyFiles: (companyId, root, signal) => {
+        let notDownloaded: string[] = []
+        try { notDownloaded = root ? notDownloadedFolders(root) : [] } catch { /* unknown: the instructions just do not list them */ }
+        return {
+          tools: createCompanyFileTools({ api: companyFilesApi, companyId, companyRoot: root, signal }),
+          instructions: companyFilesInstructions(notDownloaded),
+        }
       },
       createReferences: (company, id, signal) => new ConsultationReferences(localHistoryStore, handoffStore).forTurn(company, id, signal),
       prepareRecovery: (company, id, messages) => recoveryContext(localHistoryStore.get(company, id), handoffStore.read(company, id), messages),
@@ -1315,6 +1325,7 @@ ipcMain.handle('auth:signOut', async () => {
     })
     authCookies = []
     writeAccessStore.clear()
+    companyFilesApi.clear()
     return { success: true }
   } catch (error) {
     console.error('Sign out error:', error)
@@ -1882,6 +1893,9 @@ const writeAccessStore = createWriteAccessStore({
     if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('writeAccess:changed', { companyId, access })
   },
 })
+// The chat AI's read-only company files (company-files/): the session stays
+// here in the main process; answers are cached briefly per member.
+const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: () => authCookies, log: console })
 ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
   if (typeof companyId !== 'string' || !companyId) return null
   const cached = writeAccessStore.get(companyId)

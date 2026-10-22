@@ -29,6 +29,9 @@ export function getToolDisplayName(toolName: string): string {
   const names: Record<string, string> = {
     mcp__acb_consultations__search_consultations: '過去の相談を検索',
     mcp__acb_consultations__read_consultation: '過去の相談を参照',
+    mcp__acb_company_files__company_search: '会社全体を検索',
+    mcp__acb_company_files__company_read_file: '会社のファイルを参照',
+    mcp__acb_company_files__company_list: '会社のフォルダを一覧',
     readFile: 'ファイル読取',
     writeFile: 'ファイル書込',
     listDirectory: 'ディレクトリ一覧',

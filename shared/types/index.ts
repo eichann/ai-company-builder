@@ -143,3 +143,6 @@ export interface ApiResponse<T> {
 
 // Private folders (permission plan stage 3)
 export * from './private-folders'
+
+// Read-only company files for the chat AI (permission plan §11)
+export * from './company-files'

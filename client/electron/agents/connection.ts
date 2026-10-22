@@ -1,4 +1,5 @@
 import type { ReferenceTools } from '../consultations/tools'
+import type { CompanyFileTools } from '../company-files/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
@@ -15,6 +16,8 @@ export interface AgentConnection {
     modelId?: string
     effort?: string
     references?: ReferenceTools
+    /** Read-only company files from the server, incl. folders not downloaded (company-files/tools.ts). */
+    companyFiles?: CompanyFileTools
     resumeId?: string
     /** Refuse edits to read-only folders before they happen (write-guard.ts). */
     writeGuard?: WriteGuard
