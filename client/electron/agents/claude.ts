@@ -1,5 +1,6 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { referenceSchemas, referenceDescriptions, type ReferenceToolName } from '../consultations/tools'
+import { COMPANY_FILES_SERVER, COMPANY_FILE_TOOL_NAMES, companyFileDescriptions, companyFileSchemas, companyFileToolId } from '../company-files/tools'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -126,7 +127,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, writeGuard }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -229,7 +230,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
             // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
             const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-            if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`))) {
+            if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name)))) {
               return { behavior: 'allow' as const, updatedInput: toolInput }
             }
             // Request approval from UI
@@ -259,6 +260,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const createNative = (mode: PermissionMode) => {
         // One MCP server instance per query: a fallback re-run must not reuse the first one.
         const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
+        // App-provided (not the company repository's .mcp.json, which is protected config).
+        const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
+        const mcpServers = {
+          ...(referenceServer ? { acb_consultations: referenceServer } : {}),
+          ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
+        }
+        const allowedTools = [
+          ...(referenceServer ? Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) : []),
+          ...(companyFilesServer ? COMPANY_FILE_TOOL_NAMES.map(companyFileToolId) : []),
+        ]
         const state = { missingSession: false, autoRejected: false }
         const model = createModel(resolvedModel, {
           pathToClaudeCodeExecutable: claudePath,
@@ -267,7 +278,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           env: config.getShellEnv(),
           settingSources: ['user', 'project'],
           streamingInput: 'always',
-          ...(referenceServer ? { mcpServers: { acb_consultations: referenceServer }, allowedTools: Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) } : {}),
+          ...(allowedTools.length > 0 ? { mcpServers, allowedTools } : {}),
           ...(existingCliSessionId ? { resume: existingCliSessionId } : {}),
           // Agent SDK 0.2.47 declares effort as 4 values, but Claude Code CLI v2.1.111+
           // accepts `xhigh` (Opus 4.7+). The SDK passes the string straight to the

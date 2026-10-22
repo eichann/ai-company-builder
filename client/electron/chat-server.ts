@@ -1,4 +1,5 @@
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
+import type { CompanyFileTools } from './company-files/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -26,6 +27,11 @@ import net from 'net'
 
 export interface ChatServerConfig extends ClaudeConnectionConfig {
   createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
+  /**
+   * Read-only company files for this turn (company-files/tools.ts): the tools
+   * and the system-prompt paragraph that tells the AI when to use them.
+   */
+  createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -195,8 +201,10 @@ export async function startChatServer(config: ChatServerConfig) {
     if (authenticationError) return c.json({ error: authenticationError }, 401)
     const references = connection.ownsConversation && companyId && appSessionId ? config.createReferences?.(companyId, appSessionId, c.req.raw.signal) : undefined
     if (references) finalSystemPrompt = (finalSystemPrompt || "") + REFERENCE_INSTRUCTIONS
+    const companyFiles = connection.ownsConversation && companyId ? config.createCompanyFiles?.(companyId, companyRootPath, c.req.raw.signal) : undefined
+    if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     const writeGuard = companyId && companyRootPath ? await Promise.resolve(config.getWriteGuard?.(companyId, companyRootPath)).catch(() => undefined) : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, writeGuard }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
