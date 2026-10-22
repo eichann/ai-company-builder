@@ -216,7 +216,10 @@ let secretId: string
 describe('creating private folders', () => {
   it('is closed (even with force) while no released app syncs private folders', async () => {
     const cv = await import('../../src/lib/client-version')
-    expect(cv.PRIVATE_FOLDERS_CLIENT_COMMIT_DATE).toBeNull()
+    // Stage 3b merged as b8c5a8e (#137): its committer date (UTC).
+    expect(cv.PRIVATE_FOLDERS_CLIENT_COMMIT_DATE).toBe('20261022085300')
+    // As before 3b shipped: no cutoff.
+    cv.setPrivateFoldersClientCutoffForTests(null)
     for (const force of [false, true]) {
       const r = await create('owner', { parentPath: '人事', name: '評価', force })
       expect(r.status).toBe(409)
