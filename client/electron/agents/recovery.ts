@@ -35,6 +35,7 @@ export function recoverSessionModel(connection: AgentConnection, request: Parame
           let started = false
           let sessionSeen = false
           let complete = false
+          let ended = false
           let factory = () => original.doStream({ ...params, abortSignal: abort.signal })
           try {
             for (;;) {
@@ -61,6 +62,7 @@ export function recoverSessionModel(connection: AgentConnection, request: Parame
                   if (!cancelled) controller.enqueue(part)
                 }
                 if (retried && !complete) hooks.failed()
+                ended = true
                 break
               } catch (error) {
                 await reader?.cancel().catch(() => {})
@@ -84,8 +86,15 @@ export function recoverSessionModel(connection: AgentConnection, request: Parame
             if (retried) { try { hooks.failed() } catch { /* reporting must not hide the original error */ } }
             if (!cancelled) controller.enqueue({ type: 'error', error })
           } finally {
-            params.abortSignal?.removeEventListener('abort', relayAbort)
-            abort.abort()
+            // Ended normally: leave the inner model running. The Claude
+            // provider keeps reading after its stream closes (the next-prompt
+            // suggestion arrives ~1 s after the result) and then ends the CLI
+            // itself; aborting here killed it first, so no resumed turn ever
+            // got a suggestion. A later stop still reaches it via relayAbort.
+            if (!ended) {
+              params.abortSignal?.removeEventListener('abort', relayAbort)
+              abort.abort()
+            }
             reader?.releaseLock()
             if (!cancelled) controller.close()
           }

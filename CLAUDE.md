@@ -1186,6 +1186,10 @@ answer, for both agents. Shared types and the answer mapping:
   streak" back-off does not apply to SDK sessions. The chat server logs
   whether a suggestion came (`[chat-server] Prompt suggestion: …`, never its
   text).
+  The session-recovery wrapper (`agents/recovery.ts`) must not abort the
+  native model when its stream ends normally: the provider keeps reading
+  after closing the stream, and that abort killed the CLI before the
+  suggestion — every resumed turn (2nd reply on) silently had none.
 - Shown as light ghost text in the empty input (it replaces the placeholder),
   only while idle with no card/approval waiting. → or Tab (caret at the end,
   no modifiers) puts it into the input; Enter stays a new line and ⌘+Enter
