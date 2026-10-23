@@ -31,28 +31,37 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { installPreReceiveHook } from './hook'
 import { BARE_REPO_CONFIG } from './repo-config'
-import { listAllScopeRepos } from './scope-repo'
+import { configureBareRepoAsync, gitAsync, listAllScopeRepos } from './scope-repo'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
 import type { ScopeWithRules } from '../permissions'
 
 export { installPreReceiveHook, renderPreReceiveHook, PUSH_CHECK_ENTRY, HOOK_TEMPLATE_PATH } from './hook'
 export { BARE_REPO_CONFIG } from './repo-config'
 export {
+  configureBareRepoAsync,
   createScopeRepo,
   gitAsync,
+  GitTimeoutError,
   removeScopeRepo,
   scopeRepoPath,
   scopeReposDir,
   SCOPE_REPO_GITIGNORE,
   SERVER_GIT_IDENTITY,
 } from './scope-repo'
+export type { GitAsyncOptions } from './scope-repo'
 export type { PushPolicy } from '../push-check/policy'
 
-/** Create a bare repository (branch pinned to main: the client hardcodes origin/main) and configure it. */
-export function initBareRepo(repoPath: string): void {
+/**
+ * Create a bare repository (branch pinned to main: the client hardcodes
+ * origin/main) and configure it. Asynchronous: it runs inside the
+ * company-creation request, in the process that serves all git-http traffic
+ * (tests/security/no-exec-sync.test.ts). Fails if the pre-receive hook cannot
+ * be installed — a company repository must never accept pushes unchecked.
+ */
+export async function initBareRepo(repoPath: string): Promise<void> {
   mkdirSync(repoPath, { recursive: true })
-  execFileSync('git', ['init', '--bare', '--initial-branch=main', repoPath], { stdio: 'pipe' })
-  configureBareRepo(repoPath)
+  await gitAsync(['init', '--bare', '--initial-branch=main', repoPath], { timeoutMs: 60_000 })
+  await configureBareRepoAsync(repoPath)
 }
 
 /**

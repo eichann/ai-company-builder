@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import { execFile } from 'child_process'
 import { internalGitEnv } from '../lib/git-server'
+import { withCompanyLock } from '../lib/company-lock'
 import { existsSync, mkdirSync, writeFileSync } from 'fs'
 import { readdir, rm, stat } from 'fs/promises'
 import { promisify } from 'util'
@@ -115,24 +116,9 @@ async function git(args: string[]): Promise<string> {
   return stdout
 }
 
-// Per-company serialization of working-clone operations. A run registers
-// itself before awaiting the previous one, so two queued requests can never
-// wake up together and run git in the same working directory concurrently.
-const companyLocks = new Map<string, Promise<void>>()
-
-export async function withCompanyLock<T>(companyId: string, fn: () => Promise<T>): Promise<T> {
-  const previous = companyLocks.get(companyId) ?? Promise.resolve()
-  let release!: () => void
-  const current = previous.then(() => new Promise<void>(resolve => { release = resolve }))
-  companyLocks.set(companyId, current)
-  await previous
-  try {
-    return await fn()
-  } finally {
-    release()
-    if (companyLocks.get(companyId) === current) companyLocks.delete(companyId)
-  }
-}
+// Per-company serialization of working-clone operations (lib/company-lock.ts,
+// shared with company seeding in companies.ts)
+export { withCompanyLock }
 
 // The shared branch of the bare repo: main, or master for a repo created
 // before the branch name was pinned (the old working-clone pull fell back the
