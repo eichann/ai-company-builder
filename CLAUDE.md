@@ -294,7 +294,16 @@ P3. Each readable private folder: excluded in settings → sync it one last
 2. Retry a PENDING_PUSH left by a previous failed sync
 3. Ensure .gitignore essentials (.backups/, .workspace/, node_modules/, .env*,
    **/.personal/* with !**/.personal/.gitignore)
-4. Scan for >100MB files → append to .gitignore
+4. Scan for >100MB files → append to .gitignore (`sync/large-files.ts`): only
+   what git lists is stat'ed — `ls-files --cached` + `--others
+   --exclude-standard` (no blob read, nothing downloaded in a partial clone),
+   plus the contents of nested repositories / gitlinks; never .git,
+   node_modules, .backups/.workspace (any depth) or a private folder. Tracked
+   files over the limit still get their line (they stay tracked, as before).
+   "Already ignored" = `git check-ignore --no-index` (never a substring of the
+   file: that skipped whole departments); the line is the path as a literal
+   pattern (glob characters, leading `#`/`!`, trailing spaces escaped; a root
+   file anchored as `/name`). Threshold injectable (`SyncDeps.largeFileThreshold`)
 5. Detect nested Git repositories → ask the user BEFORE modifying anything
 6. git fetch --progress origin
 6.5 Hold back files created inside excluded (not downloaded) folders, at any

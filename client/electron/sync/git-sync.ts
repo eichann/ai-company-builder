@@ -38,6 +38,7 @@ import {
 import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
 import { findNestedGitRepos } from './nested-repos'
+import { findLargeFiles, largeFilePattern } from './large-files'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { ensurePromisorConfig, setRemoteUrl } from './remote'
 import { appliedExclusions, applySparseSelection, readSparseConfig, sparseConfigPath, staleExclusions, writeSparseConfig } from './sparse'
@@ -324,48 +325,26 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       gitignoreContent = seed
     }
 
-    // Detect large files (>100MB) and add to .gitignore — async to avoid blocking UI
-    const LARGE_FILE_THRESHOLD = 100 * 1024 * 1024 // 100MB
-    const ignoredLargeFiles: string[] = []
-
-    async function scanForLargeFiles(dir: string, baseDir: string): Promise<void> {
-      try {
-        const items = await fs.promises.readdir(dir)
-
-        for (const item of items) {
-          const fullPath = path.join(dir, item)
-          const relativePath = path.relative(baseDir, fullPath)
-
-          // Skip directories that are always ignored
-          if (item === '.git' || item === '.backups' || item === 'node_modules') continue
-          // A private folder's clone is its own repository: a large file
-          // there must not be named in the company's shared .gitignore.
-          if (privatePaths.length > 0 && isUnderAny(privatePaths, relativePath.split(path.sep).join('/'))) continue
-          // Skip if already in .gitignore
-          if (gitignoreContent.includes(relativePath)) continue
-
-          try {
-            const stat = await fs.promises.stat(fullPath)
-            if (stat.isDirectory()) {
-              await scanForLargeFiles(fullPath, baseDir)
-            } else if (stat.isFile() && stat.size > LARGE_FILE_THRESHOLD) {
-              ignoredLargeFiles.push(relativePath)
-            }
-          } catch {
-            // Skip files we can't access
-          }
-        }
-      } catch {
-        // Directory doesn't exist or can't be read
-      }
+    // Detect large files (>100MB) and add to .gitignore: only the files git
+    // lists (index entries + untracked files no rule ignores) are stat'ed,
+    // never the whole folder, and "already ignored" is git's answer, not a
+    // substring of the file. A private folder's clone is its own repository:
+    // a large file there must not be named in the company's shared
+    // .gitignore. See ./large-files.ts.
+    let ignoredLargeFiles: string[] = []
+    try {
+      ignoredLargeFiles = await findLargeFiles(git, repoPath, {
+        threshold: deps.largeFileThreshold,
+        skip: rel => isUnderAny(localOnly, rel),
+      })
+    } catch (scanError) {
+      log.warn('Git sync: Large file scan failed:', scanError)
     }
-
-    await scanForLargeFiles(repoPath, repoPath)
 
     // Add large files to .gitignore
     if (ignoredLargeFiles.length > 0) {
       const largeFilesSection = '\n# Auto-ignored: Large files (>100MB)\n' +
-        ignoredLargeFiles.map(f => f).join('\n') + '\n'
+        ignoredLargeFiles.map(largeFilePattern).join('\n') + '\n'
       await fs.promises.appendFile(gitignorePath, largeFilesSection)
       log.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
     }
