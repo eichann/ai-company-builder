@@ -19,8 +19,7 @@ const PUBLIC_ENDPOINT_EXCEPTIONS: Record<string, string[]> = {
 }
 
 // Route files where ALL endpoints are expected to be unauthenticated (stub/TODO)
-const FULLY_PUBLIC_ROUTES = [
-  'sync.ts', // TODO: Not yet implemented, all endpoints are stubs
+const FULLY_PUBLIC_ROUTES: string[] = [
   'permissions.ts', // Dead code: route unmounted from index.ts (C-2 fix), file pending deletion
 ]
 
@@ -148,20 +147,5 @@ describe('Authentication guards', () => {
       violations,
       `These endpoints are missing authentication checks:\n${violations.join('\n')}`
     ).toEqual([])
-  })
-
-  it('sync route must be documented as intentionally unauthenticated', () => {
-    // sync.ts is currently a stub with no auth. This test ensures we
-    // don't forget to add auth when we implement it.
-    const syncContent = readFileSync(join(ROUTES_DIR, 'sync.ts'), 'utf-8')
-
-    const hasAuthImport = /getUserFromRequest/.test(syncContent)
-    const isTodo = /TODO/.test(syncContent)
-
-    // Either it has auth, or it's still a TODO stub
-    expect(
-      hasAuthImport || isTodo,
-      'sync.ts has endpoints without auth and no TODO marker — add auth or mark as TODO'
-    ).toBe(true)
   })
 })
