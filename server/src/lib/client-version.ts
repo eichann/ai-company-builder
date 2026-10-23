@@ -99,13 +99,6 @@ export function compareClientVersions(a: ParsedClientVersion, b: ParsedClientVer
   return ad < bd ? -1 : ad > bd ? 1 : 0
 }
 
-/** True when `version` is a parseable build at least as new as `minimum`. */
-export function isClientVersionAtLeast(version: string | null | undefined, minimum: ParsedClientVersion): boolean {
-  const parsed = parseClientVersion(version)
-  if (!parsed) return false
-  return compareClientVersions(parsed, minimum) >= 0
-}
-
 // ----------------------------------------------------------------------------
 // Feature gates
 // ----------------------------------------------------------------------------

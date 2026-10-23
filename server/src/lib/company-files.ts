@@ -571,12 +571,6 @@ export async function withSearchSlot<T>(companyId: string, fn: () => Promise<T>)
   }
 }
 
-/** For tests: searches running or queued for the company. */
-export function searchLoad(companyId: string): { running: number; queued: number } {
-  const s = searchSlots.get(companyId)
-  return { running: s?.running ?? 0, queued: s?.queue.length ?? 0 }
-}
-
 /**
  * Cut a long matching line around the match. `column` is the 1-based BYTE
  * offset of the first match, as `git grep --column` reports it. The query is
