@@ -155,6 +155,22 @@ describe('git:sync private folders', { concurrency: CONCURRENCY }, () => {
     await settleAndCheck(world)
   })
 
+  scenario('a file at the name staged by an older app\'s preview (`git add --sparse .`) is held back before staging all the same', async t => {
+    const { world, other } = create(t)
+    ok(await other.sync(), 'other')
+    other.write(`${HR}/メモ.md`, 'my own notes\n').write('営業部/提案.md', '提案 v2\n')
+    other.git(['add', '--sparse', '.'])
+    const out = ok(await other.sync(), 'other')
+    assert.deepEqual(out.result.reservedPathFiles, [`${HR}/メモ.md`])
+    assert.equal(other.exists(`${HR}/メモ.md`), false)
+    const backups = backupsWith(other, 'reserved_path')
+    assert.deepEqual(backups.map(b => b.files), [[`${HR}/メモ.md`]])
+    assert.equal(backups[0].metadata.reasons, undefined, 'held back before staging, not recovered after a [RESERVED_PATH] rejection')
+    assert.equal(world.serverFile(`${HR}/メモ.md`), null)
+    assert.equal(world.serverFile('営業部/提案.md')?.toString(), '提案 v2\n')
+    await settleAndCheck(world)
+  })
+
   scenario('case and NFD variants of the name are held back too', async t => {
     const world = World.create(t, { members: [{ name: 'reader' }, { name: 'other' }], departments: ['hr'] })
     world.createPrivateFolder('hr/Secret', { viewers: ['reader'] })

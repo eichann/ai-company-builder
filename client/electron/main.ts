@@ -44,6 +44,7 @@ const PRIVATE_BACKUP_ID_PREFIX = 'private:'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin, setRemoteUrl } from './sync/remote'
+import { previewChanges, withScratchIndex } from './sync/preview'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar, { FSWatcher } from 'chokidar'
@@ -1463,7 +1464,7 @@ function getResolvedGit() {
 }
 
 // Create a simpleGit instance with HTTPS token authentication
-function createGit(repoPath: string): SimpleGit {
+function createGit(repoPath: string, extraEnv?: Record<string, string>): SimpleGit {
   const { binary, envOverrides } = getResolvedGit()
   return createConfiguredGit(repoPath, {
     binary,
@@ -1472,7 +1473,7 @@ function createGit(repoPath: string): SimpleGit {
     // App-owned hooks/ and templates/ (empty): the member's git hooks and
     // init.templateDir never run in the app (sync/git-factory.ts appGitDirs).
     appGitDir: path.join(app.getPath('userData'), 'git'),
-    envOverrides,
+    envOverrides: extraEnv ? { ...envOverrides, ...extraEnv } : envOverrides,
     // X-ACB-Client-Version / X-ACB-Client-Platform on git's HTTP requests,
     // so the server records which build synced (electron/client-identity.ts).
     extraConfig: gitIdentityConfig(),
@@ -1527,9 +1528,11 @@ ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, 
 // stat, no contents). No AI, a failure or 30 s without an answer → null, and
 // sync commits its fixed message. A private folder's clone uses the API key
 // only, as before.
-const generateCommitMessage = createCommitMessageGenerator({
+// `gitFor` picks the index: the member's own for sync, a throwaway copy for
+// the preview's summary (git:generateSummary — preview never stages).
+const commitMessageGenerator = (gitFor: (repoPath: string) => SimpleGit) => createCommitMessageGenerator({
   readStaged: async (repoPath) => {
-    const git: SimpleGit = createGit(repoPath)
+    const git: SimpleGit = gitFor(repoPath)
     // core.quotePath=false: Japanese names as text, not octal escapes.
     const stat = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--stat'])
     const nameStatus = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-status'])
@@ -1548,27 +1551,16 @@ const generateCommitMessage = createCommitMessageGenerator({
     return cwd
   },
 })
+const generateCommitMessage = commitMessageGenerator(createGit)
 
-// Preview changes before sync (read-only, no commit/push)
+// Preview changes before sync. Strictly read-only: it never stages — a
+// staged file inside a not-downloaded folder slipped past sync's
+// outside-checkout hold-back and was shared (sync/preview.ts).
 ipcMain.handle('git:preview', async (_, repoPath: string) => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
-    await git.raw(['add', '--sparse', '.'])
-    const status = await git.status()
-
-    const added: string[] = []
-    const modified: string[] = []
-    const deleted: string[] = []
-    for (const f of status.files) {
-      if (f.index === 'A' || f.index === '?') {
-        added.push(f.path)
-      } else if (f.index === 'D' || f.working_dir === 'D') {
-        deleted.push(f.path)
-      } else {
-        modified.push(f.path)
-      }
-    }
+    const { added, modified, deleted } = await previewChanges(git)
 
     const totalCount = added.length + modified.length + deleted.length
 
@@ -1597,9 +1589,10 @@ ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, f
     const git: SimpleGit = createGit(safePath)
 
     if (fileStatus === 'added') {
-      // New file: remove from staging and delete
-      await git.raw(['rm', '--cached', filePath])
-      const fullPath = path.join(safePath, filePath)
+      // New file: drop it from the index if it is there (preview no longer
+      // stages, so it usually is not) and delete it
+      await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', filePath])
+      const fullPath = validatePath(path.join(safePath, filePath))
       if (fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath)
       }
@@ -1615,7 +1608,8 @@ ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, f
   }
 })
 
-// Get diff for a specific file (staged changes)
+// Get diff for a specific file (what the next sync would share: the file on
+// disk against HEAD — preview does not stage)
 ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
   try {
     const safePath = validatePath(repoPath)
@@ -1623,7 +1617,7 @@ ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fil
 
     if (fileStatus === 'added') {
       // New file: show entire content as addition
-      const content = await git.show([`:${filePath}`])
+      const content = fs.readFileSync(validatePath(path.join(safePath, filePath)), 'utf-8')
       return { success: true, diff: content, isNewFile: true }
     } else if (fileStatus === 'deleted') {
       // Deleted file: show entire content as deletion
@@ -1631,7 +1625,7 @@ ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fil
       return { success: true, diff: content, isDeletedFile: true }
     } else {
       // Modified: show unified diff
-      const diff = await git.diff(['--cached', '-U3', '--', filePath])
+      const diff = await git.diff(['HEAD', '-U3', '--', filePath])
       return { success: true, diff }
     }
   } catch (err) {
@@ -1657,7 +1651,16 @@ ipcMain.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: str
 ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
   try {
     const safePath = validatePath(repoPath)
-    const summary = await generateCommitMessage(safePath)
+    // Staged into a throwaway copy of the index: preview never stages.
+    const summary = await withScratchIndex({
+      git: createGit(safePath),
+      repoPath: safePath,
+      makeGit: env => createGit(safePath, env),
+      fn: async scratch => {
+        await scratch.raw(['add', '--sparse', '.'])
+        return commitMessageGenerator(() => scratch)(safePath)
+      },
+    })
     return { success: true, summary: summary || null }
   } catch {
     return { success: false, summary: null }
