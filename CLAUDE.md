@@ -118,6 +118,20 @@ Server references shared types via:
 import { ... } from '../../shared/types'  // Path inside container
 ```
 
+### Two React lines in one workspace
+
+client is on React 18 (`@types/react` 18), admin on React 19. A library whose
+`.d.ts` imports `react` without declaring `@types/react` as a peer finds the
+types through pnpm's hidden hoist (`node_modules/.pnpm/node_modules/@types/react`),
+which holds whichever of the two versions pnpm happened to hoist — admin's
+typecheck then failed intermittently with two `ReactNode` types. Root
+`package.json` `pnpm.packageExtensions` declares the missing optional
+`@types/react` (/`-dom`) peer for those libraries (next, @phosphor-icons/react,
+@dnd-kit/*, cmdk, next-themes, react-i18next), so each one is linked to its
+workspace's own types. Adding a React library that ships types importing
+`react` without that peer: add it there too (`tsc --traceResolution` showing a
+lookup ending in `.pnpm/node_modules/@types/react` is the sign).
+
 ### Database
 
 - SQLite (`data/app.sqlite` for app, `data/auth.sqlite` for auth)

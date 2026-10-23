@@ -22,6 +22,40 @@
   "pnpm": {
     "overrides": {
       "@anthropic-ai/claude-agent-sdk": "0.3.304"
+    },
+    "packageExtensions": {
+      "next@*": {
+        "peerDependencies": { "@types/react": "*", "@types/react-dom": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true }, "@types/react-dom": { "optional": true } }
+      },
+      "@phosphor-icons/react@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "@dnd-kit/core@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "@dnd-kit/sortable@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "@dnd-kit/utilities@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "cmdk@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "next-themes@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      },
+      "react-i18next@*": {
+        "peerDependencies": { "@types/react": "*" },
+        "peerDependenciesMeta": { "@types/react": { "optional": true } }
+      }
     }
   }
 }

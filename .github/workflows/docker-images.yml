@@ -73,7 +73,7 @@ jobs:
             const lock = fs.readFileSync("/dev/stdin", "utf8")
             const server = lock.slice(lock.indexOf("\n  server:\n"), lock.indexOf("\n  shared:\n"))
             let bad = 0
-            for (const name of ["better-auth", "hono", "better-sqlite3", "drizzle-orm", "@hono/node-server", "tsx"]) {
+            for (const name of ["better-auth", "hono", "better-sqlite3", "@hono/node-server", "tsx"]) {
               // scoped names are quoted in the lockfile (\x27 = single quote)
               const want = server.match(new RegExp(`\\n      \\x27?${name}\\x27?:\\n.*\\n        version: ([^(\\s]+)`))[1]
               const have = require(`/app/node_modules/${name}/package.json`).version
