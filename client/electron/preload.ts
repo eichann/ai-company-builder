@@ -66,6 +66,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   readFile: (path: string) => ipcRenderer.invoke('fs:readFile', path),
   readFileBinary: (path: string) => ipcRenderer.invoke('fs:readFileBinary', path),
   writeFile: (path: string, content: string) => ipcRenderer.invoke('fs:writeFile', path, content),
+  backupBeforeOverwrite: (rootPath: string, filePath: string) =>
+    ipcRenderer.invoke('editor:backupBeforeOverwrite', rootPath, filePath),
   createDirectory: (path: string) => ipcRenderer.invoke('fs:createDirectory', path),
   exists: (path: string) => ipcRenderer.invoke('fs:exists', path),
   getDocumentsPath: () => ipcRenderer.invoke('app:getDocumentsPath'),
@@ -189,8 +191,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   writeEnv: (rootPath: string, vars: Record<string, string>) => ipcRenderer.invoke('env:write', rootPath, vars),
 
   // Skills
-  listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) =>
-    ipcRenderer.invoke('skills:list', rootPath, departmentFolder, departmentId, departmentName),
+  listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) =>
+    ipcRenderer.invoke('skills:list', rootPath, departmentFolder, departmentId, departmentName, options),
   publishSkill: (rootPath: string, skillRelativePath: string) =>
     ipcRenderer.invoke('skills:publish', rootPath, skillRelativePath),
   makeSkillPrivate: (rootPath: string, skillRelativePath: string) =>
@@ -548,6 +550,8 @@ declare global {
       readFile: (path: string) => Promise<string | null>
       readFileBinary: (path: string) => Promise<ArrayBuffer | null>
       writeFile: (path: string, content: string) => Promise<boolean>
+      /** Keep the disk version before the editor overwrites a file changed elsewhere (.backups/<ts>_editor_overwrite/). */
+      backupBeforeOverwrite: (rootPath: string, filePath: string) => Promise<{ success: boolean; backupPath?: string; skipped?: 'missing' | 'outside-company' | 'internal'; error?: string }>
       createDirectory: (path: string) => Promise<boolean>
       exists: (path: string) => Promise<boolean>
       getDocumentsPath: () => Promise<string>
@@ -574,7 +578,7 @@ declare global {
       writeEnv: (rootPath: string, vars: Record<string, string>) => Promise<{ success: boolean; error?: string }>
 
       // Skills
-      listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) => Promise<SkillsResult>
+      listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => Promise<SkillsResult>
       publishSkill: (rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>
       makeSkillPrivate: (rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>
       toggleSkillNurturing: (skillMdPath: string, makeNurturing: boolean) => Promise<{ success: boolean; error?: string }>

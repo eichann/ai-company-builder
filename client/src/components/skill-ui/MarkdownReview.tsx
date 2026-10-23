@@ -1332,8 +1332,8 @@ export interface MarkdownDiffViewHandle {
   scrollToText: (text: string) => void
 }
 
-export const MarkdownDiffView = React.forwardRef<MarkdownDiffViewHandle, { snapshot: string; current: string }>(
-  function MarkdownDiffView({ snapshot, current }, ref) {
+export const MarkdownDiffView = React.forwardRef<MarkdownDiffViewHandle, { snapshot: string; current: string; noChangesMessage?: string }>(
+  function MarkdownDiffView({ snapshot, current, noChangesMessage = 'レビュー時点から変更はありません' }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     // Myers diff (lib/line-diff.ts); null = too large to compare.
     const diff = useMemo(() => computeLineDiff(snapshot, current), [snapshot, current])
@@ -1367,7 +1367,7 @@ export const MarkdownDiffView = React.forwardRef<MarkdownDiffViewHandle, { snaps
     if (!hasChanges) {
       return (
         <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500 text-sm">
-          レビュー時点から変更はありません
+          {noChangesMessage}
         </div>
       )
     }

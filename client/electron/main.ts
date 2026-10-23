@@ -50,6 +50,8 @@ import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBy
 import { resolveGitBinary, resolveGitDir } from 'dugite'
 import chokidar from 'chokidar'
 import { CompanyWatcher, coveringRoot, type FileChange, type RawEventType } from './company-watcher'
+import { SkillsCache } from '../shared/skills-refresh'
+import { editorOverwriteBackupPlan, type EditorOverwriteBackupMetadata } from '../shared/editor-disk-state'
 import { localFileTarget } from './local-file-protocol'
 import net from 'net'
 import { HandoffStore } from './handoff/store'
@@ -111,6 +113,11 @@ function notDownloadedRefusal(absPath: string): string | null {
 
 // One recursive watcher per open company folder (see company-watcher.ts).
 const companyWatchers: Map<string, CompanyWatcher> = new Map()
+
+// Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
+// as soon as a watcher event makes them stale (sendFileChanges) or the
+// renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
+const skillsCache = new SkillsCache<SkillInfo[]>(5000)
 
 // Running tool processes map
 interface RunningTool {
@@ -612,6 +619,52 @@ ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   }
 })
 
+// Before the editor overwrites a file someone else changed since the tab
+// loaded it (the member confirmed): keep the disk version, byte for byte, in
+// .backups/<ts>_editor_overwrite/ — or .git/acb-private-backups/ for a file in
+// a private folder (never in that folder's working tree). Plan and rules:
+// shared/editor-disk-state.ts.
+ipcMain.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, filePath: string) => {
+  try {
+    const root = validatePath(rootPath)
+    const safePath = validatePath(filePath)
+    let bytes: Buffer
+    try {
+      bytes = await fs.promises.readFile(safePath)
+    } catch {
+      return { success: true, skipped: 'missing' as const }
+    }
+    let insideNestedRepo = false
+    for (let dir = path.dirname(safePath); dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
+      if (fs.existsSync(path.join(dir, '.git'))) { insideNestedRepo = true; break }
+    }
+    const cache = readPrivateScopesCache(root)
+    const plan = editorOverwriteBackupPlan({
+      rootPath: root,
+      filePath: safePath,
+      privateFolders: cache ? [...cache.scopes, ...(cache.pendingPublic ?? [])].map(s => s.path) : [],
+      insideNestedRepo,
+      now: new Date(),
+    })
+    if ('skip' in plan) return { success: true, skipped: plan.skip }
+    const backupDir = path.join(plan.privateFolder ? privateBackupsDir(root) : path.join(root, '.backups'), plan.folder)
+    const target = path.join(backupDir, ...plan.rel.split('/'))
+    await fs.promises.mkdir(path.dirname(target), { recursive: true })
+    await fs.promises.writeFile(target, bytes)
+    const metadata: EditorOverwriteBackupMetadata = {
+      timestamp: new Date().toISOString(),
+      reason: 'editor_overwrite',
+      files: [plan.rel],
+      privateFolder: plan.privateFolder,
+    }
+    await fs.promises.writeFile(path.join(backupDir, '_metadata.json'), JSON.stringify(metadata, null, 2))
+    return { success: true, backupPath: backupDir }
+  } catch (error) {
+    console.error('[editor] backup before overwrite failed:', error)
+    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  }
+})
+
 ipcMain.handle('fs:createDirectory', async (_, dirPath: string) => {
   try {
     const safePath = validatePath(dirPath)
@@ -787,6 +840,9 @@ function chokidarFallback(root: string, onRaw: (type: RawEventType, rel: string)
 }
 
 function sendFileChanges(changes: FileChange[]): void {
+  // A skill the AI (or anything else) created, changed or removed is scanned
+  // afresh by the next skills:list.
+  skillsCache.invalidateForChanges(changes)
   if (mainWindow && !mainWindow.isDestroyed()) {
     mainWindow.webContents.send('fs:changes', changes)
   }
@@ -2700,20 +2756,8 @@ function invalidateGitignoreCache(rootPath: string): void {
   gitignoreCache.delete(rootPath)
 }
 
-// Skills cache per skillsDir to avoid rescanning on every tab switch
-const skillsCache = new Map<string, { skills: SkillInfo[]; timestamp: number }>()
-const SKILLS_CACHE_TTL = 5000 // 5 seconds
-
 function invalidateSkillsCache(rootPath: string, departmentFolder?: string): void {
-  if (departmentFolder) {
-    const key = path.join(rootPath, departmentFolder, '.claude', 'skills')
-    skillsCache.delete(key)
-  } else {
-    // Invalidate all caches for this rootPath
-    for (const key of skillsCache.keys()) {
-      if (key.startsWith(rootPath)) skillsCache.delete(key)
-    }
-  }
+  skillsCache.invalidate(rootPath, departmentFolder)
 }
 
 /** Scan a single .claude/skills/ directory and return SkillInfo[] */
@@ -2902,19 +2946,15 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
 }
 
 // List skills for a department (scans 3 hierarchy levels)
-ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string) => {
+ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
   try {
-    // Cache key includes rootPath + departmentFolder to cover all 3 levels
-    const cacheKey = `${rootPath}::${departmentFolder}::hierarchical`
-
-    // Return cached result if fresh
-    const cached = skillsCache.get(cacheKey)
-    if (cached && Date.now() - cached.timestamp < SKILLS_CACHE_TTL) {
-      return { success: true, skills: cached.skills }
-    }
+    // A forced refresh (watcher event, sync, the member's own change) rescans.
+    if (options?.force) invalidateSkillsCache(rootPath, departmentFolder)
+    const cached = skillsCache.get(rootPath, departmentFolder)
+    if (cached) return { success: true, skills: cached }
 
     const skills = await scanSkills(rootPath, departmentFolder, departmentId, departmentName)
-    skillsCache.set(cacheKey, { skills, timestamp: Date.now() })
+    skillsCache.set(rootPath, departmentFolder, skills)
 
     return { success: true, skills }
   } catch (error) {

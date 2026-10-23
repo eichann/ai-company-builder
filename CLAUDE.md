@@ -634,12 +634,19 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 │       │                          may not edit, put back to the server's version
 │       └── _metadata.json       ← reason `write_denied`, `writeDeniedFiles`,
 │                                  restored/removed paths
+│   └── 2026-02-21T14-31-00-000_editor_overwrite/
+│       ├── 営業部/提案書.md      ← disk version (the AI's / a teammate's edit) the
+│       │                          member chose to overwrite from an editor tab
+│       └── _metadata.json       ← reason `editor_overwrite`, `files`, `privateFolder`
 └── .git/
     └── acb-private-backups/         ← private folders' backups: never in the working
         │                              tree, so no .gitignore edit can share them
         ├── 2026-02-21T14-30-00-000_private/人事/評価/評価表.md  ← conflict backup
         │                              (also _protected / _write_denied), paths
         │                              company-relative
+        ├── …_editor_overwrite/       ← editor overwrite of a file in a private folder
+        │                              (private per the cached /me/scopes, or a
+        │                              nested .git between file and root)
         ├── …_made_public/            ← unsynced edits of a folder made public
         ├── …_private_folder_existing/ ← what sat at a private folder's path before
         │                              it was downloaded
@@ -858,6 +865,30 @@ anything.
   folder), `tests/file-tree-model.test.ts`, `tests/local-file-url.test.ts`.
   Preview: `tests/download-folders-ui.html?view=filetree` exposes
   `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
+- **Skills list freshness** (`shared/skills-refresh.ts`): `skills:list`
+  caches one scan per root + department folder (`''` = company-wide) for 5 s,
+  for plain tab switches only. A scan is stale after any event at/under a
+  `.claude/skills/` it reads (root one → company-wide; any depth inside a
+  department → that department), the `.claude` folder itself, the root
+  `.gitignore` (private marks → every scan), or a folder added/removed inside
+  the department (it may carry skills). The main process drops stale scans in
+  `sendFileChanges`; the renderer (`SkillCentricLayout`) rescans the shown
+  list and the company-wide skills behind the slash commands with
+  `{ force: true }` (coalesced 120 ms, deferred ≤ 1 s while typing in chat),
+  and after every successful sync. A forced rescan keeps the list on screen
+  (no loading flash). `.claude/commands` / `.claude/agents` are not listed.
+- **External changes to open files** (`shared/editor-disk-state.ts`,
+  `TabbedEditorPanel`): a tab remembers the disk version it loaded/saved
+  (`originalContent`). No edits → it follows the disk. With edits, a disk
+  change shows 「このファイルは外部で変更されました」 (ディスクの内容を読み込む
+  after a confirm / 差分を見る — `MarkdownDiffView`, disk − vs. edits + /
+  自分の編集を残す) and **pauses autosave**; deleted → 「ファイルは削除されました。
+  保存すると作り直します」. Every save first re-reads the disk: if it is no
+  longer the loaded version, autosave stops (banner) and ⌘S / closing the tab
+  asks 「外部の変更を上書きして保存」 / 「キャンセル」 (Enter does not confirm);
+  overwriting first backs the disk version up (`editor:backupBeforeOverwrite`,
+  see Backup Structure). Closing a tab whose save was cancelled asks before
+  discarding. Preview: `tests/editor-tabs-ui.html?view=external`.
 
 ---
 
