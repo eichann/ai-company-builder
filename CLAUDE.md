@@ -207,6 +207,32 @@ import { ... } from '../../shared/types'  // Path inside container
   space with a work budget; past it the view says the diff is too large
   instead of building the old O(m·n) table (25M cells for 5,000 lines).
 
+### IPC characterization tests (client)
+
+`client/tests/ipc-*.test.ts` load the real `client/electron/main.ts` under
+plain Node: `tests/ipc-harness/electron-loader.mjs` (a `node:module` resolve
+hook) maps `electron` to `tests/ipc-harness/fake-electron.ts`, which records
+`ipcMain` handlers, window sends, dialogs and the `local-file` protocol; a
+fake server sits behind global `fetch` (`main-harness.ts`, `loadMain()`; one
+main.ts per test file, everything under one temp dir). No production code
+was changed for this — keep main.ts importable without side effects beyond
+registering handlers (startup stays inside `app.whenReady`).
+
+- `ipc-contract.test.ts` compares the whole IPC surface with
+  `tests/ipc-harness/ipc-inventory.json`: every `ipcMain.handle` / `.on`
+  channel with its parameters, every channel sent to the window, each
+  preload function's call(s) and declared type, and the unmatched ends
+  (handlers without a preload caller, preload functions the renderer never
+  calls — dead-code candidates). Adding, removing or re-wiring a channel
+  fails it on purpose: regenerate with
+  `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and
+  review the JSON diff in the PR.
+- The other files pin handler behaviour that lives in main.ts itself (the
+  allowed-roots check, which refusal each handler applies, result shapes);
+  logic one level down keeps its own tests. Run one file alone:
+  `npx tsx --test tests/ipc-fs.test.ts` (`IPC_HARNESS_VERBOSE=1` prints
+  main.ts's console).
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
@@ -987,6 +1013,22 @@ member may only read used to be rejected at sync and moved to `.backups/`
   stay the safety net. Paths are judged lexically (no symlink resolution).
 - Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in
   the file tree (where read-only starts) and above the open file.
+
+### Rule parity tests (copies that must agree)
+
+Rules that exist as separate copies are held together by tests, not by
+review: `client/tests/rule-parity-write-access.test.ts` (seeded generated
+companies: the chat guard's decision from `/me/write-access` + `/me/scopes` +
+`paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
+gate; `RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
+(path keys, department folder names, skill names, AI instruction files — every
+copy on one corpus; regexes private to a component are read from its source)
+and `server/tests/integration/admin-contract.test.ts` (every endpoint the admin
+calls, checked against `admin/src/lib/api.ts` with the TypeScript compiler,
+`tests/helpers/type-shape.ts`). Known differences are listed in each test
+(`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES`) and must keep occurring: fixing one
+fails the test until its entry is removed. Changing a rule in one copy means
+changing the others in the same PR.
 
 ---
 
