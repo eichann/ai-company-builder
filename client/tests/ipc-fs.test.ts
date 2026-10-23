@@ -36,6 +36,7 @@ before(async () => {
 after(() => h.shutdown())
 
 const DENIED = 'Access denied: path is outside allowed directories'
+const LINK_ESCAPE = 'このファイル（またはフォルダ）は会社フォルダの外を指すリンク（シンボリックリンク）のため、アプリでは開いたり変更したりできません。'
 
 test('every path-taking fs handler refuses paths outside the allowed roots, with its own failure value', async () => {
   writeFiles(root, { 'in.txt': 'inside' })
@@ -94,15 +95,84 @@ test('registering a root: fs:registerAllowedRoot accepts only a non-empty string
   assert.equal(await h.invoke('fs:readFile', path.join(later, 'a.txt')), 'a')
 })
 
-test('FINDING (not refused today): the roots check is lexical, so a symlink inside a root reaches outside it', async () => {
-  // Reported for a later fix; this pins today's behaviour so a refactor does
-  // not change it unnoticed. A fix should flip these assertions.
-  fs.symlinkSync(outside, path.join(root, 'link-out'))
-  assert.equal(await h.invoke('fs:readFile', path.join(root, 'link-out', 'secret.txt')), 'outside')
-  assert.equal(await h.invoke('fs:writeFile', path.join(root, 'link-out', 'written.txt'), 'x'), true)
-  assert.equal(fs.readFileSync(path.join(outside, 'written.txt'), 'utf-8'), 'x')
-  fs.rmSync(path.join(outside, 'written.txt'))
-  fs.rmSync(path.join(root, 'link-out'))
+test('symbolic links: judged by their real location — a link leading out of the company folder is refused, one inside works', async () => {
+  // A teammate can commit a link; the member must not read or overwrite
+  // ~/.zshrc (or another company's folder) through it.
+  const company = h.companyDir('links-co')
+  const sibling = h.companyDir('links-sibling') // another registered company
+  await h.invoke('fs:registerAllowedRoot', company)
+  await h.invoke('fs:registerAllowedRoot', sibling)
+  writeFiles(company, { 'docs/a.md': 'inside' })
+  writeFiles(sibling, { 'b.md': 'sibling' })
+  const at = (...p: string[]) => path.join(company, ...p)
+  fs.symlinkSync(outside, at('link-out'))
+  fs.symlinkSync(path.join(outside, 'secret.txt'), at('secret-link.md'))
+  fs.symlinkSync(sibling, at('link-sibling'))
+  fs.symlinkSync(path.join('..', '..', 'outside', 'secret.txt'), at('docs', 'relative-out.md')) // relative target
+  fs.symlinkSync(path.join(outside, 'not-yet.txt'), at('dangling-out.md')) // writing would create it outside
+  fs.symlinkSync('a.md', at('docs', 'link-in.md'))
+  fs.symlinkSync(at('docs'), at('docs-link'))
+  const nfdLink = at('リンク'.normalize('NFD'))
+  fs.symlinkSync(outside, nfdLink)
+
+  const escaping = [
+    at('link-out', 'secret.txt'), at('secret-link.md'), at('link-sibling', 'b.md'), at('docs', 'relative-out.md'),
+    at('dangling-out.md'), at('link-out', 'new', 'deeper.md'), path.join(nfdLink, 'secret.txt'),
+    // Normalization-insensitive volume: the NFC spelling reaches the NFD-named link too.
+    ...(process.platform === 'darwin' ? [at('リンク'.normalize('NFC'), 'secret.txt')] : []),
+  ]
+  const err = { success: false, error: LINK_ESCAPE }
+  for (const t of escaping) {
+    const where = path.relative(company, t)
+    assert.equal(await h.invoke('fs:readFile', t), null, where)
+    assert.equal(await h.invoke('fs:readFileBinary', t), null, where)
+    assert.equal(await h.invoke('fs:writeFile', t, 'pwned'), false, where)
+    assert.equal(await h.invoke('fs:exists', t), false, where)
+    assert.deepEqual(await h.invoke('fs:stat', t), { success: false }, where)
+    assert.equal(await h.invoke('fs:createDirectory', path.join(t, 'dir')), false, where)
+    assert.deepEqual(await h.invoke('fs:copy', t, at('stolen.md')), err, where)
+    assert.deepEqual(await h.invoke('fs:copy', at('docs', 'a.md'), t), err, where)
+    assert.deepEqual(await h.invoke('fs:move', at('docs', 'a.md'), t), err, where)
+    assert.deepEqual(await h.invoke('fs:moveFromExternal', path.join(h.companyDir('finder-links'), 'x.md'), t), err, where)
+    assert.deepEqual(await h.invoke('editor:backupBeforeOverwrite', company, t), err, where)
+    assert.throws(() => h.send('fs:startDrag', t), { message: LINK_ESCAPE }, where)
+  }
+  assert.deepEqual(await h.invoke('fs:readDirectory', at('link-out')), [])
+  assert.deepEqual(await h.invoke('fs:delete', at('link-out', 'secret.txt')), err) // through the link: refused
+  assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf-8'), 'outside')
+  assert.equal(fs.readFileSync(path.join(sibling, 'b.md'), 'utf-8'), 'sibling')
+  assert.deepEqual(fs.readdirSync(outside).sort(), ['secret.txt'])
+  assert.equal(fs.existsSync(at('stolen.md')), false)
+
+  // Links that stay inside behave like the files they point to.
+  assert.equal(await h.invoke('fs:readFile', at('docs', 'link-in.md')), 'inside')
+  assert.equal(await h.invoke('fs:writeFile', at('docs-link', 'b.md'), 'via link'), true)
+  assert.equal(fs.readFileSync(at('docs', 'b.md'), 'utf-8'), 'via link')
+  if (process.platform === 'darwin') {
+    // Case- and normalization-insensitive volume: another spelling of an existing folder is the same folder.
+    assert.equal(await h.invoke('fs:readFile', at('DOCS', 'a.md')), 'inside')
+  }
+
+  // The tree lists links without descending into them (a Dirent is not followed).
+  type Node = { name: string; isDirectory: boolean; children?: unknown[] }
+  const tree = await h.invoke<Node[]>('fs:readDirectoryTree', company, 3)
+  assert.deepEqual(tree.find(n => n.name === 'link-out'), { name: 'link-out', isDirectory: false, path: at('link-out') })
+
+  // The link itself lives inside: it can be renamed and deleted, and deleting never touches the target.
+  assert.deepEqual(await h.invoke('fs:rename', at('link-out'), at('link-out-2')), { success: true, newPath: at('link-out-2') })
+  assert.deepEqual(await h.invoke('fs:delete', at('link-out-2')), { success: true })
+  assert.deepEqual(await h.invoke('fs:delete', at('secret-link.md')), { success: true })
+  assert.deepEqual(await h.invoke('fs:delete', at('link-sibling')), { success: true })
+  assert.equal(fs.existsSync(at('link-out-2')), false)
+  assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf-8'), 'outside')
+  assert.equal(fs.readFileSync(path.join(sibling, 'b.md'), 'utf-8'), 'sibling')
+
+  // The registered root may itself be reached through a link (e.g. /tmp → /private/tmp).
+  const viaLink = path.join(h.base, 'company-alias')
+  fs.symlinkSync(company, viaLink)
+  await h.invoke('fs:registerAllowedRoot', viaLink)
+  assert.equal(await h.invoke('fs:readFile', path.join(viaLink, 'docs', 'a.md')), 'inside')
+  assert.equal(await h.invoke('fs:readFile', path.join(viaLink, 'docs', 'relative-out.md')), null)
 })
 
 test('fs handlers inside a root: result shapes', async () => {
@@ -280,6 +350,12 @@ test('local-file:// serves files inside the allowed roots only, never cached', a
     assert.equal(await res.text(), 'Forbidden: path is outside allowed directories')
   }
   assert.equal((await serve(new Request('local-file://'))).status, 400)
+  // Inside by name, outside through a link: refused like any outside path.
+  fs.symlinkSync(outside, path.join(root, 'served-out'))
+  const viaLink = await serve(new Request(`local-file://${root}/served-out/secret.txt`))
+  assert.equal(viaLink.status, 403)
+  assert.equal(await viaLink.text(), 'Forbidden: path is outside allowed directories')
+  fs.rmSync(path.join(root, 'served-out'))
 })
 
 test('fs:watch sends the watcher batches to the window as fs:changes; fs:unwatch stops them', async () => {

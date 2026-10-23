@@ -9,23 +9,6 @@ import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFo
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
 
-// Types for AI messages
-interface AIMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-}
-
-interface AIResponse {
-  text?: string
-  thinking?: string
-  error?: string
-}
-
-interface AICompleteData {
-  thinking?: string
-  content?: string
-}
-
 contextBridge.exposeInMainWorld('electronAPI', {
   voiceInput: {
     capabilities: () => ipcRenderer.invoke('voice:capabilities'),
@@ -102,10 +85,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Git operations
-  gitInit: (repoPath: string) => ipcRenderer.invoke('git:init', repoPath),
-  gitIsRepo: (repoPath: string) => ipcRenderer.invoke('git:isRepo', repoPath),
-  gitAddRemote: (repoPath: string, remoteName: string, remoteUrl: string) =>
-    ipcRenderer.invoke('git:addRemote', repoPath, remoteName, remoteUrl),
   gitSync: (repoPath: string, companyId: string, commitMessage: string) =>
     ipcRenderer.invoke('git:sync', repoPath, companyId, commitMessage),
   // Per-folder write access (閲覧のみ badges); refreshed by sync and the chat.
@@ -149,8 +128,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.on('setup:progress', handler)
     return () => ipcRenderer.removeListener('setup:progress', handler)
   },
-  gitPushToServer: (repoPath: string) =>
-    ipcRenderer.invoke('git:pushToServer', repoPath),
 
   // Sparse checkout
   isSparseCheckout: (repoPath: string) =>
@@ -183,8 +160,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('backup:restore', repoPath, backupId, filePath),
   backupOpenFolder: (backupPath: string) =>
     ipcRenderer.invoke('backup:openFolder', backupPath),
-  serverCreateRepo: (companyId: string) =>
-    ipcRenderer.invoke('server:createRepo', companyId),
 
   // Environment variables (.env file)
   readEnv: (rootPath: string) => ipcRenderer.invoke('env:read', rootPath),
@@ -285,37 +260,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('chatHistory:changed', wrapped)
   },
 
-  // AI operations
-  chat: (messages: AIMessage[], systemPrompt?: string, workingDirectory?: string) =>
-    ipcRenderer.invoke('ai:chat', messages, systemPrompt, workingDirectory),
-
-  // AI streaming events
-  onAIChunk: (callback: (chunk: string) => void) => {
-    const handler = (_: unknown, chunk: string) => callback(chunk)
-    ipcRenderer.on('ai:chunk', handler)
-    return () => ipcRenderer.removeListener('ai:chunk', handler)
-  },
-  onAIComplete: (callback: (data?: AICompleteData) => void) => {
-    const handler = (_: unknown, data?: AICompleteData) => callback(data)
-    ipcRenderer.on('ai:complete', handler)
-    return () => ipcRenderer.removeListener('ai:complete', handler)
-  },
-  onAIThinking: (callback: (isThinking: boolean) => void) => {
-    const handler = (_: unknown, isThinking: boolean) => callback(isThinking)
-    ipcRenderer.on('ai:thinking', handler)
-    return () => ipcRenderer.removeListener('ai:thinking', handler)
-  },
-  onAIThought: (callback: (thought: string) => void) => {
-    const handler = (_: unknown, thought: string) => callback(thought)
-    ipcRenderer.on('ai:thought', handler)
-    return () => ipcRenderer.removeListener('ai:thought', handler)
-  },
-  onAIThoughtStream: (callback: (thought: string) => void) => {
-    const handler = (_: unknown, thought: string) => callback(thought)
-    ipcRenderer.on('ai:thought-stream', handler)
-    return () => ipcRenderer.removeListener('ai:thought-stream', handler)
-  },
-
   // Chat server info (for useChat transport)
   getChatServerInfo: () => ipcRenderer.invoke('chat-server:getInfo') as Promise<{ port: number; authToken: string } | null>,
   onChatServerInfo: (callback: (info: { port: number; authToken: string }) => void) => {
@@ -377,22 +321,6 @@ interface GitResult {
   // shared, moved to outsideCheckoutBackupPath (.backups/<ts>_outside_checkout)
   outsideCheckoutFiles?: string[]
   outsideCheckoutBackupPath?: string
-}
-
-interface GitRepoResult {
-  isRepo: boolean
-}
-
-interface ServerRepoResult {
-  success: boolean
-  data?: {
-    companyId: string
-    path: string
-    httpsUrl?: string
-    sshUrl?: string
-    message?: string
-  }
-  error?: string
 }
 
 interface EnvResult {
@@ -637,9 +565,6 @@ declare global {
       onChatHistoryChanged: (callback: (data: ChatHistoryChange) => void) => () => void
 
       // Git
-      gitInit: (repoPath: string) => Promise<GitResult>
-      gitIsRepo: (repoPath: string) => Promise<GitRepoResult>
-      gitAddRemote: (repoPath: string, remoteName: string, remoteUrl: string) => Promise<GitResult>
       gitSync: (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
       getWriteAccess: (companyId: string, refresh?: boolean) => Promise<WriteAccess | null>
       onWriteAccessChanged: (callback: (data: { companyId: string; access: WriteAccess }) => void) => () => void
@@ -717,8 +642,6 @@ declare global {
         error?: string
       }>
       onSetupProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void
-      gitPushToServer: (repoPath: string) => Promise<GitResult>
-      serverCreateRepo: (companyId: string) => Promise<ServerRepoResult>
 
       // Sparse checkout
       isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
@@ -735,14 +658,6 @@ declare global {
       backupList: (repoPath: string) => Promise<BackupListResult>
       backupRestore: (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
       backupOpenFolder: (backupPath: string) => Promise<{ success: boolean; error?: string }>
-
-      // AI
-      chat: (messages: AIMessage[], systemPrompt?: string, workingDirectory?: string) => Promise<AIResponse>
-      onAIChunk: (callback: (chunk: string) => void) => () => void
-      onAIComplete: (callback: (data?: { thinking?: string; content?: string }) => void) => () => void
-      onAIThinking: (callback: (isThinking: boolean) => void) => () => void
-      onAIThought: (callback: (thought: string) => void) => () => void
-      onAIThoughtStream: (callback: (thought: string) => void) => () => void
 
       // Chat server (for useChat transport)
       getChatServerInfo: () => Promise<{ port: number; authToken: string } | null>

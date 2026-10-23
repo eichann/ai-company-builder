@@ -71,22 +71,37 @@ test('git handlers that check the allowed roots refuse outside paths with their 
   assert.equal(fs.readFileSync(path.join(outside, 'secret.txt'), 'utf-8'), 'outside')
 })
 
-test('FINDING (not refused today): handlers that take a path without checking the allowed roots', async () => {
-  // Reported for a later fix; pinned so a refactor does not change it unnoticed.
-  const log = await h.invoke<{ success: boolean; commits: unknown[] }>('git:log', outside, '', 5)
-  assert.equal(log.success, true)
-  assert.equal(log.commits.length, 1)
-  const show = await h.invoke<{ files: unknown[] }>('git:showCommit', outside, 'HEAD')
-  assert.deepEqual(show.files, [{ status: 'A', path: 'secret.txt' }])
+test('history, backup and sync handlers check the allowed roots too; commits are hex ids, never options', async () => {
+  const before = h.server.requests.length
   writeFiles(outside, { '.backups/2026-01-01/x.md': 'x' })
-  assert.equal((await h.invoke<{ backups: unknown[] }>('backup:list', outside)).backups.length, 1)
-  assert.deepEqual(await h.invoke('backup:openFolder', outside), { success: true })
-  assert.equal(h.fake.openedPaths.at(-1), outside)
-  // git:commitFileDiff passes the commit to `git show` before `--`: an option there is honoured.
+  const table: Array<[string, unknown[], unknown]> = [
+    ['git:log', [outside, '', 5], { success: false, commits: [], error: DENIED }],
+    ['git:showCommit', [outside, 'abcdef0'], { success: false, files: [], error: DENIED }],
+    ['backup:list', [outside], { success: false, error: DENIED, backups: [] }],
+    ['backup:openFolder', [path.join(outside, '.backups', '2026-01-01')], { success: false, error: DENIED }],
+    ['git:sync', [outside, 'co', 'msg'], { success: false, error: DENIED, errorType: 'unknown' }],
+  ]
+  for (const [channel, args, expected] of table) assert.deepEqual(await h.invoke(channel, ...args), expected, channel)
+  assert.deepEqual(h.fake.openedPaths, [])
+  assert.equal(h.server.requests.length, before)
+
+  // backup:openFolder opens only a backup folder (openPath would launch an app or a script).
+  const repo = path.join(root, 'open-backups')
+  writeFiles(repo, { '.backups/2026-01-01/x.md': 'x', 'tool.command': '#!/bin/sh\n' })
+  assert.deepEqual(await h.invoke('backup:openFolder', path.join(repo, '.backups', '2026-01-01')), { success: true })
+  assert.deepEqual(h.fake.openedPaths, [path.join(repo, '.backups', '2026-01-01')])
+  for (const p of [repo, path.join(repo, 'tool.command'), path.join(repo, '.backups', '2026-01-01', 'x.md')]) {
+    assert.deepEqual(await h.invoke('backup:openFolder', p), { success: false, error: 'Not a backup folder' }, p)
+  }
+  assert.equal(h.fake.openedPaths.length, 1)
+
+  // `git show <commit>`: `--output=<file>` before `--` made git write a file.
   const written = path.join(outside, 'written-by-show.txt')
-  await h.invoke('git:commitFileDiff', root, `--output=${written}`, 'in.txt')
-  assert.equal(fs.existsSync(written), true)
-  fs.rmSync(written)
+  for (const commit of [`--output=${written}`, 'HEAD', 'main~1', '-p', '', 'abc', 'g123456', 42]) {
+    assert.deepEqual(await h.invoke('git:commitFileDiff', root, commit, 'in.txt'), { success: false, error: 'Invalid commit id', diff: '' }, String(commit))
+    assert.deepEqual(await h.invoke('git:showCommit', root, commit), { success: false, files: [], error: 'Invalid commit id' }, String(commit))
+  }
+  assert.equal(fs.existsSync(written), false)
   fs.rmSync(path.join(outside, '.backups'), { recursive: true })
 })
 
@@ -127,6 +142,7 @@ test('working-tree handlers on a repository: preview, diffs, revert, log, show, 
     success: true, files: [{ status: 'A', path: 'a.md' }, { status: 'A', path: 'b.md' }, { status: 'A', path: 'dir/c.md' }],
   })
   assert.deepEqual(await h.invoke('git:showCommit', repo, first, 'dir'), { success: true, files: [{ status: 'A', path: 'dir/c.md' }] })
+  assert.deepEqual(await h.invoke('git:showCommit', repo, first.slice(0, 7).toUpperCase(), 'dir'), { success: true, files: [{ status: 'A', path: 'dir/c.md' }] }) // abbreviated
   const commitDiff = await h.invoke<{ success: boolean; diff: string }>('git:commitFileDiff', repo, first, 'a.md')
   assert.equal(commitDiff.success, true)
   assert.match(commitDiff.diff, /\+a\n/)
@@ -260,8 +276,10 @@ test('git:setupCompanyRemote: join (full or picked departments), owner first pus
   assert.deepEqual(fs.readdirSync(busy), ['mine.txt'])
   assert.deepEqual(await h.invoke('git:setupCompanyRemote', busy, 'co-unknown'), { success: false, error: 'Failed to get repository info from server' })
   h.server.offline = true
-  // Offline the raw fetch error reaches the renderer (git:inspectCompanyFolder, asked first, words it).
-  assert.deepEqual((await setup('setup-offline', 'co-x')).result, { success: false, error: 'fetch failed' })
+  // Offline: the same plain sentence as git:inspectCompanyFolder.
+  assert.deepEqual((await setup('setup-offline', 'co-x')).result, {
+    success: false, error: 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。',
+  })
   h.server.offline = false
 })
 
