@@ -56,8 +56,6 @@ test('git handlers that check the allowed roots refuse outside paths with their 
     ['git:sparseSetExclusions', [outside, ['x']], err],
     ['git:sparseUncommittedChanges', [outside, ['x']], { success: false, files: [], error: DENIED }],
     ['git:folderSizes', [outside, '', '', []], err],
-    ['git:isSparseCheckout', [outside], { enabled: false }],
-    ['git:listRemoteDirectories', [outside], { success: false, directories: [], error: DENIED }],
     ['backup:restore', [outside, 'b', 'secret.txt'], err],
   ]
   for (const [channel, args, expected] of table) assert.deepEqual(await h.invoke(channel, ...args), expected, channel)
@@ -158,7 +156,6 @@ test('working-tree handlers on a repository: preview, diffs, revert, log, show, 
 test('sparse handlers: exclusions round-trip through the worktree; uncommitted changes are reported first', async () => {
   const repo = path.join(root, 'sparse')
   commitRepo(h.base, repo, { '営業/a.md': 'a', '開発/b.md': 'b', 'top.md': 't' })
-  assert.deepEqual(await h.invoke('git:isSparseCheckout', repo), { enabled: false })
   assert.deepEqual(await h.invoke('git:sparseGetExclusions', repo), { success: true, excluded: [] })
   fs.writeFileSync(path.join(repo, '営業', 'a.md'), 'edited')
   assert.deepEqual(await h.invoke('git:sparseUncommittedChanges', repo, ['営業', '開発']), { success: true, files: ['営業/a.md'] })
@@ -166,7 +163,7 @@ test('sparse handlers: exclusions round-trip through the worktree; uncommitted c
 
   assert.deepEqual(await h.invoke('git:sparseSetExclusions', repo, ['営業']), { success: true, enabled: true, excluded: ['営業'] })
   assert.equal(fs.existsSync(path.join(repo, '営業')), false)
-  assert.deepEqual(await h.invoke('git:isSparseCheckout', repo), { enabled: true })
+  assert.equal(git(h.base, repo, ['config', '--get', 'core.sparseCheckout']).trim(), 'true')
   assert.deepEqual(await h.invoke('git:sparseGetExclusions', repo), { success: true, excluded: ['営業'] })
   // A non-array is treated as "nothing excluded".
   assert.deepEqual(await h.invoke('git:sparseSetExclusions', repo, 'not-a-list'), { success: true, enabled: false, excluded: [] })
