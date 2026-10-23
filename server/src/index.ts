@@ -10,12 +10,10 @@ import { AUTH_DB_PATH } from './lib/config'
 import { db, initDatabase } from './db'
 import { signUpWithInvitation } from './lib/invitation-signup'
 import { meRoute } from './routes/me'
-import { sshKeysRoute } from './routes/ssh-keys'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
 import { folderSizesRoute } from './routes/folder-sizes'
 import { companyFilesRoute } from './routes/company-files'
-import { syncRoute } from './routes/sync'
 import { gitRoute, configureAllBareRepos } from './routes/git'
 import { gitHttpRoute } from './routes/git-http'
 import { invitationsRoute } from './routes/invitations'
@@ -153,7 +151,6 @@ app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
 
 // Routes
 app.route('/api/me', meRoute)
-app.route('/api/users/me/ssh-keys', sshKeysRoute)
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
 app.route('/api/companies/:companyId/folder-sizes', folderSizesRoute)
@@ -161,7 +158,6 @@ app.route('/api/companies/:companyId/files', companyFilesRoute)
 app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
-app.route('/api/sync', syncRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
