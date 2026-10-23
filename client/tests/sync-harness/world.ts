@@ -221,6 +221,8 @@ export interface WorldOptions {
   impl?: SyncImplFactory
   /** Per-sync hang limit. Default SYNC_TIMEOUT_MS. */
   syncTimeoutMs?: number
+  /** Large-file threshold in bytes (sync step 4). Default: the app's 100 MB. */
+  largeFileThreshold?: number
   /** Locale for every git process and the hook. Default 'C' (the server container's). */
   locale?: string
   /** Seed .gitignore. Default: the essential patterns (no first-sync noise). */
@@ -238,6 +240,7 @@ export class World {
   readonly departments: string[]
   readonly impl: SyncImplFactory
   readonly syncTimeoutMs: number
+  readonly largeFileThreshold: number | undefined
   readonly locale: string
   private readonly gitconfig: string
   private scopes: HarnessScope[] = DEFAULT_SCOPES
@@ -257,6 +260,7 @@ export class World {
     this.departments = options.departments ?? []
     this.impl = options.impl ?? createGitSync
     this.syncTimeoutMs = options.syncTimeoutMs ?? SYNC_TIMEOUT_MS
+    this.largeFileThreshold = options.largeFileThreshold
     this.locale = options.locale ?? 'C'
     this.gitconfig = path.join(root, 'gitconfig')
   }
@@ -802,6 +806,7 @@ export class Member {
       generateCommitMessage: async () => null,
       now: () => new Date(),
       platform: process.platform,
+      largeFileThreshold: world.largeFileThreshold,
       log: {
         log: (...args: unknown[]) => this.capture('log', args),
         warn: (...args: unknown[]) => this.capture('warn', args),

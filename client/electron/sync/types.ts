@@ -65,4 +65,6 @@ export interface SyncDeps {
   /** Decides whether a failed pull is a transient Windows file lock. */
   platform: NodeJS.Platform
   log: SyncLogger
+  /** Bytes above which a file is auto-ignored (step 4). Default 100 MB; tests lower it. */
+  largeFileThreshold?: number
 }
