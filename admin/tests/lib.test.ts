@@ -88,14 +88,9 @@ describe('redirects', () => {
   })
 })
 
+// isValidFolderName itself is compared with the server's and the app's copies
+// in client/tests/rule-parity-names.test.ts.
 describe('folder names', () => {
-  it('matches the server rule', () => {
-    expect(isValidFolderName('営業部')).toBe(true)
-    expect(isValidFolderName('sales-2026.v1')).toBe(true)
-    expect(isValidFolderName('.hidden')).toBe(false)
-    expect(isValidFolderName('a b')).toBe(false)
-  })
-
   it('suggests a valid folder from a name', () => {
     expect(suggestFolderName('営業 企画部')).toBe('営業-企画部')
     expect(suggestFolderName('  Sales & Marketing ')).toBe('Sales-Marketing')

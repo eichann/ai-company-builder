@@ -266,8 +266,8 @@ test('summaries carry no message bodies; search covers bodies, drafts and titles
   assert.equal('messages' in a, false)
   assert.equal(a.messageCount, 3)
   assert.equal(a.preview, '結論です。'.repeat(24))
+  // The summaries' size at the largest real history: tests/perf/chat-history.perf.test.ts.
   assert.equal(summaries[0].draftInput, '未送信の計画')
-  assert.ok(JSON.stringify(summaries).length < 1000)
   assert.deepEqual(store.search(company, ' api '), ['a'])
   assert.deepEqual(store.search(company, '未送信'), ['b'])
   assert.deepEqual(store.search(company, '月次'), ['a'])

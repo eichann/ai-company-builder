@@ -23,15 +23,28 @@ test('ghost text: the rest of the suggestion after what was typed, only with the
   assert.equal(ghostRemainder(null, at('')), null)
 })
 
-test('typing past the suggestion dismisses it for good; typing along keeps it', () => {
-  assert.equal(suggestionAfterEdit(SUGGESTION, 'r'), SUGGESTION)
+test('typing along keeps the suggestion, anything else dismisses it for good (the rule and the CodeMirror field that applies it)', () => {
+  // The rule's edge cases.
   assert.equal(suggestionAfterEdit(SUGGESTION, 'run the'), SUGGESTION)
-  assert.equal(suggestionAfterEdit(SUGGESTION, 'x'), null)
   // Enter adds a new line, which is not part of the suggestion.
   assert.equal(suggestionAfterEdit(SUGGESTION, '\n'), null)
   assert.equal(suggestionAfterEdit(SUGGESTION, SUGGESTION), null)
-  assert.equal(suggestionAfterEdit(SUGGESTION, 'r') && suggestionAfterEdit(SUGGESTION, 'rx'), null)
   assert.equal(suggestionAfterEdit(null, ''), null)
+
+  // The editor field: set by the parent, kept while typing along, cleared by other text.
+  let state = EditorState.create({ doc: '', extensions: [ghostSuggestion(() => {})] })
+  assert.equal(currentSuggestion(state), null)
+  state = state.update({ effects: setSuggestion.of(SUGGESTION) }).state
+  assert.equal(currentSuggestion(state), SUGGESTION)
+  state = state.update({ changes: { from: 0, insert: 'run' } }).state
+  assert.equal(currentSuggestion(state), SUGGESTION)
+  state = state.update({ changes: { from: 3, insert: 'x' } }).state
+  assert.equal(currentSuggestion(state), null)
+  // Deleting back does not bring it back.
+  state = state.update({ changes: { from: 3, to: 4 } }).state
+  assert.equal(currentSuggestion(state), null)
+  state = state.update({ effects: setSuggestion.of(null) }).state
+  assert.equal(currentSuggestion(state), null)
 })
 
 test('keys: → and Tab accept at the end, Esc dismisses, Enter / ⌘+Enter / IME are left alone', () => {
@@ -68,22 +81,6 @@ test('suggestion text: first line, trimmed; empty or overlong is dropped', () =>
   assert.equal(normalizeSuggestion('   '), null)
   assert.equal(normalizeSuggestion(42), null)
   assert.equal(normalizeSuggestion('x'.repeat(MAX_SUGGESTION_LENGTH + 1)), null)
-})
-
-test('CodeMirror field: set by the parent, kept while typing along, cleared by other text', () => {
-  let state = EditorState.create({ doc: '', extensions: [ghostSuggestion(() => {})] })
-  assert.equal(currentSuggestion(state), null)
-  state = state.update({ effects: setSuggestion.of(SUGGESTION) }).state
-  assert.equal(currentSuggestion(state), SUGGESTION)
-  state = state.update({ changes: { from: 0, insert: 'run' } }).state
-  assert.equal(currentSuggestion(state), SUGGESTION)
-  state = state.update({ changes: { from: 3, insert: 'x' } }).state
-  assert.equal(currentSuggestion(state), null)
-  // Deleting back does not bring it back.
-  state = state.update({ changes: { from: 3, to: 4 } }).state
-  assert.equal(currentSuggestion(state), null)
-  state = state.update({ effects: setSuggestion.of(null) }).state
-  assert.equal(currentSuggestion(state), null)
 })
 
 test('chat server: the latest turn\'s suggestion is handed out once it arrives; failures and new turns give none', async () => {

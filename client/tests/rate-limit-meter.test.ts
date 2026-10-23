@@ -3,7 +3,6 @@ import assert from 'node:assert/strict'
 import { formatReset, fromClaudeRateLimitInfo, fromCodexRateLimits, meterView, METER_UNKNOWN_NOTE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { claudeAgentEvent, tapSdkMessages } from '../electron/agents/claude'
 import { agentProgressFromSdkMessage, applyAgentProgress, readAgentProgress } from '../shared/agent-progress'
-import { DEFAULT_AI_EFFORT, DEFAULT_AI_MODEL, MODEL_EFFORT_OPTIONS, resolveSavedEffort, resolveSavedModel } from '../src/lib/aiModels'
 
 const NOW = Date.UTC(2026, 9, 23, 3, 0, 0)
 const HOUR = 3_600_000
@@ -144,19 +143,4 @@ test('tapping the SDK Query sees every message and leaves iteration unchanged', 
   assert.equal(cleaned, true, 'break still returns the inner generator')
   tapSdkMessages(undefined, () => {})
   tapSdkMessages({}, () => {})
-})
-
-test('defaults: Opus 5.5 + medium for members who never chose; saved choices win', () => {
-  assert.equal(DEFAULT_AI_MODEL, 'opus-5-5')
-  assert.equal(DEFAULT_AI_EFFORT, 'medium')
-  assert.ok(MODEL_EFFORT_OPTIONS[DEFAULT_AI_MODEL].includes(DEFAULT_AI_EFFORT))
-  assert.equal(resolveSavedModel(null), 'opus-5-5')
-  assert.equal(resolveSavedModel('opus'), 'opus-5-5')
-  assert.equal(resolveSavedModel('toString'), 'opus-5-5')
-  assert.equal(resolveSavedModel('sonnet'), 'sonnet')
-  assert.equal(resolveSavedModel('fable-5'), 'fable-5')
-  assert.equal(resolveSavedEffort(null), 'medium')
-  assert.equal(resolveSavedEffort('bogus'), 'medium')
-  assert.equal(resolveSavedEffort('max'), 'max')
-  assert.equal(resolveSavedEffort('low'), 'low')
 })

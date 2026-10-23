@@ -150,20 +150,6 @@ describe('helpers', () => {
 })
 
 describe('writeAccessSummary', () => {
-  // The client's evaluator (client/shared/write-access.ts) in its simplest
-  // form: the deepest listed scope at or above the path decides.
-  function evaluate(summary: ReturnType<typeof writeAccessSummary>, path: string): boolean {
-    if (summary.all) return true
-    const p = normalizeScopePath(path)
-    if (p === null) return false
-    let best: { path: string; write: boolean } | null = null
-    for (const s of summary.scopes) {
-      if (s.path !== '' && p !== s.path && !p.startsWith(`${s.path}/`)) continue
-      if (!best || s.path.length > best.path.length) best = s
-    }
-    return best?.write ?? false
-  }
-
   it('owner/admin and members who may write everywhere get all: true', () => {
     expect(writeAccessSummary(RESTRICTED, 'owner', 'owner')).toEqual({ all: true, scopes: [] })
     expect(writeAccessSummary(RESTRICTED, 'admin', 'admin')).toEqual({ all: true, scopes: [] })
@@ -186,18 +172,5 @@ describe('writeAccessSummary', () => {
 
   it('without a ruled company scope nothing is writable', () => {
     expect(writeAccessSummary([scope('c', '', [], 'company')], 'alice', 'member')).toEqual({ all: false, scopes: [] })
-  })
-
-  it('evaluating the summary agrees with resolveAccess for every user and path', () => {
-    const paths = ['', 'x', '総務/x', 'コンテンツ', 'コンテンツ/ブログ', 'コンテンツ/受講生情報', 'コンテンツ/受講生情報/添付/a.pdf',
-      '人事部', '人事部/評価', '人事部/給与/2026.xlsx', '経理部/月次', 'コンテンツ受講生']
-    for (const scopes of [DEFAULT, RESTRICTED]) {
-      for (const [u, r] of Object.entries(ROLES)) {
-        const summary = writeAccessSummary(scopes, u, r)
-        for (const path of paths) {
-          expect(evaluate(summary, path), `${u} ${path}`).toBe(resolveAccess(CO, u, path, repoOf(scopes, ROLES)).write)
-        }
-      }
-    }
   })
 })

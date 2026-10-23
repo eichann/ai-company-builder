@@ -31,18 +31,13 @@ test('the protocol strips the query and fragment, decodes what Chromium encoded'
   assert.equal(localFilePathFromUrl('file:///a/b.png'), null)
 })
 
-test('serving keeps the path restrictions: inside an allowed root only, query or not', () => {
+// Serving inside / outside the allowed roots (versioned URL, traversal, a
+// sibling with the same prefix, an empty URL) goes through the registered
+// protocol handler in ipc-fs.test.ts. The cases only reachable here:
+test('serving: a query cannot smuggle an allowed path, no roots serves nothing, other schemes are refused', () => {
   const roots = [ROOT]
-  const inside = `${ROOT}/営業部/図.png`
-  assert.deepEqual(localFileTarget(localFileUrl(inside, 5), roots), { ok: true, path: path.resolve(inside) })
-  assert.deepEqual(localFileTarget(localFileUrl(inside), roots), { ok: true, path: path.resolve(inside) })
-  // outside, traversal, a sibling with the same prefix, a query that tries to smuggle a path
-  assert.deepEqual(localFileTarget('local-file:///etc/passwd?v=1', roots), { ok: false, status: 403 })
-  assert.deepEqual(localFileTarget(`local-file://${ROOT}/../secret.png?v=1`, roots), { ok: false, status: 403 })
-  assert.deepEqual(localFileTarget(`local-file://${ROOT}-other/x.png`, roots), { ok: false, status: 403 })
   assert.deepEqual(localFileTarget(`local-file:///etc/passwd?${ROOT}/x.png`, roots), { ok: false, status: 403 })
   assert.deepEqual(localFileTarget(`local-file://${ROOT}/x.png`, []), { ok: false, status: 403 })
-  assert.deepEqual(localFileTarget('local-file://', roots), { ok: false, status: 400 })
   assert.deepEqual(localFileTarget('https://example.com/x.png', roots), { ok: false, status: 400 })
 })
 

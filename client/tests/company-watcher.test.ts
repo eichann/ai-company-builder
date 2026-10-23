@@ -256,20 +256,5 @@ test('live: create / modify / replace-by-rename / delete files and images, neste
   }
 })
 
-test('live: opening and closing a recursive watcher is fast', async () => {
-  const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'acb-watch-')))
-  try {
-    for (let i = 0; i < 50; i++) fs.mkdirSync(path.join(root, `d${i}/e`), { recursive: true })
-    const t0 = performance.now()
-    const watcher = new CompanyWatcher({ root, logger: quiet, onChanges: () => {} })
-    watcher.start()
-    const opened = performance.now() - t0
-    const t1 = performance.now()
-    watcher.close()
-    const closed = performance.now() - t1
-    assert.ok(opened < 200, `open took ${opened} ms`)
-    assert.ok(closed < 200, `close took ${closed} ms`)
-  } finally {
-    fs.rmSync(root, { recursive: true, force: true })
-  }
-})
+// Opening and closing the watcher on a company-sized tree (one handle, time
+// budget) is measured in tests/perf/company-tree.perf.test.ts.
