@@ -1,5 +1,5 @@
 import { Hono } from 'hono'
-import { auth, getUserFromRequest } from '../lib/auth'
+import { getUserFromRequest } from '../lib/auth'
 
 export const meRoute = new Hono()
 

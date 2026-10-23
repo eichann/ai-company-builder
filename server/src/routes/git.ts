@@ -3,6 +3,7 @@ import { existsSync, mkdirSync } from 'fs'
 import { join } from 'path'
 import { db } from '../db'
 import { getUserFromRequest } from '../lib/auth'
+import { REPOS_DIR } from '../lib/config'
 import {
   configureAllBareRepos as configureAllBareReposIn,
   configureBareRepo,
@@ -25,10 +26,6 @@ import {
  * any company and were removed (2026-10-22 security review).
  */
 export const gitRoute = new Hono()
-
-// Base directory for Git repositories
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
 
 // Ensure repos directory exists
 if (!existsSync(REPOS_DIR)) {

@@ -33,11 +33,12 @@ import { join } from 'path'
 import type Database from 'better-sqlite3'
 import {
   createScopeRepo,
-  gitAsync,
   removeScopeRepo,
   scopeRepoPath,
   SERVER_GIT_IDENTITY,
 } from './git-server'
+import { gitAsync } from './git-exec'
+import { companyRepoPath, DATA_DIR, REPOS_DIR } from './config'
 import { listScopesWithRules } from './permission-store'
 import {
   FULL_ACCESS_ROLES,
@@ -52,9 +53,6 @@ import { foldAsciiCase } from './push-check/rules'
 
 type Conn = Database.Database
 
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-
 /**
  * Where a private folder's repository is archived (git bundle) before it is
  * deleted or made public. Server-side only: never served by any route, the
@@ -63,10 +61,6 @@ export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
  */
 export function privateFolderArchiveDir(): string {
   return process.env.PRIVATE_FOLDER_ARCHIVE_DIR || join(DATA_DIR, 'backups', 'private-folders')
-}
-
-export function companyRepoPath(companyId: string): string {
-  return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)
 }
 
 export function privateRepoPath(companyId: string, repoId: string): string {

@@ -14,33 +14,14 @@
  * folders of size 0. Asynchronous only: this runs in the process that also
  * serves git-http (no execFileSync, see tests/security/no-exec-sync.test.ts).
  */
-import { execFile } from 'child_process'
 import { existsSync } from 'fs'
-import { join } from 'path'
-import { promisify } from 'util'
-
-const execFileAsync = promisify(execFile)
-
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-
-function bareRepoPath(companyId: string): string {
-  return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)
-}
-
-async function git(args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    encoding: 'utf8',
-    maxBuffer: 512 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  })
-  return stdout
-}
+import { companyRepoPath } from './config'
+import { gitAsync } from './git-exec'
 
 async function sharedBranchCommit(bare: string): Promise<string | null> {
   for (const branch of ['main', 'master']) {
     try {
-      return (await git(['-C', bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])).trim()
+      return (await gitAsync(['-C', bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])).trim()
     } catch {
       // next name
     }
@@ -57,7 +38,7 @@ async function entriesOf(bare: string, commit: string): Promise<Entry[]> {
   const key = `${bare}\0${commit}`
   const hit = cache.get(key)
   if (hit) return hit
-  const out = await git(['-C', bare, 'ls-tree', '-r', '-l', '-z', commit])
+  const out = await gitAsync(['-C', bare, 'ls-tree', '-r', '-l', '-z', commit])
   const entries: Entry[] = []
   for (const record of out.split('\0')) {
     if (!record) continue
@@ -121,7 +102,7 @@ function resolveFolder(entries: Entry[], folder: string): string | null {
  * total size the caller needs (the ones a member left out).
  */
 export async function folderSizes(companyId: string, folder: string, measure: string[] = []): Promise<FolderSizesResult | null> {
-  const bare = bareRepoPath(companyId)
+  const bare = companyRepoPath(companyId)
   if (!existsSync(bare)) return null
   const commit = await sharedBranchCommit(bare)
   if (!commit) return null

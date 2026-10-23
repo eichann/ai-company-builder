@@ -87,7 +87,7 @@ import {
   updateRuleAccess,
   upsertScopeRule,
 } from '../lib/permission-store'
-import { getClientActivityForCompany } from '../lib/client-activity'
+import { getClientActivityForCompany, type OutdatedMember } from '../lib/client-activity'
 import { supportsWriteDeniedRecovery } from '../lib/client-version'
 import { membersLosingWrite } from '../lib/write-loss'
 import {
@@ -100,7 +100,8 @@ import {
   type SubjectType,
 } from '../lib/permissions'
 import { queryPushRejections } from '../lib/push-rejections'
-import { isValidFolderName, listRepoSubfolders, resolveRepoFolder } from './departments'
+import { listRepoSubfolders, resolveRepoFolder } from '../lib/repo-folders'
+import { isValidFolderName } from './departments'
 import { findPrivateScope } from '../lib/permissions'
 import { getPrivateFolder, listPrivateFolders, listPrivateSubfolders } from '../lib/private-folders'
 
@@ -314,17 +315,6 @@ function scopeResponse(c: Ctx, scopeId: string, status: 200 | 201 = 200) {
 
 export const OUTDATED_CLIENTS_ERROR =
   'Some members who would lose edit access use a desktop app that cannot recover from a write restriction; ask them to update the app first'
-
-export interface OutdatedMember {
-  userId: string
-  name: string | null
-  email: string | null
-  role: string
-  clientVersion: string | null
-  /** clientVersion, or 不明 when unknown. */
-  version: string
-  lastSeenAt: string | null
-}
 
 class OutdatedClientsBlock extends Error {
   constructor(readonly members: OutdatedMember[]) {

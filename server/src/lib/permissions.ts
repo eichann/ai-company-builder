@@ -172,11 +172,6 @@ export function resolveAccess(
   }
 }
 
-/** True for a private folder's scope (its own scope repository). */
-export function isPrivateScope(scope: { repoId: string | null }): boolean {
-  return scope.repoId !== null
-}
-
 /** The private scope at or above `path`, or null (private folders do not nest). */
 export function findPrivateScope<T extends { path: string; repoId: string | null }>(scopes: T[], path: string): T | null {
   let best: T | null = null

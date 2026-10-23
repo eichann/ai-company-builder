@@ -19,15 +19,12 @@
  * Everything here is asynchronous: it runs inside request handlers of the
  * process that serves all git-http traffic.
  */
-import { execFile, spawn } from 'child_process'
 import { existsSync, mkdirSync, readdirSync } from 'fs'
 import { rm } from 'fs/promises'
 import { join } from 'path'
-import { promisify } from 'util'
 import { installPreReceiveHook } from './hook'
 import { BARE_REPO_CONFIG } from './repo-config'
-
-const execFileAsync = promisify(execFile)
+import { gitAsync } from '../git-exec'
 
 export const SCOPE_REPOS_SUFFIX = '.scopes'
 
@@ -72,101 +69,6 @@ export function scopeReposDir(reposDir: string, companyId: string): string {
 export function scopeRepoPath(reposDir: string, companyId: string, repoId: string): string {
   if (!ID_RE.test(repoId)) throw new Error('invalid repository id')
   return join(scopeReposDir(reposDir, companyId), `${repoId}.git`)
-}
-
-export interface GitAsyncOptions {
-  input?: string
-  /** Added to (and overriding) this process's environment. */
-  env?: NodeJS.ProcessEnv
-  /**
-   * Watchdog: kill git — with everything it started — and reject after this
-   * many milliseconds. Meant for git that runs a hook (a push into a local
-   * bare repository runs the pre-receive checker): without it a hung hook
-   * leaves the request waiting forever.
-   */
-  timeoutMs?: number
-}
-
-/** A git invocation killed by the gitAsync watchdog. */
-export class GitTimeoutError extends Error {
-  constructor(args: string[], timeoutMs: number) {
-    const command = args.filter(a => a !== '-C' && !a.startsWith('/')).slice(0, 3).join(' ')
-    super(`git ${command} timed out after ${Math.round(timeoutMs / 1000)} s`)
-    this.name = 'GitTimeoutError'
-  }
-}
-
-const GIT_MAX_BUFFER = 512 * 1024 * 1024
-
-export async function gitAsync(args: string[], opts: GitAsyncOptions = {}): Promise<string> {
-  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0', ...(opts.env ?? {}) }
-  if (opts.timeoutMs !== undefined) return gitWithWatchdog(args, env, opts.input, opts.timeoutMs)
-  const child = execFileAsync('git', args, { encoding: 'utf8', maxBuffer: GIT_MAX_BUFFER, env })
-  if (opts.input !== undefined) {
-    child.child.stdin?.end(opts.input)
-  }
-  const { stdout } = await child
-  return stdout
-}
-
-/**
- * gitAsync with a watchdog. git runs in its own process group (spawn
- * `detached`; execFile does not pass that option on) so the watchdog kills it
- * together with what it started — receive-pack, the hook, the checker. They
- * hold the output pipes: killing git alone would leave the call open until
- * they finish. The promise rejects at the deadline regardless.
- */
-function gitWithWatchdog(args: string[], env: NodeJS.ProcessEnv, input: string | undefined, timeoutMs: number): Promise<string> {
-  const ownGroup = process.platform !== 'win32'
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn('git', args, { env, detached: ownGroup, stdio: ['pipe', 'pipe', 'pipe'], windowsHide: true })
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    let size = 0
-    let settled = false
-    const finish = (error: Error | null, out?: string) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      if (error) reject(error)
-      else resolve(out ?? '')
-    }
-    const kill = () => {
-      try {
-        if (ownGroup && child.pid !== undefined) process.kill(-child.pid, 'SIGKILL')
-        else child.kill('SIGKILL')
-      } catch {
-        // already gone
-      }
-    }
-    const timer = setTimeout(() => {
-      kill()
-      finish(new GitTimeoutError(args, timeoutMs))
-    }, timeoutMs)
-    child.stdout.on('data', (chunk: Buffer) => {
-      size += chunk.length
-      if (size > GIT_MAX_BUFFER) {
-        kill()
-        finish(new Error(`git ${args[0]}: output exceeds ${GIT_MAX_BUFFER} bytes`))
-        return
-      }
-      stdout.push(chunk)
-    })
-    child.stderr.on('data', (chunk: Buffer) => { if (stderr.length < 1024) stderr.push(chunk) })
-    child.on('error', error => finish(error))
-    child.on('close', (code, signal) => {
-      if (code === 0) {
-        finish(null, Buffer.concat(stdout).toString('utf8'))
-        return
-      }
-      const detail = Buffer.concat(stderr).toString('utf8').trim()
-      const error = new Error(`Command failed: git ${args.join(' ')} (${signal ?? `exit ${code}`})${detail ? `\n${detail}` : ''}`)
-      Object.assign(error, { code, signal, stderr: detail })
-      finish(error)
-    })
-    child.stdin.on('error', () => { /* git exited before reading its input */ })
-    child.stdin.end(input)
-  })
 }
 
 /** Standard configuration (as configureBareRepo), asynchronously. */
