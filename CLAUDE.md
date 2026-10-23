@@ -40,6 +40,33 @@ cd client && pnpm dev
 cd admin && pnpm dev
 ```
 
+### Renderer UI tests
+
+The preview pages `client/tests/*-ui.html` (+ `.tsx`) render the real React
+components with the preload API faked (`tests/ui/fixtures/electron-api.ts`:
+`installElectronAPI`, typed against `Window['electronAPI']` from
+`electron/preload.ts`) and, for the chat, a faked chat server. Playwright
+drives them in headless Chromium (`client/tests/ui/*.spec.ts`, CI job
+"Renderer UI tests (macOS)"):
+
+```bash
+cd client
+npx playwright install --only-shell chromium   # once per Playwright version
+npx playwright test                    # builds the pages, serves them, runs all (~40 s)
+npx playwright test chat-panel         # one spec
+npx tsc -p tests/ui                    # type-check specs + preview pages (CI does)
+npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/tests/<name>-ui.html
+```
+
+- Pure logic stays in node tests (`tests/*.test.ts`); a UI spec pins only
+  what a component split can break: rendering, events, focus, ARIA, what
+  stays mounted. Assert through roles and text, not pixels (no snapshots).
+- A new preview page gets a spec, and `smoke.spec.ts` picks it up
+  automatically.
+- `playwright test` starts and stops `vite preview` itself (port 4179).
+  `UI_TEST_REUSE=1` reuses one you started (rebuild it after changes);
+  stop it when done.
+
 ### Environment Variables
 
 Copy `.env.example` to `.env` and configure:
@@ -533,7 +560,8 @@ reader for the guards).
   `useSparseCheckout` instances refresh each other through the
   `acb:sparse-changed` window event. Preview page with the preload API
   mocked: `client/tests/download-folders-ui.html?view=settings|filetree&theme=light|dark&state=normal|offline|slow|confirm|applyOffline`
-  (serve with a renderer-only Vite config, without the Electron plugin).
+  (serve with `npx vite -c tests/ui/vite.config.ts`, the renderer-only config;
+  see "Renderer UI tests").
 
 ### Conflict Resolution Strategy
 
