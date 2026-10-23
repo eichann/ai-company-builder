@@ -178,6 +178,22 @@ import { ... } from '../../shared/types'  // Path inside container
   space with a work budget; past it the view says the diff is too large
   instead of building the old O(m·n) table (25M cells for 5,000 lines).
 
+### Performance baselines (client)
+
+`client/tests/perf/*.perf.test.ts` + `client/scripts/check-bundle-size.mjs`,
+CI job "Performance baselines (macOS)" (not part of `tests/*.test.ts`). They
+hold the wins of #151 (one recursive watch handle for a 15k-file company,
+first file-tree view = one ~55 KB read), #153 (search of 「の」 over ~6.5k
+files capped at 500 matches / < 1 MB, folder `git log`), #154 (autosave of an
+~8 MB history returns at once, summaries < 500 KB, the 564-message
+conversation renders only its latest window) and the renderer bundle
+(≤ 2.2 MiB JS). Budgets are ~10x a developer Mac (runners vary): they catch
+order-of-magnitude regressions, not drift. Each check prints
+`[perf] name=value unit (budget …)`; grep the job log for `[perf]`. Run one
+locally: `cd client && npx tsx --test tests/perf/git-search.perf.test.ts`;
+bundle: `npx vite build && node scripts/check-bundle-size.mjs`. Small-size
+behaviour (and the Myers diff timings) stays in the regular tests.
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
