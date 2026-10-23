@@ -133,9 +133,8 @@ export function Sidebar() {
       return
     }
 
-    // Start watching
+    // The company's watcher is opened by SkillCentricLayout; only subscribe here.
     perfMark('sidebar.watch.start')
-    window.electronAPI.watchDirectory(currentCompany.rootPath)
 
     // Handle file change events
     const unsubscribe = window.electronAPI.onFileChange((data) => {
@@ -166,7 +165,6 @@ export function Sidebar() {
 
     return () => {
       unsubscribe()
-      window.electronAPI.unwatchDirectory(currentCompany.rootPath)
       perfMark('sidebar.watch.stop')
     }
   }, [currentCompany?.rootPath, removeFileTreeEntry, requestDeferredTreeRefresh])

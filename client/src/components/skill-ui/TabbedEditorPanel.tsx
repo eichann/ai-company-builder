@@ -31,12 +31,18 @@ import {
 import { useAuthStore } from '../../stores/authStore'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { ReadOnlyBadge } from './ReadOnlyBadge'
+import { subscribeFileChanges } from '../../lib/fileEvents'
+import { useFileVersion } from '../../lib/fileVersions'
+import { normalizePathSeparators } from '../../utils/path'
+import { localFileUrl } from '../../../shared/local-file-url'
 
 interface OpenFile {
   path: string
   content: string
   originalContent: string
   isLoading: boolean
+  /** The file was deleted (or moved away) on disk after it was opened. */
+  missing?: boolean
 }
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'])
@@ -59,24 +65,62 @@ function isMarkdownFile(filePath: string): boolean {
   return ext === 'md' || ext === 'mdx'
 }
 
+/**
+ * An image from the company folder. Its `local-file://` URL carries the
+ * file's version (bumped by every watcher event for it), so a file rewritten
+ * or replaced under the same name shows at once instead of the cached copy.
+ */
+function LocalImage({ filePath, alt, className, ...rest }: { filePath: string } & Omit<React.ImgHTMLAttributes<HTMLImageElement>, 'src'>) {
+  const version = useFileVersion(filePath)
+  const src = localFileUrl(filePath, version)
+  const [failedSrc, setFailedSrc] = useState<string | null>(null)
+  if (failedSrc === src) {
+    return (
+      <span className="inline-flex items-center gap-1.5 text-xs text-gray-400 dark:text-zinc-500" role="img" aria-label={alt}>
+        <Warning size={14} />
+        画像を表示できません（削除されたか、読み込めません）
+      </span>
+    )
+  }
+  return <img {...rest} src={src} alt={alt} className={className} onError={() => setFailedSrc(src)} />
+}
+
 function PdfPreview({ filePath }: { filePath: string }) {
   const [url, setUrl] = useState<string | null>(null)
+  const [missing, setMissing] = useState(false)
+  // Re-read when the file changes on disk (same name, new content).
+  const version = useFileVersion(filePath)
 
   useEffect(() => {
     let blobUrl: string | null = null
+    let cancelled = false
 
     window.electronAPI.readFileBinary(filePath).then(buffer => {
+      if (cancelled) return
       if (buffer) {
         const blob = new Blob([buffer], { type: 'application/pdf' })
         blobUrl = URL.createObjectURL(blob)
         setUrl(blobUrl)
+        setMissing(false)
+      } else {
+        setMissing(true)
       }
     })
 
     return () => {
+      cancelled = true
       if (blobUrl) URL.revokeObjectURL(blobUrl)
     }
-  }, [filePath])
+  }, [filePath, version])
+
+  if (missing) {
+    return (
+      <div className="h-full flex items-center justify-center gap-1.5 text-gray-400 dark:text-zinc-500 text-sm">
+        <Warning size={16} />
+        PDFを表示できません（削除されたか、読み込めません）
+      </div>
+    )
+  }
 
   if (!url) {
     return (
@@ -111,11 +155,12 @@ const MarkdownPreview = React.forwardRef<HTMLDivElement, {
     const bodyRef = useRef<HTMLDivElement | null>(null)
     const components = useMemo(() => ({
       img: ({ src, alt, ...props }: React.ImgHTMLAttributes<HTMLImageElement>) => {
-        let resolvedSrc = src || ''
-        if (resolvedSrc && !resolvedSrc.startsWith('http') && !resolvedSrc.startsWith('data:')) {
-          resolvedSrc = `local-file://${basePath}/${resolvedSrc.replace(/^\.\//, '')}`
+        const raw = src || ''
+        if (raw && !raw.startsWith('http') && !raw.startsWith('data:')) {
+          // A company file: versioned URL, so a replaced image shows at once.
+          return <LocalImage {...props} filePath={`${basePath}/${raw.replace(/^\.\//, '')}`} alt={alt} className="max-w-full rounded" />
         }
-        return <img src={resolvedSrc} alt={alt} {...props} className="max-w-full rounded" />
+        return <img src={raw} alt={alt} {...props} className="max-w-full rounded" />
       },
       a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
         <a href={href} {...props} target="_blank" rel="noopener noreferrer">{children}</a>
@@ -480,49 +525,82 @@ export function TabbedEditorPanel({
   const activeFilePathRef = useRef(activeFilePath)
   activeFilePathRef.current = activeFilePath
 
-  // Reload open files when modified externally (e.g., by AI agent)
+  // Reload open files when changed on disk (e.g. by the AI agent). A file the
+  // AI replaces (write a temp file, rename it over) arrives as 'add', a
+  // deleted one as 'unlink' (for a folder possibly only the folder's path).
   useEffect(() => {
-    const unsubscribe = window.electronAPI.onFileChange(async (data) => {
-      if (data.type !== 'change') return
-      const changedPath = data.path
-
-      // Reload review data when a review or reply sidecar file changes
-      const reviewMatch = changedPath.match(/^(.+)\.review\.[^/]+\.json$/) || changedPath.match(/^(.+)\.reply\.[^/]+\.json$/)
-      if (reviewMatch) {
-        const docPath = reviewMatch[1]
-        if (docPath === activeFilePathRef.current) {
-          reviewReloadRef.current()
+    const reload = async (changedPath: string) => {
+      // Event paths use the platform's separators; tab paths may not (Windows).
+      const key = normalizePathSeparators(changedPath)
+      const filePath = [...fileContentsRef.current.keys()].find(p => normalizePathSeparators(p) === key)
+      const file = filePath ? fileContentsRef.current.get(filePath) : undefined
+      if (!filePath || !file || file.isLoading) return
+      if (isBinaryFile(filePath)) {
+        // Images and PDFs follow their file version; only the deleted mark changes here.
+        if (file.missing) {
+          setFileContents(prev => {
+            const cur = prev.get(filePath)
+            if (!cur?.missing) return prev
+            const next = new Map(prev)
+            next.set(filePath, { ...cur, missing: false })
+            return next
+          })
         }
         return
       }
-
-      const file = fileContentsRef.current.get(changedPath)
-
-      // Only reload if the file is open, not loading, and not an image
-      if (!file || file.isLoading || isBinaryFile(changedPath)) return
       // Don't overwrite unsaved local edits
       if (file.content !== file.originalContent) return
-
       try {
-        const newContent = await window.electronAPI.readFile(changedPath)
-        if (newContent !== null && newContent !== file.originalContent) {
-          setFileContents(prev => {
-            const newMap = new Map(prev)
-            newMap.set(changedPath, {
-              path: changedPath,
-              content: newContent,
-              originalContent: newContent,
-              isLoading: false,
-            })
-            return newMap
-          })
-        }
+        const newContent = await window.electronAPI.readFile(filePath)
+        if (newContent === null) return
+        setFileContents(prev => {
+          const cur = prev.get(filePath)
+          if (!cur || cur.content !== cur.originalContent) return prev
+          if (cur.originalContent === newContent && !cur.missing) return prev
+          const next = new Map(prev)
+          next.set(filePath, { path: filePath, content: newContent, originalContent: newContent, isLoading: false })
+          return next
+        })
       } catch {
         // Silently ignore read errors during external change detection
       }
-    })
+    }
 
-    return () => unsubscribe()
+    const markMissing = (removed: string) => {
+      const key = normalizePathSeparators(removed)
+      setFileContents(prev => {
+        let next: Map<string, OpenFile> | null = null
+        for (const [p, f] of prev) {
+          const k = normalizePathSeparators(p)
+          if ((k === key || k.startsWith(`${key}/`)) && !f.missing) {
+            next ??= new Map(prev)
+            next.set(p, { ...f, missing: true })
+          }
+        }
+        return next ?? prev
+      })
+    }
+
+    return subscribeFileChanges((changes) => {
+      for (const data of changes) {
+        const changedPath = data.path
+
+        // Reload review data when a review or reply sidecar file changes
+        const reviewMatch = changedPath.match(/^(.+)\.review\.[^/]+\.json$/) || changedPath.match(/^(.+)\.reply\.[^/]+\.json$/)
+        if (reviewMatch) {
+          if (reviewMatch[1] === activeFilePathRef.current) {
+            reviewReloadRef.current()
+          }
+          continue
+        }
+
+        if (data.type === 'unlink' || data.type === 'unlinkDir') {
+          markMissing(changedPath)
+        } else if (data.type === 'change' || data.type === 'add') {
+          void reload(changedPath)
+        }
+      }
+    })
   }, [])
 
   const loadFile = async (filePath: string) => {
@@ -760,6 +838,14 @@ export function TabbedEditorPanel({
         </div>
       )}
 
+      {/* The open file was deleted or moved on disk */}
+      {activeFile?.missing && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-300">
+          <Warning size={12} className="flex-shrink-0" />
+          <span className="truncate">このファイルは削除されたか、移動されました。表示しているのは開いていたときの内容です。</span>
+        </div>
+      )}
+
       {/* Error message */}
       {error && (
         <div className="flex items-center gap-2 px-4 py-2 bg-red-500/10 border-b border-red-500/20 text-red-400 text-xs">
@@ -782,8 +868,8 @@ export function TabbedEditorPanel({
           </div>
         ) : activeFile && activeFilePath && isImageFile(activeFilePath) ? (
           <div className="h-full flex items-center justify-center overflow-auto p-4 bg-[repeating-conic-gradient(#e5e5e5_0%_25%,#fff_0%_50%)] dark:bg-[repeating-conic-gradient(#333_0%_25%,#222_0%_50%)] bg-[length:16px_16px]">
-            <img
-              src={`local-file://${activeFilePath}`}
+            <LocalImage
+              filePath={activeFilePath}
               alt={getFileName(activeFilePath)}
               className="max-w-full max-h-full object-contain"
             />

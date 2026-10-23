@@ -772,6 +772,59 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
 
 ---
 
+## Architecture: File watching and the file tree (client)
+
+The owner's requirement: anything that creates, changes, deletes or replaces
+a file (the AI above all) shows in the app at once, without the member doing
+anything.
+
+- **One recursive watcher per company** (`client/electron/company-watcher.ts`):
+  a native `fs.watch(root, { recursive: true })` (FSEvents / ReadDirectoryChangesW /
+  inotify with Node ≥ 20 — Electron 31 is Node 20), opened by
+  `SkillCentricLayout` when the company opens (`watchCompany`) and closed
+  when it closes or the app quits — never on a department or tab switch.
+  chokidar per department was dropped: chokidar 5 opens one `fs.watch` per
+  directory *and* file (~14k for a 6.7k-entry company) and closes them on the
+  main thread — measured 30 s (全社) / 27 s (コンテンツ) per close; a
+  department switch took 33 s and quit 37 s, every IPC call waiting
+  meanwhile. The native watcher opens in ~1 ms and closes in < 1 ms. chokidar
+  remains only as the fallback when recursive watching is unavailable
+  (`ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`).
+- Raw events (`rename` is ambiguous) are collected per path for 100 ms from
+  the first one, then classified by `lstat` into the shape the renderer always
+  had: `add` / `addDir` / `unlink` / `unlinkDir` / `change` (≤ 2000 paths per
+  batch, the rest in the next). A file replaced by write-temp-then-rename
+  arrives as `add`; a removed folder the watcher never saw as a folder arrives
+  as `unlink` — consumers treat `unlink` as "this path and everything under
+  it". Contents of `.git` (any depth: private folder clones too),
+  `node_modules`, `.workspace` and `.backups`, and `.DS_Store`, are dropped.
+  The `disableWatchers` perf switch skips opening the watcher.
+- Renderer: one IPC subscription (`src/lib/fileEvents.ts`
+  `subscribeFileChanges`); consumers filter by path prefix.
+- **File tree** (`src/lib/fileTreeModel.ts`, `FileTreePanel`): one model per
+  shown folder in a module-level registry (switching back is instant), all
+  fed by the watcher. First view reads two levels (`readDirectoryTree(…, 1)`,
+  first-level folders open, as before); deeper folders load on expand. An
+  event re-reads only the changed path's parent, if it is on screen (root or
+  expanded); a collapsed or off-screen folder is marked stale and re-read when
+  shown; `change` re-reads nothing (`planTreeRefresh`, unit-tested). Rows are
+  memoised (`TreeRow`, actions behind one ref). The not-downloaded department
+  prompt is an overlay (the tree stays mounted) and the "folder exists" check
+  is keyed per folder (`src/lib/folderExists.ts`); left tabs stay mounted once
+  opened (history follows the department only while shown — it runs git log).
+- **Previews never show a stale file**: `src/lib/fileVersions.ts` bumps a
+  per-path counter on every event; images (tab and markdown) and PDFs use it
+  — `local-file://<path>?v=<n>` (`shared/local-file-url.ts`). The protocol
+  handler drops the query (`electron/local-file-protocol.ts`, same
+  allowed-roots check as before) and answers `Cache-Control: no-store`. An
+  open file that is deleted shows a notice; one replaced (`add`) reloads.
+- Tests: `tests/company-watcher.test.ts` (incl. a live test on a temp
+  folder), `tests/file-tree-model.test.ts`, `tests/local-file-url.test.ts`.
+  Preview: `tests/download-folders-ui.html?view=filetree` exposes
+  `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
+
+---
+
 ## Architecture: Chat Write Guard (read-only folders)
 
 The in-app chat runs Claude Code in the member's checkout. Per-folder write

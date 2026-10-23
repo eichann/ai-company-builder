@@ -81,9 +81,10 @@ Object.assign(window, {
     onSparseProgress: () => () => {},
     readDirectoryTree: async (dir: string, max: number) => tree(dir, 0, max),
     readDirectory: async (dir: string) => listDir(dir),
-    watchDirectory: async () => {},
-    unwatchDirectory: async () => {},
+    watchCompany: async () => ({ success: true }),
+    unwatchCompany: async () => ({ success: true }),
     onFileChange: () => () => {},
+    onFileChanges: () => () => {},
     getStats: async () => { throw new Error('not found') },
     createDirectory: async (p: string) => {
       const dir = p.slice(0, p.lastIndexOf('/'))

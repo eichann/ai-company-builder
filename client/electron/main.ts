@@ -8,7 +8,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protoco
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
-import { fileURLToPath } from 'url'
+import { fileURLToPath, pathToFileURL } from 'url'
 import { exec, execFileSync, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 
@@ -45,7 +45,9 @@ import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin, setRemoteUrl } from './sync/remote'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
-import chokidar, { FSWatcher } from 'chokidar'
+import chokidar from 'chokidar'
+import { CompanyWatcher, coveringRoot, type FileChange, type RawEventType } from './company-watcher'
+import { localFileTarget } from './local-file-protocol'
 import net from 'net'
 import { HandoffStore } from './handoff/store'
 import { HandoffService } from './handoff/service'
@@ -104,8 +106,8 @@ function notDownloadedRefusal(absPath: string): string | null {
   return null
 }
 
-// File watchers map for tracking active watchers
-const fileWatchers: Map<string, FSWatcher> = new Map()
+// One recursive watcher per open company folder (see company-watcher.ts).
+const companyWatchers: Map<string, CompanyWatcher> = new Map()
 
 // Running tool processes map
 interface RunningTool {
@@ -483,10 +485,11 @@ app.on('activate', () => {
   }
 })
 
-// Clean up file watchers on app quit
+// Clean up file watchers on app quit (a native recursive watcher closes in
+// well under a millisecond; chokidar's per-directory watchers took 30+ s).
 app.on('before-quit', () => {
-  fileWatchers.forEach((watcher) => watcher.close())
-  fileWatchers.clear()
+  companyWatchers.forEach((watcher) => watcher.close())
+  companyWatchers.clear()
 
   // Kill running skill tools so dev servers don't outlive the app.
   // Windows has no process groups/POSIX signals — kill the tree via taskkill.
@@ -543,7 +546,7 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
   }
 })
 
-const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
+const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 
 
 ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
@@ -753,85 +756,71 @@ ipcMain.on('fs:startDrag', (event, filePath: string) => {
   })
 })
 
-// Start watching a directory
+/**
+ * Where recursive fs.watch is unavailable (Linux before Node 20): chokidar on
+ * the company root, its events fed into the same classifier.
+ */
+function chokidarFallback(root: string, onRaw: (type: RawEventType, rel: string) => void, onError: (error: unknown) => void) {
+  const watcher = chokidar.watch(root, {
+    // Same directories as the recursive watcher; non-regular files (sockets
+    // in temporary browser profiles) make fs.watch throw.
+    ignored: (targetPath, stats) =>
+      /(^|[\\/])(\.git|node_modules|\.workspace|\.backups)([\\/])/i.test(targetPath)
+      || !!(stats && !stats.isFile() && !stats.isDirectory()),
+    persistent: true,
+    ignoreInitial: true,
+    depth: 10,
+    followSymlinks: false,
+    ignorePermissionErrors: true,
+  })
+  watcher.on('error', onError)
+  const rel = (p: string) => path.relative(root, p)
+  watcher.on('add', p => onRaw('rename', rel(p)))
+  watcher.on('addDir', p => onRaw('rename', rel(p)))
+  watcher.on('unlink', p => onRaw('rename', rel(p)))
+  watcher.on('unlinkDir', p => onRaw('rename', rel(p)))
+  watcher.on('change', p => onRaw('change', rel(p)))
+  return { close: () => { void watcher.close() } }
+}
+
+function sendFileChanges(changes: FileChange[]): void {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('fs:changes', changes)
+  }
+}
+
+// Watch a company folder: one recursive watcher for the whole company, kept
+// open across department switches. Idempotent; a folder inside an already
+// watched one is covered by it.
 ipcMain.handle('fs:watch', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
-    // Stop existing watcher for this path if any
-    if (fileWatchers.has(safePath)) {
-      await fileWatchers.get(safePath)?.close()
+    if (coveringRoot(companyWatchers.keys(), safePath)) return { success: true }
+    // A parent opened after a child replaces the child's watcher.
+    for (const [root, watcher] of companyWatchers) {
+      if (root.startsWith(safePath + path.sep)) {
+        watcher.close()
+        companyWatchers.delete(root)
+      }
     }
-
-    const watcher = chokidar.watch(safePath, {
-      ignored: (targetPath, stats) => {
-        // Skip VCS/dependency dirs and transient sandbox dirs (e.g. headless
-        // Chrome profiles under `.workspace` that skills spawn). These contain
-        // Unix domain sockets (SingletonSocket) and other special files that
-        // make fs.watch throw "UNKNOWN" on macOS.
-        if (/(^|[\\/])(\.git|node_modules|\.workspace)([\\/]|$)/.test(targetPath)) {
-          return true
-        }
-        // Never watch non-regular files (sockets, FIFOs, devices) — watching
-        // them throws and would otherwise crash the watcher.
-        if (stats && !stats.isFile() && !stats.isDirectory()) {
-          return true
-        }
-        return false
-      },
-      persistent: true,
-      ignoreInitial: true,
-      depth: 10,
-      followSymlinks: false,
-      ignorePermissionErrors: true,
-    })
-
-    // An unwatchable file (e.g. a socket in a temp browser profile) makes
-    // chokidar emit 'error'. Without a listener this surfaces as an unhandled
-    // promise rejection that freezes the app, so swallow it here.
-    watcher.on('error', (error) => {
-      console.warn(
-        '[fs:watch] watcher error (ignored):',
-        error instanceof Error ? error.message : error
-      )
-    })
-
-    // Debounce file change events to avoid flooding IPC during bulk operations
-    let pendingChanges: Array<{ type: string; path: string }> = []
-    let debounceTimer: ReturnType<typeof setTimeout> | null = null
-
-    const queueChange = (type: string, changePath: string) => {
-      pendingChanges.push({ type, path: changePath })
-      if (debounceTimer) clearTimeout(debounceTimer)
-      debounceTimer = setTimeout(() => {
-        if (pendingChanges.length > 0 && mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('fs:changes', pendingChanges)
-        }
-        pendingChanges = []
-        debounceTimer = null
-      }, 200)
-    }
-
-    watcher.on('add', (filePath) => queueChange('add', filePath))
-    watcher.on('addDir', (dirPath) => queueChange('addDir', dirPath))
-    watcher.on('unlink', (filePath) => queueChange('unlink', filePath))
-    watcher.on('unlinkDir', (dirPath) => queueChange('unlinkDir', dirPath))
-    watcher.on('change', (filePath) => queueChange('change', filePath))
-
-    fileWatchers.set(safePath, watcher)
+    const watcher = new CompanyWatcher({ root: safePath, onChanges: sendFileChanges, fallback: chokidarFallback })
+    watcher.start()
+    companyWatchers.set(safePath, watcher)
+    console.log(`[fs-watch] watching ${safePath} (${watcher.mode ?? 'retrying'})`)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
-// Stop watching a directory
+// Stop watching a company folder (the company was closed or switched).
 ipcMain.handle('fs:unwatch', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
-    const watcher = fileWatchers.get(safePath)
+    const watcher = companyWatchers.get(safePath)
     if (watcher) {
-      await watcher.close()
-      fileWatchers.delete(safePath)
+      watcher.close()
+      companyWatchers.delete(safePath)
     }
     return { success: true }
   } catch (error) {
@@ -3416,21 +3405,18 @@ app.whenReady().then(async () => {
     return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
   })
   // Handle local-file:// protocol to serve local files (restricted to allowed directories)
-  protocol.handle('local-file', (request) => {
-    const filePath = decodeURIComponent(request.url.replace('local-file://', ''))
-    const resolved = path.resolve(filePath)
-    // Check if path is within an allowed directory
-    let isAllowed = false
-    for (const root of allowedRoots) {
-      if (resolved === root || resolved.startsWith(root + path.sep)) {
-        isAllowed = true
-        break
-      }
+  // `?v=<n>` (a per-path version the renderer bumps on file events) is dropped
+  // before resolving; responses are never cached, so a replaced file shows.
+  protocol.handle('local-file', async (request) => {
+    const target = localFileTarget(request.url, allowedRoots)
+    if (!target.ok) {
+      return new Response(target.status === 403 ? 'Forbidden: path is outside allowed directories' : 'Bad request', { status: target.status })
     }
-    if (!isAllowed) {
-      return new Response('Forbidden: path is outside allowed directories', { status: 403 })
-    }
-    return electronNet.fetch('file://' + resolved)
+    const resolved = target.path
+    const response = await electronNet.fetch(pathToFileURL(resolved).toString())
+    const headers = new Headers(response.headers)
+    headers.set('Cache-Control', 'no-store')
+    return new Response(response.body, { status: response.status, statusText: response.statusText, headers })
   })
   // Start embedded Hono chat server
   try {

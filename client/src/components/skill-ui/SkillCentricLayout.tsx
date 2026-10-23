@@ -28,6 +28,8 @@ import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { normalizePathSeparators } from '../../utils/path'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
+import { subscribeFileChanges } from '../../lib/fileEvents'
+import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../lib/folderExists'
 import { dragWidth, leftPanelDrag } from '../../lib/panelResize'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
 
@@ -264,18 +266,27 @@ export function SkillCentricLayout() {
     [departments, selectedDeptId]
   )
 
-  // Check if the currently selected department folder exists on disk
-  const [deptFolderExists, setDeptFolderExists] = useState(true)
+  // Check if the currently selected department folder exists on disk. The
+  // answer is keyed by folder: an answer for the previous department never
+  // applies to this one (that flashed the download prompt and remounted the
+  // file tree on every switch), and answers are remembered per folder.
+  const deptPathForCheck = currentCompany?.rootPath && selectedDept?.folder && !isCompanyWide
+    ? `${currentCompany.rootPath}/${selectedDept.folder}`
+    : null
+  const [folderCheck, setFolderCheck] = useState<FolderCheck | null>(null)
   useEffect(() => {
-    if (!currentCompany?.rootPath || !selectedDept?.folder || isCompanyWide) {
-      setDeptFolderExists(true)
-      return
+    if (!deptPathForCheck) return
+    let cancelled = false
+    const record = (exists: boolean) => {
+      rememberFolderExists(deptPathForCheck, exists)
+      if (!cancelled) setFolderCheck({ path: deptPathForCheck, exists })
     }
-    const deptPath = `${currentCompany.rootPath}/${selectedDept.folder}`
-    window.electronAPI.exists(deptPath)
-      .then((exists: boolean) => setDeptFolderExists(exists))
-      .catch(() => setDeptFolderExists(false))
-  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, sparseCheckout.excludedPaths])
+    window.electronAPI.exists(deptPathForCheck)
+      .then((exists: boolean) => record(exists))
+      .catch(() => record(false))
+    return () => { cancelled = true }
+  }, [deptPathForCheck, sparseCheckout.excludedPaths])
+  const deptFolderExists = folderExistsFor(folderCheck, deptPathForCheck)
 
   // Department is unsynced if sparse checkout says so OR if the folder doesn't exist
   const isSelectedDeptUnsynced = useMemo(() => {
@@ -290,6 +301,13 @@ export function SkillCentricLayout() {
 
   // The effective path for file tree and chat
   const effectiveDeptFolder = isCompanyWide ? '' : (selectedDept?.folder || '')
+
+  // Left tabs opened at least once stay mounted (hidden when not shown).
+  const [visitedTabs, setVisitedTabs] = useState<ReadonlySet<LeftPanelTab>>(() => new Set([leftTab]))
+  if (!visitedTabs.has(leftTab)) setVisitedTabs(new Set([...visitedTabs, leftTab]))
+  // The history panel follows the department only while shown (it runs git log).
+  const [historyDeptFolder, setHistoryDeptFolder] = useState(effectiveDeptFolder)
+  if (leftTab === 'history' && historyDeptFolder !== effectiveDeptFolder) setHistoryDeptFolder(effectiveDeptFolder)
 
   // Load skills from file system — skip if department is unsynced
   const { skills, isLoading: isLoadingSkills, refresh: refreshSkills } = useSkills({
@@ -314,7 +332,11 @@ export function SkillCentricLayout() {
       const folder = selectedDept.folder
       const result = await sparseCheckout.apply(sparseCheckout.excludedPaths.filter(p => p !== folder))
       if (result.success) {
-        setDeptFolderExists(true)
+        const deptPath = currentCompany?.rootPath ? `${currentCompany.rootPath}/${folder}` : null
+        if (deptPath) {
+          rememberFolderExists(deptPath, true)
+          setFolderCheck({ path: deptPath, exists: true })
+        }
         refreshSkills()
       } else {
         // Say why instead of silently showing the button again.
@@ -325,7 +347,7 @@ export function SkillCentricLayout() {
     } finally {
       setIsDownloading(false)
     }
-  }, [selectedDept?.folder, sparseCheckout, refreshSkills])
+  }, [selectedDept?.folder, sparseCheckout, refreshSkills, currentCompany?.rootPath])
   useEffect(() => { setDownloadError(null) }, [selectedDept?.folder])
 
   const pendingSkillsRefreshRef = useRef(false)
@@ -403,41 +425,50 @@ export function SkillCentricLayout() {
     return () => document.removeEventListener('keydown', handleKeyDown)
   }, [])
 
-  // Watch skills directory for changes
+  // One recursive watcher for the whole company, opened with the company and
+  // kept across department switches (closing chokidar's per-department
+  // watchers blocked the main process for up to 40 s). Retried briefly in case
+  // the folder is not registered with the main process yet.
   useEffect(() => {
-    if (!currentCompany?.rootPath || (!selectedDept?.folder && !isCompanyWide)) return
-
-    const basePath = isCompanyWide ? currentCompany.rootPath : `${currentCompany.rootPath}/${selectedDept!.folder}`
-    const skillsPath = `${basePath}/.claude/skills`
-
+    const root = currentCompany?.rootPath
+    if (!root) return
     if (isPerfCutEnabled('disableWatchers')) {
       perfMark('skill_layout.watch.disabled')
       return
     }
-
-    // Start watching the skills directory
     perfMark('skill_layout.watch.start')
-    window.electronAPI.watchDirectory(skillsPath)
+    let cancelled = false
+    let retryTimer: number | null = null
+    const open = (attempt: number) => {
+      void window.electronAPI.watchCompany(root).then(result => {
+        if (cancelled || result?.success !== false || attempt >= 5) return
+        retryTimer = window.setTimeout(() => open(attempt + 1), 1000)
+      }).catch(() => {})
+    }
+    open(0)
+    return () => {
+      cancelled = true
+      if (retryTimer != null) window.clearTimeout(retryTimer)
+      void window.electronAPI.unwatchCompany(root)
+      perfMark('skill_layout.watch.stop')
+    }
+  }, [currentCompany?.rootPath])
 
-    const unsubscribe = window.electronAPI.onFileChange((data) => {
+  // Refresh the skills list when something under this view's .claude/skills changes.
+  useEffect(() => {
+    if (!currentCompany?.rootPath || (!selectedDept?.folder && !isCompanyWide)) return
+    const basePath = isCompanyWide ? currentCompany.rootPath : `${currentCompany.rootPath}/${selectedDept!.folder}`
+    const skillsPrefix = normalizePathSeparators(`${basePath}/.claude/skills`)
+    return subscribeFileChanges((changes) => {
       perfMark('skill_layout.fs_change')
-      if (isPerfCutEnabled('fsEvents')) {
-        perfMark('skill_layout.fs_change.skipped')
-        return
-      }
-
-      // Check if the change is in the skills directory
-      if (normalizePathSeparators(data.path).startsWith(normalizePathSeparators(skillsPath))) {
+      if (changes.some(c => {
+        const p = normalizePathSeparators(c.path)
+        return p === skillsPrefix || p.startsWith(`${skillsPrefix}/`)
+      })) {
         perfMark('skill_layout.skills_change')
         requestDeferredSkillsRefresh()
       }
     })
-
-    return () => {
-      unsubscribe()
-      window.electronAPI.unwatchDirectory(skillsPath)
-      perfMark('skill_layout.watch.stop')
-    }
   }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, requestDeferredSkillsRefresh])
 
   const selectedSkill = useMemo(
@@ -870,6 +901,8 @@ ${promptContent}
     }
   }, [currentCompany, refreshDepartments, refreshSkills])
 
+  const handlePrivateFolderCreated = useCallback(() => { void handleSync() }, [handleSync])
+
   const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
     if (!currentCompany?.rootPath) return
     await window.electronAPI.gitRevertFile(currentCompany.rootPath, filePath, fileStatus)
@@ -1014,205 +1047,216 @@ ${promptContent}
 
       {/* Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {isSelectedDeptUnsynced ? (
-          /* Unsynced department — download prompt (left side) */
-          <div className="flex-1 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
-            <div className="text-center max-w-md px-6">
-              <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
-                <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
-              </div>
-              <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
-                {selectedDept?.name}
-              </h2>
-              <p className="text-gray-500 dark:text-zinc-400 mb-8">
-                この部署のファイルはまだダウンロードされていません。
-                ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
-              </p>
-              <button
-                onClick={handleDownloadDepartment}
-                disabled={isDownloading}
-                className="
-                  inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
-                  text-white font-medium text-sm
-                  transition-all hover:brightness-110 active:scale-[0.98]
-                  disabled:opacity-50 disabled:cursor-not-allowed
-                "
-                style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
-              >
-                {isDownloading ? (
-                  <SpinnerGap size={18} className="animate-spin" />
-                ) : (
-                  <DownloadSimple size={18} weight="bold" />
-                )}
-                {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
-              </button>
-              {downloadError && !isDownloading && (
-                <p
-                  role="alert"
-                  className={`mt-4 inline-flex items-start gap-2 text-left text-sm ${downloadError.offline ? 'text-zinc-700 dark:text-zinc-200' : 'text-red-600 dark:text-red-300'}`}
-                >
-                  {downloadError.offline
-                    ? <WifiSlash size={16} className="mt-0.5 shrink-0 text-zinc-500" />
-                    : <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0" />}
-                  <span className="break-words">
-                    {downloadError.offline
-                      ? 'インターネットにつながっているときにダウンロードできます。何も変更していません。'
-                      : `ダウンロードできませんでした：${downloadError.message}`}
-                  </span>
-                </p>
-              )}
-            </div>
-          </div>
-        ) : (
-          /* Normal layout (left side) */
-          <>
+        {/* Left side. The not-downloaded prompt is an overlay: the file tree
+            and the other tabs stay mounted underneath (no cold re-read on a
+            department switch), hidden while it shows. */}
         <div
-          className={`flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${chatCollapsed ? 'flex-1' : 'flex-shrink-0'}`}
+          className={`relative flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${chatCollapsed ? 'flex-1' : 'flex-shrink-0'}`}
           style={chatCollapsed ? undefined : { width: leftPanelWidth }}
         >
-          {/* Tab Switcher */}
-          <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
-            <button
-              onClick={() => setLeftTab('skills')}
-              className={`
-                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                border-b-2 transition-colors
-                ${leftTab === 'skills'
-                  ? 'border-accent text-gray-900 dark:text-zinc-100'
-                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
-                }
-              `}
-            >
-              <Lightning size={16} weight={leftTab === 'skills' ? 'fill' : 'regular'} />
-              {t('tabs.skills')}
-            </button>
-            <button
-              onClick={() => setLeftTab('files')}
-              className={`
-                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                border-b-2 transition-colors
-                ${leftTab === 'files'
-                  ? 'border-accent text-gray-900 dark:text-zinc-100'
-                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
-                }
-              `}
-            >
-              <FolderSimple size={16} weight={leftTab === 'files' ? 'fill' : 'regular'} />
-              {t('tabs.files')}
-            </button>
-            <button
-              onClick={() => { setLeftTab('search'); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
-              className={`
-                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                border-b-2 transition-colors
-                ${leftTab === 'search'
-                  ? 'border-accent text-gray-900 dark:text-zinc-100'
-                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
-                }
-              `}
-            >
-              <MagnifyingGlass size={16} weight={leftTab === 'search' ? 'fill' : 'regular'} />
-              検索
-            </button>
-            <button
-              onClick={() => setLeftTab('history')}
-              className={`
-                flex items-center gap-2 px-4 py-2.5 text-sm font-medium
-                border-b-2 transition-colors
-                ${leftTab === 'history'
-                  ? 'border-accent text-gray-900 dark:text-zinc-100'
-                  : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
-                }
-              `}
-            >
-              <GitCommit size={16} weight={leftTab === 'history' ? 'fill' : 'regular'} />
-              履歴
-            </button>
-          </div>
+          <div
+            className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
+            aria-hidden={isSelectedDeptUnsynced || undefined}
+          >
+            {/* Tab Switcher */}
+            <div className="flex-shrink-0 flex border-b border-gray-200 dark:border-zinc-800 bg-gray-50 dark:bg-zinc-900">
+              <button
+                onClick={() => setLeftTab('skills')}
+                className={`
+                  flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                  border-b-2 transition-colors
+                  ${leftTab === 'skills'
+                    ? 'border-accent text-gray-900 dark:text-zinc-100'
+                    : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                  }
+                `}
+              >
+                <Lightning size={16} weight={leftTab === 'skills' ? 'fill' : 'regular'} />
+                {t('tabs.skills')}
+              </button>
+              <button
+                onClick={() => setLeftTab('files')}
+                className={`
+                  flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                  border-b-2 transition-colors
+                  ${leftTab === 'files'
+                    ? 'border-accent text-gray-900 dark:text-zinc-100'
+                    : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                  }
+                `}
+              >
+                <FolderSimple size={16} weight={leftTab === 'files' ? 'fill' : 'regular'} />
+                {t('tabs.files')}
+              </button>
+              <button
+                onClick={() => { setLeftTab('search'); requestAnimationFrame(() => searchInputRef.current?.focus()) }}
+                className={`
+                  flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                  border-b-2 transition-colors
+                  ${leftTab === 'search'
+                    ? 'border-accent text-gray-900 dark:text-zinc-100'
+                    : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                  }
+                `}
+              >
+                <MagnifyingGlass size={16} weight={leftTab === 'search' ? 'fill' : 'regular'} />
+                検索
+              </button>
+              <button
+                onClick={() => setLeftTab('history')}
+                className={`
+                  flex items-center gap-2 px-4 py-2.5 text-sm font-medium
+                  border-b-2 transition-colors
+                  ${leftTab === 'history'
+                    ? 'border-accent text-gray-900 dark:text-zinc-100'
+                    : 'border-transparent text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200'
+                  }
+                `}
+              >
+                <GitCommit size={16} weight={leftTab === 'history' ? 'fill' : 'regular'} />
+                履歴
+              </button>
+            </div>
 
-          {/* Tab Content */}
-          <div className="flex-1 overflow-hidden min-w-0">
-            {/* History Tab */}
-            {leftTab === 'history' && (
-              <CommitHistoryPanel
-                rootPath={currentCompany?.rootPath || ''}
-                departmentFolder={effectiveDeptFolder}
-              />
-            )}
-
-            {/* Search Tab */}
-            {leftTab === 'search' && (
-              <SearchPanel
-                rootPath={currentCompany?.rootPath || ''}
-                departmentFolder={effectiveDeptFolder}
-                inputRef={searchInputRef}
-              />
-            )}
-
-            {/* Skills Tab */}
-            {leftTab === 'skills' && (
-              <div className="h-full flex">
-                <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden`}>
-                  <SkillGrid
-                    skills={skills}
-                    color={selectedDept?.color || '#6366f1'}
-                    selectedSkillId={selectedSkillId}
-                    onSelectSkill={handleSelectSkill}
-                    onExecuteSkill={handleExecuteSkill}
-                    onAddSkill={handleAddSkill}
-                    onCopySkill={!isCompanyWide ? () => setShowCopySkillModal(true) : undefined}
-                    isLoading={isLoadingSkills}
+            {/* Tab Content */}
+            <div className="flex-1 overflow-hidden min-w-0">
+              {/* Tabs stay mounted once opened (hidden via CSS), so switching
+                  tabs keeps their state instead of remounting. History only
+                  follows the department while it is shown: it runs git log. */}
+              {/* History Tab */}
+              {visitedTabs.has('history') && (
+                <div className={`h-full ${leftTab !== 'history' ? 'hidden' : ''}`}>
+                  <CommitHistoryPanel
+                    rootPath={currentCompany?.rootPath || ''}
+                    departmentFolder={historyDeptFolder}
                   />
                 </div>
-                {selectedSkillId && selectedSkill && (
-                  <div className="w-1/2 border-l border-gray-200 dark:border-zinc-800 overflow-hidden">
-                    <SkillDetailPanel
-                      skill={selectedSkill}
+              )}
+
+              {/* Search Tab */}
+              {visitedTabs.has('search') && (
+                <div className={`h-full ${leftTab !== 'search' ? 'hidden' : ''}`}>
+                  <SearchPanel
+                    rootPath={currentCompany?.rootPath || ''}
+                    departmentFolder={effectiveDeptFolder}
+                    inputRef={searchInputRef}
+                  />
+                </div>
+              )}
+
+              {/* Skills Tab */}
+              {visitedTabs.has('skills') && (
+                <div className={`h-full flex ${leftTab !== 'skills' ? 'hidden' : ''}`}>
+                  <div className={`${selectedSkillId ? 'w-1/2' : 'w-full'} transition-all overflow-hidden`}>
+                    <SkillGrid
+                      skills={skills}
                       color={selectedDept?.color || '#6366f1'}
-                      onClose={() => setSelectedSkillId(null)}
-                      onExecute={() => handleExecuteSkill(selectedSkillId)}
-                      onEditFile={handleEditFile}
-                      onOpenTool={(tool, port) => setActiveTool({ tool, port })}
-                      onPublish={handlePublishSkill}
-                      onToggleNurturing={handleToggleNurturing}
+                      selectedSkillId={selectedSkillId}
+                      onSelectSkill={handleSelectSkill}
+                      onExecuteSkill={handleExecuteSkill}
+                      onAddSkill={handleAddSkill}
+                      onCopySkill={!isCompanyWide ? () => setShowCopySkillModal(true) : undefined}
+                      isLoading={isLoadingSkills}
                     />
                   </div>
-                )}
-              </div>
-            )}
+                  {selectedSkillId && selectedSkill && (
+                    <div className="w-1/2 border-l border-gray-200 dark:border-zinc-800 overflow-hidden">
+                      <SkillDetailPanel
+                        skill={selectedSkill}
+                        color={selectedDept?.color || '#6366f1'}
+                        onClose={() => setSelectedSkillId(null)}
+                        onExecute={() => handleExecuteSkill(selectedSkillId)}
+                        onEditFile={handleEditFile}
+                        onOpenTool={(tool, port) => setActiveTool({ tool, port })}
+                        onPublish={handlePublishSkill}
+                        onToggleNurturing={handleToggleNurturing}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
 
-            {/* Files Tab - always mounted, hidden via CSS to preserve state */}
-            <div className={`h-full flex min-w-0 ${leftTab !== 'files' ? 'hidden' : ''}`}>
-              <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
-                <FileTreePanel
-                  rootPath={currentCompany?.rootPath || ''}
-                  departmentFolder={effectiveDeptFolder}
-                  selectedFilePath={activeFilePath}
-                  onSelectFile={handleOpenFile}
-                  onDoubleClickFile={handlePinFile}
-                  onPrivateFolderCreated={() => { void handleSync() }}
-                />
-              </div>
-              <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" />
-              <div className="flex-1 min-w-0">
-                <TabbedEditorPanel
-                  openFiles={openFiles}
-                  activeFilePath={activeFilePath}
-                  previewFilePath={previewFilePath}
-                  tabLabels={tabLabels}
-                  onSelectFile={handleSelectOpenFile}
-                  onCloseFile={handleCloseFile}
-                  onPinFile={handlePinFile}
-                />
+              {/* Files Tab - always mounted, hidden via CSS to preserve state */}
+              <div className={`h-full flex min-w-0 ${leftTab !== 'files' ? 'hidden' : ''}`}>
+                <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
+                  <FileTreePanel
+                    rootPath={currentCompany?.rootPath || ''}
+                    departmentFolder={effectiveDeptFolder}
+                    selectedFilePath={activeFilePath}
+                    onSelectFile={handleOpenFile}
+                    onDoubleClickFile={handlePinFile}
+                    onPrivateFolderCreated={handlePrivateFolderCreated}
+                  />
+                </div>
+                <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" />
+                <div className="flex-1 min-w-0">
+                  <TabbedEditorPanel
+                    openFiles={openFiles}
+                    activeFilePath={activeFilePath}
+                    previewFilePath={previewFilePath}
+                    tabLabels={tabLabels}
+                    onSelectFile={handleSelectOpenFile}
+                    onCloseFile={handleCloseFile}
+                    onPinFile={handlePinFile}
+                  />
+                </div>
               </div>
             </div>
           </div>
+          {isSelectedDeptUnsynced && (
+            /* Unsynced department — download prompt */
+            <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
+              <div className="text-center max-w-md px-6">
+                <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
+                  <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
+                </div>
+                <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
+                  {selectedDept?.name}
+                </h2>
+                <p className="text-gray-500 dark:text-zinc-400 mb-8">
+                  この部署のファイルはまだダウンロードされていません。
+                  ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
+                </p>
+                <button
+                  onClick={handleDownloadDepartment}
+                  disabled={isDownloading}
+                  className="
+                    inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
+                    text-white font-medium text-sm
+                    transition-all hover:brightness-110 active:scale-[0.98]
+                    disabled:opacity-50 disabled:cursor-not-allowed
+                  "
+                  style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
+                >
+                  {isDownloading ? (
+                    <SpinnerGap size={18} className="animate-spin" />
+                  ) : (
+                    <DownloadSimple size={18} weight="bold" />
+                  )}
+                  {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
+                </button>
+                {downloadError && !isDownloading && (
+                  <p
+                    role="alert"
+                    className={`mt-4 inline-flex items-start gap-2 text-left text-sm ${downloadError.offline ? 'text-zinc-700 dark:text-zinc-200' : 'text-red-600 dark:text-red-300'}`}
+                  >
+                    {downloadError.offline
+                      ? <WifiSlash size={16} className="mt-0.5 shrink-0 text-zinc-500" />
+                      : <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0" />}
+                    <span className="break-words">
+                      {downloadError.offline
+                        ? 'インターネットにつながっているときにダウンロードできます。何も変更していません。'
+                        : `ダウンロードできませんでした：${downloadError.message}`}
+                    </span>
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Resize Handle (hidden when chat is collapsed) */}
         {!chatCollapsed && <ResizeHandle onResizeStart={handleLeftPanelResizeStart} onResize={handleLeftPanelResize} direction="horizontal" />}
-          </>
-        )}
 
         {/* Right Panel (Chat) */}
         {/* Collapsed tab to restore (only shown when collapsed) */}

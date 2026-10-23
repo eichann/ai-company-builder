@@ -13,6 +13,7 @@ import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { SettingsPanel } from '../src/components/settings/SettingsPanel'
 import { FileTreePanel } from '../src/components/skill-ui/FileTreePanel'
+import { dispatchFileChanges } from '../src/lib/fileEvents'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'
@@ -73,6 +74,15 @@ const DISK: Record<string, Array<{ name: string; isDirectory: boolean }>> = {
   [`${ROOT}/コンテンツ/記事`]: [{ name: '2026-10-連載.md', isDirectory: false }, { name: '入稿ルール.md', isDirectory: false }],
 }
 const listDir = (dir: string) => (DISK[dir] ?? []).map(e => ({ ...e, path: `${dir}/${e.name}` }))
+// Simulate a file the AI writes: __acbAddFile('コンテンツ/記事', 'new.md') adds it to the
+// fake disk and delivers the watcher event, as the main process would.
+Object.assign(window, {
+  __acbAddFile: (dirRel: string, name: string) => {
+    const dir = `${ROOT}/${dirRel}`
+    ;(DISK[dir] ??= []).push({ name, isDirectory: false })
+    dispatchFileChanges([{ type: 'add', path: `${dir}/${name}` }])
+  },
+})
 type TreeNode = { name: string; isDirectory: boolean; path: string; children?: TreeNode[] }
 const tree = (dir: string, depth: number, max: number): TreeNode[] =>
   listDir(dir).map(e => (e.isDirectory && depth < max ? { ...e, children: tree(e.path, depth + 1, max) } : e))
@@ -121,9 +131,10 @@ Object.assign(window, {
     },
     readDirectoryTree: async (dir: string, max: number) => tree(dir, 0, max),
     readDirectory: async (dir: string) => listDir(dir),
-    watchDirectory: async () => {},
-    unwatchDirectory: async () => {},
+    watchCompany: async () => ({ success: true }),
+    unwatchCompany: async () => ({ success: true }),
     onFileChange: () => () => {},
+    onFileChanges: () => () => {},
     getStats: async () => { throw new Error('not found') },
   },
 })
