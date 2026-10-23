@@ -1,15 +1,14 @@
 import { betterAuth } from 'better-auth'
 import Database from 'better-sqlite3'
-import path from 'path'
 import fs from 'fs'
+import { AUTH_DB_PATH, DATA_DIR } from './config'
 
 // Ensure data directory exists
-const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
-if (!fs.existsSync(dataDir)) {
-  fs.mkdirSync(dataDir, { recursive: true })
+if (!fs.existsSync(DATA_DIR)) {
+  fs.mkdirSync(DATA_DIR, { recursive: true })
 }
 
-const dbPath = path.join(dataDir, 'auth.sqlite')
+const dbPath = AUTH_DB_PATH
 
 export const auth = betterAuth({
   database: new Database(dbPath),

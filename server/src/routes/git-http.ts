@@ -6,6 +6,7 @@ import Database from 'better-sqlite3'
 import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
+import { AUTH_DB_PATH, REPOS_DIR } from '../lib/config'
 import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
@@ -22,12 +23,9 @@ import {
 
 export const gitHttpRoute = new Hono()
 
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-
 // Auth DB for direct session lookup (Better Auth signs cookies, so we can't
 // use auth.api.getSession with raw tokens from Basic Auth)
-const authDb = new Database(join(DATA_DIR, 'auth.sqlite'))
+const authDb = new Database(AUTH_DB_PATH)
 
 // ============================================================================
 // Authentication: Extract user from Basic Auth header (session token as password)

@@ -28,7 +28,7 @@ import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { StringDecoder } from 'string_decoder'
 import type Database from 'better-sqlite3'
-import { gitAsync } from './git-server'
+import { gitAsync } from './git-exec'
 import { listScopesWithRules } from './permission-store'
 import {
   canReadPrivateScope,
@@ -36,7 +36,8 @@ import {
   resolveAccess,
   type PermissionRepository,
 } from './permissions'
-import { companyRepoPath, pathKey, privateRepoPath } from './private-folders'
+import { companyRepoPath } from './config'
+import { pathKey, privateRepoPath } from './private-folders'
 import {
   COMPANY_FILES_LIMITS as LIMITS,
   type CompanyFileContent,

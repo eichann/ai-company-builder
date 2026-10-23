@@ -31,7 +31,8 @@ import { tmpdir } from 'os'
 import { join } from 'path'
 import { installPreReceiveHook } from './hook'
 import { BARE_REPO_CONFIG } from './repo-config'
-import { configureBareRepoAsync, gitAsync, listAllScopeRepos } from './scope-repo'
+import { configureBareRepoAsync, listAllScopeRepos } from './scope-repo'
+import { gitAsync } from '../git-exec'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
 import type { ScopeWithRules } from '../permissions'
 
@@ -40,15 +41,12 @@ export { BARE_REPO_CONFIG } from './repo-config'
 export {
   configureBareRepoAsync,
   createScopeRepo,
-  gitAsync,
-  GitTimeoutError,
   removeScopeRepo,
   scopeRepoPath,
   scopeReposDir,
   SCOPE_REPO_GITIGNORE,
   SERVER_GIT_IDENTITY,
 } from './scope-repo'
-export type { GitAsyncOptions } from './scope-repo'
 export type { PushPolicy } from '../push-check/policy'
 
 /**

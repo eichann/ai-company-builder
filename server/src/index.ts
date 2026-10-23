@@ -5,8 +5,8 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import Database from 'better-sqlite3'
-import path from 'path'
 import { auth } from './lib/auth'
+import { AUTH_DB_PATH } from './lib/config'
 import { db, initDatabase } from './db'
 import { signUpWithInvitation } from './lib/invitation-signup'
 import { meRoute } from './routes/me'
@@ -35,8 +35,7 @@ initDatabase()
 }
 
 // Clean up expired sessions on startup
-const dataDir = process.env.DATA_DIR || path.join(process.cwd(), 'data')
-const authDb = new Database(path.join(dataDir, 'auth.sqlite'))
+const authDb = new Database(AUTH_DB_PATH)
 
 // Ensure Better Auth tables exist (created here so a fresh install boots without
 // a manual migration step — mirrors initDatabase() for app.sqlite).
@@ -115,7 +114,7 @@ app.get('/', (c) => {
 
 // Public config endpoint (no auth required) - used by Electron client to validate server URL
 app.get('/api/config', (c) => {
-  const authDbConn = new Database(path.join(dataDir, 'auth.sqlite'))
+  const authDbConn = new Database(AUTH_DB_PATH)
   const result = authDbConn.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
   authDbConn.close()
 
@@ -133,7 +132,7 @@ app.get('/api/config', (c) => {
 app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
   // Block signup after initial setup (first user created)
   if (c.req.method === 'POST' && c.req.path === '/api/auth/sign-up/email') {
-    const authDbConn = new Database(path.join(dataDir, 'auth.sqlite'))
+    const authDbConn = new Database(AUTH_DB_PATH)
     const result = authDbConn.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
     authDbConn.close()
 

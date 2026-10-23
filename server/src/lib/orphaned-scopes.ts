@@ -28,38 +28,22 @@
  * of scopes with rules, so repeated reads cost one `git rev-parse`.
  * When a scope was first seen missing is kept in orphaned_scopes (since).
  */
-import { execFile } from 'child_process'
 import { existsSync } from 'fs'
-import { join } from 'path'
-import { promisify } from 'util'
 import { db, now } from '../db'
+import { companyRepoPath } from './config'
+import { gitAsync } from './git-exec'
 import { listScopesWithRules } from './permission-store'
 import type { ScopeWithRules } from './permissions'
 import { foldAsciiCase } from './push-check/rules'
 
-const execFileAsync = promisify(execFile)
-
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-
-function bareRepoPath(companyId: string): string {
-  return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)
-}
-
-async function git(args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync('git', args, {
-    encoding: 'utf8',
-    maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: '0' },
-  })
-  return stdout
-}
+// Output limit of the git calls here (rev-parse, one directory's ls-tree).
+const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
 
 /** The commit of the shared branch (main, or master for old repos); null when there is none. */
 async function sharedBranchCommit(bare: string): Promise<string | null> {
   for (const branch of ['main', 'master']) {
     try {
-      const out = (await git(['-C', bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])).trim()
+      const out = (await gitAsync(['-C', bare, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`], GIT_OPTS)).trim()
       if (/^[0-9a-f]{40,64}$/.test(out)) return out
     } catch {
       // try the next name
@@ -85,7 +69,7 @@ async function missingPaths(bare: string, commit: string, paths: string[]): Prom
   const list = (dir: string) => {
     let p = listings.get(dir)
     if (!p) {
-      p = git(['-C', bare, 'ls-tree', '-z', dir === '' ? commit : `${commit}:${dir}`]).then(out => {
+      p = gitAsync(['-C', bare, 'ls-tree', '-z', dir === '' ? commit : `${commit}:${dir}`], GIT_OPTS).then(out => {
         const children = new Map<string, { name: string; gitlink: boolean }>()
         for (const record of out.split('\0')) {
           if (!record) continue
@@ -161,7 +145,7 @@ function isCandidate(s: ScopeWithRules, all: ScopeWithRules[]): boolean {
 }
 
 async function compute(companyId: string): Promise<OrphanedScope[]> {
-  const bare = bareRepoPath(companyId)
+  const bare = companyRepoPath(companyId)
   if (!existsSync(bare)) return []
   const commit = await sharedBranchCommit(bare)
   const scopes = listScopesWithRules(db, companyId)

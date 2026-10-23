@@ -1,8 +1,11 @@
 import { Hono } from 'hono'
 import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
-import { gitAsync, initBareRepo, internalGitEnv } from '../lib/git-server'
+import { initBareRepo, internalGitEnv } from '../lib/git-server'
+import { gitAsync } from '../lib/git-exec'
 import { withCompanyLock } from '../lib/company-lock'
+import { toCamelCase } from '../lib/camel-case'
+import { REPOS_DIR, WORKDIR_DIR } from '../lib/config'
 import { getClientActivityForCompany } from '../lib/client-activity'
 import { parseClientVersion } from '../lib/client-version'
 import { deleteUserRules, ensureCompanyScope, removeManagerFromCompany, syncCompanyScopes } from '../lib/permission-store'
@@ -56,21 +59,6 @@ function initializeDefaultDepartments(companyId: string, userId: string) {
     )
   })
 }
-
-// Helper: Convert snake_case object to camelCase
-function toCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(obj)) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
-    result[camelKey] = value
-  }
-  return result
-}
-
-// Base directory for Git repositories
-const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
-const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-const WORKDIR_DIR = join(DATA_DIR, 'workdirs') // Must match departments.ts so GETs reuse the same clone
 
 // Helper: Create slug from name
 function createSlug(name: string): string {

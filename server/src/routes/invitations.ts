@@ -3,22 +3,13 @@ import { db, generateId, now } from '../db'
 import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { randomBytes } from 'crypto'
 import { consumeInvitation } from '../lib/invitation-signup'
+import { toCamelCase } from '../lib/camel-case'
 
 export const invitationsRoute = new Hono()
 
 /** An invitation link is valid for an integer number of days in this range (default 7). */
 export const MIN_INVITATION_DAYS = 1
 export const MAX_INVITATION_DAYS = 30
-
-// Helper: Convert snake_case object to camelCase
-function toCamelCase(obj: Record<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {}
-  for (const [key, value] of Object.entries(obj)) {
-    const camelKey = key.replace(/_([a-z])/g, (_, letter) => letter.toUpperCase())
-    result[camelKey] = value
-  }
-  return result
-}
 
 // Generate a secure token for invitation links
 function generateToken(): string {
