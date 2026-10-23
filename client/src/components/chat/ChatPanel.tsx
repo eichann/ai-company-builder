@@ -1733,8 +1733,6 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
           await window.electronAPI.completeHandoffTurn(receipt.companyId, receipt.sessionId, { messageId: message.id, content, provider: receipt.provider })
         })().catch(() => { setHistoryError('履歴は保存されましたが、引き継ぎメモの更新予約ができませんでした。') })
       }
-      // Refresh file tree in case AI created/modified files
-      window.dispatchEvent(new Event('refresh-file-tree'))
       // Fetch and store Claude CLI session ID for resume persistence
       const finishedSessionId = appSessionIdRef.current
       const finishedCompanyId = currentCompany?.id

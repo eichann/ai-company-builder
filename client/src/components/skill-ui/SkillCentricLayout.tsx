@@ -26,12 +26,12 @@ import { useDepartments } from '../../hooks/useDepartments'
 import type { SlashCommandItem } from '../chat/SlashCommandDropdown'
 import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
-import { normalizePathSeparators } from '../../utils/path'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
 import { subscribeFileChanges } from '../../lib/fileEvents'
 import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../lib/folderExists'
 import { dragWidth, leftPanelDrag } from '../../lib/panelResize'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
+import { scanAffected, skillsScopesAffected } from '../../../shared/skills-refresh'
 
 // Panel width constraints
 const MIN_LEFT_PANEL_WIDTH = 300
@@ -318,7 +318,7 @@ export function SkillCentricLayout() {
   })
 
   // Always load company-wide skills for slash command autocomplete
-  const { skills: companySkills } = useSkills({
+  const { skills: companySkills, refresh: refreshCompanySkills } = useSkills({
     rootPath: currentCompany?.rootPath || '',
     departmentFolder: '',
     departmentId: isCompanyWide ? '' : COMPANY_TAB_ID, // Skip when already viewing company tab (avoid duplicate)
@@ -350,19 +350,25 @@ export function SkillCentricLayout() {
   }, [selectedDept?.folder, sparseCheckout, refreshSkills, currentCompany?.rootPath])
   useEffect(() => { setDownloadError(null) }, [selectedDept?.folder])
 
-  const pendingSkillsRefreshRef = useRef(false)
+  // Skills rescans requested by file events, coalesced (120 ms, deferred up to
+  // 1 s while the member is typing in the chat): the shown list and/or the
+  // company-wide skills behind the slash commands.
+  const pendingSkillsRefreshRef = useRef({ shown: false, company: false })
   const deferredSkillsRefreshTimerRef = useRef<number | null>(null)
 
   const skillsDeferCountRef = useRef(0)
   const SKILLS_MAX_DEFER_COUNT = 4
 
-  const requestDeferredSkillsRefresh = useCallback(() => {
-    pendingSkillsRefreshRef.current = true
+  const requestDeferredSkillsRefresh = useCallback((which: { shown: boolean; company: boolean }) => {
+    const pending = pendingSkillsRefreshRef.current
+    pending.shown ||= which.shown
+    pending.company ||= which.company
     if (deferredSkillsRefreshTimerRef.current != null) return
     skillsDeferCountRef.current = 0
 
     const run = () => {
-      if (!pendingSkillsRefreshRef.current) {
+      const { shown, company } = pendingSkillsRefreshRef.current
+      if (!shown && !company) {
         deferredSkillsRefreshTimerRef.current = null
         return
       }
@@ -374,14 +380,15 @@ export function SkillCentricLayout() {
         return
       }
 
-      pendingSkillsRefreshRef.current = false
+      pendingSkillsRefreshRef.current = { shown: false, company: false }
       deferredSkillsRefreshTimerRef.current = null
       skillsDeferCountRef.current = 0
-      void refreshSkills()
+      if (shown) void refreshSkills()
+      if (company) void refreshCompanySkills()
     }
 
     deferredSkillsRefreshTimerRef.current = window.setTimeout(run, 120)
-  }, [refreshSkills])
+  }, [refreshSkills, refreshCompanySkills])
 
   useEffect(() => {
     return () => {
@@ -454,22 +461,29 @@ export function SkillCentricLayout() {
     }
   }, [currentCompany?.rootPath])
 
-  // Refresh the skills list when something under this view's .claude/skills changes.
+  // Rescan skills when a file event touches what the scans read: any
+  // .claude/skills/ inside the shown department (any depth), the root
+  // .claude/skills/ (company-wide view and slash commands), the root
+  // .gitignore (private marks), or folders moved in/out of the department
+  // (shared/skills-refresh.ts). The main process drops its cache on the same
+  // events; the renderer's refresh is forced anyway.
   useEffect(() => {
-    if (!currentCompany?.rootPath || (!selectedDept?.folder && !isCompanyWide)) return
-    const basePath = isCompanyWide ? currentCompany.rootPath : `${currentCompany.rootPath}/${selectedDept!.folder}`
-    const skillsPrefix = normalizePathSeparators(`${basePath}/.claude/skills`)
+    const root = currentCompany?.rootPath
+    if (!root) return
+    const shownFolder = isSelectedDeptUnsynced ? null : effectiveDeptFolder
+    const shownIsCompany = isCompanyWide
     return subscribeFileChanges((changes) => {
       perfMark('skill_layout.fs_change')
-      if (changes.some(c => {
-        const p = normalizePathSeparators(c.path)
-        return p === skillsPrefix || p.startsWith(`${skillsPrefix}/`)
-      })) {
-        perfMark('skill_layout.skills_change')
-        requestDeferredSkillsRefresh()
-      }
+      const scopes = skillsScopesAffected(root, changes)
+      if (!scopes) return
+      const company = scanAffected(scopes, '')
+      const shown = shownIsCompany ? company : (shownFolder ? scanAffected(scopes, shownFolder) : false)
+      if (!shown && !company) return
+      perfMark('skill_layout.skills_change')
+      // The company-wide hook is idle while the company tab is shown (the shown list is the same scan).
+      requestDeferredSkillsRefresh({ shown, company: company && !shownIsCompany })
     })
-  }, [currentCompany?.rootPath, selectedDept?.folder, isCompanyWide, requestDeferredSkillsRefresh])
+  }, [currentCompany?.rootPath, effectiveDeptFolder, isCompanyWide, isSelectedDeptUnsynced, requestDeferredSkillsRefresh])
 
   const selectedSkill = useMemo(
     () => skills.find((s) => s.id === selectedSkillId),
@@ -813,7 +827,9 @@ ${promptContent}
         // Refresh departments, skills, private folders and commit history after successful sync
         void usePrivateFolderStore.getState().load(currentCompany.id)
         await refreshDepartments()
-        refreshSkills()
+        // Teammates' skills: the shown list and the company-wide ones behind the slash commands.
+        void refreshSkills()
+        if (!isCompanyWide) void refreshCompanySkills()
         invalidateCommitCache()
 
         if (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) {
@@ -899,7 +915,7 @@ ${promptContent}
     } finally {
       setIsSyncing(false)
     }
-  }, [currentCompany, refreshDepartments, refreshSkills])
+  }, [currentCompany, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
 
   const handlePrivateFolderCreated = useCallback(() => { void handleSync() }, [handleSync])
 

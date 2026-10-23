@@ -35,14 +35,35 @@ import { subscribeFileChanges } from '../../lib/fileEvents'
 import { useFileVersion } from '../../lib/fileVersions'
 import { normalizePathSeparators } from '../../utils/path'
 import { localFileUrl } from '../../../shared/local-file-url'
+import {
+  applyDiskDecision,
+  canAutosave,
+  decideOnDiskEvent,
+  decideSave,
+  isDirty,
+  type EditorFileState,
+} from '../../../shared/editor-disk-state'
+import { useAppStore } from '../../stores/appStore'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 
-interface OpenFile {
+/**
+ * An open tab. `originalContent` is the disk version the tab last loaded or
+ * saved; `external` is set while the tab has edits and the disk changed (or
+ * the file was deleted) meanwhile — see shared/editor-disk-state.ts.
+ */
+interface OpenFile extends EditorFileState {
   path: string
-  content: string
-  originalContent: string
   isLoading: boolean
-  /** The file was deleted (or moved away) on disk after it was opened. */
-  missing?: boolean
+  /** The member chose 「自分の編集を残す」: the banner stays, in its short form, until saved. */
+  keepMine?: boolean
+}
+
+interface ConfirmRequest {
+  title: string
+  message: string
+  confirmText: string
+  danger?: boolean
+  resolve: (ok: boolean) => void
 }
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'svg', 'webp', 'ico', 'bmp'])
@@ -412,6 +433,11 @@ export function TabbedEditorPanel({
   const { isReadOnly } = useWriteAccess()
   const [, setIsSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [notice, setNotice] = useState<string | null>(null)
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null)
+  // The tab whose 「差分を見る」 view (disk version vs. the tab's edits) is open.
+  const [externalDiffPath, setExternalDiffPath] = useState<string | null>(null)
+  const rootPath = useAppStore(s => s.currentCompany?.rootPath ?? null)
   const loadingRef = useRef<Set<string>>(new Set())
 
   // Scroll ratio per file (0-1). Shared between editor and preview modes.
@@ -548,17 +574,17 @@ export function TabbedEditorPanel({
         }
         return
       }
-      // Don't overwrite unsaved local edits
-      if (file.content !== file.originalContent) return
+      // Clean tab → show the disk version; tab with edits → never overwrite
+      // them: show the banner and pause autosave (decideOnDiskEvent).
       try {
-        const newContent = await window.electronAPI.readFile(filePath)
-        if (newContent === null) return
+        const disk = await window.electronAPI.readFile(filePath)
         setFileContents(prev => {
           const cur = prev.get(filePath)
-          if (!cur || cur.content !== cur.originalContent) return prev
-          if (cur.originalContent === newContent && !cur.missing) return prev
+          if (!cur || cur.isLoading) return prev
+          const updated = applyDiskDecision(cur, decideOnDiskEvent(cur, disk))
+          if (updated === cur) return prev
           const next = new Map(prev)
-          next.set(filePath, { path: filePath, content: newContent, originalContent: newContent, isLoading: false })
+          next.set(filePath, updated.external ? updated : { ...updated, keepMine: false })
           return next
         })
       } catch {
@@ -566,15 +592,20 @@ export function TabbedEditorPanel({
       }
     }
 
+    // 'unlink' may name a folder: every open file at or under it is gone.
     const markMissing = (removed: string) => {
       const key = normalizePathSeparators(removed)
       setFileContents(prev => {
         let next: Map<string, OpenFile> | null = null
         for (const [p, f] of prev) {
           const k = normalizePathSeparators(p)
-          if ((k === key || k.startsWith(`${key}/`)) && !f.missing) {
+          if (f.isLoading || !(k === key || k.startsWith(`${key}/`))) continue
+          const updated = isBinaryFile(p)
+            ? (f.missing ? f : { ...f, missing: true })
+            : applyDiskDecision(f, decideOnDiskEvent(f, null))
+          if (updated !== f) {
             next ??= new Map(prev)
-            next.set(p, { ...f, missing: true })
+            next.set(p, updated)
           }
         }
         return next ?? prev
@@ -684,45 +715,98 @@ export function TabbedEditorPanel({
     })
   }, [activeFilePath, previewFilePath, onPinFile])
 
-  const saveFile = useCallback(async (filePath: string, content: string) => {
+  const askConfirm = useCallback((request: Omit<ConfirmRequest, 'resolve'>) =>
+    new Promise<boolean>(resolve => setConfirmRequest({ ...request, resolve })), [])
+
+  const updateFile = useCallback((filePath: string, update: (f: OpenFile) => OpenFile) => {
+    setFileContents(prev => {
+      const f = prev.get(filePath)
+      if (!f) return prev
+      const next = new Map(prev)
+      next.set(filePath, update(f))
+      return next
+    })
+  }, [])
+
+  /**
+   * Save `content`, never silently over someone else's version: the disk is
+   * compared with the version this tab loaded first (decideSave). Autosave
+   * (`interactive: false`) stops at a difference and shows the banner; an
+   * explicit save asks, backs the disk version up, then overwrites.
+   * Resolves true when the content is on disk.
+   */
+  const saveFile = useCallback(async (filePath: string, content: string, { interactive }: { interactive: boolean }): Promise<boolean> => {
+    const current = fileContentsRef.current.get(filePath)
+    if (!current) return false
     setIsSaving(true)
     setError(null)
     try {
+      const disk = await window.electronAPI.readFile(filePath)
+      const decision = decideSave({ ...current, content }, disk)
+      const markSaved = () => updateFile(filePath, f => ({ ...f, originalContent: content, missing: false, external: undefined, keepMine: false }))
+
+      if (decision.action === 'already-saved') {
+        markSaved()
+        return true
+      }
+
+      if (decision.action === 'ask') {
+        // Show the banner whatever happens next, so the change is never unnoticed.
+        updateFile(filePath, f => ({ ...f, external: { kind: 'changed', diskContent: decision.diskContent }, missing: false }))
+        if (!interactive) return false
+        const ok = await askConfirm({
+          title: 'このファイルは外部で変更されています',
+          message: 'このタブで開いてから、AI やほかのメンバーの同期などでファイルの内容が変わりました。\n上書きすると、いまのディスクの内容はバックアップ（.backups、非公開フォルダならその専用の場所）に保存してから、あなたの編集で置き換えます。',
+          confirmText: '外部の変更を上書きして保存',
+          danger: true,
+        })
+        if (!ok) return false
+        if (rootPath) {
+          const backup = await window.electronAPI.backupBeforeOverwrite(rootPath, filePath)
+          if (!backup.success) {
+            setError('外部の変更をバックアップできなかったため、保存を中止しました。')
+            return false
+          }
+          if (backup.backupPath) {
+            setNotice(`外部で変更された内容をバックアップしてから上書きしました（${backup.backupPath}）`)
+          }
+        }
+      }
+
+      if (decision.action === 'write' && decision.recreate) {
+        // The file (or its folder) was deleted: saving puts it back.
+        const parent = filePath.substring(0, filePath.lastIndexOf('/'))
+        if (parent) await window.electronAPI.createDirectory(parent)
+      }
+
       const success = await window.electronAPI.writeFile(filePath, content)
       if (success) {
-        setFileContents(prev => {
-          const newMap = new Map(prev)
-          const f = newMap.get(filePath)
-          if (f) {
-            newMap.set(filePath, {
-              ...f,
-              originalContent: content,
-            })
-          }
-          return newMap
-        })
-      } else {
-        setError('保存に失敗しました')
+        markSaved()
+        return true
       }
+      setError('保存に失敗しました')
+      return false
     } catch {
       setError('保存中にエラーが発生しました')
+      return false
     } finally {
       setIsSaving(false)
     }
-  }, [])
+  }, [askConfirm, rootPath, updateFile])
 
-  // Auto save with debounce (1 second after last keystroke)
+  // Auto save with debounce (1 second after last keystroke) — paused while
+  // something changed on disk that the member has not decided about.
   const autoSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   useEffect(() => {
     if (!activeFilePath) return
     const file = fileContents.get(activeFilePath)
-    if (!file || file.content === file.originalContent) return
+    if (!file || file.isLoading || !canAutosave(file)) return
 
     if (autoSaveTimerRef.current) {
       clearTimeout(autoSaveTimerRef.current)
     }
     autoSaveTimerRef.current = setTimeout(() => {
-      saveFile(activeFilePath, file.content)
+      void saveFile(activeFilePath, file.content, { interactive: false })
     }, 1000)
 
     return () => {
@@ -740,8 +824,26 @@ export function TabbedEditorPanel({
     }
     const file = fileContents.get(activeFilePath)
     if (!file) return
-    await saveFile(activeFilePath, file.content)
+    await saveFile(activeFilePath, file.content, { interactive: true })
   }, [activeFilePath, hasChanges, fileContents, saveFile])
+
+  // 「ディスクの内容を読み込む」: drop the tab's edits (after a confirm) for the disk version.
+  const handleLoadDiskVersion = useCallback(async (filePath: string) => {
+    const ok = await askConfirm({
+      title: 'ディスクの内容を読み込みますか？',
+      message: 'このタブでの編集内容は破棄され、いまのディスクの内容に置き換わります。',
+      confirmText: '編集を破棄して読み込む',
+      danger: true,
+    })
+    if (!ok) return
+    const disk = await window.electronAPI.readFile(filePath)
+    if (disk === null) {
+      setError('ファイルを読み込めませんでした（削除された可能性があります）')
+      return
+    }
+    setExternalDiffPath(null)
+    updateFile(filePath, f => ({ ...f, content: disk, originalContent: disk, missing: false, external: undefined, keepMine: false }))
+  }, [askConfirm, updateFile])
 
   // Keyboard shortcut for save
   useEffect(() => {
@@ -758,9 +860,18 @@ export function TabbedEditorPanel({
   const handleCloseTab = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
     const file = fileContents.get(path)
-    if (file && file.content !== file.originalContent) {
-      // Auto save before closing
-      await saveFile(path, file.content)
+    if (file && !file.isLoading && isDirty(file)) {
+      // Save before closing — asking first if the file changed on disk.
+      const saved = await saveFile(path, file.content, { interactive: true })
+      if (!saved) {
+        const discard = await askConfirm({
+          title: '保存せずに閉じますか？',
+          message: 'このタブでの編集内容は保存されていません。閉じると失われます。',
+          confirmText: '保存せずに閉じる',
+          danger: true,
+        })
+        if (!discard) return
+      }
     }
     onCloseFile(path)
   }
@@ -838,13 +949,90 @@ export function TabbedEditorPanel({
         </div>
       )}
 
-      {/* The open file was deleted or moved on disk */}
-      {activeFile?.missing && (
+      {/* The open file (no edits) was deleted or moved on disk */}
+      {activeFile?.missing && !activeFile.external && (
         <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-amber-500/20 bg-amber-500/10 text-[11px] text-amber-700 dark:text-amber-300">
           <Warning size={12} className="flex-shrink-0" />
           <span className="truncate">このファイルは削除されたか、移動されました。表示しているのは開いていたときの内容です。</span>
         </div>
       )}
+
+      {/* The file changed (or was deleted) on disk while this tab has edits: nothing is overwritten until the member decides */}
+      {activeFile && activeFilePath && activeFile.external && (
+        <div role="alert" data-external-change={activeFile.external.kind} className="flex-shrink-0 flex flex-wrap items-center gap-x-3 gap-y-1.5 px-4 py-2 border-b border-amber-500/30 bg-amber-500/10 text-xs text-amber-800 dark:text-amber-200">
+          <Warning size={14} className="flex-shrink-0" />
+          <span className="min-w-0 flex-1">
+            {activeFile.external.kind === 'deleted'
+              ? 'ファイルは削除されました。保存すると作り直します'
+              : activeFile.keepMine
+                ? 'このファイルは外部で変更されました。編集を続けられます（自動保存は止めています）。保存（⌘S）するときに上書きしてよいか確認します'
+                : 'このファイルは外部で変更されました。あなたの編集はまだ保存していません'}
+          </span>
+          <div className="flex items-center gap-1.5">
+            {activeFile.external.kind === 'deleted' ? (
+              <button
+                onClick={() => { void handleSave() }}
+                className="px-2 py-1 rounded-md bg-amber-500/90 text-white hover:bg-amber-500 transition-colors"
+              >
+                保存して作り直す
+              </button>
+            ) : (
+              <>
+                <button
+                  onClick={() => { void handleLoadDiskVersion(activeFilePath) }}
+                  className="px-2 py-1 rounded-md border border-amber-500/40 hover:bg-amber-500/15 transition-colors"
+                >
+                  ディスクの内容を読み込む
+                </button>
+                <button
+                  onClick={() => setExternalDiffPath(p => (p === activeFilePath ? null : activeFilePath))}
+                  aria-pressed={externalDiffPath === activeFilePath}
+                  className={`px-2 py-1 rounded-md border border-amber-500/40 transition-colors ${externalDiffPath === activeFilePath ? 'bg-amber-500/20' : 'hover:bg-amber-500/15'}`}
+                >
+                  {externalDiffPath === activeFilePath ? '差分を閉じる' : '差分を見る'}
+                </button>
+                {activeFile.keepMine ? (
+                  <button
+                    onClick={() => { void handleSave() }}
+                    className="px-2 py-1 rounded-md bg-amber-500/90 text-white hover:bg-amber-500 transition-colors"
+                  >
+                    保存…
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => { setExternalDiffPath(null); updateFile(activeFilePath, f => ({ ...f, keepMine: true })) }}
+                    className="px-2 py-1 rounded-md bg-amber-500/90 text-white hover:bg-amber-500 transition-colors"
+                  >
+                    自分の編集を残す
+                  </button>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Notice (e.g. where the overwritten version was backed up) */}
+      {notice && (
+        <div className="flex-shrink-0 flex items-center gap-2 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 bg-gray-50 dark:bg-zinc-900/40 text-[11px] text-gray-600 dark:text-zinc-300">
+          <span className="min-w-0 flex-1 truncate" title={notice}>{notice}</span>
+          <button onClick={() => setNotice(null)} className="hover:text-gray-900 dark:hover:text-zinc-100" aria-label="閉じる">
+            <X size={12} />
+          </button>
+        </div>
+      )}
+
+      <ConfirmDialog
+        isOpen={confirmRequest !== null}
+        title={confirmRequest?.title ?? ''}
+        message={confirmRequest?.message ?? ''}
+        confirmText={confirmRequest?.confirmText}
+        cancelText="キャンセル"
+        danger={confirmRequest?.danger}
+        confirmOnEnter={false}
+        onConfirm={() => { confirmRequest?.resolve(true); setConfirmRequest(null) }}
+        onCancel={() => { confirmRequest?.resolve(false); setConfirmRequest(null) }}
+      />
 
       {/* Error message */}
       {error && (
@@ -862,7 +1050,21 @@ export function TabbedEditorPanel({
 
       {/* Editor / Image Preview */}
       <div className="flex-1 overflow-hidden min-w-0">
-        {activeFile?.isLoading ? (
+        {activeFile && activeFilePath && externalDiffPath === activeFilePath && activeFile.external?.kind === 'changed' ? (
+          <div className="h-full flex flex-col">
+            <div className="flex-shrink-0 px-4 py-1.5 border-b border-gray-200 dark:border-zinc-800/50 text-[11px] text-gray-500 dark:text-zinc-400">
+              <span className="text-red-600 dark:text-red-400">−</span> ディスクの内容（外部の変更）／
+              <span className="text-green-700 dark:text-green-400">＋</span> あなたの編集（未保存）
+            </div>
+            <div className="flex-1 overflow-hidden">
+              <MarkdownDiffView
+                snapshot={activeFile.external.diskContent}
+                current={activeFile.content}
+                noChangesMessage="ディスクの内容とあなたの編集に違いはありません"
+              />
+            </div>
+          </div>
+        ) : activeFile?.isLoading ? (
           <div className="h-full flex items-center justify-center text-gray-400 dark:text-zinc-500">
             読み込み中...
           </div>
@@ -1047,7 +1249,9 @@ export function TabbedEditorPanel({
       {/* Footer hint */}
       <div className="flex-shrink-0 px-4 py-1.5 border-t border-gray-200 dark:border-zinc-800/50 bg-gray-100 dark:bg-zinc-900/50">
         <span className="text-[10px] text-gray-400 dark:text-zinc-600">
-          自動保存 {hasChanges ? '(未保存の変更あり)' : ''}
+          {activeFile?.external
+            ? '自動保存を止めています（外部の変更あり・未保存の変更あり）'
+            : `自動保存 ${hasChanges ? '(未保存の変更あり)' : ''}`}
         </span>
       </div>
     </div>

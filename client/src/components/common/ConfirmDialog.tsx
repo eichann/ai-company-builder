@@ -8,6 +8,8 @@ interface ConfirmDialogProps {
   confirmText?: string
   cancelText?: string
   danger?: boolean
+  /** Enter confirms (default). Off when the dialog can open while the member is typing elsewhere. */
+  confirmOnEnter?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
@@ -19,6 +21,7 @@ export function ConfirmDialog({
   confirmText = '確認',
   cancelText = 'キャンセル',
   danger = false,
+  confirmOnEnter = true,
   onConfirm,
   onCancel,
 }: ConfirmDialogProps) {
@@ -27,13 +30,13 @@ export function ConfirmDialog({
       if (!isOpen) return
       if (e.key === 'Escape') {
         onCancel()
-      } else if (e.key === 'Enter') {
+      } else if (e.key === 'Enter' && confirmOnEnter) {
         onConfirm()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onConfirm, onCancel])
+  }, [isOpen, onConfirm, onCancel, confirmOnEnter])
 
   if (!isOpen) return null
 
