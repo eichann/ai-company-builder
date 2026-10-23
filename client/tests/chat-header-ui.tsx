@@ -15,12 +15,43 @@ import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 //   ?theme=dark   dark mode
 //   ?limits=ok|warn|rejected|unknown   which usage snapshot the server reports
 //   ?agent=codex  Codex instead of Claude Code
+//   ?history=long  two restored tabs with a 240-message conversation (windowed
+//                  rendering, 「以前のメッセージを表示」, code highlighting)
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
 try { localStorage.clear() } catch { /* preview only */ }
+const longHistory = params.get('history') === 'long'
+
+const CODE_SAMPLES: Array<[string, string]> = [
+  ['ts', 'interface Quote { id: string; total: number }\nexport const sum = (qs: Quote[]) => qs.reduce((n, q) => n + q.total, 0)'],
+  ['python', 'def total(rows):\n    return sum(r["price"] * r["qty"] for r in rows)'],
+  ['bash', 'cd 営業部/見積書 && ls -la | grep 2026'],
+  ['json', '{ "client": "A社", "items": [{ "name": "保守", "price": 12000 }] }'],
+  ['yaml', 'quote:\n  client: A社\n  due: 2026-11-30'],
+  ['sql', 'SELECT client, SUM(total) FROM quotes GROUP BY client;'],
+  ['diff', '- 単価: 10,000円\n+ 単価: 12,000円'],
+  ['html', '<table><tr><td>保守</td><td>12,000円</td></tr></table>'],
+  ['css', '.quote { font-feature-settings: "palt"; color: #333; }'],
+  ['tsx', 'export function Total({ value }: { value: number }) { return <strong>{value.toLocaleString()}円</strong> }'],
+  ['go', 'func Total(xs []int) (n int) { for _, x := range xs { n += x }; return }'],
+  ['brainfuck', '++++[>++++<-]>.'],
+]
+function longSession() {
+  const messages = []
+  for (let i = 0; i < 120; i++) {
+    const [lang, code] = CODE_SAMPLES[i % CODE_SAMPLES.length]
+    messages.push({ id: `u${i}`, role: 'user', content: `質問${i + 1}: ${lang} の例を見せてください`, timestamp: new Date(now - (240 - i * 2) * 60_000).toISOString() })
+    messages.push({ id: `a${i}`, role: 'assistant', timestamp: new Date(now - (239 - i * 2) * 60_000).toISOString(),
+      content: `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
+  }
+  return { id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messages, createdAt: new Date(now - 300 * 60_000).toISOString(), updatedAt: new Date(now).toISOString(), revision: 1 }
+}
+if (longHistory) {
+  try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '長い相談（240件）', sessionId: 'long-history' }, { title: '別の相談', sessionId: null }], activeIndex: 0 })) } catch { /* preview only */ }
+}
 
 const now = Date.now()
 const minutes = (n: number) => now + n * 60_000
@@ -50,13 +81,14 @@ const api: Record<string, unknown> = {
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }),
-  getChatSessions: async () => [],
-  getChatSession: async () => null,
+  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] : [],
+  searchChatSessions: async () => [],
+  getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() : null,
   getAgentInteractions: async () => [],
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
-  saveChatSession: async (_company: string, session: unknown) => ({ status: 'saved', session }),
-  flushChatSession: (_company: string, session: unknown) => ({ status: 'saved', session }),
+  saveChatSession: async () => ({ status: 'saved', revision: 1 }),
+  flushChatSession: () => ({ status: 'saved', revision: 1 }),
   voiceInput: {
     capabilities: async () => ({ available: false, reason: 'プレビューでは音声入力を使えません', retryable: false }),
     devices: async () => ({ devices: [] }),

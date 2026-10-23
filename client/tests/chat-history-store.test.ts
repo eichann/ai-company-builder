@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { ChatHistoryStore, atomicWrite } from '../electron/chat-history-store'
+import { ChatHistoryStore, atomicWrite, type ChatHistoryStoreOptions } from '../electron/chat-history-store'
 import type { ChatSession, ChatSaveResult } from '../shared/chat-history'
 
 const company = 'company-1'
@@ -16,13 +16,17 @@ function saved(result: ChatSaveResult): ChatSession {
   if (result.status !== 'saved') throw new Error(result.status)
   return result.session
 }
-function fixture(t: TestContext) {
+function fixture(t: TestContext, options: ChatHistoryStoreOptions = {}) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-history-test-'))
-  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
-  return { dir, file: path.join(dir, `${company}.json`), store: new ChatHistoryStore(dir) }
+  const store = new ChatHistoryStore(dir, options)
+  t.after(async () => {
+    await store.flush().catch(() => {})
+    fs.rmSync(dir, { recursive: true, force: true })
+  })
+  return { dir, file: path.join(dir, `${company}.json`), store }
 }
 
-test('legacy history survives reads, restart, and saves beyond 100 conversations and 30 days', t => {
+test('legacy history survives reads, restart, and saves beyond 100 conversations and 30 days', async t => {
   const { dir, file, store } = fixture(t)
   const sessions = Array.from({ length: 125 }, (_, i) => session(`chat-${i}`))
   fs.writeFileSync(file, JSON.stringify({ sessions }))
@@ -30,6 +34,7 @@ test('legacy history survives reads, restart, and saves beyond 100 conversations
   assert.equal(store.list(company).length, 125)
   assert.equal(fs.readFileSync(file, 'utf8'), before)
   store.save(company, session('new'))
+  await store.flush()
   assert.equal(new ChatHistoryStore(dir).list(company).length, 126)
   assert.equal(store.get(company, 'chat-0')?.messages[0].content, '相談内容')
 })
@@ -60,11 +65,13 @@ test('stale writers cannot erase newer messages; in-flight same-writer flush is 
   assert.equal(store.save(company, { ...flush, writerId: 'window-2', writeSequence: 1 }).status, 'saved')
 })
 
-test('explicit deletion survives late saves and restarts; backup excludes deleted content', t => {
+test('explicit deletion survives late saves and restarts; backup excludes deleted content', async t => {
   const { dir, file, store } = fixture(t)
   const old = saved(store.save(company, session()))
+  await store.flush()
   store.delete(company, old.id)
   store.delete(company, old.id)
+  await store.flush()
   const reopened = new ChatHistoryStore(dir)
   assert.equal(reopened.save(company, old).status, 'deleted')
   assert.equal(reopened.patch(company, old.id, { pinned: true }), null)
@@ -108,15 +115,172 @@ test('restoring or pinning unchanged history does not make an old conversation l
   assert.equal(store.get(company, restored.id)?.updatedAt, existing.updatedAt)
 })
 
-test('provider session patches survive stale autosaves and restart', t => {
+test('provider session patches survive stale autosaves and restart', async t => {
   const { dir, store } = fixture(t)
   const first = saved(store.save(company, session('provider-switch', { agentSession: { providerId: 'claude-code', id: 'claude-old' }, claudeSessionId: 'claude-old' })))
   store.patch(company, first.id, { agentSession: { providerId: 'codex', id: 'codex-new', modelId: 'model-a' } })
   store.save(company, { ...first, draftInput: '残す下書き' })
+  await store.flush()
   const restored = new ChatHistoryStore(dir).get(company, first.id)!
   assert.equal(restored.agentSession?.providerId, 'codex')
   assert.equal(restored.agentSession?.id, 'codex-new')
   assert.equal(restored.draftInput, '残す下書き')
   store.patch(company, first.id, { agentSession: null })
+  await store.flush()
   assert.equal(new ChatHistoryStore(dir).get(company, first.id)?.agentSession, null)
+})
+
+// --- in-memory cache, coalesced asynchronous writes -------------------------
+
+/** What every earlier app version does when it opens the file (the old read()). */
+function oldVersionReads(file: string): ChatSession[] {
+  const data = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.ok(Array.isArray(data.sessions))
+  assert.ok(data.deletedSessionIds === undefined || Array.isArray(data.deletedSessionIds))
+  return data.sessions
+}
+
+test('reads come from memory: the file is parsed once, and again only after it changes on disk', async t => {
+  const { file, store } = fixture(t)
+  fs.writeFileSync(file, JSON.stringify({ sessions: [session('a')] }))
+  const reads = t.mock.method(fs, 'readFileSync')
+  store.list(company); store.get(company, 'a'); store.summaries(company); store.list(company)
+  assert.equal(reads.mock.callCount(), 1)
+  // Another process (or an older app version) replaced the file: picked up at the next read.
+  fs.writeFileSync(file, JSON.stringify({ sessions: [session('a'), session('b', { updatedAt: '2021-01-01T00:00:00Z' })] }))
+  assert.deepEqual(store.list(company).map(s => s.id), ['b', 'a'])
+  assert.equal(reads.mock.callCount(), 2)
+  // Our own writes do not invalidate the cache.
+  store.save(company, session('c'))
+  await store.flush()
+  store.list(company)
+  assert.equal(reads.mock.callCount(), 2)
+})
+
+test('saves are coalesced into one write in order; the file always holds the latest acknowledged state', async t => {
+  const { file, store } = fixture(t, { writeDelayMs: 20 })
+  const renames = t.mock.method(fs, 'renameSync')
+  let current = saved(store.save(company, session('chat', { writerId: 'w', writeSequence: 1 })))
+  for (let i = 2; i <= 30; i++) current = saved(store.save(company, { ...current, writeSequence: i, draftInput: `下書き${i}` }))
+  assert.equal(fs.existsSync(file), false, 'nothing is written synchronously')
+  await store.flush()
+  // One new file (renamed into place) for 30 saves.
+  assert.equal(renames.mock.calls.filter(call => call.arguments[1] === file).length, 1)
+  assert.equal(oldVersionReads(file)[0].draftInput, '下書き30')
+  // A save while a write is in flight is written after it, never lost.
+  current = saved(store.save(company, { ...current, writeSequence: 31, draftInput: '途中' }))
+  const flushing = store.flush()
+  current = saved(store.save(company, { ...current, writeSequence: 32, draftInput: '最後' }))
+  await flushing
+  await store.flush()
+  assert.equal(oldVersionReads(file)[0].draftInput, '最後')
+  assert.equal(new ChatHistoryStore(path.dirname(file)).get(company, 'chat')?.draftInput, '最後')
+})
+
+test('a synchronous flush (app quit) overtakes a write in flight without being overwritten by it', async t => {
+  const { file, store } = fixture(t, { writeDelayMs: 0 })
+  let current = saved(store.save(company, session('chat', { writerId: 'w', writeSequence: 1, draftInput: '古い' })))
+  await new Promise(resolve => setTimeout(resolve, 1)) // the asynchronous write has started
+  current = saved(store.save(company, { ...current, writeSequence: 2, draftInput: '新しい' }))
+  store.flushSync()
+  assert.equal(oldVersionReads(file)[0].draftInput, '新しい')
+  await store.flush()
+  assert.equal(oldVersionReads(file)[0].draftInput, '新しい')
+  assert.equal(current.draftInput, '新しい')
+  assert.deepEqual(fs.readdirSync(path.dirname(file)).filter(name => name.endsWith('.tmp')), [])
+})
+
+test('.bak is the previous version, made without re-reading the file; a deletion sanitizes it', async t => {
+  const { file, store } = fixture(t)
+  const first = saved(store.save(company, session('chat', { writerId: 'w', writeSequence: 1, draftInput: '一回目' })))
+  await store.flush()
+  const reads = t.mock.method(fs, 'readFileSync')
+  saved(store.save(company, { ...first, writeSequence: 2, draftInput: '二回目' }))
+  await store.flush()
+  assert.equal(reads.mock.callCount(), 0)
+  reads.mock.restore()
+  assert.equal(oldVersionReads(`${file}.bak`)[0].draftInput, '一回目')
+  assert.equal(oldVersionReads(file)[0].draftInput, '二回目')
+  store.delete(company, 'chat')
+  await store.flush()
+  assert.equal(oldVersionReads(`${file}.bak`).length, 0)
+  assert.equal(fs.readFileSync(`${file}.bak`, 'utf8').includes('一回目'), false)
+})
+
+test('a failed write leaves the previous file intact, is reported on the next change, and is retried', async t => {
+  const { file, store } = fixture(t, { writeDelayMs: 0, retryDelayMs: 10 })
+  const first = saved(store.save(company, session('chat', { writerId: 'w', writeSequence: 1, draftInput: '保存済み' })))
+  await store.flush()
+  const before = fs.readFileSync(file, 'utf8')
+  const failing = t.mock.method(fs.promises, 'open', async () => { throw new Error('simulated disk full') })
+  const failingSync = t.mock.method(fs, 'openSync', () => { throw new Error('simulated disk full') })
+  saved(store.save(company, { ...first, writeSequence: 2, draftInput: '未保存' }))
+  await assert.rejects(store.flush(), /simulated disk full/)
+  assert.equal(fs.readFileSync(file, 'utf8'), before)
+  assert.deepEqual(fs.readdirSync(path.dirname(file)).filter(name => name.endsWith('.tmp')), [])
+  // The member sees the failure when the tab saves again (as before, when every save wrote at once).
+  assert.throws(() => store.patch(company, 'chat', { pinned: true }), /simulated disk full/)
+  failing.mock.restore()
+  failingSync.mock.restore()
+  await store.flush()
+  assert.equal(oldVersionReads(file)[0].draftInput, '未保存')
+})
+
+test('temporary files left by a killed write are never read and are cleaned up', t => {
+  const { dir, file, store } = fixture(t)
+  fs.writeFileSync(file, JSON.stringify({ sessions: [session('chat')] }))
+  fs.writeFileSync(`${file}.0d6c.tmp`, '{"sessions":[{"half":')
+  fs.writeFileSync(`${file}.bak.0d6c.tmp`, '')
+  assert.equal(store.list(company).length, 1)
+  assert.deepEqual(fs.readdirSync(dir).sort(), [`${company}.json`])
+})
+
+test('backward compatibility: an old pretty-printed file with unknown keys and data-URL images loads and round-trips', async t => {
+  const { file, store } = fixture(t)
+  const image = `data:image/png;base64,${'A'.repeat(4000)}`
+  const legacy = session('old', { messages: [{ id: 'm', role: 'user', content: '画像です', timestamp: '2020-01-01T00:00:00Z', images: [image] }] })
+  fs.writeFileSync(file, JSON.stringify({ sessions: [legacy], futureKey: { kept: true } }, null, 2))
+  assert.equal(store.get(company, 'old')?.messages[0].images?.[0], image)
+  store.save(company, session('new'))
+  await store.flush()
+  const written = JSON.parse(fs.readFileSync(file, 'utf8'))
+  assert.deepEqual(written.futureKey, { kept: true })
+  assert.deepEqual(written.deletedSessionIds, [])
+  assert.deepEqual(oldVersionReads(file).map(s => s.id), ['old', 'new'])
+  assert.equal(oldVersionReads(file)[0].messages[0].images?.[0], image)
+})
+
+test('summaries carry no message bodies; search covers bodies, drafts and titles', t => {
+  const { store } = fixture(t)
+  const long = `[Tool: Read]\n\n${'結論です。'.repeat(500)}`
+  store.save(company, session('a', { title: '月次レポート', updatedAt: '2020-01-01T00:00:00Z', messages: [
+    { id: '1', role: 'assistant', content: '挨拶', timestamp: '2020-01-01T00:00:00Z' },
+    { id: 'q', role: 'user', content: 'ＡＰＩの接続', timestamp: '2020-01-01T00:00:00Z' },
+    { id: 'r', role: 'assistant', content: long, timestamp: '2020-01-01T00:00:00Z' },
+  ] }))
+  store.save(company, session('b', { draftInput: '未送信の計画' }))
+  store.patch(company, 'b', { pinned: true })
+  const summaries = store.summaries(company)
+  assert.deepEqual(summaries.map(s => s.id), ['b', 'a'])
+  const a = summaries.find(s => s.id === 'a')!
+  assert.equal('messages' in a, false)
+  assert.equal(a.messageCount, 3)
+  assert.equal(a.preview, '結論です。'.repeat(24))
+  assert.equal(summaries[0].draftInput, '未送信の計画')
+  assert.ok(JSON.stringify(summaries).length < 1000)
+  assert.deepEqual(store.search(company, ' api '), ['a'])
+  assert.deepEqual(store.search(company, '未送信'), ['b'])
+  assert.deepEqual(store.search(company, '月次'), ['a'])
+  assert.deepEqual(store.search(company, '該当なし'), [])
+  assert.deepEqual(store.search(company, '  '), [])
+})
+
+test('returned sessions are never edited in place by later changes', t => {
+  const { store } = fixture(t)
+  const first = saved(store.save(company, session('chat')))
+  const held = store.get(company, 'chat')!
+  store.patch(company, 'chat', { title: '新しい名前', titleAutoGenerated: false })
+  assert.equal(held.title, '相談')
+  assert.equal(first.title, '相談')
+  assert.equal(store.get(company, 'chat')?.title, '新しい名前')
 })

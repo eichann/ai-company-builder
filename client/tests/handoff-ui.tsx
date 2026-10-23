@@ -5,6 +5,7 @@ import { HandoffControl } from '../src/components/chat/HandoffControl'
 import '../src/index.css'
 import type { ChatSession } from '../shared/chat-history'
 import type { HandoffView } from '../shared/handoff'
+import { summarizeSession } from '../shared/chat-history-summary'
 const companyId = 'ui-fixture'
 const sessions: ChatSession[] = [{ companyId, id: 'example', title: '予約フォームの引き継ぎ', messages: [{ id: 'u1', role: 'user', content: '既存のJSON保存を維持して、公開前には私に確認してください。', timestamp: '2026-10-20' }], draftInput: 'テストログを確認したら…', createdAt: '2026-10-20', updatedAt: '2026-10-20' }]
 const historyListeners = new Set<(scope: { companyId: string; deletedSessionId?: string }) => void>()
@@ -12,7 +13,8 @@ const memoListeners = new Set<(scope: { companyId: string; sessionId: string }) 
 const markdown = '## 目的\n- デスクトップ版の予約フォームを作成。\n\n## 決定事項・制約\n- JSON保存を維持する。配布に影響を出さないため。\n- 公開前の確認者はユーザー。\n\n## 現在の状態\n- AI報告・未検証：試作品を作成。\n\n## 未解決事項\n- テストログの確認。\n\n## 次に行うこと\n1. ログを確認する。\n2. ユーザーに画面を見せる。\n\n## 参照先\n- なし'
 let view: HandoffView = { status: 'saved', recovery: { status: 'recovered', usedMemo: true, at: '2026-10-20T10:00:00Z' }, markdown, updatedAt: '2026-10-20T10:00:00Z', provider: 'codex', message: 'メモを保存しています。AIセッションが見つからない場合の引き継ぎに使います。', canUpdate: true, pendingTurns: 1, metrics: { totalMs: 7400, inputTokens: 6500, outputTokens: 630 } }
 Object.assign(window, { electronAPI: {
-  getChatSessions: async () => [...sessions],
+  getChatSessionSummaries: async () => sessions.map(summarizeSession),
+  searchChatSessions: async (_company: string, query: string) => sessions.filter(s => s.messages.some(m => m.content.includes(query))).map(s => s.id),
   getHandoff: async () => ({ ...view }),
   updateHandoff: async () => { view = { ...view, status: 'queued', message: '会話が落ち着いてから更新します。', canUpdate: false }; for (const fn of memoListeners) fn({ companyId, sessionId: 'example' }) },
   patchChatSession: async (_company: string, id: string, changes: object) => { Object.assign(sessions.find(s => s.id === id)!, changes); for (const fn of historyListeners) fn({ companyId }) },

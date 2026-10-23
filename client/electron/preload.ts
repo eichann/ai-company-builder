@@ -1,7 +1,7 @@
 import type { HandoffCompletion, HandoffView } from '../shared/handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { VoiceInputAPI, VoiceEvent } from '../shared/voice-input'
-import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatHistoryChange } from '../shared/chat-history'
+import type { ChatSession, ChatSaveReceipt, ChatMetadataPatch, ChatHistoryChange, ChatSessionSummary } from '../shared/chat-history'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { WriteAccess } from '../shared/write-access'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from '../shared/private-folder-ui'
@@ -258,13 +258,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.off('handoff:changed', wrapped)
   },
   // Chat history
-  getChatSessions: (companyId: string) =>
-    ipcRenderer.invoke('chatHistory:getSessions', companyId),
+  // Session lists use summaries (no message bodies); body search runs in the main process.
+  getChatSessionSummaries: (companyId: string) =>
+    ipcRenderer.invoke('chatHistory:getSummaries', companyId),
+  searchChatSessions: (companyId: string, query: string) =>
+    ipcRenderer.invoke('chatHistory:search', companyId, query),
   getChatSession: (companyId: string, sessionId: string) =>
     ipcRenderer.invoke('chatHistory:getSession', companyId, sessionId),
   saveChatSession: (companyId: string, session: ChatSession) =>
     ipcRenderer.invoke('chatHistory:saveSession', companyId, session),
-  flushChatSession: (companyId: string, session: ChatSession): ChatSaveResult => {
+  flushChatSession: (companyId: string, session: ChatSession): ChatSaveReceipt => {
     const response = ipcRenderer.sendSync('chatHistory:flushSession', companyId, session)
     if (response.error) throw new Error(response.error)
     return response.result
@@ -620,10 +623,11 @@ declare global {
       completeHandoffTurn: (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
       onHandoffChanged: (callback: (scope: { companyId: string; sessionId: string }) => void) => () => void
       // Chat history
-      getChatSessions: (companyId: string) => Promise<ChatSession[]>
+      getChatSessionSummaries: (companyId: string) => Promise<ChatSessionSummary[]>
+      searchChatSessions: (companyId: string, query: string) => Promise<string[]>
       getChatSession: (companyId: string, sessionId: string) => Promise<ChatSession | null>
-      saveChatSession: (companyId: string, session: ChatSession) => Promise<ChatSaveResult>
-      flushChatSession: (companyId: string, session: ChatSession) => ChatSaveResult
+      saveChatSession: (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
+      flushChatSession: (companyId: string, session: ChatSession) => ChatSaveReceipt
       patchChatSession: (companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>
       deleteChatSession: (companyId: string, sessionId: string) => Promise<boolean>
       onChatHistoryChanged: (callback: (data: ChatHistoryChange) => void) => () => void

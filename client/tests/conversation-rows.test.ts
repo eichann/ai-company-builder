@@ -1,20 +1,34 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import fs from 'node:fs'
+import os from 'node:os'
+import path from 'node:path'
 import { buildConversationRows, paginateConversationRows } from '../src/lib/conversationRows'
-import type { ChatSession } from '../shared/chat-history'
-const session = (id: string, extra: Partial<ChatSession> = {}): ChatSession => ({ id, companyId: 'company', title: id, messages: [], createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
+import { ChatHistoryStore } from '../electron/chat-history-store'
+import type { ChatSessionSummary } from '../shared/chat-history'
+const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
   const sessions = [session('open'), session('pinned', { pinned: true }), session('closed')]
   const rows = buildConversationRows(sessions, [{ id: 'tab', title: 'old title', sessionId: 'open' }], '')
   assert.deepEqual(rows.map(row => row.session?.id), ['open', 'pinned', 'closed'])
   assert.equal(rows[0].title, 'open')
 })
-test('search includes old message contents and unsent drafts with width and case normalization', () => {
-  const sessions = [session('body', { messages: [{ id: 'msg', role: 'user', content: 'ＡＰＩの接続', timestamp: '2026-01-01' }] }), session('draft', { draftInput: '未送信の計画' }), session('name', { title: '月次レポート' })]
-  assert.deepEqual(buildConversationRows(sessions, [], ' api ').map(r => r.session?.id), ['body'])
+test('search includes old message contents (from the store) and unsent drafts with width and case normalization', t => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-rows-test-'))
+  const store = new ChatHistoryStore(dir)
+  t.after(async () => { await store.flush(); fs.rmSync(dir, { recursive: true, force: true }) })
+  const stamp = '2026-01-01T00:00:00Z'
+  store.save('company', { id: 'body', companyId: 'company', title: 'body', createdAt: stamp, updatedAt: stamp, messages: [{ id: 'msg', role: 'user', content: 'ＡＰＩの接続', timestamp: stamp }] })
+  store.save('company', { id: 'draft', companyId: 'company', title: 'draft', createdAt: stamp, updatedAt: stamp, messages: [], draftInput: '未送信の計画' })
+  store.save('company', { id: 'name', companyId: 'company', title: '月次レポート', createdAt: stamp, updatedAt: stamp, messages: [] })
+  const sessions = store.summaries('company')
+  const search = (query: string) => buildConversationRows(sessions, [], query, new Set(store.search('company', query))).map(r => r.session?.id)
+  assert.deepEqual(search(' api '), ['body'])
+  assert.deepEqual(search('未送信'), ['draft'])
+  assert.deepEqual(search('月次'), ['name'])
+  assert.equal(search('該当なし').length, 0)
+  // Before the body search answers, titles and drafts already match.
   assert.deepEqual(buildConversationRows(sessions, [], '未送信').map(r => r.session?.id), ['draft'])
-  assert.deepEqual(buildConversationRows(sessions, [], '月次').map(r => r.session?.id), ['name'])
-  assert.equal(buildConversationRows(sessions, [], '該当なし').length, 0)
 })
 test('blank tabs remain accessible and a closed tab returns to history without losing data', () => {
   const sessions = [session('saved')]

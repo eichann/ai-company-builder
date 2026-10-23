@@ -100,6 +100,7 @@
     "toolCount": "{{n}} tools",
     "toolRunningCount": " ({{n}} running)",
     "showMoreTools": "Show more ({{n}} remaining)",
+    "showEarlierMessages": "Show earlier messages ({{n}} more)",
     "showHiddenTools": "Show {{n}} more",
     "collapseTools": "Collapse",
     "inputPlaceholder": "Type a message... (⌘+Enter to send)",
