@@ -1219,3 +1219,64 @@ answer, for both agents. Shared types and the answer mapping:
 - Preview: `client/tests/chat-composer-ui.html` (`?theme=dark`,
   `?suggestion=…`); tests: `client/tests/prompt-suggestion.test.ts`,
   `client/tests/steering.test.ts`.
+
+---
+
+## Architecture: Chat history store and rendering performance
+
+**History store** (`client/electron/chat-history-store.ts`, main process): one
+JSON file per company (`<userData>/chat-history/<companyId>.json`, the same
+`{ sessions, deletedSessionIds }` format as always, now written compact;
+unknown top-level keys are kept, so older app versions still read it).
+
+- Reads come from an in-memory copy, loaded once and reloaded only when the
+  file's identity (inode, size, mtime) changes while nothing is pending.
+  Sessions are replaced, never edited in place (callers may hold them).
+- Writes are coalesced (250 ms) and asynchronous: the new version is written
+  and fsynced as a temporary file off the main thread, then on the main thread
+  the current file becomes `.bak` by a hard link (copy where links fail — no
+  re-read) and the temporary file is renamed over it. A deletion writes at
+  once and replaces `.bak` with the new content (deleted conversations never
+  linger there). A failed write is retried every 5 s and the next save/patch
+  retries synchronously and reports the error. `flushSync()` runs on
+  `will-quit`. A save is acknowledged before it is on disk; the file on disk
+  is always a complete version. Measured on an 8.3 MB history: a save blocked
+  the main process 124 ms, now 0.2 ms.
+- IPC: `chatHistory:getSummaries` (no message bodies — the sidebar and the
+  tabs' title check; 8.1 MB → 31 KB), `chatHistory:search` (body search in the
+  main process, NFKC), `getSession`; save/flush return a receipt
+  (`ChatSaveReceipt`: status + revision), not the stored conversation.
+  `chatHistory:changed` carries `{ sessionId, kind: save | patch | delete }`:
+  a tab re-reads only a `patch` of its own conversation.
+- Autosave runs every 4 s (unload and leaving a tab still flush
+  synchronously) and skips building the session when nothing it is made of
+  changed; converted messages are cached per UIMessage object.
+- Attached images: the AI gets the full image; the bubble and history keep a
+  ≤320 px WebP thumbnail (`historyThumbnail.ts`). Old full-size data URLs load
+  as before.
+- Tests: `client/tests/chat-history-store.test.ts`.
+
+**Rendering** (`client/src/components/chat/`):
+
+- `MessageList` renders the latest 50 messages (`messageWindow.ts`, anchored
+  by message id so streaming messages append); 「以前のメッセージを表示」 adds
+  50 more and keeps the scroll position. Messages older than the latest 20
+  use `content-visibility: auto`. Hidden tabs use `content-visibility:
+  hidden`; `ChatPanelChat` is memoised with stable props.
+- Markdown is rendered per top-level block (`markdownBlocks.ts`; split only
+  at blank lines outside fences before a non-indented, non-list line; the
+  whole reply stays one block if it has link/footnote definitions), so a
+  streaming reply re-parses only its last block; an unclosed code fence is
+  shown plain until it closes. The stream throttle is 150 ms once a reply
+  passes 8,000 characters.
+- Syntax highlighting is PrismLight with a curated language set
+  (`codeHighlighter.tsx`: ts/tsx/js/jsx, python, bash/sh/zsh, json, yaml,
+  markdown, html/xml, css/scss, sql, diff, go, rust, java, kotlin, swift,
+  c/cpp/csharp, ruby, php, powershell, toml, ini, docker, graphql); other
+  languages render plain. Renderer bundle 2.48 MB → 1.97 MB.
+- Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`):
+  after 2 MB of tool inputs/outputs in one turn (api-key mode 8 MB), later
+  payloads are cut to 1 KB and input deltas stop; rows, states, errors, the
+  answer text and data parts are untouched.
+- Preview: `client/tests/chat-header-ui.html?history=long` (a restored
+  240-message conversation); tests: `client/tests/chat-rendering.test.ts`.

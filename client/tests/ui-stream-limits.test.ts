@@ -4,6 +4,8 @@ import { DefaultChatTransport, readUIMessageStream, simulateReadableStream, stre
 import { MockLanguageModelV3 } from 'ai/test'
 import {
   AGENT_OUTPUT_LIMITS,
+  AGENT_STREAM_LIMITS,
+  OVER_BUDGET_LIMITS,
   API_KEY_OUTPUT_LIMITS,
   limitToolPayloads,
   limitedUIMessageStreamResponse,
@@ -114,9 +116,9 @@ test('summarizer: api-key limits keep the 50KB-bounded local tool outputs verbat
   assert.deepEqual(summarizeToolPayload(claudeImageReadResult(), API_KEY_OUTPUT_LIMITS), ['[image: image/jpeg, 390KB]'])
 })
 
-async function collect(chunks: UIMessageChunk[]): Promise<UIMessageChunk[]> {
+async function collect(chunks: UIMessageChunk[], limits = AGENT_STREAM_LIMITS): Promise<UIMessageChunk[]> {
   const out: UIMessageChunk[] = []
-  const reader = new ReadableStream<UIMessageChunk>({ start(c) { chunks.forEach(x => c.enqueue(x)); c.close() } }).pipeThrough(limitToolPayloads()).getReader()
+  const reader = new ReadableStream<UIMessageChunk>({ start(c) { chunks.forEach(x => c.enqueue(x)); c.close() } }).pipeThrough(limitToolPayloads(limits)).getReader()
   for (;;) { const { done, value } = await reader.read(); if (done) return out; out.push(value) }
 }
 
@@ -146,6 +148,43 @@ test('transform: bounds inputs, outputs, deltas and provider metadata; keeps ids
   assert.equal(output.providerExecuted, true)
   assert.deepEqual(output.output, ['[image: image/jpeg, 390KB]'])
   assert.deepEqual(out.at(-1), { type: 'tool-output-error', toolCallId: 'e', errorText: 'File does not exist.', providerExecuted: true, dynamic: true })
+})
+
+test('transform: a turn with ~1,000 tool calls stays bounded as a whole; the answer and errors are untouched', async () => {
+  const calls = 1_000
+  const big = 'line of output '.repeat(4_000)
+  const chunks: UIMessageChunk[] = [{ type: 'start' }]
+  for (let i = 0; i < calls; i++) {
+    const id = `c${i}`
+    chunks.push(
+      { type: 'tool-input-start', toolCallId: id, toolName: 'Read', providerExecuted: true, dynamic: true },
+      { type: 'tool-input-delta', toolCallId: id, inputTextDelta: 'p'.repeat(6_000) },
+      { type: 'tool-input-available', toolCallId: id, toolName: 'Read', input: { file_path: `/book/p${i}.md`, note: big }, providerExecuted: true, dynamic: true },
+      i % 100 === 99
+        ? { type: 'tool-output-error', toolCallId: id, errorText: `failed ${i}`, providerExecuted: true, dynamic: true }
+        : { type: 'tool-output-available', toolCallId: id, output: big, providerExecuted: true, dynamic: true },
+    )
+  }
+  const answer = '結論：'.repeat(20_000)
+  chunks.push({ type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: answer }, { type: 'text-end', id: 't' }, { type: 'finish' })
+  const out = await collect(chunks)
+
+  // Per-call caps alone: ~1,000 × (12KB output + 12KB input + 6KB deltas) ≈ 30 MB.
+  const toolChars = out.filter(c => c.type.startsWith('tool-')).reduce((n, c) => n + json(c).length, 0)
+  assert.ok(toolChars < AGENT_STREAM_LIMITS.turnBudget + calls * 3_000, `tool payloads ${toolChars} chars`)
+  // Every call is still there with its state; inputs keep what identifies them.
+  assert.equal(out.filter(c => c.type === 'tool-input-available').length, calls)
+  assert.equal(out.filter(c => c.type === 'tool-output-available').length, calls - 10)
+  assert.deepEqual(out.filter(c => c.type === 'tool-output-error').map(c => (c as { errorText: string }).errorText).slice(-1), ['failed 999'])
+  const lastInput = out.filter(c => c.type === 'tool-input-available').at(-1) as Extract<UIMessageChunk, { type: 'tool-input-available' }>
+  assert.equal((lastInput.input as { file_path: string }).file_path, '/book/p999.md')
+  const lastOutput = out.filter(c => c.type === 'tool-output-available').at(-1) as Extract<UIMessageChunk, { type: 'tool-output-available' }>
+  assert.ok(json(lastOutput.output).length <= OVER_BUDGET_LIMITS.maxTotal, `last output ${json(lastOutput.output).length}`)
+  // Early calls keep the normal per-call limit.
+  const firstOutput = out.find(c => c.type === 'tool-output-available') as Extract<UIMessageChunk, { type: 'tool-output-available' }>
+  assert.ok(json(firstOutput.output).length > OVER_BUDGET_LIMITS.maxTotal, `first output ${json(firstOutput.output).length}`)
+  // The visible answer is never shortened.
+  assert.equal((out.find(c => c.type === 'text-delta') as { delta: string }).delta, answer)
 })
 
 test('transform: consultation reference outputs stay parseable by referenceFromTool', async () => {

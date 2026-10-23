@@ -1,31 +1,20 @@
 import React, { memo, useMemo } from 'react'
 import Markdown from 'react-markdown'
-import { Prism as SyntaxHighlighterRaw } from 'react-syntax-highlighter'
-import { oneLight, oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-
-// react-syntax-highlighter ships types compatible with older React. Cast for React 19 JSX compatibility.
-const SyntaxHighlighter = SyntaxHighlighterRaw as unknown as React.FC<{
-  language?: string
-  style: Record<string, React.CSSProperties>
-  PreTag?: string
-  customStyle?: React.CSSProperties
-  children: string
-}>
 import { useAppStore } from '../../stores/appStore'
 import { chatMarkdownSafety } from './chatMarkdownSafety'
+import { splitMarkdownBlocks } from './markdownBlocks'
+import { CodeHighlighter, PlainCodeBlock } from './codeHighlighter'
 
 interface MarkdownMessageProps {
   content: string
 }
 
-// Renders assistant message text as decorated markdown with GFM and async-loaded Prism syntax highlighting.
-// Links open in new windows; code blocks get themed syntax colors.
-// Images are never loaded (see chatMarkdownImages.tsx) and raw HTML is skipped.
-export const MarkdownMessage = memo(function MarkdownMessage({ content }: MarkdownMessageProps) {
-  const theme = useAppStore((s) => s.theme)
-  const isDark = theme === 'dark'
+type Components = Record<string, unknown>
 
-  const components = useMemo(() => ({
+const remarkPlugins = [...chatMarkdownSafety.remarkPlugins]
+
+function makeComponents(isDark: boolean, highlight: boolean): Components {
+  return {
     ...chatMarkdownSafety.components,
     a: ({ href, children, ...props }: React.AnchorHTMLAttributes<HTMLAnchorElement>) => (
       <a href={href} {...props} target="_blank" rel="noopener noreferrer" className="text-accent underline underline-offset-2 hover:opacity-80">
@@ -51,30 +40,43 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: Markdo
           </code>
         )
       }
-      // Fenced block: use Prism highlighter. Falls back to "text" when no language was given.
-      return (
-        <SyntaxHighlighter
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          style={(isDark ? oneDark : oneLight) as any}
-          language={lang || 'text'}
-          PreTag="div"
-          customStyle={{
-            margin: 0,
-            borderRadius: '0.5rem',
-            fontSize: '12.5px',
-            lineHeight: '1.5',
-            padding: '0.75rem 1rem',
-          }}
-        >
-          {codeText}
-        </SyntaxHighlighter>
-      )
+      // A code block still being streamed is shown plain; it is highlighted
+      // once, when its closing fence arrives.
+      if (!highlight) {
+        return <PlainCodeBlock isDark={isDark}>{codeText}</PlainCodeBlock>
+      }
+      // Fenced block: Prism (curated languages, codeHighlighter.ts). Unknown languages render plain.
+      return <CodeHighlighter isDark={isDark} language={lang || 'text'}>{codeText}</CodeHighlighter>
     },
     pre({ children }: { children?: React.ReactNode }) {
       // SyntaxHighlighter renders its own container; wrap with margin only
       return <div className="my-2">{children}</div>
     },
-  }), [isDark])
+  }
+}
+
+/** One top-level block; unchanged blocks of a streaming reply are not parsed again. */
+const MarkdownBlockView = memo(function MarkdownBlockView({ text, components }: { text: string; components: Components }) {
+  return (
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    <Markdown remarkPlugins={remarkPlugins} skipHtml={chatMarkdownSafety.skipHtml} components={components as any}>
+      {text}
+    </Markdown>
+  )
+})
+
+// Renders assistant message text as decorated markdown with GFM and Prism syntax highlighting.
+// Links open in new windows; code blocks get themed syntax colors.
+// Images are never loaded (see chatMarkdownImages.tsx) and raw HTML is skipped.
+// The text is rendered block by block (markdownBlocks.ts) so a streaming reply
+// re-parses only its last block.
+export const MarkdownMessage = memo(function MarkdownMessage({ content }: MarkdownMessageProps) {
+  const theme = useAppStore((s) => s.theme)
+  const isDark = theme === 'dark'
+
+  const components = useMemo(() => makeComponents(isDark, true), [isDark])
+  const streamingComponents = useMemo(() => makeComponents(isDark, false), [isDark])
+  const blocks = useMemo(() => splitMarkdownBlocks(content), [content])
 
   return (
     <div
@@ -84,10 +86,9 @@ export const MarkdownMessage = memo(function MarkdownMessage({ content }: Markdo
         prose-ul:my-2 prose-ol:my-2 prose-li:my-0.5
         break-words"
     >
-      {/* eslint-disable-next-line @typescript-eslint/no-explicit-any */}
-      <Markdown remarkPlugins={[...chatMarkdownSafety.remarkPlugins]} skipHtml={chatMarkdownSafety.skipHtml} components={components as any}>
-        {content}
-      </Markdown>
+      {blocks.map((block, index) => (
+        <MarkdownBlockView key={index} text={block.text} components={block.openFence ? streamingComponents : components} />
+      ))}
     </div>
   )
 })

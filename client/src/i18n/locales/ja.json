@@ -100,6 +100,7 @@
     "toolCount": "ツール {{n}}件",
     "toolRunningCount": "（実行中 {{n}}）",
     "showMoreTools": "さらに表示（残り{{n}}件）",
+    "showEarlierMessages": "以前のメッセージを表示（残り{{n}}件）",
     "showHiddenTools": "ほか{{n}}件を表示",
     "collapseTools": "折りたたむ",
     "inputPlaceholder": "メッセージを入力... (⌘+Enter で送信)",

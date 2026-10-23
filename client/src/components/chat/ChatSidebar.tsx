@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { MagnifyingGlass, Plus, PushPin, PencilSimple, Trash, X } from '@phosphor-icons/react'
-import type { ChatSession } from '../../../shared/chat-history'
+import type { ChatSessionSummary } from '../../../shared/chat-history'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 
 import { paginateConversationRows, buildConversationRows, type ConversationTab } from '../../lib/conversationRows'
@@ -16,7 +16,7 @@ interface Props {
 }
 
 export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenSession, onCloseTab, onNew, onHide }: Props) {
-  const [sessions, setSessions] = useState<ChatSession[]>([])
+  const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
   const [query, setQuery] = useState('')
   const [historyLimit, setHistoryLimit] = useState(20)
   useEffect(() => { setHistoryLimit(20) }, [companyId, query])
@@ -24,7 +24,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)
   const [title, setTitle] = useState('')
-  const [deleting, setDeleting] = useState<ChatSession | null>(null)
+  const [deleting, setDeleting] = useState<ChatSessionSummary | null>(null)
   const busy = useRef(false)
   const refreshRef = useRef<() => void>(() => {})
 
@@ -38,7 +38,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
       do {
         again = false
         try {
-          const result = await window.electronAPI.getChatSessions(companyId)
+          const result = await window.electronAPI.getChatSessionSummaries(companyId)
           if (alive) { setSessions(result); setError(null) }
         } catch (e) { if (alive) setError(String(e instanceof Error ? e.message : e)) }
         finally { if (alive) setLoading(false) }
@@ -53,9 +53,24 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
     return () => { alive = false; unsubscribe() }
   }, [companyId])
 
+  // Message bodies stay in the main process; it answers which sessions match.
+  // While a new answer is pending the previous one stays (no flicker while typing).
+  const [contentMatches, setContentMatches] = useState<ReadonlySet<string> | null>(null)
+  useEffect(() => {
+    const trimmed = query.trim()
+    if (!trimmed) { setContentMatches(null); return }
+    let alive = true
+    const timer = window.setTimeout(() => {
+      window.electronAPI.searchChatSessions(companyId, trimmed)
+        .then(ids => { if (alive) setContentMatches(new Set(ids)) })
+        .catch(e => { if (alive) setError(String(e instanceof Error ? e.message : e)) })
+    }, 150)
+    return () => { alive = false; window.clearTimeout(timer) }
+  }, [companyId, query, sessions])
+
   const rows = useMemo(() => {
-    return buildConversationRows(sessions, tabs, query)
-  }, [sessions, tabs, query])
+    return buildConversationRows(sessions, tabs, query, contentMatches ?? undefined)
+  }, [sessions, tabs, query, contentMatches])
 
   const { visibleRows, remaining } = useMemo(() => paginateConversationRows(rows, historyLimit), [rows, historyLimit])
   const groupCounts = {
@@ -99,7 +114,7 @@ export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenS
         const previous = visibleRows[index - 1]
         const previousGroup = previous?.tab ? '開いている相談' : previous?.session?.pinned ? 'ピン留め' : '履歴'
         const active = tab?.id === activeTabId
-        const preview = session?.draftInput?.trim() || [...(session?.messages ?? [])].reverse().find(m => m.content.trim() && m.id !== '1')?.content || '新しい相談を始めましょう'
+        const preview = session?.draftInput?.trim() || session?.preview || '新しい相談を始めましょう'
         return <div key={row.key}>
           {(index === 0 || previousGroup !== group) && <h3
             title={tab ? '現在タブとして開いている相談です。閉じても履歴に残ります。' : undefined}

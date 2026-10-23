@@ -51,6 +51,9 @@ import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../../../shared/r
 import { AGENT_PROGRESS_PART_TYPE, readAgentProgress } from '../../../shared/agent-progress'
 import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
+import { earlierAnchor, windowStart } from './messageWindow'
+import { streamThrottleMs } from './markdownBlocks'
+import { historyThumbnail } from './historyThumbnail'
 import { useAuthStore } from '../../stores/authStore'
 import type { ChatSession } from '../../../shared/chat-history'
 
@@ -147,6 +150,30 @@ function uiMessageToSessionMessage(
     ...(choicePrompts.length ? { choicePrompts } : {}),
     ...(steerInstructions.length ? { steerInstructions } : {}),
   }
+}
+
+// Converted messages, per UIMessage object: while a reply streams only its own
+// object changes (@ai-sdk/react replaces just the last message), so an
+// autosave converts one message instead of the whole conversation.
+const sessionMessageCache = new WeakMap<UIMessage, { at: number; images?: string[]; referenceFiles?: string[]; value: ChatSession['messages'][0] }>()
+
+function sessionMessageFor(msg: UIMessage, timestamp: Date, images?: string[], referenceFiles?: string[]): ChatSession['messages'][0] {
+  const cached = sessionMessageCache.get(msg)
+  if (cached && cached.at === timestamp.getTime() && cached.images === images && cached.referenceFiles === referenceFiles) return cached.value
+  const value = {
+    ...uiMessageToSessionMessage(msg, timestamp),
+    ...(images ? { images } : {}),
+    ...(referenceFiles ? { referenceFiles } : {}),
+  }
+  sessionMessageCache.set(msg, { at: timestamp.getTime(), images, referenceFiles, value })
+  return value
+}
+
+/** Autosave cadence (was 1 s; every tick re-serialised whole conversations in every tab). */
+const AUTOSAVE_INTERVAL_MS = 4000
+
+function sameSaveInputs(a: unknown[] | null, b: unknown[]): boolean {
+  return !!a && a.length === b.length && a.every((value, i) => Object.is(value, b[i]))
 }
 
 function sessionMessageToUIMessage(
@@ -421,15 +448,21 @@ interface MessageItemProps {
   onRegenerate?: () => void
   canEdit?: boolean
   onEditSubmit?: (messageId: string, newText: string) => void
+  /** Skip layout and paint while scrolled out of view (older messages only). */
+  deferOffscreen?: boolean
 }
 
-const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit }: MessageItemProps) {
+const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp, images, referenceFiles, isLastAssistant, canRegenerate, onRegenerate, canEdit, onEditSubmit, deferOffscreen }: MessageItemProps) {
   const { t } = useTranslation()
   const isUser = message.role === 'user'
   const markdownRender = useAppStore((s) => s.chatMarkdownRender)
 
   return (
-    <div className={`animate-slide-up ${isUser ? 'flex justify-end' : ''}`}>
+    // content-visibility: older messages scrolled out of view skip layout and
+    // paint (their last rendered height is remembered). The latest ones never
+    // do: opening a conversation scrolls to the bottom, and estimated heights
+    // there would leave it short of the end.
+    <div className={`animate-slide-up ${deferOffscreen ? '[content-visibility:auto] [contain-intrinsic-size:auto_160px]' : ''} ${isUser ? 'flex justify-end' : ''}`}>
       {/* Assistant replies use the full row (the list's px-4 gutter on both
           sides); only the member's own bubbles stay narrower, aligned right. */}
       <div className={isUser ? 'max-w-[85%] ml-auto' : 'min-w-0'}>
@@ -1347,6 +1380,9 @@ interface MessageListProps {
   onEditSubmit?: (messageId: string, newText: string) => void
 }
 
+/** The latest messages are always laid out (see MessageItem's content-visibility). */
+const ALWAYS_RENDERED_MESSAGES = 20
+
 const MessageList = memo(function MessageList({
   messages,
   status,
@@ -1371,9 +1407,44 @@ const MessageList = memo(function MessageList({
   const canRegenerate = (status === 'ready' || status === 'error') && messages.length > 1
   const canEdit = status === 'ready'
 
+  // Only the latest messages are rendered (messageWindow.ts).
+  const [anchorId, setAnchorId] = useState<string | null>(null)
+  const start = windowStart(messages, anchorId)
+  useEffect(() => {
+    const id = messages[start]?.id ?? null
+    if (id !== anchorId) setAnchorId(id)
+  }, [messages, start, anchorId])
+  // Keep what the member is reading in place when earlier messages are added above it.
+  const scrollRestoreRef = useRef<{ height: number; top: number } | null>(null)
+  useLayoutEffect(() => {
+    const restore = scrollRestoreRef.current
+    const container = containerRef.current
+    if (!restore || !container) return
+    scrollRestoreRef.current = null
+    container.scrollTop = restore.top + (container.scrollHeight - restore.height)
+  }, [start, containerRef])
+  const showEarlier = () => {
+    const container = containerRef.current
+    if (container) scrollRestoreRef.current = { height: container.scrollHeight, top: container.scrollTop }
+    setAnchorId(earlierAnchor(messages, start))
+  }
+
   return (
     <div ref={containerRef} className="flex-1 overflow-auto px-4 py-6 space-y-6">
-      {messages.map((message, index) => (
+      {start > 0 && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={showEarlier}
+            className="rounded-lg border border-gray-300 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-3 py-1.5 text-xs font-medium text-gray-600 dark:text-zinc-300 hover:bg-gray-100 dark:hover:bg-zinc-700 focus-visible:outline-accent"
+          >
+            {t('chat.showEarlierMessages', { n: start })}
+          </button>
+        </div>
+      )}
+      {messages.slice(start).map((message, offset) => {
+        const index = start + offset
+        return (
         <MessageItem
           key={message.id}
           message={message}
@@ -1390,8 +1461,10 @@ const MessageList = memo(function MessageList({
           onRegenerate={onRegenerate}
           canEdit={canEdit}
           onEditSubmit={onEditSubmit}
+          deferOffscreen={index < messages.length - ALWAYS_RENDERED_MESSAGES}
         />
-      ))}
+        )
+      })}
 
       {/* Thinking indicator when submitted but no response yet */}
       {status === 'submitted' && (
@@ -1437,7 +1510,9 @@ interface ChatPanelChatProps {
   onSessionIdChange?: (sessionId: string | null) => void
 }
 
-function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+// Memoised: every tab stays mounted, and the parent re-renders on any tab's
+// title change or tab switch. Its props are stable (see CompanyChatPanel).
+const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1638,10 +1713,14 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   // The last turn was stopped or failed: waiting sends go back into the input.
   const lastTurnAbortedRef = useRef(false)
 
+  // Re-render cadence while a reply streams: longer for a long reply, whose
+  // last markdown block is parsed again on every tick (markdownBlocks.ts).
+  const [streamThrottle, setStreamThrottle] = useState(() => streamThrottleMs(0))
+
   // useChat hook
   const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
     transport,
-    experimental_throttle: 50,
+    experimental_throttle: streamThrottle,
     onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
       lastTurnAbortedRef.current = isAbort || isDisconnect || isError
       setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: shouldRequestSuggestion({ aborted: lastTurnAbortedRef.current, authMode: authModeRef.current, enabled: promptSuggestionSetting.getSnapshot() }) }))
@@ -1690,6 +1769,14 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   })
 
   useEffect(() => { void fetchRateLimits() }, [authMode, fetchRateLimits])
+
+  useEffect(() => {
+    const last = messages[messages.length - 1]
+    let length = 0
+    if (last?.role === 'assistant') for (const part of last.parts) if (part.type === 'text') length += part.text.length
+    const next = streamThrottleMs(length)
+    if (next !== streamThrottle) setStreamThrottle(next)
+  }, [messages, streamThrottle])
 
   useEffect(() => {
     if (status === 'ready' || status === 'error') setPendingApprovals([])
@@ -1741,6 +1828,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   const historyReadyRef = useRef(false)
   const deletedRef = useRef(false)
   const savedFingerprintRef = useRef('')
+  // The objects the last acknowledged save was built from (sameSaveInputs).
+  const savedInputsRef = useRef<unknown[] | null>(null)
   const pendingFingerprintRef = useRef('')
   const acknowledgedSequenceRef = useRef(0)
   const syncSaveFailedRef = useRef(false)
@@ -1826,9 +1915,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   }, [isActive])
 
   // Checkpoint during streaming too. A trailing debounce alone would never fire
-  // while tokens keep arriving. Unload has a separate synchronous flush.
+  // while tokens keep arriving. Unload and leaving the tab flush synchronously,
+  // so the interval only bounds what a crash can lose; typing in the input is
+  // picked up by the next tick, not saved per keystroke.
   useEffect(() => {
-    const interval = window.setInterval(() => { void saveRef.current() }, 1000)
+    const interval = window.setInterval(() => { void saveRef.current() }, AUTOSAVE_INTERVAL_MS)
     return () => window.clearInterval(interval)
   }, [])
   useEffect(() => {
@@ -1846,6 +1937,9 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           deletedRef.current = true
           stop()
         }
+        // Only a metadata change of this tab's own conversation (title from the
+        // sidebar or the AI) concerns it; saves come from the tab itself.
+        if (data.sessionId && (data.sessionId !== appSessionIdRef.current || data.kind !== 'patch')) return
         void loadSessions().catch(() => {})
       }
     })
@@ -1872,7 +1966,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
   async function loadSessions() {
     if (!currentCompany?.id) return
     try {
-      const loadedSessions = await window.electronAPI.getChatSessions(currentCompany.id)
+      // Summaries only: this tab needs its own title, never the other conversations' bodies.
+      const loadedSessions = await window.electronAPI.getChatSessionSummaries(currentCompany.id)
       const current = loadedSessions.find(session => session.id === appSessionIdRef.current)
       if (current && historyReadyRef.current && current.titleAutoGenerated !== undefined) {
         customTitleRef.current = { title: current.title, auto: current.titleAutoGenerated }
@@ -1891,15 +1986,16 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
     const draftInput = clearDraft ? '' : draftInputRef.current
     if (!snapshot.some(m => m.role === 'user') && !draftInput.trim() && !initialSessionId && revisionRef.current === 0 && !pendingFingerprintRef.current) return true
     const sessionId = appSessionIdRef.current!
+    // Nothing the fingerprint is built from changed since the last acknowledged
+    // save (same objects): skip converting and serialising the whole
+    // conversation. Every open tab runs the autosave, idle ones included.
+    const inputs = [sessionId, snapshot, draftInput, messageImages, messageReferenceFiles, claudeSessionIdRef.current, agentSessionRef.current]
+    if (!override && !pendingFingerprintRef.current && savedFingerprintRef.current && sameSaveInputs(savedInputsRef.current, inputs)) return true
     const firstUser = snapshot.find(m => m.role === 'user')
     const title = customTitleRef.current?.title || (firstUser ? extractMessageText(firstUser).slice(0, 60) : t('chat.newChat'))
     const session: ChatSession = {
       id: sessionId, companyId: currentCompany.id, title,
-      messages: snapshot.map(m => ({
-        ...uiMessageToSessionMessage(m, timestampsRef.current.get(m.id) || new Date()),
-        ...(messageImages.get(m.id) ? { images: messageImages.get(m.id) } : {}),
-        ...(messageReferenceFiles.get(m.id) ? { referenceFiles: messageReferenceFiles.get(m.id) } : {}),
-      })),
+      messages: snapshot.map(m => sessionMessageFor(m, timestampsRef.current.get(m.id) || new Date(), messageImages.get(m.id), messageReferenceFiles.get(m.id))),
       draftInput,
       createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
       revision: revisionRef.current,
@@ -1923,10 +2019,11 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
         return false
       }
       if (result.status === 'conflict') throw new Error('別の画面で相談が更新されました。上書きを止めています。未保存の文章をコピーしてから開き直してください。')
-      revisionRef.current = Math.max(revisionRef.current, result.session.revision ?? 0)
+      revisionRef.current = Math.max(revisionRef.current, result.revision)
       if (session.writeSequence! >= acknowledgedSequenceRef.current) {
         acknowledgedSequenceRef.current = session.writeSequence!
         savedFingerprintRef.current = fingerprint
+        savedInputsRef.current = inputs
       }
       if (pendingFingerprintRef.current === fingerprint) pendingFingerprintRef.current = ''
       setHistoryError(null)
@@ -2186,7 +2283,8 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
           reader.onload = () => resolve(reader.result as string)
           reader.readAsDataURL(file)
         })
-        dataUrls.push(dataUrl)
+        // The AI gets the full image; the bubble and the history keep a small copy.
+        dataUrls.push(await historyThumbnail(dataUrl))
         imageParts.push({ mediaType: file.type, data: dataUrl.split(',')[1] })
       }
       pendingImagesRef.current = imageParts
@@ -2533,7 +2631,7 @@ function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo,
       </div>
     </div>
   )
-}
+})
 
 // ============================================================================
 // Main ChatPanel Component (Auth & Server wrapper)
@@ -2716,7 +2814,10 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   }, [])
 
   const updateTabTitle = useCallback((targetTabId: string, title: string) => {
-    setTabs(prev => prev.map(tab => tab.id === targetTabId ? { ...tab, title } : tab))
+    // Same title → same array: no re-render of the tab bar, sidebar or chats.
+    setTabs(prev => prev.some(tab => tab.id === targetTabId && tab.title !== title)
+      ? prev.map(tab => tab.id === targetTabId ? { ...tab, title } : tab)
+      : prev)
   }, [])
 
   const updateTabSessionId = useCallback((targetTabId: string, sessionId: string | null) => {
@@ -2728,6 +2829,27 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
       return next
     })
   }, [])
+
+  // Stable props for the memoised chats: a tab whose own props did not change
+  // (another tab's title, the active tab switching elsewhere) does not re-render.
+  const tabCallbacksRef = useRef(new Map<string, { title: (title: string) => void; sessionId: (sessionId: string | null) => void }>())
+  const tabCallbacks = (tabId: string) => {
+    let callbacks = tabCallbacksRef.current.get(tabId)
+    if (!callbacks) {
+      callbacks = { title: title => updateTabTitle(tabId, title), sessionId: sessionId => updateTabSessionId(tabId, sessionId) }
+      tabCallbacksRef.current.set(tabId, callbacks)
+    }
+    return callbacks
+  }
+  const openSettings = useCallback(() => setShowSettings(true), [])
+  const toggleSidebar = useCallback(() => setSidebarOpen(open => !open), [])
+  // The layout passes a new object on every render; only its value matters.
+  const departmentName = activeDepartment?.name
+  const departmentFolder = activeDepartment?.folder
+  const stableDepartment = useMemo(
+    () => departmentName === undefined && departmentFolder === undefined ? undefined : { name: departmentName ?? '', folder: departmentFolder ?? '' },
+    [departmentName, departmentFolder],
+  )
 
   // Handle cross-company changes (not the initial mount — that's already
   // hydrated synchronously above). tabRestoredForId gates the persist effect
@@ -2890,24 +3012,26 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
         {tabs.map((tab) => (
           <div
             key={tab.id}
-            className={`absolute inset-0 ${tab.id === activeTabId ? '' : 'invisible pointer-events-none'}`}
+            // Hidden tabs stay mounted (streams, drafts, questions keep running)
+            // but skip style, layout and paint entirely.
+            className={`absolute inset-0 ${tab.id === activeTabId ? '' : 'invisible pointer-events-none [content-visibility:hidden]'}`}
           >
             <div className={showSettings && tab.id === activeTabId ? 'h-full invisible' : 'h-full'}>
               <ChatPanelChat
                 isActive={tab.id === activeTabId}
                 departmentPath={departmentPath}
-                activeDepartment={activeDepartment}
+                activeDepartment={stableDepartment}
                 serverInfo={serverInfo}
                 authMode={authMode}
                 codexStatus={codexStatus}
                 slashCommands={slashCommands}
-                onShowSettings={() => setShowSettings(true)}
-                onTitleChange={(title) => updateTabTitle(tab.id, title)}
+                onShowSettings={openSettings}
+                onTitleChange={tabCallbacks(tab.id).title}
                 onNewTab={createNewTab}
-                onToggleSidebar={() => setSidebarOpen(open => !open)}
+                onToggleSidebar={toggleSidebar}
                 sidebarOpen={sidebarOpen}
                 initialSessionId={tab.sessionId}
-                onSessionIdChange={(sessionId) => updateTabSessionId(tab.id, sessionId)}
+                onSessionIdChange={tabCallbacks(tab.id).sessionId}
               />
             </div>
           </div>

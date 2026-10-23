@@ -272,16 +272,32 @@ export interface StreamLimits {
   /** Streamed tool-input text forwarded per call; the final
    * `tool-input-available` chunk still carries the (bounded) full input. */
   maxInputDeltaChars: number
+  /**
+   * Whole-turn budget for tool payloads (inputs, outputs, streamed input
+   * text; JSON characters). The per-call caps alone still let a turn with
+   * ~1,000 tool calls grow the in-progress message to ~25 MB — and
+   * @ai-sdk/react structuredClones that message on every chunk. Past the
+   * budget, later payloads use `overBudget` (and input deltas stop): the
+   * rows, their states and errors stay, only the expanded detail is shorter.
+   * Text and data parts (the answer, choice prompts, steering) never count.
+   */
+  turnBudget: number
+  overBudget: PayloadLimits
 }
 
-export const AGENT_STREAM_LIMITS: StreamLimits = { output: AGENT_OUTPUT_LIMITS, input: AGENT_OUTPUT_LIMITS, maxInputDeltaChars: 8_000 }
-export const API_KEY_STREAM_LIMITS: StreamLimits = { output: API_KEY_OUTPUT_LIMITS, input: API_KEY_OUTPUT_LIMITS, maxInputDeltaChars: 8_000 }
+/** What a tool payload keeps once its turn is over budget: enough to recognise it when expanded. */
+export const OVER_BUDGET_LIMITS: PayloadLimits = { maxString: 400, maxTotal: 1_000 }
+
+export const AGENT_STREAM_LIMITS: StreamLimits = { output: AGENT_OUTPUT_LIMITS, input: AGENT_OUTPUT_LIMITS, maxInputDeltaChars: 8_000, turnBudget: 2_000_000, overBudget: OVER_BUDGET_LIMITS }
+/** api-key mode replays recent tool parts to the model, so it keeps far more before tightening. */
+export const API_KEY_STREAM_LIMITS: StreamLimits = { output: API_KEY_OUTPUT_LIMITS, input: API_KEY_OUTPUT_LIMITS, maxInputDeltaChars: 8_000, turnBudget: 8_000_000, overBudget: AGENT_OUTPUT_LIMITS }
 
 const CONSULTATION_TOOL_PREFIX = 'mcp__acb_consultations__'
 
-function outputLimitsFor(toolName: string | undefined, limits: StreamLimits): PayloadLimits {
+function outputLimitsFor(toolName: string | undefined, limits: StreamLimits, overBudget: boolean): PayloadLimits {
+  // Consultation references must stay parseable; they are bounded per turn on their own (20KB).
   if (toolName?.startsWith(CONSULTATION_TOOL_PREFIX) && limits.output.maxTotal < CONSULTATION_OUTPUT_LIMITS.maxTotal) return CONSULTATION_OUTPUT_LIMITS
-  return limits.output
+  return overBudget ? limits.overBudget : limits.output
 }
 
 /**
@@ -292,33 +308,45 @@ function outputLimitsFor(toolName: string | undefined, limits: StreamLimits): Pa
 export function limitToolPayloads(limits: StreamLimits = AGENT_STREAM_LIMITS): TransformStream<UIMessageChunk, UIMessageChunk> {
   const toolNames = new Map<string, string>()
   const deltaChars = new Map<string, number>()
+  // Tool payload characters sent in this response (one stream = one turn).
+  let spent = 0
+  const overBudget = () => spent >= limits.turnBudget
+  const spend = (value: unknown) => { spent += jsonLength(value) ?? 0 }
   return new TransformStream<UIMessageChunk, UIMessageChunk>({
     transform(chunk, controller) {
       switch (chunk.type) {
-        case 'tool-input-start':
+        case 'tool-input-start': {
           toolNames.set(chunk.toolCallId, chunk.toolName)
-          controller.enqueue(chunk.providerMetadata ? { ...chunk, providerMetadata: limitProviderMetadata(chunk.providerMetadata) } : chunk)
+          const limited = chunk.providerMetadata ? { ...chunk, providerMetadata: limitProviderMetadata(chunk.providerMetadata) } : chunk
+          spend(limited.providerMetadata)
+          controller.enqueue(limited)
           return
+        }
         case 'tool-input-delta': {
           const sent = deltaChars.get(chunk.toolCallId) ?? 0
-          if (sent >= limits.maxInputDeltaChars) return
+          if (sent >= limits.maxInputDeltaChars || overBudget()) return
           deltaChars.set(chunk.toolCallId, sent + chunk.inputTextDelta.length)
+          spent += chunk.inputTextDelta.length
           controller.enqueue(chunk)
           return
         }
         case 'tool-input-available':
-        case 'tool-input-error':
+        case 'tool-input-error': {
           toolNames.set(chunk.toolCallId, chunk.toolName)
           deltaChars.delete(chunk.toolCallId)
-          controller.enqueue({
-            ...chunk,
-            input: summarizeToolPayload(chunk.input, limits.input),
-            ...(chunk.providerMetadata ? { providerMetadata: limitProviderMetadata(chunk.providerMetadata) } : {}),
-          })
+          const input = summarizeToolPayload(chunk.input, overBudget() ? limits.overBudget : limits.input)
+          const providerMetadata = chunk.providerMetadata ? limitProviderMetadata(chunk.providerMetadata) : undefined
+          spend(input)
+          spend(providerMetadata)
+          controller.enqueue({ ...chunk, input, ...(providerMetadata ? { providerMetadata } : {}) })
           return
-        case 'tool-output-available':
-          controller.enqueue({ ...chunk, output: summarizeToolPayload(chunk.output, outputLimitsFor(toolNames.get(chunk.toolCallId), limits)) })
+        }
+        case 'tool-output-available': {
+          const output = summarizeToolPayload(chunk.output, outputLimitsFor(toolNames.get(chunk.toolCallId), limits, overBudget()))
+          spend(output)
+          controller.enqueue({ ...chunk, output })
           return
+        }
         default:
           controller.enqueue(chunk)
       }

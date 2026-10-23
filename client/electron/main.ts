@@ -55,7 +55,7 @@ import { writeClaudeHandoff } from './handoff/claude'
 import { writeCodexHandoff } from './handoff/codex'
 import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
-import type { ChatSession, ChatMetadataPatch } from '../shared/chat-history'
+import type { ChatSession, ChatMetadataPatch, ChatHistoryChange, ChatSaveReceipt } from '../shared/chat-history'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
@@ -1072,21 +1072,29 @@ const handoffs = new HandoffService(localHistoryStore, handoffStore, async (prov
 }, (companyId, sessionId) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('handoff:changed', { companyId, sessionId }) })
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
+// History writes are coalesced and asynchronous; whatever is still pending is written now.
+app.on('will-quit', () => localHistoryStore.flushSync())
 ipcMain.handle('handoff:get', (_, company: string, id: string) => { handoffs.touch(company, id); return handoffs.view(company, id) })
 ipcMain.handle('handoff:update', (_, company: string, id: string) => handoffs.requestUpdate(company, id))
 ipcMain.handle('handoff:complete', (_, company: string, id: string, receipt: HandoffCompletion) => handoffs.complete(company, id, receipt))
-function broadcastChatHistoryChanged(companyId: string, deletedSessionId?: string): void {
+// Targeted change events: a tab re-reads only its own session's metadata and the
+// sidebar re-reads the summaries (no message bodies), never the whole history.
+function broadcastChatHistoryChanged(change: ChatHistoryChange): void {
   if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('chatHistory:changed', { companyId, deletedSessionId })
+    mainWindow.webContents.send('chatHistory:changed', change)
   }
 }
-ipcMain.handle('chatHistory:getSessions', (_, companyId: string) => localHistoryStore.list(companyId))
+ipcMain.handle('chatHistory:getSummaries', (_, companyId: string) => localHistoryStore.summaries(companyId))
+ipcMain.handle('chatHistory:search', (_, companyId: string, query: string) => localHistoryStore.search(companyId, query))
 ipcMain.handle('chatHistory:getSession', (_, companyId: string, sessionId: string) =>
   localHistoryStore.get(companyId, sessionId))
-function persistChatSession(companyId: string, session: ChatSession) {
+// The receipt, not the stored session: sending the whole conversation back on
+// every autosave cost as much IPC as the save itself.
+function persistChatSession(companyId: string, session: ChatSession): ChatSaveReceipt {
   const result = localHistoryStore.save(companyId, session)
-  if (result.status === 'saved') broadcastChatHistoryChanged(companyId)
-  return result
+  if (result.status === 'deleted') return result
+  if (result.status === 'saved') broadcastChatHistoryChanged({ companyId, sessionId: session.id, kind: 'save' })
+  return { status: result.status, revision: result.session.revision ?? 0 }
 }
 ipcMain.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSession) =>
   persistChatSession(companyId, session))
@@ -1097,13 +1105,13 @@ ipcMain.on('chatHistory:flushSession', (event, companyId: string, session: ChatS
 })
 ipcMain.handle('chatHistory:patchSession', (_, companyId: string, sessionId: string, patch: ChatMetadataPatch) => {
   const result = localHistoryStore.patch(companyId, sessionId, patch)
-  broadcastChatHistoryChanged(companyId)
+  broadcastChatHistoryChanged({ companyId, sessionId, kind: 'patch' })
   return result
 })
 ipcMain.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string) => {
   localHistoryStore.delete(companyId, sessionId)
   handoffs.invalidate(companyId, sessionId)
-  broadcastChatHistoryChanged(companyId, sessionId)
+  broadcastChatHistoryChanged({ companyId, sessionId, kind: 'delete', deletedSessionId: sessionId })
   return true
 })
 
@@ -3472,7 +3480,7 @@ app.whenReady().then(async () => {
       onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
       persistAgentSession: (company, id, session) => {
         if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
-        broadcastChatHistoryChanged(company)
+        broadcastChatHistoryChanged({ companyId: company, sessionId: id, kind: 'patch' })
       },
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
