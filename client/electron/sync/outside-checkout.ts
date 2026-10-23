@@ -60,6 +60,49 @@ function symlinkBlobId(full: string): string {
 }
 
 /**
+ * Put the index entries inside `folder` back to what HEAD has. Everything
+ * below compares the disk with the index, so a file already staged there —
+ * by an older app's preview, which ran `git add --sparse .`, or by a sync
+ * that stopped between staging and committing — would read as unchanged and
+ * be committed by the next `git add`. Sync never keeps anything staged
+ * inside a folder that is not downloaded, so nothing is lost: the files stay
+ * on disk and are judged like any other below. Index only; a path HEAD has
+ * whose file is absent gets its skip-worktree bit back (never "deleted").
+ */
+async function unstageToHead(git: SimpleGit, repoPath: string, folder: string): Promise<void> {
+  const head = (await git.raw(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']).catch(() => '')).trim()
+  if (!head) return // nothing committed yet: nothing can be "not downloaded" either
+  const staged = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', 'HEAD', '--', `:(literal,icase)${folder}/`]))
+    .split('\0').filter(Boolean)
+  if (staged.length === 0) return
+  const inHead = new Map<string, { mode: string; oid: string }>()
+  for (const group of chunks(staged)) {
+    const listed = await git.raw(['ls-tree', '-r', '-z', head, '--', ...group])
+    for (const entry of listed.split('\0')) {
+      const tab = entry.indexOf('\t')
+      if (tab === -1) continue
+      const [mode, , oid] = entry.slice(0, tab).split(' ')
+      inHead.set(entry.slice(tab + 1), { mode, oid })
+    }
+  }
+  const added = staged.filter(f => !inHead.has(f))
+  for (const group of chunks(added)) {
+    await git.raw(['rm', '--cached', '--sparse', '--quiet', '--ignore-unmatch', '--', ...group])
+  }
+  const restored = staged.filter(f => inHead.has(f))
+  for (const group of chunks(restored)) {
+    await git.raw(['update-index', ...group.flatMap(f => {
+      const { mode, oid } = inHead.get(f)!
+      return ['--cacheinfo', `${mode},${oid},${f}`]
+    })])
+  }
+  const absent = restored.filter(f => !fs.existsSync(path.join(repoPath, f)))
+  for (const group of chunks(absent)) {
+    await git.raw(['update-index', '--skip-worktree', '--', ...group])
+  }
+}
+
+/**
  * Move the member's files inside excluded folders to the backup before
  * anything is staged. Returns null when there is nothing to hold back.
  */
@@ -78,6 +121,8 @@ export async function holdBackOutsideCheckout(options: {
   const candidates = new Set<string>()
   const tracked: string[] = []
   for (const folder of folders) {
+    await unstageToHead(git, repoPath, folder)
+
     // New files git would add (not ignored: .personal/, large files and
     // excluded nested repos stay where they are).
     const others = await git.raw(['ls-files', '-z', '--others', '--exclude-standard', '--', `:(literal,icase)${folder}/`])

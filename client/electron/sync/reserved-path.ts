@@ -131,13 +131,21 @@ export async function holdBackReservedPaths(options: {
 }): Promise<ReservedHoldBack | null> {
   const { git, repoPath, backupPath, checkUsable, log } = options
   const raw = await git.raw(['ls-files', '-z', '--others', '--exclude-standard'])
-  const entries = raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, ''))
+  // New files already in the index count as new too: an older app's preview
+  // ran `git add --sparse .`, and a sync that stopped between staging and
+  // committing leaves them staged. Read as "known", they were never checked
+  // and reached the server's [RESERVED_PATH] rejection instead.
+  const head = (await git.raw(['rev-parse', '--verify', '--quiet', 'HEAD^{commit}']).catch(() => '')).trim()
+  const stagedNew = new Set(head
+    ? (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=A', head])).split('\0').filter(Boolean)
+    : [])
+  const entries = [...new Set([...raw.split('\0').filter(Boolean).map(e => e.replace(/\/$/, '')), ...stagedNew])]
   if (entries.length === 0) return null
   // What the company repository already has (files and their folders) is
   // never at or under a private folder: the server refuses that.
   const known = new Set<string>()
   for (const f of (await git.raw(['ls-files', '-z']).catch(() => '')).split('\0')) {
-    if (!f) continue
+    if (!f || stagedNew.has(f)) continue
     const segs = f.split('/')
     for (let i = 1; i <= segs.length; i++) known.add(pathKey(segs.slice(0, i).join('/').normalize('NFC')))
   }
@@ -163,6 +171,10 @@ export async function holdBackReservedPaths(options: {
   const folders = [...new Set(matched.map(m => m.folder))].sort()
   // Metadata first: a crash halfway still leaves a listed, restorable backup.
   writeMetadata(backupPath, { timestamp: options.now.toISOString(), folders, files, note: 'a folder name that cannot be used in the company folder; not shared — save these under another name' })
+  const unstage = files.filter(f => stagedNew.has(f))
+  for (let i = 0; i < unstage.length; i += 200) {
+    await git.raw(['rm', '--cached', '--sparse', '--quiet', '--ignore-unmatch', '--', ...unstage.slice(i, i + 200)])
+  }
   for (const { entry } of matched) {
     moveInto(path.join(repoPath, entry), path.join(backupPath, entry))
     pruneEmptyUp(path.dirname(path.join(repoPath, entry)), repoPath)

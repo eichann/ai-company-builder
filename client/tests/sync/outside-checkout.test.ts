@@ -173,6 +173,29 @@ describe('git:sync files created in a department outside the checkout', { concur
         assert.equal(world.serverFile('開発部/.personal/memo.md'), null)
       })
 
+      scenario('files staged by an older app\'s preview (`git add --sparse .`) are held back all the same', async t => {
+        const { world, a, x } = await create(t, kind)
+        a.write('営業部/提案書.md', 'sales v1 by a\n')
+        ok(await a.sync(), 'a')
+        x.write('営業部/提案書.md', 'AI draft\n').write('営業部/新規.md', 'new\n').write('営業部/新フォルダ/メモ.md', 'memo\n')
+          .write('開発部/設計.md', 'dev v1\n')
+        // What git:preview did before it became read-only: the files are in
+        // the index, so they no longer read as new or as differing from it.
+        x.git(['add', '--sparse', '.'])
+        assert.match(x.git(['-c', 'core.quotepath=false', 'diff', '--cached', '--name-only']), /営業部\/新規\.md/, 'precondition: staged')
+        const out = ok(await x.sync(), 'x')
+        for (const f of ['営業部/新規.md', '営業部/新フォルダ/メモ.md']) {
+          assert.equal(world.serverFile(f), null, `${f} was shared into a department x does not have`)
+        }
+        assert.equal(world.serverFile('営業部/提案書.md')?.toString(), 'sales v1 by a\n', 'the teammate\'s file was replaced on the server')
+        assert.equal(world.serverFile('開発部/設計.md')?.toString(), 'dev v1\n', 'the rest is shared')
+        assertHeldBack(x, out, { '営業部/提案書.md': 'AI draft\n', '営業部/新規.md': 'new\n', '営業部/新フォルダ/メモ.md': 'memo\n' })
+        assert.equal(x.exists('営業部'), false)
+        await settleAndCheck(world)
+        assert.equal(world.serverFile('営業部/提案書.md')?.toString(), 'sales v1 by a\n')
+        assert.equal(x.exists('営業部'), false)
+      })
+
       scenario('nothing created outside the checkout: no backup, no note', async t => {
         const { world, x } = await create(t, kind)
         x.write('開発部/設計.md', 'dev v1\n')
