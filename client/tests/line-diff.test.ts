@@ -80,7 +80,10 @@ test('edge cases', () => {
 
 const lines = (n: number, tag: string) => Array.from({ length: n }, (_, i) => `${tag} line ${i} ` + 'x'.repeat(i % 50))
 
-test('5,000-line documents with scattered edits: fast', () => {
+test('5,000-line documents (scattered edits, all lines replaced, every other line rewritten): diffed within the default budget', () => {
+  const t = performance.now()
+
+  // Scattered edits: both sides come back.
   const base = lines(5000, 'doc')
   const edited = base.slice()
   const r = rng(42)
@@ -89,34 +92,25 @@ test('5,000-line documents with scattered edits: fast', () => {
     if (r() < 0.5) edited.splice(at, 1)
     else edited.splice(at, 0, `inserted ${e}`)
   }
-  const t = performance.now()
-  const diff = computeLineDiff(base.join('\n'), edited.join('\n'))
-  const ms = performance.now() - t
-  assert.ok(diff)
-  assert.deepEqual(diff.filter(d => d.type !== 'add').map(d => d.text), base)
-  assert.deepEqual(diff.filter(d => d.type !== 'del').map(d => d.text), edited)
-  assert.ok(ms < 1000, `took ${ms.toFixed(0)} ms`)
-})
+  const scattered = computeLineDiff(base.join('\n'), edited.join('\n'))
+  assert.ok(scattered)
+  assert.deepEqual(scattered.filter(d => d.type !== 'add').map(d => d.text), base)
+  assert.deepEqual(scattered.filter(d => d.type !== 'del').map(d => d.text), edited)
 
-test('5,000 lines replaced by 5,000 different lines: finishes quickly', () => {
-  const t = performance.now()
-  const diff = computeLineDiff(lines(5000, 'old').join('\n'), lines(5000, 'new').join('\n'))
-  const ms = performance.now() - t
-  assert.ok(diff)
-  assert.equal(diff.filter(d => d.type === 'del').length, 5000)
-  assert.equal(diff.filter(d => d.type === 'add').length, 5000)
-  assert.ok(ms < 2000, `took ${ms.toFixed(0)} ms`)
-})
+  // Every line replaced: the worst distance, still not given up.
+  const replaced = computeLineDiff(lines(5000, 'old').join('\n'), lines(5000, 'new').join('\n'))
+  assert.ok(replaced)
+  assert.equal(replaced.filter(d => d.type === 'del').length, 5000)
+  assert.equal(replaced.filter(d => d.type === 'add').length, 5000)
 
-test('5,000 lines with every other line rewritten: completes within the default budget', () => {
-  const a = lines(5000, 'doc')
-  const b = a.map((l, i) => (i % 2 ? `${l} (edited)` : l))
-  const t = performance.now()
-  const diff = computeLineDiff(a.join('\n'), b.join('\n'))
+  // Every other line rewritten: interleaved, still not given up.
+  const b = base.map((l, i) => (i % 2 ? `${l} (edited)` : l))
+  const interleaved = computeLineDiff(base.join('\n'), b.join('\n'))
+  assert.ok(interleaved)
+  assert.equal(interleaved.filter(d => d.type === 'same').length, 2500)
+
   const ms = performance.now() - t
-  assert.ok(diff)
-  assert.equal(diff.filter(d => d.type === 'same').length, 2500)
-  assert.ok(ms < 2000, `took ${ms.toFixed(0)} ms`)
+  assert.ok(ms < 4000, `took ${ms.toFixed(0)} ms`)
 })
 
 test('pathological size: gives up (null) instead of hanging', () => {

@@ -4,7 +4,6 @@ import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import simpleGit from 'simple-git'
 import {
   GREP_LINE_CHARS, GREP_MAX_PER_FILE, GREP_MAX_TOTAL,
   companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog, trimMatchLine,
@@ -52,16 +51,14 @@ test('grep: per-file and total caps, truncated, the git process stopped early', 
     for (let i = 0; i < 60; i++) files[`営業部/doc${i}.md`] = Array.from({ length: 100 }, (_, n) => `の line ${n}`).join('\n')
     files['総務/x.md'] = 'の\n'
     const repo = initRepo(s, 'repo', files)
-    const t = performance.now()
+    // The time at company size is measured in tests/perf/git-search.perf.test.ts.
     const res = await grepCompany(s.cmd, companySearchScope(repo, '営業部'), 'の')
-    const ms = performance.now() - t
     assert.equal(res.matches.length, GREP_MAX_TOTAL)
     assert.equal(res.truncated, true)
     const perFile = new Map<string, number>()
     for (const m of res.matches) perFile.set(m.file, (perFile.get(m.file) ?? 0) + 1)
     assert.ok([...perFile.values()].every(n => n <= GREP_MAX_PER_FILE))
     assert.ok(res.matches.every(m => m.file.startsWith('営業部/')))
-    assert.ok(ms < 5000, `took ${ms.toFixed(0)} ms`)
 
     const few = await grepCompany(s.cmd, companySearchScope(repo, '総務/'), 'の')
     assert.deepEqual(few, { matches: [{ file: '総務/x.md', line: 1, text: 'の', column: 0 }], truncated: false, timedOut: false })
@@ -231,7 +228,10 @@ test('grep: an aborted search stops', async () => {
   }
 })
 
-test('git log: folder history without --follow, same commits and fields as simple-git gave', async () => {
+// The git:log handler's result shape (folder filter, message with body, field
+// names) is pinned in ipc-git.test.ts; this checks the parser's values, a
+// Japanese folder with a trailing slash, the whole company and the count limit.
+test('git log: folder history without --follow; hash, short hash, author, date, message; whole company with a limit', async () => {
   const s = sandbox()
   try {
     const repo = initRepo(s, 'repo', { 'コンテンツ/a.md': '1\n', 'other/b.md': '1\n' })
@@ -242,15 +242,14 @@ test('git log: folder history without --follow, same commits and fields as simpl
 
     const args = gitLogArgs('コンテンツ/', 50)
     assert.ok(!args.includes('--follow'))
-    const commits = parseGitLog(await simpleGit(repo).env(s.env).raw(args))
-    const legacy = await simpleGit(repo).env(s.env).log({ maxCount: 50, file: 'コンテンツ/' })
-    assert.deepEqual(commits.map(c => c.hash), legacy.all.map(c => c.hash))
+    const commits = parseGitLog(s.git(repo, args))
+    assert.deepEqual(commits.map(c => c.hash), [s.git(repo, ['rev-parse', 'HEAD~1']).trim(), s.git(repo, ['rev-parse', 'HEAD~2']).trim()])
     assert.deepEqual(commits.map(c => c.message), ['second subject\nbody line 1\nbody line 2', 'init'])
     assert.equal(commits[0].hashShort, commits[0].hash.slice(0, 7))
     assert.equal(commits[0].author, 't')
     assert.ok(!Number.isNaN(new Date(commits[0].date).getTime()))
 
-    const whole = parseGitLog(await simpleGit(repo).env(s.env).raw(gitLogArgs('', 2)))
+    const whole = parseGitLog(s.git(repo, gitLogArgs('', 2)))
     assert.deepEqual(whole.map(c => c.message), ['other only', 'second subject\nbody line 1\nbody line 2'])
   } finally {
     s.cleanup()

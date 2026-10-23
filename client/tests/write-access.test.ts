@@ -16,17 +16,16 @@ const BOB: WriteAccess = {
   ],
 }
 
-test('evaluateWrite mirrors the server resolveAccess cases', () => {
+// Whether the app lets a member write a path is compared with the server's push
+// gate in rule-parity-write-access.test.ts (generated companies, NFC/NFD and
+// A–Z spellings). What only the app uses is checked here: the deciding folder
+// named in the refusal (scopePath) and path spellings the chat tools produce.
+test('evaluateWrite names the deciding folder; slashes, backslashes and common prefixes', () => {
   const cases: Array<[string, boolean, string | null]> = [
-    ['総務/x', false, ''], // company read-only applies outside departments
-    ['コンテンツ/ブログ', true, 'コンテンツ'], // department rw overrides company r
-    ['人事部/給与/2026.xlsx', false, '人事部/給与'], // deeper deny overrides department grant
-    ['コンテンツ/受講生情報', false, 'コンテンツ/受講生情報'],
+    ['総務/x', false, ''], // decided by the company root
     ['人事部/評価', true, '人事部'],
-    ['経理部/月次', false, '経理部'],
     ['コンテンツ/受講生情報/添付/a.pdf', false, 'コンテンツ/受講生情報'], // transparent scopes are not listed
     ['/コンテンツ\\受講生情報//', false, 'コンテンツ/受講生情報'], // slashes / backslashes normalised
-    ['コンテンツ/ブログ'.normalize('NFD'), true, 'コンテンツ'], // NFD input matches NFC scope
     ['コンテンツ受講生', false, ''], // a sibling with a common prefix is not a child
   ]
   for (const [path, write, scopePath] of cases) {
