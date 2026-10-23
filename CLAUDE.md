@@ -958,6 +958,22 @@ member may only read used to be rejected at sync and moved to `.backups/`
 - Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in
   the file tree (where read-only starts) and above the open file.
 
+### Rule parity tests (copies that must agree)
+
+Rules that exist as separate copies are held together by tests, not by
+review: `client/tests/rule-parity-write-access.test.ts` (seeded generated
+companies: the chat guard's decision from `/me/write-access` + `/me/scopes` +
+`paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
+gate; `RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
+(path keys, department folder names, skill names, AI instruction files — every
+copy on one corpus; regexes private to a component are read from its source)
+and `server/tests/integration/admin-contract.test.ts` (every endpoint the admin
+calls, checked against `admin/src/lib/api.ts` with the TypeScript compiler,
+`tests/helpers/type-shape.ts`). Known differences are listed in each test
+(`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES`) and must keep occurring: fixing one
+fails the test until its entry is removed. Changing a rule in one copy means
+changing the others in the same PR.
+
 ---
 
 ## Architecture: Private Folders (server, stage 3a)
