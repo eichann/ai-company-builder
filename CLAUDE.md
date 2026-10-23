@@ -178,6 +178,32 @@ import { ... } from '../../shared/types'  // Path inside container
   space with a work budget; past it the view says the diff is too large
   instead of building the old O(m·n) table (25M cells for 5,000 lines).
 
+### IPC characterization tests (client)
+
+`client/tests/ipc-*.test.ts` load the real `client/electron/main.ts` under
+plain Node: `tests/ipc-harness/electron-loader.mjs` (a `node:module` resolve
+hook) maps `electron` to `tests/ipc-harness/fake-electron.ts`, which records
+`ipcMain` handlers, window sends, dialogs and the `local-file` protocol; a
+fake server sits behind global `fetch` (`main-harness.ts`, `loadMain()`; one
+main.ts per test file, everything under one temp dir). No production code
+was changed for this — keep main.ts importable without side effects beyond
+registering handlers (startup stays inside `app.whenReady`).
+
+- `ipc-contract.test.ts` compares the whole IPC surface with
+  `tests/ipc-harness/ipc-inventory.json`: every `ipcMain.handle` / `.on`
+  channel with its parameters, every channel sent to the window, each
+  preload function's call(s) and declared type, and the unmatched ends
+  (handlers without a preload caller, preload functions the renderer never
+  calls — dead-code candidates). Adding, removing or re-wiring a channel
+  fails it on purpose: regenerate with
+  `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and
+  review the JSON diff in the PR.
+- The other files pin handler behaviour that lives in main.ts itself (the
+  allowed-roots check, which refusal each handler applies, result shapes);
+  logic one level down keeps its own tests. Run one file alone:
+  `npx tsx --test tests/ipc-fs.test.ts` (`IPC_HARNESS_VERBOSE=1` prints
+  main.ts's console).
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
