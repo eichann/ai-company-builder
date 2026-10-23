@@ -120,6 +120,31 @@ jobs:
           SYNC_SOAK_MEMBERS: '3'
           SYNC_SOAK_ROUNDS: '8'
 
+  perf-baselines:
+    name: Performance baselines (macOS)
+    # Guards the recent performance wins against order-of-magnitude
+    # regressions: one recursive watcher per company and a lazy file tree
+    # (#151), the capped company search and git log without --follow (#153),
+    # the history store and windowed chat rendering (#154), and the renderer
+    # bundle size. Budgets are ~10x a developer Mac's numbers (runners vary);
+    # every check prints a `[perf] name=value` line, so the measured values
+    # stay in this job's log. Separate from test-client so a flaky timing is
+    # visible as such. macOS like the other client jobs (recursive fs.watch
+    # is FSEvents there, as on members' Macs).
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: ./.github/actions/setup
+      - name: Benchmarks
+        working-directory: client
+        run: npx tsx --test --test-concurrency=1 tests/perf/*.perf.test.ts
+      - name: Renderer bundle size
+        working-directory: client
+        run: |
+          npx vite build
+          node scripts/check-bundle-size.mjs dist
+
   universal-git:
     name: Universal bundled git (macOS)
     # The mac app ships dugite's git as a universal binary merged from the
