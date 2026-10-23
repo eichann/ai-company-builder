@@ -612,7 +612,7 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       const isCustomMessage = commitMessage && commitMessage !== 'Sync from AI Company Builder'
       const finalMessage = isCustomMessage
         ? commitMessage
-        : (await deps.generateCommitMessage(repoPath)) || commitMessage || 'Sync from AI Company Builder'
+        : (await deps.generateCommitMessage(repoPath, { kind: opts.kind })) || commitMessage || 'Sync from AI Company Builder'
       await git.commit(finalMessage)
     }
 

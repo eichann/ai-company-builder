@@ -4,6 +4,7 @@ import { AgentInteractions } from './agent-interactions'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
+import { createCommitMessageGenerator } from './commit-message'
 import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
 import path from 'path'
 import fs from 'fs'
@@ -15,7 +16,7 @@ import { promisify } from 'util'
 const execAsync = promisify(exec)
 import { createAnthropic } from '@ai-sdk/anthropic'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
-import { streamText, generateText } from 'ai'
+import { streamText } from 'ai'
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import type { SimpleGit } from 'simple-git'
 import {
@@ -1520,45 +1521,33 @@ ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, 
   }
 })
 
-// Generate a commit message from staged changes using Claude Code CLI (Haiku)
-async function generateCommitMessage(repoPath: string): Promise<string | null> {
-  try {
-    const appConfig = loadConfig()
-    if (!appConfig.anthropicApiKey) {
-      console.warn('Git sync: No API key configured, skipping commit message generation')
-      return null
-    }
-
+// Sync's commit message (electron/commit-message.ts): written by the AI the
+// member signs in with — Claude Code (`claude -p --model haiku`, isolated),
+// Codex, or the API key — from the staged file list only (name-status +
+// stat, no contents). No AI, a failure or 30 s without an answer → null, and
+// sync commits its fixed message. A private folder's clone uses the API key
+// only, as before.
+const generateCommitMessage = createCommitMessageGenerator({
+  readStaged: async (repoPath) => {
     const git: SimpleGit = createGit(repoPath)
-    const diffStat = await git.diff(['--cached', '--stat'])
-    const diffSummary = await git.diff(['--cached', '--name-status'])
-    if (!diffStat.trim()) return null
-
-    const prompt = `以下のgit diffから、日本語のコミットメッセージを生成してください。
-- 1行目: 変更の要約
-- 変更が多い場合は空行の後に箇条書きで各変更を列挙
-- メッセージのみ出力し、他は何も出力しないでください
-
-${diffSummary}\n\n${diffStat}`
-
-    const anthropic = createAnthropic({ apiKey: appConfig.anthropicApiKey })
-    const result = await generateText({
-      model: anthropic('claude-haiku-4-5-20251001'),
-      prompt,
-      maxOutputTokens: 300,
-    })
-
-    const message = result.text.trim()
-    if (message) {
-      console.log(`Git sync: Generated commit message: ${message.slice(0, 200)}`)
-      return message
-    }
-    return null
-  } catch (err) {
-    console.warn('Git sync: Commit message generation failed:', err)
-    return null
-  }
-}
+    // core.quotePath=false: Japanese names as text, not octal escapes.
+    const stat = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--stat'])
+    const nameStatus = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-status'])
+    return { nameStatus, stat }
+  },
+  settings: () => {
+    const config = loadConfig()
+    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
+  },
+  claudeReady: isClaudeCodeAuthenticated,
+  getCli: getClaudeCodeCliPath,
+  getEnv: getShellEnv,
+  getCwd: () => {
+    const cwd = path.join(app.getPath('userData'), 'commit-message')
+    fs.mkdirSync(cwd, { recursive: true })
+    return cwd
+  },
+})
 
 // Preview changes before sync (read-only, no commit/push)
 ipcMain.handle('git:preview', async (_, repoPath: string) => {
