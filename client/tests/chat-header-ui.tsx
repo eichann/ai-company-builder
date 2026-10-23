@@ -6,9 +6,12 @@ import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
+import { CHOICE_PART_TYPE, parseChoiceQuestions, type ChoicePromptRecord } from '../shared/choice-prompt'
+import { STEER_PART_TYPE, type SteerStatus } from '../shared/steer'
+import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { CodexStatus } from '../shared/agent'
 import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
-import { installElectronAPI } from './ui/fixtures/electron-api'
+import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -19,6 +22,8 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 //   ?agent=codex  Codex instead of Claude Code
 //   ?history=long  two restored tabs with a 240-message conversation (windowed
 //                  rendering, 「以前のメッセージを表示」, code highlighting)
+//   ?turn=manual   the reply streams only what window.__acbChat sends (the
+//                  Playwright UI tests drive it: tests/ui/chat-panel.spec.ts)
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -77,6 +82,8 @@ if (snapshot && agent === 'codex') snapshot = { ...snapshot, provider: 'codex', 
 
 const PORT = 1
 const noop = () => {}
+const interactions = emitter<AgentInteractionRequest>()
+const interactionsClosed = emitter<AgentInteractionRequest>()
 installElectronAPI({
   getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
   getClaudeCodeStatus: async () => ({ available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now }),
@@ -87,6 +94,9 @@ installElectronAPI({
   searchChatSessions: async () => [],
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession : null,
   getAgentInteractions: async () => [],
+  onAgentInteraction: interactions.subscribe,
+  onAgentInteractionClosed: interactionsClosed.subscribe,
+  respondAgentInteraction: async (id, response) => { control.answered(id, response); return true },
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
   saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
@@ -136,12 +146,83 @@ function chatStream(): Response {
   return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } })
 }
 
+// ?turn=manual: the test is the chat server. Each /api/chat request opens a
+// stream that stays open until control.finish(); /api/steer answers with
+// control.steerStatus (and, like the chat server, puts a delivered
+// instruction into the running reply); /api/prompt-suggestion answers with
+// control.suggestion; control.ask() shows a choice card, and answering it
+// puts the record into the reply like the chat server's chunk injector.
+const manual = params.get('turn') === 'manual'
+let current: ReadableStreamDefaultController<Uint8Array> | null = null
+let currentSessionId: string | null = null
+let steerCount = 0
+const control = {
+  requests: [] as Array<{ path: string; body: Record<string, unknown> | null }>,
+  steerStatus: 'delivered' as SteerStatus,
+  suggestion: null as string | null,
+  open: () => current !== null,
+  send(chunk: unknown) { current?.enqueue(sse(chunk)) },
+  text(id: string, delta: string) { control.send({ type: 'text-delta', id, delta }) },
+  finish() {
+    control.send({ type: 'finish-step' })
+    control.send({ type: 'finish', finishReason: 'stop' })
+    current?.close()
+    current = null
+  },
+  ask(toolCallId = 'toolu_ask') {
+    const questions = parseChoiceQuestions([{ question: '提案書はどの形式で作成しますか？', header: '出力形式', multiSelect: false, options: [
+      { label: 'PowerPoint', description: '営業がそのまま編集・投影できます' },
+      { label: 'PDF', description: '配布用。レイアウトが崩れません' },
+    ] }])
+    pendingQuestions.set(toolCallId, questions)
+    interactions.emit({ id: `ask-${toolCallId}`, appSessionId: currentSessionId ?? '', kind: 'choices', agent: 'claude-code', toolCallId, questions })
+  },
+  answers: [] as Array<{ id: string; response: AgentInteractionResponse }>,
+  answered(id: string, response: AgentInteractionResponse) {
+    control.answers.push({ id, response })
+    const toolCallId = id.replace(/^ask-/, '')
+    const questions = pendingQuestions.get(toolCallId) ?? []
+    const record: ChoicePromptRecord = 'choices' in response ? { id: toolCallId, questions, answers: response.choices } : { id: toolCallId, questions, cancelled: 'cancelled' }
+    control.send({ type: CHOICE_PART_TYPE, id: `choice-${toolCallId}`, data: record })
+  },
+}
+const pendingQuestions = new Map<string, ReturnType<typeof parseChoiceQuestions>>()
+Object.assign(window, { __acbChat: control })
+
+function manualStream(signal: AbortSignal | null | undefined): Response {
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      current = controller
+      // 停止 aborts the request, as a real fetch would.
+      signal?.addEventListener('abort', () => {
+        if (current === controller) current = null
+        try { controller.error(new DOMException('The user aborted a request.', 'AbortError')) } catch { /* already closed */ }
+      })
+      control.send({ type: 'start', messageId: `assistant-${control.requests.length}` })
+      control.send({ type: 'start-step' })
+    },
+  })
+  return new Response(body, { headers: { 'content-type': 'text/event-stream', 'x-vercel-ai-ui-message-stream': 'v1' } })
+}
+
 const realFetch = window.fetch.bind(window)
 window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   const url = typeof input === 'string' ? input : input instanceof URL ? input.href : input.url
   if (!url.startsWith(`http://127.0.0.1:${PORT}/`)) return realFetch(input, init)
   const path = new URL(url).pathname
   const json = (value: unknown) => new Response(JSON.stringify(value), { headers: { 'content-type': 'application/json' } })
+  const body = typeof init?.body === 'string' ? JSON.parse(init.body) as Record<string, unknown> : null
+  if (manual) control.requests.push({ path, body })
+  if (manual && path === '/api/chat') {
+    currentSessionId = typeof body?.appSessionId === 'string' ? body.appSessionId : null
+    return manualStream(init?.signal)
+  }
+  if (manual && path === '/api/steer') {
+    const id = `s${++steerCount}`
+    if (control.steerStatus !== 'unavailable') control.send({ type: STEER_PART_TYPE, id: `steer-${id}`, data: { id, text: body?.text } })
+    return json({ status: control.steerStatus, ...(control.steerStatus !== 'unavailable' ? { id } : {}) })
+  }
+  if (path.startsWith('/api/prompt-suggestion/')) return json({ suggestion: control.suggestion })
   if (path === '/api/rate-limits') return json({ rateLimits: snapshot && params.get('preload') !== '0' ? snapshot : null })
   if (path === '/api/chat') return chatStream()
   if (path === '/api/generate-title') return json({ title: '見積書のたたき台' })

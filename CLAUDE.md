@@ -61,8 +61,10 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
 - Pure logic stays in node tests (`tests/*.test.ts`); a UI spec pins only
   what a component split can break: rendering, events, focus, ARIA, what
   stays mounted. Assert through roles and text, not pixels (no snapshots).
-- A new preview page gets a spec, and `smoke.spec.ts` picks it up
-  automatically.
+- The chat specs drive the reply through `window.__acbChat`
+  (`chat-header-ui.html?turn=manual`), the main screen through
+  `window.__acbLayout` (`skill-layout-ui.html`). A new preview page gets a
+  spec, and `smoke.spec.ts` picks it up automatically.
 - `playwright test` starts and stops `vite preview` itself (port 4179).
   `UI_TEST_REUSE=1` reuses one you started (rebuild it after changes);
   stop it when done.
