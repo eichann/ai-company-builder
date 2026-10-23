@@ -21,7 +21,6 @@ import { meRoute } from '../../src/routes/me'
 import { companiesRoute } from '../../src/routes/companies'
 import { departmentsRoute } from '../../src/routes/departments'
 import { gitRoute } from '../../src/routes/git'
-import { sshKeysRoute } from '../../src/routes/ssh-keys'
 import { invitationsRoute } from '../../src/routes/invitations'
 
 // Build test app with routes mounted (mirrors real app structure)
@@ -30,7 +29,6 @@ app.route('/api/me', meRoute)
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
 app.route('/api/git', gitRoute)
-app.route('/api/users/me/ssh-keys', sshKeysRoute)
 app.route('/api', invitationsRoute)
 
 // Helper to make JSON requests
@@ -152,24 +150,6 @@ describe('Auth rejection (401) — unauthenticated requests', () => {
     ])('%s %s no longer exists', async (method, path) => {
       const res = await jsonReq(method, path, method === 'POST' ? { companyId: 'c1' } : undefined)
       expect(res.status).toBe(404)
-    })
-  })
-
-  // --- /api/users/me/ssh-keys ---
-  describe('sshKeysRoute', () => {
-    it('GET /api/users/me/ssh-keys', async () => {
-      const res = await jsonReq('GET', '/api/users/me/ssh-keys')
-      expect(res.status).toBe(401)
-    })
-
-    it('POST /api/users/me/ssh-keys', async () => {
-      const res = await jsonReq('POST', '/api/users/me/ssh-keys', { publicKey: 'ssh-rsa AAAA' })
-      expect(res.status).toBe(401)
-    })
-
-    it('DELETE /api/users/me/ssh-keys/:id', async () => {
-      const res = await jsonReq('DELETE', '/api/users/me/ssh-keys/key-1')
-      expect(res.status).toBe(401)
     })
   })
 
