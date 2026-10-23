@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo, useSyncExternalStore, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import {
   CaretRight,
@@ -21,9 +21,8 @@ import { isPathWithin } from '../../lib/editorTabs'
 import { InputDialog } from '../common/InputDialog'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 import { getFileIcon, FolderIcon } from './FileIcons'
-import { isPerfCutEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
-import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
-import { isReviewSidecarFile, detectReviewStatus, hasUnseenReviews } from './MarkdownReview'
+import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
+import { detectReviewStatus, hasUnseenReviews, isReviewSidecarFile } from './MarkdownReview'
 import { ReadOnlyBadge } from './ReadOnlyBadge'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
@@ -32,16 +31,18 @@ import { NewFolderDialog } from './NewFolderDialog'
 import { usePrivateFolders } from '../../hooks/usePrivateFolders'
 import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
-import { boundaryCrossing, crossingMessage, lastSegment, viewersLabel } from '../../../shared/private-folder-ui'
-
-interface FileEntry {
-  name: string
-  path: string
-  isDirectory: boolean
-  children?: FileEntry[]
-  /** A folder this computer does not download (sparse exclusion): shown as a placeholder. */
-  notDownloaded?: boolean
-}
+import { boundaryCrossing, crossingMessage, lastSegment, viewersLabel, type MyPrivateFolder } from '../../../shared/private-folder-ui'
+import {
+  applyEventsToFileTreeModels,
+  getFileTreeModel,
+  retainFileTreeModels,
+  reviewStatusOfListing,
+  viewOfListing,
+  type FileEntry,
+  type FileTreeIO,
+  type RawDirEntry,
+} from '../../lib/fileTreeModel'
+import { subscribeFileChanges } from '../../lib/fileEvents'
 
 // Allowed file extensions for external drop
 const ALLOWED_DROP_EXTENSIONS = new Set([
@@ -69,6 +70,178 @@ const sortEntries = (entries: FileEntry[]): FileEntry[] =>
     if (!a.isDirectory && b.isDirectory) return 1
     return a.name.localeCompare(b.name)
   })
+
+const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
+
+const treeIO: FileTreeIO = {
+  readDirectory: dir => window.electronAPI.readDirectory(dir),
+  readDirectoryTree: (dir, depth) => window.electronAPI.readDirectoryTree(dir, depth) as Promise<RawDirEntry[]>,
+}
+
+// Every tree model (shown or not) learns about watcher events, so a
+// department visited earlier is up to date when it is shown again. One
+// subscription for the app's lifetime.
+let modelEventsInstalled = false
+function installModelEvents(): void {
+  if (modelEventsInstalled) return
+  modelEventsInstalled = true
+  subscribeFileChanges((changes) => {
+    perfMark('file_tree_panel.fs_change')
+    applyEventsToFileTreeModels(changes)
+  })
+}
+
+type ReviewBadge = 'request' | 'unseen' | 'seen' | null
+
+/** Everything a row does, behind one stable ref so memoised rows never re-render for new callbacks. */
+interface RowActions {
+  click: (entry: FileEntry, e: React.MouseEvent) => void
+  doubleClick: (entry: FileEntry) => void
+  contextMenu: (entry: FileEntry, e: React.MouseEvent) => void
+  keyDown: (entry: FileEntry, e: React.KeyboardEvent) => void
+  dragStart: (entry: FileEntry, e: React.DragEvent) => void
+  dragEnd: () => void
+  dragOver: (entry: FileEntry, e: React.DragEvent) => void
+  dragLeave: (entry: FileEntry, e: React.DragEvent) => void
+  drop: (entry: FileEntry, e: React.DragEvent) => void
+  download: (entry: FileEntry) => void
+  clearSelection: () => void
+}
+
+interface TreeRowProps {
+  entry: FileEntry
+  depth: number
+  isExpanded: boolean
+  isHighlighted: boolean
+  isLoading: boolean
+  isDragOver: boolean
+  isDragSource: boolean
+  showReadOnly: boolean
+  privateRoot: MyPrivateFolder | null
+  review: ReviewBadge
+  downloading: boolean
+  actions: React.MutableRefObject<RowActions>
+}
+
+const TreeRow = memo(function TreeRow({
+  entry, depth, isExpanded, isHighlighted, isLoading, isDragOver, isDragSource,
+  showReadOnly, privateRoot, review, downloading, actions,
+}: TreeRowProps) {
+  // A folder this computer does not download: muted, not expandable, not a
+  // drop target; one click downloads it.
+  if (entry.notDownloaded) {
+    return (
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label={`${entry.name}（未ダウンロード）`}
+        title="このフォルダはこのPCにダウンロードしていません。サーバーにはあります。"
+        onClick={() => actions.current.clearSelection()}
+        onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !downloading) { e.preventDefault(); actions.current.download(entry) } }}
+        onContextMenu={e => actions.current.contextMenu(entry, e)}
+        className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus:ring-1 focus:ring-accent/50 text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
+        style={{ paddingLeft: `${8 + depth * 12}px` }}
+      >
+        <span className="flex-shrink-0 w-3 h-4" />
+        <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+          <FolderSimpleDashed size={14} className="text-gray-400 dark:text-zinc-500" />
+        </span>
+        <span className="truncate" title={entry.name}>{entry.name}</span>
+        <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-2">
+          {downloading ? (
+            <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
+              <SpinnerGap size={11} className="animate-spin" />ダウンロード中…
+            </span>
+          ) : (
+            <>
+              <span className="text-[11px] text-gray-400 dark:text-zinc-500 group-hover:hidden group-focus-within:hidden">未ダウンロード</span>
+              <button
+                type="button"
+                tabIndex={-1}
+                onClick={e => { e.stopPropagation(); actions.current.download(entry) }}
+                className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10 group-hover:flex group-focus-within:flex"
+              >
+                <CloudArrowDown size={12} />ダウンロード
+              </button>
+            </>
+          )}
+        </span>
+      </div>
+    )
+  }
+
+  const FileIc = entry.isDirectory ? null : getFileIcon(entry.name, false)
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      onDragStart={e => actions.current.dragStart(entry, e)}
+      onDragEnd={() => actions.current.dragEnd()}
+      onDragOver={e => actions.current.dragOver(entry, e)}
+      onDragLeave={e => { if (isDragOver) actions.current.dragLeave(entry, e) }}
+      onDrop={e => actions.current.drop(entry, e)}
+      onClick={e => actions.current.click(entry, e)}
+      onDoubleClick={() => actions.current.doubleClick(entry)}
+      onContextMenu={e => actions.current.contextMenu(entry, e)}
+      onKeyDown={e => actions.current.keyDown(entry, e)}
+      className={`
+        w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
+        rounded-md transition-colors outline-none focus:ring-1 focus:ring-accent/50
+        ${isHighlighted
+          ? 'bg-accent/20 text-gray-900 dark:text-zinc-100'
+          : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-white/[0.04] hover:text-gray-900 dark:hover:text-zinc-200'
+        }
+        ${isDragOver && entry.isDirectory ? 'ring-2 ring-accent bg-accent/10' : ''}
+        ${isDragSource ? 'opacity-50' : ''}
+      `}
+      style={{ paddingLeft: `${8 + depth * 12}px` }}
+    >
+      <span className="flex-shrink-0 w-3 h-4 flex items-center justify-center">
+        {entry.isDirectory && (
+          isLoading ? (
+            <SpinnerGap size={10} className="text-gray-400 dark:text-zinc-500 animate-spin" />
+          ) : (
+            <CaretRight
+              size={10}
+              className={`text-gray-400 dark:text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
+            />
+          )
+        )}
+      </span>
+      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
+        {FileIc ? <FileIc size={14} /> : <FolderIcon size={14} isOpen={isExpanded} />}
+      </span>
+      <span className="truncate" title={entry.name}>{entry.name}</span>
+      {privateRoot && (
+        <span
+          className="flex-shrink-0 text-indigo-500 dark:text-indigo-400"
+          title={viewersLabel(privateRoot)}
+          aria-label={`非公開（${privateRoot.viewerCount}人だけが見られます）`}
+          data-private-folder
+        >
+          <LockSimple size={12} weight="fill" />
+        </span>
+      )}
+      {showReadOnly && <ReadOnlyBadge compact />}
+      {/* 依頼バッジ: UIからの依頼ボタンは非表示にしたが、
+          Slack通知連携で review-request を再利用予定のため残してある */}
+      {review === 'request' && (
+        <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
+      )}
+      {review === 'unseen' && (
+        <span className="flex-shrink-0 ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="新しいレビューあり" />
+      )}
+      {review === 'seen' && (
+        <span className="flex-shrink-0 ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" title="レビューあり" />
+      )}
+    </div>
+  )
+})
+
+type TreeRowItem =
+  | { kind: 'entry'; entry: FileEntry; depth: number }
+  | { kind: 'empty'; key: string; depth: number }
 
 export function FileTreePanel({
   rootPath,
@@ -131,30 +304,27 @@ export function FileTreePanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [repoRel, sparse.excludedPaths, sparse.notDownloadedFolderOf])
 
-  const [files, setFiles] = useState<FileEntry[]>([])
-  const [expandedDirs, setExpandedDirs] = useState<Set<string>>(new Set())
-  const [loadedDirs, setLoadedDirs] = useState<Set<string>>(new Set())
-  const [loadingDirs, setLoadingDirs] = useState<Set<string>>(new Set())
-  const [isLoading, setIsLoading] = useState(false)
+  const departmentPath = departmentFolder ? `${rootPath}/${departmentFolder}` : rootPath
+
+  // The tree's data lives in a model per folder (src/lib/fileTreeModel.ts):
+  // cached across department switches, fed by the company's watcher, loaded
+  // lazily (a folder is read when expanded; an event re-reads only its parent).
+  installModelEvents()
+  const model = useMemo(() => getFileTreeModel(departmentPath, treeIO), [departmentPath])
+  const treeVersion = useSyncExternalStore(model.subscribe, model.getVersion)
+  useEffect(() => {
+    if (rootPath) retainFileTreeModels(rootPath)
+  }, [rootPath])
+  useEffect(() => {
+    if (!departmentPath) return
+    perfMark('file_tree_panel.activate')
+    void model.activate()
+    return () => model.deactivate()
+  }, [model, departmentPath])
+
   const [showDotFiles, setShowDotFiles] = useState(true)
-  // Ref to track current expanded dirs without triggering re-renders of loadFiles
-  const expandedDirsRef = useRef<Set<string>>(expandedDirs)
-  expandedDirsRef.current = expandedDirs
-
-  // Cache for loaded children
-  const childrenCache = useRef<Map<string, FileEntry[]>>(new Map())
-  // Review status per directory: dirPath → Map<docName → { hasReview, hasRequest, reviewFileNames }>
-  const reviewStatusRef = useRef<Map<string, Map<string, { hasReview: boolean; hasRequest: boolean; reviewFileNames: string[] }>>>(new Map())
-  const pendingReloadRef = useRef(false)
-  const deferredReloadTimerRef = useRef<number | null>(null)
-
-  // Per-department tree cache to avoid re-reading on tab switch
-  const departmentTreeCache = useRef<Map<string, {
-    files: FileEntry[]
-    children: Map<string, FileEntry[]>
-    expandedDirs: Set<string>
-    loadedDirs: Set<string>
-  }>>(new Map())
+  const [refreshing, setRefreshing] = useState(false)
+  const isLoading = model.initialLoading || refreshing
 
   // Context menu state
   const [contextMenu, setContextMenu] = useState<{
@@ -209,188 +379,31 @@ export function FileTreePanel({
   const [dragSourcePaths, setDragSourcePaths] = useState<Set<string>>(new Set())
   const [dropWarning, setDropWarning] = useState<string | null>(null)
 
-  const departmentPath = departmentFolder ? `${rootPath}/${departmentFolder}` : rootPath
-
   // Determine the target directory for new file/folder creation based on current selection
   const activeParentPath = (() => {
     // The active editor tab may belong to another department (tabs survive
     // department switches): new files then go to this department's folder.
     if (!selectedFilePath || !isPathWithin(selectedFilePath, departmentPath)) return departmentPath
-    // Find if the selected path is a directory (check in expanded dirs or files)
-    const isDir = expandedDirs.has(selectedFilePath) ||
-      files.some(f => f.path === selectedFilePath && f.isDirectory) ||
-      Array.from(childrenCache.current.values()).flat().some(f => f.path === selectedFilePath && f.isDirectory)
-    if (isDir) return selectedFilePath
-    // It's a file — use its parent directory
-    return selectedFilePath.substring(0, selectedFilePath.lastIndexOf('/'))
+    // A folder the tree knows (O(1)) — else a file: use its parent directory.
+    if (model.isDirectory(selectedFilePath)) return selectedFilePath
+    return parentDir(selectedFilePath)
   })()
 
-  // Filter and convert raw tree data from IPC into FileEntry[], populating childrenCache
-  // Only populates cache (loadedDirs) — does NOT set expandedDirs (that's UI state)
-  const processTree = useCallback((
-    rawEntries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>,
-    includeDotFiles: boolean,
-  ): { topLevel: FileEntry[]; firstLevelDirs: Set<string>; loadedDirs: Set<string> } => {
-    const newLoaded = new Set<string>()
-    const firstLevelDirs = new Set<string>()
-
-    const process = (entries: Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, parentPath: string | null, depth: number): FileEntry[] => {
-      const result: FileEntry[] = []
-      // Detect review status for all files in this directory
-      if (parentPath) {
-        const allNames = entries.map(e => e.name)
-        const dirReviewStatus = detectReviewStatus(allNames)
-        reviewStatusRef.current.set(parentPath, dirReviewStatus)
-      }
-
-      for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
-        if (entry.name.startsWith('.') && !includeDotFiles) continue
-        // Hide review sidecar files from the tree
-        if (!entry.isDirectory && isReviewSidecarFile(entry.name)) continue
-
-        const fileEntry: FileEntry = {
-          name: entry.name,
-          path: entry.path,
-          isDirectory: entry.isDirectory,
-        }
-        result.push(fileEntry)
-
-        if (entry.isDirectory) {
-          if (depth === 0) firstLevelDirs.add(entry.path)
-          // Cache children data if available, but don't auto-expand
-          if (entry.children) {
-            const children = sortEntries(process(entry.children as Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>, entry.path, depth + 1))
-            childrenCache.current.set(entry.path, children)
-            newLoaded.add(entry.path)
-          }
-        }
-      }
-      return result
-    }
-
-    const topLevel = sortEntries(process(rawEntries, null, 0))
-    return { topLevel, firstLevelDirs, loadedDirs: newLoaded }
-  }, [])
-
-  // Load single directory (for lazy-loading deeper levels and refresh)
-  const loadSingleDirectory = useCallback(async (dirPath: string, includeDotFiles: boolean): Promise<FileEntry[]> => {
+  /** Re-read the root and every open folder (the refresh button). */
+  const refreshTree = useCallback(async () => {
+    setRefreshing(true)
     try {
-      const entries = await window.electronAPI.readDirectory(dirPath)
-      const result: FileEntry[] = []
-      // Detect review status from all files in directory (including hidden review files)
-      const allNames = entries.map(e => e.name)
-      const dirReviewStatus = detectReviewStatus(allNames)
-      reviewStatusRef.current.set(dirPath, dirReviewStatus)
-
-      for (const entry of entries) {
-        if (entry.name === 'node_modules' || entry.name === '.DS_Store') continue
-        if (entry.name.startsWith('.') && !includeDotFiles) continue
-        if (!entry.isDirectory && isReviewSidecarFile(entry.name)) continue
-        result.push({ name: entry.name, path: entry.path, isDirectory: entry.isDirectory })
-      }
-      return sortEntries(result)
-    } catch {
-      return []
-    }
-  }, [])
-
-  // Load children for a specific directory (lazy loading for depth > 2)
-  const loadChildren = useCallback(async (dirPath: string): Promise<FileEntry[]> => {
-    const cached = childrenCache.current.get(dirPath)
-    if (cached && loadedDirs.has(dirPath)) return cached
-
-    setLoadingDirs(prev => new Set(prev).add(dirPath))
-    try {
-      const children = await loadSingleDirectory(dirPath, showDotFiles)
-      childrenCache.current.set(dirPath, children)
-      setLoadedDirs(prev => new Set(prev).add(dirPath))
-      return children
+      await model.revalidateVisible()
     } finally {
-      setLoadingDirs(prev => {
-        const next = new Set(prev)
-        next.delete(dirPath)
-        return next
-      })
+      setRefreshing(false)
     }
-  }, [loadSingleDirectory, showDotFiles, loadedDirs])
+  }, [model])
 
-  // Track current load request to discard stale results
-  const loadRequestRef = useRef(0)
-
-  // Save cache when department changes (before new load)
-  const prevDepartmentRef = useRef(departmentPath)
-  if (prevDepartmentRef.current !== departmentPath) {
-    departmentTreeCache.current.set(prevDepartmentRef.current, {
-      files,
-      children: new Map(childrenCache.current),
-      expandedDirs: new Set(expandedDirsRef.current),
-      loadedDirs: new Set(loadedDirs),
-    })
-    prevDepartmentRef.current = departmentPath
-  }
-
-  // Load entire tree with single IPC call
-  const loadFiles = useCallback(async (preserveExpandedState = false) => {
-    perfMark('file_tree_panel.load_files.start')
-    const startedAt = performance.now()
-    const requestId = ++loadRequestRef.current
-
-    // Check department cache for instant restore on tab switch
-    if (!preserveExpandedState) {
-      const cached = departmentTreeCache.current.get(departmentPath)
-      if (cached) {
-        setFiles(cached.files)
-        childrenCache.current = new Map(cached.children)
-        setExpandedDirs(cached.expandedDirs)
-        setLoadedDirs(cached.loadedDirs)
-        perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
-        // Background refresh with single IPC call (don't touch expandedDirs — preserve user's state)
-        window.electronAPI.readDirectoryTree(departmentPath, 5).then(rawEntries => {
-          // Discard stale result if department changed since this request
-          if (loadRequestRef.current !== requestId) return
-          const { topLevel, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
-          setFiles(topLevel)
-          // Only update loadedDirs (which dirs have cached children), NOT expandedDirs
-          setLoadedDirs(prev => {
-            const merged = new Set(prev)
-            for (const d of newLoaded) merged.add(d)
-            return merged
-          })
-        })
-        return
-      }
-    }
-
-    if (!preserveExpandedState) {
-      // Only clear cache on full reload (tab switch), not on refresh
-      setIsLoading(true)
-      childrenCache.current.clear()
-      setLoadedDirs(new Set())
-    }
-
-    try {
-      // Single IPC call fetches 2 levels of directory tree
-      const rawEntries = await window.electronAPI.readDirectoryTree(departmentPath, 5)
-      // Discard stale result if department changed since this request
-      if (loadRequestRef.current !== requestId) return
-      const { topLevel, firstLevelDirs, loadedDirs: newLoaded } = processTree(rawEntries, showDotFiles)
-      setFiles(topLevel)
-
-      if (preserveExpandedState) {
-        // Don't change expandedDirs — preserve user's state as-is
-      } else {
-        // Initial load: auto-expand only first-level directories
-        setExpandedDirs(firstLevelDirs)
-      }
-      setLoadedDirs(newLoaded)
-    } finally {
-      perfMeasure('file_tree_panel.load_files.ms', performance.now() - startedAt)
-      if (!preserveExpandedState && loadRequestRef.current === requestId) {
-        setIsLoading(false)
-      }
-    }
-  }, [departmentPath, showDotFiles, processTree])
+  /** Show an app-made change in `dir` (and open it so the new item is visible). */
+  const showChangeIn = useCallback(async (dir: string, open = false) => {
+    if (open && dir !== departmentPath && !model.isExpanded(dir)) await model.expand(dir)
+    await model.invalidate(dir)
+  }, [model, departmentPath])
 
   const downloadFolder = useCallback(async (entry: FileEntry) => {
     const folder = notDownloadedOf(entry.path)
@@ -402,15 +415,12 @@ export function FileTreePanel({
         setDropWarning(result.offline ? 'インターネットにつながっているときにダウンロードできます' : `ダウンロードできませんでした：${result.error ?? ''}`)
         setTimeout(() => setDropWarning(null), 5000)
       } else {
-        childrenCache.current.delete(entry.path)
-        setLoadedDirs(prev => { const n = new Set(prev); n.delete(entry.path); return n })
-        void loadFiles(true)
+        void model.invalidate(parentDir(entry.path))
       }
     } finally {
       setDownloading(prev => { const n = new Set(prev); n.delete(entry.path); return n })
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [notDownloadedOf, sparse])
+  }, [notDownloadedOf, sparse, model])
 
   /** Refuse an action that would write into a folder that is not downloaded (the main process refuses too). */
   const refuseNotDownloaded = useCallback((absTarget: string): boolean => {
@@ -495,128 +505,47 @@ export function FileTreePanel({
     }
 
     if (moved > 0) {
-      loadFiles(true)
+      void showChangeIn(destDir)
     }
-  }, [loadFiles])
+  }, [resolveUniquePath, showChangeIn])
 
-  const deferCountRef = useRef(0)
-  const MAX_DEFER_COUNT = 4 // max ~1 second of deferral (4 × 250ms)
-
-  const requestDeferredReload = useCallback(() => {
-    pendingReloadRef.current = true
-    if (deferredReloadTimerRef.current != null) return
-    deferCountRef.current = 0
-
-    const run = () => {
-      if (!pendingReloadRef.current) {
-        deferredReloadTimerRef.current = null
-        return
-      }
-
-      if (isChatInputRecentlyActive() && deferCountRef.current < MAX_DEFER_COUNT) {
-        deferCountRef.current++
-        perfMark('file_tree_panel.load_files.deferred_for_chat_input')
-        deferredReloadTimerRef.current = window.setTimeout(run, 250)
-        return
-      }
-
-      pendingReloadRef.current = false
-      deferredReloadTimerRef.current = null
-      deferCountRef.current = 0
-      void loadFiles(true)
-    }
-
-    deferredReloadTimerRef.current = window.setTimeout(run, 120)
-  }, [loadFiles])
-
+  // Without the company watcher (perf diagnostics), changes show on refresh only.
   useEffect(() => {
-    return () => {
-      if (deferredReloadTimerRef.current != null) {
-        window.clearTimeout(deferredReloadTimerRef.current)
-      }
-    }
+    if (isPerfCutEnabled('disableWatchers')) perfMark('file_tree_panel.watch.disabled')
   }, [])
 
-  useEffect(() => {
-    loadFiles()
-  }, [loadFiles])
-
-  // File watching
-  useEffect(() => {
-    if (!departmentPath) return
-
-    if (isPerfCutEnabled('disableWatchers')) {
-      perfMark('file_tree_panel.watch.disabled')
-      return
-    }
-
-    perfMark('file_tree_panel.watch.start')
-    window.electronAPI.watchDirectory(departmentPath)
-
-    const unsubscribe = window.electronAPI.onFileChange((data) => {
-      perfMark('file_tree_panel.fs_change')
-      if (isPerfCutEnabled('fsEvents')) {
-        perfMark('file_tree_panel.fs_change.skipped')
-        return
+  // The visible rows, depth-first: entries of expanded folders follow their folder.
+  const rows = useMemo(() => {
+    const out: TreeRowItem[] = []
+    const walk = (dirPath: string, depth: number) => {
+      const raw = model.listing(dirPath)
+      const entries = withPlaceholders(dirPath, raw ? viewOfListing(raw, showDotFiles, isReviewSidecarFile) : [])
+      for (const entry of entries) {
+        out.push({ kind: 'entry', entry, depth })
+        if (!entry.isDirectory || entry.notDownloaded || !model.isExpanded(entry.path)) continue
+        const before = out.length
+        walk(entry.path, depth + 1)
+        if (out.length === before && !model.isLoading(entry.path)) {
+          out.push({ kind: 'empty', key: `${entry.path}\0empty`, depth })
+        }
       }
-      if (!normalizePathSeparators(data.path).startsWith(normalizePathSeparators(departmentPath))) {
-        return
-      }
-
-      // Coalesce fs updates and defer heavy tree reload while user is typing in chat.
-      requestDeferredReload()
-    })
-
-    return () => {
-      unsubscribe()
-      window.electronAPI.unwatchDirectory(departmentPath)
-      perfMark('file_tree_panel.watch.stop')
     }
-  }, [departmentPath, requestDeferredReload])
+    if (departmentPath) walk(departmentPath, 0)
+    return out
+    // treeVersion: the model changed (listings, expanded folders, loading).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [model, treeVersion, departmentPath, showDotFiles, withPlaceholders])
 
   // Flatten visible entries for shift+click range selection
-  const flattenVisibleEntries = useCallback((entries: FileEntry[]): string[] => {
-    const result: string[] = []
-    for (const entry of entries) {
-      result.push(entry.path)
-      if (entry.isDirectory && expandedDirs.has(entry.path)) {
-        const children = childrenCache.current.get(entry.path) || []
-        result.push(...flattenVisibleEntries(children))
-      }
-    }
-    return result
-  }, [expandedDirs])
+  const visiblePaths = useMemo(
+    () => rows.flatMap(r => (r.kind === 'entry' && !r.entry.notDownloaded ? [r.entry.path] : [])),
+    [rows],
+  )
 
-  // Toggle directory expansion with lazy loading
-  const toggleDir = useCallback(async (path: string) => {
-    const isCurrentlyExpanded = expandedDirs.has(path)
-
-    if (isCurrentlyExpanded) {
-      // Collapse
-      setExpandedDirs(prev => {
-        const next = new Set(prev)
-        next.delete(path)
-        return next
-      })
-    } else {
-      // Expand - use cache if available, otherwise load
-      if (!childrenCache.current.has(path) && !loadedDirs.has(path)) {
-        await loadChildren(path)
-      }
-      setExpandedDirs(prev => new Set(prev).add(path))
-    }
-  }, [expandedDirs, loadedDirs, loadChildren])
-
-  const renderFileIcon = (name: string, isDirectory: boolean, isExpanded: boolean) => {
-    const icon = isDirectory
-      ? <FolderIcon size={14} isOpen={isExpanded} />
-      : (() => { const IC = getFileIcon(name, false); return <IC size={14} /> })()
-    return (
-      <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-        {icon}
-      </span>
-    )
-  }
+  // Toggle directory expansion (reads it when never read or out of date)
+  const toggleDir = useCallback((path: string) => {
+    void model.toggle(path)
+  }, [model])
 
   // Context menu handlers
   const handleContextMenu = useCallback((e: React.MouseEvent, entry: FileEntry | null, parentPath: string) => {
@@ -689,7 +618,7 @@ export function FileTreePanel({
       defaultValue: entry.name,
       mode: 'rename',
       targetPath: entry.path,
-      parentPath: entry.path.substring(0, entry.path.lastIndexOf('/')),
+      parentPath: parentDir(entry.path),
     })
     closeContextMenu()
   }, [closeContextMenu, t, refusePrivateRoot])
@@ -749,41 +678,19 @@ export function FileTreePanel({
       await window.electronAPI.renameItem(targetPath, newPath)
     }
 
-    // Invalidate cache and reload
-    childrenCache.current.delete(parentPath)
-    setLoadedDirs(prev => {
-      const next = new Set(prev)
-      next.delete(parentPath)
-      return next
-    })
-
-    // Ensure the parent directory is expanded so the new item is visible
-    if (parentPath !== departmentPath && !expandedDirs.has(parentPath)) {
-      setExpandedDirs(prev => new Set(prev).add(parentPath))
-    }
-
-    if (parentPath === departmentPath) {
-      loadFiles(true)
-    } else {
-      await loadChildren(parentPath)
-    }
+    // Show it at once (the watcher reports it too) and open the parent so the new item is visible.
+    await showChangeIn(parentPath, true)
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
-  }, [inputDialog, departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded, refuseReserved])
+  }, [inputDialog, showChangeIn, refuseNotDownloaded, refuseReserved])
 
   /** 公開 (or inside a private folder) from 「新しいフォルダ…」: on disk, as before. */
   const createPlainFolder = useCallback(async (parentPath: string, name: string) => {
     if (refuseNotDownloaded(`${parentPath}/${name}`) || await refuseReserved(`${parentPath}/${name}`)) { setNewFolder(null); return }
     await window.electronAPI.createDirectory(`${parentPath}/${name}`)
-    childrenCache.current.delete(parentPath)
-    setLoadedDirs(prev => { const next = new Set(prev); next.delete(parentPath); return next })
-    if (parentPath !== departmentPath && !expandedDirs.has(parentPath)) {
-      setExpandedDirs(prev => new Set(prev).add(parentPath))
-    }
-    if (parentPath === departmentPath) loadFiles(true)
-    else await loadChildren(parentPath)
+    await showChangeIn(parentPath, true)
     setNewFolder(null)
-  }, [departmentPath, expandedDirs, loadFiles, loadChildren, refuseNotDownloaded, refuseReserved])
+  }, [showChangeIn, refuseNotDownloaded, refuseReserved])
 
   // Internal drag & drop: confirm when files cross a private folder's edge
   // (public → private: their past versions stay in everyone's history;
@@ -801,7 +708,7 @@ export function FileTreePanel({
         await window.electronAPI.moveItem(sourcePath, destPath)
       }
       setSelectedPaths(new Set())
-      loadFiles(true)
+      await Promise.all([destDir, ...sources.map(parentDir)].map(dir => model.invalidate(dir)))
     }
     const destRel = privateFolders.relativePath(`${destDir}/_`)
     const crossing = destRel === null ? null : sources
@@ -813,7 +720,7 @@ export function FileTreePanel({
     if (!crossing) { await run(); return }
     const msg = crossingMessage(crossing, sources.length, '移動')
     setMoveConfirm({ ...msg, run })
-  }, [privateFolders, refusePrivateRoot, resolveUniquePath, loadFiles, setSelectedPaths, refuseReserved])
+  }, [privateFolders, refusePrivateRoot, resolveUniquePath, setSelectedPaths, refuseReserved, model])
 
   const handleDeleteConfirm = useCallback(async () => {
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
@@ -821,23 +728,13 @@ export function FileTreePanel({
 
     for (const p of paths) {
       await window.electronAPI.deleteItem(p)
-      affectedParents.add(p.substring(0, p.lastIndexOf('/')))
-    }
-
-    // Invalidate cache for all affected parent directories
-    for (const parentPath of affectedParents) {
-      childrenCache.current.delete(parentPath)
-      setLoadedDirs(prev => {
-        const next = new Set(prev)
-        next.delete(parentPath)
-        return next
-      })
+      affectedParents.add(parentDir(p))
     }
 
     setSelectedPaths(new Set())
-    loadFiles(true)
+    await Promise.all([...affectedParents].map(dir => model.invalidate(dir)))
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-  }, [confirmDialog, loadFiles])
+  }, [confirmDialog, model, setSelectedPaths])
 
   // Build context menu items
   const getContextMenuItems = useCallback((entry: FileEntry | null, parentPath: string, snapshot?: Set<string>): ContextMenuItem[] => {
@@ -854,10 +751,7 @@ export function FileTreePanel({
             setSelectedPaths(effectiveSelection)
             const paths = [...effectiveSelection]
             const count = paths.length
-            const hasFolders = paths.some(p =>
-              files.some(f => f.path === p && f.isDirectory) ||
-              Array.from(childrenCache.current.values()).flat().some(f => f.path === p && f.isDirectory)
-            )
+            const hasFolders = paths.some(p => model.isDirectory(p))
             const message = `${count}件のアイテムを削除しますか？` +
               (hasFolders ? ' フォルダを含む場合、中身もすべて削除されます。' : '') +
               ' この操作は取り消せません。'
@@ -940,68 +834,58 @@ export function FileTreePanel({
     )
 
     return items
-  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, closeContextMenu, files, t, downloadFolder])
+  }, [handleNewFile, handleNewFolder, handleRename, handleDelete, handleCopyPath, closeContextMenu, t, downloadFolder, model, setSelectedPaths])
 
-  // A folder this computer does not download: muted, not expandable, not a
-  // drop target; one click downloads it.
-  const renderNotDownloaded = (entry: FileEntry, depth: number) => {
-    const busy = downloading.has(entry.path)
-    return (
-      <div key={entry.path}>
-        <div
-          role="button"
-          tabIndex={0}
-          aria-label={`${entry.name}（未ダウンロード）`}
-          title="このフォルダはこのPCにダウンロードしていません。サーバーにはあります。"
-          onClick={() => setSelectedPaths(new Set())}
-          onKeyDown={e => { if ((e.key === 'Enter' || e.key === ' ') && !busy) { e.preventDefault(); void downloadFolder(entry) } }}
-          onContextMenu={e => handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))}
-          className="group w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm rounded-md outline-none transition-colors focus:ring-1 focus:ring-accent/50 text-gray-400 dark:text-zinc-500 hover:bg-gray-100 dark:hover:bg-white/[0.04]"
-          style={{ paddingLeft: `${8 + depth * 12}px` }}
-        >
-          <span className="flex-shrink-0 w-3 h-4" />
-          <span className="flex-shrink-0 w-4 h-4 flex items-center justify-center">
-            <FolderSimpleDashed size={14} className="text-gray-400 dark:text-zinc-500" />
-          </span>
-          <span className="truncate" title={entry.name}>{entry.name}</span>
-          <span className="ml-auto flex flex-shrink-0 items-center gap-1 pl-2">
-            {busy ? (
-              <span className="flex items-center gap-1 text-[11px] text-gray-500 dark:text-zinc-400">
-                <SpinnerGap size={11} className="animate-spin" />ダウンロード中…
-              </span>
-            ) : (
-              <>
-                <span className="text-[11px] text-gray-400 dark:text-zinc-500 group-hover:hidden group-focus-within:hidden">未ダウンロード</span>
-                <button
-                  type="button"
-                  tabIndex={-1}
-                  onClick={e => { e.stopPropagation(); void downloadFolder(entry) }}
-                  className="hidden items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium text-accent hover:bg-accent/10 group-hover:flex group-focus-within:flex"
-                >
-                  <CloudArrowDown size={12} />ダウンロード
-                </button>
-              </>
-            )}
-          </span>
-        </div>
-      </div>
-    )
-  }
-
-  const renderEntry = (entry: FileEntry, depth: number = 0): JSX.Element => {
-    if (entry.notDownloaded) return renderNotDownloaded(entry, depth)
-    const isExpanded = expandedDirs.has(entry.path)
-    const isFileActive = selectedFilePath === entry.path
-    const isMultiSelected = selectedPaths.has(entry.path)
-    const isHighlighted = isMultiSelected || isFileActive
-    const isLoadingChildren = loadingDirs.has(entry.path)
-    const children = withPlaceholders(entry.path, childrenCache.current.get(entry.path) || [])
-    // 閲覧のみ: badge where read-only starts (a top-level entry, or the parent is writable).
-    const showReadOnly = entry.isDirectory && isReadOnly(entry.path)
-      && (depth === 0 || !isReadOnly(entry.path.substring(0, entry.path.lastIndexOf('/'))))
-    const privateRoot = entry.isDirectory ? privateFolders.privateRootAt(entry.path) : null
-
-    const handleKeyDown = (e: React.KeyboardEvent) => {
+  // Row behaviour behind one stable ref: rows are memoised and never need new callbacks.
+  const rowActions = useRef<RowActions>(null as unknown as RowActions)
+  rowActions.current = {
+    click: (entry, e) => {
+      if (e.shiftKey && lastClickedPath) {
+        // Shift+click: range selection
+        const startIdx = visiblePaths.indexOf(lastClickedPath)
+        const endIdx = visiblePaths.indexOf(entry.path)
+        if (startIdx !== -1 && endIdx !== -1) {
+          const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
+          setSelectedPaths(new Set(visiblePaths.slice(from, to + 1)))
+        }
+      } else if (e.metaKey || e.ctrlKey) {
+        // Cmd/Ctrl+click: toggle individual selection
+        setSelectedPaths(prev => {
+          const next = new Set(prev)
+          if (next.has(entry.path)) {
+            next.delete(entry.path)
+          } else {
+            next.add(entry.path)
+          }
+          return next
+        })
+        setLastClickedPath(entry.path)
+      } else {
+        // Normal click: reset selection
+        setSelectedPaths(new Set())
+        setLastClickedPath(entry.path)
+        if (entry.isDirectory) {
+          toggleDir(entry.path)
+        } else {
+          onSelectFile(entry.path)
+        }
+      }
+    },
+    doubleClick: (entry) => {
+      if (!entry.isDirectory && onDoubleClickFile) onDoubleClickFile(entry.path)
+    },
+    contextMenu: (entry, e) => {
+      if (entry.notDownloaded) {
+        handleContextMenu(e, entry, parentDir(entry.path))
+        return
+      }
+      // If right-clicking on an unselected item while multi-selecting, add it to selection
+      if (selectedPathsRef.current.size > 0 && !selectedPathsRef.current.has(entry.path)) {
+        setSelectedPaths(prev => new Set(prev).add(entry.path))
+      }
+      handleContextMenu(e, entry, parentDir(entry.path))
+    },
+    keyDown: (entry, e) => {
       if (e.key === 'F2') {
         e.preventDefault()
         handleRename(entry)
@@ -1009,199 +893,77 @@ export function FileTreePanel({
         e.preventDefault()
         handleDelete(entry)
       }
-    }
-
-    return (
-      <div key={entry.path}>
-        <div
-          role="button"
-          tabIndex={0}
-          draggable
-          onDragStart={(e) => {
-            // Alt/Option + drag: native drag to external apps (browser, Finder, Slack, etc.)
-            if (e.altKey && !entry.isDirectory) {
-              e.preventDefault()
-              window.electronAPI.startDrag(entry.path)
-              return
-            }
-            // Normal drag: internal tree move
-            const paths = isMultiSelected && selectedPaths.size > 1
-              ? [...selectedPaths]
-              : [entry.path]
-            setDragSourcePaths(new Set(paths))
-            e.dataTransfer.setData('application/x-file-paths', JSON.stringify(paths))
-            e.dataTransfer.effectAllowed = 'move'
-          }}
-          onDragEnd={() => {
-            setDragSourcePaths(new Set())
-            setDragOverPath(null)
-          }}
-          onDragOver={(e) => {
-            if (!entry.isDirectory) return
-            // Internal D&D checks
-            if (dragSourcePaths.size > 0) {
-              if (dragSourcePaths.has(entry.path)) return
-              for (const src of dragSourcePaths) {
-                if (entry.path.startsWith(src + '/')) return
-              }
-            }
-            e.preventDefault()
-            e.stopPropagation()
-            e.dataTransfer.dropEffect = 'move'
-            setDragOverPath(entry.path)
-          }}
-          onDragLeave={(e) => {
-            if (dragOverPath === entry.path) {
-              const rect = e.currentTarget.getBoundingClientRect()
-              const { clientX, clientY } = e
-              if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
-                setDragOverPath(null)
-              }
-            }
-          }}
-          onDrop={async (e) => {
-            e.preventDefault()
-            e.stopPropagation()
-            setDragOverPath(null)
-
-            if (!entry.isDirectory) return
-
-            // External file drop (from Finder etc.)
-            if (e.dataTransfer.files.length > 0 && !e.dataTransfer.getData('application/x-file-paths')) {
-              await handleExternalFileDrop(e.dataTransfer.files, entry.path)
-              return
-            }
-
-            // Internal move
-            const raw = e.dataTransfer.getData('application/x-file-paths')
-            if (!raw) return
-            const sourcePaths: string[] = JSON.parse(raw)
-            await requestMove(sourcePaths, entry.path)
-          }}
-          onClick={(e) => {
-            if (e.shiftKey && lastClickedPath) {
-              // Shift+click: range selection
-              const flat = flattenVisibleEntries(files)
-              const startIdx = flat.indexOf(lastClickedPath)
-              const endIdx = flat.indexOf(entry.path)
-              if (startIdx !== -1 && endIdx !== -1) {
-                const [from, to] = startIdx < endIdx ? [startIdx, endIdx] : [endIdx, startIdx]
-                const rangePaths = flat.slice(from, to + 1)
-                setSelectedPaths(new Set(rangePaths))
-              }
-            } else if (e.metaKey || e.ctrlKey) {
-              // Cmd/Ctrl+click: toggle individual selection
-              setSelectedPaths(prev => {
-                const next = new Set(prev)
-                if (next.has(entry.path)) {
-                  next.delete(entry.path)
-                } else {
-                  next.add(entry.path)
-                }
-                return next
-              })
-              setLastClickedPath(entry.path)
-            } else {
-              // Normal click: reset selection
-              setSelectedPaths(new Set())
-              setLastClickedPath(entry.path)
-              if (entry.isDirectory) {
-                toggleDir(entry.path)
-              } else {
-                onSelectFile(entry.path)
-              }
-            }
-          }}
-          onDoubleClick={() => {
-            if (!entry.isDirectory && onDoubleClickFile) {
-              onDoubleClickFile(entry.path)
-            }
-          }}
-          onContextMenu={(e) => {
-            // If right-clicking on an unselected item while multi-selecting, add it to selection
-            if (selectedPaths.size > 0 && !selectedPaths.has(entry.path)) {
-              setSelectedPaths(prev => new Set(prev).add(entry.path))
-            }
-            handleContextMenu(e, entry, entry.path.substring(0, entry.path.lastIndexOf('/')))
-          }}
-          onKeyDown={handleKeyDown}
-          className={`
-            w-full flex items-center gap-1.5 px-2 py-1 text-left text-sm cursor-pointer
-            rounded-md transition-colors outline-none focus:ring-1 focus:ring-accent/50
-            ${isHighlighted
-              ? 'bg-accent/20 text-gray-900 dark:text-zinc-100'
-              : 'text-gray-600 dark:text-zinc-400 hover:bg-gray-100 dark:hover:bg-white/[0.04] hover:text-gray-900 dark:hover:text-zinc-200'
-            }
-            ${dragOverPath === entry.path && entry.isDirectory ? 'ring-2 ring-accent bg-accent/10' : ''}
-            ${dragSourcePaths.has(entry.path) ? 'opacity-50' : ''}
-          `}
-          style={{ paddingLeft: `${8 + depth * 12}px` }}
-        >
-          <span className="flex-shrink-0 w-3 h-4 flex items-center justify-center">
-            {entry.isDirectory && (
-              isLoadingChildren ? (
-                <SpinnerGap size={10} className="text-gray-400 dark:text-zinc-500 animate-spin" />
-              ) : (
-                <CaretRight
-                  size={10}
-                  className={`text-gray-400 dark:text-zinc-600 transition-transform ${isExpanded ? 'rotate-90' : ''}`}
-                />
-              )
-            )}
-          </span>
-          {renderFileIcon(entry.name, entry.isDirectory, isExpanded)}
-          <span className="truncate" title={entry.name}>{entry.name}</span>
-          {privateRoot && (
-            <span
-              className="flex-shrink-0 text-indigo-500 dark:text-indigo-400"
-              title={viewersLabel(privateRoot)}
-              aria-label={`非公開（${privateRoot.viewerCount}人だけが見られます）`}
-              data-private-folder
-            >
-              <LockSimple size={12} weight="fill" />
-            </span>
-          )}
-          {showReadOnly && <ReadOnlyBadge compact />}
-          {(() => {
-            if (entry.isDirectory) return null
-            const dirPath = entry.path.substring(0, entry.path.lastIndexOf('/'))
-            const dirStatus = reviewStatusRef.current.get(dirPath)
-            const fileStatus = dirStatus?.get(entry.name)
-            if (!fileStatus) return null
-            {/* 依頼バッジ: UIからの依頼ボタンは非表示にしたが、
-                Slack通知連携で review-request を再利用予定のため残してある */}
-            if (fileStatus.hasRequest) {
-              return <span className="flex-shrink-0 ml-auto text-[9px] px-1 rounded bg-amber-500/20 text-amber-400" title="レビュー依頼あり">依頼</span>
-            }
-            if (fileStatus.hasReview) {
-              const unseen = hasUnseenReviews(entry.path, fileStatus.reviewFileNames)
-              return unseen
-                ? <span className="flex-shrink-0 ml-auto w-2 h-2 rounded-full bg-amber-400 animate-pulse" title="新しいレビューあり" />
-                : <span className="flex-shrink-0 ml-auto w-1.5 h-1.5 rounded-full bg-blue-400" title="レビューあり" />
-            }
-            return null
-          })()}
-        </div>
-
-        {entry.isDirectory && isExpanded && (
-          <div>
-            {children.length > 0 ? (
-              children.map(child => renderEntry(child, depth + 1))
-            ) : !isLoadingChildren ? (
-              <div
-                className="text-xs text-gray-400 dark:text-zinc-600 italic"
-                style={{ paddingLeft: `${20 + depth * 12}px` }}
-              >
-                {t('fileTree.emptyFolder')}
-              </div>
-            ) : null}
-          </div>
-        )}
-      </div>
-    )
+    },
+    dragStart: (entry, e) => {
+      // Alt/Option + drag: native drag to external apps (browser, Finder, Slack, etc.)
+      if (e.altKey && !entry.isDirectory) {
+        e.preventDefault()
+        window.electronAPI.startDrag(entry.path)
+        return
+      }
+      // Normal drag: internal tree move
+      const selected = selectedPathsRef.current
+      const paths = selected.has(entry.path) && selected.size > 1 ? [...selected] : [entry.path]
+      setDragSourcePaths(new Set(paths))
+      e.dataTransfer.setData('application/x-file-paths', JSON.stringify(paths))
+      e.dataTransfer.effectAllowed = 'move'
+    },
+    dragEnd: () => {
+      setDragSourcePaths(new Set())
+      setDragOverPath(null)
+    },
+    dragOver: (entry, e) => {
+      if (!entry.isDirectory) return
+      // Internal D&D checks
+      if (dragSourcePaths.size > 0) {
+        if (dragSourcePaths.has(entry.path)) return
+        for (const src of dragSourcePaths) {
+          if (entry.path.startsWith(src + '/')) return
+        }
+      }
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move'
+      setDragOverPath(entry.path)
+    },
+    dragLeave: (_entry, e) => {
+      const rect = e.currentTarget.getBoundingClientRect()
+      const { clientX, clientY } = e
+      if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) {
+        setDragOverPath(null)
+      }
+    },
+    drop: (entry, e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDragOverPath(null)
+      if (!entry.isDirectory) return
+      // External file drop (from Finder etc.)
+      if (e.dataTransfer.files.length > 0 && !e.dataTransfer.getData('application/x-file-paths')) {
+        void handleExternalFileDrop(e.dataTransfer.files, entry.path)
+        return
+      }
+      // Internal move
+      const raw = e.dataTransfer.getData('application/x-file-paths')
+      if (!raw) return
+      const sourcePaths: string[] = JSON.parse(raw)
+      void requestMove(sourcePaths, entry.path)
+    },
+    download: (entry) => { void downloadFolder(entry) },
+    clearSelection: () => setSelectedPaths(new Set()),
   }
 
-  const visibleFiles = withPlaceholders(departmentPath, files)
+  /** The review badge of a file row (from its folder's names; sidecars are hidden). */
+  const reviewBadgeOf = (entry: FileEntry): ReviewBadge => {
+    if (entry.isDirectory) return null
+    const raw = model.listing(parentDir(entry.path))
+    const fileStatus = raw ? reviewStatusOfListing(raw, detectReviewStatus).get(entry.name) : undefined
+    if (!fileStatus) return null
+    if (fileStatus.hasRequest) return 'request'
+    if (fileStatus.hasReview) return hasUnseenReviews(entry.path, fileStatus.reviewFileNames) ? 'unseen' : 'seen'
+    return null
+  }
+
   // 「🔒 非公開：N人だけが見られます」 while the selection (or the department) is inside a private folder.
   const currentPrivate = privateFolders.privateOf(`${activeParentPath}/_`) ?? privateFolders.privateOf(`${departmentPath}/_`)
   const newFolderParentRel = newFolder ? privateFolders.relativePath(newFolder.parentPath) ?? '' : ''
@@ -1229,7 +991,7 @@ export function FileTreePanel({
             {showDotFiles ? <Eye size={14} /> : <EyeSlash size={14} />}
           </button>
           <button
-            onClick={() => loadFiles()}
+            onClick={() => { void refreshTree() }}
             disabled={isLoading}
             className="p-1 rounded hover:bg-gray-200 dark:hover:bg-white/[0.05] text-gray-500 dark:text-zinc-500 hover:text-gray-700 dark:hover:text-zinc-300 transition-colors disabled:opacity-50"
             title={t('fileTree.refresh')}
@@ -1294,12 +1056,45 @@ export function FileTreePanel({
           await requestMove(sourcePaths, departmentPath)
         }}
       >
-        {visibleFiles.length === 0 && !isLoading ? (
+        {rows.length === 0 && !isLoading ? (
           <div className="px-3 py-4 text-center text-xs text-gray-400 dark:text-zinc-600">
             {t('fileTree.noFiles')}
           </div>
         ) : (
-          visibleFiles.map(entry => renderEntry(entry))
+          rows.map(row => {
+            if (row.kind === 'empty') {
+              return (
+                <div
+                  key={row.key}
+                  className="text-xs text-gray-400 dark:text-zinc-600 italic"
+                  style={{ paddingLeft: `${20 + row.depth * 12}px` }}
+                >
+                  {t('fileTree.emptyFolder')}
+                </div>
+              )
+            }
+            const { entry, depth } = row
+            // 閲覧のみ: badge where read-only starts (a top-level entry, or the parent is writable).
+            const showReadOnly = entry.isDirectory && !entry.notDownloaded && isReadOnly(entry.path)
+              && (depth === 0 || !isReadOnly(parentDir(entry.path)))
+            return (
+              <TreeRow
+                key={entry.path}
+                entry={entry}
+                depth={depth}
+                isExpanded={entry.isDirectory && model.isExpanded(entry.path)}
+                isHighlighted={selectedPaths.has(entry.path) || selectedFilePath === entry.path}
+                isLoading={entry.isDirectory && model.isLoading(entry.path)}
+                isDragOver={dragOverPath === entry.path}
+                isDragSource={dragSourcePaths.has(entry.path)}
+                showReadOnly={showReadOnly}
+                privateRoot={entry.isDirectory && !entry.notDownloaded ? privateFolders.privateRootAt(entry.path) : null}
+                review={reviewBadgeOf(entry)}
+                downloading={downloading.has(entry.path)}
+                actions={rowActions}
+              />
+            )
+          })
         )}
       </div>
 

@@ -81,13 +81,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Native drag to external apps
   startDrag: (filePath: string) => ipcRenderer.send('fs:startDrag', filePath),
 
-  // File watching
-  watchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:watch', rootPath),
-  unwatchDirectory: (rootPath: string) => ipcRenderer.invoke('fs:unwatch', rootPath),
+  // File watching: one recursive watcher per open company folder (opened by
+  // SkillCentricLayout when the company opens). Everything else subscribes.
+  watchCompany: (rootPath: string) => ipcRenderer.invoke('fs:watch', rootPath),
+  unwatchCompany: (rootPath: string) => ipcRenderer.invoke('fs:unwatch', rootPath),
   onFileChange: (callback: (data: { type: string; path: string }) => void) => {
     const batchHandler = (_: unknown, changes: Array<{ type: string; path: string }>) => {
       for (const change of changes) callback(change)
     }
+    ipcRenderer.on('fs:changes', batchHandler)
+    return () => ipcRenderer.removeListener('fs:changes', batchHandler)
+  },
+  /** The same events, one call per batch (sent at most every ~100 ms). */
+  onFileChanges: (callback: (changes: Array<{ type: string; path: string }>) => void) => {
+    const batchHandler = (_: unknown, changes: Array<{ type: string; path: string }>) => callback(changes)
     ipcRenderer.on('fs:changes', batchHandler)
     return () => ipcRenderer.removeListener('fs:changes', batchHandler)
   },
@@ -554,9 +561,10 @@ declare global {
       startDrag: (filePath: string) => void
 
       // File watching
-      watchDirectory: (rootPath: string) => Promise<{ success: boolean; error?: string }>
-      unwatchDirectory: (rootPath: string) => Promise<{ success: boolean; error?: string }>
+      watchCompany: (rootPath: string) => Promise<{ success: boolean; error?: string }>
+      unwatchCompany: (rootPath: string) => Promise<{ success: boolean; error?: string }>
       onFileChange: (callback: (data: { type: string; path: string }) => void) => () => void
+      onFileChanges: (callback: (changes: Array<{ type: string; path: string }>) => void) => () => void
 
       // Environment variables
       readEnv: (rootPath: string) => Promise<EnvResult>
