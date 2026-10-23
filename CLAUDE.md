@@ -223,8 +223,16 @@ Admin UI = Can also perform file operations
 4. **Delete department**: Confirm → rm -rf + git add -A → commit → push → delete from DB
 
 Mutations work in the working clone (`data/workdirs/<companyId>`, pulled
-first) under a per-company promise-chain lock (`withCompanyLock`), and all
-git there is async (`execFile`) — no `execFileSync` in request handlers.
+first) under a per-company promise-chain lock (`withCompanyLock`,
+`server/src/lib/company-lock.ts`), and all git there is async (`execFile`) —
+no `execFileSync` in request handlers. Company creation seeds the default
+department folders the same way (async, under the lock, before the 201;
+`gitAsync` with `timeoutMs`: 60 s per local step, 300 s for the push, which
+kills git's whole process group — the hook included — and fails the seeding,
+company still created). `tests/security/no-exec-sync.test.ts` refuses
+`execFileSync` / `spawnSync` / `execSync` anywhere in `server/src` outside an
+allow-list (today only startup-time `configureBareRepo` in
+`lib/git-server/index.ts`).
 
 ---
 

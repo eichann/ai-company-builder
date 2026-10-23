@@ -3,7 +3,10 @@
  *
  * execSync passes strings through /bin/sh, allowing command injection
  * via backticks, $(), and other shell metacharacters.
- * All git/shell operations must use execFileSync (no shell interpretation).
+ * All git/shell operations must use execFile / spawn (no shell
+ * interpretation) — and asynchronously: the second suite below refuses
+ * execFileSync / spawnSync / execSync anywhere in src/ outside an explicit
+ * allow-list of startup-time code.
  */
 import { describe, it, expect } from 'vitest'
 import { readFileSync } from 'fs'
@@ -105,5 +108,64 @@ describe('No execSync in server code', () => {
     const content = readFileSync(join(ROUTES_DIR, 'departments.ts'), 'utf-8')
       .split('\n').filter(line => !line.trim().startsWith('//')).join('\n')
     expect(content).not.toMatch(/\b(execFileSync|spawnSync|execSync)\b/)
+  })
+})
+
+/**
+ * Files (relative to src/) allowed to run a synchronous child process, each
+ * with the reason. Nothing reachable from a request handler belongs here.
+ */
+const SYNC_CHILD_PROCESS_ALLOWED: Record<string, string> = {
+  // configureBareRepo / configureAllBareRepos: run once at startup
+  // (index.ts, before the server listens) and by tests. Company creation uses
+  // the async initBareRepo / configureBareRepoAsync.
+  'lib/git-server/index.ts': 'startup-time repository configuration',
+}
+
+function withoutComments(source: string): string {
+  return source
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .map(line => line.replace(/(^|[^:'"`])\/\/.*$/, '$1'))
+    .join('\n')
+}
+
+describe('No synchronous child process in server code', () => {
+  // The server is one process: request handlers, every member's git-http
+  // fetch/push, login and the admin panel share its event loop. A
+  // synchronous child process blocks all of them for as long as it runs —
+  // company creation's execFileSync push waited on the pre-receive checker
+  // with no limit at all.
+  it('no source file runs execFileSync / spawnSync / execSync outside the allow-list', () => {
+    const violations: string[] = []
+    for (const filePath of getAllSrcFiles(SRC_DIR)) {
+      const relative = filePath.replace(SRC_DIR + '/', '')
+      if (relative in SYNC_CHILD_PROCESS_ALLOWED) continue
+      const lines = withoutComments(readFileSync(filePath, 'utf-8')).split('\n')
+      lines.forEach((line, i) => {
+        if (/\b(execFileSync|spawnSync|execSync)\b/.test(line)) violations.push(`${relative}:${i + 1}: ${line.trim()}`)
+      })
+    }
+    expect(violations).toEqual([])
+  })
+
+  it('every allow-listed file still exists and still needs its entry', () => {
+    for (const relative of Object.keys(SYNC_CHILD_PROCESS_ALLOWED)) {
+      const content = withoutComments(readFileSync(join(SRC_DIR, relative), 'utf-8'))
+      expect(content, `${relative} no longer runs a synchronous child process: remove it from the allow-list`)
+        .toMatch(/\b(execFileSync|spawnSync|execSync)\b/)
+    }
+  })
+
+  it('the synchronous repository setup is not called from request handlers', () => {
+    // initBareRepo is async; configureBareRepo (sync) is for startup only
+    const violations: string[] = []
+    for (const filePath of getRouteFiles()) {
+      const lines = withoutComments(readFileSync(filePath, 'utf-8')).split('\n')
+      lines.forEach((line, i) => {
+        if (/\bconfigureBareRepo\s*\(/.test(line)) violations.push(`${filePath.replace(ROUTES_DIR + '/', '')}:${i + 1}`)
+      })
+    }
+    expect(violations).toEqual([])
   })
 })
