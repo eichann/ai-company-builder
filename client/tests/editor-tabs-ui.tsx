@@ -10,6 +10,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { TabbedEditorPanel } from '../src/components/skill-ui/TabbedEditorPanel'
 import { tabDepartmentLabels } from '../src/lib/editorTabs'
+import { useAppStore } from '../src/stores/appStore'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -38,6 +39,9 @@ Object.assign(window, {
   },
 })
 
+// The open company, as in the app (the overwrite backup goes under its folder).
+useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+
 // What the AI (or a sync pull) does to the open file, as the watcher reports it.
 // ?view=external adds the buttons; type in the editor first to have unsaved edits.
 function externalEdit(p: string) {
@@ -48,7 +52,7 @@ function externalDelete(p: string) {
   delete files[p]
   emitChanges?.([{ type: 'unlink', path: p }])
 }
-Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete })
+Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files })
 
 export function Preview() {
   const [dept, setDept] = useState(params.get('dept') ?? 'sales')

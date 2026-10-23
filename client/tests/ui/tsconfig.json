@@ -1,0 +1,14 @@
+{
+  // Type-checks the Playwright UI tests and the preview pages they drive
+  // (`npx tsc -p tests/ui`, run by the "Renderer UI tests" CI job).
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  "include": [
+    "./**/*.ts",
+    "../*-ui.tsx",
+    // Declares Window['electronAPI'] (the typed fake in fixtures/electron-api.ts).
+    "../../electron/preload.ts"
+  ]
+}

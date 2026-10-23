@@ -13,6 +13,8 @@ export default tseslint.config(
       'release',
       'out',
       'node_modules',
+      'test-results',
+      'playwright-report',
       '**/*.tsbuildinfo',
     ],
   },

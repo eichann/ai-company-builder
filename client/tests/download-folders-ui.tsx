@@ -115,6 +115,12 @@ Object.assign(window, {
         for (const fn of progressListeners) fn({ repoPath, receivedBytes: Math.round((total * i) / Math.max(steps, 20)) })
       }
       excluded = [...next]
+      // What git checks out: the downloaded folders appear on the fake disk.
+      for (const rel of downloading) {
+        const dir = `${ROOT}/${rel.slice(0, rel.lastIndexOf('/'))}`
+        const name = rel.slice(rel.lastIndexOf('/') + 1)
+        if (rel.includes('/') && DISK[dir] && !DISK[dir].some(e => e.name === name)) DISK[dir].push({ name, isDirectory: true })
+      }
       return { success: true, enabled: next.length > 0, excluded: [...next] }
     },
     onSparseProgress: (fn: (d: { repoPath: string; receivedBytes: number }) => void) => { progressListeners.add(fn); return () => progressListeners.delete(fn) },

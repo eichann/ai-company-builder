@@ -4,6 +4,9 @@ node_modules/
 
 # Build outputs
 dist/
+# Playwright UI tests (client/tests/ui)
+client/test-results/
+client/playwright-report/
 dist-electron/
 out/
 *.tsbuildinfo

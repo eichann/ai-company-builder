@@ -1,4 +1,3 @@
-/* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -7,6 +6,9 @@ import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
+import type { CodexStatus } from '../shared/agent'
+import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
+import { installElectronAPI } from './ui/fixtures/electron-api'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -75,33 +77,26 @@ if (snapshot && agent === 'codex') snapshot = { ...snapshot, provider: 'codex', 
 
 const PORT = 1
 const noop = () => {}
-const api: Record<string, unknown> = {
+installElectronAPI({
   getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
-  getClaudeCodeStatus: async () => ({ available: true, authenticated: true }),
+  getClaudeCodeStatus: async () => ({ available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now }),
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
-  getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }),
-  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] : [],
+  getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
+  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
-  getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() : null,
+  getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession : null,
   getAgentInteractions: async () => [],
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
-  saveChatSession: async () => ({ status: 'saved', revision: 1 }),
-  flushChatSession: () => ({ status: 'saved', revision: 1 }),
+  saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
+  flushChatSession: () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
   voiceInput: {
     capabilities: async () => ({ available: false, reason: 'プレビューでは音声入力を使えません', retryable: false }),
-    devices: async () => ({ devices: [] }),
+    devices: async () => ({ ok: true, devices: [] }),
     start: async () => {}, stop: async () => {}, cancel: async () => {},
     onEvent: () => noop, onLevel: () => noop, onState: () => noop,
-  },
-}
-;(window as unknown as { electronAPI: unknown }).electronAPI = new Proxy(api, {
-  get(target, name: string) {
-    if (name in target) return target[name]
-    if (name.startsWith('on')) return () => noop
-    return async () => undefined
-  },
+  } as never,
 })
 
 // --- Mocked chat server ------------------------------------------------------

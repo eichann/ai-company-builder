@@ -16,7 +16,8 @@
     "predev": "node scripts/build-speech.mjs",
     "handoff:probe": "tsx scripts/handoff/run.ts",
     "handoff:probe-absence": "tsx scripts/handoff/probe-absence.ts",
-    "test:handoff": "tsx --test tests/handoff.test.ts"
+    "test:handoff": "tsx --test tests/handoff.test.ts",
+    "test:ui": "playwright test"
   },
   "build": {
     "appId": "com.ai-company-builder.client",
@@ -115,6 +116,7 @@
   },
   "devDependencies": {
     "@eslint/js": "^9.39.2",
+    "@playwright/test": "1.63.0",
     "@types/react": "^18.3.3",
     "@types/react-dom": "^18.3.0",
     "@types/react-syntax-highlighter": "^15.5.13",
