@@ -1,10 +1,25 @@
 // The real ChatPanel (tests/chat-header-ui.tsx) with a mocked preload API and
 // a mocked chat server. Pure parts are pinned elsewhere — message window
 // arithmetic and markdown blocks (chat-rendering.test.ts), tool-row grouping
-// (tool-rows.test.ts), meter view (rate-limit-meter.test.ts). These tests pin how ChatPanel wires them
+// (tool-rows.test.ts), meter view (rate-limit-meter.test.ts), steering and
+// choice protocols (steering.test.ts, choice-prompt.test.ts), suggestion rules
+// (prompt-suggestion.test.ts). These tests pin how ChatPanel wires them
 // together on screen, which is what the ChatPanel split (R3) can break.
 import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
+
+type Control = {
+  requests: Array<{ path: string; body: Record<string, unknown> | null }>
+  steerStatus: 'delivered' | 'not-delivered' | 'unavailable'
+  suggestion: string | null
+  open(): boolean
+  send(chunk: unknown): void
+  text(id: string, delta: string): void
+  finish(): void
+  ask(toolCallId?: string): void
+  answers: Array<{ id: string; response: unknown }>
+}
+declare global { interface Window { __acbChat: Control } }
 
 const input = (page: Page) => page.locator('.cm-content[role="textbox"]').locator('visible=true')
 const typed = (page: Page) => expect.poll(() => input(page).evaluate(content => {
@@ -17,6 +32,9 @@ async function send(page: Page, text: string) {
   await page.keyboard.insertText(text)
   await page.keyboard.press('Meta+Enter')
 }
+const chat = async <T>(page: Page, fn: (control: Control) => T) => (await page.evaluateHandle(() => window.__acbChat)).evaluate(fn)
+const paths = (page: Page) => chat(page, c => c.requests.map(r => r.path))
+const turnStarted = (page: Page) => expect.poll(() => chat(page, c => c.open())).toBe(true)
 
 test.describe('a running turn', () => {
   test('Claude Code: subagent row with its live progress line, usage meter, stop button, model locked', async ({ page }) => {
@@ -48,6 +66,116 @@ test.describe('a running turn', () => {
     await openPreview(page, 'chat-header', { limits: 'unknown' })
     await expect(page.getByRole('banner').getByRole('button', { name: '利用上限: 情報なし' })).toBeVisible()
   })
+
+  test('streaming markdown: finished blocks keep their DOM nodes while only the tail grows', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '手順を書いて')
+    await turnStarted(page)
+    await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '## 手順\n\n最初に資料を集めます。\n\n') })
+    const first = page.getByText('最初に資料を集めます。')
+    await expect(first).toBeVisible()
+    await first.evaluate(element => { (element as HTMLElement & { __acbMark?: boolean }).__acbMark = true })
+    await chat(page, c => c.text('t1', '```ts\nconst total = 1'))
+    await expect(page.locator('code', { hasText: 'const total = 1' })).toBeVisible()
+    await chat(page, c => c.text('t1', '2\n```\n\n次に見積書を作ります。'))
+    await expect(page.getByText('次に見積書を作ります。')).toBeVisible()
+    await expect(page.locator('code', { hasText: 'const total = 12' })).toBeVisible()
+    expect(await first.evaluate(element => (element as HTMLElement & { __acbMark?: boolean }).__acbMark === true),
+      'the first paragraph was not re-mounted while the reply streamed').toBe(true)
+    await chat(page, c => { c.send({ type: 'text-end', id: 't1' }); c.finish() })
+    await expect(page.getByRole('button', { name: '停止' })).toHaveCount(0)
+  })
+})
+
+test.describe('instructions while the AI works', () => {
+  test('delivered: shown inside the running reply, nothing waits, the turn keeps running', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '見積書を作って')
+    await turnStarted(page)
+    await send(page, '価格表は10月版で')
+    await expect(page.getByText('作業中に追加した指示')).toBeVisible()
+    await expect(page.getByText('価格表は10月版で')).toBeVisible()
+    await expect(page.getByText(/応答が終わったら送ります/)).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '停止' })).toBeVisible()
+    expect((await chat(page, c => c.requests.filter(r => r.path === '/api/steer').map(r => r.body)))).toEqual([
+      expect.objectContaining({ text: '価格表は10月版で' }),
+    ])
+  })
+
+  for (const steerStatus of ['unavailable', 'not-delivered'] as const) {
+    test(`${steerStatus}: waits above the input and goes out as the next message when the turn ends`, async ({ page }) => {
+      await openPreview(page, 'chat-header', { turn: 'manual' })
+      await page.evaluate(status => { window.__acbChat.steerStatus = status }, steerStatus)
+      await send(page, '見積書を作って')
+      await turnStarted(page)
+      await send(page, '価格表は10月版で')
+      const waiting = page.getByRole('listitem').filter({ hasText: '応答が終わったら送ります' })
+      await expect(waiting).toContainText('価格表は10月版で')
+      await chat(page, c => c.finish())
+      await expect(waiting).toHaveCount(0)
+      // An instruction the agent took but never read leaves the reply: it is sent again as a message.
+      await expect(page.getByText('作業中に追加した指示')).toHaveCount(0)
+      await expect.poll(() => paths(page)).toEqual(expect.arrayContaining(['/api/chat', '/api/steer']))
+      await expect.poll(async () => (await paths(page)).filter(p => p === '/api/chat').length).toBe(2)
+      await expect(page.getByText('価格表は10月版で')).toBeVisible()
+    })
+  }
+
+  test('a waiting message can be taken back into the input; after a stop, waiting messages return to the input', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await chat(page, c => { c.steerStatus = 'unavailable' })
+    await send(page, '見積書を作って')
+    await turnStarted(page)
+    await send(page, '一つ目')
+    const waiting = page.getByRole('listitem').filter({ hasText: '応答が終わったら送ります' })
+    await waiting.getByRole('button', { name: '取り消す' }).click()
+    await expect(waiting).toHaveCount(0)
+    await typed(page).toBe('一つ目')
+
+    await page.keyboard.press('Meta+Enter')
+    await expect(waiting).toContainText('一つ目')
+    await page.getByRole('banner').getByRole('button', { name: '停止' }).click()
+    await expect(waiting).toHaveCount(0)
+    await typed(page).toBe('一つ目')
+    expect((await paths(page)).filter(p => p === '/api/chat')).toHaveLength(1)
+  })
+})
+
+test('a next-prompt suggestion is asked for after a finished turn and offered as ghost text', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await chat(page, c => { c.suggestion = 'はい、本文まで書いてください' })
+  await send(page, '骨子を作って')
+  await turnStarted(page)
+  await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '骨子です。'); c.send({ type: 'text-end', id: 't1' }) })
+  // Not while the AI works.
+  await expect(page.locator('.cm-ghost-suggestion')).toHaveCount(0)
+  await chat(page, c => c.finish())
+  await expect(page.locator('.cm-ghost-suggestion')).toHaveText('はい、本文まで書いてください')
+  expect((await paths(page)).some(p => p.startsWith('/api/prompt-suggestion/'))).toBe(true)
+})
+
+test('a choice question waits above the input of its own conversation, survives a tab switch, and is answered in place', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await send(page, '提案書を作って')
+  await turnStarted(page)
+  await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '確認させてください。'); c.send({ type: 'text-end', id: 't1' }); c.ask() })
+  const card = page.getByRole('region', { name: 'Claudeからの質問' }).locator('visible=true')
+  await expect(card).toBeVisible()
+
+  // Another conversation does not show it; coming back does, and the reply kept streaming meanwhile.
+  const sidebar = page.getByRole('complementary', { name: '相談一覧' })
+  await sidebar.getByRole('button', { name: '新しい相談', exact: true }).click()
+  await expect(card).toHaveCount(0)
+  await chat(page, c => { c.send({ type: 'text-start', id: 't2' }); c.text('t2', '（回答をお待ちしています）'); c.send({ type: 'text-end', id: 't2' }) })
+  await sidebar.getByRole('button', { name: /^提案書を作って/ }).click()
+  await expect(card).toBeVisible()
+  await expect(page.getByText('（回答をお待ちしています）')).toBeVisible()
+
+  await card.getByRole('radio', { name: /^PDF/ }).check()
+  await card.getByRole('button', { name: '回答する' }).click()
+  await expect(card).toHaveCount(0)
+  expect(await chat(page, c => c.answers)).toEqual([{ id: 'ask-toolu_ask', response: { choices: [{ selected: ['PDF'] }] } }])
+  await expect(page.getByText('選択肢の質問 · 回答済み')).toBeVisible()
 })
 
 test.describe('a long restored conversation', () => {
