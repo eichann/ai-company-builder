@@ -91,9 +91,7 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
 
   // A company id is one path segment of the URL, never more.
   await h.invoke('api:getDepartments', '../me?x=1')
-  await h.invoke('api:getCompany', 'a/b')
-  assert.equal(h.server.requests.at(-2)!.path, '/api/companies/..%2Fme%3Fx%3D1/departments')
-  assert.equal(h.server.requests.at(-1)!.path, '/api/companies/a%2Fb')
+  assert.equal(h.server.requests.at(-1)!.path, '/api/companies/..%2Fme%3Fx%3D1/departments')
 
   assert.deepEqual(await h.invoke('auth:signOut'), { success: true })
   assert.match(h.server.to('/api/auth/sign-out')[0].headers.get('Cookie') ?? '', /tok\.sig/)

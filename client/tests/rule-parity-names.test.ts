@@ -10,8 +10,7 @@
 //                              rules foldAsciiCase (bytewise, latin1 — by design)
 //   department folder names    server routes/departments.ts, admin lib/folder-name.ts,
 //                              client NewFolderDialog.tsx
-//   skill folder names         client NewSkillWizard.tsx, CopySkillModal.tsx,
-//                              src/lib/skill-tools.ts
+//   skill folder names         client NewSkillWizard.tsx, CopySkillModal.tsx
 //   AI instruction files       client write-guard.ts vs push-check rules.ts / policy.ts
 //
 // Intended differences are pinned explicitly (and explained) so that a
@@ -30,7 +29,6 @@ import { pathKey as serverPathKey } from '../../server/src/lib/private-folders'
 import { instructionFileAllowed, reservedKey } from '../../server/src/lib/push-check/policy'
 import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE } from '../../server/src/lib/push-check/rules'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
-import { skillFolderNameSchema } from '../src/lib/skill-tools'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
 
 // admin/ is a CommonJS-typed package: tsx exposes its named exports on `default`.
@@ -141,23 +139,16 @@ const SKILL_NAMES: Array<[string, boolean]> = [
   ['スキル', false], ['ｓｋｉｌｌ', false], ['skill/sub', false], ['café', false],
 ]
 
-test('skill folder names: the wizard, the copy dialog and the AI tool schema agree', () => {
+test('skill folder names: the wizard and the copy dialog agree', () => {
   const copies: Record<string, (s: string) => boolean> = {
     'NewSkillWizard.tsx isValidFolderName': (s) => regexFromSource('client/src/components/skill-ui/NewSkillWizard.tsx',
       /function isValidFolderName\(name: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(name\)/).test(s),
     'CopySkillModal.tsx isValidFolderName': (s) => regexFromSource('client/src/components/skill-ui/CopySkillModal.tsx',
       /function isValidFolderName\(name: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(name\)/).test(s),
-    'skill-tools.ts skillFolderNameSchema': (s) => skillFolderNameSchema.safeParse(s).success,
   }
   for (const [name, expected] of SKILL_NAMES) {
     for (const [copy, accepts] of Object.entries(copies)) assert.equal(accepts(name), expected, `${copy}(${JSON.stringify(name)})`)
   }
-  // Intended difference: only the schema caps the length (50). The dialogs
-  // generate names cut to 50 characters, but a typed 51-character name passes them.
-  const long = 'a'.repeat(51)
-  assert.equal(skillFolderNameSchema.safeParse(long).success, false)
-  assert.equal(regexFromSource('client/src/components/skill-ui/NewSkillWizard.tsx',
-    /function isValidFolderName\(name: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(name\)/).test(long), true)
 })
 
 // ---------------------------------------------------------------------------

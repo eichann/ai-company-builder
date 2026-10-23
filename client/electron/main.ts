@@ -870,10 +870,6 @@ ipcMain.handle('fs:unwatch', async (_, rootPath: string) => {
   }
 })
 
-ipcMain.handle('app:getDocumentsPath', () => {
-  return app.getPath('documents')
-})
-
 // .env file management
 interface EnvVars {
   [key: string]: string
@@ -994,10 +990,6 @@ ipcMain.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-ke
   return true
 })
 
-ipcMain.handle('config:isClaudeCodeAvailable', () => {
-  return isClaudeCodeAuthenticated()
-})
-
 ipcMain.handle('config:getClaudeCodeStatus', () => {
   const status = checkClaudeCodeStatus(true) // force refresh when explicitly requested
   return status
@@ -1046,29 +1038,6 @@ ipcMain.handle('config:validateServerUrl', async (_, url: string) => {
     const message = error instanceof Error ? error.message : 'Unknown error'
     return { valid: false, error: `Could not connect: ${message}` }
   }
-})
-
-// DocBase cookie for image proxy
-ipcMain.handle('config:getDocbaseCookie', () => {
-  const config = loadConfig()
-  return config.docbaseCookie || null
-})
-
-ipcMain.handle('config:setDocbaseCookie', (_, cookie: string) => {
-  const config = loadConfig()
-  config.docbaseCookie = cookie
-  saveConfig(config)
-  // Apply immediately to current session
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
-      { urls: ['https://image.docbase.io/*'] },
-      (details, callback) => {
-        details.requestHeaders['Cookie'] = cookie
-        callback({ requestHeaders: details.requestHeaders })
-      }
-    )
-  }
-  return true
 })
 
 const agentInteractions = new AgentInteractions((owner, event, request) => {
@@ -1357,25 +1326,6 @@ ipcMain.handle('api:createCompany', async (_, name: string) => {
     return data
   } catch (error) {
     console.error('Create company error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipcMain.handle('api:getCompany', async (_, companyId: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}`, {
-      headers: {
-        'Cookie': authCookies.join('; '),
-      },
-    })
-
-    const data = await response.json()
-    if (!response.ok) {
-      return { success: false, error: data.error || 'Failed to fetch company' }
-    }
-    return data
-  } catch (error) {
-    console.error('Get company error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
@@ -2252,32 +2202,6 @@ ipcMain.handle('git:folderSizes', async (_, repoPath: string, companyId: string,
     return { success: true, ...view, folders: [...view.folders, ...privateNodes] }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Check if sparse checkout is enabled
-ipcMain.handle('git:isSparseCheckout', async (_, repoPath: string) => {
-  try {
-    const git = createGit(validatePath(repoPath))
-    const config = await git.raw(['config', '--get', 'core.sparseCheckout'])
-    return { enabled: config.trim() === 'true' }
-  } catch {
-    return { enabled: false }
-  }
-})
-
-// List top-level directories from remote (includes sparse-excluded ones)
-ipcMain.handle('git:listRemoteDirectories', async (_, repoPath: string) => {
-  try {
-    const git = createGit(validatePath(repoPath))
-    const result = await git.raw(['ls-tree', '-d', '--name-only', 'origin/main'])
-    return {
-      success: true,
-      directories: result.split('\n').filter(d => d && !d.startsWith('.'))
-    }
-  } catch (error) {
-    console.error('List remote directories error:', error)
-    return { success: false, directories: [], error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
 
@@ -3159,19 +3083,6 @@ ipcMain.handle('tools:stop', async (_, toolPath: string) => {
     console.error('Tool stop error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
-})
-
-// List running tools
-ipcMain.handle('tools:list-running', async () => {
-  const tools: Array<{ toolPath: string; port: number; pid?: number }> = []
-  for (const [toolPath, tool] of runningTools) {
-    tools.push({
-      toolPath,
-      port: tool.port,
-      pid: tool.process.pid,
-    })
-  }
-  return { success: true, tools }
 })
 
 // Open URL in external browser

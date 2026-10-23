@@ -36,7 +36,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // Companies API
   getCompanies: () => ipcRenderer.invoke('api:getCompanies'),
   createCompany: (name: string) => ipcRenderer.invoke('api:createCompany', name),
-  getCompany: (companyId: string) => ipcRenderer.invoke('api:getCompany', companyId),
 
   // Departments API
   getDepartments: (companyId: string) => ipcRenderer.invoke('api:getDepartments', companyId),
@@ -53,7 +52,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('editor:backupBeforeOverwrite', rootPath, filePath),
   createDirectory: (path: string) => ipcRenderer.invoke('fs:createDirectory', path),
   exists: (path: string) => ipcRenderer.invoke('fs:exists', path),
-  getDocumentsPath: () => ipcRenderer.invoke('app:getDocumentsPath'),
 
   // Extended file system operations
   deleteItem: (path: string) => ipcRenderer.invoke('fs:delete', path),
@@ -130,10 +128,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
 
   // Sparse checkout
-  isSparseCheckout: (repoPath: string) =>
-    ipcRenderer.invoke('git:isSparseCheckout', repoPath),
-  listRemoteDirectories: (repoPath: string) =>
-    ipcRenderer.invoke('git:listRemoteDirectories', repoPath),
   sparseGetExclusions: (repoPath: string) =>
     ipcRenderer.invoke('git:sparseGetExclusions', repoPath),
   sparseSetExclusions: (repoPath: string, excluded: string[]) =>
@@ -180,8 +174,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.invoke('tools:start', toolPath, startCommand),
   stopTool: (toolPath: string) =>
     ipcRenderer.invoke('tools:stop', toolPath),
-  listRunningTools: () =>
-    ipcRenderer.invoke('tools:list-running'),
   openExternal: (url: string) =>
     ipcRenderer.invoke('shell:openExternal', url),
 
@@ -192,7 +184,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCodexStatus: () => ipcRenderer.invoke('codex:status'),
   getAuthMode: () => ipcRenderer.invoke('config:getAuthMode'),
   setAuthMode: (mode: 'claude-code' | 'codex' | 'api-key') => ipcRenderer.invoke('config:setAuthMode', mode),
-  isClaudeCodeAvailable: () => ipcRenderer.invoke('config:isClaudeCodeAvailable'),
   getClaudeCodeStatus: () => ipcRenderer.invoke('config:getClaudeCodeStatus'),
   getPermissionMode: () => ipcRenderer.invoke('config:getPermissionMode'),
   setPermissionMode: (mode: PermissionMode) =>
@@ -465,7 +456,6 @@ declare global {
       // Companies API
       getCompanies: () => Promise<CompaniesResult>
       createCompany: (name: string) => Promise<CompanyResult>
-      getCompany: (companyId: string) => Promise<CompanyResult>
 
       // Departments API
       getDepartments: (companyId: string) => Promise<DepartmentsResult>
@@ -482,7 +472,6 @@ declare global {
       backupBeforeOverwrite: (rootPath: string, filePath: string) => Promise<{ success: boolean; backupPath?: string; skipped?: 'missing' | 'outside-company' | 'internal'; error?: string }>
       createDirectory: (path: string) => Promise<boolean>
       exists: (path: string) => Promise<boolean>
-      getDocumentsPath: () => Promise<string>
 
       // Extended file system operations
       deleteItem: (path: string) => Promise<{ success: boolean; error?: string }>
@@ -514,7 +503,6 @@ declare global {
       // Tools (Web apps)
       startTool: (toolPath: string, startCommand?: string) => Promise<{ success: boolean; port?: number; pid?: number; alreadyRunning?: boolean; error?: string }>
       stopTool: (toolPath: string) => Promise<{ success: boolean; message?: string; error?: string }>
-      listRunningTools: () => Promise<{ success: boolean; tools: Array<{ toolPath: string; port: number; pid?: number }> }>
       openExternal: (url: string) => Promise<{ success: boolean; error?: string }>
 
       // Config
@@ -524,7 +512,6 @@ declare global {
       getCodexStatus: () => Promise<import('../shared/agent').CodexStatus>
       getAuthMode: () => Promise<'claude-code' | 'codex' | 'api-key'>
       setAuthMode: (mode: 'claude-code' | 'codex' | 'api-key') => Promise<boolean>
-      isClaudeCodeAvailable: () => Promise<boolean>
       getClaudeCodeStatus: () => Promise<{
         available: boolean
         authenticated: boolean
@@ -644,8 +631,6 @@ declare global {
       onSetupProgress: (callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void
 
       // Sparse checkout
-      isSparseCheckout: (repoPath: string) => Promise<{ enabled: boolean }>
-      listRemoteDirectories: (repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>
       sparseGetExclusions: (repoPath: string) => Promise<{ success: boolean; excluded: string[]; error?: string }>
       sparseSetExclusions: (repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }>
       sparseUncommittedChanges: (repoPath: string, folders: string[]) => Promise<{ success: boolean; files: string[]; error?: string }>

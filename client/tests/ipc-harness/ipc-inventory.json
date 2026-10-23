@@ -17,17 +17,9 @@
         "file": "main.ts",
         "params": ""
       },
-      "api:getCompany": {
-        "file": "main.ts",
-        "params": "companyId: string"
-      },
       "api:getDepartments": {
         "file": "main.ts",
         "params": "companyId: string"
-      },
-      "app:getDocumentsPath": {
-        "file": "main.ts",
-        "params": ""
       },
       "auth:getSession": {
         "file": "main.ts",
@@ -101,10 +93,6 @@
         "file": "main.ts",
         "params": ""
       },
-      "config:getDocbaseCookie": {
-        "file": "main.ts",
-        "params": ""
-      },
       "config:getPermissionMode": {
         "file": "main.ts",
         "params": ""
@@ -117,10 +105,6 @@
         "file": "main.ts",
         "params": ""
       },
-      "config:isClaudeCodeAvailable": {
-        "file": "main.ts",
-        "params": ""
-      },
       "config:setApiKey": {
         "file": "main.ts",
         "params": "apiKey: string"
@@ -128,10 +112,6 @@
       "config:setAuthMode": {
         "file": "main.ts",
         "params": "mode: 'claude-code' | 'codex' | 'api-key'"
-      },
-      "config:setDocbaseCookie": {
-        "file": "main.ts",
-        "params": "cookie: string"
       },
       "config:setPermissionMode": {
         "file": "main.ts",
@@ -253,17 +233,9 @@
         "file": "main.ts",
         "params": "folder: string, companyId: string"
       },
-      "git:isSparseCheckout": {
-        "file": "main.ts",
-        "params": "repoPath: string"
-      },
       "git:listFiles": {
         "file": "main.ts",
         "params": "repoPath: string, folderPath: string"
-      },
-      "git:listRemoteDirectories": {
-        "file": "main.ts",
-        "params": "repoPath: string"
       },
       "git:log": {
         "file": "main.ts",
@@ -352,10 +324,6 @@
       "tool-approval-response": {
         "file": "main.ts",
         "params": "toolUseId: string, approved: boolean"
-      },
-      "tools:list-running": {
-        "file": "main.ts",
-        "params": ""
       },
       "tools:start": {
         "file": "main.ts",
@@ -584,23 +552,11 @@
       ],
       "declared": "() => Promise<CompaniesResult>"
     },
-    "getCompany": {
-      "calls": [
-        "invoke api:getCompany($0)"
-      ],
-      "declared": "(companyId: string) => Promise<CompanyResult>"
-    },
     "getDepartments": {
       "calls": [
         "invoke api:getDepartments($0)"
       ],
       "declared": "(companyId: string) => Promise<DepartmentsResult>"
-    },
-    "getDocumentsPath": {
-      "calls": [
-        "invoke app:getDocumentsPath()"
-      ],
-      "declared": "() => Promise<string>"
     },
     "getHandoff": {
       "calls": [
@@ -733,30 +689,6 @@
         "invoke config:hasApiKey()"
       ],
       "declared": "() => Promise<boolean>"
-    },
-    "isClaudeCodeAvailable": {
-      "calls": [
-        "invoke config:isClaudeCodeAvailable()"
-      ],
-      "declared": "() => Promise<boolean>"
-    },
-    "isSparseCheckout": {
-      "calls": [
-        "invoke git:isSparseCheckout($0)"
-      ],
-      "declared": "(repoPath: string) => Promise<{ enabled: boolean }>"
-    },
-    "listRemoteDirectories": {
-      "calls": [
-        "invoke git:listRemoteDirectories($0)"
-      ],
-      "declared": "(repoPath: string) => Promise<{ success: boolean; directories: string[]; error?: string }>"
-    },
-    "listRunningTools": {
-      "calls": [
-        "invoke tools:list-running()"
-      ],
-      "declared": "() => Promise<{ success: boolean; tools: Array<{ toolPath: string; port: number; pid?: number }> }>"
     },
     "listSkills": {
       "calls": [
@@ -1132,21 +1064,12 @@
     }
   },
   "unmatched": {
-    "handlersWithoutPreloadCaller": [
-      "config:getDocbaseCookie",
-      "config:setDocbaseCookie"
-    ],
+    "handlersWithoutPreloadCaller": [],
     "preloadCallsWithoutHandler": [],
     "sendsWithoutPreloadListener": [],
     "preloadListenersWithoutSender": [],
     "exposedButNotDeclared": [],
     "declaredButNotExposed": [],
-    "preloadApiUnusedByRenderer": [
-      "getCompany",
-      "isClaudeCodeAvailable",
-      "isSparseCheckout",
-      "listRemoteDirectories",
-      "listRunningTools"
-    ]
+    "preloadApiUnusedByRenderer": []
   }
 }
