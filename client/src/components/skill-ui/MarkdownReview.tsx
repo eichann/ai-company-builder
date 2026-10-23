@@ -1,4 +1,9 @@
+// This module is the review feature as a whole: its sidecar-file helpers and
+// hooks are exported next to its components, and other modules import them
+// from here. Splitting it only for fast refresh would touch every importer.
+/* eslint-disable react-refresh/only-export-components */
 import React, { useState, useCallback, useRef, useEffect, useMemo, useImperativeHandle } from 'react'
+import { computeLineDiff } from '../../lib/line-diff'
 import {
   ChatCircleDots,
   Check,
@@ -1323,44 +1328,6 @@ export function useTextSelection(
 // Component: MarkdownDiffView
 // ============================================================================
 
-type DiffLine = { type: 'same' | 'add' | 'del'; text: string }
-
-function computeDiff(oldText: string, newText: string): DiffLine[] {
-  const oldLines = oldText.split('\n')
-  const newLines = newText.split('\n')
-  const m = oldLines.length
-  const n = newLines.length
-
-  // LCS via Hunt-Szymanski for reasonable performance
-  const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0))
-  for (let i = 1; i <= m; i++) {
-    for (let j = 1; j <= n; j++) {
-      dp[i][j] = oldLines[i - 1] === newLines[j - 1]
-        ? dp[i - 1][j - 1] + 1
-        : Math.max(dp[i - 1][j], dp[i][j - 1])
-    }
-  }
-
-  // Backtrack to build diff
-  const result: DiffLine[] = []
-  let i = m, j = n
-  const stack: DiffLine[] = []
-  while (i > 0 || j > 0) {
-    if (i > 0 && j > 0 && oldLines[i - 1] === newLines[j - 1]) {
-      stack.push({ type: 'same', text: oldLines[i - 1] })
-      i--; j--
-    } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-      stack.push({ type: 'add', text: newLines[j - 1] })
-      j--
-    } else {
-      stack.push({ type: 'del', text: oldLines[i - 1] })
-      i--
-    }
-  }
-  while (stack.length) result.push(stack.pop()!)
-  return result
-}
-
 export interface MarkdownDiffViewHandle {
   scrollToText: (text: string) => void
 }
@@ -1368,8 +1335,9 @@ export interface MarkdownDiffViewHandle {
 export const MarkdownDiffView = React.forwardRef<MarkdownDiffViewHandle, { snapshot: string; current: string }>(
   function MarkdownDiffView({ snapshot, current }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
-    const diff = useMemo(() => computeDiff(snapshot, current), [snapshot, current])
-    const hasChanges = diff.some(d => d.type !== 'same')
+    // Myers diff (lib/line-diff.ts); null = too large to compare.
+    const diff = useMemo(() => computeLineDiff(snapshot, current), [snapshot, current])
+    const hasChanges = diff === null || diff.some(d => d.type !== 'same')
 
     useImperativeHandle(ref, () => ({
       scrollToText(text: string) {
@@ -1387,6 +1355,14 @@ export const MarkdownDiffView = React.forwardRef<MarkdownDiffViewHandle, { snaps
         }
       }
     }), [])
+
+    if (diff === null) {
+      return (
+        <div className="h-full flex items-center justify-center px-8 text-center text-gray-400 dark:text-zinc-500 text-sm">
+          差分が大きすぎるため表示できません。ファイルを直接確認してください。
+        </div>
+      )
+    }
 
     if (!hasChanges) {
       return (

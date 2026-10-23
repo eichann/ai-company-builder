@@ -17,14 +17,17 @@ export function FileSearchModal({ isOpen, onClose, rootPath, departmentFolder, o
   const inputRef = useRef<HTMLInputElement>(null)
   const listRef = useRef<HTMLDivElement>(null)
 
-  const prefix = departmentFolder + '/'
+  // departmentFolder '' = the whole company (全社 tab): paths stay company-relative.
+  const prefix = departmentFolder ? departmentFolder + '/' : ''
 
-  // Load file list when modal opens
+  // Load file list when modal opens (tracked + untracked, downloaded folders only)
   useEffect(() => {
-    if (!isOpen || !rootPath || !departmentFolder) return
-    window.electronAPI.gitListFiles(rootPath, `${departmentFolder}/`).then(result => {
-      if (result.success) setAllFiles(result.files)
+    if (!isOpen || !rootPath) return
+    let cancelled = false
+    window.electronAPI.gitListFiles(rootPath, departmentFolder).then(result => {
+      if (!cancelled && result.success) setAllFiles(result.files)
     }).catch(() => {})
+    return () => { cancelled = true }
   }, [isOpen, rootPath, departmentFolder])
 
   // Focus input when modal opens

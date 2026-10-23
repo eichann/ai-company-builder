@@ -665,14 +665,22 @@ declare global {
         diff: string
         error?: string
       }>
+      // folderPath '' = the whole company (electron/git-search.ts)
       gitListFiles: (repoPath: string, folderPath: string) => Promise<{
         success: boolean
         files: string[]
+        truncated?: boolean
         error?: string
       }>
+      // Fixed string, A–Z case-insensitive; ≤20 matches per file, ≤500 in all
+      // (`truncated`); `text` is cut around the match, `column` = its start.
       gitGrep: (repoPath: string, query: string, folderPath: string) => Promise<{
         success: boolean
-        results: Array<{ file: string; line: number; text: string }>
+        results: Array<{ file: string; line: number; text: string; column?: number }>
+        truncated?: boolean
+        timedOut?: boolean
+        /** A newer search from this window replaced this one. */
+        cancelled?: boolean
         error?: string
       }>
       gitLog: (repoPath: string, folderPath: string, limit?: number) => Promise<{

@@ -7,18 +7,32 @@ interface GrepMatch {
   file: string
   line: number
   text: string
+  column?: number
 }
 
 interface GroupedResult {
   file: string
   displayPath: string
-  matches: { line: number; text: string }[]
+  matches: { line: number; text: string; column?: number }[]
 }
 
 interface SearchPanelProps {
   rootPath: string
+  /** '' = the whole company (全社 tab). */
   departmentFolder: string
   inputRef?: React.RefObject<HTMLInputElement>
+}
+
+/** The line with the matched text emphasised (the search is case-insensitive for A–Z, so the length is the query's). */
+function MatchText({ text, column, length }: { text: string; column?: number; length: number }) {
+  if (column === undefined || column < 0 || column >= text.length || length <= 0) return <>{text}</>
+  return (
+    <>
+      {text.slice(0, column)}
+      <mark className="bg-amber-200/70 dark:bg-amber-400/25 text-inherit rounded-sm">{text.slice(column, column + length)}</mark>
+      {text.slice(column + length)}
+    </>
+  )
 }
 
 interface SelectedResult {
@@ -36,6 +50,9 @@ interface LoadedFile {
 export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPanelProps) {
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<GrepMatch[]>([])
+  const [truncated, setTruncated] = useState(false)
+  const [searchError, setSearchError] = useState<string | null>(null)
+  const [searchedQuery, setSearchedQuery] = useState('')
   const [isSearching, setIsSearching] = useState(false)
   const [hasSearched, setHasSearched] = useState(false)
   const [selected, setSelected] = useState<SelectedResult | null>(null)
@@ -45,26 +62,50 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
   const localInputRef = useRef<HTMLInputElement>(null)
   const effectiveRef = inputRef || localInputRef
 
-  const departmentPath = `${rootPath}/${departmentFolder}`
-  const prefix = departmentFolder + '/'
+  // Results are company-relative; shown relative to the department ('' = whole company).
+  const prefix = departmentFolder ? departmentFolder + '/' : ''
+  const searchSeq = useRef(0)
+
+  // A different department (or company) makes the old results meaningless.
+  useEffect(() => {
+    searchSeq.current++
+    setResults([])
+    setTruncated(false)
+    setSearchError(null)
+    setHasSearched(false)
+    setIsSearching(false)
+    setSelected(null)
+    setLoadedFile(null)
+  }, [rootPath, departmentFolder])
 
   const handleSearch = useCallback(async () => {
     const trimmed = query.trim()
-    if (!trimmed || !rootPath || !departmentFolder) return
+    if (!trimmed || !rootPath) return
 
+    const seq = ++searchSeq.current
     setIsSearching(true)
     setHasSearched(true)
+    setSearchError(null)
     try {
-      const result = await window.electronAPI.gitGrep(rootPath, trimmed, `${departmentFolder}/`)
+      // Main caps it (20 per file, 500 in all) and stops the previous search.
+      const result = await window.electronAPI.gitGrep(rootPath, trimmed, departmentFolder)
+      if (seq !== searchSeq.current || result.cancelled) return
+      setSearchedQuery(trimmed)
       if (result.success) {
         setResults(result.results)
+        setTruncated(!!result.truncated)
       } else {
         setResults([])
+        setTruncated(false)
+        setSearchError('検索できませんでした')
       }
     } catch {
+      if (seq !== searchSeq.current) return
       setResults([])
+      setTruncated(false)
+      setSearchError('検索できませんでした')
     } finally {
-      setIsSearching(false)
+      if (seq === searchSeq.current) setIsSearching(false)
     }
   }, [query, rootPath, departmentFolder])
 
@@ -74,8 +115,12 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
       handleSearch()
     }
     if (e.key === 'Escape') {
+      searchSeq.current++
       setQuery('')
       setResults([])
+      setTruncated(false)
+      setSearchError(null)
+      setIsSearching(false)
       setHasSearched(false)
       setSelected(null)
       setLoadedFile(null)
@@ -84,13 +129,13 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
 
   // Group results by file
   const grouped = useMemo<GroupedResult[]>(() => {
-    const map = new Map<string, { line: number; text: string }[]>()
+    const map = new Map<string, { line: number; text: string; column?: number }[]>()
     for (const r of results) {
       const existing = map.get(r.file)
       if (existing) {
-        existing.push({ line: r.line, text: r.text })
+        existing.push({ line: r.line, text: r.text, column: r.column })
       } else {
-        map.set(r.file, [{ line: r.line, text: r.text }])
+        map.set(r.file, [{ line: r.line, text: r.text, column: r.column }])
       }
     }
     return Array.from(map.entries()).map(([file, matches]) => ({
@@ -119,11 +164,11 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
     return () => { cancelled = true }
   }, [selected?.filePath, loadedFile?.path])
 
-  const handleSelectMatch = useCallback((displayPath: string, line: number) => {
-    const filePath = `${departmentPath}/${displayPath}`
+  const handleSelectMatch = useCallback((file: string, displayPath: string, line: number) => {
+    const filePath = `${rootPath}/${file}`
     setSelected({ filePath, displayPath, line })
     setSelectCounter(c => c + 1)
-  }, [departmentPath])
+  }, [rootPath])
 
   // Only render editor when loaded content matches the selected file
   const isContentReady = selected !== null && loadedFile !== null && loadedFile.path === selected.filePath
@@ -147,7 +192,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
             />
             {query && (
               <button
-                onClick={() => { setQuery(''); setResults([]); setHasSearched(false); setSelected(null); setLoadedFile(null) }}
+                onClick={() => { searchSeq.current++; setQuery(''); setResults([]); setTruncated(false); setSearchError(null); setIsSearching(false); setHasSearched(false); setSelected(null); setLoadedFile(null) }}
                 className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded hover:bg-gray-200 dark:hover:bg-zinc-700 text-gray-400 dark:text-zinc-500"
               >
                 <X size={11} />
@@ -156,11 +201,17 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
           </div>
           {hasSearched && !isSearching && (
             <p className="mt-1.5 text-[10px] text-gray-400 dark:text-zinc-500">
-              {results.length === 0
-                ? '一致する結果がありません'
-                : `${grouped.length}ファイル / ${results.length}件`
+              {searchError
+                ? searchError
+                : results.length === 0
+                  ? '一致する結果がありません'
+                  : `${grouped.length}ファイル / ${results.length}件`
               }
-              {results.length >= 200 && ' (上限200件)'}
+            </p>
+          )}
+          {hasSearched && !isSearching && truncated && (
+            <p className="mt-1 text-[10px] text-amber-600 dark:text-amber-400/80">
+              結果が多いため最初の{results.length}件を表示しています。言葉を増やして絞り込んでください。
             </p>
           )}
         </div>
@@ -182,7 +233,13 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
               {grouped.map(({ file, displayPath, matches }) => {
                 const IC = getFileIcon(file.split('/').pop() || '', false)
                 return (
-                  <div key={file} className="mb-1">
+                  // content-visibility: the browser skips layout/paint of off-screen
+                  // groups (≤500 matches, so no windowing library is needed).
+                  <div
+                    key={file}
+                    className="mb-1"
+                    style={{ contentVisibility: 'auto', containIntrinsicSize: `auto ${24 + matches.length * 20}px` }}
+                  >
                     {/* File header */}
                     <div className="flex items-center gap-1.5 px-3 py-1 text-[11px] font-medium text-gray-700 dark:text-zinc-300">
                       <IC size={13} className="flex-shrink-0" />
@@ -191,11 +248,11 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
                     </div>
                     {/* Match lines */}
                     {matches.map((m, i) => {
-                      const isActive = selected?.filePath === `${departmentPath}/${displayPath}` && selected?.line === m.line
+                      const isActive = selected?.filePath === `${rootPath}/${file}` && selected?.line === m.line
                       return (
                         <button
                           key={i}
-                          onClick={() => handleSelectMatch(displayPath, m.line)}
+                          onClick={() => handleSelectMatch(file, displayPath, m.line)}
                           className={`w-full text-left flex items-start gap-2 px-3 py-0.5 transition-colors group ${
                             isActive
                               ? 'bg-accent/10 dark:bg-accent/15'
@@ -210,7 +267,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
                               ? 'text-accent dark:text-accent'
                               : 'text-gray-600 dark:text-zinc-400 group-hover:text-gray-800 dark:group-hover:text-zinc-200'
                           }`}>
-                            {m.text}
+                            <MatchText text={m.text} column={m.column} length={searchedQuery.length} />
                           </span>
                         </button>
                       )

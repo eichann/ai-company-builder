@@ -28,7 +28,8 @@ import {
   writeDeniedMessage,
 } from './protected-config'
 import { createGitSync } from './sync/git-sync'
-import { createConfiguredGit } from './sync/git-factory'
+import { configuredGitCommand, createConfiguredGit } from './sync/git-factory'
+import { companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog } from './git-search'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
 import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
@@ -1656,37 +1657,41 @@ ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
   }
 })
 
-// Git log filtered by folder path
-// List tracked files in a folder (for file name search)
+// Search tab / Cmd+P / history panel: electron/git-search.ts (limits, what
+// is searched, no lazy fetch). The same git configuration as createGit, for a
+// process whose output is streamed and stopped early.
+function searchGitCommand() {
+  const { binary, envOverrides } = getResolvedGit()
+  return configuredGitCommand({
+    binary,
+    askPassPath: getGitAskPassPath(),
+    token: '', // read-only local commands: no server access
+    appGitDir: path.join(app.getPath('userData'), 'git'),
+    envOverrides,
+    extraConfig: gitIdentityConfig(),
+  })
+}
+
+// File names in a folder ('' = the whole company) for Cmd+P: tracked and
+// untracked (not ignored), downloaded folders and readable private folders.
 ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
   try {
     const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-    const raw = await git.raw(['ls-files', '--', folderPath])
-    const files = raw.split('\n').filter(f => f.length > 0)
-    return { success: true, files }
+    const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
+    const { files, truncated } = await listCompanyFiles(searchGitCommand(), scope)
+    return { success: true, files, truncated }
   } catch (err) {
     console.error('Git ls-files error:', err)
     return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
   }
 })
 
+// Git log filtered by folder path (no --follow: see gitLogArgs)
 ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
   try {
     const git: SimpleGit = createGit(repoPath)
-    const logOptions: Record<string, unknown> = { maxCount: limit }
-    if (folderPath) logOptions.file = folderPath
-    const logResult = await git.log(logOptions)
-    return {
-      success: true,
-      commits: logResult.all.map(c => ({
-        hash: c.hash,
-        hashShort: c.hash.substring(0, 7),
-        message: c.body ? `${c.message}\n${c.body}`.trim() : c.message,
-        author: c.author_name,
-        date: c.date,
-      })),
-    }
+    const raw = await git.raw(gitLogArgs(folderPath, limit))
+    return { success: true, commits: parseGitLog(raw) }
   } catch (err) {
     console.error('Git log error:', err)
     return { success: false, commits: [], error: err instanceof Error ? err.message : 'Failed' }
@@ -1715,39 +1720,26 @@ ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string,
   }
 })
 
-// Git grep - content search within a department folder
-ipcMain.handle('git:grep', async (_, repoPath: string, query: string, folderPath: string) => {
+// Content search in a folder ('' = the whole company): fixed string, A–Z
+// case-insensitive, ≤20 matches per file and ≤500 in all (git is stopped
+// there), lines cut around the match. A new search from the same window stops
+// the previous one.
+const runningGreps = new Map<number, AbortController>()
+ipcMain.handle('git:grep', async (event, repoPath: string, query: string, folderPath: string) => {
+  const senderId = event.sender.id
+  runningGreps.get(senderId)?.abort()
+  const controller = new AbortController()
+  runningGreps.set(senderId, controller)
   try {
     const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-    // -n: line numbers, -I: skip binary, --max-count=200: limit results
-    // Search working tree (not HEAD) so uncommitted files are included
-    // Use -e to safely pass pattern (avoids issues if query starts with -)
-    const raw = await git.raw(['grep', '-n', '-I', '--max-count=200', '-e', query, '--', folderPath])
-    // Format: path/to/file:lineNo:matchedLine
-    const results: { file: string; line: number; text: string }[] = []
-    for (const line of raw.split('\n')) {
-      if (!line) continue
-      const firstColon = line.indexOf(':')
-      if (firstColon < 0) continue
-      const filePart = line.slice(0, firstColon)
-      const rest = line.slice(firstColon + 1)
-      const secondColon = rest.indexOf(':')
-      if (secondColon < 0) continue
-      const lineNo = parseInt(rest.slice(0, secondColon), 10)
-      const text = rest.slice(secondColon + 1)
-      if (!isNaN(lineNo)) {
-        results.push({ file: filePart, line: lineNo, text })
-      }
-    }
-    return { success: true, results }
+    const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
+    const { matches, truncated, timedOut } = await grepCompany(searchGitCommand(), scope, String(query ?? ''), controller.signal)
+    return { success: true, results: matches, truncated, timedOut, cancelled: controller.signal.aborted }
   } catch (err: unknown) {
-    // git grep exits with code 1 when no matches found
-    if (err && typeof err === 'object' && 'message' in err && typeof (err as { message: string }).message === 'string' && (err as { message: string }).message.includes('exit code 1')) {
-      return { success: true, results: [] }
-    }
     console.error('Git grep error:', err)
     return { success: false, results: [], error: err instanceof Error ? err.message : 'Failed' }
+  } finally {
+    if (runningGreps.get(senderId) === controller) runningGreps.delete(senderId)
   }
 })
 
