@@ -156,6 +156,28 @@ import { ... } from '../../shared/types'  // Path inside container
 - Defaults for members who never chose: Opus 5.5 + effort medium
   (`src/lib/aiModels.ts`); only an explicit choice is saved.
 
+### Search, Cmd+P and folder history (client)
+
+`client/electron/git-search.ts` (main.ts `git:grep` / `git:listFiles` /
+`git:log`; tests `client/tests/git-search.test.ts`):
+
+- Content search is a fixed string, A–Z case-insensitive (`LC_ALL=C -F -i`),
+  ≤20 matches per file, **≤500 in all** — git's output is streamed and the
+  process killed there (`truncated` → 「結果が多いため最初の500件を表示しています」),
+  15 s timeout, lines cut to ~300 chars around the match. Uncapped, 「の」 in
+  one department was 168,856 lines / 53 MB through IPC and froze the window.
+- What is searched: the worktree (tracked + untracked, never ignored), never
+  `.backups/` / `.workspace/` or a not-downloaded folder (exclude pathspecs),
+  readable private folders in their own clone (paths company-relative). Every
+  read runs with `GIT_NO_LAZY_FETCH=1` + `GIT_OPTIONAL_LOCKS=0`: a search must
+  never download a blob. `''` = the whole company (pathspec `.`, never `/`).
+- Folder history uses `git log -- :(literal)<folder>/` — no `--follow`
+  (simple-git's `file` option added it: 0.9 s instead of 0.02 s, same commits).
+  `invalidateCommitCache()` also makes the visible history panel re-fetch.
+- The review diff (`src/lib/line-diff.ts`) is Myers O((N+M)·D) in linear
+  space with a work budget; past it the view says the diff is too large
+  instead of building the old O(m·n) table (25M cells for 5,000 lines).
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII

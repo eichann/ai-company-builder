@@ -33,12 +33,19 @@ interface CommitHistoryPanelProps {
 const commitCache = new Map<string, { commits: Commit[]; timestamp: number }>()
 const CACHE_TTL = 60_000 // 1 minute
 
-/** Clear all commit caches (call after git sync) */
+// Panels on screen re-fetch when the cache is invalidated (clearing it alone
+// left the visible list stale until the department was switched).
+const invalidationListeners = new Set<() => void>()
+
+/** Clear all commit caches and refresh the visible history (call after git sync) */
+// eslint-disable-next-line react-refresh/only-export-components -- shares the panel's module-level cache
 export function invalidateCommitCache() {
   commitCache.clear()
+  for (const listener of [...invalidationListeners]) listener()
 }
 
 /** Prefetch commits for a department in the background */
+// eslint-disable-next-line react-refresh/only-export-components -- shares the panel's module-level cache
 export function prefetchCommits(rootPath: string, departmentFolder: string) {
   if (!rootPath) return
   const key = `${rootPath}::${departmentFolder}`
@@ -123,6 +130,8 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
   const [commitFiles, setCommitFiles] = useState<Map<string, CommitFile[]>>(new Map())
   const [loadingFiles, setLoadingFiles] = useState<string | null>(null)
   const mountedRef = useRef(true)
+  const currentKeyRef = useRef(cacheKey)
+  currentKeyRef.current = cacheKey
 
   useEffect(() => {
     mountedRef.current = true
@@ -135,9 +144,10 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
     try {
       const pathFilter = departmentFolder ? `${departmentFolder}/` : ''
       const result = await window.electronAPI.gitLog(rootPath, pathFilter, 50)
-      if (result.success && mountedRef.current) {
-        setCommits(result.commits)
+      if (result.success) {
         commitCache.set(cacheKey, { commits: result.commits, timestamp: Date.now() })
+        // Not when the panel moved to another department meanwhile.
+        if (mountedRef.current && currentKeyRef.current === cacheKey) setCommits(result.commits)
       }
     } catch (err) {
       console.error('Failed to load commits:', err)
@@ -160,6 +170,13 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
       loadCommits(true)
     }
   }, [cacheKey, loadCommits])
+
+  // After a sync: fetch again in the background, keeping the current list on screen.
+  useEffect(() => {
+    const listener = () => { void loadCommits(false) }
+    invalidationListeners.add(listener)
+    return () => { invalidationListeners.delete(listener) }
+  }, [loadCommits])
 
   const toggleCommit = useCallback(async (hash: string) => {
     if (expandedCommit === hash) {
