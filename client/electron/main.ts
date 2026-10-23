@@ -14,22 +14,11 @@ import { exec, execFileSync, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
-import { createAnthropic } from '@ai-sdk/anthropic'
-import { claudeCode } from 'ai-sdk-provider-claude-code'
-import { streamText } from 'ai'
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import type { SimpleGit } from 'simple-git'
-import {
-  isProtectedConfigRejection,
-  parseProtectedConfigPaths,
-  protectedConfigMessage,
-  isWriteDeniedRejection,
-  parseWriteDeniedPaths,
-  writeDeniedMessage,
-} from './protected-config'
 import { createGitSync } from './sync/git-sync'
 import { configuredGitCommand, createConfiguredGit } from './sync/git-factory'
-import { companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog } from './git-search'
+import { commitFileDiffArgs, companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog, showCommitArgs } from './git-search'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
 import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
@@ -44,7 +33,7 @@ import { companyPathOf, privateBackupsDir, readPrivateScopesCache, readableScope
 const PRIVATE_BACKUP_ID_PREFIX = 'private:'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
-import { configureOrigin, setRemoteUrl } from './sync/remote'
+import { configureOrigin } from './sync/remote'
 import { previewChanges, withScratchIndex } from './sync/preview'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
@@ -67,32 +56,29 @@ import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
 import type { InstructionAuthority } from './write-guard'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
+import { AllowedRoots, type ValidateOptions } from './allowed-roots'
+import { isExternalUrlAllowed } from './external-url'
 
 // Allowed directory roots for file system access control
-// Paths are added when the user selects a directory via dialog or sets up a company folder
-const allowedRoots: Set<string> = new Set()
+// Paths are added when the user selects a directory via dialog or sets up a
+// company folder. A path must be inside one by name AND by its real location
+// (symbolic links resolved): ./allowed-roots.ts.
+const allowedRoots = new AllowedRoots()
 
 /**
- * Validate that a path is within an allowed directory.
- * Prevents path traversal attacks from the renderer process.
+ * Validate that a path is within an allowed directory, links resolved.
+ * Prevents path traversal (and symlink escapes) from the renderer process.
+ * `followFinal: false` judges the entry itself (delete / rename source).
  */
-function validatePath(inputPath: string): string {
-  const resolved = path.resolve(inputPath)
-  for (const root of allowedRoots) {
-    if (resolved === root || resolved.startsWith(root + path.sep)) {
-      return resolved
-    }
-  }
-  throw new Error(`Access denied: path is outside allowed directories`)
+function validatePath(inputPath: string, options?: ValidateOptions): string {
+  return allowedRoots.validate(inputPath, options)
 }
 
 /**
  * Add a directory to the allowed roots.
- * Also allows the app's userData directory (for config, etc.).
  */
 function addAllowedRoot(dirPath: string): void {
-  const resolved = path.resolve(dirPath)
-  allowedRoots.add(resolved)
+  allowedRoots.add(dirPath)
 }
 
 /**
@@ -130,11 +116,6 @@ const runningTools: Map<string, RunningTool> = new Map()
 // ESM equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
-
-interface ChatMessage {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-}
 
 let mainWindow: BrowserWindow | null = null
 const hasInstanceLock = app.requestSingleInstanceLock()
@@ -648,7 +629,8 @@ ipcMain.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, fileP
     })
     if ('skip' in plan) return { success: true, skipped: plan.skip }
     const backupDir = path.join(plan.privateFolder ? privateBackupsDir(root) : path.join(root, '.backups'), plan.folder)
-    const target = path.join(backupDir, ...plan.rel.split('/'))
+    // Inside the company by its real location too (.backups could be a link).
+    const target = validatePath(path.join(backupDir, ...plan.rel.split('/')))
     await fs.promises.mkdir(path.dirname(target), { recursive: true })
     await fs.promises.writeFile(target, bytes)
     const metadata: EditorOverwriteBackupMetadata = {
@@ -689,8 +671,9 @@ ipcMain.handle('fs:exists', async (_, targetPath: string) => {
 // Delete file or folder
 ipcMain.handle('fs:delete', async (_, targetPath: string) => {
   try {
-    const safePath = validatePath(targetPath)
-    const stat = await fs.promises.stat(safePath)
+    // The entry itself: deleting a link removes the link, never its target.
+    const safePath = validatePath(targetPath, { followFinal: false })
+    const stat = await fs.promises.lstat(safePath)
     if (stat.isDirectory()) {
       await fs.promises.rm(safePath, { recursive: true })
     } else {
@@ -705,7 +688,7 @@ ipcMain.handle('fs:delete', async (_, targetPath: string) => {
 // Rename file or folder
 ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
   try {
-    const safeOld = validatePath(oldPath)
+    const safeOld = validatePath(oldPath, { followFinal: false })
     const safeNew = validatePath(newPath)
     const refused = notDownloadedRefusal(safeNew) ?? await reservedRefusal(safeNew)
     if (refused) return { success: false, error: refused }
@@ -719,7 +702,7 @@ ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
 // Move file or folder
 ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string) => {
   try {
-    const safeSrc = validatePath(sourcePath)
+    const safeSrc = validatePath(sourcePath, { followFinal: false })
     const safeDest = validatePath(destinationPath)
     const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
     if (refused) return { success: false, error: refused }
@@ -932,7 +915,7 @@ function stringifyEnvFile(vars: EnvVars): string {
 ipcMain.handle('env:read', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
-    const envPath = path.join(safePath, '.env')
+    const envPath = validatePath(path.join(safePath, '.env'))
     if (!fs.existsSync(envPath)) {
       return { success: true, vars: {} }
     }
@@ -948,14 +931,14 @@ ipcMain.handle('env:read', async (_, rootPath: string) => {
 ipcMain.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
   try {
     const safePath = validatePath(rootPath)
-    const envPath = path.join(safePath, '.env')
+    const envPath = validatePath(path.join(safePath, '.env'))
     const content = stringifyEnvFile(vars)
     await fs.promises.writeFile(envPath, content, 'utf-8')
 
     // Self-heal: ensure secrets are never synced, even for older folders whose
     // .gitignore predates the seed (or had the entries removed). The .env file
     // holds API keys, so it must stay local-only.
-    const gitignorePath = path.join(safePath, '.gitignore')
+    const gitignorePath = validatePath(path.join(safePath, '.gitignore'))
     let gitignoreContent = ''
     if (fs.existsSync(gitignorePath)) {
       gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
@@ -1296,13 +1279,16 @@ ipcMain.handle('auth:signOut', async () => {
         'Cookie': authCookies.join('; '),
       },
     })
-    authCookies = []
-    writeAccessStore.clear()
-    companyFilesApi.clear()
     return { success: true }
   } catch (error) {
     console.error('Sign out error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+  } finally {
+    // Signed out on this computer even when the server cannot be told
+    // (offline): nothing here may keep using the old session.
+    authCookies = []
+    writeAccessStore.clear()
+    companyFilesApi.clear()
   }
 })
 
@@ -1377,7 +1363,7 @@ ipcMain.handle('api:createCompany', async (_, name: string) => {
 
 ipcMain.handle('api:getCompany', async (_, companyId: string) => {
   try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies/${companyId}`, {
+    const response = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}`, {
       headers: {
         'Cookie': authCookies.join('; '),
       },
@@ -1396,7 +1382,7 @@ ipcMain.handle('api:getCompany', async (_, companyId: string) => {
 
 ipcMain.handle('api:getDepartments', async (_, companyId: string) => {
   try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
+    const response = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`, {
       headers: {
         'Cookie': authCookies.join('; '),
       },
@@ -1541,41 +1527,6 @@ ipcMain.handle('git:getBinaryStatus', async () => {
   return { bundled: !fallback, binary }
 })
 
-// Git operations
-ipcMain.handle('git:init', async (_, repoPath: string) => {
-  try {
-    const git: SimpleGit = createGit(repoPath)
-    await git.init()
-    return { success: true }
-  } catch (error) {
-    console.error('Git init error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipcMain.handle('git:isRepo', async (_, repoPath: string) => {
-  try {
-    const git: SimpleGit = createGit(repoPath)
-    const isRepo = await git.checkIsRepo()
-    return { isRepo }
-  } catch {
-    return { isRepo: false }
-  }
-})
-
-ipcMain.handle('git:addRemote', async (_, repoPath: string, remoteName: string, remoteUrl: string) => {
-  try {
-    const git: SimpleGit = createGit(repoPath)
-    // set-url, never remove + add: removing drops a partial clone's
-    // promisor config (./sync/remote.ts).
-    await setRemoteUrl(git, remoteUrl, remoteName)
-    return { success: true }
-  } catch (error) {
-    console.error('Git addRemote error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
 // Sync's commit message (electron/commit-message.ts): written by the AI the
 // member signs in with — Claude Code (`claude -p --model haiku`, isolated),
 // Codex, or the API key — from the staged file list only (name-status +
@@ -1646,7 +1597,7 @@ ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, f
       // New file: drop it from the index if it is there (preview no longer
       // stages, so it usually is not) and delete it
       await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', filePath])
-      const fullPath = validatePath(path.join(safePath, filePath))
+      const fullPath = validatePath(path.join(safePath, filePath), { followFinal: false })
       if (fs.existsSync(fullPath)) {
         fs.unlinkSync(fullPath)
       }
@@ -1693,7 +1644,8 @@ ipcMain.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: str
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
-    const diff = await git.show([commitHash, '--', filePath])
+    // A hex commit id only: `--output=<file>` here made git write a file.
+    const diff = await git.raw(commitFileDiffArgs(commitHash, filePath))
     return { success: true, diff }
   } catch (err) {
     console.error('Git commit file diff error:', err)
@@ -1753,7 +1705,7 @@ ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) 
 // Git log filtered by folder path (no --follow: see gitLogArgs)
 ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
   try {
-    const git: SimpleGit = createGit(repoPath)
+    const git: SimpleGit = createGit(validatePath(repoPath))
     const raw = await git.raw(gitLogArgs(folderPath, limit))
     return { success: true, commits: parseGitLog(raw) }
   } catch (err) {
@@ -1765,10 +1717,8 @@ ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit:
 // Show files changed in a specific commit, filtered by folder
 ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
   try {
-    const git: SimpleGit = createGit(repoPath)
-    const args = ['show', '--name-status', '--pretty=format:', commitHash]
-    if (folderPath) args.push('--', folderPath)
-    const result = await git.raw(args)
+    const git: SimpleGit = createGit(validatePath(repoPath))
+    const result = await git.raw(showCommitArgs(commitHash, folderPath))
     const files: Array<{ status: string; path: string }> = []
     for (const line of result.trim().split('\n')) {
       if (!line) continue
@@ -1826,6 +1776,11 @@ const gitSync = createGitSync({
 })
 
 ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
+  try {
+    repoPath = validatePath(repoPath)
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error), errorType: 'unknown' as const }
+  }
   const result = await gitSync(repoPath, companyId, commitMessage)
   // Rules may have changed since the last look: refresh the chat guard / badges.
   if (result.success && companyId) void writeAccessStore.refresh(companyId)
@@ -1956,7 +1911,7 @@ const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。�
 
 // The company's repository URL on the server (null when the server cannot say).
 async function companyRemoteUrl(companyId: string): Promise<string | null> {
-  const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${companyId}`, {
+  const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${encodeURIComponent(companyId)}`, {
     headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
   })
   if (!repoInfoResponse.ok) return null
@@ -2015,7 +1970,13 @@ ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, company
   try {
     repoPath = validatePath(repoPath)
     // Fetch HTTPS URL from server API
-    const remoteUrl = await companyRemoteUrl(companyId)
+    let remoteUrl: string | null
+    try {
+      remoteUrl = await companyRemoteUrl(companyId)
+    } catch (fetchError) {
+      console.warn('Git setup: Could not reach the server:', fetchError)
+      return { success: false, error: SETUP_OFFLINE_MESSAGE }
+    }
     if (!remoteUrl) {
       return { success: false, error: 'Failed to get repository info from server' }
     }
@@ -2093,7 +2054,7 @@ ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, company
         const headMatch = lsHeads.match(/refs\/heads\/(\S+)/)
         let departments: string[] | null = null
         try {
-          const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${companyId}/departments`, {
+          const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`, {
             headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
           })
           const deptData = deptResponse.ok ? await deptResponse.json() : null
@@ -2321,8 +2282,9 @@ ipcMain.handle('git:listRemoteDirectories', async (_, repoPath: string) => {
 })
 
 // Get backup history
-ipcMain.handle('backup:list', async (_, repoPath: string) => {
+ipcMain.handle('backup:list', async (_, unsafeRepoPath: string) => {
   try {
+    const repoPath = validatePath(unsafeRepoPath)
     // .backups/ in the working tree, and the private folders' backups kept
     // inside .git (sync/private-folders.ts privateBackupsDir — never in the
     // working tree, so they can never be staged into the company repository).
@@ -2413,6 +2375,9 @@ ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, f
     if (!fs.existsSync(srcPath)) {
       return { success: false, error: 'Backup file not found' }
     }
+    // Links resolved, both stay inside the company folder.
+    validatePath(srcPath)
+    validatePath(destPath)
 
     // Ensure destination directory exists
     fs.mkdirSync(path.dirname(destPath), { recursive: true })
@@ -2430,78 +2395,17 @@ ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, f
 // Open backup folder in Finder/Explorer
 ipcMain.handle('backup:openFolder', async (_, backupPath: string) => {
   try {
-    await shell.openPath(backupPath)
+    // Only a backup folder (what backup:list returns) inside a company:
+    // openPath on anything else could launch it (an .app, a script).
+    const safe = validatePath(backupPath)
+    const parent = path.basename(path.dirname(safe))
+    if ((parent !== '.backups' && parent !== 'acb-private-backups') || !fs.statSync(safe).isDirectory()) {
+      return { success: false, error: 'Not a backup folder' }
+    }
+    await shell.openPath(safe)
     return { success: true }
   } catch (error) {
     console.error('Open folder error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Push to server
-ipcMain.handle('git:pushToServer', async (_, repoPath: string) => {
-  try {
-    const git: SimpleGit = createGit(repoPath)
-
-    // Add all changes
-    await git.raw(['add', '--sparse', '.'])
-
-    // Check status
-    const status = await git.status()
-
-    // Commit if there are changes
-    if (status.files.length > 0) {
-      await git.commit(`Sync: ${new Date().toISOString()}`)
-    }
-
-    // Push with set-upstream
-    const branch = status.current || 'main'
-    await git.push('origin', branch, ['--set-upstream', '--force', '--progress'])
-
-    return { success: true, message: `Pushed to server (branch: ${branch})` }
-  } catch (error) {
-    console.error('Git push error:', error)
-    const errorMsg = error instanceof Error ? error.message : String(error)
-    if (isProtectedConfigRejection(errorMsg)) {
-      const protectedFiles = parseProtectedConfigPaths(errorMsg)
-      return { success: false, error: protectedConfigMessage(protectedFiles), errorType: 'protected_config', protectedFiles }
-    }
-    if (isWriteDeniedRejection(errorMsg)) {
-      const writeDeniedFiles = parseWriteDeniedPaths(errorMsg)
-      return { success: false, error: writeDeniedMessage(writeDeniedFiles), errorType: 'write_denied', writeDeniedFiles }
-    }
-    if (errorMsg.includes('SECRET_DETECTED')) {
-      const fileLines = errorMsg
-        .split('\n')
-        .map((line: string) => line.replace(/^remote:\s*/, '').trim())
-        .filter((line: string) => line.startsWith('- '))
-      const fileList = fileLines.length > 0 ? fileLines.join('\n') : '（詳細不明）'
-      return {
-        success: false,
-        error: `シークレット（APIキー等）が検出されました。\n該当ファイルからシークレットを削除してから再度同期してください。\n\n${fileList}`,
-        secretDetected: true
-      }
-    }
-    return { success: false, error: errorMsg }
-  }
-})
-
-// Create repo on server via API
-ipcMain.handle('server:createRepo', async (_, companyId: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/git/repos`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': authCookies.join('; '),
-      },
-      body: JSON.stringify({ companyId }),
-    })
-
-    const data = await response.json()
-    return data
-  } catch (error) {
-    console.error('Server createRepo error:', error)
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
   }
 })
@@ -2524,26 +2428,6 @@ const DEFAULT_SYSTEM_PROMPT = `あなたは会社の業務をサポートするA
 
 実際の回答は<think>タグの外に記述してください。
 シンプルな挨拶や短い質問には思考は不要です。`
-
-// Parse text to extract thinking and content parts
-interface ParsedContent {
-  thinking: string | null
-  content: string
-}
-
-function parseThinkingContent(text: string): ParsedContent {
-  const thinkRegex = /<think>([\s\S]*?)<\/think>/g
-  let thinking: string | null = null
-  let content = text
-
-  const match = thinkRegex.exec(text)
-  if (match) {
-    thinking = match[1].trim()
-    content = text.replace(thinkRegex, '').trim()
-  }
-
-  return { thinking, content }
-}
 
 // Build system prompt with working directory context
 function buildSystemPrompt(workingDirectory?: string): string {
@@ -2948,6 +2832,7 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
 // List skills for a department (scans 3 hierarchy levels)
 ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
   try {
+    rootPath = validatePath(rootPath)
     // A forced refresh (watcher event, sync, the member's own change) rescans.
     if (options?.force) invalidateSkillsCache(rootPath, departmentFolder)
     const cached = skillsCache.get(rootPath, departmentFolder)
@@ -2963,10 +2848,18 @@ ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: stri
   }
 })
 
+/** A skill folder as a .gitignore line: one line, never a way to add others. */
+function skillGitignoreEntry(value: unknown): string {
+  if (typeof value !== 'string' || !value.trim() || /[\r\n]/.test(value)) throw new Error('Invalid skill path')
+  return value
+}
+
 // Publish a skill (remove from .gitignore, one-way / irreversible)
 ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: string) => {
   try {
-    const gitignorePath = path.join(rootPath, '.gitignore')
+    rootPath = validatePath(rootPath)
+    skillGitignoreEntry(skillRelativePath)
+    const gitignorePath = validatePath(path.join(rootPath, '.gitignore'))
     if (!fs.existsSync(gitignorePath)) return { success: true }
 
     const content = fs.readFileSync(gitignorePath, 'utf-8')
@@ -2997,7 +2890,9 @@ ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: 
 // Add skill to .gitignore (used when creating a new skill)
 ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
   try {
-    const gitignorePath = path.join(rootPath, '.gitignore')
+    rootPath = validatePath(rootPath)
+    skillGitignoreEntry(skillRelativePath)
+    const gitignorePath = validatePath(path.join(rootPath, '.gitignore'))
     const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
     const lines = content.split('\n')
 
@@ -3021,8 +2916,10 @@ ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePa
 })
 
 // Toggle nurturing status in SKILL.md frontmatter
-ipcMain.handle('skills:toggleNurturing', async (_, skillMdPath: string, makeNurturing: boolean) => {
+ipcMain.handle('skills:toggleNurturing', async (_, unsafeSkillMdPath: string, makeNurturing: boolean) => {
   try {
+    const skillMdPath = validatePath(unsafeSkillMdPath)
+    if (path.basename(skillMdPath) !== 'SKILL.md') return { success: false, error: 'Not a SKILL.md' }
     if (!fs.existsSync(skillMdPath)) {
       return { success: false, error: 'SKILL.md not found' }
     }
@@ -3062,8 +2959,16 @@ ipcMain.handle('skills:toggleNurturing', async (_, skillMdPath: string, makeNurt
 })
 
 // Start a tool (Web app)
-ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string = 'dev') => {
+ipcMain.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev') => {
   try {
+    // A skill's tool folder (<…>/.claude/skills/<skill>/tools/<tool>) inside
+    // a company, and one of the scripts the skills scan offers: this runs
+    // `npm install` and `npm run` there.
+    const toolPath = validatePath(unsafeToolPath)
+    const root = allowedRoots.rootOf(toolPath)
+    const rel = root ? path.relative(root, toolPath).split(path.sep).join('/') : ''
+    if (!/(^|\/)\.claude\/skills\/[^/]+\/tools\/[^/]+$/.test(rel)) return { success: false, error: 'Not a skill tool folder' }
+    if (startCommand !== 'dev' && startCommand !== 'start') return { success: false, error: 'Unknown start command' }
     console.log('[tools:start] toolPath:', toolPath, 'command:', startCommand)
 
     // Check if already running
@@ -3215,6 +3120,7 @@ ipcMain.handle('tools:start', async (_, toolPath: string, startCommand: string =
 // Stop a running tool
 ipcMain.handle('tools:stop', async (_, toolPath: string) => {
   try {
+    toolPath = typeof toolPath === 'string' ? path.resolve(toolPath) : ''
     const runningTool = runningTools.get(toolPath)
     if (!runningTool) {
       return { success: true, message: 'Tool was not running' }
@@ -3271,159 +3177,13 @@ ipcMain.handle('tools:list-running', async () => {
 // Open URL in external browser
 ipcMain.handle('shell:openExternal', async (_, url: string) => {
   try {
+    // Web pages and mail only: file:, javascript: or an app's own scheme
+    // would open local files or launch other programs.
+    if (!isExternalUrlAllowed(url)) return { success: false, error: 'このリンクは開けません（http / https / mailto のみ開けます）。' }
     await shell.openExternal(url)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// AI Chat handler
-ipcMain.handle('ai:chat', async (_event, messages: ChatMessage[], systemPrompt?: string, workingDirectory?: string) => {
-  const config = loadConfig()
-  const authMode = config.authMode || 'claude-code'
-
-  // Build system prompt with working directory context
-  const finalSystemPrompt = systemPrompt || buildSystemPrompt(workingDirectory)
-  if (authMode === 'codex') return { error: 'Codexは相談チャットから利用してください。' }
-
-  try {
-    let model
-
-    if (authMode === 'claude-code') {
-      // Use Claude Code CLI authentication (Max/Pro subscription)
-      const ccStatus = checkClaudeCodeStatus()
-      if (!ccStatus?.available || !ccStatus?.authenticated) {
-        return { error: ccStatus?.error || 'Claude Code CLIが認証されていません。`claude login`を実行してください。' }
-      }
-      const claudePath = getClaudeCodeCliPath()
-      model = claudeCode('sonnet', {
-        pathToClaudeCodeExecutable: claudePath,
-        // Bypass permission prompts for smoother UX
-        permissionMode: 'bypassPermissions',
-        // Set working directory for Claude Code
-        cwd: workingDirectory,
-        // Ensure the spawned process has the user's shell PATH (needed in .app bundles)
-        env: getShellEnv(),
-      })
-    } else {
-      // Use API key authentication
-      if (!config.anthropicApiKey) {
-        return { error: 'APIキーが設定されていません。' }
-      }
-      const anthropic = createAnthropic({
-        apiKey: config.anthropicApiKey,
-      })
-      model = anthropic('claude-sonnet-4-20250514')
-    }
-
-    const result = streamText({
-      model,
-      system: finalSystemPrompt,
-      messages,
-    })
-
-    // Stream the response back to renderer
-    let fullText = ''
-    let inThinking = false
-    let thinkingStarted = false
-    let thinkingContent = ''
-
-    for await (const chunk of result.textStream) {
-      fullText += chunk
-
-      // Check if we're entering a thinking block
-      if (!inThinking && fullText.includes('<think>') && !fullText.includes('</think>')) {
-        inThinking = true
-        if (!thinkingStarted) {
-          thinkingStarted = true
-          // Signal thinking started
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ai:thinking', true)
-          }
-        }
-        // Extract and send thinking content so far
-        const thinkStart = fullText.indexOf('<think>') + 7
-        const currentThinking = fullText.slice(thinkStart)
-        if (currentThinking !== thinkingContent) {
-          thinkingContent = currentThinking
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ai:thought-stream', thinkingContent)
-          }
-        }
-        continue
-      }
-
-      // While in thinking mode, stream thinking content
-      if (inThinking && !fullText.includes('</think>')) {
-        const thinkStart = fullText.indexOf('<think>') + 7
-        const currentThinking = fullText.slice(thinkStart)
-        if (currentThinking !== thinkingContent) {
-          thinkingContent = currentThinking
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ai:thought-stream', thinkingContent)
-          }
-        }
-        continue
-      }
-
-      // Check if thinking block is complete
-      if (inThinking && fullText.includes('</think>')) {
-        inThinking = false
-        const parsed = parseThinkingContent(fullText)
-        if (parsed.thinking) {
-          // Send final thinking content
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            mainWindow.webContents.send('ai:thought-stream', parsed.thinking)
-            mainWindow.webContents.send('ai:thinking', false)
-          }
-        }
-        continue
-      }
-
-      // Send content chunks (outside of think tags)
-      if (!inThinking && mainWindow && !mainWindow.isDestroyed()) {
-        // Only send if we're past the thinking block or there was no thinking
-        if (!fullText.includes('<think>') || fullText.includes('</think>')) {
-          // Filter out the think tags from what we send
-          const cleanChunk = chunk.replace(/<\/?think>/g, '')
-          if (cleanChunk) {
-            mainWindow.webContents.send('ai:chunk', cleanChunk)
-          }
-        }
-      }
-    }
-
-    // Final parse to get clean content
-    const parsed = parseThinkingContent(fullText)
-
-    // Signal completion
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('ai:complete', {
-        thinking: parsed.thinking,
-        content: parsed.content
-      })
-    }
-
-    return { text: parsed.content, thinking: parsed.thinking }
-  } catch (error: unknown) {
-    console.error('AI Chat Error:', error)
-    let errorMessage = 'Unknown error'
-    if (error instanceof Error) {
-      errorMessage = error.message
-      // Check for API-specific error data
-      if ('data' in error && typeof error.data === 'object' && error.data !== null) {
-        const data = error.data as { error?: { message?: string } }
-        if (data.error?.message) {
-          errorMessage = data.error.message
-        }
-      }
-    }
-    // Signal completion even on error
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      mainWindow.webContents.send('ai:complete')
-    }
-    return { error: errorMessage }
   }
 })
 
@@ -3444,7 +3204,13 @@ app.whenReady().then(async () => {
     if (!target.ok) {
       return new Response(target.status === 403 ? 'Forbidden: path is outside allowed directories' : 'Bad request', { status: target.status })
     }
-    const resolved = target.path
+    // Inside by name; a link there must not lead out of the company folder.
+    let resolved: string
+    try {
+      resolved = validatePath(target.path)
+    } catch {
+      return new Response('Forbidden: path is outside allowed directories', { status: 403 })
+    }
     const response = await electronNet.fetch(pathToFileURL(resolved).toString())
     const headers = new Headers(response.headers)
     headers.set('Cache-Control', 'no-store')

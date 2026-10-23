@@ -16,6 +16,7 @@ import { loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harnes
 import type { ChatSession } from '../shared/chat-history'
 
 let h: MainHarness
+const LINK_ESCAPE = 'このファイル（またはフォルダ）は会社フォルダの外を指すリンク（シンボリックリンク）のため、アプリでは開いたり変更したりできません。'
 
 before(async () => {
   h = await loadMain()
@@ -88,9 +89,23 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
   assert.equal(signUp.error, `API returned non-JSON response (status 502) from ${SERVER_URL}. Preview: <html>Bad gateway</html>`)
   assert.deepEqual(JSON.parse(h.server.to('/api/auth/sign-up/email')[0].body!), { email: 'new@example.com', password: 'pw', name: 'new' })
 
+  // A company id is one path segment of the URL, never more.
+  await h.invoke('api:getDepartments', '../me?x=1')
+  await h.invoke('api:getCompany', 'a/b')
+  assert.equal(h.server.requests.at(-2)!.path, '/api/companies/..%2Fme%3Fx%3D1/departments')
+  assert.equal(h.server.requests.at(-1)!.path, '/api/companies/a%2Fb')
+
   assert.deepEqual(await h.invoke('auth:signOut'), { success: true })
   assert.match(h.server.to('/api/auth/sign-out')[0].headers.get('Cookie') ?? '', /tok\.sig/)
   const asked = h.server.to('/api/me').length
+  assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null })
+  assert.equal(h.server.to('/api/me').length, asked)
+
+  // Signing out offline still forgets the session on this computer.
+  await h.invoke('auth:signIn', 'me@example.com', 'right')
+  h.server.offline = true
+  assert.deepEqual(await h.invoke('auth:signOut'), { success: false, error: 'fetch failed' })
+  h.server.offline = false
   assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null })
   assert.equal(h.server.to('/api/me').length, asked)
 })
@@ -131,6 +146,7 @@ test('chat history: saves answer with a receipt and broadcast to the window; the
 
 test('skills: the scan (company-wide vs department, nested groups, private, nurturing, tools) and its edits', async () => {
   const root = h.companyDir('skills-co')
+  await h.invoke('fs:registerAllowedRoot', root)
   const skill = (name: string, extra = '') => `---\nname: ${name}\ndescription: ${name} の説明\n${extra}---\n\n# ${name}\n`
   writeFiles(root, {
     '.gitignore': 'node_modules/\n\n# Private skills\n営業/.claude/skills/beta/\n',
@@ -188,7 +204,56 @@ test('skills: the scan (company-wide vs department, nested groups, private, nurt
   assert.deepEqual(await h.invoke('skills:toggleNurturing', md, false), { success: true })
   assert.equal(fs.readFileSync(md, 'utf-8'), skill('デルタ'))
   assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(root, '営業/チームA/.claude/skills/gamma/SKILL.md'), true), { success: false, error: 'No frontmatter found' })
-  assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(root, 'missing.md'), true), { success: false, error: 'SKILL.md not found' })
+  assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(root, 'missing', 'SKILL.md'), true), { success: false, error: 'SKILL.md not found' })
+
+  // Only SKILL.md files inside a company; a .gitignore entry is one line;
+  // a .gitignore that is a link out of the company is never written.
+  const outside = h.companyDir('skills-outside')
+  writeFiles(outside, { 'SKILL.md': skill('外'), 'x.md': '---\nname: x\n---\n' })
+  const denied = { success: false, error: 'Access denied: path is outside allowed directories' }
+  assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(outside, 'SKILL.md'), true), denied)
+  assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(root, '.gitignore'), true), { success: false, error: 'Not a SKILL.md' })
+  assert.deepEqual(await h.invoke('skills:list', outside, '', 'd'), { ...denied, skills: [] })
+  for (const channel of ['skills:publish', 'skills:makePrivate']) {
+    assert.deepEqual(await h.invoke(channel, outside, 'a/.claude/skills/x/'), denied, channel)
+    assert.deepEqual(await h.invoke(channel, root, '営業/.claude/skills/x/\n!.backups/'), { success: false, error: 'Invalid skill path' }, channel)
+  }
+  fs.renameSync(path.join(root, '.gitignore'), path.join(outside, '.gitignore'))
+  fs.symlinkSync(path.join(outside, '.gitignore'), path.join(root, '.gitignore'))
+  const linked = await h.invoke<{ success: boolean; error: string }>('skills:makePrivate', root, '営業/.claude/skills/x/')
+  assert.deepEqual(linked, { success: false, error: LINK_ESCAPE })
+  assert.equal(fs.readFileSync(path.join(outside, '.gitignore'), 'utf-8'), 'node_modules/\n\n')
+  assert.equal(fs.readFileSync(path.join(outside, 'SKILL.md'), 'utf-8'), skill('外'))
+})
+
+test('tools:start runs npm only in a skill tool folder inside a company, with a script the scan offers', async () => {
+  const root = h.companyDir('tools-co')
+  await h.invoke('fs:registerAllowedRoot', root)
+  const outside = h.companyDir('tools-outside')
+  const pkg = JSON.stringify({ name: 't', scripts: { dev: 'x' } })
+  writeFiles(outside, { 'app/package.json': pkg })
+  writeFiles(root, { 'app/package.json': pkg, '営業/.claude/skills/s/tools/app/package.json': pkg })
+  const tool = path.join(root, '営業', '.claude', 'skills', 's', 'tools', 'app')
+  const table: Array<[unknown[], unknown]> = [
+    [[path.join(outside, 'app')], { success: false, error: 'Access denied: path is outside allowed directories' }],
+    [[path.join(root, 'app')], { success: false, error: 'Not a skill tool folder' }],
+    [[path.join(tool, '..')], { success: false, error: 'Not a skill tool folder' }],
+    [[tool, 'build && rm -rf ~'], { success: false, error: 'Unknown start command' }],
+    [[tool, '--prefix=/'], { success: false, error: 'Unknown start command' }],
+  ]
+  for (const [args, expected] of table) assert.deepEqual(await h.invoke('tools:start', ...args), expected, JSON.stringify(args))
+  for (const dir of [path.join(outside, 'app'), path.join(root, 'app'), tool]) assert.equal(fs.existsSync(path.join(dir, 'node_modules')), false)
+})
+
+test('shell:openExternal opens web pages and mail links only', async () => {
+  const refused = { success: false, error: 'このリンクは開けません（http / https / mailto のみ開けます）。' }
+  for (const url of ['http://localhost:3100', 'https://example.com/a?b=1', 'mailto:someone@example.com']) {
+    assert.deepEqual(await h.invoke('shell:openExternal', url), { success: true }, url)
+  }
+  for (const url of ['file:///etc/passwd', 'javascript:alert(1)', 'vscode://file/etc/passwd', 'smb://host/share', '/Applications/Calculator.app', '', 42, null]) {
+    assert.deepEqual(await h.invoke('shell:openExternal', url), refused, String(url))
+  }
+  assert.deepEqual(h.fake.openedExternal, ['http://localhost:3100', 'https://example.com/a?b=1', 'mailto:someone@example.com'])
 })
 
 test('private folders and write access: malformed arguments never reach the server; create forwards only known fields', async () => {

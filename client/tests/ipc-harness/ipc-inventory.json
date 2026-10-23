@@ -9,10 +9,6 @@
         "file": "main.ts",
         "params": "id: string, response: AgentInteractionResponse"
       },
-      "ai:chat": {
-        "file": "main.ts",
-        "params": "messages: ChatMessage[], systemPrompt?: string, workingDirectory?: string"
-      },
       "api:createCompany": {
         "file": "main.ts",
         "params": "name: string"
@@ -51,7 +47,7 @@
       },
       "backup:list": {
         "file": "main.ts",
-        "params": "repoPath: string"
+        "params": "unsafeRepoPath: string"
       },
       "backup:openFolder": {
         "file": "main.ts",
@@ -229,10 +225,6 @@
         "file": "main.ts",
         "params": "filePath: string, content: string"
       },
-      "git:addRemote": {
-        "file": "main.ts",
-        "params": "repoPath: string, remoteName: string, remoteUrl: string"
-      },
       "git:commitFileDiff": {
         "file": "main.ts",
         "params": "repoPath: string, commitHash: string, filePath: string"
@@ -257,17 +249,9 @@
         "file": "main.ts",
         "params": "repoPath: string, query: string, folderPath: string"
       },
-      "git:init": {
-        "file": "main.ts",
-        "params": "repoPath: string"
-      },
       "git:inspectCompanyFolder": {
         "file": "main.ts",
         "params": "folder: string, companyId: string"
-      },
-      "git:isRepo": {
-        "file": "main.ts",
-        "params": "repoPath: string"
       },
       "git:isSparseCheckout": {
         "file": "main.ts",
@@ -286,10 +270,6 @@
         "params": "repoPath: string, folderPath: string, limit: number = 50"
       },
       "git:preview": {
-        "file": "main.ts",
-        "params": "repoPath: string"
-      },
-      "git:pushToServer": {
         "file": "main.ts",
         "params": "repoPath: string"
       },
@@ -349,10 +329,6 @@
         "file": "main.ts",
         "params": "targetPath: string"
       },
-      "server:createRepo": {
-        "file": "main.ts",
-        "params": "companyId: string"
-      },
       "shell:openExternal": {
         "file": "main.ts",
         "params": "url: string"
@@ -371,7 +347,7 @@
       },
       "skills:toggleNurturing": {
         "file": "main.ts",
-        "params": "skillMdPath: string, makeNurturing: boolean"
+        "params": "unsafeSkillMdPath: string, makeNurturing: boolean"
       },
       "tool-approval-response": {
         "file": "main.ts",
@@ -383,7 +359,7 @@
       },
       "tools:start": {
         "file": "main.ts",
-        "params": "toolPath: string, startCommand: string = 'dev'"
+        "params": "unsafeToolPath: string, startCommand: string = 'dev'"
       },
       "tools:stop": {
         "file": "main.ts",
@@ -440,18 +416,6 @@
       "agent-interaction:${event}": [
         "main.ts"
       ],
-      "ai:chunk": [
-        "main.ts"
-      ],
-      "ai:complete": [
-        "main.ts"
-      ],
-      "ai:thinking": [
-        "main.ts"
-      ],
-      "ai:thought-stream": [
-        "main.ts"
-      ],
       "chat-server:info": [
         "main.ts"
       ],
@@ -505,12 +469,6 @@
         "invoke backup:restore($0, $1, $2)"
       ],
       "declared": "(repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>"
-    },
-    "chat": {
-      "calls": [
-        "invoke ai:chat($0, $1, $2)"
-      ],
-      "declared": "(messages: AIMessage[], systemPrompt?: string, workingDirectory?: string) => Promise<AIResponse>"
     },
     "completeHandoffTurn": {
       "calls": [
@@ -692,12 +650,6 @@
       ],
       "declared": "(companyId: string, refresh?: boolean) => Promise<WriteAccess | null>"
     },
-    "gitAddRemote": {
-      "calls": [
-        "invoke git:addRemote($0, $1, $2)"
-      ],
-      "declared": "(repoPath: string, remoteName: string, remoteUrl: string) => Promise<GitResult>"
-    },
     "gitBinaryStatus": {
       "calls": [
         "invoke git:getBinaryStatus()"
@@ -728,23 +680,11 @@
       ],
       "declared": "(repoPath: string, query: string, folderPath: string) => Promise<{ success: boolean results: Array<{ file: string; line: number; text: string; column?: number }> truncated?: boolean timedOut?: boolean /** A newer search from this window replaced this one. */ cancelled?: boolean error?: string }>"
     },
-    "gitInit": {
-      "calls": [
-        "invoke git:init($0)"
-      ],
-      "declared": "(repoPath: string) => Promise<GitResult>"
-    },
     "gitInspectCompanyFolder": {
       "calls": [
         "invoke git:inspectCompanyFolder($0, $1)"
       ],
       "declared": "(folder: string, companyId: string) => Promise<{ success: boolean decision?: | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' } | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string } error?: string }>"
-    },
-    "gitIsRepo": {
-      "calls": [
-        "invoke git:isRepo($0)"
-      ],
-      "declared": "(repoPath: string) => Promise<GitRepoResult>"
     },
     "gitListFiles": {
       "calls": [
@@ -763,12 +703,6 @@
         "invoke git:preview($0)"
       ],
       "declared": "(repoPath: string) => Promise<{ success: boolean hasChanges: boolean changes: { added: string[]; modified: string[]; deleted: string[] } totalCount: number error?: string }>"
-    },
-    "gitPushToServer": {
-      "calls": [
-        "invoke git:pushToServer($0)"
-      ],
-      "declared": "(repoPath: string) => Promise<GitResult>"
     },
     "gitRevertFile": {
       "calls": [
@@ -861,41 +795,6 @@
         "removeListener agent-interaction:closed(<fn>)"
       ],
       "declared": "(callback: (request: AgentInteractionRequest) => void) => () => void"
-    },
-    "onAIChunk": {
-      "calls": [
-        "on ai:chunk(<fn>)",
-        "removeListener ai:chunk(<fn>)"
-      ],
-      "declared": "(callback: (chunk: string) => void) => () => void"
-    },
-    "onAIComplete": {
-      "calls": [
-        "on ai:complete(<fn>)",
-        "removeListener ai:complete(<fn>)"
-      ],
-      "declared": "(callback: (data?: { thinking?: string; content?: string }) => void) => () => void"
-    },
-    "onAIThinking": {
-      "calls": [
-        "on ai:thinking(<fn>)",
-        "removeListener ai:thinking(<fn>)"
-      ],
-      "declared": "(callback: (isThinking: boolean) => void) => () => void"
-    },
-    "onAIThought": {
-      "calls": [
-        "on ai:thought(<fn>)",
-        "removeListener ai:thought(<fn>)"
-      ],
-      "declared": "(callback: (thought: string) => void) => () => void"
-    },
-    "onAIThoughtStream": {
-      "calls": [
-        "on ai:thought-stream(<fn>)",
-        "removeListener ai:thought-stream(<fn>)"
-      ],
-      "declared": "(callback: (thought: string) => void) => () => void"
     },
     "onChatHistoryChanged": {
       "calls": [
@@ -1055,12 +954,6 @@
         "invoke dialog:selectDirectory()"
       ],
       "declared": "() => Promise<string | null>"
-    },
-    "serverCreateRepo": {
-      "calls": [
-        "invoke server:createRepo($0)"
-      ],
-      "declared": "(companyId: string) => Promise<ServerRepoResult>"
     },
     "setApiKey": {
       "calls": [
@@ -1245,28 +1138,15 @@
     ],
     "preloadCallsWithoutHandler": [],
     "sendsWithoutPreloadListener": [],
-    "preloadListenersWithoutSender": [
-      "ai:thought"
-    ],
+    "preloadListenersWithoutSender": [],
     "exposedButNotDeclared": [],
     "declaredButNotExposed": [],
     "preloadApiUnusedByRenderer": [
-      "chat",
       "getCompany",
-      "gitAddRemote",
-      "gitInit",
-      "gitIsRepo",
-      "gitPushToServer",
       "isClaudeCodeAvailable",
       "isSparseCheckout",
       "listRemoteDirectories",
-      "listRunningTools",
-      "onAIChunk",
-      "onAIComplete",
-      "onAIThinking",
-      "onAIThought",
-      "onAIThoughtStream",
-      "serverCreateRepo"
+      "listRunningTools"
     ]
   }
 }

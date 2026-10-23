@@ -411,6 +411,28 @@ const FIELD = '\x1f'
 const RECORD = '\x1e'
 
 /**
+ * A commit the renderer names (history panel, commit diff): a full or
+ * abbreviated hex object id, nothing else. Anything that could be read as an
+ * option (`--output=<file>` makes `git show` write a file) or as a revision
+ * expression is refused before git runs.
+ */
+export function commitIdArg(value: unknown): string {
+  if (typeof value === 'string' && /^[0-9a-f]{4,64}$/i.test(value)) return value
+  throw new Error('Invalid commit id')
+}
+
+/** `git show --name-status` for one commit, optionally limited to a folder; paths always after `--`. */
+export function showCommitArgs(commit: unknown, folder?: unknown): string[] {
+  return ['show', '--name-status', '--pretty=format:', commitIdArg(commit), '--', ...(typeof folder === 'string' && folder ? [folder] : [])]
+}
+
+/** `git show` of one file in one commit; the path always after `--`. */
+export function commitFileDiffArgs(commit: unknown, filePath: unknown): string[] {
+  if (typeof filePath !== 'string' || !filePath) throw new Error('Invalid file path')
+  return ['show', commitIdArg(commit), '--', filePath]
+}
+
+/**
  * `git log` for a folder. No `--follow`: simple-git's `file` option added it,
  * which made git track renames of the *folder* path commit by commit — 0.9 s
  * instead of 0.02 s on a 5k-file department, with the same commits (rename
