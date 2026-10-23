@@ -26,6 +26,8 @@ export interface CodexTextRequest {
   text: string
   signal: AbortSignal
   modelId?: string
+  /** Default: the voice formatter's. */
+  developerInstructions?: string
   onMetrics?: (metrics: { model: string; setupMs: number; generationMs: number; inputTokens?: number; outputTokens?: number }) => void
 }
 export function generateCodexText(request: CodexTextRequest, createRpc: (env: Record<string, string>, overrides: string[]) => CodexTransport = (env, overrides) => new CodexRpc(env, overrides)): Promise<string> {
@@ -111,7 +113,7 @@ export function generateCodexText(request: CodexTextRequest, createRpc: (env: Re
       const result = await rpc.request<{ thread: { id: string } }>('thread/start', {
         model: model.id, modelProvider: 'openai', cwd: request.cwd, ephemeral: true,
         sandbox: 'read-only', approvalPolicy: 'never', approvalsReviewer: 'user',
-        baseInstructions: request.system, developerInstructions: '音声整形だけを行い、ツール・スキルを使用しないでください。',
+        baseInstructions: request.system, developerInstructions: request.developerInstructions ?? '音声整形だけを行い、ツール・スキルを使用しないでください。',
         config: { mcp_servers: mcpServers },
       })
       threadId = result.thread.id

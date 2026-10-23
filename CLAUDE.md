@@ -329,6 +329,19 @@ P3. Each readable private folder: excluded in settings → sync it one last
          denied folder is moved back) → commit → push again, once
 ```
 
+**Commit message (step 9)**: written by the AI the member signs in with
+(`client/electron/commit-message.ts`, wired in `main.ts`): the chosen auth
+mode first — Claude Code as an isolated one-shot `claude -p --model haiku`
+(the voice polisher's flags, shared `electron/claude-oneshot.ts`), Codex
+(`generateCodexText`), or the API key (`claude-haiku-5-5`) — then whichever
+other is ready. Input is only `git diff --cached --name-status` + `--stat`
+(`core.quotePath=false`, capped), sent as JSON data; only the answer's
+`<commit_message>` block is used, sanitised (72-char subject, ≤ 20 body lines,
+≤ 2,000 chars). Nothing available, a failure, no tagged block or 30 s → the
+fixed 「Sync from AI Company Builder」; the message itself is never logged. A
+private folder's clone (`kind: 'scope'`) uses the API key only, as before —
+its file names never go to a CLI sign-in (Codex is another vendor).
+
 ### First Setup: Download Only the Picked Departments (partial clone)
 
 A member setting up a company in a **fresh folder** (no local commits) picks

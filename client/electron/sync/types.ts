@@ -59,7 +59,7 @@ export interface SyncDeps {
   dialog: SyncDialog
   api: SyncServerApi
   /** AI commit message for the staged changes, or null to use the default. */
-  generateCommitMessage(repoPath: string): Promise<string | null>
+  generateCommitMessage(repoPath: string, opts?: { kind?: 'company' | 'scope' }): Promise<string | null>
   /** Clock for backup folder names, metadata and retention. */
   now(): Date
   /** Decides whether a failed pull is a transient Windows file lock. */
