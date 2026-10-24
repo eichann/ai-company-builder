@@ -30,8 +30,14 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   loopback by default (`BIND_ADDR`, 127.0.0.1); use a reverse proxy (Caddy) for external access.
   OrbStack ≤ 2.2.0 cannot forward loopback-bound ports when host and container ports match —
   set `BIND_ADDR=0.0.0.0` in `.env` there.
-- `api` mounts `./server/src:/app/src`, `./shared:/app/shared` and `./data:/app/data` and runs
-  `tsx watch`. When you add a directory the server needs at run time, add its mount here too.
+- `api` runs the code baked into its image (`server/Dockerfile`: `server/src` + `shared`,
+  `node --import tsx src/index.ts`, no watch) with a read-only root filesystem; it mounts only
+  `./data:/app/data` and a `/tmp` volume. Server changes need `docker compose up -d --build api`
+  (a `restart` runs the old code); hot reload is `pnpm dev:server` on the host. Why: the server
+  will hold members' API keys (key broker), so whoever can write the checkout must not change
+  what it runs. A new place the server writes at run time goes under `DATA_DIR`, or `/tmp` for
+  scratch; anything else fails on the read-only filesystem. The image stays TypeScript + tsx on
+  purpose: the pre-receive hook runs `push-check/entry.ts` with the server's node and tsx loader.
 - `admin` is a production build (`next build`, standalone server) with no source mount, because
   it is internet-facing and must not run `next dev`. Rebuild after admin changes
   (`docker compose up -d --build admin`), or use `pnpm dev:admin` on the host for hot reload.

@@ -5,3 +5,12 @@ node_modules
 .env.local
 .next
 */.next
+
+# Never part of an image: the server's data (databases, company
+# repositories) and secrets. Build contexts are the repository root.
+data
+.env
+.env.*
+!.env.example
+.personal
+client/release-*

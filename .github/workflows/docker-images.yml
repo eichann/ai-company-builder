@@ -22,7 +22,10 @@ on:
       - 'patches/**'
       - 'server/package.json'
       - 'admin/package.json'
-      - 'shared/package.json'
+      - 'shared/**'
+      # The api image bakes the server's code in (no source mount)
+      - 'server/src/**'
+      - 'server/tsconfig.json'
       - '.github/workflows/docker-images.yml'
   push:
     branches: [main]
@@ -84,6 +87,21 @@ jobs:
             console.log("better-sqlite3 loads; node =", process.execPath)
             process.exit(bad ? 1 : 0)
           ' < pnpm-lock.yaml
+
+      - name: API runs the image's code, read-only, with no watcher
+        run: |
+          # No source mount: what runs is what the image was built from.
+          docker compose exec -T api sh -c '! grep -qE " /app/(src|shared) " /proc/self/mountinfo' \
+            || { echo "::error::api has server/src or shared mounted from the host"; exit 1; }
+          # Read-only root filesystem: the code cannot be changed in place.
+          docker compose exec -T api sh -c '! touch /app/src/index.ts 2>/dev/null' \
+            || { echo "::error::api's /app/src is writable"; exit 1; }
+          # ...while the places the server writes stay writable.
+          docker compose exec -T api sh -c 'touch /app/data/.rw-check /tmp/.rw-check && rm /app/data/.rw-check /tmp/.rw-check'
+          # PID 1 is the server itself, not tsx watch.
+          cmd=$(docker compose exec -T api sh -c 'tr "\0" " " < /proc/1/cmdline')
+          echo "api PID 1: $cmd"
+          case "$cmd" in *watch*) echo "::error::api runs a file watcher"; exit 1;; esac
 
       - name: Admin serves /login from the production server
         run: |

@@ -78,10 +78,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 COPY --from=deps /app/node_modules ./node_modules
 COPY server/package.json server/tsconfig.json ./
+# The code the server runs is the code baked in here: compose mounts only
+# ./data, so a change on the host's server/src or shared/ does nothing until
+# the image is rebuilt (`docker compose up -d --build api`). Whoever can write
+# the checkout cannot change what the running server — which will hold the
+# members' API keys — executes on its next request.
 COPY server/src ./src
-# The server imports ../../shared/types (types and the private-folder path
-# hashing helpers). docker-compose
-# bind-mounts ./shared over this; baking it in keeps the image runnable alone.
+# The server imports ../../shared (types and the shared rules, shared/core).
 COPY shared ./shared
 
 # Create data directory
@@ -90,5 +93,8 @@ RUN mkdir -p data
 # Expose port
 EXPOSE 3001
 
-# Start the server with tsx (resolved from /app/node_modules/.bin)
-CMD ["npx", "tsx", "watch", "src/index.ts"]
+# Run the TypeScript sources through tsx's loader, once — no watch, no npx.
+# Still TypeScript at run time on purpose: the pre-receive hook runs
+# src/lib/push-check/entry.ts with this node and tsx loader
+# (lib/git-server/hook.ts). One process, so `docker stop` signals the server.
+CMD ["node", "--import", "tsx", "src/index.ts"]
