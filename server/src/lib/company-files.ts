@@ -35,9 +35,10 @@ import {
   isSameOrAncestorPath,
   resolveAccess,
   type PermissionRepository,
-} from './permissions'
+} from '../../shared/core/permissions'
 import { companyRepoPath } from './config'
-import { pathKey, privateRepoPath } from './private-folders'
+import { privateRepoPath } from './private-folders'
+import { pathKey } from '../../shared/core/paths'
 import {
   COMPANY_FILES_LIMITS as LIMITS,
   type CompanyFileContent,

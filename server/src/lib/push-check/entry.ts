@@ -18,7 +18,7 @@ export const REJECT_EXIT = 10
 
 interface Gates {
   write: WriteGate
-  /** Reserved private-folder paths (reservedKey form) — company repository only. */
+  /** Reserved private-folder paths (pathKey form) — company repository only. */
   reserved: string[]
   /** Department folders the pusher manages (instruction files). */
   managedFolders?: string[]

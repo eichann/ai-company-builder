@@ -24,9 +24,8 @@ import {
 } from '../../../shared/private-folder-ui'
 import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../shared/private-folder-help'
 import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHelp'
-
-// The server's department folder-name rule (server/src/routes/departments.ts isValidFolderName).
-const FOLDER_RE = /^[\w぀-ゟ゠-ヿ一-鿿][\w぀-ゟ゠-ヿ一-鿿._-]*$/
+// The server's department folder-name rule (private folder names follow it too).
+import { isValidFolderName } from '../../../../shared/core/names'
 
 export interface NewFolderDialogProps {
   isOpen: boolean
@@ -110,7 +109,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
   const editorReach = editorsMode === 'all' ? reach : admins.length + editors.filter(id => viewerIds.includes(id)).length
 
   const trimmed = name.trim()
-  const invalid = isPrivate && trimmed !== '' && !FOLDER_RE.test(trimmed)
+  const invalid = isPrivate && trimmed !== '' && !isValidFolderName(trimmed)
   const canSubmit = trimmed !== '' && !invalid && !busy
 
   const submit = async (force = false) => {

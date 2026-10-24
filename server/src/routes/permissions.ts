@@ -14,7 +14,7 @@
  * (lib/orphaned-scopes.ts).
  *
  * Department managers are in routes/departments.ts (/:id/managers).
- * Semantics of scopes and rules: lib/permissions.ts. Nothing here enforces
+ * Semantics of scopes and rules: shared/core/permissions.ts. Nothing here enforces
  * anything — Phase 1 only stores and exposes the model.
  */
 import { createHash } from 'crypto'
@@ -32,7 +32,7 @@ import {
   summarizeRules,
   writeAccessSummary,
   type ScopeRule,
-} from '../lib/permissions'
+} from '../../shared/core/permissions'
 import { listRecentPushRejections } from '../lib/push-rejections'
 import { findOrphanedScopes } from '../lib/orphaned-scopes'
 
@@ -222,7 +222,7 @@ permissionsRoute.get('/me/capabilities', async (c) => {
 
 // GET /api/companies/:companyId/me/write-access
 // The caller's write access as data the client evaluates per path with
-// resolveAccess()'s semantics (see writeAccessSummary in lib/permissions.ts).
+// resolveAccess()'s semantics (see writeAccessSummary in shared/core/permissions.ts).
 // `version` (also the ETag) changes whenever the answer changes.
 permissionsRoute.get('/me/write-access', async (c) => {
   const auth = await authenticateMember(c)

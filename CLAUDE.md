@@ -113,10 +113,38 @@ forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at runtime.
 
 ### Import Paths
 
-Server references shared types via:
+Server references shared types and rules via:
 ```typescript
 import { ... } from '../../shared/types'  // Path inside container
+import { ... } from '../../shared/core/permissions'
 ```
+
+### Shared rules (`shared/core`)
+
+The rules the server, the desktop app and the admin console must apply
+identically live in ONE copy under `shared/core/` (pure TypeScript: modules
+import only each other — no Node built-ins, packages, Electron, React, Hono,
+database or git; `server/tests/unit/core-purity.test.ts` enforces it):
+
+| Module | Rules |
+|---|---|
+| `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold), `nameKey`, `normalizeReservedPath` (paths/check contract, `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
+| `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
+| `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, … (moved from `server/src/lib/permissions.ts`) |
+| `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`) |
+| `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md`: names, who may change them |
+| `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
+
+Imported by relative path: the server through its `server/shared` symlink
+(`/app/shared` in the image), the app's main process, preload and renderer
+directly (`client/shared/write-access.ts` / `sparse-paths.ts` re-export what
+they used to define; Vite bundles it), the admin from `admin/src/lib` (its Dockerfile
+copies `shared/` into the build stage; Turbopack's root is the repository,
+`outputFileTracingRoot`). The push checker's `foldAsciiCase` /
+`INSTRUCTION_FILE_RE` (`server/src/lib/push-check/rules.ts`) stay bytewise
+twins over git's latin1 bytes by design — the regex is built from the core's
+name list, and `client/tests/rule-parity-names.test.ts` pins the
+equivalence.
 
 ### Two React lines in one workspace
 
@@ -347,6 +375,7 @@ Main-process code lives by domain (R3 split `client/electron/main.ts`,
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
+- Both rules live in `shared/core/names.ts` (`isValidSkillName`, `isValidFolderName`)
 - Skill folder/file names remain ASCII only: `/^[a-z0-9][a-z0-9_-]*$/`
 - Department folder pattern: `/^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/`
 
@@ -778,7 +807,7 @@ reintroduces a specific, observed way for a non-engineer to lose work.
 | A `PROTECTED_CONFIG` or `WRITE_DENIED` (no write permission for the folder) rejection is resolved by **rewriting the unpushed commits**, never by a retry or a revert commit (`client/electron/protected-config.ts`) | The rejected change is already committed and the hook checks *every* commit in the range, so a retry or a revert on top fails at the same step forever — the "permanently unable to sync" shape again. The dialog backs up the member's version, squashes the unpushed commits with `reset --soft origin/main` (refused unless `origin/main` is an ancestor of `HEAD`, or it would revert teammates' work), restores just those paths to the server's version (or removes them), and commits the rest. Before restoring, sync first pushes the unpushed commits squashed into one with every file as the member has it: a change they already undid (e.g. took the `hooks` out of a skill after the first rejection) blocks only through its intermediate commit, and restoring would discard — or, for a new skill, remove — an acceptable final version. Push is also attempted whenever commits are still unpushed, because a rejected push writes no `PENDING_PUSH` and a sync with no new edits used to report success while the commits never left the machine. |
 | `.personal/` content is never shared, for anyone (owner/admin included): the pre-receive hook rejects with `PERSONAL_PATH` any push in which a commit (or the net `old..new` diff) adds or modifies a file inside a directory named `.personal` at any depth, case-insensitively. Exceptions: the `.gitignore` directly inside a `.personal/` (the server writes it when creating a company or department, and its own local-transport push must keep working), and deletions (how an already-shared file gets unshared). Sync also adds `**/.personal/*` + `!**/.personal/.gitignore` to the root `.gitignore` (`**/` because a pattern with a slash is anchored to the `.gitignore`'s directory) | Department `.personal/` folders were protected only by the `.gitignore` inside them, so a `.personal/` created by hand anywhere else synced like a normal folder and its files were shared with the whole company. Recovery differs from `PROTECTED_CONFIG`: the file is the member's private file, so sync untracks it (`git rm --cached`, kept on disk) instead of restoring a server version, after squashing the unpushed commits for the same every-commit reason. No dialog — nothing is lost. A file the server already had is deleted from the server by that commit. |
 | The secret scan reads every commit new to the server, not only the net `old..new` diff: added lines of each commit in `rev-list <new> --not --all` (against its first parent; merges as combined diffs counting only lines added relative to every parent; root commits against the empty tree) plus the net diff, in one `diff-tree --stdin -p` stream, deduplicated per file × pattern. A single commit on top of `old` is read once. New branches keep the old rule (whole content of the tip commit's files). Sync recovers like the first step of `PROTECTED_CONFIG`: on `SECRET_DETECTED` it squashes the unpushed commits (`squashUnpushedCommits`, same ancestor check) and pushes once more; if the files still hold the secret it reports them (`secretDetected`, no `PENDING_PUSH`). The secret is never removed for the member | A secret added in one commit and removed in a later one passed the net-diff scan, yet the intermediate commit — secret included — landed in shared history on every member's machine. Scanning every commit alone would have made "remove the secret and sync again" fail forever (the rejected commit is still in the range), so the client squashes it away; the secret never reaches the server. 200 commits / 50,000 lines check in under a second (`push-check-performance.test.ts`). |
-| Write permission is enforced on push: for every path a push changes (adds, edits, deletes, both sides of a rename; every new commit plus the net diff, as above) the checker evaluates `resolveAccess(pusher, path).write` (`lib/permissions.ts`; owner/admin always pass; also checked with A–Z case folded, since macOS/Windows check `Sales/x` out into `sales/`). Denied paths reject the push with `[WRITE_DENIED]` + `  - <path>` lines (same shape as `PERSONAL_PATH`). The rules reach the checker as a **snapshot** git-http writes per receive-pack request (pusher + the company's scopes and rules, 0600 temp file, path in `ACB_PUSH_POLICY`, removed when the request ends; `lib/git-server` `preparePushCheck`). A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable pusher denies every changed path unless writing is open to everyone. The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1` (`internalGitEnv`) and skip only the write check; git-http strips both variables from what it inherits, so a client cannot select either. A push with neither (local transport on the server host: tests, an operator) is not write-checked | The checker runs as a child of `git receive-pack` and also in the client's sync harness, where no API or database exists, so it reads no database: git-http — the code that authenticated the pusher — decides who is pushing and what the rules were at that moment. With the default seed (`everyone: read + write` on the company scope) nothing changes and no paths are even listed. Rejections are recorded in `push_rejections` from the response like every other marker (`lib/push-rejections.ts`). |
+| Write permission is enforced on push: for every path a push changes (adds, edits, deletes, both sides of a rename; every new commit plus the net diff, as above) the checker evaluates `resolveAccess(pusher, path).write` (`shared/core/permissions.ts`; owner/admin always pass; also checked with A–Z case folded, since macOS/Windows check `Sales/x` out into `sales/`). Denied paths reject the push with `[WRITE_DENIED]` + `  - <path>` lines (same shape as `PERSONAL_PATH`). The rules reach the checker as a **snapshot** git-http writes per receive-pack request (pusher + the company's scopes and rules, 0600 temp file, path in `ACB_PUSH_POLICY`, removed when the request ends; `lib/git-server` `preparePushCheck`). A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable pusher denies every changed path unless writing is open to everyone. The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1` (`internalGitEnv`) and skip only the write check; git-http strips both variables from what it inherits, so a client cannot select either. A push with neither (local transport on the server host: tests, an operator) is not write-checked | The checker runs as a child of `git receive-pack` and also in the client's sync harness, where no API or database exists, so it reads no database: git-http — the code that authenticated the pusher — decides who is pushing and what the rules were at that moment. With the default seed (`everyone: read + write` on the company scope) nothing changes and no paths are even listed. Rejections are recorded in `push_rejections` from the response like every other marker (`lib/push-rejections.ts`). |
 | A private folder's path is **reserved** in the company repository, for everyone (owner/admin included): the push checker rejects with `[RESERVED_PATH]` any push in which a commit (or the net diff) adds or modifies a path at or under a private folder's path — compared NFC + A–Z folded, so `sales/secret/` hits `sales/Secret`, an NFD `人事/評価` hits the NFC one, a rename into it counts on its new side, a file named exactly like the folder counts. So does a **non-folder above it**: a file, symlink or gitlink at any ancestor path of a private folder (`人事` as a symlink when `人事/評価` is private) is listed with the pusher's own path as the folder. Deletions are never refused. The reservation cannot be raced: git-http registers every company receive-pack (`beginCompanyPush`) *before* taking its snapshot, and creating a private folder — after writing its rows — waits for every push registered before them to end (60 s, else 503 `BUSY` and nothing is created), then re-checks the company repository and rolls back if one of them landed at the path; pushes registered later carry the reservation in their snapshot. Same shape as `PERSONAL_PATH` (`  - <path>` lines), each path followed by a reason line `      （『<prefix as the pusher spelled it>』というフォルダ名は使えません。別の名前にしてください。）`. The reserved paths reach the checker only through the git-http snapshot (`reservedPathsFor`, private scopes = `repo_id` set); pushes without one (the server's own, local transport) are not checked — the server validates its own operations (department create/rename refuse a reserved name). The company repository's write check ignores private scopes, so a non-reader sees only this marker, never `[WRITE_DENIED]` there | Without it a member who cannot see `人事/評価` (or their chat AI) creates that folder: with the client's exclusion their files would silently never sync; without it they would be shared with the whole company inside a folder its owners believe private — and a reader's next sync could stage the private checkout into the company repository if the exclusion were ever lost (plan §1.3 D1/D2). The message names only what the pusher typed: by the owner's decision (option B) a private folder's name, its existence as *private* and its viewers are never revealed to someone who cannot read it. A symlink or file above the folder would put a reader's private checkout under — or through — something else on their disk. The race: a push whose snapshot predated the reservation was checked without it, and the creation's re-check only saw pushes that had already landed (reproduced with a proxy delaying the push body; `private-folders.test.ts` "a push racing the creation"). |
 | The company's **first** private folder is refused (409 `OUTDATED_CLIENTS`, the #119 shape: `members`, `canForce`) while any member's app is not known to handle private folders (`supportsPrivateFolders` in `server/src/lib/client-version.ts`: build commit date ≥ `PRIVATE_FOLDERS_CLIENT_COMMIT_DATE`; unknown/never-seen = not ready). The constant is the committer date of stage 3b's merge commit (b8c5a8e, #137: `20261022085300`); while it was `null` **no** private folder could be created at all (409 `PRIVATE_FOLDERS_UNAVAILABLE`, `force` included). Afterwards an owner/admin's `force: true` overrides the first-folder check; a manager sending `force` gets 403 `FORCE_NOT_ALLOWED` | An app older than 3b syncs only the company repository: a reader never receives the folder, and the `[RESERVED_PATH]` rejection is a generic push failure it retries on every sync forever — the "permanently unable to sync" shape again. Later private folders do not re-check: by then the owner has accepted the risk once. Before any released app can sync one, `force` would only create a folder nobody's app can receive. |
 | AI instruction files — `CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md` at any depth, case-insensitive — may be added, changed or deleted by owner/admin anywhere and by a **department manager inside a department folder they manage** (any depth; root-level ones owner/admin only; owner decision 案B). Anyone else is rejected inside the existing `[PROTECTED_CONFIG]` section (its own sub-list, plain `  - <path>` lines), so current apps already recover (dialog → restore the server's version). The managed folders reach the checker in the git-http snapshot (`managedFolders`); in a scope repository the path is judged as `<scopePath>/<path>`. Pushes without a snapshot (local transport) know no managers. `CLAUDE.local.md` is personal by convention but, once committed, is loaded like `CLAUDE.md` for everyone — so it is protected the same way rather than refused outright (which no current app could recover from). The chat's write guard (`client/electron/write-guard.ts`) refuses the same edits up front | Claude Code / Codex load these into every chat in or below their folder, so whoever writes one steers every teammate's AI there — a prompt injection that runs with each member's permissions, while the files themselves look like harmless Markdown. |
@@ -1086,12 +1115,21 @@ member may only read used to be rejected at sync and moved to `.backups/`
 ("the AI's work vanished"). The chat now refuses such edits before they run:
 
 - Server: `GET /api/companies/:companyId/me/write-access` →
-  `{ version, role, all, scopes: [{ path, write }] }` (`writeAccessSummary` in
-  `server/src/lib/permissions.ts`; ETag = version, `If-None-Match` → 304).
-  `all: true` for owner/admin or when nothing restricts the member.
-- Client: `client/shared/write-access.ts` evaluates a path exactly like
-  `resolveAccess` + the push gate (NFC, deepest listed scope decides, A–Z
-  folded spelling must be writable too). `client/electron/write-access-store.ts`
+  `{ version, role, all, scopes: [{ path, write, private? }] }`
+  (`writeAccessSummary` in `shared/core/permissions.ts`; ETag = version,
+  `If-None-Match` → 304). `all: true` for owner/admin or when nothing
+  restricts the member. `private: true` marks a private folder the member
+  can read.
+- Client: `evaluateWrite` (`shared/core/write-access.ts`, the server's own
+  copy) evaluates a path exactly like `resolveAccess` + the push gate (NFC,
+  deepest listed scope decides, A–Z folded spelling must be writable too).
+  Inside a readable private folder the folder part is taken in its stored
+  spelling (on a case-insensitive disk `評価/CAFé/x` lands in the clone of
+  `評価/café` and is pushed as `<stored path>/x`); of two scopes that differ
+  only in A–Z case the one sorting first (`compareScopePaths`) decides — the
+  push check sorts the same way (`foldScopePaths`) instead of depending on
+  the database's row order. `client/tests/rule-parity-write-access.test.ts`
+  holds both sides to the same answer on generated companies. `client/electron/write-access-store.ts`
   caches it per company — fetched when the renderer opens a company, after
   every successful sync, and at each chat turn (3 s budget, cached answer on
   failure).
@@ -1110,7 +1148,9 @@ member may only read used to be rejected at sync and moved to `.backups/`
   safety net there.
 - Private folders (`WriteGuard.getPrivateFolders`): a write that would
   create something at a folder name the member may not use (`decideReservedWrite`,
-  asking `POST …/paths/check` through sync's cached checker; unknown allows)
+  asking `POST …/paths/check` through sync's cached checker, the target as a
+  file — so a file named like a folder above a private folder is refused
+  too, as the push check refuses it; unknown allows)
   is refused with the server's sentence 「『<what the AI typed>』というフォルダ名は使えません。別の名前にしてください。」;
   a write into a private folder the member may only read (`canWrite: false`,
   from the cached `/me/scopes` answer) with the read-only message. Writes into a readable, writable private folder
@@ -1129,19 +1169,24 @@ member may only read used to be rejected at sync and moved to `.backups/`
 
 ### Rule parity tests (copies that must agree)
 
-Rules that exist as separate copies are held together by tests, not by
-review: `client/tests/rule-parity-write-access.test.ts` (seeded generated
+Since R2 the shared rules have one copy (`shared/core`, see "Shared rules"
+above); what can still drift — the app's decision built from several server
+answers, the push checker's bytewise twins, the admin's hand-written API
+types — is held together by tests, not by review:
+`client/tests/rule-parity-write-access.test.ts` (seeded generated
 companies: the chat guard's decision from `/me/write-access` + `/me/scopes` +
 `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
-gate; `RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
-(path keys, department folder names, skill names, AI instruction files — every
-copy on one corpus; regexes private to a component are read from its source)
-and `server/tests/integration/admin-contract.test.ts` (every endpoint the admin
-calls, checked against `admin/src/lib/api.ts` with the TypeScript compiler,
-`tests/helpers/type-shape.ts`). Known differences are listed in each test
-(`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES`) and must keep occurring: fixing one
-fails the test until its entry is removed. Changing a rule in one copy means
-changing the others in the same PR.
+gate, and the push gate must not depend on the order of the scopes;
+`RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
+(path keys, department folder names, skill names, AI instruction files on one
+corpus; the renderer dialogs must import `shared/core/names.ts`, checked from
+their source) and `server/tests/integration/admin-contract.test.ts` (every
+endpoint the admin calls, checked against `admin/src/lib/api.ts` with the
+TypeScript compiler, `tests/helpers/type-shape.ts`). No known differences are
+left (`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES` are empty); a new entry needs
+a reported reason and must keep occurring — fixing it fails the test until
+the entry is removed. Changing a rule means changing it in `shared/core`;
+the bytewise twins in the same PR.
 
 ---
 
@@ -1230,12 +1275,16 @@ Client sync (3b) and the UIs (3c) build on the contract in
     others — the salted hashes (`reserved`) are no longer sent: short
     Japanese folder names are cheap to brute-force against a known salt.
     `company_path_salts` is left in the schema, unused.
-  - `POST /paths/check` `{ paths: string[] }` (any member, ≤50 paths,
-    ≤60 paths per member per minute → 429 `RATE_LIMITED` + `Retry-After`)
-    → `{ results: [{ path, usable }] }`: `usable: false` exactly when the path
-    (any case/NFC — `normalizeReservedPath`) is at or under a private folder
-    the caller cannot read, i.e. where a push would get `[RESERVED_PATH]`; a
-    reader's paths inside it are usable. Same shape and work for every path,
+  - `POST /paths/check` `{ paths: string[], files?: string[] }` (any member,
+    ≤50 paths, ≤60 paths per member per minute → 429 `RATE_LIMITED` +
+    `Retry-After`) → `{ results: [{ path, usable }] }`: `usable: false`
+    exactly when a push of the path would get `[RESERVED_PATH]`: it is (any
+    case/NFC — `normalizeReservedPath`) at or under a private folder the
+    caller cannot read (a reader's paths inside it are usable), or — for a
+    path also listed in `files` (it will be a file or symlink, not a folder)
+    — a strict ancestor of any private folder, readable or not
+    (`isPathUsable` in `shared/core/reserved-paths.ts`). `files` is optional:
+    older apps send none and get the folder answer, older servers ignore it. Same shape and work for every path,
     never says which folder or why; paths are not logged. The app checks a
     path and its prefixes to name the folder it shows in
     `reservedPathMessage`. The push-time `[RESERVED_PATH]` check stays the
@@ -1345,9 +1394,12 @@ Builds on 3a's contract (`shared/types/private-folders.ts`). Code:
   `.git/acb-private-scopes.json` (companyId, version, scopes, `pendingPublic`).
   Offline syncs and the chat guard's read-only check use it.
 - **Names the member may not use** are known only per path, from the server:
-  `POST /api/companies/:id/paths/check { paths ≤ 50 }` → `{ results: [{ path,
+  `POST /api/companies/:id/paths/check { paths ≤ 50, files? }` → `{ results: [{ path,
   usable }] }` (60 paths per member per minute, 429 beyond; `usable: false` at or under a private folder the caller cannot
-  read). One checker per app (`gitSync.pathChecker`, 5-minute cache) serves
+  read, and for a path in `files` also above any private folder).
+  `reservedFolderOf(companyId, rel, { file: true })` asks the last segment
+  as a file (cached apart); only the chat guard does so today — sync and the
+  app's file operations ask folders, as before. One checker per app (`gitSync.pathChecker`, 5-minute cache) serves
   sync's hold-back, the app's file operations (`fs:*` backstop for paths that
   do not exist yet; `privateFolders:reservedPathRefusal` IPC for the file
   tree's new file / 新しいフォルダ… (公開) / rename / move) and the chat guard

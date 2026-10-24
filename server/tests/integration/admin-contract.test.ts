@@ -2,8 +2,8 @@
  * Integration Test: the admin console's hand-written API types
  * (admin/src/lib/api.ts) against what the server really answers.
  *
- * The admin's Docker build context is admin/ only, so it cannot import the
- * server's types and declares ~37 of them by hand; its own tests run against
+ * The admin declares ~37 of the server's response types by hand (since R2 it
+ * imports the shared rules from shared/core, but not the API types); its own tests run against
  * hand-written fixtures (admin/tests/fixtures.ts) that follow those types.
  * Nothing tied either to the server. Here every endpoint the admin calls is
  * called on the real routes (real SQLite, a real bare repository) and its
@@ -68,7 +68,7 @@ const TYPES: Record<string, string> = {
   PrivateFolder: 'PrivateFolderDetail',
   PushRejections: 'PushRejectionPage',
   Invitations: 'Invitation[]',
-  Invitation: 'Invitation',
+  CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
   InvitationAccept: '{ companyId: string; companyName: string; role: Role }',
   Departments: 'Department[]',
@@ -84,15 +84,9 @@ const TYPES: Record<string, string> = {
 }
 
 /** Known, reported differences: `<call>: <field path>` of a ShapeReport error. */
-const KNOWN_MISMATCHES: Array<{ id: string; describe: string; error: RegExp }> = [
-  {
-    id: 'invitation-create-partial',
-    describe: 'POST /companies/:id/invitations answers only { id, token, companyId, companyName, role, expiresAt, '
-      + 'createdAt }, but invitationsApi.create is typed as a full Invitation (createdBy, usedBy…, isExpired, isUsed). '
-      + 'The members page only reads token / expiresAt of it today, so nothing breaks yet.',
-    error: /^POST …\/invitations → Invitation: Invitation\.(createdBy|createdByName|createdByEmail|usedBy|usedByName|usedByEmail|usedAt|isExpired|isUsed): missing/,
-  },
-]
+// None: the last one (invitation-create-partial) was fixed by typing the
+// POST …/invitations answer as CreatedInvitation.
+const KNOWN_MISMATCHES: Array<{ id: string; describe: string; error: RegExp }> = []
 
 const CO = 'acco'
 const base = `/api/companies/${CO}`
@@ -276,11 +270,11 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   })
 
   it('invitations', async () => {
-    const inv = await expectShape('Invitation', USERS.owner, 'POST', `${base}/invitations`, { role: 'member', expiresInDays: 7 })
+    const inv = await expectShape('CreatedInvitation', USERS.owner, 'POST', `${base}/invitations`, { role: 'member', expiresInDays: 7 })
     await expectShape('Invitations', USERS.owner, 'GET', `${base}/invitations`)
     await expectShape('InvitationValidate', USERS.newbie, 'GET', `/api/invitations/${inv.token}`)
     await expectShape('InvitationAccept', USERS.newbie, 'POST', `/api/invitations/${inv.token}/accept`)
-    const other = await expectShape('Invitation', USERS.owner, 'POST', `${base}/invitations`, { role: 'member', expiresInDays: 1 })
+    const other = await expectShape('CreatedInvitation', USERS.owner, 'POST', `${base}/invitations`, { role: 'member', expiresInDays: 1 })
     await expectShape('Success', USERS.owner, 'DELETE', `${base}/invitations/${other.id}`, undefined, false)
     await expectShape('Success', USERS.owner, 'DELETE', `${base}/members/${USERS.newbie}`, undefined, false)
   })

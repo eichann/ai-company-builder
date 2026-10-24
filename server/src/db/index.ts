@@ -108,7 +108,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (user_id, company_id)
     );
 
-    -- Permission model (lib/permissions.ts): write rules are enforced on push
+    -- Permission model (shared/core/permissions.ts): write rules are enforced on push
     -- (Phase 2), read rules on private folders' scope repositories (Phase 3).
     -- A scope is a node rules attach to: path '' = the whole company, otherwise
     -- a repo-relative folder ('コンテンツ', 'コンテンツ/受講生情報'), NFC, no

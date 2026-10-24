@@ -34,7 +34,7 @@ import { BARE_REPO_CONFIG } from './repo-config'
 import { configureBareRepoAsync, listAllScopeRepos } from './scope-repo'
 import { gitAsync } from '../git-exec'
 import { PUSH_POLICY_VERSION, type PushPolicy } from '../push-check/policy'
-import type { ScopeWithRules } from '../permissions'
+import type { ScopeWithRules } from '../../../shared/core/permissions'
 
 export { installPreReceiveHook, renderPreReceiveHook, PUSH_CHECK_ENTRY, HOOK_TEMPLATE_PATH } from './hook'
 export { BARE_REPO_CONFIG } from './repo-config'

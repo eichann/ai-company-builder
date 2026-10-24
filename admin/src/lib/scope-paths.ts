@@ -1,23 +1,11 @@
-// Folder-path helpers mirroring server/src/lib/permissions.ts ('' = company root).
+// Folder-path helpers ('' = company root). The comparisons are the server's
+// own (shared/core/paths.ts); the rest are display helpers.
+import { compareScopePaths, isSameOrAncestorPath } from '../../../shared/core/paths'
+
+export { compareScopePaths, isSameOrAncestorPath }
 
 export function pathSegments(path: string): string[] {
   return path.split('/').filter(Boolean)
-}
-
-/** Parents before children, siblings by name (same order the server returns scopes in). */
-export function compareScopePaths(a: string, b: string): number {
-  const as = pathSegments(a)
-  const bs = pathSegments(b)
-  for (let i = 0; i < Math.min(as.length, bs.length); i++) {
-    if (as[i] !== bs[i]) return as[i] < bs[i] ? -1 : 1
-  }
-  return as.length - bs.length
-}
-
-/** True when `ancestor` is `path` itself or one of its parent folders. */
-export function isSameOrAncestorPath(ancestor: string, path: string): boolean {
-  if (ancestor === '') return true
-  return path === ancestor || path.startsWith(`${ancestor}/`)
 }
 
 export function parentPath(path: string): string {

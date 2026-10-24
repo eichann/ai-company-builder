@@ -8,6 +8,7 @@ import {
   SpinnerGap,
   Check,
 } from '@phosphor-icons/react'
+import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
 import type { DepartmentConfig, Skill } from '../../types'
 import { COMPANY_TAB_ID } from './DepartmentTabs'
 
@@ -22,18 +23,9 @@ interface CopySkillModalProps {
   unsyncedFolders?: Set<string>
 }
 
-// Generate folder name from display name
+// Skill folder names: the shared rule (shared/core/names.ts).
 function generateFolderName(displayName: string): string {
-  return displayName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-|-$/g, '')
-    .substring(0, 50)
-    || 'copied-skill'
-}
-
-function isValidFolderName(name: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]*$/.test(name)
+  return suggestSkillName(displayName, 'copied-skill')
 }
 
 export function CopySkillModal({
@@ -155,12 +147,12 @@ export function CopySkillModal({
   }
 
   const handleFolderNameChange = (newFolderName: string) => {
-    const sanitized = newFolderName.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+    const sanitized = sanitizeSkillNameInput(newFolderName)
     setFolderName(sanitized)
     setFolderNameEdited(true)
   }
 
-  const folderNameValid = isValidFolderName(folderName)
+  const folderNameValid = isValidSkillName(folderName)
 
   const handleCopy = async () => {
     if (!selectedSkill?.skillPath || !name.trim() || !folderNameValid) return

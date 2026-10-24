@@ -9,6 +9,6 @@
     "strict": true,
     "skipLibCheck": true
   },
-  "include": ["types/**/*"],
+  "include": ["types/**/*", "core/**/*"],
   "exclude": ["node_modules", "dist"]
 }

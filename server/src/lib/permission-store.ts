@@ -1,5 +1,5 @@
 /**
- * SQLite side of the permission model (see lib/permissions.ts for semantics).
+ * SQLite side of the permission model (see shared/core/permissions.ts for semantics).
  *
  * Tables (created in db/index.ts): scopes, scope_rules, department_managers,
  * push_rejections. Every function takes the connection explicitly so the
@@ -28,7 +28,7 @@ import {
   type ScopeRule,
   type ScopeWithRules,
   type SubjectType,
-} from './permissions'
+} from '../../shared/core/permissions'
 
 type Conn = Database.Database
 
@@ -325,7 +325,7 @@ export function replaceDepartmentManagers(conn: Conn, departmentId: string, user
 //   copying*: the rules of the scope that governed it so far are copied in
 //   first (breakInheritance), so adding "田中: 編集できる" to a folder changes
 //   nothing for anyone else. Without the copy, every member not named by the
-//   new rule would fall to "no rule" there (lib/permissions.ts, step 3).
+//   new rule would fall to "no rule" there (shared/core/permissions.ts, step 3).
 // - A folder scope (kind 'folder') left without rules is removed; company and
 //   department scopes stay (they follow the company / departments tables).
 // ----------------------------------------------------------------------------

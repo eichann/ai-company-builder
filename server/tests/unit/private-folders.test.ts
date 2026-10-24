@@ -17,9 +17,9 @@ import {
   type PermissionRepository,
   type ScopeRule,
   type ScopeWithRules,
-} from '../../src/lib/permissions'
-import { reservedPathsFor, reservedPrefixOf, writeGateFor, parsePushPolicy, type PushPolicy } from '../../src/lib/push-check/policy'
-import { isPathUsable } from '../../src/lib/private-folders'
+} from '../../shared/core/permissions'
+import { reservedAncestorOf, reservedPathsFor, reservedPrefixOf, writeGateFor, parsePushPolicy, type PushPolicy } from '../../src/lib/push-check/policy'
+import { isPathUsable } from '../../shared/core/reserved-paths'
 import {
   normalizeReservedPath,
   reservedPathCandidates,
@@ -72,7 +72,7 @@ describe('writeAccessSummary', () => {
     expect(s.all).toBe(true)
   })
   it('lists a readable one with the member\'s write', () => {
-    expect(writeAccessSummary([ROOT, HR, EVAL], 'viewer', 'member').scopes).toContainEqual({ path: '人事/評価', write: false })
+    expect(writeAccessSummary([ROOT, HR, EVAL], 'viewer', 'member').scopes).toContainEqual({ path: '人事/評価', write: false, private: true })
     expect(writeAccessSummary([ROOT, HR, EVAL], 'editor', 'member')).toEqual({ all: true, scopes: [] })
   })
 })
@@ -135,6 +135,27 @@ describe('reserved paths (shared/types/private-folders.ts, isPathUsable)', () =>
     // above it, next to it: usable
     expect(isPathUsable(scopes, 'u-x', 'member', 'sales')).toBe(true)
     expect(isPathUsable(scopes, 'u-x', 'member', 'sales/評価2')).toBe(true)
+  })
+
+  it('a FILE at a strict ancestor of any private folder is unusable for everyone (as [RESERVED_PATH] refuses it)', () => {
+    const priv: ScopeWithRules = { id: 'p', path: 'Sales/評価/2026', kind: 'folder', departmentId: null, repoId: 'r', rules: [rule('everyone', null, false, false), rule('user', 'u-v', true, false)] }
+    const scopes = [ROOT, priv]
+    for (const user of [['u-x', 'member'], ['u-v', 'member'], ['u-o', 'owner']] as const) {
+      for (const p of ['sales', 'SALES/評価', `Sales/${'評価'.normalize('NFD')}`]) {
+        expect(isPathUsable(scopes, user[0], user[1], p, { asFile: true })).toBe(false)
+        expect(isPathUsable(scopes, user[0], user[1], p)).toBe(true) // as a folder: fine
+      }
+      expect(isPathUsable(scopes, user[0], user[1], 'sales/評価2', { asFile: true })).toBe(true)
+      expect(isPathUsable(scopes, user[0], user[1], 'other', { asFile: true })).toBe(true)
+    }
+    // At or under: as before (a reader's file inside goes to its repository).
+    expect(isPathUsable(scopes, 'u-v', 'member', 'sales/評価/2026/a.md', { asFile: true })).toBe(true)
+    expect(isPathUsable(scopes, 'u-x', 'member', 'sales/評価/2026/a.md', { asFile: true })).toBe(false)
+    // The push check refuses exactly these files.
+    const reserved = reservedPathsFor({ version: 1, companyId: 'c', pusher: null, scopes })
+    for (const p of ['sales', 'SALES/評価', 'sales/評価2', 'other']) {
+      expect(reservedAncestorOf(p, reserved) !== null).toBe(!isPathUsable(scopes, 'u-o', 'owner', p, { asFile: true }))
+    }
   })
 
   it('candidates are every prefix, shortest first; the message names only the folder', () => {

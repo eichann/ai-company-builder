@@ -66,7 +66,7 @@ export interface PushCheckContext {
    */
   contentCheckAvailable: boolean
   /**
-   * Private-folder paths reserved in this repository (policy.reservedKey
+   * Private-folder paths reserved in this repository (shared/core pathKey
    * form). Empty for scope repositories and for pushes without a snapshot.
    */
   reserved?: string[]

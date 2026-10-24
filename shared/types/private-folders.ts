@@ -13,6 +13,7 @@
  * Paths are company-relative, '/'-separated, Unicode NFC, without leading or
  * trailing slashes ('人事/評価').
  */
+import { normalizeReservedPath } from '../core/paths'
 
 // ----------------------------------------------------------------------------
 // GET /api/companies/:companyId/me/scopes
@@ -64,6 +65,13 @@ export const PATHS_CHECK_PATHS_PER_MINUTE = 60
 /** Body: company-relative paths, any spelling (compared as normalizeReservedPath). */
 export interface PathCheckRequest {
   paths: string[]
+  /**
+   * Optional: those of `paths` (same spelling) the caller will create as a
+   * FILE (or symlink), not a folder. Such a path is also unusable when a
+   * private folder lies below it — a push of a file there is refused with
+   * [RESERVED_PATH] for everyone. Servers before 2026-10-24 ignore it.
+   */
+  files?: string[]
 }
 
 export interface PathCheckResult {
@@ -74,7 +82,9 @@ export interface PathCheckResult {
    * private folder they cannot read, so a push would be refused with
    * [RESERVED_PATH]. Show reservedPathMessage(<the path or the folder the
    * member typed>). Paths inside a private folder the member CAN read are
-   * usable (they go to its own repository). The answer never says why.
+   * usable (they go to its own repository). A path listed in `files` is also
+   * unusable at a strict ancestor of any private folder. The answer never
+   * says why.
    */
   usable: boolean
 }
@@ -94,16 +104,9 @@ export const RESERVED_PATH_ALGORITHM = 'sha256-salt-nfc-asciilower-v1' as const
  * How reserved paths are compared: split on '/' (and '\\'), empty segments
  * dropped, each segment Unicode NFC with ASCII A–Z lowered to a–z (nothing
  * else is case-folded: not full-width Ａ, not É — exactly the comparison the
- * server's push check uses), joined with '/'.
+ * server's push check uses), joined with '/'. One copy: shared/core/paths.ts.
  */
-export function normalizeReservedPath(path: string): string {
-  return path
-    .normalize('NFC')
-    .split(/[/\\]/)
-    .filter(s => s.length > 0)
-    .map(s => s.replace(/[A-Z]+/g, m => m.toLowerCase()))
-    .join('/')
-}
+export { normalizeReservedPath }
 
 /** @deprecated The hashes are no longer sent; kept for one release. */
 export function reservedPathKeyInput(salt: string, path: string): string {

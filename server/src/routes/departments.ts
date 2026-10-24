@@ -18,7 +18,9 @@ import {
   replaceDepartmentManagers,
   syncCompanyScopes,
 } from '../lib/permission-store'
-import { listPrivateFolders, pathKey } from '../lib/private-folders'
+import { listPrivateFolders } from '../lib/private-folders'
+import { pathKey } from '../../shared/core/paths'
+import { isValidFolderName } from '../../shared/core/names'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import type {
   Department,
@@ -52,11 +54,6 @@ function getUserMembership(userId: string, companyId: string): { role: string } 
 // Helper: Check if user can edit departments
 function canEditDepartments(role: string): boolean {
   return role === 'owner' || role === 'admin'
-}
-
-// Helper: Validate folder name (ASCII + Japanese allowed)
-export function isValidFolderName(folder: string): boolean {
-  return /^[\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF][\w\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FFF._-]*$/.test(folder)
 }
 
 // Private folders (lib/private-folders.ts) whose path is `folder` or inside
@@ -801,7 +798,7 @@ departmentsRoute.post('/sync', async (c) => {
 //
 // Owner/admin assign them per department. In Phase 1 the assignment is only
 // stored and exposed; being a manager grants no file access (see
-// lib/permissions.ts).
+// shared/core/permissions.ts).
 // ============================================================================
 
 function departmentInCompany(deptId: string, companyId: string): boolean {

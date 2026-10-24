@@ -64,6 +64,31 @@ test('path checker: every prefix, batches of 50, cached, unknown never blocks', 
   assert.equal(await down.reservedFolderOf('c', '人事/評価/x.md'), null)
 })
 
+test('path checker: a path that will be a file is asked as one (refused above a private folder), cached apart', async () => {
+  const asked: Array<{ paths: string[]; files?: string[] }> = []
+  const private_ = '人事/評価'
+  const checker = createPathChecker(async (_c, paths, files) => {
+    asked.push(files ? { paths, files } : { paths })
+    return paths.map(p => ({
+      path: p,
+      usable: !(p === private_ || p.startsWith(`${private_}/`)) && !(files?.includes(p) && private_.startsWith(`${p}/`)),
+    }))
+  })
+  // A file named like a folder above the private one: refused, named as typed.
+  assert.equal(await checker.reservedFolderOf('c', '人事', { file: true }), '人事')
+  assert.deepEqual(asked[0], { paths: ['人事'], files: ['人事'] })
+  // The same path as a folder (or a prefix of another path) has its own answer.
+  assert.equal(await checker.reservedFolderOf('c', '人事'), null)
+  assert.equal(await checker.reservedFolderOf('c', '人事/メモ.md', { file: true }), null)
+  assert.deepEqual(asked.slice(1), [{ paths: ['人事'] }, { paths: ['人事/メモ.md'], files: ['人事/メモ.md'] }])
+  // Cached per kind.
+  assert.equal(await checker.reservedFolderOf('c', '人事', { file: true }), '人事')
+  assert.equal(asked.length, 3)
+  // Folder-only callers (sync) send exactly what they sent before.
+  await checker.usable('c', ['営業部'])
+  assert.deepEqual(asked[3], { paths: ['営業部'] })
+})
+
 test('the managed excludes block keeps the member\'s own lines', t => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excl-'))
   t.after(() => fs.rmSync(root, { recursive: true, force: true }))

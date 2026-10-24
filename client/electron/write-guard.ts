@@ -40,6 +40,7 @@
 import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } from '../shared/write-access'
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 import { reservedPathMessage } from '../../shared/types/private-folders'
+import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 
 /** Private folders as the guard sees them (from the cached /me/scopes answer, sync/private-folders.ts). */
 export interface PrivateFolderView {
@@ -47,9 +48,11 @@ export interface PrivateFolderView {
    * The private folder — in the spelling of `rel` — that `rel` would write
    * into although the member cannot read it, or null. A write there is
    * refused with the server's [RESERVED_PATH] wording: sync would move the
-   * file to .backups/ instead of sharing it.
+   * file to .backups/ instead of sharing it. `file`: `rel` will be a file —
+   * also refused (named `rel`) when a private folder lies below it, as the
+   * push check refuses such a file.
    */
-  reservedFolderOf(rel: string): Promise<string | null>
+  reservedFolderOf(rel: string, options?: { file?: boolean }): Promise<string | null>
   /** The readable private folder `rel` lies in when the member may only read it (canWrite false), or null. */
   readOnlyFolderOf(rel: string): string | null
 }
@@ -81,29 +84,16 @@ export interface WriteGuard {
   getPrivateFolderView?: () => PrivateFolderView | undefined
 }
 
+/** Who may change AI instruction files: the member's role and the folders of the departments they manage. */
 export interface InstructionAuthority {
   role: string
   managedFolders: readonly string[]
 }
 
-// CLAUDE.local.md is personal by convention, but once shared it is loaded like
-// CLAUDE.md for everyone, so the server protects it the same way.
-const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md'])
-const FULL_ACCESS_ROLES = new Set(['owner', 'admin'])
-
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md at any depth, A–Z case-insensitive (the server's push check folds the same way). */
-export function isInstructionFile(repoPath: string): boolean {
-  const name = repoPath.normalize('NFC').split('/').pop() ?? ''
-  return INSTRUCTION_FILES.has(name.replace(/[A-Z]+/g, m => m.toLowerCase()))
-}
-
-/** May this member change the instruction file at `repoPath`? */
-export function mayChangeInstructionFile(authority: InstructionAuthority, repoPath: string): boolean {
-  if (FULL_ACCESS_ROLES.has(authority.role)) return true
-  const folder = repoPath.normalize('NFC').split('/').slice(0, -1).join('/')
-  if (folder === '') return false
-  return excludedFolderOf(authority.managedFolders.map(f => f.normalize('NFC')), `${folder}/x`) !== null
-}
+// Which files are AI instruction files, and who may change them, is the
+// server's own rule (shared/core/instruction-files.ts; the push check uses
+// the same copy).
+export { isInstructionFile, mayChangeInstructionFile }
 
 /** Never shared (the app's scratch area, backups, personal folders): the push check never sees them. */
 function isUnsharedPath(rel: string): boolean {
@@ -254,7 +244,8 @@ export async function decideReservedWrite(guard: WriteGuard | undefined, toolNam
   for (const target of toolWriteTargets(toolName, toolInput)) {
     const rel = repoRelativePath(guard.root, target, cwd)
     if (!rel) continue
-    const reserved = await view.reservedFolderOf(rel).catch(() => null)
+    // Every target of these tools is a file.
+    const reserved = await view.reservedFolderOf(rel, { file: true }).catch(() => null)
     if (reserved !== null) {
       const folder = reserved.normalize('NFC')
       return { deny: true, path: rel, folder, message: reservedPathMessage(folder) }

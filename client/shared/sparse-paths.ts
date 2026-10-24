@@ -19,15 +19,13 @@
  * the redundant entries below another one).
  *
  * Paths are compared like the push check and the write guard
- * (shared/write-access.ts): NFC, '/'-separated, A–Z folded (macOS/Windows
+ * (shared/core/paths.ts): NFC, '/'-separated, A–Z folded (macOS/Windows
  * default filesystems ignore case; git's ignorecase folds ASCII only).
  */
-import { foldAsciiCase, normalizeRepoPath } from './write-access'
+import { foldAsciiCase, nameKey, normalizeRepoPath } from '../../shared/core/paths'
 
-/** Comparison key of a repo-relative path: NFC + A–Z folded. */
-export function pathKey(p: string): string {
-  return foldAsciiCase(p.normalize('NFC'))
-}
+/** Comparison key of a repo-relative path: NFC + A–Z folded (shared/core nameKey). */
+export const pathKey = nameKey
 
 /**
  * Whether `p` may be an exclusion at all: a non-empty relative folder path

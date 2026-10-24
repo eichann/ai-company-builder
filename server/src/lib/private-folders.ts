@@ -48,8 +48,8 @@ import {
   type PermissionRepository,
   type ScopeRule,
   type ScopeWithRules,
-} from './permissions'
-import { foldAsciiCase } from './push-check/rules'
+} from '../../shared/core/permissions'
+import { pathKey } from '../../shared/core/paths'
 
 type Conn = Database.Database
 
@@ -65,11 +65,6 @@ export function privateFolderArchiveDir(): string {
 
 export function privateRepoPath(companyId: string, repoId: string): string {
   return scopeRepoPath(REPOS_DIR, companyId, repoId)
-}
-
-/** NFC + A–Z folded: how paths are compared everywhere (push check, conflicts). */
-export function pathKey(path: string): string {
-  return foldAsciiCase(path.normalize('NFC').split('/').filter(Boolean).join('/'))
 }
 
 /** Same or ancestor, compared as pathKey()s. */
@@ -105,26 +100,6 @@ export function listPrivateFolders(conn: Conn, companyId: string, scopes = listS
 
 export function getPrivateFolder(conn: Conn, companyId: string, scopeId: string): PrivateFolderRecord | null {
   return listPrivateFolders(conn, companyId).find(p => p.scope.id === scopeId) ?? null
-}
-
-/**
- * May this member put something at `path` (POST /paths/check)? false exactly
- * when the path is at or under a private folder they cannot read — what a
- * push of theirs there would be refused with ([RESERVED_PATH]). A reader's
- * paths inside a private folder are usable (they go to its own repository).
- * Every private folder is compared, whatever the outcome, so the answer
- * takes the same work for every path.
- */
-export function isPathUsable(scopes: ScopeWithRules[], userId: string, role: string, path: string): boolean {
-  const key = pathKey(path)
-  let usable = true
-  for (const s of scopes) {
-    if (s.repoId === null) continue
-    const inside = isSameOrAncestorPath(pathKey(s.path), key)
-    const readable = canReadPrivateScope(s, userId, role)
-    if (inside && !readable) usable = false
-  }
-  return usable
 }
 
 // ----------------------------------------------------------------------------

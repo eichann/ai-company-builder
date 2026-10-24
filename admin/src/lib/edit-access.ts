@@ -6,7 +6,7 @@
 //
 // These helpers convert between that choice and the server's rule rows, and
 // compute who can edit under a choice before it is saved, mirroring
-// server/src/lib/permissions.ts (owner/admin always edit; on the deciding
+// shared/core/permissions.ts (owner/admin always edit; on the deciding
 // scope a user rule beats a role rule beats the everyone rule).
 import type { EffectiveMember, Member, PermissionRule, RuleInput } from './api'
 import { isAdminRole } from './format'

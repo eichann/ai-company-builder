@@ -7,20 +7,20 @@
 // repository, and the scope repository's gate for a readable private folder.
 //
 // Client: what the chat write guard decides from what the server sends it —
-// GET /me/write-access (writeAccessSummary) evaluated by
-// client/shared/write-access.ts, the cached GET /me/scopes answer
+// GET /me/write-access (writeAccessSummary) evaluated by evaluateWrite
+// (both in shared/core — the app's client/shared/write-access.ts re-exports it), the cached GET /me/scopes answer
 // (canWriteInPrivateFolder) and POST /paths/check (isPathUsable) through the
 // app's path checker — i.e. checkWritePath + decideReservedWrite in
-// client/electron/write-guard.ts, wired like main.ts privateFolderGuardView.
+// client/electron/write-guard.ts, wired like features/private-folders/guards.ts guardView.
 //
 // Generated: scope trees with everyone / role / user rules, private folders,
 // owner / admin / members (a department manager is a member: managing grants
 // no file access), Japanese names, A–Z case variants, NFC and NFD spellings,
 // deep paths. Seeded, so a failure names its seed and the world.
 //
-// A mismatch is a bug in one of the two copies. Mismatches that are known and
-// reported (not fixed here) are listed in KNOWN_DIFFERENCES; anything else
-// fails. Each known difference must still occur, so fixing one makes this
+// A mismatch is a bug in one of the two sides. Mismatches that are known and
+// reported would be listed in KNOWN_DIFFERENCES (empty: both sides agree on
+// every generated decision); anything else fails. Each known difference must still occur, so fixing one makes this
 // test ask for its entry to be removed.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -30,7 +30,7 @@ import {
   writeAccessSummary,
   type ScopeRule,
   type ScopeWithRules,
-} from '../../server/src/lib/permissions'
+} from '../../shared/core/permissions'
 import {
   reservedAncestorOf,
   reservedPathsFor,
@@ -39,7 +39,9 @@ import {
   PUSH_POLICY_VERSION,
   type PushPolicy,
 } from '../../server/src/lib/push-check/policy'
-import { canWriteInPrivateFolder, isPathUsable, pathKey as serverPathKey } from '../../server/src/lib/private-folders'
+import { canWriteInPrivateFolder } from '../../server/src/lib/private-folders'
+import { isPathUsable } from '../../shared/core/reserved-paths'
+import { pathKey as serverPathKey } from '../../shared/core/paths'
 import { normalizeReservedPath, type MyPrivateScope } from '../../shared/types/private-folders'
 import { type WriteAccess } from '../shared/write-access'
 import { checkWritePath, decideReservedWrite, type WriteGuard } from '../electron/write-guard'
@@ -203,14 +205,14 @@ async function clientDecision(scopes: ScopeWithRules[], user: { id: string; role
     .filter(s => s.repoId !== null && canReadPrivateScope(s, user.id, user.role))
     .map(s => ({ scopeId: s.id, path: s.path, cloneUrl: '', clonePath: '', canWrite: canWriteInPrivateFolder(scopes, s, CO, user.id, user.role) }))
   // POST /paths/check
-  const checker = createPathChecker(async (_companyId, paths) =>
-    paths.map(p => ({ path: p, usable: isPathUsable(scopes, user.id, user.role, normalizeReservedPath(p)) })))
+  const checker = createPathChecker(async (_companyId, paths, files) =>
+    paths.map(p => ({ path: p, usable: isPathUsable(scopes, user.id, user.role, normalizeReservedPath(p), { asFile: files?.includes(p) }) })))
   const guard: WriteGuard = {
     root: ROOT,
     getAccess: () => access,
     getPrivateFolderView: () => ({
-      // main.ts privateFolderGuardView (without its "exists on disk" shortcut).
-      reservedFolderOf: async (rel: string) => (readableScopeOf(myScopes, rel) ? null : checker.reservedFolderOf(CO, rel)),
+      // features/private-folders/guards.ts guardView (without its "exists on disk" shortcut).
+      reservedFolderOf: async (rel: string, options?: { file?: boolean }) => (readableScopeOf(myScopes, rel) ? null : checker.reservedFolderOf(CO, rel, options)),
       readOnlyFolderOf: (rel: string) => {
         const s = readableScopeOf(myScopes, rel)
         return s && !s.canWrite ? s.path : null
@@ -223,7 +225,7 @@ async function clientDecision(scopes: ScopeWithRules[], user: { id: string; role
 }
 
 // ---------------------------------------------------------------------------
-// Known, reported differences (not fixed here — see the PR description)
+// Known, reported differences
 // ---------------------------------------------------------------------------
 
 interface Mismatch {
@@ -236,40 +238,11 @@ interface Mismatch {
   scopes: ScopeWithRules[]
 }
 
-const KNOWN_DIFFERENCES: Array<{ id: string; describe: string; matches: (m: Mismatch) => boolean }> = [
-  {
-    id: 'file-above-private-folder',
-    describe: 'A FILE at a strict ancestor of a private folder (e.g. a file "人事" while "人事/評価" is private): '
-      + 'the push check refuses it ([RESERVED_PATH], reservedAncestorOf) but paths/check — and so the chat '
-      + 'guard — only knows "at or under", so the app lets the AI write it and sync recovers after the rejection.',
-    matches: m => m.server.via === 'reserved-ancestor' && m.client,
-  },
-  {
-    id: 'private-folder-case-variant',
-    describe: 'A path inside a readable private folder whose private-folder prefix is spelled with different A–Z '
-      + 'case ("評価/CAFé/x" for the private folder "評価/café"). On a case-insensitive disk the file lands in the clone '
-      + 'and is pushed as <scopePath>/<rest>, so the scope repository judges the stored spelling of the prefix. The app\'s '
-      + 'evaluateWrite judges the whole path as typed: its exact pass does not see the private scope (or the rules inside '
-      + 'it) and falls back to the rules above the private folder — usually stricter (the AI is refused), but laxer when '
-      + 'the company root lets the member write and a rule inside the private folder does not.',
-    matches: (m) => {
-      if (m.server.via !== 'scope-repo') return false
-      const priv = m.scopes.find(s => s.repoId !== null && isSameOrAncestorPath(serverPathKey(s.path), serverPathKey(m.path)))
-      return !!priv && !isSameOrAncestorPath(priv.path, m.path.normalize('NFC'))
-    },
-  },
-  {
-    id: 'case-colliding-scopes',
-    describe: 'Two ruled scopes whose paths differ only in A–Z case ("Café" and "café") above the path: the '
-      + 'A–Z-folded lookup finds two equally deep scopes and both copies keep the first one — the server in database '
-      + 'row order, the app in the summary\'s sorted order — so they can pick different rules.',
-    matches: (m) => {
-      const key = serverPathKey(m.path)
-      const above = m.scopes.filter(s => s.rules.length > 0 && isSameOrAncestorPath(serverPathKey(s.path), key))
-      return above.some((a, i) => above.some((b, j) => i !== j && a.path !== b.path && serverPathKey(a.path) === serverPathKey(b.path)))
-    },
-  },
-]
+// None since R2: the three reported in #160 (a private folder typed in
+// another A–Z case, case-colliding scopes, a file above a private folder)
+// were fixed by adopting the server's semantics. A new entry needs a
+// reported reason; each entry must keep occurring.
+const KNOWN_DIFFERENCES: Array<{ id: string; describe: string; matches: (m: Mismatch) => boolean }> = []
 
 function describeMismatch(m: Mismatch): string {
   return [
@@ -294,6 +267,11 @@ test(`client write decisions equal the server's push decisions (${SEEDS} generat
       for (const path of queryPaths(world)) {
         const server = serverDecision(world.scopes, user, path)
         if (server === null) continue
+        // The database returns scopes in no promised order: the push check's
+        // answer must not depend on it (two scopes whose paths differ only in
+        // A–Z case: the one sorting first decides, on both sides).
+        assert.equal(serverDecision([...world.scopes].reverse(), user, path)?.write, server.write,
+          `seed ${seed}: ${user.id} ${JSON.stringify(path)}: the push check depends on the order of the scopes`)
         const client = await clientDecision(world.scopes, user, path)
         compared++
         if (client === server.write) continue

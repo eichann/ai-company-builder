@@ -1,21 +1,23 @@
-// Rule parity: the name and path rules that exist as separate copies in the
-// server, the desktop app and the admin console must agree on one corpus.
-// One table test per rule; each copy is the production code (imported, or —
-// for constants private to a React component or a route module that opens
-// the database at import — the regex literal read from its source).
+// Rule parity: the name and path rules the server, the desktop app and the
+// admin console share must give the same answers on one corpus. Since R2 they
+// live in ONE copy, shared/core/ (paths.ts, names.ts, instruction-files.ts);
+// what remains to check is that every caller still goes through it, and that
+// the copies kept apart ON PURPOSE agree where they must:
 //
-//   path key (NFC + A–Z fold)  client write-access / sparse-paths, shared
-//                              normalizeReservedPath, server private-folders
-//                              pathKey, push-check policy reservedKey, push-check
-//                              rules foldAsciiCase (bytewise, latin1 — by design)
-//   department folder names    server routes/departments.ts, admin lib/folder-name.ts,
-//                              client NewFolderDialog.tsx
-//   skill folder names         client NewSkillWizard.tsx, CopySkillModal.tsx
-//   AI instruction files       client write-guard.ts vs push-check rules.ts / policy.ts
+//   path keys                  shared/core pathKey / nameKey / normalizeRepoPath
+//                              (server, app incl. sparse-paths, paths/check
+//                              contract) vs push-check rules foldAsciiCase
+//                              (bytewise over latin1 — separate by design)
+//   department folder names    shared/core names.ts; admin lib/folder-name.ts and
+//                              the app's NewFolderDialog.tsx must use it
+//   skill folder names         shared/core names.ts; NewSkillWizard.tsx and
+//                              CopySkillModal.tsx must use it
+//   AI instruction files       shared/core instruction-files.ts (app guard, push
+//                              policy) vs push-check rules.ts INSTRUCTION_FILE_RE
+//                              (bytewise regex built from the core's names)
 //
-// Intended differences are pinned explicitly (and explained) so that a
-// refactor which merges the copies (R2, one shared core) keeps them or
-// removes them on purpose.
+// Intended differences (backslashes, '.' segments, NFD in the push checker, a
+// local-only Unicode fold) are pinned explicitly below.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -25,8 +27,9 @@ import { foldAsciiCase as clientFold, normalizeRepoPath } from '../shared/write-
 import { pathKey as sparsePathKey } from '../shared/sparse-paths'
 import { editorOverwriteBackupPlan } from '../shared/editor-disk-state'
 import { normalizeReservedPath } from '../../shared/types/private-folders'
-import { pathKey as serverPathKey } from '../../server/src/lib/private-folders'
-import { instructionFileAllowed, reservedKey } from '../../server/src/lib/push-check/policy'
+import { pathKey as serverPathKey } from '../../shared/core/paths'
+import { isValidFolderName as coreFolderName, isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../shared/core/names'
+import { instructionFileAllowed } from '../../server/src/lib/push-check/policy'
 import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE } from '../../server/src/lib/push-check/rules'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
@@ -37,11 +40,13 @@ const adminFolderName: (s: string) => boolean = (adminFolderNameModule as unknow
 
 const repo = join(dirname(fileURLToPath(import.meta.url)), '..', '..')
 
-/** A regex literal from a source file (group 1 of `pattern`), as the code compiles it. */
-function regexFromSource(rel: string, pattern: RegExp): RegExp {
-  const m = readFileSync(join(repo, rel), 'utf8').match(pattern)
-  assert.ok(m, `${rel}: the rule's regex was not found (moved? update this test to import it)`)
-  return new Function(`return ${m[1]}`)() as RegExp
+/** A renderer component that must take a rule from shared/core/names.ts instead of keeping its own regex. */
+function assertUsesCoreNames(rel: string, names: string[]) {
+  const source = readFileSync(join(repo, rel), 'utf8')
+  const m = source.match(/import \{([^}]*)\} from '(?:\.\.\/)+shared\/core\/names'/)
+  assert.ok(m, `${rel}: imports nothing from shared/core/names`)
+  for (const n of names) assert.ok(m[1].split(',').map(x => x.trim()).includes(n), `${rel}: does not import ${n} from shared/core/names`)
+  assert.doesNotMatch(source, /\/\^\[(\\w|a-z0-9)/, `${rel}: keeps a regex literal of its own for the rule`)
 }
 
 // ---------------------------------------------------------------------------
@@ -61,8 +66,7 @@ test('path keys: every copy computes the same NFC + A–Z-folded key', () => {
       'client normalizeRepoPath + foldAsciiCase': clientFold(normalizeRepoPath(p) ?? '<null>'),
       'client sparse-paths pathKey': sparsePathKey(p),
       'shared normalizeReservedPath': normalizeReservedPath(p),
-      'server private-folders pathKey': serverPathKey(p),
-      'server push-check reservedKey': reservedKey(p),
+      'shared/core pathKey (server)': serverPathKey(p),
       // The push checker folds git's raw bytes read as latin1 (LC_ALL=C): UTF-8
       // multi-byte sequences never contain 0x41–0x5A, so on NFC input it is the
       // same function. It does not NFC-normalise: git hands it the bytes as pushed.
@@ -79,7 +83,6 @@ test('path keys: the intended differences between the copies', () => {
   assert.equal(normalizeReservedPath('a\\B'), 'a/b')
   assert.equal(clientFold(normalizeRepoPath('a\\B')!), 'a/b')
   assert.equal(serverPathKey('a\\B'), 'a\\b')
-  assert.equal(reservedKey('a\\B'), 'a\\b')
   // '.' / '..': the client's path normaliser refuses them; key functions keep them.
   assert.equal(normalizeRepoPath('a/../b'), null)
   assert.equal(serverPathKey('a/../b'), 'a/../b')
@@ -116,17 +119,15 @@ const FOLDER_NAMES: Array<[string, boolean]> = [
 
 test('department folder names: server, admin and the app accept exactly the same names', () => {
   const copies: Record<string, (s: string) => boolean> = {
-    'server routes/departments.ts isValidFolderName': (s) => regexFromSource('server/src/routes/departments.ts',
-      /export function isValidFolderName\(folder: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(folder\)/).test(s),
+    'shared/core names.ts isValidFolderName (server, app)': coreFolderName,
     'admin lib/folder-name.ts isValidFolderName': adminFolderName,
-    'client NewFolderDialog.tsx FOLDER_RE': (s) => regexFromSource('client/src/components/skill-ui/NewFolderDialog.tsx',
-      /const FOLDER_RE = (\/.+\/[a-z]*)\n/).test(s),
   }
   for (const [name, expected] of FOLDER_NAMES) {
     for (const [copy, accepts] of Object.entries(copies)) {
       assert.equal(accepts(name), expected, `${copy}(${JSON.stringify(name)})`)
     }
   }
+  assertUsesCoreNames('client/src/components/skill-ui/NewFolderDialog.tsx', ['isValidFolderName'])
 })
 
 // ---------------------------------------------------------------------------
@@ -139,15 +140,16 @@ const SKILL_NAMES: Array<[string, boolean]> = [
   ['スキル', false], ['ｓｋｉｌｌ', false], ['skill/sub', false], ['café', false],
 ]
 
-test('skill folder names: the wizard and the copy dialog agree', () => {
-  const copies: Record<string, (s: string) => boolean> = {
-    'NewSkillWizard.tsx isValidFolderName': (s) => regexFromSource('client/src/components/skill-ui/NewSkillWizard.tsx',
-      /function isValidFolderName\(name: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(name\)/).test(s),
-    'CopySkillModal.tsx isValidFolderName': (s) => regexFromSource('client/src/components/skill-ui/CopySkillModal.tsx',
-      /function isValidFolderName\(name: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(name\)/).test(s),
+test('skill folder names: one rule, used by the wizard and the copy dialog', () => {
+  for (const [name, expected] of SKILL_NAMES) assert.equal(isValidSkillName(name), expected, `isValidSkillName(${JSON.stringify(name)})`)
+  // Suggestions and typed input always end up valid (or empty while typing).
+  for (const display of ['My Skill', '営業レポート', '  --A b--  ', 'x'.repeat(80), 'Café au lait']) {
+    assert.ok(isValidSkillName(suggestSkillName(display, 'new-skill')), `suggestSkillName(${JSON.stringify(display)})`)
   }
-  for (const [name, expected] of SKILL_NAMES) {
-    for (const [copy, accepts] of Object.entries(copies)) assert.equal(accepts(name), expected, `${copy}(${JSON.stringify(name)})`)
+  assert.equal(suggestSkillName('営業', 'new-skill'), 'new-skill')
+  assert.equal(sanitizeSkillNameInput('My Skill_2!'), 'myskill_2')
+  for (const rel of ['client/src/components/skill-ui/NewSkillWizard.tsx', 'client/src/components/skill-ui/CopySkillModal.tsx']) {
+    assertUsesCoreNames(rel, ['isValidSkillName', 'sanitizeSkillNameInput', 'suggestSkillName'])
   }
 })
 

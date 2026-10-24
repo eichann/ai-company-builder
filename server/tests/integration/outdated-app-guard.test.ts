@@ -36,7 +36,7 @@ import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/lib/permission-store'
-import { resolveAccess } from '../../src/lib/permissions'
+import { resolveAccess } from '../../shared/core/permissions'
 import { supportsWriteDeniedRecovery, WRITE_DENIED_RECOVERY_COMMIT_DATE } from '../../src/lib/client-version'
 import { membersLosingWrite } from '../../src/lib/write-loss'
 

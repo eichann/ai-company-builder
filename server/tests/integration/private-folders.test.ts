@@ -666,6 +666,22 @@ describe('POST /paths/check', () => {
     expect((await check('owner', ['人事/評価/new.md', '人事/面談/x'])).body.data.results.map((r: Loose) => r.usable)).toEqual([true, true])
   })
 
+  it('a path listed in `files` is also unusable above a private folder — for everyone, as [RESERVED_PATH] refuses a file there', async () => {
+    const { resetPathCheckBudgetForTests } = await import('../../src/routes/private-folders')
+    resetPathCheckBudgetForTests()
+    for (const user of ['other', 'viewer', 'owner'] as const) {
+      const r = await as(user, 'POST', `${base}/paths/check`, { paths: ['人事', '新規部署', '人事/評価/a.md'], files: ['人事', '新規部署', '人事/評価/a.md'] })
+      expect(r.status).toBe(200)
+      expect(r.body.data.results.map((x: Loose) => x.usable)).toEqual([false, true, user !== 'other'])
+    }
+    // Only the listed ones; without `files` (older apps): folder semantics, as before.
+    expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['人事', '新規部署'], files: ['新規部署'] })).body.data.results
+      .map((x: Loose) => x.usable)).toEqual([true, true])
+    expect((await check('other', ['人事', '人事/評価', '新規部署'])).body.data.results.map((x: Loose) => x.usable)).toEqual([true, false, true])
+    expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['a'], files: 'a' })).status).toBe(400)
+    expect((await as('other', 'POST', `${base}/paths/check`, { paths: ['a'], files: [1] })).status).toBe(400)
+  })
+
   it('validates the request', async () => {
     expect((await check('other', [])).status).toBe(400)
     expect((await check('other', 'x')).status).toBe(400)
