@@ -24,6 +24,7 @@ export function turnToolEvents(
     conversationId: request.appSessionId,
     turnId: context?.turnId,
     companyId: context?.companyId,
+    department: context?.department,
     model: request.modelId,
     companyRoot: context?.companyRoot,
     cwd: request.workingDirectory,

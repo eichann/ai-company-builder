@@ -4,6 +4,17 @@
 // server, and without a reverse proxy the admin's own /api/* proxy
 // (src/proxy.ts) forwards them. Either way the session cookie is first-party.
 
+import type {
+  AgentEventPage,
+  AgentEventQuery,
+  AgentEventRetentionPreview,
+  AgentEventSettings,
+  AgentEventSettingsUpdate,
+  AgentEventSummary,
+  AgentEventViewerMode,
+  AgentEventViewers,
+} from '../../../shared/types/agent-events'
+
 const API_BASE = ''
 
 /** An HTTP error from the API, keeping the status so the UI can explain it. */
@@ -528,6 +539,62 @@ export const pushRejectionsApi = {
     const qs = params.toString()
     return getData<PushRejectionPage>(`/api/companies/${enc(companyId)}/push-rejections${qs ? `?${qs}` : ''}`)
   },
+}
+
+// ---------------------------------------------------------------------------
+// The AI action log (monitoring M1; shared/types/agent-events.ts)
+// ---------------------------------------------------------------------------
+
+// One copy of these shapes: the server builds them from the same file, and
+// server/tests/integration/admin-contract.test.ts checks its answers against
+// the names below.
+export type {
+  AgentEventDailyCount,
+  AgentEventPage,
+  AgentEventQuery,
+  AgentEventRecord,
+  AgentEventRetentionPreview,
+  AgentEventSettings,
+  AgentEventSettingsChange,
+  AgentEventSettingsUpdate,
+  AgentEventSummary,
+  AgentEventTarget,
+  AgentEventViewer,
+  AgentEventViewerMode,
+  AgentEventViewers,
+  ToolCategory,
+  ToolDecision,
+} from '../../../shared/types/agent-events'
+
+export const agentEventsApi = {
+  /** Newest first; pass `nextCursor` back as `cursor` for older events. */
+  list: (companyId: string, q: AgentEventQuery = {}) => {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(q)) {
+      if (value !== undefined && value !== '') params.set(key, String(value))
+    }
+    const qs = params.toString()
+    return getData<AgentEventPage>(`/api/companies/${enc(companyId)}/agent-events${qs ? `?${qs}` : ''}`)
+  },
+  /** Counts per member and day; `tzOffsetMinutes` = minutes east of UTC (540 for Japan). */
+  summary: (companyId: string, q: { from?: string; to?: string; tzOffsetMinutes?: number } = {}) => {
+    const params = new URLSearchParams()
+    if (q.from) params.set('from', q.from)
+    if (q.to) params.set('to', q.to)
+    if (q.tzOffsetMinutes !== undefined) params.set('tzOffsetMinutes', String(q.tzOffsetMinutes))
+    const qs = params.toString()
+    return getData<AgentEventSummary>(`/api/companies/${enc(companyId)}/agent-events/summary${qs ? `?${qs}` : ''}`)
+  },
+  settings: (companyId: string) =>
+    getData<AgentEventSettings>(`/api/companies/${enc(companyId)}/agent-events/settings`),
+  updateSettings: (companyId: string, update: AgentEventSettingsUpdate) =>
+    getData<AgentEventSettings>(`/api/companies/${enc(companyId)}/agent-events/settings`, { method: 'PUT', body: update }),
+  /** How many events a retention of `days` would delete (confirm before shortening). */
+  retentionPreview: (companyId: string, days: number) =>
+    getData<AgentEventRetentionPreview>(`/api/companies/${enc(companyId)}/agent-events/settings/retention-preview?days=${days}`),
+  /** Who would see the log under `mode`, with their scope (the settings card's live list). */
+  viewers: (companyId: string, mode: AgentEventViewerMode) =>
+    getData<AgentEventViewers>(`/api/companies/${enc(companyId)}/agent-events/viewers?mode=${enc(mode)}`),
 }
 
 // ---------------------------------------------------------------------------

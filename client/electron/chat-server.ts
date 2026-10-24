@@ -267,7 +267,7 @@ export async function startChatServer(config: ChatServerConfig) {
         }
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
-    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID() }
+    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder }
     const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {

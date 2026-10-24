@@ -67,6 +67,11 @@ const TYPES: Record<string, string> = {
   PrivateFolders: 'PrivateFolderSummary[]',
   PrivateFolder: 'PrivateFolderDetail',
   PushRejections: 'PushRejectionPage',
+  AgentEvents: 'AgentEventPage',
+  AgentEventSummary: 'AgentEventSummary',
+  AgentEventSettings: 'AgentEventSettings',
+  AgentEventRetentionPreview: 'AgentEventRetentionPreview',
+  AgentEventViewers: 'AgentEventViewers',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -186,6 +191,7 @@ beforeAll(async () => {
   const { permissionRulesRoute } = await import('../../src/routes/permission-rules')
   const { privateFoldersRoute } = await import('../../src/routes/private-folders')
   const { invitationsRoute } = await import('../../src/routes/invitations')
+  const { agentEventsRoute } = await import('../../src/routes/agent-events')
   // The same mounts as src/index.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
@@ -194,6 +200,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', permissionsRoute)
   app.route('/api/companies/:companyId', permissionRulesRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
+  app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -267,6 +274,31 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('MakePublic', USERS.owner, 'POST', `${base}/private-folders/${created.scopeId}/make-public`, {})
     const second = await expectShape('PrivateFolder', USERS.owner, 'POST', `${base}/private-folders`, { parentPath: '人事', name: '給与', force: true })
     await expectShape('PrivateFolderDelete', USERS.owner, 'DELETE', `${base}/private-folders/${second.scopeId}?confirm=${encodeURIComponent('給与')}`)
+  })
+
+  it('the AI action log', async () => {
+    // Events of every target kind, sent the way the app does.
+    const at = new Date().toISOString()
+    const targets = [
+      { kind: 'file', path: '営業部/契約書/a.md' }, { kind: 'outside', sensitive: 'ssh' },
+      { kind: 'files', files: [{ kind: 'file', path: '人事/README.md' }], more: 2 },
+      { kind: 'command', programs: ['git push'], redirect: true }, { kind: 'web', host: 'example.com' },
+      { kind: 'mcp', server: 'github', tool: 'create_issue' }, { kind: 'subagent', subagentType: 'Explore' }, { kind: 'none' },
+    ]
+    const events = targets.map((target, i) => ({
+      version: 1, id: `ac-ev-${i}`, callId: `toolu_${i}`, at, durationMs: 5, conversationId: 'conv', turnId: 'turn', department: '営業部',
+      agent: 'claude-code', model: 'm', tool: 'Read', category: 'read', target, decision: i % 2 ? 'auto-allowed' : 'guard-denied',
+      ...(i % 2 ? { outcome: 'ok' } : { guardReason: 'read-only-folder' }),
+    }))
+    const sent = await call(USERS.member, 'POST', `${base}/agent-events`, { events })
+    expect(sent.json?.data).toEqual({ accepted: targets.length, duplicates: 0, rejected: 0 })
+
+    await expectShape('AgentEvents', USERS.owner, 'GET', `${base}/agent-events?limit=50`)
+    await expectShape('AgentEventSummary', USERS.owner, 'GET', `${base}/agent-events/summary?tzOffsetMinutes=540`)
+    await expectShape('AgentEventSettings', USERS.owner, 'GET', `${base}/agent-events/settings`)
+    await expectShape('AgentEventSettings', USERS.owner, 'PUT', `${base}/agent-events/settings`, { retentionDays: 90, viewers: 'admins-and-managers' })
+    await expectShape('AgentEventRetentionPreview', USERS.owner, 'GET', `${base}/agent-events/settings/retention-preview?days=30`)
+    await expectShape('AgentEventViewers', USERS.owner, 'GET', `${base}/agent-events/viewers?mode=admins-and-managers`)
   })
 
   it('invitations', async () => {
