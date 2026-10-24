@@ -100,5 +100,5 @@ events through it), the read shapes and the limits. The admin re-exports the rea
 `prune()` deletes events older than each company's retention in chunks of 500, yielding to the
 event loop between chunks; `lib/agent-event-retention.ts` runs it 5 s after start and daily
 (`index.ts`). Version gate: `AGENT_EVENTS_CLIENT_COMMIT_DATE` in `lib/client-version.ts` is
-null until the owner sets it from the sending PR's merge commit date (PR 4 lists members whose
-app is older).
+the committer date (UTC) of #206's merge commit, `20261024181341`; the admin log page lists the
+members whose app is older.

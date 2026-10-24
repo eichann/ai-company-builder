@@ -187,12 +187,11 @@ export function supportsPrivateFolders(
  * Committer date (UTC, YYYYMMDDHHmmss) of the first main commit whose desktop
  * app sends the AI action log (POST /agent-events, monitoring M1 PR 3).
  *
- * null until that change merges: no released app sends events yet. Set it
- * then, computed like PRIVATE_FOLDERS_CLIENT_COMMIT_DATE from the merge
- * commit; the admin console's log page lists the members whose app is older
- * (supportsAgentEvents false), since their AI's actions are not recorded.
+ * The committer date of #206's merge commit (50d34ce). The admin console's
+ * log page lists the members whose app is older (supportsAgentEvents false),
+ * since their AI's actions are not recorded.
  */
-export const AGENT_EVENTS_CLIENT_COMMIT_DATE: string | null = null
+export const AGENT_EVENTS_CLIENT_COMMIT_DATE: string | null = '20261024181341'
 
 /** Does this desktop-app build send the AI action log? Unknown = no; always no while the cutoff is null. */
 export function supportsAgentEvents(
