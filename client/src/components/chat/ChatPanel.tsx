@@ -3,7 +3,7 @@ import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
-import type { AgentSession, AuthMode, CodexStatus } from '../../../shared/agent'
+import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import { agentCan, agentShortLabel } from '../../../shared/agents/registry'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
@@ -16,7 +16,7 @@ import { canSteerText } from '../../../shared/steer'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
-import { DefaultChatTransport, type UIMessage } from 'ai'
+import type { UIMessage } from 'ai'
 import { history, historyKeymap, isolateHistory } from '@codemirror/commands'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
 import { EditorView, keymap, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
@@ -52,15 +52,17 @@ import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
 import { earlierAnchor, windowStart } from './messageWindow'
 import { streamThrottleMs } from './markdownBlocks'
-import { historyThumbnail } from './historyThumbnail'
 import { useAuthStore } from '../../stores/authStore'
-import type { ChatSession } from '../../../shared/chat-history'
 import type { ChatServerClient } from './chatServerClient'
 import { useChatServer } from './hooks/useChatServer'
-import { AUTOSAVE_INTERVAL_MS, greetingMessages, messageText, sameSaveInputs, sessionMessageFor, sessionMessageToUIMessage, titleTranscript, uiMessageToSessionMessage } from './chatSessionMessages'
 import { newChatTab, persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, type ChatTab } from './chatTabsStorage'
 import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts, type QueuedSend } from './queuedSends'
-import { buildChatRequestBody } from './chatRequestBody'
+import { useChatDraft, type ChatInputApi } from './hooks/useChatDraft'
+import { completeHandoffTurn, persistAgentSession, stampNewMessages, useConversation } from './hooks/useConversation'
+import { useChatHistory } from './hooks/useChatHistory'
+import { useTitleGeneration } from './hooks/useTitleGeneration'
+import { useAttachToLatestUserMessage, useMessageAttachments } from './hooks/useMessageAttachments'
+import { useChatRequestContext, useChatTransport } from './hooks/useChatTransport'
 
 // ============================================================================
 // Utility Components
@@ -384,13 +386,6 @@ const MessageItem = memo(function MessageItem({ message, isStreaming, timestamp,
 // ============================================================================
 // Input Component (Optimized - uncontrolled textarea for maximum performance)
 // ============================================================================
-
-interface ChatInputApi {
-  focus: () => void
-  captureInsertion: () => (text: string) => boolean
-  getValue: () => string
-  setValue: (text: string) => void
-}
 
 interface ChatInputProps {
   initialDraft?: string
@@ -1397,8 +1392,6 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   const selectedCodexEffort = codexModel?.efforts.includes(codexEffort) ? codexEffort : codexModel?.defaultEffort || ''
   const selectedModel = authMode === 'codex' ? codexModel?.id : aiModel
   const selectedEffort = authMode === 'codex' ? selectedCodexEffort : aiEffort
-  const authModeRef = useRef(authMode)
-  authModeRef.current = authMode
   const chatMarkdownRender = useAppStore((state) => state.chatMarkdownRender)
   const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
@@ -1406,13 +1399,14 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     setPendingChatInput(null, false)
   }, [setPendingChatInput])
 
+  // Which conversation this tab shows (refs read by the transport, onFinish
+  // and the interaction lookup below — so this comes first).
+  const conversation = useConversation(initialSessionId)
+  const { appSessionIdRef, claudeSessionIdRef, agentSessionRef, handoffRequestRef, historyError, setHistoryError, currentSessionId, setCurrentSessionId, timestampsRef, saveRef } = conversation
+  // Imperative handle to read/write the chat input value for per-session draft persistence
+  const { draftRef: draftInputRef, onDraftChange: handleDraftChange, inputApiRef: chatInputApiRef } = useChatDraft()
+
   const [interactions, setInteractions] = useState<AgentInteractionRequest[]>([])
-  // App session ID ref (for Claude CLI session resume). Declared before the
-  // interaction lookup below, which reads it during render: declared later, the
-  // first agent question (AskUserQuestion / ask_user / Codex approval) hit the
-  // temporal dead zone and crashed the window.
-  // Eagerly assigned on first message send so the server can track the CLI session from the start
-  const appSessionIdRef = useRef<string | null>(initialSessionId || crypto.randomUUID())
   const currentInteraction = interactions.find(item => item.appSessionId === appSessionIdRef.current)
   useEffect(() => {
     let active = true
@@ -1437,7 +1431,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
         .filter(item => item.appSessionId === sessionId)
         .map(item => window.electronAPI.respondAgentInteraction(item.id, { cancelled: true })))).catch(() => {})
     }
-  }, [])
+  }, [appSessionIdRef])
 
   // Tool approval state
   const [pendingApprovals, setPendingApprovals] = useState<ToolApprovalRequest[]>([])
@@ -1452,34 +1446,23 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       setPendingApprovals(queue => queue.some(p => p.toolUseId === data.toolUseId) ? queue : [...queue, data])
     })
     return unsub
-  }, [])
+  }, [appSessionIdRef])
 
   const handleToolApprovalResponse = useCallback((toolUseId: string, approved: boolean) => {
     window.electronAPI.respondToolApproval(toolUseId, approved)
     setPendingApprovals(queue => queue.filter(p => p.toolUseId !== toolUseId))
   }, [])
 
-  // Refs for dynamic body params
-  const workingDirRef = useRef(departmentPath || currentCompany?.rootPath)
-  const activeDepartmentRef = useRef(activeDepartment)
-  const aiModelRef = useRef<string | undefined>(selectedModel)
-  const aiEffortRef = useRef<string>(selectedEffort)
-
-  useEffect(() => {
-    workingDirRef.current = departmentPath || currentCompany?.rootPath
-  }, [departmentPath, currentCompany?.rootPath])
-
-  useEffect(() => {
-    activeDepartmentRef.current = activeDepartment
-  }, [activeDepartment])
-
-  useEffect(() => {
-    aiModelRef.current = selectedModel
-  }, [selectedModel])
-
-  useEffect(() => {
-    aiEffortRef.current = selectedEffort
-  }, [selectedEffort])
+  // What each request carries (refs: the transport reads them per request).
+  const { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef: aiModelRef, effortRef: aiEffortRef, companyIdRef, companyRootRef } = useChatRequestContext({
+    authMode,
+    workingDirectory: departmentPath || currentCompany?.rootPath,
+    activeDepartment,
+    companyId: currentCompany?.id,
+    companyRootPath: currentCompany?.rootPath,
+    modelId: selectedModel,
+    effort: selectedEffort,
+  })
 
   // Keep the selected effort valid for the current model. If the user switches to a
   // model that doesn't support the current effort (e.g. xhigh on Opus 4.6), demote to
@@ -1490,54 +1473,25 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     }
   }, [aiModel, aiEffort, setAIEffort])
 
+  const attachments = useMessageAttachments()
+  const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
 
-  // Pending images to send with next message
-  const pendingImagesRef = useRef<Array<{ mediaType: string; data: string }>>([])
-  // Pending data URLs to associate with the next user message
-  const pendingImageDataUrlsRef = useRef<string[]>([])
-  // Store sent images keyed by message ID for display in chat
-  const [messageImages, setMessageImages] = useState<Map<string, string[]>>(new Map())
-  // Store reference file paths keyed by message ID for display in chat
-  const [messageReferenceFiles, setMessageReferenceFiles] = useState<Map<string, string[]>>(new Map())
-  // Pending file paths to send as reference context
-  const pendingFilePathsRef = useRef<string[]>([])
-  // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
-  const pendingDisplayFilePathsRef = useRef<string[]>([])
-
-  const lastNotifiedTitleRef = useRef<string | null>(null)
-  // Claude CLI session ID (persisted across app restarts via ChatSession)
-  const claudeSessionIdRef = useRef<string | null>(null)
-  const agentSessionRef = useRef<AgentSession | null | undefined>(undefined)
-  const handoffRequestRef = useRef<{ companyId: string; sessionId: string; provider: AuthMode } | null>(null)
-  const companyIdRef = useRef(currentCompany?.id)
-  companyIdRef.current = currentCompany?.id
-  // The company checkout root: the chat's write guard judges paths relative to it.
-  const companyRootRef = useRef(currentCompany?.rootPath)
-  companyRootRef.current = currentCompany?.rootPath
-  // Transport (memoized - only recreated when the chat server changes). The
-  // body is read from refs when each request is made (chatRequestBody.ts).
-  const transport = useMemo(() => {
-    return new DefaultChatTransport({
-      api: chatServer.chatUrl,
-      headers: chatServer.headers,
-      body: () => buildChatRequestBody({
-        authMode: authModeRef,
-        agentSession: agentSessionRef,
-        workingDirectory: workingDirRef,
-        companyId: companyIdRef,
-        companyRootPath: companyRootRef,
-        activeDepartment: activeDepartmentRef,
-        modelId: aiModelRef,
-        effort: aiEffortRef,
-        promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
-        appSessionId: appSessionIdRef,
-        claudeSessionId: claudeSessionIdRef,
-        pendingImages: pendingImagesRef,
-        pendingFilePaths: pendingFilePathsRef,
-        handoffRequest: handoffRequestRef,
-      }),
-    })
-  }, [chatServer])
+  const transport = useChatTransport(chatServer, {
+    authMode: authModeRef,
+    agentSession: agentSessionRef,
+    workingDirectory: workingDirRef,
+    companyId: companyIdRef,
+    companyRootPath: companyRootRef,
+    activeDepartment: activeDepartmentRef,
+    modelId: aiModelRef,
+    effort: aiEffortRef,
+    promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
+    appSessionId: appSessionIdRef,
+    claudeSessionId: claudeSessionIdRef,
+    pendingImages: pendingImagesRef,
+    pendingFilePaths: pendingFilePathsRef,
+    handoffRequest: handoffRequestRef,
+  })
 
   // Plan usage for the header meter (shared/rate-limits.ts): streamed live as
   // transient data parts, and fetched here for a tab that has not streamed yet.
@@ -1549,10 +1503,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     } catch {
       // The meter keeps what it has.
     }
-  }, [chatServer])
-
-  // Declared before useChat: its onFinish reports handoff failures here.
-  const [historyError, setHistoryError] = useState<string | null>(null)
+  }, [chatServer, authModeRef])
 
   // Next-prompt suggestion (promptSuggestion.ts) and messages sent while the
   // AI works (shared/steer.ts). Declared before useChat: its onFinish records
@@ -1576,32 +1527,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
       lastTurnAbortedRef.current = isAbort || isDisconnect || isError
       setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: shouldRequestSuggestion({ aborted: lastTurnAbortedRef.current, authMode: authModeRef.current, enabled: promptSuggestionSetting.getSnapshot() }) }))
-      const receipt = handoffRequestRef.current
-      if (receipt && !isAbort && !isDisconnect && !isError && finishReason === 'stop') {
-        const content = uiMessageToSessionMessage(message, new Date()).content
-        void (async () => {
-          if (appSessionIdRef.current !== receipt.sessionId || companyIdRef.current !== receipt.companyId) return
-          if (!await saveCurrentSession(finishedMessages)) return
-          await window.electronAPI.completeHandoffTurn(receipt.companyId, receipt.sessionId, { messageId: message.id, content, provider: receipt.provider })
-        })().catch(() => { setHistoryError('履歴は保存されましたが、引き継ぎメモの更新予約ができませんでした。') })
-      }
+      completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
       // Fetch and store Claude CLI session ID for resume persistence
-      const finishedSessionId = appSessionIdRef.current
-      const finishedCompanyId = currentCompany?.id
-      if (finishedSessionId && finishedCompanyId) {
-        chatServer.sessionInfo(finishedSessionId)
-          .then(data => {
-            if (data.agentSession) {
-              if (appSessionIdRef.current === finishedSessionId) agentSessionRef.current = data.agentSession
-              void window.electronAPI.patchChatSession(finishedCompanyId, finishedSessionId, { agentSession: data.agentSession }).catch(() => {})
-            }
-            if (data.claudeSessionId) {
-              if (appSessionIdRef.current === finishedSessionId) claudeSessionIdRef.current = data.claudeSessionId
-              void window.electronAPI.patchChatSession(finishedCompanyId, finishedSessionId, { claudeSessionId: data.claudeSessionId }).catch(() => {})
-            }
-          })
-          .catch(() => {})
-      }
+      persistAgentSession(conversation, chatServer, currentCompany?.id)
     },
     onError: (err) => {
       console.error('[useChat] Error:', err)
@@ -1633,67 +1561,47 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   const modelLocked = status === 'submitted' || status === 'streaming'
   const displayedModel = aiModel
 
-  // Associate pending images with new user messages
-  useEffect(() => {
-    if (pendingImageDataUrlsRef.current.length === 0) return
-    const userMsgs = messages.filter(m => m.role === 'user')
-    const lastUserMsg = userMsgs[userMsgs.length - 1]
-    if (lastUserMsg && !messageImages.has(lastUserMsg.id)) {
-      const urls = pendingImageDataUrlsRef.current
-      pendingImageDataUrlsRef.current = []
-      setMessageImages(prev => new Map(prev).set(lastUserMsg.id, urls))
-    }
-  }, [messages, messageImages])
-
-  // Associate pending reference files with new user messages
-  useEffect(() => {
-    if (pendingDisplayFilePathsRef.current.length === 0) return
-    const userMsgs = messages.filter(m => m.role === 'user')
-    const lastUserMsg = userMsgs[userMsgs.length - 1]
-    if (lastUserMsg && !messageReferenceFiles.has(lastUserMsg.id)) {
-      const paths = pendingDisplayFilePathsRef.current
-      pendingDisplayFilePathsRef.current = []
-      setMessageReferenceFiles(prev => new Map(prev).set(lastUserMsg.id, paths))
-    }
-  }, [messages, messageReferenceFiles])
+  useAttachToLatestUserMessage(messages, attachments)
 
   // Timestamp tracking (sync during render for immediate availability)
-  const timestampsRef = useRef(new Map<string, Date>())
-  const now = new Date()
-  for (const msg of messages) {
-    if (!timestampsRef.current.has(msg.id)) {
-      timestampsRef.current.set(msg.id, now)
-    }
-  }
+  stampNewMessages(timestampsRef.current, messages)
 
-  // Session management state
-  const [currentSessionId, setCurrentSessionId] = useState<string | null>(appSessionIdRef.current)
-  const revisionRef = useRef(0)
-  const writerIdRef = useRef(crypto.randomUUID())
-  const writeSequenceRef = useRef(0)
-  const createdAtRef = useRef(new Date().toISOString())
-  const historyReadyRef = useRef(false)
-  const deletedRef = useRef(false)
-  const savedFingerprintRef = useRef('')
-  // The objects the last acknowledged save was built from (sameSaveInputs).
-  const savedInputsRef = useRef<unknown[] | null>(null)
-  const pendingFingerprintRef = useRef('')
-  const acknowledgedSequenceRef = useRef(0)
-  const syncSaveFailedRef = useRef(false)
-  const messagesRef = useRef(messages)
-  messagesRef.current = messages
-  const saveRef = useRef<(override?: UIMessage[], sync?: boolean, clearDraft?: boolean) => Promise<boolean>>(async () => true)
-  // Imperative handle to read/write the chat input value for per-session draft persistence
-  const draftInputRef = useRef('')
-  const handleDraftChange = useCallback((text: string) => { draftInputRef.current = text }, [])
-  const chatInputApiRef = useRef<ChatInputApi | null>(null)
-  // Tracks whether title auto-generation has been attempted/completed for the current session
-  const titleGenerationDoneRef = useRef(false)
-  // Tracks previous status so we can detect "stream just finished" transitions
-  const prevStatusRef = useRef<string>('ready')
-  // Holds an explicit title (auto-generated or user-edited) for the current session.
-  // When null, saveCurrentSession falls back to deriving from the first user message.
-  const customTitleRef = useRef<{ title: string; auto: boolean } | null>(null)
+  // The conversation in the history store: restore, autosave, flush, new chat.
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, startNewChat } = useChatHistory({
+    conversation,
+    initialSessionId,
+    companyId: currentCompany?.id,
+    greeting: t('chat.greeting', { company: currentCompany?.name || '' }),
+    newChatTitle: t('chat.newChat'),
+    isActive,
+    messages,
+    setMessages,
+    status,
+    stop,
+    chatServer,
+    draftRef: draftInputRef,
+    inputApiRef: chatInputApiRef,
+    messageImages,
+    messageReferenceFiles,
+    setMessageImages: attachments.setMessageImages,
+    setMessageReferenceFiles: attachments.setMessageReferenceFiles,
+    onTitleChange,
+    onSessionIdChange,
+  })
+
+  useTitleGeneration({
+    status,
+    messages,
+    companyId: currentCompany?.id,
+    chatServer,
+    appSessionIdRef,
+    authModeRef,
+    modelIdRef: aiModelRef,
+    titleGenerationDoneRef,
+    customTitleRef,
+    onTitleChange,
+  })
+
   // Composition state for auto-scroll
   const isInputComposingRef = useRef(false)
   const compositionEndTimerRef = useRef<number | null>(null)
@@ -1703,259 +1611,6 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
   const shouldAutoScrollRef = useRef(true)
-
-  // Shows a spinner over the message list while the persisted session for
-  // this tab is being loaded — replaces the brief greeting→messages flicker.
-  const [isRestoringSession, setIsRestoringSession] = useState(true)
-
-  // Restore once. The stable ID is retained throughout restoration.
-  useEffect(() => {
-    let cancelled = false
-    void (async () => {
-      try {
-        await loadSessions()
-        const session = initialSessionId && currentCompany?.id
-          ? await window.electronAPI.getChatSession(currentCompany.id, initialSessionId) : null
-        if (cancelled) return
-        if (session) {
-          revisionRef.current = session.revision ?? 0
-          createdAtRef.current = session.createdAt
-          claudeSessionIdRef.current = session.claudeSessionId ?? null
-          agentSessionRef.current = session.agentSession
-          for (const msg of session.messages) timestampsRef.current.set(msg.id, new Date(msg.timestamp))
-          setMessages(session.messages.map(sessionMessageToUIMessage))
-          setMessageImages(new Map(session.messages.filter(m => m.images).map(m => [m.id, m.images!])))
-          setMessageReferenceFiles(new Map(session.messages.filter(m => m.referenceFiles).map(m => [m.id, m.referenceFiles!])))
-          draftInputRef.current = session.draftInput ?? ''
-          chatInputApiRef.current?.setValue(draftInputRef.current)
-          titleGenerationDoneRef.current = session.titleAutoGenerated !== undefined
-          customTitleRef.current = session.titleAutoGenerated !== undefined || session.messages.some(m => m.role === 'user')
-            ? { title: session.title, auto: session.titleAutoGenerated ?? false } : null
-          onTitleChange?.(session.title)
-        } else {
-          // Missing/deleted history must never reuse an old tombstoned ID.
-          if (initialSessionId) {
-            appSessionIdRef.current = crypto.randomUUID()
-            setCurrentSessionId(appSessionIdRef.current)
-          }
-          setMessages(greetingMessages(t('chat.greeting', { company: currentCompany?.name || '' })))
-        }
-        historyReadyRef.current = true
-      } catch (e) {
-        setHistoryError(e instanceof Error ? e.message : '相談の復元に失敗しました。')
-      } finally {
-        if (!cancelled) setIsRestoringSession(false)
-      }
-    })()
-    return () => { cancelled = true }
-    // This instance owns one conversation; opening history is handled by the parent.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
-
-  useEffect(() => {
-    if (currentSessionId) onSessionIdChange?.(currentSessionId)
-  }, [currentSessionId, onSessionIdChange])
-
-  // Persist drafts immediately when leaving a conversation, including clearing an old draft.
-  useEffect(() => {
-    if (!isActive) void saveRef.current(undefined, true)
-  }, [isActive])
-
-  // Checkpoint during streaming too. A trailing debounce alone would never fire
-  // while tokens keep arriving. Unload and leaving the tab flush synchronously,
-  // so the interval only bounds what a crash can lose; typing in the input is
-  // picked up by the next tick, not saved per keystroke.
-  useEffect(() => {
-    const interval = window.setInterval(() => { void saveRef.current() }, AUTOSAVE_INTERVAL_MS)
-    return () => window.clearInterval(interval)
-  }, [])
-  useEffect(() => {
-    if (status === 'ready' || status === 'error') void saveRef.current()
-  }, [status, messages])
-
-  // Subscribe to cross-tab chat history changes so each tab keeps its sessions cache in sync.
-  // Without this, an action in one tab (pin toggle, rename, delete, auto-save) would not
-  // be reflected in another tab's history dropdown until that tab triggers its own reload.
-  useEffect(() => {
-    if (!currentCompany?.id) return
-    const unsubscribe = window.electronAPI.onChatHistoryChanged((data) => {
-      if (data.companyId === currentCompany.id) {
-        if (data.deletedSessionId === appSessionIdRef.current) {
-          deletedRef.current = true
-          stop()
-        }
-        // Only a metadata change of this tab's own conversation (title from the
-        // sidebar or the AI) concerns it; saves come from the tab itself.
-        if (data.sessionId && (data.sessionId !== appSessionIdRef.current || data.kind !== 'patch')) return
-        void loadSessions().catch(() => {})
-      }
-    })
-    return unsubscribe
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentCompany?.id])
-
-  // Trigger one-shot title generation when the first AI response finishes streaming
-  useEffect(() => {
-    const wasStreaming = prevStatusRef.current === 'streaming' || prevStatusRef.current === 'submitted'
-    const justFinished = wasStreaming && status === 'ready'
-    prevStatusRef.current = status
-    if (!justFinished) return
-    if (titleGenerationDoneRef.current) return
-    if (!currentCompany?.id) return
-    // Need at least: greeting + 1 user message + 1 assistant response
-    if (messages.length < 3) return
-    // Fire-and-forget; failures fall back to the truncated user message title
-    generateAndSaveTitle()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [status, messages.length, currentCompany?.id])
-
-  // Session functions
-  async function loadSessions() {
-    if (!currentCompany?.id) return
-    try {
-      // Summaries only: this tab needs its own title, never the other conversations' bodies.
-      const loadedSessions = await window.electronAPI.getChatSessionSummaries(currentCompany.id)
-      const current = loadedSessions.find(session => session.id === appSessionIdRef.current)
-      if (current && historyReadyRef.current && current.titleAutoGenerated !== undefined) {
-        customTitleRef.current = { title: current.title, auto: current.titleAutoGenerated }
-        onTitleChange?.(current.title)
-      }
-    } catch (e) {
-      setHistoryError(e instanceof Error ? e.message : '相談一覧を読み込めません。')
-      throw e
-    }
-  }
-
-  async function saveCurrentSession(override?: UIMessage[], sync = false, clearDraft = false): Promise<boolean> {
-    if (sync) syncSaveFailedRef.current = false
-    if (!currentCompany?.id || !historyReadyRef.current || deletedRef.current) return false
-    const snapshot = override ?? messagesRef.current
-    const draftInput = clearDraft ? '' : draftInputRef.current
-    if (!snapshot.some(m => m.role === 'user') && !draftInput.trim() && !initialSessionId && revisionRef.current === 0 && !pendingFingerprintRef.current) return true
-    const sessionId = appSessionIdRef.current!
-    // Nothing the fingerprint is built from changed since the last acknowledged
-    // save (same objects): skip converting and serialising the whole
-    // conversation. Every open tab runs the autosave, idle ones included.
-    const inputs = [sessionId, snapshot, draftInput, messageImages, messageReferenceFiles, claudeSessionIdRef.current, agentSessionRef.current]
-    if (!override && !pendingFingerprintRef.current && savedFingerprintRef.current && sameSaveInputs(savedInputsRef.current, inputs)) return true
-    const firstUser = snapshot.find(m => m.role === 'user')
-    const title = customTitleRef.current?.title || (firstUser ? messageText(firstUser).slice(0, 60) : t('chat.newChat'))
-    const session: ChatSession = {
-      id: sessionId, companyId: currentCompany.id, title,
-      messages: snapshot.map(m => sessionMessageFor(m, timestampsRef.current.get(m.id) || new Date(), messageImages.get(m.id), messageReferenceFiles.get(m.id))),
-      draftInput,
-      createdAt: createdAtRef.current, updatedAt: new Date().toISOString(),
-      revision: revisionRef.current,
-      writerId: writerIdRef.current,
-      writeSequence: ++writeSequenceRef.current,
-      ...(agentSessionRef.current !== undefined ? { agentSession: agentSessionRef.current } : {}),
-      ...(claudeSessionIdRef.current ? { claudeSessionId: claudeSessionIdRef.current } : {}),
-      ...(customTitleRef.current ? { titleAutoGenerated: customTitleRef.current.auto } : {}),
-    }
-    const fingerprint = JSON.stringify([sessionId, session.messages, draftInput, session.claudeSessionId, session.agentSession])
-    if (!override && fingerprint === savedFingerprintRef.current && !pendingFingerprintRef.current) return true
-    if (!sync && !override && fingerprint === pendingFingerprintRef.current) return true
-    pendingFingerprintRef.current = fingerprint
-    try {
-      const result = sync
-        ? window.electronAPI.flushChatSession(currentCompany.id, session)
-        : await window.electronAPI.saveChatSession(currentCompany.id, session)
-      if (appSessionIdRef.current !== sessionId) return true
-      if (result.status === 'deleted') {
-        deletedRef.current = true
-        return false
-      }
-      if (result.status === 'conflict') throw new Error('別の画面で相談が更新されました。上書きを止めています。未保存の文章をコピーしてから開き直してください。')
-      revisionRef.current = Math.max(revisionRef.current, result.revision)
-      if (session.writeSequence! >= acknowledgedSequenceRef.current) {
-        acknowledgedSequenceRef.current = session.writeSequence!
-        savedFingerprintRef.current = fingerprint
-        savedInputsRef.current = inputs
-      }
-      if (pendingFingerprintRef.current === fingerprint) pendingFingerprintRef.current = ''
-      setHistoryError(null)
-      if (title !== lastNotifiedTitleRef.current) {
-        lastNotifiedTitleRef.current = title
-        onTitleChange?.(title)
-      }
-      return true
-    } catch (e) {
-      if (sync) syncSaveFailedRef.current = true
-      if (appSessionIdRef.current === sessionId) {
-        savedFingerprintRef.current = ''
-        pendingFingerprintRef.current = ''
-        setHistoryError(e instanceof Error ? e.message : '相談を保存できませんでした。')
-      }
-      return false
-    }
-  }
-  saveRef.current = saveCurrentSession
-
-  // Generate a concise title for the current session via the chat-server's Haiku endpoint
-  async function generateAndSaveTitle() {
-    if (!currentCompany?.id || !chatServer) return
-    if (titleGenerationDoneRef.current) return
-
-    // Skip greeting (first assistant message); take up to 6 subsequent messages
-    const transcript = titleTranscript(messages)
-
-    if (transcript.length < 2) return
-    const targetSessionId = appSessionIdRef.current!
-    titleGenerationDoneRef.current = true
-
-    try {
-      const data = await chatServer.generateTitle({ messages: transcript, authMode: authModeRef.current, modelId: aiModelRef.current })
-      if (!data) return
-      const newTitle = data.title?.trim()
-      if (!newTitle) return
-
-      const saved = await window.electronAPI.patchChatSession(currentCompany.id, targetSessionId, { title: newTitle, titleAutoGenerated: true })
-      if (saved && appSessionIdRef.current === targetSessionId) {
-        customTitleRef.current = { title: saved.title, auto: saved.titleAutoGenerated ?? false }
-        onTitleChange?.(saved.title)
-      }
-    } catch (e) {
-      console.error('Title generation failed:', e)
-    }
-  }
-
-  async function startNewChat(options?: { skipSave?: boolean }) {
-    // Stop any in-flight stream so a partial assistant response is captured before saving
-    if (status === 'streaming' || status === 'submitted') {
-      stop()
-      await new Promise(r => setTimeout(r, 150))
-    }
-    // Save current session (including draft input) before starting a new one.
-    // Skipped when invoked right after deleting the active session, so the
-    // deleted session is not re-persisted from the still-populated state.
-    if (!options?.skipSave) {
-      if (!await saveCurrentSession()) return false
-    }
-    // Clear Claude CLI session mapping on the server
-    if (appSessionIdRef.current) chatServer.forgetSession(appSessionIdRef.current)
-    appSessionIdRef.current = crypto.randomUUID()
-    writerIdRef.current = crypto.randomUUID()
-    writeSequenceRef.current = 0
-    revisionRef.current = 0
-    createdAtRef.current = new Date().toISOString()
-    savedFingerprintRef.current = ''
-    pendingFingerprintRef.current = ''
-    acknowledgedSequenceRef.current = 0
-    deletedRef.current = false
-    claudeSessionIdRef.current = null
-    agentSessionRef.current = null
-    timestampsRef.current.clear()
-    const greeting = greetingMessages(t('chat.greeting', { company: currentCompany?.name || '' }))
-    messagesRef.current = greeting
-    setMessages(greeting)
-    setCurrentSessionId(appSessionIdRef.current)
-    // Clear the input for the fresh chat (per-session draft is empty by default)
-    chatInputApiRef.current?.setValue('')
-    // Allow auto-title generation for the new session
-    titleGenerationDoneRef.current = false
-    customTitleRef.current = null
-    return true
-  }
 
   // History content mounts after restoration; hidden tabs have no layout.
   // Reset only on opening a chat, so reading older messages stays possible.
@@ -2032,28 +1687,12 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     markChatInputActivity()
   }, [])
 
-  // Flush before window reload/close and before an editor is detached on tab close.
-  useLayoutEffect(() => {
-    const flush = (event?: BeforeUnloadEvent) => {
-      // The sync branch finishes before its returned Promise settles.
-      void saveRef.current(undefined, true)
-      if (event && syncSaveFailedRef.current) {
-        event.preventDefault()
-        event.returnValue = ''
-      }
+  // A pending composition-end timer must not fire after the tab closed.
+  useLayoutEffect(() => () => {
+    if (compositionEndTimerRef.current != null) {
+      window.clearTimeout(compositionEndTimerRef.current)
     }
-    window.addEventListener('beforeunload', flush)
-    return () => {
-      window.removeEventListener('beforeunload', flush)
-      flush()
-      stop()
-      if (compositionEndTimerRef.current != null) {
-        window.clearTimeout(compositionEndTimerRef.current)
-      }
-      // Clean up Claude CLI session on the server when tab is closed
-      if (appSessionIdRef.current) chatServer.forgetSession(appSessionIdRef.current)
-    }
-  }, [chatServer, stop])
+  }, [])
 
   // Send handler (supports interrupt: stop current stream + send new message)
   const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
@@ -2086,29 +1725,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     }
     lastTurnAbortedRef.current = false
 
-    // Convert images to base64 and store in ref for transport body
-    if (files && files.length > 0) {
-      const imageParts: Array<{ mediaType: string; data: string }> = []
-      const dataUrls: string[] = []
-      for (const file of files) {
-        const dataUrl = await new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = () => resolve(reader.result as string)
-          reader.readAsDataURL(file)
-        })
-        // The AI gets the full image; the bubble and the history keep a small copy.
-        dataUrls.push(await historyThumbnail(dataUrl))
-        imageParts.push({ mediaType: file.type, data: dataUrl.split(',')[1] })
-      }
-      pendingImagesRef.current = imageParts
-      pendingImageDataUrlsRef.current = dataUrls
-    }
-
-    // Store file paths in ref for transport body (sent as referenceFiles in system prompt)
-    if (filePaths && filePaths.length > 0) {
-      pendingFilePathsRef.current = [...filePaths]
-      pendingDisplayFilePathsRef.current = [...filePaths]
-    }
+    // Images (base64) and file paths for the request body and the bubble
+    if (files && files.length > 0) await stageImages(files)
+    if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
 
     const message: UIMessage = {
       id: crypto.randomUUID(), role: 'user',
@@ -2121,7 +1740,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     }
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, currentSessionId, chatServer])
+  }, [status, sendMessage, currentSessionId, chatServer, stageImages, stageFilePaths, appSessionIdRef, authModeRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef])
 
   // The turn ended: waiting sends go out together as the next message — or,
   // after a stop or an error, back into the input. An instruction the agent did not
@@ -2142,7 +1761,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     const merged = mergeQueuedSends(queuedSends)
     setQueuedSends([])
     void handleSend(merged.text, merged.files, merged.filePaths)
-  }, [status, queuedSends, handleSend, setMessages])
+  }, [status, queuedSends, handleSend, setMessages, chatInputApiRef])
 
   const cancelQueuedSend = useCallback((index: number) => {
     const item = queuedSends[index]
@@ -2151,7 +1770,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     const draft = chatInputApiRef.current?.getValue() ?? ''
     chatInputApiRef.current?.setValue(draftWith(draft, [item.text]))
     chatInputApiRef.current?.focus()
-  }, [queuedSends])
+  }, [queuedSends, chatInputApiRef])
 
   // After a reply: ask the chat server for Claude Code's next-prompt
   // suggestion (it follows the reply by about a second) and offer it in the
@@ -2169,7 +1788,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [finishedTurn, chatServer])
+  }, [finishedTurn, chatServer, appSessionIdRef, chatInputApiRef])
 
   useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
   const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
@@ -2197,7 +1816,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     if (msgIndex === -1) return
     setMessages(current.slice(0, msgIndex))
     sendMessage({ text: newText })
-  }, [setMessages, sendMessage])
+  }, [setMessages, sendMessage, messagesRef])
 
   // The usage meter shows only its fullest window when the header is narrow.
   const headerRef = useRef<HTMLElement>(null)
