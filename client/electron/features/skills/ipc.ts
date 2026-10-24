@@ -102,6 +102,8 @@ async function findSkillsDirs(baseDir: string, maxDepth = 5): Promise<{ skillsDi
   return results
 }
 
+export const INVALID_DEPARTMENT_FOLDER = 'Invalid department folder'
+
 export interface SkillsDeps {
   paths: PathGuard
 }
@@ -296,9 +298,26 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths }: SkillsDeps): Ski
   }
 
   // List skills for a department (scans 3 hierarchy levels)
+  /**
+   * The department folder the scan walks: a relative path inside the (already
+   * checked) company root — no absolute path, no `..`, no NUL — whose joined
+   * path also passes the allowed-roots check (real location) and stays under
+   * this root (not a sibling company that happens to be registered too).
+   */
+  function checkedDepartmentDir(root: string, departmentFolder: unknown): string {
+    if (typeof departmentFolder !== 'string' || departmentFolder.includes('\0') || path.isAbsolute(departmentFolder)
+      || path.win32.isAbsolute(departmentFolder) || departmentFolder.split(/[\\/]/).includes('..')) {
+      throw new Error(INVALID_DEPARTMENT_FOLDER)
+    }
+    const dir = paths.validate(path.join(root, departmentFolder))
+    if (!dir.startsWith(root + path.sep)) throw new Error(INVALID_DEPARTMENT_FOLDER)
+    return dir
+  }
+
   ipc.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
     try {
       rootPath = paths.validate(rootPath)
+      if (departmentFolder) checkedDepartmentDir(rootPath, departmentFolder)
       // A forced refresh (watcher event, sync, the member's own change) rescans.
       if (options?.force) invalidateSkillsCache(rootPath, departmentFolder)
       const cached = skillsCache.get(rootPath, departmentFolder)

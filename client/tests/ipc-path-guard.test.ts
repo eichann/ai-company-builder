@@ -89,7 +89,7 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'git:folderSizes': { folder: 'a repository folder sent to the server' },
   'git:sparseUncommittedChanges': { folders: 'repository folders (git pathspecs)' },
   'privateFolders:createContext': { parentPath: 'a company-relative folder sent to the server' },
-  'skills:list': { departmentFolder: 'a department folder under the checked root' },
+  'skills:list': { departmentFolder: 'relative to the checked root: absolute / .. refused, the joined path validated and kept under that root (ipc-app.test.ts)' },
   'skills:publish': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
   'skills:makePrivate': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
 }
