@@ -35,6 +35,7 @@ import {
 } from '../../../shared/core/permissions'
 import { foldAsciiCase, pathKey } from '../../../shared/core/paths'
 import { instructionFileInManagedFolder } from '../../../shared/core/instruction-files'
+import { foldScopePaths } from '../../../shared/core/write-access'
 import { reservedAncestorOf, reservedPrefixOf } from '../../../shared/core/reserved-paths'
 
 export const PUSH_POLICY_VERSION = 1
@@ -204,8 +205,10 @@ export function writeGateFor(policy: PushPolicy): WriteGate {
   const exact: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
   // macOS and Windows check out "Sales/x.md" into an existing "sales/"
   // folder, so a path must also be writable when compared without A–Z case
-  // (the bytewise A–Z folding of the case-collision check).
-  const foldedScopes = scopes.map(s => ({ ...s, path: foldAsciiCase(s.path) }))
+  // (the bytewise A–Z folding of the case-collision check). Of two scopes
+  // that differ only in A–Z case, the one sorting first decides — the same
+  // rule the app's evaluateWrite applies (shared/core/write-access.ts).
+  const foldedScopes = foldScopePaths(scopes)
   const folded: PermissionRepository = { getMemberRole: () => role, listScopes: () => foldedScopes }
   return {
     kind: 'check',
@@ -223,7 +226,7 @@ function scopeRepoGate(policy: PushPolicy, scopePath: string): WriteGate {
   if (FULL_ACCESS_ROLES.has(role)) return { kind: 'allow-all' }
   if (!findPrivateScope(scopes, scopePath)) return { kind: 'deny-all' }
   const exact: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
-  const foldedScopes = scopes.map(s => ({ ...s, path: foldAsciiCase(s.path) }))
+  const foldedScopes = foldScopePaths(scopes)
   const folded: PermissionRepository = { getMemberRole: () => role, listScopes: () => foldedScopes }
   return {
     kind: 'check',

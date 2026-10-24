@@ -88,3 +88,44 @@ test('the denial message names the folder and tells the AI to ask instead of ret
     'このフォルダ（営業部/契約書）は閲覧のみのため、編集できません。編集が必要な場合はフォルダの管理者に依頼してください。別の場所に保存する場合は、ユーザーに確認してください。')
   assert.match(readOnlyMessage(''), /会社フォルダのトップ/)
 })
+
+test('inside a readable private folder the folder part counts in its stored spelling (as its repository receives it)', () => {
+  const access: WriteAccess = {
+    version: 'v', role: 'member', all: false,
+    scopes: [
+      { path: '', write: true },
+      { path: '評価/café', write: true, private: true },
+      { path: '評価/café/下書き', write: false },
+    ],
+  }
+  // "評価/CAFé/下書き/x" lands in the clone of "評価/café" on a case-insensitive
+  // disk and is pushed there as "下書き/x": read-only, like the stored spelling.
+  assert.equal(evaluateWrite(access, '評価/café/下書き/x.md').write, false)
+  assert.equal(evaluateWrite(access, '評価/CAFé/下書き/x.md').write, false)
+  assert.equal(evaluateWrite(access, '評価/CAFé/下書き/x.md').scopePath, '評価/café/下書き')
+  assert.equal(evaluateWrite(access, '評価/CAFÉ/下書き/x.md').write, true) // É is not A–Z: another folder
+  assert.equal(evaluateWrite(access, '評価/CAFé/x.md').write, true)
+  // The company root is read-only, the private folder writable: the typed
+  // spelling no longer falls back to the root's rules.
+  const editor: WriteAccess = { ...access, scopes: [{ path: '', write: false }, { path: '評価/café', write: true, private: true }] }
+  assert.equal(evaluateWrite(editor, '評価/CAFé/x.md').write, true)
+  // Without the flag (an older server) the path is judged as typed.
+  const old: WriteAccess = { ...editor, scopes: editor.scopes.map(({ path, write }) => ({ path, write })) }
+  assert.equal(evaluateWrite(old, '評価/CAFé/x.md').write, false)
+  assert.equal(isWriteAccess(access), true)
+  assert.equal(isWriteAccess({ ...access, scopes: [{ path: '', write: true, private: 'yes' }] }), false)
+})
+
+test('two scopes differing only in A–Z case: the one sorting first decides, whatever the order sent', () => {
+  const scopes = [
+    { path: '', write: true },
+    { path: 'café', write: true },
+    { path: 'Café', write: false },
+  ]
+  for (const order of [scopes, [...scopes].reverse()]) {
+    const access: WriteAccess = { version: 'v', role: 'member', all: false, scopes: order }
+    // Folded, both are "café": "Café" sorts first (code unit order), so its rules decide.
+    assert.equal(evaluateWrite(access, 'café/x.md').write, false)
+    assert.equal(evaluateWrite(access, 'Café/x.md').write, false)
+  }
+})

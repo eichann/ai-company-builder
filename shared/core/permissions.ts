@@ -35,6 +35,7 @@
  * app evaluate access with this one copy.
  */
 import { compareScopePaths, isSameOrAncestorPath, normalizeRepoPath } from './paths'
+import type { WriteAccessScope } from './write-access'
 
 export type ScopeKind = 'company' | 'department' | 'folder'
 export type SubjectType = 'everyone' | 'role' | 'user'
@@ -203,13 +204,15 @@ export function summarizeRules(rules: ScopeRule[]): EffectiveSummary {
  * - otherwise `scopes` lists every scope that HAS rules (the transparent ones
  *   decide nothing) with the outcome of its rules for this member. For a path,
  *   the deepest listed scope at or above it decides; none → no write
- *   (resolveAccess's 'no-rule').
+ *   (resolveAccess's 'no-rule'). A private folder the member can read is
+ *   marked `private: true` (evaluateWrite in ./write-access.ts takes paths
+ *   inside it in its stored spelling, as its repository receives them).
  *
  * Paths are NFC, '/'-separated, '' = company root, sorted parents first.
  */
 export interface WriteAccessSummary {
   all: boolean
-  scopes: Array<{ path: string; write: boolean }>
+  scopes: WriteAccessScope[]
 }
 
 export function writeAccessSummary(scopes: ScopeWithRules[], userId: string, role: string): WriteAccessSummary {
@@ -222,7 +225,11 @@ export function writeAccessSummary(scopes: ScopeWithRules[], userId: string, rol
   const hidden = scopes.filter(s => s.repoId !== null && !readablePrivate.includes(s))
   const decided = scopes
     .filter(s => s.rules.length > 0 && !hidden.some(h => isSameOrAncestorPath(h.path, s.path)))
-    .map(s => ({ path: s.path, write: applicableRules(s.rules, userId, role).some(r => r.canWrite) }))
+    .map((s): WriteAccessScope => ({
+      path: s.path,
+      write: applicableRules(s.rules, userId, role).some(r => r.canWrite),
+      ...(s.repoId !== null ? { private: true } : {}),
+    }))
     .sort((a, b) => compareScopePaths(a.path, b.path))
   const hasRoot = decided.some(s => s.path === '')
   if (hasRoot && decided.every(s => s.write)) return { all: true, scopes: [] }

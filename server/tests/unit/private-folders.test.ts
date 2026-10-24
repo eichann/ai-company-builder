@@ -72,7 +72,7 @@ describe('writeAccessSummary', () => {
     expect(s.all).toBe(true)
   })
   it('lists a readable one with the member\'s write', () => {
-    expect(writeAccessSummary([ROOT, HR, EVAL], 'viewer', 'member').scopes).toContainEqual({ path: '人事/評価', write: false })
+    expect(writeAccessSummary([ROOT, HR, EVAL], 'viewer', 'member').scopes).toContainEqual({ path: '人事/評価', write: false, private: true })
     expect(writeAccessSummary([ROOT, HR, EVAL], 'editor', 'member')).toEqual({ all: true, scopes: [] })
   })
 })

@@ -133,9 +133,12 @@ database or git; `server/tests/unit/core-purity.test.ts` enforces it):
 | `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, … (moved from `server/src/lib/permissions.ts`) |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`) |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md`: names, who may change them |
+| `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 
 Imported by relative path: the server through its `server/shared` symlink
-(`/app/shared` in the image), the admin from `admin/src/lib` (its Dockerfile
+(`/app/shared` in the image), the app's main process, preload and renderer
+directly (`client/shared/write-access.ts` / `sparse-paths.ts` re-export what
+they used to define; Vite bundles it), the admin from `admin/src/lib` (its Dockerfile
 copies `shared/` into the build stage; Turbopack's root is the repository,
 `outputFileTracingRoot`). The push checker's `foldAsciiCase` /
 `INSTRUCTION_FILE_RE` (`server/src/lib/push-check/rules.ts`) stay bytewise
@@ -1112,12 +1115,21 @@ member may only read used to be rejected at sync and moved to `.backups/`
 ("the AI's work vanished"). The chat now refuses such edits before they run:
 
 - Server: `GET /api/companies/:companyId/me/write-access` →
-  `{ version, role, all, scopes: [{ path, write }] }` (`writeAccessSummary` in
-  `shared/core/permissions.ts`; ETag = version, `If-None-Match` → 304).
-  `all: true` for owner/admin or when nothing restricts the member.
-- Client: `client/shared/write-access.ts` evaluates a path exactly like
-  `resolveAccess` + the push gate (NFC, deepest listed scope decides, A–Z
-  folded spelling must be writable too). `client/electron/write-access-store.ts`
+  `{ version, role, all, scopes: [{ path, write, private? }] }`
+  (`writeAccessSummary` in `shared/core/permissions.ts`; ETag = version,
+  `If-None-Match` → 304). `all: true` for owner/admin or when nothing
+  restricts the member. `private: true` marks a private folder the member
+  can read.
+- Client: `evaluateWrite` (`shared/core/write-access.ts`, the server's own
+  copy) evaluates a path exactly like `resolveAccess` + the push gate (NFC,
+  deepest listed scope decides, A–Z folded spelling must be writable too).
+  Inside a readable private folder the folder part is taken in its stored
+  spelling (on a case-insensitive disk `評価/CAFé/x` lands in the clone of
+  `評価/café` and is pushed as `<stored path>/x`); of two scopes that differ
+  only in A–Z case the one sorting first (`compareScopePaths`) decides — the
+  push check sorts the same way (`foldScopePaths`) instead of depending on
+  the database's row order. `client/tests/rule-parity-write-access.test.ts`
+  holds both sides to the same answer on generated companies. `client/electron/write-access-store.ts`
   caches it per company — fetched when the renderer opens a company, after
   every successful sync, and at each chat turn (3 s budget, cached answer on
   failure).

@@ -9,6 +9,7 @@ import {
   Sparkle,
   Check
 } from '@phosphor-icons/react'
+import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
 
 interface NewSkillWizardProps {
   departmentName: string
@@ -19,19 +20,9 @@ interface NewSkillWizardProps {
 
 type Step = 'name' | 'description' | 'prompt' | 'confirm'
 
-// Generate folder name from display name (alphanumeric, -, _ only)
+// Skill folder names: the shared rule (shared/core/names.ts).
 function generateFolderName(displayName: string): string {
-  return displayName
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')  // Replace non-alphanumeric with -
-    .replace(/^-|-$/g, '')        // Remove leading/trailing -
-    .substring(0, 50)             // Limit length
-    || 'new-skill'                // Fallback
-}
-
-// Validate folder name (alphanumeric, -, _ only)
-function isValidFolderName(name: string): boolean {
-  return /^[a-z0-9][a-z0-9_-]*$/.test(name)
+  return suggestSkillName(displayName, 'new-skill')
 }
 
 export function NewSkillWizard({
@@ -58,12 +49,12 @@ export function NewSkillWizard({
 
   const handleFolderNameChange = (newFolderName: string) => {
     // Only allow valid characters
-    const sanitized = newFolderName.toLowerCase().replace(/[^a-z0-9_-]/g, '')
+    const sanitized = sanitizeSkillNameInput(newFolderName)
     setFolderName(sanitized)
     setFolderNameEdited(true)
   }
 
-  const folderNameValid = isValidFolderName(folderName)
+  const folderNameValid = isValidSkillName(folderName)
 
   const steps: { id: Step; label: string; number: number }[] = [
     { id: 'name', label: t('skillWizard.nameLabel'), number: 1 },

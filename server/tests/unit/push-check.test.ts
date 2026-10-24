@@ -185,6 +185,19 @@ describe('write policy', () => {
     expect(writeGateFor(policy({ id: 'gone', role: null }, [open, salesRO])).kind).toBe('deny-all')
   })
 
+  it('two scopes differing only in A–Z case: the one sorting first decides, whatever order the database returns', () => {
+    const lower = scope('l', 'café', [['everyone', null, true, true]])
+    const upper = scope('u', 'Café', [['everyone', null, true, false]])
+    for (const scopes of [[open, lower, upper], [open, upper, lower]]) {
+      const gate = writeGateFor(policy({ id: 'u', role: 'member' }, scopes))
+      if (gate.kind !== 'check') throw new Error(gate.kind)
+      // Folded, both are "café"; "Café" sorts first (code unit order) and is read-only.
+      expect(gate.canWrite('café/a.md')).toBe(false)
+      expect(gate.canWrite('Café/a.md')).toBe(false)
+      expect(gate.canWrite('other/a.md')).toBe(true)
+    }
+  })
+
   it('a company without rules denies members (no-rule), as resolveAccess does', () => {
     const gate = writeGateFor(policy({ id: 'u', role: 'member' }, [scope('c', '', [])]))
     expect(gate.kind === 'check' && gate.canWrite('a.md')).toBe(false)

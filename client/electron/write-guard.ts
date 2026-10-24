@@ -40,6 +40,7 @@
 import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } from '../shared/write-access'
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 import { reservedPathMessage } from '../../shared/types/private-folders'
+import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
 
 /** Private folders as the guard sees them (from the cached /me/scopes answer, sync/private-folders.ts). */
 export interface PrivateFolderView {
@@ -81,29 +82,16 @@ export interface WriteGuard {
   getPrivateFolderView?: () => PrivateFolderView | undefined
 }
 
+/** Who may change AI instruction files: the member's role and the folders of the departments they manage. */
 export interface InstructionAuthority {
   role: string
   managedFolders: readonly string[]
 }
 
-// CLAUDE.local.md is personal by convention, but once shared it is loaded like
-// CLAUDE.md for everyone, so the server protects it the same way.
-const INSTRUCTION_FILES = new Set(['claude.md', 'claude.local.md', 'agents.md'])
-const FULL_ACCESS_ROLES = new Set(['owner', 'admin'])
-
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md at any depth, A–Z case-insensitive (the server's push check folds the same way). */
-export function isInstructionFile(repoPath: string): boolean {
-  const name = repoPath.normalize('NFC').split('/').pop() ?? ''
-  return INSTRUCTION_FILES.has(name.replace(/[A-Z]+/g, m => m.toLowerCase()))
-}
-
-/** May this member change the instruction file at `repoPath`? */
-export function mayChangeInstructionFile(authority: InstructionAuthority, repoPath: string): boolean {
-  if (FULL_ACCESS_ROLES.has(authority.role)) return true
-  const folder = repoPath.normalize('NFC').split('/').slice(0, -1).join('/')
-  if (folder === '') return false
-  return excludedFolderOf(authority.managedFolders.map(f => f.normalize('NFC')), `${folder}/x`) !== null
-}
+// Which files are AI instruction files, and who may change them, is the
+// server's own rule (shared/core/instruction-files.ts; the push check uses
+// the same copy).
+export { isInstructionFile, mayChangeInstructionFile }
 
 /** Never shared (the app's scratch area, backups, personal folders): the push check never sees them. */
 function isUnsharedPath(rel: string): boolean {
