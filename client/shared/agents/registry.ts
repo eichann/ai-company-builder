@@ -14,10 +14,12 @@
  * module must provide every factory a capability here claims (also tested).
  */
 
-/** The member's sign-in choice (`config.authMode`), and the registry key. */
-export type AgentId = 'claude-code' | 'codex' | 'api-key'
+import type { AuthMode } from '../agent'
 
-/** Display and preference order (settings cards, commit-message fallbacks). */
+/** The member's sign-in choice (`config.authMode`, shared/agent.ts `AuthMode`), and the registry key. */
+export type AgentId = AuthMode
+
+/** Display and preference order (settings cards, commit-message fallbacks). `AGENTS` below must have each. */
 export const AGENT_IDS: readonly AgentId[] = ['claude-code', 'codex', 'api-key']
 
 export function isAgentId(value: unknown): value is AgentId {

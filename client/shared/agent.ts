@@ -1,7 +1,8 @@
-import type { AgentId } from './agents/registry'
-
-/** The member's sign-in choice = an agent registry id (shared/agents/registry.ts). */
-export type AuthMode = AgentId
+/**
+ * The member's sign-in choice = the agent registry's ids (shared/agents/registry.ts
+ * `AgentId`, which must list exactly these). Named here so the IPC contract keeps its type name.
+ */
+export type AuthMode = 'claude-code' | 'codex' | 'api-key'
 export interface AgentSession {
   providerId: AuthMode
   id: string
