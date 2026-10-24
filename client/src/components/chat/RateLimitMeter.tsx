@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Gauge } from '@phosphor-icons/react'
 import { meterView, type MeterLevel, type MeterWindowView, type RateLimitProvider } from '../../../shared/rate-limits'
 import { useRateLimits } from './agentStatusStore'
+import { agentShortLabel } from '../../../shared/agents/registry'
 
 // The chat header's plan usage meter (shared/rate-limits.ts has the mapping).
 // Full: every window as label + bar + %; compact: the fullest window only.
@@ -52,7 +53,7 @@ export function RateLimitMeter({ provider, compact = false }: { provider: RateLi
   const snapshot = useRateLimits(provider)
   const now = useMinuteClock()
   const view = meterView(snapshot, provider, now)
-  const name = provider === 'codex' ? 'Codex' : 'Claude'
+  const name = agentShortLabel(provider)
   const fullest = view.windows.reduce<MeterWindowView | undefined>((top, w) => !top || (w.percent ?? -1) > (top.percent ?? -1) ? w : top, undefined)
   const shown = compact ? (fullest ? [fullest] : []) : view.windows
   const summary = view.windows.length > 0

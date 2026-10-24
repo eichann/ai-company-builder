@@ -3,6 +3,7 @@
 //   config:*, codex:status
 
 import type { CodexStatus } from '../../../shared/agent'
+import { isAgentId } from '../../../shared/agents/registry'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../../../shared/permission-mode'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { ClaudeCli } from '../../services/claude-cli'
@@ -41,7 +42,7 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
 
   ipc.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-key') => {
     const current = config.load()
-    if (!['claude-code', 'codex', 'api-key'].includes(mode)) throw new Error('不明なAI接続方式です。')
+    if (!isAgentId(mode)) throw new Error('不明なAI接続方式です。')
     current.authMode = mode
     config.save(current)
     return true

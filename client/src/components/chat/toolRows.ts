@@ -7,8 +7,8 @@ import type { UIMessage } from 'ai'
  * thousands of parts, and `@ai-sdk/react` structuredClones that message on
  * every chunk, so every part object is a new reference on every 50ms tick.
  * This module turns the parts into a bounded plan:
- *  - tool calls made inside a subagent (`callProviderMetadata['claude-code']
- *    .parentToolCallId`, set by ai-sdk-provider-claude-code) are nested under
+ *  - tool calls made inside a subagent (`callProviderMetadata[<provider>]
+ *    .parentToolCallId`, e.g. set by ai-sdk-provider-claude-code) are nested under
  *    the subagent's own `Agent`/`Task` row instead of flat in the conversation;
  *  - long runs of consecutive top-level tool rows collapse into one summary row;
  *  - each row carries primitive fields so memoised views can compare by value.
@@ -112,10 +112,15 @@ export function inputSummaryOf(input: unknown): string {
   return ''
 }
 
+/** The subagent call this tool call ran inside: `parentToolCallId` in whichever provider's metadata carries it. */
 function parentOf(part: { callProviderMetadata?: unknown }): string | undefined {
-  const meta = part.callProviderMetadata as Record<string, Record<string, unknown> | undefined> | undefined
-  const parent = meta?.['claude-code']?.parentToolCallId
-  return typeof parent === 'string' && parent ? parent : undefined
+  const meta = part.callProviderMetadata
+  if (!meta || typeof meta !== 'object') return undefined
+  for (const value of Object.values(meta as Record<string, unknown>)) {
+    const parent = (value as { parentToolCallId?: unknown } | null | undefined)?.parentToolCallId
+    if (typeof parent === 'string' && parent) return parent
+  }
+  return undefined
 }
 
 /** Tool row for a `tool-*` or `dynamic-tool` part, else undefined. */

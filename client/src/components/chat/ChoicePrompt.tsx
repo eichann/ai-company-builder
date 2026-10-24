@@ -1,6 +1,7 @@
 import { memo, useEffect, useId, useRef, useState } from 'react'
 import { CheckCircle, ListChecks, XCircle } from '@phosphor-icons/react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../shared/agent-interaction'
+import { agentShortLabel } from '../../../shared/agents/registry'
 import { MAX_OTHER_LENGTH, choiceAnswerText, choiceCancelLabel, type ChoicePromptRecord, type ChoiceQuestion } from '../../../shared/choice-prompt'
 import { buildChoiceAnswers, choiceAnswerLines, emptyDraft, toggleOption, toggleOther, type ChoiceDraft } from './choicePromptState'
 
@@ -74,7 +75,7 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
     catch { setError('回答を送信できませんでした。もう一度お試しください。') }
     finally { setSending(false) }
   }
-  const agent = request.agent === 'codex' ? 'Codex' : 'Claude'
+  const agent = agentShortLabel(request.agent)
   return (
     <section aria-label={`${agent}からの質問`} className="flex-shrink-0 mx-4 mb-3 rounded-xl border border-accent/30 bg-white dark:bg-zinc-900 shadow-sm p-4 text-sm max-h-[55vh] overflow-y-auto animate-fade-in"
       onKeyDown={e => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && answers && !sending) { e.preventDefault(); void respond({ choices: answers }) } }}>

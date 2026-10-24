@@ -1,8 +1,7 @@
-import { generateText } from 'ai'
-import { createAnthropic } from '@ai-sdk/anthropic'
 import type { AuthMode } from '../shared/agent'
-import { generateCodexText } from './agents/codex-text'
-import { polishVoice, VOICE_SYSTEM_PROMPT } from './voice-polisher'
+import { isAgentId, type AgentId } from '../shared/agents/registry'
+import { oneShotUnavailable, runOneShotText, type OneShotTextRequest } from './agents/registry'
+import { VOICE_MESSAGES, VOICE_SYSTEM_PROMPT } from './voice-polisher'
 
 export type VoiceFormatter = (text: string, signal: AbortSignal) => Promise<string>
 export interface VoiceFormatterConfig {
@@ -14,22 +13,11 @@ export interface VoiceFormatterConfig {
   /** Fixed part + the member's 「整え方の指示」, read when recording starts. Default: the built-in prompt. */
   systemPrompt?: string
 }
-const defaultAdapters = {
-  claude: polishVoice,
-  codex: generateCodexText,
-  api: async (apiKey: string, text: string, signal: AbortSignal, system: string) => {
-    const result = await generateText({
-      model: createAnthropic({ apiKey })('claude-haiku-4-5-20251001'),
-      system, prompt: JSON.stringify({ transcript: text }),
-      abortSignal: signal, maxRetries: 0, maxOutputTokens: 4096,
-    })
-    if (result.finishReason === 'length') throw new Error('整形結果が長すぎます。原文をご確認ください')
-    return result.text
-  },
-}
+/** Runs one agent's one-shot job (agents/registry.ts); tests inject their own. */
+export type VoiceAdapter = (agent: AgentId, request: OneShotTextRequest) => Promise<string>
 
 // Capture routing/credentials when recording starts, not when recognition finishes.
-export function createVoiceFormatter(config: VoiceFormatterConfig, adapters = defaultAdapters): VoiceFormatter {
+export function createVoiceFormatter(config: VoiceFormatterConfig, adapter: VoiceAdapter = runOneShotText): VoiceFormatter {
   const snapshot = { ...config, env: { ...config.env }, systemPrompt: config.systemPrompt ?? VOICE_SYSTEM_PROMPT }
   return async (text, signal) => {
     if (signal.aborted) throw new Error('キャンセルしました')
@@ -41,19 +29,18 @@ export function createVoiceFormatter(config: VoiceFormatterConfig, adapters = de
     const startedAt = Date.now()
     let success = false
     try {
-      let result: string
-      if (snapshot.authMode === 'codex') {
-        result = await adapters.codex({
-          env: snapshot.env, cwd: snapshot.cwd, system: snapshot.systemPrompt,
-          text: JSON.stringify({ transcript: text }), signal: controller.signal,
-          onMetrics: metrics => console.info('[voice] codex formatting', metrics),
-        })
-      } else if (snapshot.authMode === 'api-key') {
-        if (!snapshot.apiKey) throw new Error('APIキーが設定されていません。設定からAPIキーを登録してください')
-        result = await adapters.api(snapshot.apiKey, text, controller.signal, snapshot.systemPrompt)
-      } else {
-        result = await adapters.claude(snapshot.getCli(), snapshot.cwd, text, controller.signal, snapshot.env, snapshot.systemPrompt)
-      }
+      // A stored value the app does not know runs Claude Code, as it always did.
+      const agent: AgentId = isAgentId(snapshot.authMode) ? snapshot.authMode : 'claude-code'
+      const host = { getCli: snapshot.getCli, cwd: snapshot.cwd, env: snapshot.env, apiKey: snapshot.apiKey }
+      const unavailable = oneShotUnavailable(agent, host)
+      if (unavailable) throw new Error(unavailable)
+      // The member's own agent only: a failure never falls back to another one.
+      const result = await adapter(agent, {
+        job: 'voice', system: snapshot.systemPrompt, input: { transcript: text }, signal: controller.signal, host,
+        timeoutMs: 60_000, maxOutputTokens: 4096, cliMessages: VOICE_MESSAGES,
+        truncatedMessage: '整形結果が長すぎます。原文をご確認ください',
+        onMetrics: metrics => console.info(`[voice] ${agent} formatting`, metrics),
+      })
       if (controller.signal.aborted) throw new Error('キャンセルしました')
       if (!result.trim() || result.length > 100_000) throw new Error('有効な整形結果を取得できませんでした。原文をご確認ください')
       success = true

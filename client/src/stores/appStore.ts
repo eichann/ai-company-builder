@@ -11,7 +11,7 @@ export type Language = 'en' | 'ja'
 
 // Models, effort levels and the defaults for members who have not chosen: lib/aiModels.ts.
 export type { AIModel, AIEffort } from '../lib/aiModels'
-export { MODEL_EFFORT_OPTIONS, MODEL_LABELS } from '../lib/aiModels'
+export { MODEL_EFFORT_OPTIONS, MODEL_LABELS, CLAUDE_MODELS } from '../lib/aiModels'
 
 const readSaved = (key: string): string | null => {
   try { return typeof window !== 'undefined' ? localStorage.getItem(key) : null } catch { return null }

@@ -1,6 +1,7 @@
 import { CODEX_LOGIN_HELP, CODEX_WINDOWS_UNSUPPORTED, type CodexModel } from '../../shared/agent'
 import { CodexRpc } from './codex-rpc'
 import { readCodexModels, requireChatGPT, type CodexTransport } from './codex'
+import { AGENTS } from '../../shared/agents/registry'
 
 // Process-local overrides; never write the user's Codex configuration or copy credentials.
 const disabledFeatures = ['shell_tool', 'unified_exec', 'shell_snapshot', 'apply_patch_freeform', 'apps', 'plugins', 'remote_plugin', 'hooks', 'codex_hooks', 'plugin_hooks', 'memories', 'memory_tool', 'multi_agent', 'multi_agent_v2', 'collab', 'code_mode', 'js_repl', 'browser_use', 'computer_use', 'image_generation', 'imagegenext', 'view_image', 'skill_search', 'tool_search', 'request_permissions', 'request_permissions_tool', 'goals']
@@ -14,7 +15,7 @@ export const CODEX_TEXT_OVERRIDES = [
 export function selectVoiceModel(models: CodexModel[], requested?: string) {
   // Prefer the lightweight model verified for Japanese dictation; resolve access from the live catalog.
   const model = requested ? models.find(m => m.id === requested)
-    : models.find(m => m.id === 'gpt-5.6-luna') || models.find(m => m.isDefault) || models[0]
+    : models.find(m => m.id === AGENTS.codex.tasks.voice) || models.find(m => m.isDefault) || models[0]
   if (!model) throw new Error('音声整形に利用できるCodexモデルがありません。接続を再確認してください。')
   return { model, effort: model.efforts.includes('low') ? 'low' : model.defaultEffort }
 }

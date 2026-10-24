@@ -2,6 +2,7 @@ import { CodexRpc } from '../agents/codex-rpc'
 import { readCodexModels, requireChatGPT, type CodexTransport } from '../agents/codex'
 import { CODEX_TEXT_OVERRIDES } from '../agents/codex-text'
 import { CODEX_WINDOWS_UNSUPPORTED } from '../../shared/agent'
+import { AGENTS } from '../../shared/agents/registry'
 import { HANDOFF_SYSTEM, HANDOFF_TOOL, HANDOFF_TOOL_DESCRIPTION, HANDOFF_TIMEOUT_MS, handoffInputText, saveHandoffArguments, type HandoffRequest, type HandoffMetrics } from './contract'
 
 type Factory = (env: Record<string, string>, overrides: string[]) => CodexTransport
@@ -77,7 +78,7 @@ export function writeCodexHandoff(request: HandoffRequest, createRpc: Factory = 
       await requireChatGPT(rpc)
       if (done) return
       const models = await readCodexModels(rpc)
-      const modelId = request.modelId || 'gpt-5.6-luna'
+      const modelId = request.modelId || AGENTS.codex.tasks.handoff!
       const model = models.find(m => m.id === modelId)
       if (!model) throw new Error(`検証用モデル ${modelId} を利用できません`)
       metrics.model = model.id

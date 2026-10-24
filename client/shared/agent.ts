@@ -1,3 +1,7 @@
+/**
+ * The member's sign-in choice = the agent registry's ids (shared/agents/registry.ts
+ * `AgentId`, which must list exactly these). Named here so the IPC contract keeps its type name.
+ */
 export type AuthMode = 'claude-code' | 'codex' | 'api-key'
 export interface AgentSession {
   providerId: AuthMode

@@ -1,3 +1,4 @@
+import type { AgentId } from './agents/registry'
 import type { ChoiceAnswer, ChoiceCancelReason, ChoiceQuestion } from './choice-prompt'
 
 export interface AgentQuestion {
@@ -12,7 +13,7 @@ export type AgentInteraction = { kind: 'questions'; questions: AgentQuestion[] }
   kind: 'permissions'; reason: string; cwd: string; entries: { label: string; access: string }[]; network: boolean; supported: boolean
 } | {
   /** A choice prompt (choice-prompt.ts): Claude Code's AskUserQuestion or Codex's ask_user. */
-  kind: 'choices'; agent: 'claude-code' | 'codex'; toolCallId?: string; questions: ChoiceQuestion[]
+  kind: 'choices'; agent: AgentId; toolCallId?: string; questions: ChoiceQuestion[]
 }
 export type AgentInteractionRequest = AgentInteraction & { id: string; appSessionId: string }
 export type AgentInteractionResponse =

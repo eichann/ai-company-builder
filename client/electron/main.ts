@@ -13,8 +13,7 @@ import { createFetchSyncServerApi } from './sync/server-api'
 import { createCompanyFilesApi } from './company-files/api'
 import { HandoffStore } from './handoff/store'
 import { HandoffService } from './handoff/service'
-import { writeClaudeHandoff } from './handoff/claude'
-import { writeCodexHandoff } from './handoff/codex'
+import { writeAgentHandoff } from './agents/registry'
 import { ChatHistoryStore } from './chat-history-store'
 import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
@@ -174,7 +173,7 @@ const handoffs = new HandoffService(localHistoryStore, handoffStore, async (prov
   const cwd = path.join(app.getPath('userData'), 'handoff-worker')
   fs.mkdirSync(cwd, { recursive: true })
   const input = { ...request, cwd, env: shellEnv.env() }
-  return provider === 'claude-code' ? writeClaudeHandoff({ ...input, cli: claudeCli.path() }) : writeCodexHandoff(input)
+  return writeAgentHandoff(provider, input, { getCli: claudeCli.path })
 }, (companyId, sessionId) => appWindow.send('handoff:changed', { companyId, sessionId }))
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())

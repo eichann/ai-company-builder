@@ -1,10 +1,11 @@
 import { runClaudeOneShot } from './claude-oneshot'
 import { composeVoicePrompt } from '../shared/voice-prompt'
+import { AGENTS } from '../shared/agents/registry'
 
 /** The default prompt (fixed part + default 「整え方の指示」); members may edit the latter. */
 export const VOICE_SYSTEM_PROMPT = composeVoicePrompt()
 
-const VOICE_MESSAGES = {
+export const VOICE_MESSAGES = {
   cancelled: 'キャンセルしました',
   timedOut: '文章の整形がタイムアウトしました',
   spawnFailed: 'Claude Codeを起動できません。インストール状況をご確認ください',
@@ -15,5 +16,5 @@ const VOICE_MESSAGES = {
 }
 
 export function polishVoice(cli: string, cwd: string, transcript: string, signal: AbortSignal, env: NodeJS.ProcessEnv = process.env, systemPrompt: string = VOICE_SYSTEM_PROMPT): Promise<string> {
-  return runClaudeOneShot({ cli, cwd, systemPrompt, input: { transcript }, signal, env, timeoutMs: 60_000, messages: VOICE_MESSAGES })
+  return runClaudeOneShot({ cli, cwd, model: AGENTS['claude-code'].tasks.voice!, systemPrompt, input: { transcript }, signal, env, timeoutMs: 60_000, messages: VOICE_MESSAGES })
 }

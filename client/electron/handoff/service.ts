@@ -5,8 +5,10 @@ import type { ChatSession } from '../../shared/chat-history'
 import type { HandoffCompletion, HandoffView, HandoffRecovery } from '../../shared/handoff'
 import { HandoffStore, fingerprint, matches, type Cursor, type HandoffState } from './store'
 import { handoffInputText, validateHandoff, type HandoffInput, type HandoffMetrics, type HandoffRequest } from './contract'
+import { agentCan, isAgentId, type AgentId } from '../../shared/agents/registry'
 
-type Writer = (provider: 'claude-code' | 'codex', request: Pick<HandoffRequest, 'input' | 'signal' | 'save'>) => Promise<HandoffMetrics>
+/** Writes the memo with the agent that held the conversation (agents/registry.ts writeAgentHandoff). */
+type Writer = (provider: AgentId, request: Pick<HandoffRequest, 'input' | 'signal' | 'save'>) => Promise<HandoffMetrics>
 interface Options { idleMs: number; cooldownMs: number; turns: number; characters: number; jobsPerHour: number; now: () => number }
 const defaults: Options = { idleMs: 20_000, cooldownMs: 600_000, turns: 16, characters: 12_000, jobsPerHour: 4, now: Date.now }
 const keyOf = (company: string, id: string) => JSON.stringify([company, id])
@@ -63,7 +65,7 @@ export class HandoffService {
   complete(company: string, id: string, receipt: HandoffCompletion) {
     const session = this.history.get(company, id)
     if (!session) return
-    if (!['claude-code', 'codex', 'api-key'].includes(receipt.provider)) throw new Error('不正なAI接続です')
+    if (!isAgentId(receipt.provider)) throw new Error('不正なAI接続です')
     const index = session.messages.findIndex(m => m.id === receipt.messageId)
     if (index < 0 || session.messages[index].role !== 'assistant' || session.messages[index].content !== receipt.content) throw new Error('応答の保存が完了していません')
     const state = this.store.read(company, id)
@@ -80,7 +82,7 @@ export class HandoffService {
     const session = this.history.get(company, id)
     if (!session) { this.store.remove(company, id); return }
     const state = this.store.read(company, id)
-    if (state.checkpoint && state.checkpoint.provider !== 'api-key' && !state.error && this.due(session, state)) {
+    if (state.checkpoint && agentCan(state.checkpoint.provider, 'handoff') && !state.error && this.due(session, state)) {
       this.queue.set(keyOf(company, id), { company, id }); this.wake()
     }
   }
@@ -92,7 +94,7 @@ export class HandoffService {
     // Explicit manual update also works for old conversations with no post-install completion receipt.
     if (!state.checkpoint) {
       const provider = session.agentSession?.providerId ?? (session.claudeSessionId ? 'claude-code' : undefined)
-      if (!provider || provider === 'api-key' || !session.messages.length) throw new Error('この相談のAI接続を確認できません。')
+      if (!provider || !agentCan(provider, 'handoff') || !session.messages.length) throw new Error('この相談のAI接続を確認できません。')
       const cursor = { index: session.messages.length, offset: 0 }
       state.checkpoint = { cursor, hash: fingerprint(session.messages, cursor), provider, messageId: session.messages.at(-1)!.id }
       this.store.write(company, id, state)
@@ -119,7 +121,7 @@ export class HandoffService {
     const checkpoint = state.checkpoint
     const key = keyOf(company, id)
     const provider = checkpoint?.provider ?? session.agentSession?.providerId ?? (session.claudeSessionId ? 'claude-code' : undefined)
-    const supported = provider !== 'api-key'
+    const supported = !provider || agentCan(provider, 'handoff')
     const pending = checkpoint ? (!state.memo || !atEnd(checkpoint.cursor, state.memo.cursor)) : !!provider && !!session.messages.length
     const status = !supported ? 'unsupported' : this.running?.key === key ? 'running' : this.queue.has(key) ? 'queued' : state.error ? 'error' : state.memo ? 'saved' : 'waiting'
     const message = status === 'unsupported' ? 'APIキー方式のメモ自動保存は未対応です。' : status === 'running' ? '引き継ぎメモを整理中…' : status === 'queued' ? '会話が落ち着いてから更新します。利用量の上限に達した場合は待機します。' : state.error || (state.memo ? 'メモを保存しています。AIセッションが見つからない場合の引き継ぎに使います。' : '会話が長くなると自動保存します。短い会話は「メモを更新」でも確認できます。')
@@ -153,7 +155,7 @@ export class HandoffService {
         const session = this.history.get(company, id)
         if (!session) { this.invalidate(company, id); continue }
         const state = this.store.read(company, id)
-        if (!state.checkpoint || state.checkpoint.provider === 'api-key' || (state.memo && atEnd(state.memo.cursor, state.checkpoint.cursor))) { this.queue.delete(key); this.changed(company, id); continue }
+        if (!state.checkpoint || !agentCan(state.checkpoint.provider, 'handoff') || (state.memo && atEnd(state.memo.cursor, state.checkpoint.cursor))) { this.queue.delete(key); this.changed(company, id); continue }
         const attempts = this.budget()
         const eligible = Math.max((state.lastAttempt ?? -Infinity) + this.options.cooldownMs, attempts.length >= this.options.jobsPerHour ? attempts[0] + 3600_000 : 0)
         if (eligible > this.options.now()) { wait = Math.min(wait, eligible - this.options.now()); continue }

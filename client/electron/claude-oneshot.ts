@@ -1,7 +1,7 @@
 import { spawnVoiceProcess } from './voice-process'
 
 /**
- * One isolated, non-persistent `claude -p` call: Haiku, no tools, no MCP, no
+ * One isolated, non-persistent `claude -p` call: the caller's model (Haiku), no tools, no MCP, no
  * slash commands, no settings or memory from anywhere, the input as JSON on
  * stdin (data, never shell source or an instruction slot) and the
  * instructions in the system prompt. Used by the voice polisher and by sync's
@@ -20,6 +20,8 @@ export interface ClaudeOneShotMessages {
 export interface ClaudeOneShotRequest {
   cli: string
   cwd: string
+  /** The CLI `--model` (registry task model: shared/agents/registry.ts). */
+  model: string
   systemPrompt: string
   /** Serialised as JSON on stdin. */
   input: unknown
@@ -29,13 +31,13 @@ export interface ClaudeOneShotRequest {
   messages: ClaudeOneShotMessages
 }
 
-export const CLAUDE_ONESHOT_FLAGS = ['--model', 'haiku', '--safe-mode', '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--setting-sources', '', '--output-format', 'json']
+export const CLAUDE_ONESHOT_FLAGS = ['--safe-mode', '--tools', '', '--strict-mcp-config', '--disable-slash-commands', '--no-session-persistence', '--setting-sources', '', '--output-format', 'json']
 
 export function runClaudeOneShot(request: ClaudeOneShotRequest): Promise<string> {
-  const { cli, cwd, systemPrompt, input, signal, env = process.env, timeoutMs, messages } = request
+  const { cli, cwd, model, systemPrompt, input, signal, env = process.env, timeoutMs, messages } = request
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new Error(messages.cancelled)); return }
-    const child = spawnVoiceProcess(cli, ['-p', ...CLAUDE_ONESHOT_FLAGS, '--system-prompt', systemPrompt], {
+    const child = spawnVoiceProcess(cli, ['-p', '--model', model, ...CLAUDE_ONESHOT_FLAGS, '--system-prompt', systemPrompt], {
       cwd, env: { ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
     })
     let output = ''

@@ -2,6 +2,7 @@ import ReactMarkdown from 'react-markdown'
 import { useEffect, useId, useRef, useState } from 'react'
 import { Note, X } from '@phosphor-icons/react'
 import type { HandoffView } from '../../../shared/handoff'
+import { agentShortLabel } from '../../../shared/agents/registry'
 
 export function HandoffControl({ companyId, sessionId, active = true }: { companyId: string; sessionId: string; active?: boolean }) {
   const [view, setView] = useState<HandoffView | null>(null)
@@ -36,7 +37,7 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
       <p className="mt-3 text-xs" role="status">{view?.message || '読み込み中…'}</p>
       {recoveryLabel && <p className="mt-2 text-xs text-gray-500">{recoveryLabel}</p>}
       {error && <p role="alert" className="mt-2 text-xs text-red-500">{error}</p>}
-      {view?.updatedAt && <p className="mt-2 text-[11px] text-gray-500">保存日時：{new Date(view.updatedAt).toLocaleString('ja-JP')} · {view.provider === 'codex' ? 'Codex' : 'Claude'}{view.metrics && ` · ${(view.metrics.totalMs / 1000).toFixed(1)}秒`}</p>}
+      {view?.updatedAt && <p className="mt-2 text-[11px] text-gray-500">保存日時：{new Date(view.updatedAt).toLocaleString('ja-JP')} · {agentShortLabel(view.provider)}{view.metrics && ` · ${(view.metrics.totalMs / 1000).toFixed(1)}秒`}</p>}
       <div className="mt-4 break-words text-xs leading-6 bg-gray-50 dark:bg-zinc-800 rounded-lg p-3 max-h-[45vh] overflow-auto prose prose-sm dark:prose-invert max-w-none [&_h2]:text-sm [&_h2]:mt-3 [&_h2]:mb-1 [&_ul]:my-1 [&_ol]:my-1 [&_li]:my-0">
         <ReactMarkdown components={{ a: ({ children }) => <span>{children}</span>, img: () => null }}>{view?.markdown || 'メモはまだありません。応答が正常に終了して保存された会話が対象です。'}</ReactMarkdown>
       </div>

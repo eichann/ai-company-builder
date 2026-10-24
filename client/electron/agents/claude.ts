@@ -15,6 +15,7 @@ import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-re
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { createClaudeSteer, tapQuery } from './steering'
+import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../../shared/agents/registry'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -56,19 +57,8 @@ const DANGEROUS_PATTERNS: RegExp[] = [
   /(?<!\d)>\s*\//,                    // > / (redirect to root, but not 2>/dev/null)
 ]
 
-// Map UI model keys → exact Claude Code CLI model strings.
-// opus-4-6 / opus-4-8 / opus-5 / opus-5-5 request the 1M-context variant ([1m]); fable-5 has a
-// native 1M context window so it takes no suffix; sonnet/haiku stay as aliases.
-const MODEL_CLI_MAP: Record<string, string> = {
-  'opus-4-6': 'claude-opus-4-6[1m]',
-  'opus-4-8': 'claude-opus-4-8[1m]',
-  'opus-5': 'claude-opus-5[1m]',
-  'opus-5-5': 'claude-opus-5-5[1m]',
-  'fable-5': 'claude-fable-5',
-  sonnet: 'sonnet',
-  haiku: 'haiku',
-}
-const DEFAULT_CLI_MODEL = 'claude-opus-5-5[1m]'
+// UI model keys → exact CLI model strings, and the xhigh clamp: the agent
+// registry (shared/agents/registry.ts) holds every model id.
 
 // `auto` (Claude Code's classifier mode) can be unavailable in two ways, and
 // both must degrade to 'default' — which asks through canUseTool — rather than
@@ -135,34 +125,6 @@ export function claudeAgentEvent(message: unknown): AgentEvent | undefined {
   }
   const progress = agentProgressFromSdkMessage(message)
   return progress ? { type: 'agent-progress', progress } : undefined
-}
-
-function resolveClaudeModel(modelId?: string): string {
-  if (!modelId) return DEFAULT_CLI_MODEL
-  return MODEL_CLI_MAP[modelId] ?? modelId
-}
-
-// xhigh effort is only supported on Opus 4.7+ (incl. 4.8), Opus 5, Opus 5.5, and Fable 5.
-// Demote elsewhere so a stale selection — e.g. one carried over by session resume — doesn't
-// error on the CLI. Note: 'claude-opus-4-5' does not contain 'opus-5', so this check is safe.
-// The 'opus-5' substring test deliberately also matches 'claude-opus-5-5[1m]' — keep it a
-// substring test, not an exact match, or Opus 5.5 silently loses xhigh.
-function resolveEffort(
-  model: string,
-  effort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max',
-): 'low' | 'medium' | 'high' | 'xhigh' | 'max' | undefined {
-  if (
-    effort === 'xhigh' &&
-    !(
-      model.includes('opus-4-8') ||
-      model.includes('opus-4-7') ||
-      model.includes('opus-5') ||
-      model.includes('fable-5')
-    )
-  ) {
-    return 'high'
-  }
-  return effort
 }
 
 export function createClaudeConnection(config: ClaudeConnectionConfig, createModel = claudeCode): AgentConnection {
@@ -350,8 +312,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         console.log(`[chat-server] Resuming Claude CLI session: ${existingCliSessionId} (app session: ${appSessionId})`)
       }
 
-      const resolvedModel = resolveClaudeModel(modelId)
-      const resolvedEffort = resolveEffort(resolvedModel, effort as Parameters<typeof resolveEffort>[1])
+      const resolvedModel = claudeCliModel(modelId)
+      const resolvedEffort = claudeCliEffort(resolvedModel, effort as AgentEffort | undefined)
 
       const createNative = (mode: PermissionMode) => {
         // One MCP server instance per query: a fallback re-run must not reuse the first one.
@@ -527,7 +489,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       } })
     },
     createTitleModel() {
-      return createModel('haiku', {
+      return createModel(AGENTS['claude-code'].tasks.title!, {
         pathToClaudeCodeExecutable: config.getClaudeCodeCliPath(),
         env: config.getShellEnv(),
         settingSources: ['user', 'project'],

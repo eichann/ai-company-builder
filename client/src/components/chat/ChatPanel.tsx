@@ -5,7 +5,8 @@ import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
-import type { AgentSession, CodexStatus } from '../../../shared/agent'
+import type { AgentSession, AuthMode, CodexStatus } from '../../../shared/agent'
+import { agentCan, agentShortLabel } from '../../../shared/agents/registry'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
@@ -40,14 +41,14 @@ import {
   ShieldWarning,
   ClockCountdown,
 } from '@phosphor-icons/react'
-import { useAppStore, MODEL_EFFORT_OPTIONS, MODEL_LABELS, type AIModel, type AIEffort } from '../../stores/appStore'
+import { useAppStore, MODEL_EFFORT_OPTIONS, CLAUDE_MODELS, type AIModel, type AIEffort } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
 import { AssistantMessageParts } from './MessageParts'
 import { RateLimitMeter } from './RateLimitMeter'
 import { reportAgentProgress, setRateLimits } from './agentStatusStore'
-import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../../../shared/rate-limits'
+import { RATE_LIMITS_PART_TYPE, hasRateLimits, type RateLimitSnapshot } from '../../../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE, readAgentProgress } from '../../../shared/agent-progress'
 import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
@@ -61,7 +62,6 @@ import type { ChatSession } from '../../../shared/chat-history'
 // Types
 // ============================================================================
 
-type AuthMode = 'claude-code' | 'codex' | 'api-key'
 
 /** A message that waits for the running turn to end (see handleSend). */
 interface QueuedSend {
@@ -1689,7 +1689,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   // Plan usage for the header meter (shared/rate-limits.ts): streamed live as
   // transient data parts, and fetched here for a tab that has not streamed yet.
   const fetchRateLimits = useCallback(async () => {
-    if (authModeRef.current !== 'claude-code' && authModeRef.current !== 'codex') return
+    if (!hasRateLimits(authModeRef.current)) return
     try {
       const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/rate-limits?provider=${authModeRef.current}`, { headers: { Authorization: `Bearer ${serverInfo.authToken}` } })
       const data = await res.json() as { rateLimits?: RateLimitSnapshot | null }
@@ -2259,7 +2259,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     if (status === 'streaming' || status === 'submitted') {
       const item: QueuedSend = { text, files, filePaths }
       const sessionId = appSessionIdRef.current
-      if (authModeRef.current !== 'api-key' && sessionId && !files?.length && !filePaths?.length && canSteerText(text)) {
+      if (agentCan(authModeRef.current, 'steering') && sessionId && !files?.length && !filePaths?.length && canSteerText(text)) {
         void steerRunningTurn(serverInfo, sessionId, text).then(response => {
           if (response.status === 'delivered') return
           setQueuedSends(queue => [...queue, { ...item, ...(response.id ? { steerPartId: `steer-${response.id}` } : {}) }])
@@ -2413,12 +2413,12 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
           </div>
           <div className="flex items-center gap-2">
             {/* The model selector already names the agent when space is short. */}
-            {(!narrowHeader || authMode === 'api-key') && (
+            {(!narrowHeader || !hasRateLimits(authMode)) && (
               <span className="text-[10px] font-medium tracking-wider uppercase px-1.5 py-0.5 rounded-md bg-accent/15 text-accent">
-                {authMode === 'codex' ? 'Codex' : authMode === 'claude-code' ? 'Claude' : 'API'}
+                {agentShortLabel(authMode)}
               </span>
             )}
-            {(authMode === 'claude-code' || authMode === 'codex') && <RateLimitMeter provider={authMode} compact={narrowHeader} />}
+            {hasRateLimits(authMode) && <RateLimitMeter provider={authMode} compact={narrowHeader} />}
             {/* Status indicator */}
             {status === 'submitted' && (
               <span className="flex items-center gap-1 text-[10px] text-accent animate-fade-in whitespace-nowrap" title={t('chat.statusSubmitted')}>
@@ -2464,13 +2464,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
               className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
-              <option value="fable-5">{MODEL_LABELS['fable-5']}</option>
-              <option value="opus-5-5">{MODEL_LABELS['opus-5-5']}</option>
-              <option value="opus-5">{MODEL_LABELS['opus-5']}</option>
-              <option value="opus-4-8">{MODEL_LABELS['opus-4-8']}</option>
-              <option value="opus-4-6">{MODEL_LABELS['opus-4-6']}</option>
-              <option value="sonnet">{MODEL_LABELS.sonnet}</option>
-              <option value="haiku">{MODEL_LABELS.haiku}</option>
+              {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
           )}
 
@@ -2614,7 +2608,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
             voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || (authMode === 'codex' && (!codexStatus.authenticated || !codexModel))}
-            placeholder={running ? t(authMode === 'api-key' ? 'chat.inputPlaceholderQueued' : 'chat.inputPlaceholderWorking') : t('chat.inputPlaceholder')}
+            placeholder={running ? t(agentCan(authMode, 'steering') ? 'chat.inputPlaceholderWorking' : 'chat.inputPlaceholderQueued') : t('chat.inputPlaceholder')}
             hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}

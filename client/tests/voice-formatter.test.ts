@@ -1,22 +1,26 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { createVoiceFormatter, type VoiceFormatterConfig } from '../electron/voice-formatter'
+import { createVoiceFormatter, type VoiceAdapter, type VoiceFormatterConfig } from '../electron/voice-formatter'
+import type { OneShotTextRequest } from '../electron/agents/registry'
 import { generateCodexText, CODEX_TEXT_OVERRIDES, selectVoiceModel } from '../electron/agents/codex-text'
 import type { CodexTransport } from '../electron/agents/codex'
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 
 const signal = () => new AbortController().signal
+// Fakes per agent; the formatter picks one through the registry id.
+type Fakes = { claude: (r: OneShotTextRequest) => Promise<string>; codex: (r: OneShotTextRequest) => Promise<string>; api: (r: OneShotTextRequest) => Promise<string> }
+const route = (fakes: Fakes): VoiceAdapter => (agent, request) => (agent === 'codex' ? fakes.codex : agent === 'api-key' ? fakes.api : fakes.claude)(request)
 const config = (authMode: VoiceFormatterConfig['authMode']): VoiceFormatterConfig => ({ authMode, apiKey: 'test-key', getCli: () => { throw new Error('Claude must not be accessed') }, cwd: '/tmp', env: {} })
 
 test('Codex/API routing needs no Claude install; snapshot survives setting changes', async () => {
   for (const mode of ['codex', 'api-key'] as const) {
     const settings = config(mode)
     const calls: string[] = []
-    const format = createVoiceFormatter(settings, {
+    const format = createVoiceFormatter(settings, route({
       claude: async () => { throw new Error('Wrong provider') },
-      codex: async request => { calls.push('codex'); assert.equal(JSON.parse(request.text).transcript, '原文'); return '整形済み' },
-      api: async key => { calls.push('api-key'); assert.equal(key, 'test-key'); return '整形済み' },
-    })
+      codex: async request => { calls.push('codex'); assert.equal((request.input as { transcript: string }).transcript, '原文'); return '整形済み' },
+      api: async request => { calls.push('api-key'); assert.equal(request.host.apiKey, 'test-key'); return '整形済み' },
+    }))
     settings.authMode = 'claude-code'; settings.apiKey = 'changed'
     assert.equal(await format('原文', signal()), '整形済み')
     assert.deepEqual(calls, [mode])
@@ -24,7 +28,7 @@ test('Codex/API routing needs no Claude install; snapshot survives setting chang
 })
 test('Claude routing stays on Haiku adapter and provider failure never falls back', async () => {
   let claudeCalls = 0
-  const adapters = { claude: async () => { claudeCalls++; return 'Claude結果' }, codex: async () => { throw new Error('login required') }, api: async () => 'api' }
+  const adapters = route({ claude: async request => { claudeCalls++; assert.equal(request.job, 'voice'); return 'Claude結果' }, codex: async () => { throw new Error('login required') }, api: async () => 'api' })
   const settings = { ...config('claude-code'), getCli: () => '/fake/claude' }
   assert.equal(await createVoiceFormatter(settings, adapters)('原文', signal()), 'Claude結果')
   await assert.rejects(createVoiceFormatter(config('codex'), adapters)('原文', signal()), /login required/)
@@ -33,7 +37,7 @@ test('Claude routing stays on Haiku adapter and provider failure never falls bac
 })
 test('cancelled or empty formatting results cannot reach the textbox', async () => {
   const controller = new AbortController()
-  const adapters = { claude: async () => '', api: async () => '', codex: async () => { controller.abort(); return '遅い結果' } }
+  const adapters = route({ claude: async () => '', api: async () => '', codex: async () => { controller.abort(); return '遅い結果' } })
   await assert.rejects(createVoiceFormatter(config('codex'), adapters)('原文', controller.signal), /キャンセル/)
   await assert.rejects(createVoiceFormatter(config('api-key'), adapters)('原文', signal()), /有効な整形結果/)
 })
