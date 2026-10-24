@@ -355,9 +355,11 @@ describe('GET /api/companies/:id/client-activity', () => {
       clientPlatform: PLATFORM,
       build: { semver: '0.0.1', sha: '95346af', commitDate: '20261021031200', dev: false },
     })
+    // A boolean for every member (false while AGENT_EVENTS_CLIENT_COMMIT_DATE is null, and for unknown builds).
+    expect(body.data.every(m => typeof m.supportsAgentEvents === 'boolean')).toBe(true)
     expect(pusher.lastPushAt).toBeTruthy()
     const admin = body.data.find(m => m.userId === 'u-admin')!
-    expect(admin).toMatchObject({ clientVersion: null, build: null, lastSeenAt: null, lastFetchAt: null, lastPushAt: null })
+    expect(admin).toMatchObject({ clientVersion: null, build: null, lastSeenAt: null, lastFetchAt: null, lastPushAt: null, supportsAgentEvents: false })
   })
 })
 

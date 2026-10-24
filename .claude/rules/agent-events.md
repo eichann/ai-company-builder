@@ -13,12 +13,16 @@ paths:
   - "client/tests/agent-event-sender.test.ts"
   - "client/src/lib/agentLogNotice.ts"
   - "client/src/components/chat/AgentLogNotice.tsx"
+  - "admin/src/app/companies/*/agent-events/**"
+  - "admin/src/components/agent-events/**"
+  - "admin/src/lib/agent-events.ts"
+  - "admin/tests/agent-events.test.tsx"
 ---
 
-# AI action log (monitoring M1): sending and the server side
+# AI action log (monitoring M1): sending, the server side, the admin page
 
 The app records one event per tool call (`chat-and-agents.md`, "AI action log"), sends them
-(below), and the server stores and serves them.
+(below), the server stores and serves them, and the admin console shows them (last section).
 
 ## Sending from the app (`client/electron/services/agent-event-sender.ts`)
 
@@ -102,3 +106,32 @@ event loop between chunks; `lib/agent-event-retention.ts` runs it 5 s after star
 (`index.ts`). Version gate: `AGENT_EVENTS_CLIENT_COMMIT_DATE` in `lib/client-version.ts` is
 the committer date (UTC) of #206's merge commit, `20261024181341`; the admin log page lists the
 members whose app is older.
+
+## Admin console (「AI の操作の記録」, `admin/src/app/companies/[id]/agent-events/page.tsx`)
+
+- **Navigation**: `NAV_ITEMS` entry `agent-events`, shown when `isAdmin || canViewAgentEvents`.
+  `GET /me/capabilities` carries `canViewAgentEvents` (`agentEvents.canRead(member)`, composed
+  in `routes/permissions.ts`: owner/admin, or a manager while `viewers` is
+  `admins-and-managers`); the context falls back to the role until capabilities arrive. A
+  member who opens the URL anyway gets 403 from the list → a plain empty state.
+- **Words**: `admin/src/lib/agent-events.ts` holds every label as `Record<enum, …>` (category,
+  decision + tone, guard reason, agent, outcome, sensitive place, viewer mode), the target
+  description (`hidden` → 「非公開（表示できません）」, `outside` → 「会社フォルダの外」 + the
+  secret place's kind), the URL filters and the periods. A new enum value in
+  `shared/types/agent-events.ts` without a label fails the compiler and
+  `admin/tests/agent-events.test.tsx`. The console says 「部署の責任者」 for managers, as everywhere
+  else in the admin.
+- **Log tab** (`components/agent-events/log-view.tsx`): filters in the URL (`period` today / 7d
+  (default) / 30d / custom with `from`/`to` days, `member`, `category`, `decision`, `q`,
+  `conversation`) so a view can be shared; periods are whole local days. Rows newest first,
+  「もっと見る」 follows `nextCursor`. 「この会話の流れ」 sets `conversation`: only that filter is
+  sent (no period), shown oldest first. Summary strip from `/summary` with the browser's
+  `tzOffsetMinutes`. 「記録を送っていないアプリ」 (owner/admin): members whose
+  `GET /client-activity` row has `supportsAgentEvents: false` (`lib/client-version.ts`
+  `supportsAgentEvents`: build older than `AGENT_EVENTS_CLIENT_COMMIT_DATE`, or unknown).
+- **Settings tab** (owner/admin, `?tab=settings`, `components/agent-events/settings-view.tsx`):
+  retention 30 / 90 / 180 / 1年 / custom (7–3650), viewers as two radio cards each with its
+  live `GET /viewers?mode=` list (shown for the selected card, and for the other on hover /
+  focus). Changes are a draft; the bar lists them (「保存期間: 180日 → 90日」) and 保存 sends only
+  what changed. A shorter retention first asks `retention-preview` and confirms 「N日より前の記録
+  N 件が消えます。よろしいですか？」. History from the settings' `history`.

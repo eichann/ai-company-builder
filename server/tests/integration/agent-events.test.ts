@@ -25,12 +25,14 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { agentEventsRoute } from '../../src/routes/agent-events'
+import { permissionsRoute } from '../../src/routes/permissions'
 import { services } from '../../src/composition'
 import { replaceDepartmentManagers } from '../../src/lib/permission-store'
 import type { AgentToolEvent } from '../../shared/types/agent-events'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', agentEventsRoute)
+app.route('/api/companies/:companyId', permissionsRoute)
 
 const CO = 'ae-co'
 const BASE = `/api/companies/${CO}/agent-events`
@@ -178,6 +180,20 @@ describe('GET /agent-events', () => {
     expect(summary.json.data.days.reduce((s: number, d: Json) => s + d.total, 0)).toBe(2)
     expect((await call('ae-owner', 'PUT', `${BASE}/settings`, { viewers: 'admins' })).status).toBe(200)
     expect((await list('ae-manager')).status).toBe(403)
+  })
+
+  it('/me/capabilities says who may open the log (the admin console navigation)', async () => {
+    const can = async (user: string) => (await call(user, 'GET', `/api/companies/${CO}/me/capabilities`)).json.data.canViewAgentEvents
+    expect(await can('ae-owner')).toBe(true)
+    expect(await can('ae-admin')).toBe(true)
+    expect(await can('ae-manager')).toBe(false)
+    expect(await can('ae-member')).toBe(false)
+    await call('ae-owner', 'PUT', `${BASE}/settings`, { viewers: 'admins-and-managers' })
+    expect(await can('ae-manager')).toBe(true)
+    // A member who manages no department still cannot.
+    expect(await can('ae-member')).toBe(false)
+    await call('ae-owner', 'PUT', `${BASE}/settings`, { viewers: 'admins' })
+    expect(await can('ae-manager')).toBe(false)
   })
 
   it('summary: per member and day, by category, denied counted', async () => {

@@ -64,8 +64,8 @@ export const managers: Record<string, Array<{ userId: string; name: string; emai
   d_hr: [],
 }
 
-export const ownerCapabilities: Capabilities = { role: 'owner', managedDepartmentIds: [] }
-export const managerCapabilities: Capabilities = { role: 'member', managedDepartmentIds: ['d_sales'] }
+export const ownerCapabilities: Capabilities = { role: 'owner', managedDepartmentIds: [], canViewAgentEvents: true }
+export const managerCapabilities: Capabilities = { role: 'member', managedDepartmentIds: ['d_sales'], canViewAgentEvents: false }
 
 export const clientActivity: ClientActivity[] = [
   activity('u_owner', '0.0.1+95346af.20261021031200', { semver: '0.0.1', sha: '95346af', commitDate: '20261021031200', dev: false }),
@@ -86,6 +86,7 @@ function activity(userId: string, clientVersion: string | null, build: ClientAct
     lastSeenAt: '2026-10-21T08:00:00.000Z',
     lastFetchAt: '2026-10-21T07:55:00.000Z',
     lastPushAt: '2026-10-20T07:55:00.000Z',
+    supportsAgentEvents: false,
   }
 }
 

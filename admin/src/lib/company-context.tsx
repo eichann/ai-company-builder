@@ -18,6 +18,8 @@ export interface CompanyContextValue {
   isAdmin: boolean
   /** Departments the signed-in user is a manager (部署の責任者) of. */
   managedDepartmentIds: string[]
+  /** May open 「AI の操作の記録」: owner/admin, or a department manager while the log's viewer setting allows it. */
+  canViewAgentEvents: boolean
   /** Re-read the company, the company list and the user's role (after a rename or role change). */
   refresh: () => void
 }
@@ -42,6 +44,8 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
   // the same role and covers the moment before capabilities arrive.
   const role = capabilities.data?.role ?? company.data?.role ?? null
   const managedDepartmentIds = capabilities.data?.managedDepartmentIds
+  // Until capabilities arrive: owner/admin can always read the log.
+  const canViewAgentEvents = capabilities.data?.canViewAgentEvents ?? isAdminRole(role)
   const { reload: reloadCompany } = company
   const { reload: reloadCompanies } = companies
   const { reload: reloadCapabilities } = capabilities
@@ -54,13 +58,14 @@ export function CompanyProvider({ companyId, children }: { companyId: string; ch
       role,
       isAdmin: isAdminRole(role),
       managedDepartmentIds: managedDepartmentIds ?? [],
+      canViewAgentEvents,
       refresh: () => {
         reloadCompany()
         reloadCompanies()
         reloadCapabilities()
       },
     }),
-    [companyId, company, companies, role, managedDepartmentIds, reloadCompany, reloadCompanies, reloadCapabilities]
+    [companyId, company, companies, role, managedDepartmentIds, canViewAgentEvents, reloadCompany, reloadCompanies, reloadCapabilities]
   )
 
   return <CompanyContext.Provider value={value}>{children}</CompanyContext.Provider>

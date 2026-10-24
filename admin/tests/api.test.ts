@@ -112,7 +112,7 @@ describe('API client (contract)', () => {
 
   it('GET me/capabilities', async () => {
     mockApi({ [`GET ${base}/me/capabilities`]: { body: ok(managerCapabilities) } })
-    expect(await capabilitiesApi.get(COMPANY_ID)).toEqual({ role: 'member', managedDepartmentIds: ['d_sales'] })
+    expect(await capabilitiesApi.get(COMPANY_ID)).toEqual({ role: 'member', managedDepartmentIds: ['d_sales'], canViewAgentEvents: false })
   })
 
   it('reorder posts { items }', async () => {
