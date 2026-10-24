@@ -214,7 +214,7 @@
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:folderSizes": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, companyId: string, folder: string, measure: string[]"
       },
       "git:generateSummary": {
@@ -230,7 +230,7 @@
         "params": "repoPath: string, query: string, folderPath: string"
       },
       "git:inspectCompanyFolder": {
-        "file": "main.ts",
+        "file": "features/company-setup/ipc.ts",
         "params": "folder: string, companyId: string"
       },
       "git:listFiles": {
@@ -250,7 +250,7 @@
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:setupCompanyRemote": {
-        "file": "main.ts",
+        "file": "features/company-setup/ipc.ts",
         "params": "repoPath: string, companyId: string, selectedPaths?: string[]"
       },
       "git:showCommit": {
@@ -258,15 +258,15 @@
         "params": "repoPath: string, commitHash: string, folderPath?: string"
       },
       "git:sparseGetExclusions": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string"
       },
       "git:sparseSetExclusions": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, excluded: string[]"
       },
       "git:sparseUncommittedChanges": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, folders: string[]"
       },
       "git:sync": {
@@ -397,10 +397,10 @@
         "main.ts"
       ],
       "setup:progress": [
-        "main.ts"
+        "features/company-setup/ipc.ts"
       ],
       "sparse:progress": [
-        "main.ts"
+        "features/download-choices/ipc.ts"
       ],
       "tool-approval-request": [
         "main.ts"
