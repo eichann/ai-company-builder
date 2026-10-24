@@ -54,6 +54,10 @@ one place an added agent brings its own controls; everything else asks the regis
   (UIMessage ↔ history, conversion cache, title transcript), `chatRequestBody.ts` (the
   `/api/chat` body: same fields and order, pending attachments consumed once),
   `chatTabsStorage.ts` (remembered tabs), `queuedSends.ts` (merging waiting messages).
+- Editing a message and resending goes through the normal send path (`sendTurn` in
+  `ChatConversation.tsx`): a synchronous save of the conversation cut before the edited message +
+  the new one, then send. The edited message's file references are sent again; images are not
+  (history keeps thumbnails only).
 
 ## Talking to the chat server
 

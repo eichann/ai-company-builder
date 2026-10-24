@@ -162,6 +162,9 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
   「回答する」, ⌘/Ctrl+Enter). The outcome is injected as a `data-choice-prompt` part
   (`createChunkInjector`), stored as `choicePrompts` (with `at`, the offset in `content`), and
   `agentInputMessages` turns it into text when the conversation moves to another agent.
+- History records of choice prompts and extra instructions carry `at` (offset in `content`) and
+  `seq` (their place among the reply's questions and instructions, live order). At the same `at`,
+  `seq` decides; records without `seq` (older history) keep the stored order.
 - The dangerous-command approval banner (`tool-approval-request`) is a separate channel; both can
   show at once. Pending cards survive tab switches; closing the tab cancels them.
 - Preview `client/tests/choice-prompt-ui.html` (`?theme=dark`, `?state=answered`); tests
