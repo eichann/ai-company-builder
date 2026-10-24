@@ -7,7 +7,7 @@
 // with the whole company — over a teammate's file the member never had. The
 // same staging hid new paths from the reserved-path hold-back. Preview now
 // only reads `git status` (untracked files count as added); nothing in the
-// index or on disk changes. See the guards table in CLAUDE.md.
+// index or on disk changes. See .claude/rules/sync-guards.md.
 
 import fs from 'fs'
 import path from 'path'

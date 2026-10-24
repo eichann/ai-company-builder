@@ -2,8 +2,8 @@
 // shares by an anchored, literal line in the root .gitignore. The scan only
 // looks at what git lists (index entries + untracked files no rule ignores)
 // and asks git whether a path is already ignored. See
-// client/electron/sync/large-files.ts and "Architecture: Client Sync" in
-// CLAUDE.md. The threshold is lowered per world (largeFileThreshold) so no
+// client/electron/sync/large-files.ts and step 4 in
+// .claude/rules/sync.md. The threshold is lowered per world (largeFileThreshold) so no
 // scenario writes 100 MB.
 
 import { describe, test, type TestContext } from 'node:test'

@@ -1,8 +1,7 @@
 /**
  * Departments: folder on the shared branch = source of truth, row = display
  * settings (order, icon, color, display name), scope = permission rules,
- * managers = who may edit them (CLAUDE.md "Architecture: Department
- * Management").
+ * managers = who may edit them (.claude/rules/server.md "Departments").
  *
  * Folder changes go through the RepoStore (working clone, company lock,
  * async git); the rows follow only once the folder change succeeded. A

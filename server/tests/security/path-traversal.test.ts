@@ -91,7 +91,7 @@ describe('Path traversal prevention', () => {
     }
 
     // These must be accepted. Department folders allow ASCII and Japanese
-    // (hiragana / katakana / kanji), per CLAUDE.md folder-naming rules.
+    // (hiragana / katakana / kanji), per the folder-naming rule in shared/core/names.ts.
     const validNames = [
       'sales',
       'my-dept',

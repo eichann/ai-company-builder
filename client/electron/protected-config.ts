@@ -10,7 +10,7 @@
 //
 // The rejected change is already committed locally, so retrying the push can
 // never succeed: every sync would fail at the same step — the failure shape
-// documented under "Non-Negotiable Guards" in CLAUDE.md. A revert commit on
+// documented in .claude/rules/sync-guards.md. A revert commit on
 // top does not help either, because the hook checks every commit in the
 // pushed range. The way out is to rewrite the unpushed commits:
 //

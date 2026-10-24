@@ -1,7 +1,7 @@
 // Choosing a company folder in CompanySelector (both 「既存のフォルダを開く」
 // and 「新しく作成」): which folders get the department picker + partial first
 // setup, which open as before, which are refused — and opening the remembered
-// company directly after login. See "First Setup" in CLAUDE.md.
+// company directly after login. See .claude/rules/download-choices.md.
 
 import { test } from 'node:test'
 import assert from 'node:assert/strict'

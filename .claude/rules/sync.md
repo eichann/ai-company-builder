@@ -1,0 +1,168 @@
+---
+paths:
+  - "client/electron/sync/**"
+  - "client/electron/protected-config.ts"
+  - "client/electron/commit-message.ts"
+  - "client/electron/features/sync/**"
+  - "client/electron/services/app-git.ts"
+  - "client/electron/services/commit-messages.ts"
+  - "client/tests/sync/**"
+  - "client/tests/sync-harness/**"
+  - "client/tests/sync-*.test.ts"
+  - "client/tests/protected-config.test.ts"
+  - "client/tests/commit-message.test.ts"
+  - "client/src/components/common/SyncPreviewDialog.tsx"
+---
+
+# Client sync (`git:sync`)
+
+The member's whole contract is one rule: **"when you've made changes you want to share, press
+the sync button."** They have no terminal, no Git vocabulary and no way to repair a repository by
+hand. So whatever sync cannot resolve on its own either stops safely with the local work intact,
+or asks a question in the member's words. It never leaves a repository half-rebased.
+
+Before changing sync, also read `sync-guards.md` (the guards and their tests) and
+`sync-testing.md` (the harness every change runs through). Background, incidents and the full
+original text: `docs/architecture/sync.md` (internal; may be absent).
+
+## Code map
+
+- `sync/git-sync.ts` `createGitSync` — the orchestration. It imports nothing from Electron: git
+  (`sync/git-factory.ts`, the one place the app's git options live), dialogs (`SyncDialog`,
+  rendered by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), clock and
+  logger are injected (`sync/types.ts` `SyncDeps`). `features/sync/ipc.ts` wires the real
+  implementations into `git:sync`; the app's git comes from `services/app-git.ts`.
+- Helpers: `conflicts.ts`, `nested-repos.ts`, `large-files.ts`, `gitignore-merge.ts`,
+  `sparse.ts`, `first-setup.ts`, `outside-checkout.ts`, `not-downloaded.ts`, `remote.ts`,
+  `push-landed.ts`, `preview.ts`, `../protected-config.ts` (rejection recovery); private folders:
+  `private-folders.ts`, `private-sync.ts`, `path-check.ts`, `reserved-path.ts`.
+
+## One press, several repositories
+
+1. P1 `GET /me/scopes` (cached in `.git/acb-private-scopes.json`) decides access gained / lost /
+   made public for private folders (`private-folders-client.md`).
+2. P2 every readable private path goes into the company's `.git/info/exclude`.
+3. The company repository runs steps 0–13 below.
+4. P3 each readable private folder (its own scope repository, cloned at its path) runs the same
+   steps with its own lock and `PENDING_PUSH`. A failure in one repository does not stop the others.
+
+## Steps (per repository)
+
+```
+0    serialize per repository (syncLocks)
+1    repair a partial clone's lost promisor config (remote.ts); recover stale rebase / merge /
+     cherry-pick state; write `.gitignore merge=union` into .git/info/attributes (idempotent)
+2    retry a PENDING_PUSH left by a failed sync
+3    ensure .gitignore essentials: .backups/, .workspace/, node_modules/, .env*,
+     **/.personal/* + !**/.personal/.gitignore
+4    files >100 MB → a literal line in .gitignore (large-files.ts; details below)
+5    nested git repositories → ask the member BEFORE changing anything
+6    git fetch --progress origin
+6.5  hold back files created in not-downloaded folders → .backups/<ts>_outside_checkout/
+6.3  company repo: stop (nothing changed) if origin/main turned a readable private folder or an
+     ancestor of it into a file or symlink
+6.6  company repo: new files under a name the member may not use → .backups/<ts>_reserved_path/
+7    reconcile the sparse checkout with the member's exclusions (download-choices.md)
+8    warn about files deleted locally (sync / restore / cancel)
+9    git add --sparse . → unstage anything under .backups/, .workspace/ or a private folder
+     (index only) → commit (AI message, below) → record localHash
+10   git pull --rebase --progress origin main  (stopped mid-rebase → 11)
+11   conflict loop until the rebase finishes:
+       a back up the local version of newly conflicted files
+       b classify unmerged entries by stage 2: present → checkout --ours + add -f;
+         absent → rm --force (the server deleted it)
+       c rebase --continue
+11.5 if commits were replayed: drop duplicate lines union merging left in .gitignore → commit
+12   restore department folders deleted locally
+13   push --set-upstream --progress (also when only older unpushed commits remain);
+     on failure see "Push results" below
+```
+
+Large-file scan (step 4): stat only what git lists (`ls-files --cached` + `--others
+--exclude-standard`, plus nested repos / gitlinks); never `.git`, `node_modules`,
+`.backups`/`.workspace` at any depth, or a private folder. "Already ignored" means
+`git check-ignore --no-index`. The line is the path as a literal pattern (glob characters,
+leading `#`/`!`, trailing spaces escaped; a root file anchored as `/name`). Tracked files over
+the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileThreshold`.
+
+## Conflict resolution
+
+- The server's version wins for a conflicted file; the member's version is first saved to
+  `.backups/`. A file the server deleted follows the deletion (same rule), also backed up.
+- `.gitignore` files (any depth) merge with git's `union` driver instead, so both sides' lines
+  survive and the file never stops a rebase.
+- During a rebase `--ours` is the **upstream / server** side — the inverse of a merge. Keep
+  `--ours` here; switching to `--theirs` would keep the member's side and drop the teammate's.
+- Use `rebase --continue`, not `--abort`, so auto-merged files are kept. Use `rebase --skip`
+  only when the pick is genuinely empty; any other stall aborts and reports the error.
+- Stage the server version with `git add -f`, and pass `--sparse` to every index update on a
+  path sync did not just check out (conflict `add -f` / `rm`, nested-repo and `.personal`
+  untracking, the protected-config restore). Both were found by the harness: without them the
+  same pick failed on every sync. After the rebase, excluded nested repos are untracked again
+  (one extra commit) so the exclusion holds within the same sync.
+- Back up with `git cat-file -p <localHash>:<file>` into a Buffer (`binaryCatFile`), never
+  `git show` (a string corrupts pptx/png). Fallbacks: `:3:<file>` when the file is gone at
+  `localHash`; an *earlier* local version that a pick replaces goes to
+  `.backups/<timestamp>_<round>/` with its own `_metadata.json`.
+- The success message reports overwritten and deleted files separately; the result carries
+  `conflictFiles` and `deletedConflictFiles` — a file that just vanishes reads as data loss.
+
+## Push results (step 13)
+
+- A failed push writes `.git/PENDING_PUSH`; the local commit is never rolled back.
+- A push that throws may still have landed (watchdog kill during a long hook, connection lost
+  after acceptance). Every push goes through `pushToServer` → `pushLandedDespiteError`
+  (`push-landed.ts`): unless the error is a recognised rejection (hook markers, `[rejected]`,
+  non-fast-forward, auth), fetch and treat an empty `origin/main..HEAD` as success.
+- Rejections, handled in `git-sync.ts` with `protected-config.ts` (markers: `push-check.md`):
+  - `[PERSONAL_PATH]` / `[LOCAL_ONLY_PATH]` — no dialog: squash the unpushed commits, untrack
+    the listed paths (kept on disk), push once more. Still rejected → `errorType`
+    `personal_path` / `local_only_path` with `personalFiles` / `localOnlyFiles`, no PENDING_PUSH.
+  - `[RESERVED_PATH]` — no dialog: squash (ancestor check), back up the listed files to
+    `.backups/<ts>_reserved_path/`, remove them from commit and disk, put an exact move back,
+    push once. Second rejection → `errorType: 'reserved_path'`.
+  - `[SECRET_DETECTED]` — squash the unpushed commits (files unchanged), push once more; if the
+    files still hold the secret, report them (`secretDetected`, no PENDING_PUSH). The app never
+    removes a secret for the member.
+  - `[PROTECTED_CONFIG]` and/or `[WRITE_DENIED]` — ask first (one dialog per section, both before
+    anything changes): 「このファイルは管理者だけが変更できます」 / 「編集できないファイルがあります」,
+    default 「元に戻して残りを同期」. On restore: first push the unpushed commits squashed with
+    every file as it is now; only if still rejected, back up the member's version, `reset --soft
+    origin/main`, put the listed paths back to the server's version (protected first; an exact
+    move into a denied folder is moved back), commit, push once. Cancel / no window →
+    `errorType` `protected_config` / `write_denied` with the file list, offered again next sync.
+  - `[HOOK_ERROR]` — the server could not run its checks; nothing was accepted; retry later.
+- Recovery rewrites the unpushed commits (`reset --soft origin/main`, refused unless
+  `origin/main` is an ancestor of `HEAD`) because the server checks every commit in the range: a
+  retry or a revert on top would fail forever. Push is attempted whenever commits are unpushed.
+- Result fields: `errorType` is one of `network`, `auth`, `conflict`, `locked`, `push_failed`,
+  `protected_config`, `write_denied`, `personal_path`, `local_only_path`, `reserved_path`,
+  `unknown` (the IPC contract types it as these names or `string`). Private folders add
+  `privateFolders` (per folder), `newPrivateFolders`, `lostPrivateFolders`, `madePublicFolders`;
+  a failed private folder makes the whole result `success: false` with
+  「非公開フォルダ『…』を同期できませんでした。…その他のフォルダは同期しました」.
+- On Windows a transient file lock during the rebase is retried twice before it counts as failure.
+
+## Backups
+
+- `.backups/` (gitignored, local only): `<ts>/` conflict copies + `_metadata.json`
+  (`conflictFiles`, `deletedConflictFiles`); `<ts>_protected/`, `_write_denied/`,
+  `_outside_checkout/` (`folders`, `files`, `serverFiles`), `_reserved_path/` (+ `reasons`),
+  `_editor_overwrite/` (disk version an editor tab overwrote).
+- Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
+  `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
+  `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.
+- `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
+  are pruned at the start of each sync.
+
+## Commit message (step 9)
+
+Written by the AI the member signs in with (`commit-message.ts`, generator built in
+`services/commit-messages.ts`): the chosen auth mode first — Claude Code as a one-shot
+`claude -p --model haiku` (`claude-oneshot.ts`), Codex (`generateCodexText`) or the API key
+(`claude-haiku-5-5`) — then whichever other is ready. Input is only `git diff --cached
+--name-status` + `--stat` (`core.quotePath=false`, capped) as JSON data; only the answer's
+`<commit_message>` block is used, sanitised (72-char subject, ≤ 20 body lines, ≤ 2,000 chars).
+No AI, a failure, no tagged block or 30 s → 「Sync from AI Company Builder」. The message is never
+logged. A private folder's clone (`kind: 'scope'`) uses the API key only, so its file names never
+go to a CLI sign-in or another vendor.

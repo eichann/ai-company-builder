@@ -23,7 +23,7 @@
 // does not cover is the HTTP layer itself (askpass, postBuffer, http-backend
 // streaming) — that belongs to the server's git-http tests.
 //
-// See "Testing Sync" in CLAUDE.md for how to run it and add scenarios.
+// See .claude/rules/sync-testing.md for how to run it and add scenarios.
 
 import fs from 'node:fs'
 import os from 'node:os'

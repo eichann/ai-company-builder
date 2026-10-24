@@ -1,6 +1,6 @@
 /**
  * An open text file against the file on disk (TabbedEditorPanel; see
- * "External changes to open files" in CLAUDE.md).
+ * "External changes to open files" in .claude/rules/files-and-editor.md).
  *
  * `originalContent` is the disk version the tab last loaded or saved. A tab
  * with no edits follows the disk (the AI's edit, a sync pull). A tab with

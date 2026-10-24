@@ -77,7 +77,7 @@ export default tseslint.config(
   // (electron/features/ports.ts, electron/ipc/registrar.ts), never on
   // Electron: only the shell (main.ts, preload.ts, electron-adapter.ts,
   // voice-input.ts) imports it, so another desktop shell replaces that layer
-  // only. CLAUDE.md "Main process layout".
+  // only. .claude/rules/ipc-and-main-process.md "Layout".
   {
     files: ['electron/features/**/*.ts', 'electron/services/**/*.ts', 'electron/ipc/**/*.ts'],
     rules: {

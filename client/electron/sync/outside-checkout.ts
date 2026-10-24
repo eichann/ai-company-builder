@@ -1,7 +1,7 @@
 // Files created inside a folder the member excluded from their checkout
 // (sparse exclusions: the settings panel, or the departments not picked at
-// first setup) — a department, or any folder inside one. See the guards
-// table in CLAUDE.md.
+// first setup) — a department, or any folder inside one. See
+// .claude/rules/sync-guards.md.
 //
 // The folder is absent on disk, so neither the member nor the chat AI can see
 // what teammates keep there. A file written at e.g. 営業部/提案書.md lands on

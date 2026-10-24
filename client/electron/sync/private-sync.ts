@@ -1,6 +1,6 @@
 // The private-folder steps of git:sync around the company repository's own
-// sync (git-sync.ts drives them in this order; see "Private Folders (client
-// sync, stage 3b)" in CLAUDE.md):
+// sync (git-sync.ts drives them in this order; see
+// .claude/rules/private-folders-client.md):
 //
 //   preparePrivateFolders  (before the company sync)
 //     /me/scopes → compare with the cached answer:

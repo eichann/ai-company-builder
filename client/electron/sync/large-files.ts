@@ -1,5 +1,5 @@
 // Step 4 of git:sync: files over 100 MB are kept out of what sync shares by
-// a line in the root .gitignore (CLAUDE.md, "Architecture: Client Sync").
+// a line in the root .gitignore (.claude/rules/sync.md, step 4).
 //
 // The scan used to walk and stat the whole company folder — .workspace/, app
 // bundles and other ignored trees included — pruned by a substring test on

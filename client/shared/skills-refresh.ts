@@ -1,6 +1,6 @@
 /**
  * When the skills list must be re-read (main-process cache and renderer
- * refresh share these rules, see "Skills list freshness" in CLAUDE.md).
+ * refresh share these rules, see "Skills list freshness" in .claude/rules/files-and-editor.md).
  *
  * `skills:list` scans one of two things for a company root:
  *  - the company-wide view (department folder ''): `<root>/.claude/skills/`;

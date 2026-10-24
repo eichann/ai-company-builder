@@ -210,7 +210,7 @@ const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_pat
 /** The app's own MCP servers: read-only, never send anything out. */
 const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations']
 
-/** Never shared: the app's scratch area and personal folders (see CLAUDE.md, .gitignore essentials). */
+/** Never shared: the app's scratch area and personal folders (see .claude/rules/sync.md, .gitignore essentials). */
 function isUnsharedPath(rel: string): boolean {
   const segments = rel.normalize('NFC').split('/')
   if (segments[0] === '.workspace' || segments[0] === '.backups') return true
