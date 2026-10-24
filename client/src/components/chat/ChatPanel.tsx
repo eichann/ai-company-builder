@@ -1,6 +1,4 @@
 import { OpenConsultationContext } from './consultation-context'
-import { referenceFromTool, type ConsultationReference } from '../../../shared/consultation-reference'
-import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
@@ -14,7 +12,7 @@ import { ghostSuggestion, handleGhostKey, setSuggestion } from './ghostSuggestio
 import { canOfferSuggestion, shouldRequestSuggestion, suggestionDescription } from './promptSuggestion'
 import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
 import { normalizeSuggestion } from '../../../shared/prompt-suggestion'
-import { STEER_PART_TYPE, canSteerText, type SteerResponse } from '../../../shared/steer'
+import { canSteerText } from '../../../shared/steer'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useChat } from '@ai-sdk/react'
@@ -57,141 +55,12 @@ import { streamThrottleMs } from './markdownBlocks'
 import { historyThumbnail } from './historyThumbnail'
 import { useAuthStore } from '../../stores/authStore'
 import type { ChatSession } from '../../../shared/chat-history'
-
-// ============================================================================
-// Types
-// ============================================================================
-
-
-/** A message that waits for the running turn to end (see handleSend). */
-interface QueuedSend {
-  text: string
-  files?: File[]
-  filePaths?: string[]
-  /** Its `data-steer` part, when the agent took it but did not read it in time. */
-  steerPartId?: string
-}
-
-/** Push an extra instruction into the conversation's running turn (chat-server `/api/steer`). */
-async function steerRunningTurn(server: { port: number; authToken: string }, appSessionId: string, text: string): Promise<SteerResponse> {
-  try {
-    const res = await fetch(`http://127.0.0.1:${server.port}/api/steer`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appSessionId, text }),
-    })
-    const data = res.ok ? await res.json() as Partial<SteerResponse> : null
-    return data?.status === 'delivered' || data?.status === 'not-delivered' ? { status: data.status, id: data.id } : { status: 'unavailable' }
-  } catch {
-    return { status: 'unavailable' }
-  }
-}
-
-// ============================================================================
-// Hooks
-// ============================================================================
-
-function useChatServerInfo() {
-  const [info, setInfo] = useState<{ port: number; authToken: string } | null>(null)
-
-  useEffect(() => {
-    window.electronAPI.getChatServerInfo().then((result: { port: number; authToken: string } | null) => {
-      if (result) setInfo(result)
-    })
-    const unsub = window.electronAPI.onChatServerInfo((serverInfo: { port: number; authToken: string }) => {
-      setInfo(serverInfo)
-    })
-    return unsub
-  }, [])
-
-  return info
-}
-
-// ============================================================================
-// Session Conversion (UIMessage <-> ChatSession)
-// ============================================================================
-
-function uiMessageToSessionMessage(
-  msg: UIMessage,
-  timestamp: Date,
-): ChatSession['messages'][0] {
-  let content = ''
-  let thinking: string | undefined
-  const consultationReferences: ConsultationReference[] = []
-  const choicePrompts: StoredChoicePrompt[] = []
-  const steerInstructions: StoredSteer[] = []
-  for (const part of msg.parts) {
-    const choice = storedChoiceFromPart(part as { type: string; data?: unknown }, content.length, choicePrompts)
-    if (choice) { choicePrompts.push(choice); continue }
-    const steer = storedSteerFromPart(part as { type: string; data?: unknown }, content.length, steerInstructions)
-    if (steer) { steerInstructions.push(steer); continue }
-    const p = part as { type: string; toolName?: string; output?: unknown; data?: ConsultationReference }
-    const ref = p.type === 'data-consultation-reference' ? p.data : referenceFromTool(p.toolName || p.type.replace(/^tool-/, ''), p.output)
-    if (ref && !consultationReferences.some(r => r.id === ref.id)) consultationReferences.push(ref)
-    if (part.type === 'text') content += part.text
-    if (part.type === 'reasoning') thinking = (thinking || '') + part.text
-    // Summarize tool invocations as text
-    if (typeof part.type === 'string' && part.type.startsWith('tool-')) {
-      const toolName = part.type.replace('tool-', '')
-      content += `\n[Tool: ${toolName}]`
-    }
-    if (part.type === 'dynamic-tool') {
-      const dynPart = part as { toolName: string }
-      content += `\n[Tool: ${dynPart.toolName}]`
-    }
-  }
-  return {
-    id: msg.id,
-    role: msg.role as 'user' | 'assistant',
-    content,
-    timestamp: timestamp.toISOString(),
-    thinking,
-    ...(consultationReferences.length ? { consultationReferences } : {}),
-    ...(choicePrompts.length ? { choicePrompts } : {}),
-    ...(steerInstructions.length ? { steerInstructions } : {}),
-  }
-}
-
-// Converted messages, per UIMessage object: while a reply streams only its own
-// object changes (@ai-sdk/react replaces just the last message), so an
-// autosave converts one message instead of the whole conversation.
-const sessionMessageCache = new WeakMap<UIMessage, { at: number; images?: string[]; referenceFiles?: string[]; value: ChatSession['messages'][0] }>()
-
-function sessionMessageFor(msg: UIMessage, timestamp: Date, images?: string[], referenceFiles?: string[]): ChatSession['messages'][0] {
-  const cached = sessionMessageCache.get(msg)
-  if (cached && cached.at === timestamp.getTime() && cached.images === images && cached.referenceFiles === referenceFiles) return cached.value
-  const value = {
-    ...uiMessageToSessionMessage(msg, timestamp),
-    ...(images ? { images } : {}),
-    ...(referenceFiles ? { referenceFiles } : {}),
-  }
-  sessionMessageCache.set(msg, { at: timestamp.getTime(), images, referenceFiles, value })
-  return value
-}
-
-/** Autosave cadence (was 1 s; every tick re-serialised whole conversations in every tab). */
-const AUTOSAVE_INTERVAL_MS = 4000
-
-function sameSaveInputs(a: unknown[] | null, b: unknown[]): boolean {
-  return !!a && a.length === b.length && a.every((value, i) => Object.is(value, b[i]))
-}
-
-function sessionMessageToUIMessage(
-  msg: ChatSession['messages'][0],
-): UIMessage {
-  const parts: UIMessage['parts'] = []
-  if (msg.thinking) {
-    parts.push({ type: 'reasoning' as const, text: msg.thinking })
-  }
-  // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
-  parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions))
-  for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
-  return {
-    id: msg.id,
-    role: msg.role as 'user' | 'assistant',
-    parts,
-  }
-}
+import type { ChatServerClient } from './chatServerClient'
+import { useChatServer } from './hooks/useChatServer'
+import { AUTOSAVE_INTERVAL_MS, greetingMessages, messageText, sameSaveInputs, sessionMessageFor, sessionMessageToUIMessage, titleTranscript, uiMessageToSessionMessage } from './chatSessionMessages'
+import { newChatTab, persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, type ChatTab } from './chatTabsStorage'
+import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts, type QueuedSend } from './queuedSends'
+import { buildChatRequestBody } from './chatRequestBody'
 
 // ============================================================================
 // Utility Components
@@ -1497,7 +1366,7 @@ interface ChatPanelChatProps {
   isActive: boolean
   departmentPath?: string
   activeDepartment?: { name: string; folder: string }
-  serverInfo: { port: number; authToken: string }
+  chatServer: ChatServerClient
   authMode: AuthMode
   codexStatus: CodexStatus
   slashCommands?: SlashCommandItem[]
@@ -1512,7 +1381,7 @@ interface ChatPanelChatProps {
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, activeDepartment, serverInfo, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -1645,59 +1514,42 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   // The company checkout root: the chat's write guard judges paths relative to it.
   const companyRootRef = useRef(currentCompany?.rootPath)
   companyRootRef.current = currentCompany?.rootPath
-  // Transport (memoized - only recreated when server info changes)
+  // Transport (memoized - only recreated when the chat server changes). The
+  // body is read from refs when each request is made (chatRequestBody.ts).
   const transport = useMemo(() => {
     return new DefaultChatTransport({
-      api: `http://127.0.0.1:${serverInfo.port}/api/chat`,
-      headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-      body: () => {
-        const body: Record<string, unknown> = {
-          authMode: authModeRef.current,
-          agentSession: agentSessionRef.current,
-          workingDirectory: workingDirRef.current,
-          companyId: companyIdRef.current,
-          companyRootPath: companyRootRef.current,
-          activeDepartment: activeDepartmentRef.current || undefined,
-          modelId: aiModelRef.current,
-          effort: aiEffortRef.current,
-          // Settings → 入力候補; off → the CLI is not asked for a suggestion.
-          promptSuggestions: promptSuggestionSetting.getSnapshot(),
-        }
-        // Ensure app session ID exists (eagerly create on first request)
-        if (!appSessionIdRef.current) {
-          appSessionIdRef.current = crypto.randomUUID()
-        }
-        body.appSessionId = appSessionIdRef.current
-        // Include persisted Claude CLI session ID for resume after restart
-        if (claudeSessionIdRef.current) {
-          body.claudeSessionId = claudeSessionIdRef.current
-        }
-        if (pendingImagesRef.current.length > 0) {
-          body.images = pendingImagesRef.current
-          pendingImagesRef.current = []
-        }
-        if (pendingFilePathsRef.current.length > 0) {
-          body.referenceFiles = pendingFilePathsRef.current
-          pendingFilePathsRef.current = []
-        }
-        handoffRequestRef.current = companyIdRef.current && appSessionIdRef.current ? { companyId: companyIdRef.current, sessionId: appSessionIdRef.current, provider: authModeRef.current } : null
-        return body
-      },
+      api: chatServer.chatUrl,
+      headers: chatServer.headers,
+      body: () => buildChatRequestBody({
+        authMode: authModeRef,
+        agentSession: agentSessionRef,
+        workingDirectory: workingDirRef,
+        companyId: companyIdRef,
+        companyRootPath: companyRootRef,
+        activeDepartment: activeDepartmentRef,
+        modelId: aiModelRef,
+        effort: aiEffortRef,
+        promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
+        appSessionId: appSessionIdRef,
+        claudeSessionId: claudeSessionIdRef,
+        pendingImages: pendingImagesRef,
+        pendingFilePaths: pendingFilePathsRef,
+        handoffRequest: handoffRequestRef,
+      }),
     })
-  }, [serverInfo.port, serverInfo.authToken])
+  }, [chatServer])
 
   // Plan usage for the header meter (shared/rate-limits.ts): streamed live as
   // transient data parts, and fetched here for a tab that has not streamed yet.
   const fetchRateLimits = useCallback(async () => {
     if (!hasRateLimits(authModeRef.current)) return
     try {
-      const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/rate-limits?provider=${authModeRef.current}`, { headers: { Authorization: `Bearer ${serverInfo.authToken}` } })
-      const data = await res.json() as { rateLimits?: RateLimitSnapshot | null }
+      const data = await chatServer.rateLimits(authModeRef.current)
       setRateLimits(data.rateLimits)
     } catch {
       // The meter keeps what it has.
     }
-  }, [serverInfo.port, serverInfo.authToken])
+  }, [chatServer])
 
   // Declared before useChat: its onFinish reports handoff failures here.
   const [historyError, setHistoryError] = useState<string | null>(null)
@@ -1737,10 +1589,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       const finishedSessionId = appSessionIdRef.current
       const finishedCompanyId = currentCompany?.id
       if (finishedSessionId && finishedCompanyId) {
-        fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${finishedSessionId}`, {
-          headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-        })
-          .then(res => res.json())
+        chatServer.sessionInfo(finishedSessionId)
           .then(data => {
             if (data.agentSession) {
               if (appSessionIdRef.current === finishedSessionId) agentSessionRef.current = data.agentSession
@@ -1889,7 +1738,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
             appSessionIdRef.current = crypto.randomUUID()
             setCurrentSessionId(appSessionIdRef.current)
           }
-          setMessages([{ id: '1', role: 'assistant', parts: [{ type: 'text', text: t('chat.greeting', { company: currentCompany?.name || '' }) }] }])
+          setMessages(greetingMessages(t('chat.greeting', { company: currentCompany?.name || '' })))
         }
         historyReadyRef.current = true
       } catch (e) {
@@ -1990,7 +1839,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     const inputs = [sessionId, snapshot, draftInput, messageImages, messageReferenceFiles, claudeSessionIdRef.current, agentSessionRef.current]
     if (!override && !pendingFingerprintRef.current && savedFingerprintRef.current && sameSaveInputs(savedInputsRef.current, inputs)) return true
     const firstUser = snapshot.find(m => m.role === 'user')
-    const title = customTitleRef.current?.title || (firstUser ? extractMessageText(firstUser).slice(0, 60) : t('chat.newChat'))
+    const title = customTitleRef.current?.title || (firstUser ? messageText(firstUser).slice(0, 60) : t('chat.newChat'))
     const session: ChatSession = {
       id: sessionId, companyId: currentCompany.id, title,
       messages: snapshot.map(m => sessionMessageFor(m, timestampsRef.current.get(m.id) || new Date(), messageImages.get(m.id), messageReferenceFiles.get(m.id))),
@@ -2042,41 +1891,21 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   }
   saveRef.current = saveCurrentSession
 
-  // Helper: extract plain text from a UIMessage for title generation
-  function extractMessageText(msg: UIMessage): string {
-    let text = ''
-    for (const part of msg.parts) {
-      if (part.type === 'text') text += part.text
-    }
-    return text
-  }
-
   // Generate a concise title for the current session via the chat-server's Haiku endpoint
   async function generateAndSaveTitle() {
-    if (!currentCompany?.id || !serverInfo) return
+    if (!currentCompany?.id || !chatServer) return
     if (titleGenerationDoneRef.current) return
 
     // Skip greeting (first assistant message); take up to 6 subsequent messages
-    const transcript = messages.slice(1, 7).map(m => ({
-      role: m.role as 'user' | 'assistant',
-      content: extractMessageText(m),
-    })).filter(m => m.content.trim().length > 0)
+    const transcript = titleTranscript(messages)
 
     if (transcript.length < 2) return
     const targetSessionId = appSessionIdRef.current!
     titleGenerationDoneRef.current = true
 
     try {
-      const res = await fetch(`http://127.0.0.1:${serverInfo.port}/api/generate-title`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${serverInfo.authToken}`,
-        },
-        body: JSON.stringify({ messages: transcript, authMode: authModeRef.current, modelId: aiModelRef.current }),
-      })
-      if (!res.ok) return
-      const data = await res.json() as { title?: string; error?: string }
+      const data = await chatServer.generateTitle({ messages: transcript, authMode: authModeRef.current, modelId: aiModelRef.current })
+      if (!data) return
       const newTitle = data.title?.trim()
       if (!newTitle) return
 
@@ -2103,12 +1932,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       if (!await saveCurrentSession()) return false
     }
     // Clear Claude CLI session mapping on the server
-    if (appSessionIdRef.current) {
-      fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-      }).catch(() => {})
-    }
+    if (appSessionIdRef.current) chatServer.forgetSession(appSessionIdRef.current)
     appSessionIdRef.current = crypto.randomUUID()
     writerIdRef.current = crypto.randomUUID()
     writeSequenceRef.current = 0
@@ -2121,11 +1945,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     claudeSessionIdRef.current = null
     agentSessionRef.current = null
     timestampsRef.current.clear()
-    const greeting: UIMessage[] = [{
-      id: '1',
-      role: 'assistant' as const,
-      parts: [{ type: 'text' as const, text: t('chat.greeting', { company: currentCompany?.name || '' }) }],
-    }]
+    const greeting = greetingMessages(t('chat.greeting', { company: currentCompany?.name || '' }))
     messagesRef.current = greeting
     setMessages(greeting)
     setCurrentSessionId(appSessionIdRef.current)
@@ -2231,14 +2051,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
         window.clearTimeout(compositionEndTimerRef.current)
       }
       // Clean up Claude CLI session on the server when tab is closed
-      if (appSessionIdRef.current) {
-        fetch(`http://127.0.0.1:${serverInfo.port}/api/session/${appSessionIdRef.current}`, {
-          method: 'DELETE',
-          headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-        }).catch(() => {})
-      }
+      if (appSessionIdRef.current) chatServer.forgetSession(appSessionIdRef.current)
     }
-  }, [serverInfo.authToken, serverInfo.port, stop])
+  }, [chatServer, stop])
 
   // Send handler (supports interrupt: stop current stream + send new message)
   const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
@@ -2260,9 +2075,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       const item: QueuedSend = { text, files, filePaths }
       const sessionId = appSessionIdRef.current
       if (agentCan(authModeRef.current, 'steering') && sessionId && !files?.length && !filePaths?.length && canSteerText(text)) {
-        void steerRunningTurn(serverInfo, sessionId, text).then(response => {
+        void chatServer.steer(sessionId, text).then(response => {
           if (response.status === 'delivered') return
-          setQueuedSends(queue => [...queue, { ...item, ...(response.id ? { steerPartId: `steer-${response.id}` } : {}) }])
+          setQueuedSends(queue => [...queue, { ...item, ...(response.id ? { steerPartId: steerPartId(response.id) } : {}) }])
         })
       } else {
         setQueuedSends(queue => [...queue, item])
@@ -2306,28 +2121,27 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     }
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, currentSessionId, serverInfo])
+  }, [status, sendMessage, currentSessionId, chatServer])
 
   // The turn ended: waiting sends go out together as the next message — or,
   // after a stop or an error, back into the input. An instruction the agent did not
   // read leaves the reply first (it is sent again as a normal message).
   useEffect(() => {
     if ((status !== 'ready' && status !== 'error') || queuedSends.length === 0) return
-    const unread = new Set(queuedSends.flatMap(item => item.steerPartId ? [item.steerPartId] : []))
+    const unread = unreadSteerParts(queuedSends)
     if (unread.size) {
-      setMessages(current => current.map(m => m.role !== 'assistant' ? m : { ...m, parts: m.parts.filter(p => !(p.type === STEER_PART_TYPE && unread.has((p as { id?: string }).id ?? ''))) }))
+      setMessages(current => withoutSteerParts(current, unread))
     }
     if (status === 'error' || lastTurnAbortedRef.current) {
       const draft = chatInputApiRef.current?.getValue() ?? ''
-      chatInputApiRef.current?.setValue([draft, ...queuedSends.map(item => item.text)].filter(text => text.trim()).join('\n\n'))
+      chatInputApiRef.current?.setValue(draftWith(draft, queuedSends.map(item => item.text)))
       setQueuedSends([])
       return
     }
     // All of them as one message: one more turn, not a race of several.
-    const files = queuedSends.flatMap(item => item.files ?? [])
-    const filePaths = [...new Set(queuedSends.flatMap(item => item.filePaths ?? []))]
+    const merged = mergeQueuedSends(queuedSends)
     setQueuedSends([])
-    void handleSend(queuedSends.map(item => item.text).join('\n\n'), files.length ? files : undefined, filePaths.length ? filePaths : undefined)
+    void handleSend(merged.text, merged.files, merged.filePaths)
   }, [status, queuedSends, handleSend, setMessages])
 
   const cancelQueuedSend = useCallback((index: number) => {
@@ -2335,7 +2149,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     if (!item) return
     setQueuedSends(queue => queue.filter((_, i) => i !== index))
     const draft = chatInputApiRef.current?.getValue() ?? ''
-    chatInputApiRef.current?.setValue([draft, item.text].filter(text => text.trim()).join('\n\n'))
+    chatInputApiRef.current?.setValue(draftWith(draft, [item.text]))
     chatInputApiRef.current?.focus()
   }, [queuedSends])
 
@@ -2347,18 +2161,15 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     const sessionId = appSessionIdRef.current
     if (!sessionId) return
     let cancelled = false
-    fetch(`http://127.0.0.1:${serverInfo.port}/api/prompt-suggestion/${encodeURIComponent(sessionId)}`, {
-      headers: { Authorization: `Bearer ${serverInfo.authToken}` },
-    })
-      .then(res => res.ok ? res.json() : null)
-      .then((data: { suggestion?: unknown } | null) => {
+    chatServer.promptSuggestion(sessionId)
+      .then(data => {
         if (cancelled || appSessionIdRef.current !== sessionId) return
         const suggestion = normalizeSuggestion(data?.suggestion)
         if (suggestion && canOfferSuggestion({ running: false, waitingForMember: false, draft: chatInputApiRef.current?.getValue() ?? '' })) setPromptSuggestion(suggestion)
       })
       .catch(() => {})
     return () => { cancelled = true }
-  }, [finishedTurn, serverInfo.port, serverInfo.authToken])
+  }, [finishedTurn, chatServer])
 
   useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
   const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
@@ -2633,64 +2444,6 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
 // Chat Tab Bar
 // ============================================================================
 
-interface ChatTab {
-  id: string  // Ephemeral handle (random UUID), regenerated on each app start
-  title: string
-  sessionId: string | null  // Persisted chat session id (null until first save)
-}
-
-// ============================================================================
-// Persisted chat tab state (per company)
-// ============================================================================
-
-const CHAT_TABS_KEY_PREFIX = 'chatTabs:'
-
-type PersistedChatTabs = {
-  tabs: Array<{ title: string; sessionId: string | null }>
-  activeIndex: number
-}
-
-function safeReadChatTabs(companyId: string): PersistedChatTabs | null {
-  try {
-    const raw = localStorage.getItem(`${CHAT_TABS_KEY_PREFIX}${companyId}`)
-    if (!raw) return null
-    const parsed = JSON.parse(raw)
-    if (!parsed || !Array.isArray(parsed.tabs)) return null
-    const seenSessionIds = new Set<string>()
-    const tabs = parsed.tabs
-      .filter((t: unknown): t is { title: unknown; sessionId: unknown } =>
-        typeof t === 'object' && t !== null)
-      .map((t: { title: unknown; sessionId: unknown }) => ({
-        title: typeof t.title === 'string' ? t.title : '',
-        sessionId: typeof t.sessionId === 'string' ? t.sessionId : null,
-      }))
-    const uniqueTabs = tabs.filter((tab: { sessionId: string | null }) => {
-      if (!tab.sessionId) return true
-      if (seenSessionIds.has(tab.sessionId)) return false
-      seenSessionIds.add(tab.sessionId)
-      return true
-    })
-    if (uniqueTabs.length === 0) return null
-    const activeIndex =
-      typeof parsed.activeIndex === 'number' && parsed.activeIndex >= 0 && parsed.activeIndex < tabs.length
-        ? parsed.activeIndex
-        : 0
-    const activeSessionId = tabs[activeIndex]?.sessionId
-    const uniqueActiveIndex = Math.max(0, uniqueTabs.findIndex((tab: { sessionId: string | null }) => tab.sessionId === activeSessionId))
-    return { tabs: uniqueTabs, activeIndex: uniqueActiveIndex }
-  } catch {
-    return null
-  }
-}
-
-function safeWriteChatTabs(companyId: string, state: PersistedChatTabs): void {
-  try {
-    localStorage.setItem(`${CHAT_TABS_KEY_PREFIX}${companyId}`, JSON.stringify(state))
-  } catch {
-    // Storage may be unavailable; fail silently.
-  }
-}
-
 // ============================================================================
 // Main ChatPanel Component (Auth & Server wrapper + Tab management)
 // ============================================================================
@@ -2710,7 +2463,7 @@ export function ChatPanel(props: ChatPanelProps) {
 
 function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: ChatPanelProps) {
   const { t } = useTranslation()
-  const serverInfo = useChatServerInfo()
+  const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
 
   const panelRef = useRef<HTMLDivElement>(null)
@@ -2732,7 +2485,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
     const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 680))
     observer.observe(panel)
     return () => observer.disconnect()
-  }, [isChecking, isReady, serverInfo])
+  }, [isChecking, isReady, chatServer])
 
   // Synchronously hydrate the tab list from localStorage during the first
   // render so multi-tab users see the right tab count immediately — no
@@ -2740,21 +2493,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   // freshly-generated UUIDs (the persisted entry only stores titles + session ids).
   const initialChatStateRef = useRef<{ tabs: ChatTab[]; activeTabId: string } | null>(null)
   if (initialChatStateRef.current === null) {
-    const persisted = currentCompany?.id ? safeReadChatTabs(currentCompany.id) : null
-    if (persisted && persisted.tabs.length > 0) {
-      const restored: ChatTab[] = persisted.tabs.map((tab) => ({
-        id: crypto.randomUUID(),
-        title: tab.title || t('chat.newChat'),
-        sessionId: tab.sessionId,
-      }))
-      initialChatStateRef.current = {
-        tabs: restored,
-        activeTabId: restored[persisted.activeIndex]?.id ?? restored[0].id,
-      }
-    } else {
-      const tab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
-      initialChatStateRef.current = { tabs: [tab], activeTabId: tab.id }
-    }
+    initialChatStateRef.current = restoreChatTabs(currentCompany?.id ? safeReadChatTabs(currentCompany.id) : null, t('chat.newChat'))
   }
 
   // Tab management state
@@ -2764,7 +2503,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   tabsRef.current = tabs
 
   const createNewTab = useCallback(() => {
-    const newTab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
+    const newTab = newChatTab(t('chat.newChat'))
     setTabs(prev => [...prev, newTab])
     setActiveTabId(newTab.id)
   }, [t])
@@ -2772,7 +2511,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   const openSession = useCallback((sessionId: string) => {
     const existing = tabsRef.current.find(tab => tab.sessionId === sessionId)
     if (existing) { setActiveTabId(existing.id); return }
-    const tab: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId }
+    const tab = newChatTab(t('chat.newChat'), sessionId)
     tabsRef.current = [...tabsRef.current, tab]
     setTabs(tabsRef.current)
     setActiveTabId(tab.id)
@@ -2784,7 +2523,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
       if (companyId !== currentCompany.id || !deletedSessionId) return
       const remaining = tabsRef.current.filter(tab => tab.sessionId !== deletedSessionId)
       if (remaining.length === tabsRef.current.length) return
-      if (!remaining.length) remaining.push({ id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null })
+      if (!remaining.length) remaining.push(newChatTab(t('chat.newChat')))
       tabsRef.current = remaining
       setTabs(remaining)
       setActiveTabId(id => remaining.some(tab => tab.id === id) ? id : remaining[0].id)
@@ -2859,20 +2598,9 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
     isFirstTabMountRef.current = false
 
     if (!wasFirstMount) {
-      const persisted = safeReadChatTabs(targetCompanyId)
-      if (persisted && persisted.tabs.length > 0) {
-        const restored: ChatTab[] = persisted.tabs.map((tab) => ({
-          id: crypto.randomUUID(),
-          title: tab.title || t('chat.newChat'),
-          sessionId: tab.sessionId,
-        }))
-        setTabs(restored)
-        setActiveTabId(restored[persisted.activeIndex]?.id ?? restored[0].id)
-      } else {
-        const fresh: ChatTab = { id: crypto.randomUUID(), title: t('chat.newChat'), sessionId: null }
-        setTabs([fresh])
-        setActiveTabId(fresh.id)
-      }
+      const restored = restoreChatTabs(safeReadChatTabs(targetCompanyId), t('chat.newChat'))
+      setTabs(restored.tabs)
+      setActiveTabId(restored.activeTabId)
     }
     setTabRestoredForId(targetCompanyId)
   }, [currentCompany?.id, tabRestoredForId, t])
@@ -2880,11 +2608,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   // Persist the tab list whenever it changes, gated on restoration completion.
   useEffect(() => {
     if (!currentCompany?.id || tabRestoredForId !== currentCompany.id) return
-    const activeIndex = Math.max(0, tabs.findIndex(tab => tab.id === activeTabId))
-    safeWriteChatTabs(currentCompany.id, {
-      tabs: tabs.map(tab => ({ title: tab.title, sessionId: tab.sessionId })),
-      activeIndex,
-    })
+    safeWriteChatTabs(currentCompany.id, persistedChatTabs(tabs, activeTabId))
   }, [currentCompany?.id, tabRestoredForId, tabs, activeTabId])
 
 
@@ -2928,7 +2652,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
   // Render States
   // ============================================================================
 
-  if (isChecking || !serverInfo) {
+  if (isChecking || !chatServer) {
     return (
       <div className="h-full flex flex-col items-center justify-center p-8">
         <div className="relative">
@@ -3013,7 +2737,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
                 isActive={tab.id === activeTabId}
                 departmentPath={departmentPath}
                 activeDepartment={stableDepartment}
-                serverInfo={serverInfo}
+                chatServer={chatServer}
                 authMode={authMode}
                 codexStatus={codexStatus}
                 slashCommands={slashCommands}
