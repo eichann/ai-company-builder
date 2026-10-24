@@ -2,39 +2,39 @@
   "main": {
     "handle": {
       "agent-interaction:list": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": ""
       },
       "agent-interaction:respond": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": "id: string, response: AgentInteractionResponse"
       },
       "api:createCompany": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "name: string"
       },
       "api:getCompanies": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "api:getDepartments": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "companyId: string"
       },
       "auth:getSession": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "auth:signIn": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "email: string, password: string"
       },
       "auth:signOut": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "auth:signUp": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "email: string, password: string, name?: string"
       },
       "backup:list": {
@@ -54,27 +54,27 @@
         "params": ""
       },
       "chatHistory:deleteSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string"
       },
       "chatHistory:getSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string"
       },
       "chatHistory:getSummaries": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string"
       },
       "chatHistory:patchSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string, patch: ChatMetadataPatch"
       },
       "chatHistory:saveSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, session: ChatSession"
       },
       "chatHistory:search": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, query: string"
       },
       "codex:status": {
@@ -274,15 +274,15 @@
         "params": "repoPath: string, companyId: string, commitMessage: string"
       },
       "handoff:complete": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string, receipt: HandoffCompletion"
       },
       "handoff:get": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string"
       },
       "handoff:update": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string"
       },
       "privateFolders:create": {
@@ -322,7 +322,7 @@
         "params": "unsafeSkillMdPath: string, makeNurturing: boolean"
       },
       "tool-approval-response": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": "toolUseId: string, approved: boolean"
       },
       "tools:start": {
@@ -372,7 +372,7 @@
     },
     "on": {
       "chatHistory:flushSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, session: ChatSession"
       },
       "fs:startDrag": {
@@ -388,7 +388,7 @@
         "main.ts"
       ],
       "chatHistory:changed": [
-        "main.ts"
+        "features/chat-history/ipc.ts"
       ],
       "fs:changes": [
         "main.ts"

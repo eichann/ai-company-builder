@@ -311,11 +311,14 @@ domains); what has moved so far:
   stores. Features never import `electron` (eslint `no-restricted-imports`
   on `electron/features/**`, `electron/services/**`, `electron/ipc/**`).
   Done: `settings` (config:*, codex:status), `env` (env:*), `backups`
-  (backup:*).
+  (backup:*), `auth` (auth:*, api:*), `chat-history` (chatHistory:*,
+  handoff:*), `agent-interactions` (agent-interaction:*, tool approvals).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the
-  member's `claude`, status cached 30 s).
+  member's `claude`, status cached 30 s), `session.ts` (the server session
+  cookies, memory only — every server client and git's token read them
+  here).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports.
 - `main.ts` — the composition root: creates the services and stores, calls
   each `register…Ipc`, owns the window and the app lifecycle. Startup stays

@@ -1,7 +1,6 @@
 import { ConsultationReferences } from './consultations/service'
 import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
-import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { createCommitMessageGenerator } from './commit-message'
@@ -44,9 +43,7 @@ import { HandoffStore } from './handoff/store'
 import { HandoffService } from './handoff/service'
 import { writeClaudeHandoff } from './handoff/claude'
 import { writeCodexHandoff } from './handoff/codex'
-import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
-import type { ChatSession, ChatMetadataPatch, ChatHistoryChange, ChatSaveReceipt } from '../shared/chat-history'
 import { normalizePermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
@@ -60,7 +57,11 @@ import type { DirectoryTreeNode } from '../shared/ipc-contract'
 import { createConfigStore } from './services/config-store'
 import { createShellEnvironment } from './services/shell-env'
 import { createClaudeCli } from './services/claude-cli'
-import { desktopShell } from './electron-adapter'
+import { createWindowPort, desktopShell } from './electron-adapter'
+import { createSession } from './services/session'
+import { registerAuthIpc } from './features/auth/ipc'
+import { registerChatHistoryIpc } from './features/chat-history/ipc'
+import { createToolApprovals, registerAgentInteractionsIpc } from './features/agent-interactions/ipc'
 import { registerSettingsIpc } from './features/settings/ipc'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
@@ -127,6 +128,8 @@ const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
 
 let mainWindow: BrowserWindow | null = null
+// Events to the window (features/ports.ts WindowPort).
+const appWindow = createWindowPort(() => mainWindow)
 const hasInstanceLock = app.requestSingleInstanceLock()
 if (!hasInstanceLock) app.quit()
 app.on('second-instance', () => {
@@ -618,20 +621,9 @@ const agentInteractions = new AgentInteractions((owner, event, request) => {
   const target = mainWindow?.webContents
   if (target && !target.isDestroyed() && target.id === owner) target.send(`agent-interaction:${event}`, request)
 })
-ipc.handle('agent-interaction:list', event => agentInteractions.list(event.sender.id))
-ipc.handle('agent-interaction:respond', (event, id: string, response: AgentInteractionResponse) => agentInteractions.respond(event.sender.id, id, response))
-
-// Tool approval IPC (chat-server → renderer → response)
-const pendingApprovals = new Map<string, { resolve: (result: { approved: boolean }) => void }>()
-
-ipc.handle('tool-approval-response', (_, toolUseId: string, approved: boolean) => {
-  const pending = pendingApprovals.get(toolUseId)
-  if (pending) {
-    pending.resolve({ approved })
-    pendingApprovals.delete(toolUseId)
-  }
-  return true
-})
+// The send stays unguarded, as it always was: a destroyed window rejects the approval.
+const toolApprovals = createToolApprovals(request => mainWindow?.webContents.send('tool-approval-request', request))
+registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: toolApprovals })
 
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
@@ -641,51 +633,12 @@ const handoffs = new HandoffService(localHistoryStore, handoffStore, async (prov
   fs.mkdirSync(cwd, { recursive: true })
   const input = { ...request, cwd, env: shellEnv.env() }
   return provider === 'claude-code' ? writeClaudeHandoff({ ...input, cli: claudeCli.path() }) : writeCodexHandoff(input)
-}, (companyId, sessionId) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('handoff:changed', { companyId, sessionId }) })
+}, (companyId, sessionId) => appWindow.send('handoff:changed', { companyId, sessionId }))
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
 // History writes are coalesced and asynchronous; whatever is still pending is written now.
 app.on('will-quit', () => localHistoryStore.flushSync())
-ipc.handle('handoff:get', (_, company: string, id: string) => { handoffs.touch(company, id); return handoffs.view(company, id) })
-ipc.handle('handoff:update', (_, company: string, id: string) => handoffs.requestUpdate(company, id))
-ipc.handle('handoff:complete', (_, company: string, id: string, receipt: HandoffCompletion) => handoffs.complete(company, id, receipt))
-// Targeted change events: a tab re-reads only its own session's metadata and the
-// sidebar re-reads the summaries (no message bodies), never the whole history.
-function broadcastChatHistoryChanged(change: ChatHistoryChange): void {
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('chatHistory:changed', change)
-  }
-}
-ipc.handle('chatHistory:getSummaries', (_, companyId: string) => localHistoryStore.summaries(companyId))
-ipc.handle('chatHistory:search', (_, companyId: string, query: string) => localHistoryStore.search(companyId, query))
-ipc.handle('chatHistory:getSession', (_, companyId: string, sessionId: string) =>
-  localHistoryStore.get(companyId, sessionId))
-// The receipt, not the stored session: sending the whole conversation back on
-// every autosave cost as much IPC as the save itself.
-function persistChatSession(companyId: string, session: ChatSession): ChatSaveReceipt {
-  const result = localHistoryStore.save(companyId, session)
-  if (result.status === 'deleted') return result
-  if (result.status === 'saved') broadcastChatHistoryChanged({ companyId, sessionId: session.id, kind: 'save' })
-  return { status: result.status, revision: result.session.revision ?? 0 }
-}
-ipc.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSession) =>
-  persistChatSession(companyId, session))
-// Used only during unload, when an asynchronous renderer request cannot be awaited.
-ipc.on('chatHistory:flushSession', (event, companyId: string, session: ChatSession) => {
-  try { event.returnValue = { result: persistChatSession(companyId, session) } }
-  catch (error) { event.returnValue = { error: error instanceof Error ? error.message : '保存に失敗しました。' } }
-})
-ipc.handle('chatHistory:patchSession', (_, companyId: string, sessionId: string, patch: ChatMetadataPatch) => {
-  const result = localHistoryStore.patch(companyId, sessionId, patch)
-  broadcastChatHistoryChanged({ companyId, sessionId, kind: 'patch' })
-  return result
-})
-ipc.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string) => {
-  localHistoryStore.delete(companyId, sessionId)
-  handoffs.invalidate(companyId, sessionId)
-  broadcastChatHistoryChanged({ companyId, sessionId, kind: 'delete', deletedSessionId: sessionId })
-  return true
-})
+const chatHistory = registerChatHistoryIpc(ipc, { history: localHistoryStore, handoffs, window: appWindow })
 
 // Server API URL - read from config.json (set during first-launch setup) with env fallback
 function getServerApiUrl(): string {
@@ -697,229 +650,28 @@ function getServerApiUrl(): string {
 installServerFetchIdentity(getServerApiUrl)
 console.log(`[client-identity] build ${BUILD_INFO.version} (built ${BUILD_INFO.builtAt})`)
 
-function extractResponseMessageFromJson(data: unknown): string | undefined {
-  if (!data || typeof data !== 'object') return undefined
-  const record = data as Record<string, unknown>
-  const message = record.message
-  const error = record.error
-  if (typeof message === 'string' && message) return message
-  if (typeof error === 'string' && error) return error
-  return undefined
-}
-
-async function parseJsonResponseSafe(response: Response): Promise<{
-  json: unknown | null
-  nonJsonError?: string
-}> {
-  const text = await response.text()
-  if (!text) {
-    return { json: null }
-  }
-
-  try {
-    return { json: JSON.parse(text) }
-  } catch {
-    const preview = text.replace(/\s+/g, ' ').slice(0, 120)
-    return {
-      json: null,
-      nonJsonError: `API returned non-JSON response (status ${response.status}) from ${getServerApiUrl()}. Preview: ${preview}`,
-    }
-  }
-}
-
-// Session cookie storage (in-memory for the session)
-let authCookies: string[] = []
+// The member's session with the server (cookies, in memory only).
+const session = createSession()
 
 // Per-folder write access of the signed-in member (shared/write-access.ts).
 // The renderer asks when it opens a company and gets writeAccess:changed
 // broadcasts after that; the chat refreshes it per turn, sync after success.
 const writeAccessStore = createWriteAccessStore({
   baseUrl: getServerApiUrl,
-  cookies: () => authCookies,
-  onChange: (companyId, access) => {
-    if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('writeAccess:changed', { companyId, access })
-  },
+  cookies: session.cookies,
+  onChange: (companyId, access) => appWindow.send('writeAccess:changed', { companyId, access }),
 })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
-const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: () => authCookies, log: console })
+const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
-// Auth API handlers
-ipc.handle('auth:signUp', async (_, email: string, password: string, name?: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/auth/sign-up/email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'app://',
-      },
-      body: JSON.stringify({ email, password, name: name || email.split('@')[0] }),
-    })
-
-    // Store cookies from response
-    const cookies = response.headers.getSetCookie()
-    if (cookies.length > 0) {
-      authCookies = cookies
-    }
-
-    const { json, nonJsonError } = await parseJsonResponseSafe(response)
-    if (nonJsonError) {
-      return { success: false, error: nonJsonError }
-    }
-
-    const data = json as Record<string, unknown> | null
-    if (!response.ok) {
-      return { success: false, error: extractResponseMessageFromJson(data) || 'Sign up failed' }
-    }
-    return { success: true, data }
-  } catch (error) {
-    console.error('Sign up error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('auth:signIn', async (_, email: string, password: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/auth/sign-in/email`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'app://',
-      },
-      body: JSON.stringify({ email, password }),
-    })
-
-    // Store cookies from response
-    const cookies = response.headers.getSetCookie()
-    if (cookies.length > 0) {
-      authCookies = cookies
-    }
-
-    const { json, nonJsonError } = await parseJsonResponseSafe(response)
-    if (nonJsonError) {
-      return { success: false, error: nonJsonError }
-    }
-
-    const data = json as Record<string, unknown> | null
-    if (!response.ok) {
-      return { success: false, error: extractResponseMessageFromJson(data) || 'Sign in failed' }
-    }
-    return { success: true, data }
-  } catch (error) {
-    console.error('Sign in error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('auth:signOut', async () => {
-  try {
-    await fetch(`${getServerApiUrl()}/api/auth/sign-out`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Origin': 'app://',
-        'Cookie': authCookies.join('; '),
-      },
-    })
-    return { success: true }
-  } catch (error) {
-    console.error('Sign out error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  } finally {
-    // Signed out on this computer even when the server cannot be told
-    // (offline): nothing here may keep using the old session.
-    authCookies = []
+registerAuthIpc(ipc, {
+  session,
+  serverUrl: getServerApiUrl,
+  onSignedOut: () => {
     writeAccessStore.clear()
     companyFilesApi.clear()
-  }
-})
-
-ipc.handle('auth:getSession', async () => {
-  try {
-    if (authCookies.length === 0) {
-      return { success: false, user: null }
-    }
-
-    const response = await fetch(`${getServerApiUrl()}/api/me`, {
-      headers: {
-        'Cookie': authCookies.join('; '),
-      },
-    })
-
-    if (!response.ok) {
-      return { success: false, user: null }
-    }
-
-    const data = await response.json()
-    if (data.success && data.data) {
-      return { success: true, user: data.data }
-    }
-    return { success: false, user: null }
-  } catch (error) {
-    console.error('Get session error:', error)
-    return { success: false, user: null }
-  }
-})
-
-// Companies API handlers
-ipc.handle('api:getCompanies', async () => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies`, {
-      headers: {
-        'Cookie': authCookies.join('; '),
-      },
-    })
-
-    const data = await response.json()
-    if (!response.ok) {
-      return { success: false, error: data.error || 'Failed to fetch companies' }
-    }
-    return data
-  } catch (error) {
-    console.error('Get companies error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('api:createCompany', async (_, name: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Cookie': authCookies.join('; '),
-      },
-      body: JSON.stringify({ name }),
-    })
-
-    const data = await response.json()
-    if (!response.ok) {
-      return { success: false, error: data.error || 'Failed to create company' }
-    }
-    return data
-  } catch (error) {
-    console.error('Create company error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('api:getDepartments', async (_, companyId: string) => {
-  try {
-    const response = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`, {
-      headers: {
-        'Cookie': authCookies.join('; '),
-      },
-    })
-
-    const data = await response.json()
-    if (!response.ok) {
-      return { success: false, error: data.error || 'Failed to fetch departments' }
-    }
-    return data
-  } catch (error) {
-    console.error('Get departments error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
+  },
 })
 
 // ============================================================================
@@ -952,29 +704,6 @@ function getGitAskPassPath(): string {
 
   gitAskPassPath = scriptPath
   return scriptPath
-}
-
-/**
- * Extract the Better Auth session token from authCookies.
- */
-function extractSessionToken(cookies: string[]): string {
-  for (const cookie of cookies) {
-    // Better Auth session cookie (with or without __Secure- prefix)
-    const match = cookie.match(/(?:__Secure-)?better-auth\.session_token=([^;]+)/)
-    if (match) {
-      let token = match[1]
-      try {
-        token = decodeURIComponent(token)
-      } catch { /* use as-is */ }
-      // Better Auth signed cookies: "token.signature" — extract token part only
-      const dotIndex = token.indexOf('.')
-      if (dotIndex > 0) {
-        token = token.slice(0, dotIndex)
-      }
-      return token
-    }
-  }
-  return ''
 }
 
 // Resolve git binary: try dugite's bundled git first, fall back to system git.
@@ -1032,7 +761,7 @@ function createGit(repoPath: string, extraEnv?: Record<string, string>): SimpleG
   return createConfiguredGit(repoPath, {
     binary,
     askPassPath: getGitAskPassPath(),
-    token: extractSessionToken(authCookies),
+    token: session.gitToken(),
     // App-owned hooks/ and templates/ (empty): the member's git hooks and
     // init.templateDir never run in the app (sync/git-factory.ts appGitDirs).
     appGitDir: path.join(app.getPath('userData'), 'git'),
@@ -1288,7 +1017,7 @@ const gitSync = createGitSync({
       return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
     },
   }),
-  api: createFetchSyncServerApi({ baseUrl: getServerApiUrl, cookies: () => authCookies }),
+  api: createFetchSyncServerApi({ baseUrl: getServerApiUrl, cookies: session.cookies }),
   generateCommitMessage,
   now: () => new Date(),
   platform: process.platform,
@@ -1364,7 +1093,7 @@ ipc.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) =>
 
 // Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
 // icons. Only the person's dialog creates them — never the chat (no tool).
-const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: () => authCookies })
+const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // The private folders this member may read, per company, for the chat's
 // private-read guard (private-read-guard.ts). Refreshed at every chat turn;
 // a failed refresh keeps the last answer (unknown = local reads are not recognised).
@@ -1432,7 +1161,7 @@ const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。�
 // The company's repository URL on the server (null when the server cannot say).
 async function companyRemoteUrl(companyId: string): Promise<string | null> {
   const repoInfoResponse = await fetch(`${getServerApiUrl()}/api/git/repos/${encodeURIComponent(companyId)}`, {
-    headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+    headers: session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {},
   })
   if (!repoInfoResponse.ok) return null
   const repoInfo = await repoInfoResponse.json()
@@ -1531,7 +1260,7 @@ ipc.handle('git:setupCompanyRemote', async (event, repoPath: string, companyId: 
     // Configure git user from authenticated session (local to this repo)
     try {
       const meResponse = await fetch(`${getServerApiUrl()}/api/me`, {
-        headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+        headers: session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {},
       })
       if (meResponse.ok) {
         const meData = await meResponse.json()
@@ -1575,7 +1304,7 @@ ipc.handle('git:setupCompanyRemote', async (event, repoPath: string, companyId: 
         let departments: string[] | null = null
         try {
           const deptResponse = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`, {
-            headers: authCookies.length > 0 ? { 'Cookie': authCookies.join('; ') } : {},
+            headers: session.cookies().length > 0 ? { 'Cookie': session.cookies().join('; ') } : {},
           })
           const deptData = deptResponse.ok ? await deptResponse.json() : null
           if (deptData?.success && Array.isArray(deptData.data)) {
@@ -1759,7 +1488,7 @@ ipc.handle('git:sparseUncommittedChanges', async (_, repoPath: string, folders: 
 ipc.handle('git:folderSizes', async (_, repoPath: string, companyId: string, folder: string, measure: string[]) => {
   try {
     const safe = validatePath(repoPath)
-    const fetchSizes = companyId ? serverFolderSizes({ baseUrl: getServerApiUrl(), companyId, cookies: authCookies }) : null
+    const fetchSizes = companyId ? serverFolderSizes({ baseUrl: getServerApiUrl(), companyId, cookies: session.cookies() }) : null
     const listed = typeof folder === 'string' ? folder : ''
     const view = await folderSizesView(createGit(safe), fetchSizes, listed, Array.isArray(measure) ? measure : [])
     // Readable private folders are not in the company repository: list them
@@ -2609,7 +2338,7 @@ app.whenReady().then(async () => {
       onRecovery: (company, id, recovery) => handoffs.recordRecovery(company, id, recovery),
       persistAgentSession: (company, id, session) => {
         if (!localHistoryStore.patch(company, id, { agentSession: session, claudeSessionId: session.providerId === 'claude-code' ? session.id : '' })) throw new Error('相談が削除されたため引き継ぎを中止しました。')
-        broadcastChatHistoryChanged({ companyId: company, sessionId: id, kind: 'patch' })
+        chatHistory.changed({ companyId: company, sessionId: id, kind: 'patch' })
       },
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
@@ -2623,21 +2352,7 @@ app.whenReady().then(async () => {
           owner.removeListener('did-start-navigation', close)
         })
       },
-      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => {
-        return new Promise((resolve) => {
-          pendingApprovals.set(toolUseId, { resolve })
-          mainWindow?.webContents.send('tool-approval-request', {
-            toolUseId, toolName, toolInput, appSessionId, ...(reason ? { reason } : {}),
-          })
-          // 60s timeout → auto-deny
-          setTimeout(() => {
-            if (pendingApprovals.has(toolUseId)) {
-              pendingApprovals.delete(toolUseId)
-              resolve({ approved: false })
-            }
-          }, 60_000)
-        })
-      },
+      requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
     }
     const result = await startChatServer(serverConfig)
     chatServerInfo = { port: result.port, authToken: result.authToken }
