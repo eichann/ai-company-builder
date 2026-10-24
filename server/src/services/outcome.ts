@@ -3,7 +3,7 @@
  * answer (routes/respond.ts maps the kind to the status code). The body is
  * the API's JSON error body, exactly as clients receive it.
  */
-export type RefusalKind = 'bad-request' | 'forbidden' | 'not-found' | 'conflict' | 'gone'
+export type RefusalKind = 'bad-request' | 'forbidden' | 'not-found' | 'conflict' | 'gone' | 'unavailable'
 
 export interface Refusal {
   ok: false

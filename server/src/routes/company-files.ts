@@ -14,11 +14,9 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { db } from '../db'
 import { getUserFromRequest } from '../lib/auth'
-import { getMemberRole } from '../lib/permission-store'
+import { services } from '../composition'
 import {
-  buildView,
   CompanyFilesError,
   listTree,
   parseRequestPath,
@@ -38,9 +36,9 @@ async function authAndAuthorize(c: Context): Promise<Member | Response> {
   if (!user) return c.json({ error: 'Unauthorized' }, 401)
   const companyId = c.req.param('companyId')
   if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const role = getMemberRole(db, companyId, user.id)
-  if (!role) return c.json({ error: 'Company not found or access denied' }, 404)
-  return { companyId, userId: user.id, role }
+  const member = services.access.memberOf(companyId, user.id)
+  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
+  return member
 }
 
 /** Integer query parameter within [min, max]; `fallback` when absent; null when invalid. */
@@ -61,7 +59,7 @@ const invalid = (c: Context, code: 'INVALID_PATH' | 'INVALID_QUERY', message: st
 
 async function respond(c: Context, m: Member, run: (view: CompanyFilesView) => Promise<unknown> | unknown) {
   try {
-    const view = await buildView(db, m.companyId, m.userId, m.role)
+    const view = await services.companyFiles.build(m.companyId, m.userId, m.role)
     return c.json({ success: true, data: await run(view) })
   } catch (error) {
     if (error instanceof CompanyFilesError) return c.json({ error: error.message, code: error.code }, error.status)

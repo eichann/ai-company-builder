@@ -173,6 +173,15 @@ export function canReadPrivateScope(scope: ScopeWithRules, userId: string, role:
   return scope.rules.length > 0 && applicableRules(scope.rules, userId, role).some(r => r.canRead)
 }
 
+/** May the member push to this private folder's repository at all (write somewhere in it)? */
+export function canWriteInPrivateFolder(scopes: ScopeWithRules[], folder: ScopeWithRules, companyId: string, userId: string, role: string): boolean {
+  if (FULL_ACCESS_ROLES.has(role)) return true
+  const repo: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
+  return scopes
+    .filter(s => isSameOrAncestorPath(folder.path, s.path))
+    .some(s => resolveAccess(companyId, userId, s.path, repo).write)
+}
+
 export type EffectiveSummary = 'everyone-rw' | 'everyone-r' | 'restricted'
 
 /**

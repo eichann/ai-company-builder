@@ -21,13 +21,15 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
-import { randomIds, systemClock } from './adapters/system'
+import { companyFileViews } from './adapters/company-files'
+import { processCompanyLock, randomIds, systemClock } from './adapters/system'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
 import { createDepartmentService } from './services/departments'
 import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
+import { createPrivateFolderService } from './services/private-folders'
 
 export function createServices(conn: Database.Database) {
   const repos = {
@@ -63,6 +65,8 @@ export function createServices(conn: Database.Database) {
       repoStore,
       managedFolders: permissionViews.managedFolders,
     }),
+    privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
+    companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,
   }

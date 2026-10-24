@@ -41,16 +41,15 @@ import { gitAsync } from './git-exec'
 import { companyRepoPath, DATA_DIR, REPOS_DIR } from './config'
 import { listScopesWithRules } from './permission-store'
 import {
-  FULL_ACCESS_ROLES,
   canReadPrivateScope,
+  canWriteInPrivateFolder,
   isSameOrAncestorPath,
   resolveAccess,
   type PermissionRepository,
   type ScopeRule,
-  type ScopeWithRules,
 } from '../../shared/core/permissions'
 import { pathKey } from '../../shared/core/paths'
-import type { PrivateFolderRecord } from '../ports/private-folders'
+import type { FolderAccess, PrivateFolderRecord, PrivateRuleSet } from '../ports/private-folders'
 
 type Conn = Database.Database
 
@@ -157,10 +156,7 @@ export async function existsInCompanyRepo(companyId: string, path: string): Prom
 // Create
 // ----------------------------------------------------------------------------
 
-export interface PrivateRuleSet {
-  viewers: string[]
-  editors: string[]
-}
+export type { PrivateRuleSet }
 
 export function privateRules(set: PrivateRuleSet): Array<Omit<ScopeRule, 'id'>> {
   const editors = new Set(set.editors)
@@ -318,12 +314,7 @@ export function replacePrivateFolderRules(conn: Conn, scopeId: string, rules: Pr
 // Who can read / write (for the overview and the members list)
 // ----------------------------------------------------------------------------
 
-export interface FolderAccess {
-  userId: string
-  role: string
-  read: boolean
-  write: boolean
-}
+export type { FolderAccess }
 
 export function folderAccess(conn: Conn, companyId: string, path: string, scopes = listScopesWithRules(conn, companyId)): FolderAccess[] {
   const members = conn.prepare(`SELECT user_id, role FROM memberships WHERE company_id = ? ORDER BY created_at ASC`)
@@ -341,14 +332,8 @@ export function readablePrivateFolders(conn: Conn, companyId: string, userId: st
   return listPrivateFolders(conn, companyId, scopes).filter(p => canReadPrivateScope(p.scope, userId, role))
 }
 
-/** May the member push to this private folder's repository at all (write somewhere in it)? */
-export function canWriteInPrivateFolder(scopes: ScopeWithRules[], folder: ScopeWithRules, companyId: string, userId: string, role: string): boolean {
-  if (FULL_ACCESS_ROLES.has(role)) return true
-  const repo: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
-  return scopes
-    .filter(s => isSameOrAncestorPath(folder.path, s.path))
-    .some(s => resolveAccess(companyId, userId, s.path, repo).write)
-}
+/** May the member push to this private folder's repository at all? (shared/core, re-exported for git-http.) */
+export { canWriteInPrivateFolder }
 
 // ----------------------------------------------------------------------------
 // Pushes in flight to scope repositories (make-public waits for them)

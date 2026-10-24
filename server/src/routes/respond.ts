@@ -7,6 +7,8 @@ const STATUS = {
   'not-found': 404,
   conflict: 409,
   gone: 410,
+  /** Busy right now (a push still running); try again in a moment. */
+  unavailable: 503,
 } as const satisfies Record<RefusalKind, number>
 
 /** A service's refusal as the HTTP answer: its body, with the kind's status code. */
