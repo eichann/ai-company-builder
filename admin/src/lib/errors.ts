@@ -46,6 +46,9 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/company name is required/i, '会社名を入力してください。'],
   [/company name must be at most/i, '会社名は100文字以内にしてください。'],
   [/company name contains invalid characters/i, '会社名に使えない文字（改行など）が含まれています。'],
+  [/only owners and admins can view the ai action log/i, 'AI の操作の記録を見られるのは、オーナーと管理者です（設定によっては部署の責任者も、自分の部署の分だけ見られます）。'],
+  [/only owners and admins can manage the ai action log settings/i, 'AI の操作の記録の設定を変えられるのは、オーナーと管理者だけです。'],
+  [/^at most \d+ days$/i, '一度に見られる期間は400日までです。期間を短くしてください。'],
   [/invitation.*(expired|used|invalid|not found)/i, 'この招待リンクは無効か、有効期限が切れています。管理者に新しいリンクを依頼してください。'],
 ]
 

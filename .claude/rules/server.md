@@ -63,7 +63,7 @@ GET  /api/config                                  setup state (no auth)
                               POST /reorder, POST /sync, GET|PUT /:id/managers  departments.ts
 /api/companies/:companyId/folder-sizes  GET ?path=&measure=                  folder-sizes.ts
 /api/companies/:companyId/files         GET /tree, /content, /search          company-files.ts
-/api/companies/:companyId     GET /overview, /permissions, /me/capabilities, /me/write-access
+/api/companies/:companyId     GET /overview, /permissions, /me/capabilities (+ canViewAgentEvents), /me/write-access
                                                                              permissions.ts
                               PUT /permissions/scopes/by-path, POST /permissions/rules,
                               PATCH|DELETE /permissions/rules/:ruleId,

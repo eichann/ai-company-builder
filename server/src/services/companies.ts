@@ -16,7 +16,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { ScopeRepository } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
-import { parseClientVersion } from '../lib/client-version'
+import { parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -57,6 +57,8 @@ export interface MemberActivityView {
   lastSeenAt: string | null
   lastFetchAt: string | null
   lastPushAt: string | null
+  /** Does this build send the AI action log (lib/client-version.ts)? Unknown = false. */
+  supportsAgentEvents: boolean
 }
 
 export interface CompanyServiceDeps {
@@ -226,6 +228,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
           lastSeenAt: row?.last_seen_at ?? null,
           lastFetchAt: row?.last_fetch_at ?? null,
           lastPushAt: row?.last_push_at ?? null,
+          supportsAgentEvents: supportsAgentEvents(row?.client_version),
         }
       })
     },

@@ -403,6 +403,11 @@ export function createAgentEventService(deps: AgentEventDeps) {
       }
     },
 
+    /** May this member read the log (any part of it)? The admin console's navigation (/me/capabilities). */
+    canRead(member: Member): boolean {
+      return readerOf(member).ok
+    },
+
     /** GET …/agent-events/summary: counts per member and day (+ per category). */
     summary(member: Member, raw: RawQuery): Outcome<AgentEventSummary> {
       const reader = readerOf(member)

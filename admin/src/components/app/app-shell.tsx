@@ -15,6 +15,7 @@ import {
   LockSimple,
   Moon,
   Plus,
+  Robot,
   ShieldCheck,
   SignOut,
   SquaresFour,
@@ -50,7 +51,14 @@ interface NavItem {
   label: string
   icon: Icon
   /** Who sees the item; everyone when omitted. */
-  visible?: (c: { isAdmin: boolean; isManager: boolean }) => boolean
+  visible?: (c: NavContext) => boolean
+}
+
+export interface NavContext {
+  isAdmin: boolean
+  isManager: boolean
+  /** The log's viewer setting lets this user read it (see CompanyContextValue). */
+  canViewAgentEvents: boolean
 }
 
 export const NAV_ITEMS: NavItem[] = [
@@ -60,6 +68,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'permissions', label: '権限', icon: ShieldCheck, visible: (c) => c.isAdmin || c.isManager },
   { segment: 'private-folders', label: '非公開フォルダ', icon: LockSimple, visible: (c) => c.isAdmin || c.isManager },
   { segment: 'security', label: 'セキュリティ', icon: LockKey, visible: (c) => c.isAdmin },
+  { segment: 'agent-events', label: 'AI の操作の記録', icon: Robot, visible: (c) => c.isAdmin || c.canViewAgentEvents },
   { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]
 
@@ -98,7 +107,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
 function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
   const pathname = usePathname()
-  const { companyId, isAdmin, managedDepartmentIds } = useCompany()
+  const { companyId, isAdmin, managedDepartmentIds, canViewAgentEvents } = useCompany()
+  const navContext: NavContext = { isAdmin, isManager: managedDepartmentIds.length > 0, canViewAgentEvents }
   const base = `/companies/${companyId}`
 
   return (
@@ -107,7 +117,7 @@ function SidebarContent({ onNavigate }: { onNavigate?: () => void }) {
         <CompanySwitcher onNavigate={onNavigate} />
       </div>
       <nav aria-label="メインメニュー" className="flex-1 space-y-0.5 overflow-y-auto px-3 py-2">
-        {NAV_ITEMS.filter((item) => !item.visible || item.visible({ isAdmin, isManager: managedDepartmentIds.length > 0 })).map((item) => {
+        {NAV_ITEMS.filter((item) => !item.visible || item.visible(navContext)).map((item) => {
           const href = item.segment ? `${base}/${item.segment}` : base
           const active = item.segment ? pathname.startsWith(href) : pathname === base
           const IconComponent = item.icon

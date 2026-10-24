@@ -5,7 +5,8 @@
  *   GET /overview           owner/admin
  *   GET /permissions        owner/admin (all scopes); department managers
  *                           (the subtrees of the departments they manage)
- *   GET /me/capabilities    any member: role, managed departments (ids and folders)
+ *   GET /me/capabilities    any member: role, managed departments (ids and folders),
+ *                           whether they may read the AI action log (canViewAgentEvents)
  *   GET /me/write-access    any member: where they may write (for the desktop
  *                           app's AI guard; ETag / If-None-Match → 304)
  *
@@ -25,7 +26,7 @@ import { requireFullAccess, type Member } from '../services/access'
 import { refusal } from './respond'
 
 export const permissionsRoute = new Hono()
-const { access, permissionViews } = services
+const { access, permissionViews, agentEvents } = services
 
 async function authenticateMember(c: { req: { raw: Request; param: (name: string) => string | undefined }; json: (body: unknown, status?: number) => Response }): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -61,7 +62,12 @@ permissionsRoute.get('/permissions', async (c) => {
 permissionsRoute.get('/me/capabilities', async (c) => {
   const member = await authenticateMember(c)
   if (member instanceof Response) return member
-  return c.json({ success: true, data: permissionViews.capabilities(member) })
+  return c.json({
+    success: true,
+    // The admin console shows 「AI の操作の記録」 in its navigation from this flag
+    // (owner/admin; a department manager while the log's viewer setting allows).
+    data: { ...permissionViews.capabilities(member), canViewAgentEvents: agentEvents.canRead(member) },
+  })
 })
 
 // GET /api/companies/:companyId/me/write-access

@@ -173,6 +173,8 @@ export const companiesApi = {
 export interface Capabilities {
   role: Role
   managedDepartmentIds: string[]
+  /** May open 「AI の操作の記録」 (owner/admin; a manager while the log's viewer setting allows). */
+  canViewAgentEvents: boolean
 }
 
 export const capabilitiesApi = {
@@ -253,6 +255,8 @@ export interface ClientActivity {
   lastSeenAt: string | null
   lastFetchAt: string | null
   lastPushAt: string | null
+  /** Does this build send the AI action log (server cutoff AGENT_EVENTS_CLIENT_COMMIT_DATE)? false for unknown builds. */
+  supportsAgentEvents: boolean
 }
 
 export const clientActivityApi = {
@@ -557,13 +561,19 @@ export type {
   AgentEventSettings,
   AgentEventSettingsChange,
   AgentEventSettingsUpdate,
+  AgentEventSettingsValues,
   AgentEventSummary,
   AgentEventTarget,
   AgentEventViewer,
   AgentEventViewerMode,
   AgentEventViewers,
+  AgentKind,
+  GuardReason,
+  SensitiveLocation,
+  ShownFileTarget,
   ToolCategory,
   ToolDecision,
+  ToolOutcome,
 } from '../../../shared/types/agent-events'
 
 export const agentEventsApi = {

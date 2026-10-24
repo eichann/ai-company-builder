@@ -359,7 +359,7 @@ describe('メンバー: 役割の変更', () => {
   })
 
   it('admins do not get role changes', async () => {
-    mockApi({ ...companyRoutes({ role: 'admin', managedDepartmentIds: [] }), [`GET ${base}/overview`]: { body: ok(quietOverview) } })
+    mockApi({ ...companyRoutes({ role: 'admin', managedDepartmentIds: [], canViewAgentEvents: true }), [`GET ${base}/overview`]: { body: ok(quietOverview) } })
     renderInCompany(<MembersPage />)
     await userEvent.click(await screen.findByRole('button', { name: '田中 太郎 の操作' }))
     expect(await screen.findByRole('menuitem', { name: '会社から削除' })).toBeInTheDocument()
