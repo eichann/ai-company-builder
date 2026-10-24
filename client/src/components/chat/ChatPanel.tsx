@@ -8,6 +8,7 @@ import { ChatSidebar } from './ChatSidebar'
 import { ChatPanelChat } from './ChatConversation'
 import { AuthSettings } from './ChatAuthSettings'
 import { ChatAuthChecking, ChatSetupNeeded } from './ChatAuthGate'
+import { AgentLogNotice } from './AgentLogNotice'
 import { useChatServer } from './hooks/useChatServer'
 import { useChatTabs } from './hooks/useChatTabs'
 import { useAgentAuth } from './hooks/useAgentAuth'
@@ -26,10 +27,10 @@ export function ChatPanel(props: ChatPanelProps) {
   const userId = useAuthStore(s => s.user?.id)
   const companyId = useAppStore(s => s.currentCompany?.id)
   if (!userId || !companyId) return null
-  return <CompanyChatPanel key={`${userId}:${companyId}`} {...props} />
+  return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: ChatPanelProps) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -141,6 +142,8 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
       </div>
 
       {settingsOverlay}
+      {/* Once per account on this PC: the AI action log goes to the administrators. */}
+      {!showSettings && <AgentLogNotice userId={userId} />}
     </div>
     </OpenConsultationContext.Provider>
   )

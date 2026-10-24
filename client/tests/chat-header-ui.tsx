@@ -1,4 +1,5 @@
 import { createRoot } from 'react-dom/client'
+import { markAgentLogNoticeSeen } from '../src/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
 import { ChatPanel } from '../src/components/chat/ChatPanel'
@@ -33,6 +34,8 @@ if (params.get('theme') === 'dark') document.documentElement.classList.add('dark
 const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
 try { localStorage.clear() } catch { /* preview only */ }
+// The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
+if (params.get('notice') !== '1') markAgentLogNoticeSeen('preview-user')
 const longHistory = params.get('history') === 'long'
 const editHistory = params.get('history') === 'edit'
 const signedOut = params.get('auth') === 'none'

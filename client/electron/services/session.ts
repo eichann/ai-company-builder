@@ -9,6 +9,13 @@ export interface Session {
   /** After sign-in / sign-up: the response's Set-Cookie values (ignored when there are none). */
   update(cookies: string[]): void
   clear(): void
+  /**
+   * The account these cookies belong to, once the server confirmed it
+   * (/api/me answered); null while signed out or not confirmed yet. New
+   * cookies (another sign-in) forget it until the next confirmation.
+   */
+  userId(): string | null
+  setUserId(id: string): void
   /** The Better Auth session token for git's HTTPS credentials ('' when none). */
   gitToken(): string
 }
@@ -39,13 +46,22 @@ export function extractSessionToken(cookies: string[]): string {
 export function createSession(): Session {
   // Session cookie storage (in-memory for the session)
   let authCookies: string[] = []
+  let user: string | null = null
   return {
     cookies: () => authCookies,
     update(cookies) {
-      if (cookies.length > 0) authCookies = cookies
+      if (cookies.length > 0) {
+        authCookies = cookies
+        user = null
+      }
     },
     clear() {
       authCookies = []
+      user = null
+    },
+    userId: () => user,
+    setUserId(id) {
+      if (authCookies.length > 0 && id) user = id
     },
     gitToken: () => extractSessionToken(authCookies),
   }

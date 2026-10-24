@@ -9,13 +9,47 @@ paths:
   - "server/src/lib/agent-event-retention.ts"
   - "server/tests/unit/agent-events.test.ts"
   - "server/tests/integration/agent-events.test.ts"
+  - "client/electron/services/agent-event-sender.ts"
+  - "client/tests/agent-event-sender.test.ts"
+  - "client/src/lib/agentLogNotice.ts"
+  - "client/src/components/chat/AgentLogNotice.tsx"
 ---
 
-# AI action log (monitoring M1): server side
+# AI action log (monitoring M1): sending and the server side
 
-The app records one event per tool call (`chat-and-agents.md`, "AI action log"); the server
-stores and serves them. Sending from the app is not built yet (PR 3); nothing calls the
-ingest in production.
+The app records one event per tool call (`chat-and-agents.md`, "AI action log"), sends them
+(below), and the server stores and serves them.
+
+## Sending from the app (`client/electron/services/agent-event-sender.ts`)
+
+The recorder's sink, created in `main.ts` (tests `client/tests/agent-event-sender.test.ts`, fake
+clock + fake fetch).
+
+- **Whose events**: `services/session.ts` `userId()` is the account /api/me confirmed for the
+  current cookies (set in `auth:getSession`, which the renderer calls after every sign-in and at
+  start; new cookies forget it). An event is filed under the account signed in when its turn
+  first reported (`turnId` → account, so a turn never changes account); no account or no
+  `companyId` → dropped (counted, logged once). A queue is sent only while its own account is
+  signed in, with that account's cookie; another account's queue waits on disk.
+- **Disk**: `<userData>/agent-events/<user>/<company>.jsonl` (ids percent-encoded, dirs 0700,
+  files 0600), one `{ t, e }` line per event. Appends batched (1 s) and async; after a send the
+  file is rewritten (tmp + rename, removed when empty). A torn / unreadable line is skipped and
+  the file rewritten. ≤ 10 MB and 7 days per queue, oldest dropped (counted, logged). Quit
+  (`will-quit` → `flushSync`): timers stop, the in-memory part is written synchronously; while an
+  async read/write of the queue may still land, the whole queue goes to `<company>.jsonl.quit`,
+  merged (dedupe by id) at the next start.
+- **Sending**: ≤ 200 per POST (and ≤ 900 KB), every 10 s while events wait, at once for a full
+  batch or for events left from before at sign-in; one request per queue. 2xx → removed (the
+  server's `rejected` count is logged); 401 → kept until `sessionStarted` (next sign-in);
+  404 `Company not found or access denied` → queue and file deleted (any other 404 = older
+  server: retry in 5 min); 400 / 413 → batch halved, a single refused event dropped; 429 →
+  `Retry-After`; network / 5xx / other → 10 s doubling to 5 min. Sign-out stops sending (queues
+  kept). Logs counts and status codes only. No turn-end flush yet (10 s timer only).
+- **Telling the member** (owner decision): `src/lib/agentLogNotice.ts` holds the sentence; the
+  chat shows `AgentLogNotice` once per account on this PC (localStorage
+  `acb.agentLogNoticeSeen:<userId>`; non-modal `role="dialog"`, OK focused, Esc closes), and
+  the settings nav always shows the sentence. Spec `client/tests/ui/agent-log-notice.spec.ts`
+  (`chat-header-ui.html?notice=1`; the other previews mark it seen).
 
 ## Contract
 
@@ -60,5 +94,6 @@ events through it), the read shapes and the limits. The admin re-exports the rea
 
 `prune()` deletes events older than each company's retention in chunks of 500, yielding to the
 event loop between chunks; `lib/agent-event-retention.ts` runs it 5 s after start and daily
-(`index.ts`). Version gate placeholder: `AGENT_EVENTS_CLIENT_COMMIT_DATE` = null in
-`lib/client-version.ts` until the app's sending merges (PR 4 lists members whose app is older).
+(`index.ts`). Version gate: `AGENT_EVENTS_CLIENT_COMMIT_DATE` in `lib/client-version.ts` is
+null until the owner sets it from the sending PR's merge commit date (PR 4 lists members whose
+app is older).

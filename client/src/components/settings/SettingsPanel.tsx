@@ -5,9 +5,10 @@ import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
+import { AGENT_LOG_NOTICE_TEXT } from '../../lib/agentLogNotice'
 
 // Common API key definitions
 const COMMON_API_KEYS = [
@@ -288,7 +289,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
             <p className="text-[15px] font-semibold tracking-tight">設定</p>
             <p className="mt-0.5 truncate text-xs text-zinc-500 dark:text-zinc-400" title={currentCompany.rootPath}>{currentCompany.name}</p>
           </div>
-          <div className="space-y-5 overflow-y-auto">
+          <div className="min-h-0 space-y-5 overflow-y-auto">
             {NAV.map(group => (
               <div key={group.group}>
                 <p className="px-2.5 pb-1.5 text-[11px] font-medium text-zinc-400 dark:text-zinc-500">{group.group}</p>
@@ -315,6 +316,11 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
               </div>
             ))}
           </div>
+          {/* Always shown, whatever section is open (owner decision: members are told). */}
+          <p className="mt-auto flex shrink-0 gap-1.5 border-t border-zinc-200 px-2.5 pt-3 text-[11px] leading-relaxed text-zinc-500 dark:border-white/[0.06] dark:text-zinc-400">
+            <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
+            <span>{AGENT_LOG_NOTICE_TEXT}</span>
+          </p>
         </nav>
 
         {/* Section content */}
