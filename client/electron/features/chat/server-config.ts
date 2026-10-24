@@ -15,6 +15,7 @@ import type { HandoffService } from '../../handoff/service'
 import type { HandoffStore } from '../../handoff/store'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
+import type { AgentEventRecorder } from '../../services/agent-events'
 import type { ShellEnvironment } from '../../services/shell-env'
 import { notDownloadedFolders } from '../../sync/not-downloaded'
 import type { WriteAccessStore } from '../../write-access-store'
@@ -37,6 +38,10 @@ export interface ChatServerConfigDeps {
   toolApprovals: ToolApprovals
   /** A choice prompt in the window that owns the chat (closed with it). */
   requestInteraction: ChatServerConfig['requestInteraction']
+  /** Cancel a conversation's pending choice cards (agent-interactions.ts). */
+  cancelChoicePrompts: (appSessionId: string) => void
+  /** The AI action log (services/agent-events.ts). */
+  agentEvents: AgentEventRecorder
 }
 
 export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerConfig {
@@ -84,5 +89,11 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     },
     requestInteraction: deps.requestInteraction,
     requestToolApproval: (toolName, toolInput, toolUseId, appSessionId, reason) => deps.toolApprovals.request(toolName, toolInput, toolUseId, appSessionId, reason),
+    cancelInteractions: appSessionId => {
+      deps.toolApprovals.cancel(appSessionId)
+      deps.cancelChoicePrompts(appSessionId)
+    },
+    onToolEvent: event => deps.agentEvents.record(event),
+    toolEventPaths: () => deps.agentEvents.paths(),
 }
 }

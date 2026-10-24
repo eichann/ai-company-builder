@@ -41,6 +41,7 @@ import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } fr
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
+import type { GuardReason } from '../shared/agent-events'
 
 /** Private folders as the guard sees them (from the cached /me/scopes answer, sync/private-folders.ts). */
 export interface PrivateFolderView {
@@ -108,7 +109,8 @@ export function instructionFileMessage(path: string): string {
 
 export type GuardDecision =
   | { deny: false }
-  | { deny: true; path: string; folder: string; message: string }
+  /** `code`: which rule refused, for the AI action log (shared/agent-events.ts); never shown. */
+  | { deny: true; path: string; folder: string; message: string; code: GuardReason }
 
 const FILE_TOOLS: Record<string, string> = {
   Write: 'file_path',
@@ -128,12 +130,12 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   const missing = notDownloaded.length > 0 ? excludedFolderOf(notDownloaded, rel) : null
   if (missing !== null) {
     const folder = missing.normalize('NFC')
-    return { deny: true, path: rel, folder, message: notDownloadedAgentMessage(folder) }
+    return { deny: true, path: rel, folder, message: notDownloadedAgentMessage(folder), code: 'not-downloaded' }
   }
   if (isInstructionFile(rel) && !isUnsharedPath(rel)) {
     const authority = guard.getInstructionAuthority?.()
     if (authority && !mayChangeInstructionFile(authority, rel)) {
-      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: instructionFileMessage(rel) }
+      return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: instructionFileMessage(rel), code: 'instruction-file' }
     }
   }
   // A private folder the member may only read: known locally (cached
@@ -142,14 +144,14 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
   const privateFolders = guard.getPrivateFolderView?.()
   if (privateFolders) {
     const readOnly = privateFolders.readOnlyFolderOf(rel)
-    if (readOnly !== null) return { deny: true, path: rel, folder: readOnly, message: readOnlyMessage(readOnly) }
+    if (readOnly !== null) return { deny: true, path: rel, folder: readOnly, message: readOnlyMessage(readOnly), code: 'read-only-folder' }
   }
   const access = guard.getAccess()
   if (!access || access.all) return { deny: false }
   const decision = evaluateWrite(access, rel)
   if (decision.write) return { deny: false }
   const folder = decision.scopePath ?? rel.split('/').slice(0, -1).join('/')
-  return { deny: true, path: rel, folder, message: readOnlyMessage(folder) }
+  return { deny: true, path: rel, folder, message: readOnlyMessage(folder), code: 'read-only-folder' }
 }
 
 /**
@@ -248,7 +250,7 @@ export async function decideReservedWrite(guard: WriteGuard | undefined, toolNam
     const reserved = await view.reservedFolderOf(rel, { file: true }).catch(() => null)
     if (reserved !== null) {
       const folder = reserved.normalize('NFC')
-      return { deny: true, path: rel, folder, message: reservedPathMessage(folder) }
+      return { deny: true, path: rel, folder, message: reservedPathMessage(folder), code: 'reserved-path' }
     }
   }
   return { deny: false }
@@ -428,7 +430,7 @@ export function checkGitClone(root: string, command: string, cwd?: string): Guar
       const rel = repoRelativePath(root, clone.target, clone.cwd ?? root)
       if (rel === null) continue // outside the company: not shared
       if (inWorkspace(rel)) continue
-      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: cloneMessage(clone.name) }
+      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: cloneMessage(clone.name), code: 'git-clone' }
     }
   }
   if (/\binit\b/.test(command)) {
@@ -436,7 +438,7 @@ export function checkGitClone(root: string, command: string, cwd?: string): Guar
       const rel = repoRelativePath(root, init.target, init.cwd ?? root)
       if (rel === null || rel === '') continue // outside the company, or the company folder itself
       if (inWorkspace(rel)) continue
-      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: initMessage(init.name) }
+      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: initMessage(init.name), code: 'git-init' }
     }
   }
   return { deny: false }

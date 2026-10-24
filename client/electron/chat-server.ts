@@ -26,6 +26,7 @@ import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createP
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
+import { turnToolEvents } from './agents/tool-events'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
 import net from 'net'
@@ -49,6 +50,8 @@ export interface ChatServerConfig extends AgentHost {
    * returns undefined when nothing is known — then nothing is blocked.
    */
   getWriteGuard?: (companyId: string, companyRoot: string) => Promise<WriteGuard | undefined>
+  /** Cancel a conversation's pending tool approvals and choice cards (a stopped turn). */
+  cancelInteractions?: (appSessionId: string) => void
 }
 
 // ============================================================================
@@ -134,8 +137,8 @@ export async function startChatServer(config: ChatServerConfig) {
 
   // Current native session for each ACB conversation (provider-tagged).
   const agentSessionMap = new Map<string, AgentSession>()
-  // Running turns: steering (extra instructions) and next-prompt suggestions.
-  const chatTurns = createChatTurns()
+  // Running turns: steering (extra instructions), next-prompt suggestions, abort handles.
+  const chatTurns = createChatTurns(undefined, { cancelInteractions: config.cancelInteractions })
 
 
   // CORS for Electron renderer (Vite dev server or file:// protocol)
@@ -263,7 +266,9 @@ export async function startChatServer(config: ChatServerConfig) {
           injector.push({ type: AGENT_PROGRESS_PART_TYPE, data: event.progress, transient: true })
         }
       } : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion }
+    // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
+    const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID() }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -284,8 +289,9 @@ export async function startChatServer(config: ChatServerConfig) {
     // API key mode: add filesystem tools + optional skill tools
     const tools = (() => {
       if (connection.ownsConversation) return undefined
-      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard) : undefined
-      const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath) : undefined
+      const toolEvents = turnToolEvents(config, authMode, modelRequest)
+      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents) : undefined
+      const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents) : undefined
       if (!fsTools && !skillTools) return undefined
       return { ...fsTools, ...skillTools }
     })()
@@ -356,20 +362,23 @@ export async function startChatServer(config: ChatServerConfig) {
     }
 
     const activityToken = crypto.randomUUID()
+    // The renderer's stop (the request's signal) or the main process's (chat-turns abort).
+    const running = chatTurns.track({ appSessionId, companyId }, c.req.raw.signal, injector)
     let released = false
     const release = (outcome: 'finished' | 'failed' = 'failed') => {
       if (released) return
       released = true
-      c.req.raw.signal.removeEventListener('abort', abortRelease)
+      running.signal.removeEventListener('abort', abortRelease)
+      running.end()
       turn?.end(outcome)
       config.onChatActivity?.(activityToken, false)
     }
     function abortRelease() { release('failed') }
     config.onChatActivity?.(activityToken, true)
-    c.req.raw.signal.addEventListener('abort', abortRelease, { once: true })
+    running.signal.addEventListener('abort', abortRelease, { once: true })
     let result
     try { result = streamText({
-      abortSignal: c.req.raw.signal,
+      abortSignal: running.signal,
       maxRetries: 0,
       model,
       ...(finalSystemPrompt ? { system: finalSystemPrompt } : {}),
@@ -512,6 +521,7 @@ ${transcript}
 
   console.log(`[chat-server] Started on http://127.0.0.1:${port}`)
 
-  return { port, authToken, server }
+  // `turns.abort` / `abortAll` stop running turns from the main process (monitoring M2).
+  return { port, authToken, server, turns: { abort: chatTurns.abort, abortAll: chatTurns.abortAll } }
 }
 

@@ -27,6 +27,8 @@ export class AgentInteractions {
   }
   list(owner: number) { return [...this.pending.values()].filter(p => p.owner === owner).map(p => p.request) }
   closeOwner(owner: number) { for (const p of this.pending.values()) if (p.owner === owner) p.finish({ cancelled: true, reason: 'aborted' }) }
+  /** Cancel every pending request of one conversation (its turn was stopped). */
+  cancelConversation(appSessionId: string) { for (const p of [...this.pending.values()]) if (p.request.appSessionId === appSessionId) p.finish({ cancelled: true, reason: 'aborted' }) }
   respond(owner: number, id: string, response: AgentInteractionResponse): boolean {
     const p = this.pending.get(id)
     if (!p || p.owner !== owner || !response || typeof response !== 'object') return false

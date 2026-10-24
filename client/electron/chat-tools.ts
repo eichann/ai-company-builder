@@ -6,6 +6,7 @@ import { exec } from 'child_process'
 import crypto from 'crypto'
 import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
 import { agentEnv } from './agents/agent-env'
+import type { GuardReason, ToolDecision, ToolEventTracker } from '../shared/agent-events'
 
 // Approval callback type (optional, injected from chat-server)
 export type RequestApproval = (
@@ -24,6 +25,34 @@ function validatePath(filePath: string, workingDirectory: string): string {
     throw new Error(`Access denied: path "${filePath}" is outside working directory`)
   }
   return resolved
+}
+
+// ============================================================================
+// AI action log (shared/agent-events.ts)
+// ============================================================================
+
+/**
+ * One call of an API-key tool in the action log: `decide` once the tool knows
+ * (refusals are recorded at once), then `run` the work, which records how it
+ * ended. Without a tracker it only runs.
+ */
+function logCall(events: ToolEventTracker | undefined, tool: string, input: Record<string, unknown>, cwd?: string) {
+  const call = { tool, input, cwd }
+  let id: string | undefined
+  return {
+    decide(decision: ToolDecision, guardReason?: GuardReason) { id = events?.decide(id, call, decision, guardReason) },
+    async run<T>(work: () => Promise<T>, failed?: (value: T) => boolean): Promise<T> {
+      if (!id) id = events?.decide(undefined, call, 'auto-allowed')
+      try {
+        const value = await work()
+        if (id) events?.finish(id, failed?.(value) ? 'error' : 'ok')
+        return value
+      } catch (error) {
+        if (id) events?.finish(id, 'error')
+        throw error
+      }
+    },
+  }
 }
 
 // ============================================================================
@@ -71,7 +100,7 @@ const readSkillFileSchema = z.object({
   ),
 })
 
-export function createSkillTools(skillFolderPath: string) {
+export function createSkillTools(skillFolderPath: string, events?: ToolEventTracker) {
   return {
     readSkillFile: tool({
       description:
@@ -79,24 +108,30 @@ export function createSkillTools(skillFolderPath: string) {
         'Path is relative to the skill folder root.',
       inputSchema: readSkillFileSchema,
       execute: async ({ path: filePath }) => {
-        const absPath = validatePath(filePath, skillFolderPath)
-        const content = await fs.readFile(absPath, 'utf-8')
-        return truncate(content, 50_000)
+        const log = logCall(events, 'readSkillFile', { path: filePath }, skillFolderPath)
+        return log.run(async () => {
+          const absPath = validatePath(filePath, skillFolderPath)
+          const content = await fs.readFile(absPath, 'utf-8')
+          return truncate(content, 50_000)
+        })
       },
     }),
   }
 }
 
-export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard) {
+export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard, events?: ToolEventTracker) {
   return {
     readFile: tool({
       description:
         'Read the contents of a file at the given path (relative to the working directory).',
       inputSchema: readFileSchema,
       execute: async ({ path: filePath }) => {
-        const absPath = validatePath(filePath, workingDirectory)
-        const content = await fs.readFile(absPath, 'utf-8')
-        return truncate(content, 50_000) // 50 KB limit
+        const log = logCall(events, 'readFile', { path: filePath })
+        return log.run(async () => {
+          const absPath = validatePath(filePath, workingDirectory)
+          const content = await fs.readFile(absPath, 'utf-8')
+          return truncate(content, 50_000) // 50 KB limit
+        })
       },
     }),
 
@@ -105,19 +140,23 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Write content to a file at the given path (relative to the working directory). Creates parent directories if needed.',
       inputSchema: writeFileSchema,
       execute: async ({ path: filePath, content }) => {
+        const log = logCall(events, 'writeFile', { path: filePath })
         // Read-only folder: refuse before asking the member to approve it.
         const guarded = writeGuard ? checkWritePath(writeGuard, validatePath(filePath, workingDirectory)) : undefined
-        if (guarded?.deny) throw new Error(guarded.message)
+        if (guarded?.deny) { log.decide('guard-denied', guarded.code); throw new Error(guarded.message) }
         const reserved = await decideReservedWrite(writeGuard, 'Write', { file_path: validatePath(filePath, workingDirectory) }, workingDirectory)
-        if (reserved.deny) throw new Error(reserved.message)
+        if (reserved.deny) { log.decide('guard-denied', reserved.code); throw new Error(reserved.message) }
         if (requestApproval) {
           const result = await requestApproval('writeFile', { path: filePath }, crypto.randomUUID())
+          log.decide(result.approved ? 'member-allowed' : 'member-denied')
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
         }
-        const absPath = validatePath(filePath, workingDirectory)
-        await fs.mkdir(path.dirname(absPath), { recursive: true })
-        await fs.writeFile(absPath, content, 'utf-8')
-        return `File written: ${filePath}`
+        return log.run(async () => {
+          const absPath = validatePath(filePath, workingDirectory)
+          await fs.mkdir(path.dirname(absPath), { recursive: true })
+          await fs.writeFile(absPath, content, 'utf-8')
+          return `File written: ${filePath}`
+        })
       },
     }),
 
@@ -126,15 +165,18 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'List files and directories at the given path (relative to the working directory). Hidden files (starting with .) are excluded.',
       inputSchema: listDirectorySchema,
       execute: async ({ path: dirPath }) => {
-        const absPath = validatePath(dirPath, workingDirectory)
-        const entries = await fs.readdir(absPath, { withFileTypes: true })
-        const items = entries
-          .filter((e) => !e.name.startsWith('.'))
-          .map((e) => ({
-            name: e.name,
-            type: e.isDirectory() ? 'directory' : 'file',
-          }))
-        return JSON.stringify(items, null, 2)
+        const log = logCall(events, 'listDirectory', { path: dirPath })
+        return log.run(async () => {
+          const absPath = validatePath(dirPath, workingDirectory)
+          const entries = await fs.readdir(absPath, { withFileTypes: true })
+          const items = entries
+            .filter((e) => !e.name.startsWith('.'))
+            .map((e) => ({
+              name: e.name,
+              type: e.isDirectory() ? 'directory' : 'file',
+            }))
+          return JSON.stringify(items, null, 2)
+        })
       },
     }),
 
@@ -143,11 +185,13 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Execute a shell command in the working directory. Use for build, test, or inspection tasks. Dangerous commands are blocked.',
       inputSchema: executeCommandSchema,
       execute: async ({ command }) => {
+        const log = logCall(events, 'executeCommand', { command })
         let guarded = decideToolWrite(writeGuard, 'Bash', { command }, workingDirectory)
         if (!guarded.deny) guarded = await decideReservedWrite(writeGuard, 'Bash', { command }, workingDirectory)
-        if (guarded.deny) throw new Error(guarded.message)
+        if (guarded.deny) { log.decide('guard-denied', guarded.code); throw new Error(guarded.message) }
         if (requestApproval) {
           const result = await requestApproval('executeCommand', { command }, crypto.randomUUID())
+          log.decide(result.approved ? 'member-allowed' : 'member-denied')
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
         }
 
@@ -186,11 +230,13 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         const commandLower = command.toLowerCase()
         for (const pattern of DANGEROUS_PATTERNS) {
           if (pattern.test(commandLower)) {
+            log.decide('guard-denied', 'dangerous-command')
             throw new Error(`Blocked: command matches dangerous pattern`)
           }
         }
 
-        return new Promise<string>((resolve) => {
+        let exitedWithError = false
+        return log.run(() => new Promise<string>((resolve) => {
           exec(
             command,
             {
@@ -204,6 +250,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
               const err = truncate(stderr, 5_000) // 5 KB
 
               if (error) {
+                exitedWithError = true
                 resolve(
                   `Exit code: ${error.code ?? 1}\n` +
                     (out ? `stdout:\n${out}\n` : '') +
@@ -214,7 +261,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
               }
             },
           )
-        })
+        }), () => exitedWithError)
       },
     }),
   }

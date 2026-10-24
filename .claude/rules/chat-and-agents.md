@@ -14,6 +14,9 @@ paths:
   - "client/electron/features/chat/**"
   - "client/electron/features/agent-interactions/**"
   - "client/electron/services/claude-cli.ts"
+  - "client/electron/services/agent-events.ts"
+  - "client/tests/agent-events.test.ts"
+  - "client/tests/agent-tool-events.test.ts"
   - "client/shared/choice-prompt.ts"
   - "client/shared/steer.ts"
   - "client/shared/prompt-suggestion.ts"
@@ -214,3 +217,53 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
   else or Esc dismisses. One per turn. Screen readers: `aria-describedby` + a polite live region.
 - Preview `client/tests/chat-composer-ui.html` (`?theme=dark`, `?suggestion=…`); tests
   `client/tests/prompt-suggestion.test.ts`, `client/tests/steering.test.ts`.
+
+## AI action log (monitoring M1) and turn abort handles (M2)
+
+Contract `client/shared/agent-events.ts` (pure); tests `client/tests/agent-events.test.ts`,
+`client/tests/agent-tool-events.test.ts`. Sending to the server is not built yet.
+
+- **One event per tool call** (`AgentToolEvent`, `version: 1`): id, callId (tool_use_id / Codex
+  item id), at, durationMs, conversationId (appSessionId), turnId, companyId, agent, model,
+  subagentType, tool, category (read / write / command / web / mcp-external / app-tool /
+  subagent / question / other), target, decision (auto-allowed / member-allowed / member-denied /
+  guard-denied / policy-default / policy-denied / stopped), guardReason (a code such as
+  `read-only-folder`, `not-downloaded`, `reserved-path`, `private-read`, `dangerous-command` —
+  never the message), outcome (ok / error / unfinished). Emitted once the call is over: a refusal
+  at once (no outcome), an allowed call with its result, anything still open when the turn ends
+  as `unfinished`.
+- **Metadata only.** `describeTarget` is the only reader of a tool input: company-relative NFC
+  paths (outside the company only `{ kind: 'outside' }`, plus `sensitive`: ssh / env-file /
+  keychain / credentials / app-data — never the path), program name + subcommand for a short
+  allowlist (git, npm, pnpm, yarn, bun, pip, uv, brew, docker, gh, cargo, go; `python -m <module>`;
+  `npx <package>`; `sh -c '…'` is read inside), `redirect: true` for `>` / `>>` / `&>` / `tee`,
+  ≤ 5 programs per compound command, the web host, the MCP server + tool, the subagent type.
+  No prompt, content, argument, URL path/query or message — a test feeds secrets and checks the
+  serialized events. Categories need no agent id (tool names do not collide); app MCP servers
+  (`APP_MCP_SERVERS`) are `app-tool`, `ask_user` / `AskUserQuestion` are `question`.
+- **Where it is reported.** The host's `onToolEvent` (`AgentHostConfig`, plus `toolEventPaths`
+  for home / userData); the chat server only adds `toolEventContext` (company, root, turn id) to
+  the request. Each turn builds a tracker with `agents/tool-events.ts` `turnToolEvents`; every
+  emission is wrapped (a failing recorder never reaches the agent). Translation per agent:
+  - Claude (`agents/claude-tool-events.ts`): the PreToolUse hook and canUseTool return a
+    `ToolVerdict` (the unchanged CLI answer + its decision) and are recorded at one point each;
+    PostToolUse / PostToolUseFailure (outcome, the CLI's `duration_ms`) and PermissionDenied
+    (`policy-denied`) are installed when a recorder is set; the query's end closes the turn.
+  - Codex (`agents/codex-tool-events.ts`): command / file-change approvals (member's answer,
+    paired by `itemId`), `item/started` / `item/completed` (Codex's own policy otherwise;
+    `declined` = `policy-denied`); `finish()` closes the turn.
+  - API key (`chat-tools.ts` `logCall`): inside the five tools.
+- Limits: a call Claude's auto-mode classifier refuses without the PermissionDenied hook ends as
+  `unfinished` (decision `policy-default`); Codex's sandbox decisions are not visible beyond the
+  item status; titles, one-shots and hand-off are not logged.
+- Recorder `electron/services/agent-events.ts` (created in `main.ts`, injected into
+  `features/chat/server-config.ts`): a bounded ring (500) and one `[agent-events]` console line
+  per event; `sinks` is the seam for sending to the server.
+- **Turn abort handles** (`chat-turns.ts` `track` / `abort(filter, reason)` / `abortAll`, returned
+  by `startChatServer` as `turns`): every response runs under an AbortController that follows the
+  request's signal (the renderer's stop) and goes into streamText, so each agent stops its usual
+  way. A main-process stop first pushes a transient `data-turn-stopped` part `{ reason }`
+  (`stopped-by-admin` / `app-quit`), cancels the conversation's tool approvals
+  (`ToolApprovals.cancel`) and choice cards (`AgentInteractions.cancelConversation`), then aborts
+  with the reason; the stream ends with an `abort` chunk carrying it (no error shown). Nothing
+  calls it in production yet.
