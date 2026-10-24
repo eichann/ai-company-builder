@@ -301,8 +301,8 @@ How to add an IPC channel:
 
 ### Main process layout (client)
 
-`client/electron/main.ts` is being split by domain (R3, one PR per 1–3
-domains); what has moved so far:
+Main-process code lives by domain (R3 split `client/electron/main.ts`,
+3,220 lines, into these):
 
 - `electron/features/<domain>/ipc.ts` — one module per IPC domain, exporting
   `register<Domain>Ipc(ipc: IpcRegistrar, deps)`. Dependencies are injected
@@ -311,15 +311,38 @@ domains); what has moved so far:
   stores. Features never import `electron` (eslint `no-restricted-imports`
   on `electron/features/**`, `electron/services/**`, `electron/ipc/**`).
   Done: `settings` (config:*, codex:status), `env` (env:*), `backups`
-  (backup:*).
+  (backup:*), `auth` (auth:*, api:*), `chat-history` (chatHistory:*,
+  handoff:*), `agent-interactions` (agent-interaction:*, tool approvals),
+  `fs` (fs:*, dialog:selectDirectory, editor:backupBeforeOverwrite; the
+  company watchers in `fs/watchers.ts`), `git-history` (git:preview, diffs,
+  revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
+  `sync` (git:sync, writeAccess:get), `private-folders` (privateFolders:*;
+  `guards.ts`: readable folders / instruction-file authority for the chat
+  guards, the reserved-name refusal for file operations), `company-setup`
+  (git:inspectCompanyFolder, git:setupCompanyRemote), `download-choices`
+  (git:sparse*, git:folderSizes), `skills` (skills:*; the scan and its
+  cache), `tools` (tools:start/stop, shell:openExternal; running tools are
+  stopped on quit), `chat` (`server-config.ts`: what the embedded chat server
+  gets — settings, CLI, guards, company-file tools, hand-off, the member's
+  answers; `system-prompt.ts`).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the
-  member's `claude`, status cached 30 s).
-- `electron/electron-adapter.ts` — Electron's implementations of the ports.
-- `main.ts` — the composition root: creates the services and stores, calls
-  each `register…Ipc`, owns the window and the app lifecycle. Startup stays
-  inside `app.whenReady`; nothing new runs at import time.
+  member's `claude`, status cached 30 s), `session.ts` (the server session
+  cookies, memory only — every server client and git's token read them
+  here), `app-git.ts` (every git the app runs: bundled-or-system binary,
+  GIT_ASKPASS token, the guarded `sync/git-factory.ts` configuration),
+  `commit-messages.ts` (sync's AI commit message).
+- `electron/electron-adapter.ts` — Electron's implementations of the ports
+  (`DesktopShell`, `WindowPort`, sync's message boxes) and the
+  `local-file://` protocol (allowed roots, real location, no-store).
+- `main.ts` (~330 lines) — the composition root: creates the services and
+  stores in dependency order, calls each `register…Ipc`, owns the window,
+  the app lifecycle and `chat-server:getInfo`, starts voice input and the
+  chat server in `app.whenReady`. Nothing new runs at import time. Shell
+  layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`:
+  the only files that import Electron, i.e. what another desktop shell
+  (Tauri) replaces.
 
 ### File Naming Rules
 

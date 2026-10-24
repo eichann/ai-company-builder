@@ -5,6 +5,7 @@
 
 import type { EventChannel, EventPayload } from '../../shared/ipc-contract'
 import type { ValidateOptions } from '../allowed-roots'
+import type { IpcSender } from '../ipc/registrar'
 
 /**
  * The allowed-roots check (electron/allowed-roots.ts AllowedRoots): every
@@ -29,4 +30,8 @@ export interface DesktopShell {
   openPath(path: string): Promise<string>
   /** Open a URL in the default browser / mail app. */
   openExternal(url: string): Promise<void>
+  /** The folder picker; null when cancelled. */
+  selectDirectory(): Promise<string | null>
+  /** Start a native drag of a (validated) file out of the window that sent the request. */
+  startDrag(sender: IpcSender, file: string): void
 }

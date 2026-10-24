@@ -2,39 +2,39 @@
   "main": {
     "handle": {
       "agent-interaction:list": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": ""
       },
       "agent-interaction:respond": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": "id: string, response: AgentInteractionResponse"
       },
       "api:createCompany": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "name: string"
       },
       "api:getCompanies": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "api:getDepartments": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "companyId: string"
       },
       "auth:getSession": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "auth:signIn": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "email: string, password: string"
       },
       "auth:signOut": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": ""
       },
       "auth:signUp": {
-        "file": "main.ts",
+        "file": "features/auth/ipc.ts",
         "params": "email: string, password: string, name?: string"
       },
       "backup:list": {
@@ -54,27 +54,27 @@
         "params": ""
       },
       "chatHistory:deleteSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string"
       },
       "chatHistory:getSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string"
       },
       "chatHistory:getSummaries": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string"
       },
       "chatHistory:patchSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, sessionId: string, patch: ChatMetadataPatch"
       },
       "chatHistory:saveSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, session: ChatSession"
       },
       "chatHistory:search": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, query: string"
       },
       "codex:status": {
@@ -126,11 +126,11 @@
         "params": "url: string"
       },
       "dialog:selectDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": ""
       },
       "editor:backupBeforeOverwrite": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string, filePath: string"
       },
       "env:read": {
@@ -142,195 +142,195 @@
         "params": "rootPath: string, vars: EnvVars"
       },
       "fs:copy": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:createDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:delete": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:exists": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:move": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:moveFromExternal": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:readDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:readDirectoryTree": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string, maxDepth: number = 2"
       },
       "fs:readFile": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       },
       "fs:readFileBinary": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       },
       "fs:registerAllowedRoot": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:rename": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "oldPath: string, newPath: string"
       },
       "fs:stat": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:unwatch": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string"
       },
       "fs:watch": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string"
       },
       "fs:writeFile": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string, content: string"
       },
       "git:commitFileDiff": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, commitHash: string, filePath: string"
       },
       "git:fileDiff": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:folderSizes": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, companyId: string, folder: string, measure: string[]"
       },
       "git:generateSummary": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string"
       },
       "git:getBinaryStatus": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": ""
       },
       "git:grep": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, query: string, folderPath: string"
       },
       "git:inspectCompanyFolder": {
-        "file": "main.ts",
+        "file": "features/company-setup/ipc.ts",
         "params": "folder: string, companyId: string"
       },
       "git:listFiles": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, folderPath: string"
       },
       "git:log": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, folderPath: string, limit: number = 50"
       },
       "git:preview": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string"
       },
       "git:revertFile": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:setupCompanyRemote": {
-        "file": "main.ts",
+        "file": "features/company-setup/ipc.ts",
         "params": "repoPath: string, companyId: string, selectedPaths?: string[]"
       },
       "git:showCommit": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, commitHash: string, folderPath?: string"
       },
       "git:sparseGetExclusions": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string"
       },
       "git:sparseSetExclusions": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, excluded: string[]"
       },
       "git:sparseUncommittedChanges": {
-        "file": "main.ts",
+        "file": "features/download-choices/ipc.ts",
         "params": "repoPath: string, folders: string[]"
       },
       "git:sync": {
-        "file": "main.ts",
+        "file": "features/sync/ipc.ts",
         "params": "repoPath: string, companyId: string, commitMessage: string"
       },
       "handoff:complete": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string, receipt: HandoffCompletion"
       },
       "handoff:get": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string"
       },
       "handoff:update": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "company: string, id: string"
       },
       "privateFolders:create": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string, input: CreatePrivateFolderRequest"
       },
       "privateFolders:createContext": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string, parentPath: string"
       },
       "privateFolders:mine": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string"
       },
       "privateFolders:reservedPathRefusal": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "targetPath: string"
       },
       "shell:openExternal": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "url: string"
       },
       "skills:list": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }"
       },
       "skills:makePrivate": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, skillRelativePath: string"
       },
       "skills:publish": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, skillRelativePath: string"
       },
       "skills:toggleNurturing": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "unsafeSkillMdPath: string, makeNurturing: boolean"
       },
       "tool-approval-response": {
-        "file": "main.ts",
+        "file": "features/agent-interactions/ipc.ts",
         "params": "toolUseId: string, approved: boolean"
       },
       "tools:start": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "unsafeToolPath: string, startCommand: string = 'dev'"
       },
       "tools:stop": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "toolPath: string"
       },
       "voice:cancel": {
@@ -366,17 +366,17 @@
         "params": "id: string"
       },
       "writeAccess:get": {
-        "file": "main.ts",
+        "file": "features/sync/ipc.ts",
         "params": "companyId: string, refresh?: boolean"
       }
     },
     "on": {
       "chatHistory:flushSession": {
-        "file": "main.ts",
+        "file": "features/chat-history/ipc.ts",
         "params": "companyId: string, session: ChatSession"
       },
       "fs:startDrag": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       }
     },
@@ -388,19 +388,19 @@
         "main.ts"
       ],
       "chatHistory:changed": [
-        "main.ts"
+        "features/chat-history/ipc.ts"
       ],
       "fs:changes": [
-        "main.ts"
+        "features/fs/ipc.ts"
       ],
       "handoff:changed": [
         "main.ts"
       ],
       "setup:progress": [
-        "main.ts"
+        "features/company-setup/ipc.ts"
       ],
       "sparse:progress": [
-        "main.ts"
+        "features/download-choices/ipc.ts"
       ],
       "tool-approval-request": [
         "main.ts"

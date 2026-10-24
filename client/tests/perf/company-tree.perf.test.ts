@@ -37,9 +37,9 @@ test('perf #151: one recursive watch handle for a 15k-file company; open + close
   }
 })
 
-// The renderer's IO, answering like main.ts's fs:readDirectory /
+// The renderer's IO, answering like the fs:readDirectory /
 // fs:readDirectoryTree handlers (same algorithm, without IPC and the
-// allowed-root check; those handlers live inside main.ts).
+// allowed-root check; those handlers live in electron/features/fs/ipc.ts).
 const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 async function readDirectoryTree(dir: string, maxDepth: number, depth = 0): Promise<RawDirEntry[]> {
   const entries = await fs.promises.readdir(dir, { withFileTypes: true })
