@@ -1,0 +1,339 @@
+import { HandoffControl } from './HandoffControl'
+import { AgentInteractionCard } from './AgentInteractionCard'
+import type { AuthMode, CodexStatus } from '../../../shared/agent'
+import { agentCan } from '../../../shared/agents/registry'
+import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
+import { useEffect, useCallback, memo } from 'react'
+import { useTranslation } from 'react-i18next'
+import type { UIMessage } from 'ai'
+import { CircleNotch } from '@phosphor-icons/react'
+import { useAppStore } from '../../stores/appStore'
+import { perfMark } from '../../lib/perfDiagnostics'
+import { type SlashCommandItem } from './SlashCommandDropdown'
+import { markChatInputActivity } from '../../lib/chatInputActivity'
+import type { ChatServerClient } from './chatServerClient'
+import { useChatDraft } from './hooks/useChatDraft'
+import { completeHandoffTurn, persistAgentSession, stampNewMessages, useConversation } from './hooks/useConversation'
+import { useChatHistory } from './hooks/useChatHistory'
+import { useTitleGeneration } from './hooks/useTitleGeneration'
+import { useAttachToLatestUserMessage, useMessageAttachments } from './hooks/useMessageAttachments'
+import { useChatRequestContext, useChatTransport } from './hooks/useChatTransport'
+import { useAgentInteractions, useToolApprovals } from './hooks/useAgentInteractions'
+import { useQueuedSendFlush, useSteering } from './hooks/useSteering'
+import { usePromptSuggestion } from './hooks/usePromptSuggestion'
+import { useChatAutoScroll } from './hooks/useChatAutoScroll'
+import { useAgentModelSelection } from './hooks/useAgentModelSelection'
+import { useRateLimitsRefresh, useStreamingChat } from './hooks/useStreamingChat'
+import { ChatHeader } from './ChatHeader'
+import { MessageList } from './ChatMessageList'
+import { ToolApprovalBanner } from './ToolApprovalBanner'
+import { ChatInput } from './ChatComposer'
+import { QueuedSendList } from './QueuedSendList'
+
+// One chat tab: a conversation with the agent. A composition of hooks
+// (hooks/, one concern each, in the order useChat needs them) and
+// presentational parts (ChatHeader, MessageList, ChatInput, banners).
+
+export interface ChatPanelChatProps {
+  isActive: boolean
+  departmentPath?: string
+  activeDepartment?: { name: string; folder: string }
+  chatServer: ChatServerClient
+  authMode: AuthMode
+  codexStatus: CodexStatus
+  slashCommands?: SlashCommandItem[]
+  onShowSettings: () => void
+  onTitleChange?: (title: string) => void
+  onNewTab?: () => void
+  onToggleSidebar: () => void
+  sidebarOpen: boolean
+  initialSessionId?: string | null
+  onSessionIdChange?: (sessionId: string | null) => void
+}
+
+// Memoised: every tab stays mounted, and the parent re-renders on any tab's
+// title change or tab switch. Its props are stable (see CompanyChatPanel).
+export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+  const { t } = useTranslation()
+  const currentCompany = useAppStore((state) => state.currentCompany)
+  const pendingChatInput = useAppStore((state) => state.pendingChatInput)
+  const pendingChatNewSession = useAppStore((state) => state.pendingChatNewSession)
+  const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
+  const models = useAgentModelSelection(authMode, codexStatus)
+
+  const handlePendingTextConsumed = useCallback(() => {
+    setPendingChatInput(null, false)
+  }, [setPendingChatInput])
+
+  // Which conversation this tab shows (refs read by the transport, onFinish
+  // and the interaction lookup below — so this comes first).
+  const conversation = useConversation(initialSessionId)
+  const { appSessionIdRef, claudeSessionIdRef, agentSessionRef, handoffRequestRef, historyError, setHistoryError, currentSessionId, setCurrentSessionId, timestampsRef, saveRef } = conversation
+  // Imperative handle to read/write the chat input value for per-session draft persistence
+  const { draftRef: draftInputRef, onDraftChange: handleDraftChange, inputApiRef: chatInputApiRef } = useChatDraft()
+
+  // The agent's questions for this conversation (looked up during render).
+  const { currentInteraction, respondToInteraction } = useAgentInteractions(appSessionIdRef)
+
+  // What each request carries (refs: the transport reads them per request).
+  const { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef: aiModelRef, effortRef: aiEffortRef, companyIdRef, companyRootRef } = useChatRequestContext({
+    authMode,
+    workingDirectory: departmentPath || currentCompany?.rootPath,
+    activeDepartment,
+    companyId: currentCompany?.id,
+    companyRootPath: currentCompany?.rootPath,
+    modelId: models.selectedModel,
+    effort: models.selectedEffort,
+  })
+
+  const attachments = useMessageAttachments()
+  const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
+
+  const transport = useChatTransport(chatServer, {
+    authMode: authModeRef,
+    agentSession: agentSessionRef,
+    workingDirectory: workingDirRef,
+    companyId: companyIdRef,
+    companyRootPath: companyRootRef,
+    activeDepartment: activeDepartmentRef,
+    modelId: aiModelRef,
+    effort: aiEffortRef,
+    promptSuggestions: () => promptSuggestionSetting.getSnapshot(),
+    appSessionId: appSessionIdRef,
+    claudeSessionId: claudeSessionIdRef,
+    pendingImages: pendingImagesRef,
+    pendingFilePaths: pendingFilePathsRef,
+    handoffRequest: handoffRequestRef,
+  })
+
+  // Next-prompt suggestion and messages sent while the AI works. Declared
+  // before useChat: its onFinish records how the turn ended.
+  const suggestions = usePromptSuggestion({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef, currentSessionId })
+  const { onTurnFinished: suggestionTurnFinished, resetSuggestion } = suggestions
+  const steering = useSteering({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef })
+  const { queuedSends, lastTurnAbortedRef, sendWhileRunning, cancelQueuedSend } = steering
+
+  const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useStreamingChat(transport, ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
+    lastTurnAbortedRef.current = isAbort || isDisconnect || isError
+    suggestionTurnFinished(lastTurnAbortedRef.current)
+    completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
+    // Fetch and store Claude CLI session ID for resume persistence
+    persistAgentSession(conversation, chatServer, currentCompany?.id)
+  })
+  const { pendingApproval, respondToApproval } = useToolApprovals(appSessionIdRef, status)
+
+  useRateLimitsRefresh(chatServer, authMode, authModeRef)
+
+  // Model/provider changes start a fresh native session with visible history.
+  const modelLocked = status === 'submitted' || status === 'streaming'
+
+  useAttachToLatestUserMessage(messages, attachments)
+
+  // Timestamp tracking (sync during render for immediate availability)
+  stampNewMessages(timestampsRef.current, messages)
+
+  // The conversation in the history store: restore, autosave, flush, new chat.
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, startNewChat } = useChatHistory({
+    conversation,
+    initialSessionId,
+    companyId: currentCompany?.id,
+    greeting: t('chat.greeting', { company: currentCompany?.name || '' }),
+    newChatTitle: t('chat.newChat'),
+    isActive,
+    messages,
+    setMessages,
+    status,
+    stop,
+    chatServer,
+    draftRef: draftInputRef,
+    inputApiRef: chatInputApiRef,
+    messageImages,
+    messageReferenceFiles,
+    setMessageImages: attachments.setMessageImages,
+    setMessageReferenceFiles: attachments.setMessageReferenceFiles,
+    onTitleChange,
+    onSessionIdChange,
+  })
+
+  useTitleGeneration({
+    status,
+    messages,
+    companyId: currentCompany?.id,
+    chatServer,
+    appSessionIdRef,
+    authModeRef,
+    modelIdRef: aiModelRef,
+    titleGenerationDoneRef,
+    customTitleRef,
+    onTitleChange,
+  })
+
+  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isActive, isRestoringSession, messages, status })
+
+  const handleInputActivity = useCallback(() => {
+    markChatInputActivity()
+  }, [])
+
+  // Send handler. While the AI works the message goes into the running turn
+  // (steering) or waits for the turn to end; it no longer stops the AI.
+  const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
+    if (!text.trim() && (!files || files.length === 0)) return
+    perfMark('chat.send.start')
+
+    // Ensure session ID exists before first message (don't wait for auto-save debounce)
+    if (!currentSessionId && !appSessionIdRef.current) {
+      const newId = crypto.randomUUID()
+      setCurrentSessionId(newId)
+      appSessionIdRef.current = newId
+    }
+
+    resetSuggestion()
+    if (status === 'streaming' || status === 'submitted') {
+      sendWhileRunning({ text, files, filePaths })
+      return
+    }
+    lastTurnAbortedRef.current = false
+
+    // Images (base64) and file paths for the request body and the bubble
+    if (files && files.length > 0) await stageImages(files)
+    if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
+
+    const message: UIMessage = {
+      id: crypto.randomUUID(), role: 'user',
+      parts: [{ type: 'text', text: text || '画像を確認してください' }],
+    }
+    timestampsRef.current.set(message.id, new Date())
+    if (!await saveRef.current([...messagesRef.current, message], true, true)) {
+      chatInputApiRef.current?.setValue(text)
+      return
+    }
+    try { await sendMessage(message) }
+    catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
+  }, [status, sendMessage, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef])
+
+  // The turn ended: waiting sends go out together (or back into the input).
+  useQueuedSendFlush(steering, status, handleSend, setMessages, chatInputApiRef)
+
+  const running = status === 'submitted' || status === 'streaming'
+  const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
+
+  // Start new chat and auto-send when skill execution is triggered (only active tab)
+  useEffect(() => {
+    if (!isActive || !historyReadyRef.current) return
+    if (pendingChatNewSession && pendingChatInput) {
+      const text = pendingChatInput
+      setPendingChatInput(null, false)
+      startNewChat().then(started => {
+        if (started) void handleSend(text)
+      })
+    }
+  }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
+
+  // Edit message handler: trim messages after edit point, resend
+  // Reads messages through the ref so the callback keeps its identity while
+  // streaming; depending on `messages` re-rendered every MessageItem per chunk.
+  const handleEditMessage = useCallback((messageId: string, newText: string) => {
+    const current = messagesRef.current
+    const msgIndex = current.findIndex(m => m.id === messageId)
+    if (msgIndex === -1) return
+    setMessages(current.slice(0, msgIndex))
+    sendMessage({ text: newText })
+  }, [setMessages, sendMessage, messagesRef])
+
+  // ============================================================================
+  // Render
+  // ============================================================================
+
+  return (
+    <div className="h-full flex flex-col bg-white dark:bg-zinc-900">
+      {/* Header */}
+      <ChatHeader
+        authMode={authMode}
+        status={status}
+        codexStatus={codexStatus}
+        models={models}
+        modelLocked={modelLocked}
+        onStop={stop}
+        onNewChat={onNewTab || (() => startNewChat())}
+        onToggleSidebar={onToggleSidebar}
+        sidebarOpen={sidebarOpen}
+        onShowSettings={onShowSettings}
+      />
+      {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isActive} />}
+
+
+      {historyError && (
+        <div role="alert" className="px-4 py-2 text-sm text-red-600 dark:text-red-400 bg-red-500/10">
+          {historyError}
+        </div>
+      )}
+      {/* Error Banner */}
+      {status === 'error' && error && (
+        <div className="flex-shrink-0 px-4 py-2 bg-red-500/10 border-b border-red-500/20">
+          <div className="text-sm text-red-400">
+            {t('chat.errorOccurred', { error: error.message })}
+          </div>
+        </div>
+      )}
+
+      {/* Messages Area */}
+      {isRestoringSession ? (
+        <div className="flex-1 flex items-center justify-center">
+          <CircleNotch size={24} className="text-ink-muted animate-spin" />
+        </div>
+      ) : (
+        <MessageList
+          messages={messages}
+          status={status}
+          messagesEndRef={messagesEndRef}
+          containerRef={messagesContainerRef}
+          timestamps={timestampsRef.current}
+          messageImages={messageImages}
+          messageReferenceFiles={messageReferenceFiles}
+          onRegenerate={regenerate}
+          onEditSubmit={handleEditMessage}
+        />
+      )}
+
+      {models.agentUnavailable && (
+        <div role="alert" className="px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
+          {codexStatus.error || 'Codexの接続を確認してください。'}
+          <button onClick={onShowSettings} className="ml-2 underline">設定を開く</button>
+        </div>
+      )}
+      {/* Tool Approval Banner (above input) */}
+      {currentInteraction && <AgentInteractionCard key={currentInteraction.id} request={currentInteraction} onRespond={response => respondToInteraction(currentInteraction.id, response)} />}
+      {pendingApproval && (
+        <ToolApprovalBanner
+          request={pendingApproval}
+          onRespond={respondToApproval}
+        />
+      )}
+
+      {/* Input Area */}
+      <div className="flex-shrink-0 border-t border-gray-200 dark:border-zinc-800">
+        <QueuedSendList queuedSends={queuedSends} onCancel={cancelQueuedSend} />
+        <div className="p-4 pb-7">
+          <ChatInput
+            initialDraft={draftInputRef.current}
+            onDraftChange={handleDraftChange}
+            voiceActive={isActive}
+            voiceScope={appSessionIdRef.current ?? ''}
+            onSend={handleSend}
+            disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || models.agentUnavailable}
+            placeholder={running ? t(agentCan(authMode, 'steering') ? 'chat.inputPlaceholderWorking' : 'chat.inputPlaceholderQueued') : t('chat.inputPlaceholder')}
+            hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
+            onCompositionStateChange={handleInputCompositionStateChange}
+            onInputActivity={handleInputActivity}
+            pendingText={pendingChatNewSession ? null : (isActive ? pendingChatInput : null)}
+            onPendingTextConsumed={handlePendingTextConsumed}
+            slashCommands={slashCommands}
+            apiRef={chatInputApiRef}
+            suggestion={offeredSuggestion}
+            onSuggestionCleared={suggestions.clearPromptSuggestion}
+          />
+        </div>
+      </div>
+    </div>
+  )
+})

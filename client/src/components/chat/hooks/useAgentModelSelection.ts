@@ -37,7 +37,10 @@ export function useAgentModelSelection(authMode: AuthMode, codexStatus: CodexSta
   const chooseCodexModel = (id: string) => { setCodexModelId(id); localStorage.setItem(CODEX_MODEL_KEY, id) }
   const chooseCodexEffort = (effort: string) => { setCodexEffort(effort); localStorage.setItem(CODEX_EFFORT_KEY, effort) }
 
-  return { aiModel, setAIModel, aiEffort, setAIEffort, codexModel, selectedCodexEffort, chooseCodexModel, chooseCodexEffort, selectedModel, selectedEffort }
+  // A live-catalog agent that is not signed in or offers no model cannot take a message (the input is disabled, a banner says why).
+  const agentUnavailable = liveCatalog && (!codexStatus.authenticated || !codexModel)
+
+  return { aiModel, setAIModel, aiEffort, setAIEffort, codexModel, selectedCodexEffort, chooseCodexModel, chooseCodexEffort, selectedModel, selectedEffort, agentUnavailable }
 }
 
 export type AgentModelSelection = ReturnType<typeof useAgentModelSelection>
