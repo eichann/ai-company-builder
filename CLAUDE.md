@@ -889,9 +889,11 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
 
 - **In CI** (`.github/workflows/ci.yml`) the harness runs on 4 macOS runners
   ("Sync harness N/4 (macOS)"): file groups balanced by duration in
-  `.github/scripts/sync-shard.mjs` — the last shard also runs every file not
-  listed there, so a new test file needs no CI change (move it to another
-  group if it is long). The required check "Sync harness (macOS)" is a small
+  `.github/scripts/sync-shard.mjs` (`node .github/scripts/sync-shard.mjs 2`
+  runs shard 2 locally) — the last shard also runs every file not listed
+  there, so a new test file needs no CI change (move it to another group if it
+  is long). `private-folders.test.ts`, the longest file, is split over two
+  shards with `SYNC_HARNESS_PART=k/n` (every n-th scenario; unset = all). The required check "Sync harness (macOS)" is a small
   job that is green only when every shard passed (or all were skipped).
   - **Soak**: pull requests run one seed of each world — `SYNC_SOAK_SEEDS=1`,
     `SYNC_SOAK_MIXED_SEEDS=101`, `SYNC_SOAK_PRIVATE_SEEDS=201`, 3 members × 6

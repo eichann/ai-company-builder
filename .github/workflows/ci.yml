@@ -150,8 +150,9 @@ jobs:
     # platform; /bin/sh is bash).
     #
     # Split over 4 runners by file groups balanced by duration
-    # (.github/scripts/sync-shard.mjs; the last shard also runs any file not
-    # listed there). The required check is the `sync-harness` job below.
+    # (.github/scripts/sync-shard.mjs; private-folders.test.ts is split over
+    # two shards, and the last shard also runs any file not listed there).
+    # The required check is the `sync-harness` job below.
     #
     # Soak: pull requests run one seed of each world (plain, mixed with
     # partial clones, private folders) x 6 rounds; push to main, nightly and
@@ -169,7 +170,6 @@ jobs:
       - uses: ./.github/actions/setup
       - run: git --version
       - name: Run this shard's test files
-        working-directory: client
         env:
           SHARD: ${{ matrix.shard }}
           SYNC_SOAK_SEEDS: ${{ github.event_name == 'pull_request' && '1' || '1,2,3' }}
@@ -177,11 +177,7 @@ jobs:
           SYNC_SOAK_PRIVATE_SEEDS: ${{ github.event_name == 'pull_request' && '201' || '201,202' }}
           SYNC_SOAK_MEMBERS: '3'
           SYNC_SOAK_ROUNDS: ${{ github.event_name == 'pull_request' && '6' || '8' }}
-        run: |
-          files=$(node ../.github/scripts/sync-shard.mjs "$SHARD")
-          echo "Shard $SHARD: $files"
-          # shellcheck disable=SC2086 # word splitting is the point
-          npx tsx --test $files
+        run: node .github/scripts/sync-shard.mjs "$SHARD"
 
   sync-harness:
     name: Sync harness (macOS)

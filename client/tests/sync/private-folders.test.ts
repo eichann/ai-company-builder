@@ -19,7 +19,15 @@ import { checkWritePath, decideReservedWrite } from '../../electron/write-guard'
 
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
 const SCENARIO_TIMEOUT_MS = Number(process.env.SYNC_HARNESS_SCENARIO_TIMEOUT_MS) || 10 * 60_000
-const scenario = (name: string, fn: (t: TestContext) => Promise<void>) => test(name, { timeout: SCENARIO_TIMEOUT_MS }, fn)
+// CI runs this file (the longest of the harness) on two runners:
+// SYNC_HARNESS_PART=k/n registers only every n-th scenario, starting with the
+// k-th. Unset = every scenario.
+const [PART, PARTS] = (process.env.SYNC_HARNESS_PART ?? '1/1').split('/').map(Number)
+let scenarioCount = 0
+const scenario = (name: string, fn: (t: TestContext) => Promise<void>) => {
+  if (scenarioCount++ % PARTS !== PART - 1) return
+  test(name, { timeout: SCENARIO_TIMEOUT_MS }, fn)
+}
 
 function ok(outcome: SyncOutcome, who = ''): SyncOutcome {
   assert.equal(outcome.result.success, true, `${who} sync failed: ${JSON.stringify(outcome.result)}`)
