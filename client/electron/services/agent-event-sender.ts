@@ -15,8 +15,11 @@
 //   and asynchronous; after a send the file is rewritten (temporary file +
 //   rename) with what is left. A torn last line (crash mid-write) is skipped.
 //   Per queue at most 10 MB and 7 days: the oldest go first (counted, logged).
-// - Sending: every 10 s while events wait, at once when a full batch (200)
-//   waits; one request in flight per queue. 2xx → removed (re-sends are fine,
+// - Sending: every 60 s while events wait (never with an empty queue), 2 s
+//   after a chat turn ends (`turnEnded`, so its closing events are in), and at
+//   once when a full batch (200) waits; one request in flight per queue. The
+//   log is for looking back, not real time — the emergency stop (M2) has its
+//   own path — so the app and server are not woken every few seconds. 2xx → removed (re-sends are fine,
 //   the server drops duplicate ids); 401 → kept until the next sign-in;
 //   404 "not a member" → the queue is deleted; 400 / 413 → the batch is
 //   halved, a single event the server still refuses is dropped; 429 →
@@ -56,8 +59,16 @@ export interface AgentEventSenderDeps {
   limits?: Partial<SenderLimits>
 }
 
+/** While events wait: one send per queue per minute at most (besides turn ends and full batches). */
+export const AGENT_EVENTS_SEND_INTERVAL_MS = 60_000
+/** After a chat turn ends: its last events (closing `unfinished` ones) come right after the response. */
+export const AGENT_EVENTS_TURN_END_DELAY_MS = 2_000
+
 export interface SenderLimits {
   sendIntervalMs: number
+  turnEndDelayMs: number
+  /** First retry after a network / 5xx failure; doubles up to maxBackoffMs. */
+  backoffBaseMs: number
   writeDelayMs: number
   maxBatch: number
   maxBatchBytes: number
@@ -68,7 +79,9 @@ export interface SenderLimits {
 }
 
 const DEFAULT_LIMITS: SenderLimits = {
-  sendIntervalMs: 10_000,
+  sendIntervalMs: AGENT_EVENTS_SEND_INTERVAL_MS,
+  turnEndDelayMs: AGENT_EVENTS_TURN_END_DELAY_MS,
+  backoffBaseMs: 10_000,
   writeDelayMs: 1_000,
   maxBatch: AGENT_EVENTS_MAX_PER_REQUEST,
   // The server takes ≤ 1 MB per request; events are well under 2 KB each.
@@ -80,6 +93,8 @@ const DEFAULT_LIMITS: SenderLimits = {
 }
 
 export interface AgentEventSender extends AgentEventSink {
+  /** A chat turn ended: send the signed-in account's waiting events shortly. */
+  turnEnded(): void
   /** An account was confirmed signed in (sign-in, or the session restored): send its queues. */
   sessionStarted(): void
   /** Signed out: stop sending (the queues stay for the next sign-in of that account). */
@@ -111,6 +126,8 @@ interface Queue {
   writing: boolean
   writeTimer: unknown
   sendTimer: unknown
+  /** When sendTimer fires. */
+  sendAt: number
   sending: Promise<void> | null
   /** Earliest time the next send may start (backoff / Retry-After). */
   notBefore: number
@@ -193,7 +210,7 @@ export function createAgentEventSender(deps: AgentEventSenderDeps): AgentEventSe
         key, userId, companyId,
         file: path.join(userDir(userId), `${safeSegment(companyId)}.jsonl`),
         events: [], bytes: 0, unwritten: [], rewrite: false, loaded: false,
-        chain: Promise.resolve(), writing: false, writeTimer: undefined, sendTimer: undefined,
+        chain: Promise.resolve(), writing: false, writeTimer: undefined, sendTimer: undefined, sendAt: 0,
         sending: null, notBefore: 0, failures: 0, authBlocked: false, batchLimit: limits.maxBatch,
         droppedUnlogged: 0, removed: false,
       }
@@ -317,11 +334,14 @@ export function createAgentEventSender(deps: AgentEventSenderDeps): AgentEventSe
   function scheduleSend(q: Queue, delay?: number): void {
     if (!canSend(q) || q.sending) return
     const now = clock.now()
-    const wait = Math.max(delay ?? (q.events.length >= q.batchLimit ? 0 : limits.sendIntervalMs), q.notBefore - now, 0)
+    // Waiting out a backoff / Retry-After replaces the interval; a full batch goes at once.
+    const wait = Math.max(delay ?? (q.events.length >= q.batchLimit || q.notBefore > now ? 0 : limits.sendIntervalMs), q.notBefore - now, 0)
     if (q.sendTimer !== undefined) {
-      if (wait > 0) return
+      // Keep the earlier of the two.
+      if (q.sendAt <= now + wait) return
       clock.clearTimeout(q.sendTimer)
     }
+    q.sendAt = now + wait
     q.sendTimer = clock.setTimeout(() => {
       q.sendTimer = undefined
       startSend(q)
@@ -350,7 +370,7 @@ export function createAgentEventSender(deps: AgentEventSenderDeps): AgentEventSe
 
   function backoff(q: Queue, ms?: number): void {
     q.failures++
-    const delay = ms ?? Math.min(limits.maxBackoffMs, limits.sendIntervalMs * 2 ** (q.failures - 1))
+    const delay = ms ?? Math.min(limits.maxBackoffMs, limits.backoffBaseMs * 2 ** (q.failures - 1))
     q.notBefore = clock.now() + delay
   }
 
@@ -508,6 +528,12 @@ export function createAgentEventSender(deps: AgentEventSenderDeps): AgentEventSe
         scannedUsers.add(userId)
         track(scanUser(userId))
       }
+    },
+
+    turnEnded() {
+      const userId = deps.userId()
+      if (!userId || closed) return
+      for (const q of queues.values()) if (q.userId === userId) scheduleSend(q, limits.turnEndDelayMs)
     },
 
     signedOut() {

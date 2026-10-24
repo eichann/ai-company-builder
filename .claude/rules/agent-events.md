@@ -38,13 +38,18 @@ clock + fake fetch).
   (`will-quit` → `flushSync`): timers stop, the in-memory part is written synchronously; while an
   async read/write of the queue may still land, the whole queue goes to `<company>.jsonl.quit`,
   merged (dedupe by id) at the next start.
-- **Sending**: ≤ 200 per POST (and ≤ 900 KB), every 10 s while events wait, at once for a full
-  batch or for events left from before at sign-in; one request per queue. 2xx → removed (the
+- **Schedule** (owner decision: not every few seconds, for app and server load): every 60 s
+  while events wait (`AGENT_EVENTS_SEND_INTERVAL_MS`; never with an empty queue), 2 s after each
+  chat turn ends (`onChatActivity(…, false)` in `features/chat/server-config.ts` → recorder
+  `turnEnded()` → sink `turnEnded`; the delay lets the turn's closing events land), at once for
+  a full batch (200) or for events left from before at sign-in. A turn end never jumps a backoff.
+  The log is for looking back; the emergency stop (M2) does not depend on this path.
+- **Sending**: ≤ 200 per POST (and ≤ 900 KB); one request per queue. 2xx → removed (the
   server's `rejected` count is logged); 401 → kept until `sessionStarted` (next sign-in);
   404 `Company not found or access denied` → queue and file deleted (any other 404 = older
   server: retry in 5 min); 400 / 413 → batch halved, a single refused event dropped; 429 →
   `Retry-After`; network / 5xx / other → 10 s doubling to 5 min. Sign-out stops sending (queues
-  kept). Logs counts and status codes only. No turn-end flush yet (10 s timer only).
+  kept). Logs counts and status codes only.
 - **Telling the member** (owner decision): `src/lib/agentLogNotice.ts` holds the sentence; the
   chat shows `AgentLogNotice` once per account on this PC (localStorage
   `acb.agentLogNoticeSeen:<userId>`; non-modal `role="dialog"`, OK focused, Esc closes), and

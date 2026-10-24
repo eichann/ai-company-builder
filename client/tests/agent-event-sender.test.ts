@@ -4,7 +4,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { createAgentEventSender, safeSegment, type AgentEventSender, type SenderClock } from '../electron/services/agent-event-sender'
+import { AGENT_EVENTS_SEND_INTERVAL_MS, createAgentEventSender, safeSegment, type AgentEventSender, type SenderClock } from '../electron/services/agent-event-sender'
 import { createSession } from '../electron/services/session'
 import { parseAgentToolEvent, type AgentToolEvent } from '../../shared/types/agent-events'
 
@@ -122,7 +122,7 @@ const readQueue = (file: string) => fs.existsSync(file) ? fs.readFileSync(file, 
 
 // ---------------------------------------------------------------------------
 
-test('events wait 10 s, then go out in one batch with the session cookie; sent events leave the disk', async () => {
+test('events wait 60 s, then go out in one batch with the session cookie; sent events leave the disk', async () => {
   const { sender, server, time, dir } = setup()
   await sender.whenIdle()
   const a = event(); const b = event()
@@ -134,8 +134,10 @@ test('events wait 10 s, then go out in one batch with the session cookie; sent e
   assert.equal(fs.statSync(file).mode & 0o777, 0o600)
   assert.equal(fs.statSync(path.dirname(file)).mode & 0o777, 0o700)
   assert.equal(server.calls.length, 0)
+  await tick(sender, time, 58_000)
+  assert.equal(server.calls.length, 0, 'not before the minute')
 
-  await tick(sender, time, 9_000)
+  await tick(sender, time, 1_000)
   assert.equal(server.calls.length, 1)
   assert.equal(server.calls[0].url, 'https://acb.example/api/companies/c1/agent-events')
   assert.match(server.calls[0].cookie, /u1-token/)
@@ -151,6 +153,48 @@ test('events wait 10 s, then go out in one batch with the session cookie; sent e
   assert.equal(server.calls.length, 1)
 })
 
+test('the interval is one minute; a turn end sends 2 s later; an empty queue never sends', async () => {
+  assert.equal(AGENT_EVENTS_SEND_INTERVAL_MS, 60_000)
+  const { sender, server, time } = setup()
+  await sender.whenIdle()
+  // Nothing waits: neither the turn end nor time sends anything.
+  sender.turnEnded()
+  await tick(sender, time, 5 * 60_000)
+  assert.equal(server.calls.length, 0)
+
+  sender.add(event()); sender.add(event())
+  await tick(sender, time, 5_000)
+  sender.turnEnded()
+  await tick(sender, time, 1_000)
+  assert.equal(server.calls.length, 0)
+  await tick(sender, time, 1_000)
+  assert.equal(server.calls.length, 1, 'two seconds after the turn ended')
+  assert.equal(server.calls[0].events.length, 2)
+  // The minute timer of those events does not fire a second request.
+  await tick(sender, time, 5 * 60_000)
+  assert.equal(server.calls.length, 1)
+
+  // A turn end does not jump a backoff.
+  server.answer('network')
+  sender.add(event())
+  sender.turnEnded()
+  await tick(sender, time, 2_000)
+  assert.equal(server.calls.length, 2)
+  sender.turnEnded()
+  await tick(sender, time, 2_000)
+  assert.equal(server.calls.length, 2, 'still backing off')
+  await tick(sender, time, 8_000)
+  assert.equal(server.calls.length, 3)
+})
+
+test('the recorder passes the turn end to its sinks', async () => {
+  const { createAgentEventRecorder } = await import('../electron/services/agent-events')
+  let ended = 0
+  const recorder = createAgentEventRecorder({ log: () => {}, sinks: [{ add() {}, turnEnded() { ended++ } }, { add() {} }] })
+  recorder.turnEnded()
+  assert.equal(ended, 1)
+})
+
 test('a full batch (200) goes out at once; batches never exceed 200', async () => {
   const { sender, server, time } = setup()
   await sender.whenIdle()
@@ -159,7 +203,7 @@ test('a full batch (200) goes out at once; batches never exceed 200', async () =
   await tick(sender, time, 0)
   await tick(sender, time, 0)
   assert.deepEqual(server.calls.map(c => c.events.length), [200, 200])
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   assert.deepEqual(server.calls.map(c => c.events.length), [200, 200, 50])
   assert.equal(new Set(server.calls.flatMap(c => c.events.map(e => e.id))).size, 450)
 })
@@ -170,7 +214,7 @@ test('one queue per company; each batch goes to its own company', async () => {
   sender.add(event({ companyId: 'c1' }))
   sender.add(event({ companyId: 'c2' }))
   sender.add(event({ companyId: 'c1' }))
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   const byUrl = Object.fromEntries(server.calls.map(c => [c.url.split('/')[5], c.events.length]))
   assert.deepEqual(byUrl, { c1: 2, c2: 1 })
 })
@@ -196,7 +240,7 @@ test('an account switch never mixes queues: the old account’s events wait for 
   signIn('bob'); sender.sessionStarted()
   const fromBob = event()
   sender.add(fromBob)
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   await tick(sender, time, 60_000)
   assert.equal(server.calls.length, 1)
   assert.match(server.calls[0].cookie, /bob-token/)
@@ -228,7 +272,7 @@ test('a turn keeps the account it started under, even if another account signs i
   signIn('bob')
   sender.add(event({ turnId: 'U' }))
   sender.sessionStarted()
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   assert.equal(server.calls.length, 0, 'alice is not signed in, bob has nothing of his own')
   assert.deepEqual(sender.pending(), { 'alice/c1': 2 })
   assert.equal(sender.stats().droppedNoAccount, 2)
@@ -325,7 +369,7 @@ test('401: kept, no retries until the next sign-in', async () => {
   await sender.whenIdle()
   server.answer({ status: 401 })
   sender.add(event())
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   await tick(sender, time, 10 * 60_000)
   assert.equal(server.calls.length, 1)
   sender.sessionStarted()
@@ -342,13 +386,13 @@ test('404 "not a member": the queue and its file are deleted; another 404 is ret
   await tick(sender, time, 1_000)
   const file = queueFile(dir, 'u1', 'c1')
   assert.ok(fs.existsSync(file))
-  await tick(sender, time, 9_000)
+  await tick(sender, time, 59_000)
   assert.deepEqual(sender.pending(), {})
   assert.equal(fs.existsSync(file), false)
 
   server.answer({ status: 404, body: { error: 'Not Found' } })
   sender.add(event({ companyId: 'c2' }))
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   assert.deepEqual(sender.pending(), { 'u1/c2': 1 })
   await tick(sender, time, 5 * 60_000)
   assert.equal(server.calls.length, 3)
@@ -371,7 +415,7 @@ test('413 / 400: the batch is halved; a single event still refused is dropped �
   const { sender, time } = setup({ fetch: refuseBad })
   await sender.whenIdle()
   for (const e of [fine[0], bad, fine[1], fine[2]]) sender.add(e)
-  for (let i = 0; i < 10; i++) await tick(sender, time, 10_000)
+  for (let i = 0; i < 10; i++) await tick(sender, time, 60_000)
   assert.deepEqual(sender.pending(), { 'u1/c1': 0 })
   assert.equal(sender.stats().droppedRejected, 1)
   // [4] 413 → [2] 400 → [1] ok → [2] 400 → [1] 400, dropped → [1] ok → [1] ok
@@ -384,7 +428,7 @@ test('2xx with rejected events: the batch is done and the count logged', async (
   await sender.whenIdle()
   server.answer({ status: 200, body: { success: true, data: { accepted: 1, duplicates: 0, rejected: 1 } } })
   sender.add(event()); sender.add(event())
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   await tick(sender, time, 60_000)
   assert.equal(server.calls.length, 1)
   assert.equal(sender.stats().droppedRejected, 1)
@@ -396,7 +440,7 @@ test('429 honours Retry-After', async () => {
   await sender.whenIdle()
   server.answer({ status: 429, headers: { 'Retry-After': '120' } })
   sender.add(event())
-  await tick(sender, time, 10_000)
+  await tick(sender, time, 60_000)
   assert.equal(server.calls.length, 1)
   await tick(sender, time, 119_000)
   assert.equal(server.calls.length, 1)
