@@ -12,6 +12,8 @@
  *   when the input already held other text.
  */
 
+import { agentCan } from '../../../shared/agents/registry'
+
 export interface GhostInput {
   /** The input's text. */
   doc: string
@@ -76,7 +78,7 @@ export function canOfferSuggestion(state: {
  * turned it off in settings (then the CLI is not asked to make one at all).
  */
 export function shouldRequestSuggestion(turn: { aborted: boolean; authMode: string; enabled: boolean }): boolean {
-  return turn.enabled && !turn.aborted && turn.authMode === 'claude-code'
+  return turn.enabled && !turn.aborted && agentCan(turn.authMode, 'promptSuggestions')
 }
 
 /** Screen-reader description while a suggestion is offered. */

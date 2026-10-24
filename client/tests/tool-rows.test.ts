@@ -169,3 +169,13 @@ test('group signatures ignore re-cloning but change when the group changes', () 
   assert.equal(signaturePropsEqual({ item: agentsOf(before)[3] }, { item: agentsOf(grown)[3] }), false)
   assert.ok(GROUP_PAGE_SIZE >= 10)
 })
+
+test('the subagent parent is read from whichever provider reports it (agent-agnostic)', () => {
+  const part = (meta: unknown) => ({ type: 'dynamic-tool', toolCallId: 'c', toolName: 'Read', state: 'input-available', input: {}, callProviderMetadata: meta } as unknown as Part)
+  assert.equal(toolRowOf(part({ 'claude-code': { parentToolCallId: 'agent-1' } }))?.parentToolCallId, 'agent-1')
+  assert.equal(toolRowOf(part({ other: { parentToolCallId: 'agent-2' } }))?.parentToolCallId, 'agent-2')
+  assert.equal(toolRowOf(part({ 'claude-code': { parentToolCallId: null } }))?.parentToolCallId, undefined)
+  assert.equal(toolRowOf(part({ 'claude-code': { parentToolCallId: '' } }))?.parentToolCallId, undefined)
+  assert.equal(toolRowOf(part({ x: null, y: 'str' }))?.parentToolCallId, undefined)
+  assert.equal(toolRowOf(part(undefined))?.parentToolCallId, undefined)
+})

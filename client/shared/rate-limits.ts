@@ -17,7 +17,15 @@
  *   `resetsAt` is in seconds, windows are told apart by `windowDurationMins`.
  */
 
-export type RateLimitProvider = 'claude-code' | 'codex'
+import { agentCan, type AgentId } from './agents/registry'
+
+/** Agents whose payloads this module reads (the ones claiming `capabilities.rateLimits`). */
+export type RateLimitProvider = Extract<AgentId, 'claude-code' | 'codex'>
+
+/** The agent reports plan usage (agent registry `capabilities.rateLimits`). */
+export function hasRateLimits(agent: unknown): agent is RateLimitProvider {
+  return agentCan(agent, 'rateLimits')
+}
 
 export interface RateLimitWindow {
   /** Stable key: Claude's window name (`five_hour`, `seven_day`, …) or `codex:<minutes>`. */

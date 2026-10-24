@@ -281,6 +281,11 @@ export function agentDescriptor(id: unknown): AgentDescriptor | undefined {
   return isAgentId(id) ? AGENTS[id] : undefined
 }
 
+/** The short name shown for an agent ('Claude', 'Codex', 'API'); 'Claude' for anything unknown, as the UI always showed. */
+export function agentShortLabel(id: unknown): string {
+  return agentDescriptor(id)?.shortLabel ?? AGENTS['claude-code'].shortLabel
+}
+
 /** One capability of an id; false for an unknown id. */
 export function agentCan(id: unknown, capability: keyof AgentCapabilities): boolean {
   return agentDescriptor(id)?.capabilities[capability] ?? false
