@@ -38,15 +38,15 @@
         "params": "email: string, password: string, name?: string"
       },
       "backup:list": {
-        "file": "main.ts",
+        "file": "features/backups/ipc.ts",
         "params": "unsafeRepoPath: string"
       },
       "backup:openFolder": {
-        "file": "main.ts",
+        "file": "features/backups/ipc.ts",
         "params": "backupPath: string"
       },
       "backup:restore": {
-        "file": "main.ts",
+        "file": "features/backups/ipc.ts",
         "params": "repoPath: string, backupId: string, filePath: string"
       },
       "chat-server:getInfo": {
@@ -78,51 +78,51 @@
         "params": "companyId: string, query: string"
       },
       "codex:status": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:getApiKey": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:getAuthMode": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:getClaudeCodeStatus": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:getPermissionMode": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:getServerUrl": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:hasApiKey": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": ""
       },
       "config:setApiKey": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": "apiKey: string"
       },
       "config:setAuthMode": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": "mode: 'claude-code' | 'codex' | 'api-key'"
       },
       "config:setPermissionMode": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": "mode: PermissionMode"
       },
       "config:setServerUrl": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": "url: string"
       },
       "config:validateServerUrl": {
-        "file": "main.ts",
+        "file": "features/settings/ipc.ts",
         "params": "url: string"
       },
       "dialog:selectDirectory": {
@@ -134,11 +134,11 @@
         "params": "rootPath: string, filePath: string"
       },
       "env:read": {
-        "file": "main.ts",
+        "file": "features/env/ipc.ts",
         "params": "rootPath: string"
       },
       "env:write": {
-        "file": "main.ts",
+        "file": "features/env/ipc.ts",
         "params": "rootPath: string, vars: EnvVars"
       },
       "fs:copy": {

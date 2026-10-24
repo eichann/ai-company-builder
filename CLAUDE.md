@@ -299,6 +299,28 @@ How to add an IPC channel:
    parameter goes into GUARDED (or EXEMPT) in `tests/ipc-path-guard.test.ts`.
 4. Regenerate `tests/ipc-harness/ipc-inventory.json` and review the diff.
 
+### Main process layout (client)
+
+`client/electron/main.ts` is being split by domain (R3, one PR per 1–3
+domains); what has moved so far:
+
+- `electron/features/<domain>/ipc.ts` — one module per IPC domain, exporting
+  `register<Domain>Ipc(ipc: IpcRegistrar, deps)`. Dependencies are injected
+  (like `sync/types.ts` `SyncDeps`): the allowed-roots `PathGuard`, the
+  `WindowPort` for events, the `DesktopShell` (`features/ports.ts`), services,
+  stores. Features never import `electron` (eslint `no-restricted-imports`
+  on `electron/features/**`, `electron/services/**`, `electron/ipc/**`).
+  Done: `settings` (config:*, codex:status), `env` (env:*), `backups`
+  (backup:*).
+- `electron/services/` — state shared across features, as explicit objects
+  instead of module variables: `config-store.ts` (config.json, cached),
+  `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the
+  member's `claude`, status cached 30 s).
+- `electron/electron-adapter.ts` — Electron's implementations of the ports.
+- `main.ts` — the composition root: creates the services and stores, calls
+  each `register…Ipc`, owns the window and the app lifecycle. Startup stays
+  inside `app.whenReady`; nothing new runs at import time.
+
 ### File Naming Rules
 
 - Department folder names allow Japanese characters (hiragana, katakana, kanji) and ASCII
