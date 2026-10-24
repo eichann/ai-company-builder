@@ -1,7 +1,6 @@
 import { OpenConsultationContext } from './consultation-context'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
-import type { AgentInteractionRequest } from '../../../shared/agent-interaction'
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
 import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import { agentCan, agentShortLabel } from '../../../shared/agents/registry'
@@ -9,13 +8,10 @@ import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/pe
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { VoiceInputControl } from './VoiceInputControl'
 import { ghostSuggestion, handleGhostKey, setSuggestion } from './ghostSuggestion'
-import { canOfferSuggestion, shouldRequestSuggestion, suggestionDescription } from './promptSuggestion'
+import { suggestionDescription } from './promptSuggestion'
 import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
-import { normalizeSuggestion } from '../../../shared/prompt-suggestion'
-import { canSteerText } from '../../../shared/steer'
 import { useState, useEffect, useLayoutEffect, useRef, useCallback, memo, useMemo, useId } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useChat } from '@ai-sdk/react'
 import type { UIMessage } from 'ai'
 import { history, historyKeymap, isolateHistory } from '@codemirror/commands'
 import { Compartment, EditorState, Transaction } from '@codemirror/state'
@@ -45,24 +41,26 @@ import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropd
 import { markChatInputActivity } from '../../lib/chatInputActivity'
 import { AssistantMessageParts } from './MessageParts'
 import { RateLimitMeter } from './RateLimitMeter'
-import { reportAgentProgress, setRateLimits } from './agentStatusStore'
-import { RATE_LIMITS_PART_TYPE, hasRateLimits, type RateLimitSnapshot } from '../../../shared/rate-limits'
-import { AGENT_PROGRESS_PART_TYPE, readAgentProgress } from '../../../shared/agent-progress'
+import { hasRateLimits } from '../../../shared/rate-limits'
 import { getToolDisplayName } from './toolRows'
 import { ChatSidebar } from './ChatSidebar'
 import { earlierAnchor, windowStart } from './messageWindow'
-import { streamThrottleMs } from './markdownBlocks'
 import { useAuthStore } from '../../stores/authStore'
 import type { ChatServerClient } from './chatServerClient'
 import { useChatServer } from './hooks/useChatServer'
 import { newChatTab, persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, type ChatTab } from './chatTabsStorage'
-import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts, type QueuedSend } from './queuedSends'
 import { useChatDraft, type ChatInputApi } from './hooks/useChatDraft'
 import { completeHandoffTurn, persistAgentSession, stampNewMessages, useConversation } from './hooks/useConversation'
 import { useChatHistory } from './hooks/useChatHistory'
 import { useTitleGeneration } from './hooks/useTitleGeneration'
 import { useAttachToLatestUserMessage, useMessageAttachments } from './hooks/useMessageAttachments'
 import { useChatRequestContext, useChatTransport } from './hooks/useChatTransport'
+import { useAgentInteractions, useToolApprovals } from './hooks/useAgentInteractions'
+import { useQueuedSendFlush, useSteering } from './hooks/useSteering'
+import { usePromptSuggestion } from './hooks/usePromptSuggestion'
+import { useChatAutoScroll } from './hooks/useChatAutoScroll'
+import { useAgentModelSelection } from './hooks/useAgentModelSelection'
+import { useRateLimitsRefresh, useStreamingChat } from './hooks/useStreamingChat'
 
 // ============================================================================
 // Utility Components
@@ -1382,16 +1380,8 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
   const pendingChatNewSession = useAppStore((state) => state.pendingChatNewSession)
   const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
-  const aiModel = useAppStore((state) => state.aiModel)
-  const setAIModel = useAppStore((state) => state.setAIModel)
-  const aiEffort = useAppStore((state) => state.aiEffort)
-  const setAIEffort = useAppStore((state) => state.setAIEffort)
-  const [codexModelId, setCodexModelId] = useState(() => localStorage.getItem('acb-codex-model') || '')
-  const [codexEffort, setCodexEffort] = useState(() => localStorage.getItem('acb-codex-effort') || '')
-  const codexModel = codexStatus.models.find(m => m.id === codexModelId) || codexStatus.models.find(m => m.isDefault) || codexStatus.models[0]
-  const selectedCodexEffort = codexModel?.efforts.includes(codexEffort) ? codexEffort : codexModel?.defaultEffort || ''
-  const selectedModel = authMode === 'codex' ? codexModel?.id : aiModel
-  const selectedEffort = authMode === 'codex' ? selectedCodexEffort : aiEffort
+  const models = useAgentModelSelection(authMode, codexStatus)
+  const { aiModel, setAIModel, aiEffort, setAIEffort, codexModel, selectedCodexEffort } = models
   const chatMarkdownRender = useAppStore((state) => state.chatMarkdownRender)
   const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
@@ -1406,52 +1396,8 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
   // Imperative handle to read/write the chat input value for per-session draft persistence
   const { draftRef: draftInputRef, onDraftChange: handleDraftChange, inputApiRef: chatInputApiRef } = useChatDraft()
 
-  const [interactions, setInteractions] = useState<AgentInteractionRequest[]>([])
-  const currentInteraction = interactions.find(item => item.appSessionId === appSessionIdRef.current)
-  useEffect(() => {
-    let active = true
-    const closed = new Set<string>()
-    // Kept for every conversation (shown only for the one on screen), so a
-    // question asked while this tab shows another conversation is still
-    // there when the member comes back to it.
-    const add = (request: AgentInteractionRequest) => {
-      if (!active || closed.has(request.id)) return
-      setInteractions(queue => queue.some(item => item.id === request.id) ? queue : [...queue, request])
-    }
-    const unsubscribe = window.electronAPI.onAgentInteraction(add)
-    const unsubscribeClosed = window.electronAPI.onAgentInteractionClosed(request => {
-      closed.add(request.id)
-      setInteractions(queue => queue.filter(item => item.id !== request.id))
-    })
-    void window.electronAPI.getAgentInteractions().then(requests => requests.forEach(add)).catch(() => {})
-    return () => {
-      active = false; unsubscribe(); unsubscribeClosed()
-      const sessionId = appSessionIdRef.current
-      void window.electronAPI.getAgentInteractions().then(requests => Promise.all(requests
-        .filter(item => item.appSessionId === sessionId)
-        .map(item => window.electronAPI.respondAgentInteraction(item.id, { cancelled: true })))).catch(() => {})
-    }
-  }, [appSessionIdRef])
-
-  // Tool approval state
-  const [pendingApprovals, setPendingApprovals] = useState<ToolApprovalRequest[]>([])
-  const pendingApproval = pendingApprovals[0]
-
-  useEffect(() => {
-    const unsub = window.electronAPI.onToolApprovalRequest((data) => {
-      // Only accept approval requests for this tab's session
-      if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) {
-        return // Not for this tab
-      }
-      setPendingApprovals(queue => queue.some(p => p.toolUseId === data.toolUseId) ? queue : [...queue, data])
-    })
-    return unsub
-  }, [appSessionIdRef])
-
-  const handleToolApprovalResponse = useCallback((toolUseId: string, approved: boolean) => {
-    window.electronAPI.respondToolApproval(toolUseId, approved)
-    setPendingApprovals(queue => queue.filter(p => p.toolUseId !== toolUseId))
-  }, [])
+  // The agent's questions for this conversation (looked up during render).
+  const { currentInteraction, respondToInteraction } = useAgentInteractions(appSessionIdRef)
 
   // What each request carries (refs: the transport reads them per request).
   const { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef: aiModelRef, effortRef: aiEffortRef, companyIdRef, companyRootRef } = useChatRequestContext({
@@ -1460,18 +1406,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     activeDepartment,
     companyId: currentCompany?.id,
     companyRootPath: currentCompany?.rootPath,
-    modelId: selectedModel,
-    effort: selectedEffort,
+    modelId: models.selectedModel,
+    effort: models.selectedEffort,
   })
-
-  // Keep the selected effort valid for the current model. If the user switches to a
-  // model that doesn't support the current effort (e.g. xhigh on Opus 4.6), demote to
-  // 'high' (a level every model supports) instead of relying on silent CLI fallback.
-  useEffect(() => {
-    if (!MODEL_EFFORT_OPTIONS[aiModel].includes(aiEffort)) {
-      setAIEffort('high')
-    }
-  }, [aiModel, aiEffort, setAIEffort])
 
   const attachments = useMessageAttachments()
   const { pendingImagesRef, pendingFilePathsRef, messageImages, messageReferenceFiles, stageImages, stageFilePaths } = attachments
@@ -1493,73 +1430,26 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     handoffRequest: handoffRequestRef,
   })
 
-  // Plan usage for the header meter (shared/rate-limits.ts): streamed live as
-  // transient data parts, and fetched here for a tab that has not streamed yet.
-  const fetchRateLimits = useCallback(async () => {
-    if (!hasRateLimits(authModeRef.current)) return
-    try {
-      const data = await chatServer.rateLimits(authModeRef.current)
-      setRateLimits(data.rateLimits)
-    } catch {
-      // The meter keeps what it has.
-    }
-  }, [chatServer, authModeRef])
+  // Next-prompt suggestion and messages sent while the AI works. Declared
+  // before useChat: its onFinish records how the turn ended.
+  const suggestions = usePromptSuggestion({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef, currentSessionId })
+  const { onTurnFinished: suggestionTurnFinished, resetSuggestion } = suggestions
+  const steering = useSteering({ chatServer, authModeRef, appSessionIdRef, inputApiRef: chatInputApiRef })
+  const { queuedSends, lastTurnAbortedRef, sendWhileRunning, cancelQueuedSend } = steering
 
-  // Next-prompt suggestion (promptSuggestion.ts) and messages sent while the
-  // AI works (shared/steer.ts). Declared before useChat: its onFinish records
-  // how the turn ended.
-  const [promptSuggestion, setPromptSuggestion] = useState<string | null>(null)
-  const [finishedTurn, setFinishedTurn] = useState<{ n: number; suggest: boolean } | null>(null)
-  // Sends that wait for the running turn to end: no steering available, or
-  // the agent did not read the instruction before the turn ended.
-  const [queuedSends, setQueuedSends] = useState<QueuedSend[]>([])
-  // The last turn was stopped or failed: waiting sends go back into the input.
-  const lastTurnAbortedRef = useRef(false)
-
-  // Re-render cadence while a reply streams: longer for a long reply, whose
-  // last markdown block is parsed again on every tick (markdownBlocks.ts).
-  const [streamThrottle, setStreamThrottle] = useState(() => streamThrottleMs(0))
-
-  // useChat hook
-  const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useChat({
-    transport,
-    experimental_throttle: streamThrottle,
-    onFinish: ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
-      lastTurnAbortedRef.current = isAbort || isDisconnect || isError
-      setFinishedTurn(turn => ({ n: (turn?.n ?? 0) + 1, suggest: shouldRequestSuggestion({ aborted: lastTurnAbortedRef.current, authMode: authModeRef.current, enabled: promptSuggestionSetting.getSnapshot() }) }))
-      completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
-      // Fetch and store Claude CLI session ID for resume persistence
-      persistAgentSession(conversation, chatServer, currentCompany?.id)
-    },
-    onError: (err) => {
-      console.error('[useChat] Error:', err)
-    },
-    onData: (part) => {
-      if (part.type === RATE_LIMITS_PART_TYPE) setRateLimits(part.data as RateLimitSnapshot)
-      else if (part.type === AGENT_PROGRESS_PART_TYPE) {
-        const progress = readAgentProgress(part.data)
-        if (progress) reportAgentProgress(progress)
-      }
-    },
+  const { messages, sendMessage, status, stop, setMessages, error, regenerate } = useStreamingChat(transport, ({ messages: finishedMessages, message, isAbort, isDisconnect, isError, finishReason }) => {
+    lastTurnAbortedRef.current = isAbort || isDisconnect || isError
+    suggestionTurnFinished(lastTurnAbortedRef.current)
+    completeHandoffTurn(conversation, companyIdRef, { finishedMessages, message, isAbort, isDisconnect, isError, finishReason })
+    // Fetch and store Claude CLI session ID for resume persistence
+    persistAgentSession(conversation, chatServer, currentCompany?.id)
   })
+  const { pendingApproval, respondToApproval } = useToolApprovals(appSessionIdRef, status)
 
-  useEffect(() => { void fetchRateLimits() }, [authMode, fetchRateLimits])
-
-  useEffect(() => {
-    const last = messages[messages.length - 1]
-    let length = 0
-    if (last?.role === 'assistant') for (const part of last.parts) if (part.type === 'text') length += part.text.length
-    const next = streamThrottleMs(length)
-    if (next !== streamThrottle) setStreamThrottle(next)
-  }, [messages, streamThrottle])
-
-  useEffect(() => {
-    if (status === 'ready' || status === 'error') setPendingApprovals([])
-  }, [status])
+  useRateLimitsRefresh(chatServer, authMode, authModeRef)
 
   // Model/provider changes start a fresh native session with visible history.
   const modelLocked = status === 'submitted' || status === 'streaming'
-  const displayedModel = aiModel
 
   useAttachToLatestUserMessage(messages, attachments)
 
@@ -1602,99 +1492,14 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     onTitleChange,
   })
 
-  // Composition state for auto-scroll
-  const isInputComposingRef = useRef(false)
-  const compositionEndTimerRef = useRef<number | null>(null)
-  const pendingAutoScrollRef = useRef(false)
-
-  // Auto-scroll refs
-  const messagesEndRef = useRef<HTMLDivElement>(null)
-  const messagesContainerRef = useRef<HTMLDivElement>(null)
-  const shouldAutoScrollRef = useRef(true)
-
-  // History content mounts after restoration; hidden tabs have no layout.
-  // Reset only on opening a chat, so reading older messages stays possible.
-  useLayoutEffect(() => {
-    if (!isActive || isRestoringSession) return
-    shouldAutoScrollRef.current = true
-    pendingAutoScrollRef.current = false
-    const container = messagesContainerRef.current
-    if (container) container.scrollTop = container.scrollHeight
-  }, [isActive, isRestoringSession])
-
-  // Attach after the message list actually mounts, not while the spinner is shown.
-  useEffect(() => {
-    if (!isActive || isRestoringSession) return
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      shouldAutoScrollRef.current = distanceFromBottom < 120
-    }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    handleScroll()
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-    }
-  }, [isActive, isRestoringSession])
-
-  // Auto-scroll when messages change
-  useEffect(() => {
-    if (!isActive || isRestoringSession) return
-    if (isInputComposingRef.current) {
-      pendingAutoScrollRef.current = true
-      return
-    }
-    if (!shouldAutoScrollRef.current) return
-    pendingAutoScrollRef.current = false
-    messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
-  }, [messages, status, isActive, isRestoringSession])
-
-  // Composition handling
-  const flushAfterComposition = useCallback(() => {
-    if (pendingAutoScrollRef.current) {
-      pendingAutoScrollRef.current = false
-      if (shouldAutoScrollRef.current) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
-      }
-    }
-  }, [])
-
-  const handleInputCompositionStateChange = useCallback((isComposing: boolean) => {
-    if (isComposing) {
-      if (compositionEndTimerRef.current != null) {
-        window.clearTimeout(compositionEndTimerRef.current)
-        compositionEndTimerRef.current = null
-      }
-      isInputComposingRef.current = true
-      return
-    }
-
-    if (compositionEndTimerRef.current != null) {
-      window.clearTimeout(compositionEndTimerRef.current)
-    }
-    compositionEndTimerRef.current = window.setTimeout(() => {
-      compositionEndTimerRef.current = null
-      isInputComposingRef.current = false
-      flushAfterComposition()
-    }, 180)
-  }, [flushAfterComposition])
+  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isActive, isRestoringSession, messages, status })
 
   const handleInputActivity = useCallback(() => {
     markChatInputActivity()
   }, [])
 
-  // A pending composition-end timer must not fire after the tab closed.
-  useLayoutEffect(() => () => {
-    if (compositionEndTimerRef.current != null) {
-      window.clearTimeout(compositionEndTimerRef.current)
-    }
-  }, [])
-
-  // Send handler (supports interrupt: stop current stream + send new message)
+  // Send handler. While the AI works the message goes into the running turn
+  // (steering) or waits for the turn to end; it no longer stops the AI.
   const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
     if (!text.trim() && (!files || files.length === 0)) return
     perfMark('chat.send.start')
@@ -1706,21 +1511,9 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
       appSessionIdRef.current = newId
     }
 
-    setPromptSuggestion(null)
-    setFinishedTurn(null)
-    // While the AI works the message goes into the running turn (steering),
-    // or waits for the turn to end; it no longer stops the AI.
+    resetSuggestion()
     if (status === 'streaming' || status === 'submitted') {
-      const item: QueuedSend = { text, files, filePaths }
-      const sessionId = appSessionIdRef.current
-      if (agentCan(authModeRef.current, 'steering') && sessionId && !files?.length && !filePaths?.length && canSteerText(text)) {
-        void chatServer.steer(sessionId, text).then(response => {
-          if (response.status === 'delivered') return
-          setQueuedSends(queue => [...queue, { ...item, ...(response.id ? { steerPartId: steerPartId(response.id) } : {}) }])
-        })
-      } else {
-        setQueuedSends(queue => [...queue, item])
-      }
+      sendWhileRunning({ text, files, filePaths })
       return
     }
     lastTurnAbortedRef.current = false
@@ -1740,60 +1533,13 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
     }
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, currentSessionId, chatServer, stageImages, stageFilePaths, appSessionIdRef, authModeRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef])
+  }, [status, sendMessage, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef])
 
-  // The turn ended: waiting sends go out together as the next message — or,
-  // after a stop or an error, back into the input. An instruction the agent did not
-  // read leaves the reply first (it is sent again as a normal message).
-  useEffect(() => {
-    if ((status !== 'ready' && status !== 'error') || queuedSends.length === 0) return
-    const unread = unreadSteerParts(queuedSends)
-    if (unread.size) {
-      setMessages(current => withoutSteerParts(current, unread))
-    }
-    if (status === 'error' || lastTurnAbortedRef.current) {
-      const draft = chatInputApiRef.current?.getValue() ?? ''
-      chatInputApiRef.current?.setValue(draftWith(draft, queuedSends.map(item => item.text)))
-      setQueuedSends([])
-      return
-    }
-    // All of them as one message: one more turn, not a race of several.
-    const merged = mergeQueuedSends(queuedSends)
-    setQueuedSends([])
-    void handleSend(merged.text, merged.files, merged.filePaths)
-  }, [status, queuedSends, handleSend, setMessages, chatInputApiRef])
+  // The turn ended: waiting sends go out together (or back into the input).
+  useQueuedSendFlush(steering, status, handleSend, setMessages, chatInputApiRef)
 
-  const cancelQueuedSend = useCallback((index: number) => {
-    const item = queuedSends[index]
-    if (!item) return
-    setQueuedSends(queue => queue.filter((_, i) => i !== index))
-    const draft = chatInputApiRef.current?.getValue() ?? ''
-    chatInputApiRef.current?.setValue(draftWith(draft, [item.text]))
-    chatInputApiRef.current?.focus()
-  }, [queuedSends, chatInputApiRef])
-
-  // After a reply: ask the chat server for Claude Code's next-prompt
-  // suggestion (it follows the reply by about a second) and offer it in the
-  // input if the member has not started typing.
-  useEffect(() => {
-    if (!finishedTurn?.suggest) return
-    const sessionId = appSessionIdRef.current
-    if (!sessionId) return
-    let cancelled = false
-    chatServer.promptSuggestion(sessionId)
-      .then(data => {
-        if (cancelled || appSessionIdRef.current !== sessionId) return
-        const suggestion = normalizeSuggestion(data?.suggestion)
-        if (suggestion && canOfferSuggestion({ running: false, waitingForMember: false, draft: chatInputApiRef.current?.getValue() ?? '' })) setPromptSuggestion(suggestion)
-      })
-      .catch(() => {})
-    return () => { cancelled = true }
-  }, [finishedTurn, chatServer, appSessionIdRef, chatInputApiRef])
-
-  useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
-  const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
   const running = status === 'submitted' || status === 'streaming'
-  const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? promptSuggestion : null
+  const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
 
   // Start new chat and auto-send when skill execution is triggered (only active tab)
   useEffect(() => {
@@ -1874,12 +1620,12 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
         <div className="flex items-center justify-end gap-1 min-w-0">
           {authMode === 'codex' && <>
             <select aria-label="Codexモデル" value={codexModel?.id || ''} disabled={modelLocked || !codexModel}
-              onChange={e => { setCodexModelId(e.target.value); localStorage.setItem('acb-codex-model', e.target.value) }}
+              onChange={e => models.chooseCodexModel(e.target.value)}
               className="h-7 max-w-44 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
               {codexStatus.models.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
             <select aria-label="Codex思考の強さ" value={selectedCodexEffort} disabled={modelLocked || !codexModel}
-              onChange={e => { setCodexEffort(e.target.value); localStorage.setItem('acb-codex-effort', e.target.value) }}
+              onChange={e => models.chooseCodexEffort(e.target.value)}
               className="h-7 min-w-0 shrink text-[11px] rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 px-1.5 disabled:opacity-50">
               {codexModel?.efforts.map(e => <option key={e} value={e}>{e}</option>)}
             </select>
@@ -1887,7 +1633,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
           {/* Model selection is locked only while a turn is in flight. */}
           {authMode === 'claude-code' && (
             <select
-              value={displayedModel}
+              value={aiModel}
               disabled={modelLocked}
               title={modelLocked ? '応答中はモデルを変更できません' : undefined}
               onChange={(e) => setAIModel(e.target.value as AIModel)}
@@ -2003,16 +1749,11 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
         </div>
       )}
       {/* Tool Approval Banner (above input) */}
-      {currentInteraction && <AgentInteractionCard key={currentInteraction.id} request={currentInteraction} onRespond={async response => {
-        const id = currentInteraction.id
-        const accepted = await window.electronAPI.respondAgentInteraction(id, response)
-        if (accepted) setInteractions(queue => queue.filter(item => item.id !== id))
-        return accepted
-      }} />}
+      {currentInteraction && <AgentInteractionCard key={currentInteraction.id} request={currentInteraction} onRespond={response => respondToInteraction(currentInteraction.id, response)} />}
       {pendingApproval && (
         <ToolApprovalBanner
           request={pendingApproval}
-          onRespond={handleToolApprovalResponse}
+          onRespond={respondToApproval}
         />
       )}
 
@@ -2047,7 +1788,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
             slashCommands={slashCommands}
             apiRef={chatInputApiRef}
             suggestion={offeredSuggestion}
-            onSuggestionCleared={clearPromptSuggestion}
+            onSuggestionCleared={suggestions.clearPromptSuggestion}
           />
         </div>
       </div>
