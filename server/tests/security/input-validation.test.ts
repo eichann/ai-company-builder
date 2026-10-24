@@ -47,7 +47,11 @@ describe('Input validation', () => {
     expect(putIdx).toBeGreaterThan(-1)
 
     const body = content.slice(putIdx, putIdx + 2000)
-    expect(body, 'PUT /:id must validate new folder name').toMatch(/isValidFolderName/)
+    // The check runs in the service (after the repository check, as before)
+    expect(body, 'PUT /:id must hand the update to the department service').toMatch(/departments\.update\(/)
+    const service = readFileSync(join(ROUTES_DIR, '../services/departments.ts'), 'utf-8')
+    const update = service.slice(service.indexOf('async update('))
+    expect(update.slice(0, 1500), 'the update must validate a new folder name').toMatch(/isValidFolderName\(body\.folder\)[\s\S]*bad-request/)
   })
 
   it('git-http must validate service parameter', () => {

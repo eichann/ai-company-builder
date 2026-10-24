@@ -74,7 +74,7 @@ describe('server layering', () => {
   })
 
   // Grows with each route moved onto services.
-  const ROUTES_WITHOUT_SQL = ['companies.ts', 'invitations.ts']
+  const ROUTES_WITHOUT_SQL = ['companies.ts', 'departments.ts', 'invitations.ts']
 
   for (const name of ROUTES_WITHOUT_SQL) {
     it(`routes/${name} runs no SQL and does not touch the database connection`, () => {

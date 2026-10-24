@@ -58,7 +58,8 @@ vi.mock('../../src/lib/auth', () => ({
 import { execFileSync, spawnSync } from 'child_process'
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
-import { departmentsRoute, withCompanyLock } from '../../src/routes/departments'
+import { departmentsRoute } from '../../src/routes/departments'
+import { withCompanyLock } from '../../src/lib/company-lock'
 import { configureBareRepo } from '../../src/routes/git'
 
 // Every push runs the real pre-receive hook, which is slow on some hosts.

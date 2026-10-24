@@ -4,14 +4,15 @@
  * is asynchronous (lib/git-exec.ts): these run inside request handlers of the
  * process that also serves every member's git-http traffic.
  */
-import { existsSync } from 'fs'
-import { mkdir, writeFile } from 'fs/promises'
+import { existsSync, mkdirSync, writeFileSync } from 'fs'
+import { mkdir, readdir, rm, stat, writeFile } from 'fs/promises'
 import { join } from 'path'
 import type { RepoStore } from '../ports/repo-store'
 import { initBareRepo, internalGitEnv } from '../lib/git-server'
 import { gitAsync } from '../lib/git-exec'
 import { withCompanyLock } from '../lib/company-lock'
-import { REPOS_DIR, WORKDIR_DIR } from '../lib/config'
+import { companyRepoPath, REPOS_DIR, WORKDIR_DIR } from '../lib/config'
+import { countFilesInRepoFolder, listFoldersFromRepo } from '../lib/repo-folders'
 
 // Watchdog for each git command of the seeding. The push runs the
 // pre-receive checker; a hung checker must fail the seeding, not leave the
@@ -97,6 +98,170 @@ function seedCompanyRepo(companyId: string, bareRepoPath: string, departmentFold
   })
 }
 
+// ============================================================================
+// Department folders in the working clone (routes/departments.ts)
+//
+// Everything here is asynchronous: a synchronous git call (the old
+// `execFileSync('git', ['pull', ...])` on every list request) froze the whole
+// server — 42 s on a 7.7 GB working clone — for everyone. Reading the shared
+// branch: lib/repo-folders.ts.
+// ============================================================================
+
+// git in the working clone. internalGitEnv: the pushes made here (department
+// folder create / rename / delete) are the server's own — the hook skips the
+// write-permission check for them; every content rule still applies.
+function git(args: string[]): Promise<string> {
+  return gitAsync(args, { env: { ...internalGitEnv(), GIT_TERMINAL_PROMPT: '0' } })
+}
+
+// The working directory for a company, up to date with the bare repo.
+// Mutations only, and only inside withCompanyLock.
+async function getWorkingDir(companyId: string): Promise<string> {
+  const sanitizedId = companyId.replace(/[^a-zA-Z0-9_-]/g, '')
+  const workDir = join(WORKDIR_DIR, sanitizedId)
+  const bareRepo = companyRepoPath(companyId)
+
+  if (!existsSync(bareRepo)) {
+    throw new Error('Repository not found')
+  }
+
+  if (!existsSync(workDir)) {
+    // Clone from bare repo
+    await git(['clone', bareRepo, workDir])
+  } else {
+    // Ensure remote URL points to correct bare repo path (fixes server migration issues)
+    try {
+      const currentUrl = (await git(['-C', workDir, 'remote', 'get-url', 'origin'])).trim()
+      if (currentUrl !== bareRepo) {
+        await git(['-C', workDir, 'remote', 'set-url', 'origin', bareRepo])
+      }
+    } catch {
+      // Ignore - remote might not exist yet
+    }
+
+    // Pull latest changes
+    try {
+      await git(['-C', workDir, 'pull', 'origin', 'main'])
+    } catch {
+      try {
+        await git(['-C', workDir, 'pull', 'origin', 'master'])
+      } catch {
+        // Ignore pull errors (might be empty repo)
+      }
+    }
+  }
+
+  return workDir
+}
+
+// Commit and push changes
+async function commitAndPush(workDir: string, message: string): Promise<void> {
+  try {
+    await git(['-C', workDir, 'add', '-A'])
+    await git(['-C', workDir, 'commit', '-m', message, '--allow-empty'])
+    try {
+      await git(['-C', workDir, 'push', 'origin', 'HEAD'])
+    } catch {
+      // Ignore push errors (remote might not be available)
+    }
+  } catch (error) {
+    console.error('Git commit/push error:', error)
+    // Don't throw - commit might fail if nothing changed
+  }
+}
+
+// Count files in a directory of the working clone (recursive)
+async function countFilesInDir(dirPath: string): Promise<{ files: number; folders: number }> {
+  let files = 0
+  let folders = 0
+
+  async function count(path: string) {
+    if (!existsSync(path)) return
+    for (const item of await readdir(path)) {
+      if (item.startsWith('.')) continue
+      const itemPath = join(path, item)
+      if ((await stat(itemPath)).isDirectory()) {
+        folders++
+        await count(itemPath)
+      } else {
+        files++
+      }
+    }
+  }
+
+  await count(dirPath)
+  return { files, folders }
+}
+
+function createDepartmentFolder(companyId: string, folder: string, commitMessage: string): Promise<boolean> {
+  return withCompanyLock(companyId, async () => {
+    const workDir = await getWorkingDir(companyId)
+    const folderPath = join(workDir, folder)
+
+    if (existsSync(folderPath)) {
+      return false
+    }
+
+    // Folder with .gitkeep and the .personal workspace (gitignored)
+    mkdirSync(folderPath, { recursive: true })
+    writeFileSync(join(folderPath, '.gitkeep'), '')
+    const personalDir = join(folderPath, '.personal')
+    mkdirSync(personalDir, { recursive: true })
+    writeFileSync(join(personalDir, '.gitignore'), '# Personal workspace — not synced\n*\n!.gitignore\n')
+
+    await commitAndPush(workDir, commitMessage)
+    return true
+  })
+}
+
+function renameDepartmentFolder(companyId: string, from: string, to: string, commitMessage: string): Promise<boolean> {
+  return withCompanyLock(companyId, async () => {
+    const workDir = await getWorkingDir(companyId)
+    const oldPath = join(workDir, from)
+    const newPath = join(workDir, to)
+
+    if (existsSync(newPath)) {
+      return false
+    }
+
+    if (existsSync(oldPath)) {
+      // git mv for proper tracking
+      await git(['-C', workDir, 'mv', from, to])
+      await commitAndPush(workDir, commitMessage)
+    }
+    return true
+  })
+}
+
+function deleteDepartmentFolder(companyId: string, folder: string, commitMessage: string): Promise<{ deletedFiles: number; deletedFolders: number }> {
+  return withCompanyLock(companyId, async () => {
+    const workDir = await getWorkingDir(companyId)
+    const folderPath = join(workDir, folder)
+
+    if (!existsSync(folderPath)) {
+      return { deletedFiles: 0, deletedFolders: 0 }
+    }
+
+    const counts = await countFilesInDir(folderPath)
+    await rm(folderPath, { recursive: true, force: true })
+    await git(['-C', workDir, 'add', '-A'])
+    await commitAndPush(workDir, commitMessage)
+    return { deletedFiles: counts.files, deletedFolders: counts.folders }
+  })
+}
+
 export function localRepoStore(): RepoStore {
-  return { createCompanyRepo, seedCompanyRepo }
+  if (!existsSync(WORKDIR_DIR)) {
+    mkdirSync(WORKDIR_DIR, { recursive: true })
+  }
+  return {
+    createCompanyRepo,
+    seedCompanyRepo,
+    companyRepoExists: companyId => existsSync(companyRepoPath(companyId)),
+    listRootFolders: listFoldersFromRepo,
+    countFilesInFolder: countFilesInRepoFolder,
+    createDepartmentFolder,
+    renameDepartmentFolder,
+    deleteDepartmentFolder,
+  }
 }

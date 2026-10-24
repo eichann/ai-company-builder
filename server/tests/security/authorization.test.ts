@@ -42,8 +42,8 @@ describe('Role-based authorization', () => {
       const handlerBody = content.slice(idx, idx + 1500)
       expect(
         handlerBody,
-        `${pattern} must call canEditDepartments or check role`
-      ).toMatch(/canEditDepartments|membership\.role/)
+        `${pattern} must check the owner/admin role`
+      ).toMatch(FORBIDDEN)
     }
   })
 

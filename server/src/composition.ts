@@ -14,6 +14,7 @@ import { sqliteMembershipRepository } from './adapters/sqlite/memberships'
 import { sqliteInvitationRepository } from './adapters/sqlite/invitations'
 import { sqliteDepartmentRepository } from './adapters/sqlite/departments'
 import { sqliteScopeRepository } from './adapters/sqlite/scopes'
+import { sqlitePrivateFolderRepository } from './adapters/sqlite/private-folders'
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
@@ -22,6 +23,7 @@ import { randomIds, systemClock } from './adapters/system'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
+import { createDepartmentService } from './services/departments'
 
 export function createServices(conn: Database.Database) {
   const repos = {
@@ -30,6 +32,7 @@ export function createServices(conn: Database.Database) {
     invitations: sqliteInvitationRepository(conn),
     departments: sqliteDepartmentRepository(conn),
     scopes: sqliteScopeRepository(conn),
+    privateFolders: sqlitePrivateFolderRepository(conn),
     clientActivity: sqliteClientActivityRepository(),
   }
   const shared = {
@@ -44,6 +47,7 @@ export function createServices(conn: Database.Database) {
     access: createAccessPolicy(repos.memberships),
     companies: createCompanyService({ ...repos, ...shared, repoStore }),
     invitations: createInvitationService({ ...repos, ...shared }),
+    departments: createDepartmentService({ ...repos, ...shared, repoStore }),
   }
 }
 
