@@ -22,9 +22,11 @@
 //    scan did too).
 //  - An untracked nested repository is one `dir/` entry, and so is a tracked
 //    gitlink (a directory on disk): their contents are walked like the old
-//    scan did (skipping .git / .backups / node_modules), because "keep
-//    sharing" in the nested-repository step drops the inner .git right after
-//    this step and would otherwise stage a large file inside.
+//    scan did (skipping .git / .backups / node_modules). Since 2026-10-24 the
+//    scan runs after the nested-repository step, so a repository the member
+//    keeps local is ignored (.git/info/exclude) and not listed at all, and
+//    one whose .git they dropped is listed as plain files; the walk remains
+//    for a repository the step could not decide on.
 //  - Ignored untracked files are not listed: git would never stage them.
 //
 // "Already ignored" is asked of git (`check-ignore --no-index`, one call per

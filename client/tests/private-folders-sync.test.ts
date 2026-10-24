@@ -8,6 +8,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { cloneUrlAllowed, readPrivateExcludes, safeScopeDir, sameScopeRemote, writePrivateExcludes } from '../electron/sync/private-folders'
+import { readNestedRepoExcludes, writeNestedRepoExcludes } from '../electron/sync/nested-repos'
 import { createPathChecker, pathPrefixes } from '../electron/sync/path-check'
 import { parseReservedPathRejection } from '../electron/sync/reserved-path'
 
@@ -99,6 +100,30 @@ test('the managed excludes block keeps the member\'s own lines', t => {
   assert.deepEqual(readPrivateExcludes(root), ['人事/評価'])
   writePrivateExcludes(root, [])
   assert.equal(fs.readFileSync(path.join(root, '.git', 'info', 'exclude'), 'utf-8'), '# mine\n*.log\n')
+})
+
+test('the private-folder and nested-repository blocks of .git/info/exclude never clobber each other', t => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-excl-'))
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }))
+  const file = path.join(root, '.git', 'info', 'exclude')
+  fs.mkdirSync(path.dirname(file), { recursive: true })
+  fs.writeFileSync(file, '# mine\n*.log\n')
+  assert.equal(writePrivateExcludes(root, ['人事/評価']), true)
+  assert.equal(writeNestedRepoExcludes(root, ['tools/外部ツール', 'a[1]']), true)
+  // Rewriting one block in place leaves the other (and the member's lines) alone.
+  assert.equal(writePrivateExcludes(root, ['人事/評価']), false)
+  assert.equal(writeNestedRepoExcludes(root, ['a[1]', 'tools/外部ツール']), false, 'order does not matter')
+  assert.equal(writePrivateExcludes(root, ['人事/評価', '経理/給与']), true)
+  assert.deepEqual(readNestedRepoExcludes(root).sort(), ['a[1]', 'tools/外部ツール'])
+  assert.deepEqual(readPrivateExcludes(root), ['人事/評価', '経理/給与'])
+  const text = fs.readFileSync(file, 'utf-8')
+  assert.ok(text.includes('/a\\[1\\]/'), 'glob characters are escaped')
+  assert.ok(text.includes(`/${'tools/外部ツール'.normalize('NFD')}/`), 'NFD spelling too')
+  assert.ok(text.startsWith('# mine\n*.log\n'))
+  writeNestedRepoExcludes(root, [])
+  assert.deepEqual(readPrivateExcludes(root), ['人事/評価', '経理/給与'])
+  writePrivateExcludes(root, [])
+  assert.equal(fs.readFileSync(file, 'utf-8'), '# mine\n*.log\n')
 })
 
 test('[RESERVED_PATH] section: paths and the reason lines, verbatim', () => {

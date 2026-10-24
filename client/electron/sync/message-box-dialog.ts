@@ -25,30 +25,33 @@ export function createMessageBoxSyncDialog(host: MessageBoxHost): SyncDialog {
   return {
     canAsk: () => host.hasWindow(),
 
+    // Nested repositories (owner decision 2026-10-24): the default never
+    // shares anything new and never changes what teammates see. "Exclude"
+    // is this computer only (.git/info/exclude, see ./nested-repos.ts).
     async confirmSharedNestedRepo(repo) {
       const { response } = await host.showMessageBox({
         type: 'warning',
-        buttons: ['.git を取り除いて共有を続ける（推奨）', '同期対象から除外する', 'キャンセル'],
+        buttons: ['このPCで増えたファイルは共有しない（おすすめ）', '.git を削除して中身をすべて共有する', 'キャンセル'],
         defaultId: 0,
         cancelId: 2,
-        title: '共有中のフォルダに別のGit情報を検出',
-        message: `「${repo}」の中に別のGit管理情報(.git)が見つかりました。`,
-        detail: `フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します`,
+        title: '共有中のフォルダに、別の場所から取り込んだ情報があります',
+        message: `共有中のフォルダ「${repo}」の中に、GitHub など別の場所から取り込んだときの管理情報（隠しフォルダ「.git」）が見つかりました。`,
+        detail: `・「このPCで増えたファイルは共有しない」: すでに共有されているファイルは、これまでどおり全員と同期します。このPCでこのフォルダに増えたファイルは、ほかのメンバーには共有しません。ほかのメンバーの画面からは何も消えません\n・「.git を削除して中身をすべて共有する」: 隠しフォルダ「.git」（取り込み元とのつながりの記録）を削除し、中のファイルをすべて会社の全員に共有します。パスワードなど、共有してはいけない情報が入っていないか確かめてから選んでください\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。`,
       })
       if (response === 2) return 'cancel'
-      if (response === 0) return 'keep-sharing'
+      if (response === 1) return 'keep-sharing'
       return 'exclude'
     },
 
     async confirmExternalNestedRepo(repo) {
       const { response } = await host.showMessageBox({
         type: 'warning',
-        buttons: ['同期対象から除外して続行', 'キャンセル'],
+        buttons: ['共有せず、このPCだけに置く（おすすめ）', 'キャンセル'],
         defaultId: 0,
         cancelId: 1,
-        title: '外部Gitリポジトリを検出',
-        message: `「${repo}」は別のGitリポジトリです。`,
-        detail: `このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。`,
+        title: '別の場所から取り込んだフォルダがあります',
+        message: `「${repo}」は、GitHub など別の場所から取り込んだフォルダのようです。`,
+        detail: `このようなフォルダには、会社で共有してはいけない情報（パスワードなど）が入っていることがあるため、共有しません。\n\n・「共有せず、このPCだけに置く」: フォルダはこのPCにそのまま残り、ほかのメンバーには共有されません。ほかのメンバーの画面には何も起きません\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。`,
       })
       return response === 1 ? 'cancel' : 'exclude'
     },

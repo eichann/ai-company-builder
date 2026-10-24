@@ -8,6 +8,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { World } from '../sync-harness/world'
+import { readNestedRepoExcludes } from '../../electron/sync/nested-repos'
 import { assertNoLostWork, settleAndCheck } from '../sync-harness/invariants'
 
 describe('git:sync findings', { concurrency: 4 }, () => {
@@ -61,24 +62,29 @@ describe('git:sync findings', { concurrency: 4 }, () => {
 
   // Found by the soak once it could exclude shared folders (after the
   // .gitignore union fix). A member answers "exclude" for a shared folder
-  // with a stray .git — the commit untracks the folder and adds it to
+  // with a stray .git — the commit untracked the folder and added it to
   // .gitignore — while a teammate edits a file in it. Replaying the pick
-  // conflicts (modify/delete), sync takes the server version, and
+  // conflicted (modify/delete), sync took the server version, and
   // `git add` refused it as ignored: the rebase was aborted, and the next
   // sync stopped at the same pick again.
+  // Since 2026-10-24 "exclude" is local (.git/info/exclude) and untracks
+  // nothing but gitlinks, so the folder stays shared; a conflict on a file in
+  // it must still resolve (server wins, `add -f` past the local exclusion).
   test('excluding a shared folder while a teammate edits it does not get stuck', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], seed: { '営業部/提案書.md': 'v0\n' } })
     const [a, b] = world.members
     b.write('営業部/提案書.md', 'edit by b\n')
     assert.equal((await b.sync()).result.success, true)
     a.initNestedRepo('営業部').willAnswer('sharedNestedRepo', 'exclude')
+    a.write('営業部/提案書.md', 'edit by a\n')
     const out = await a.sync()
     assert.equal(out.result.success, true, JSON.stringify(out.result))
-    // The exclusion holds within this one sync: the folder left the server.
-    assert.equal(world.serverFile('営業部/提案書.md'), null)
+    assert.deepEqual(out.result.conflictFiles, ['営業部/提案書.md'])
+    // The folder stays shared for everyone; the server's version won.
+    assert.equal(world.serverFile('営業部/提案書.md')?.toString(), 'edit by b\n')
     assert.equal(a.head(), world.serverHead())
     assert.equal(a.readText('営業部/提案書.md'), 'edit by b\n')
-    assert.ok(a.isIgnored('営業部/提案書.md'))
+    assert.ok(a.exists('営業部/.git'))
     await settleAndCheck(world)
   })
 
@@ -105,16 +111,19 @@ describe('git:sync findings', { concurrency: 4 }, () => {
   // later one hit a conflict and "server wins" dropped its lines. The next
   // sync detected the nested repo again and asked the same question again;
   // with several members doing this at once, two rounds of syncing were not
-  // enough to converge. .gitignore now merges with the union driver.
-  test('concurrent .gitignore exclusions converge within two syncs each', async t => {
+  // enough to converge. .gitignore now merges with the union driver — and
+  // since 2026-10-24 nested-repo exclusions never reach it at all (each
+  // member's own .git/info/exclude).
+  test('concurrent nested-repo exclusions converge within two syncs each', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }, { name: 'c' }] })
+    const gitignoreBefore = world.serverFile('.gitignore')?.toString()
     for (const m of world.members) m.initNestedRepo(`ext-${m.name}`)
     for (const m of world.members) await m.sync()
     await settleAndCheck(world)
-    const serverIgnore = world.serverFile('.gitignore')?.toString() ?? ''
+    assert.equal(world.serverFile('.gitignore')?.toString(), gitignoreBefore, 'the shared .gitignore never names them')
     for (const m of world.members) {
       assert.equal(m.dialogHistory.length, 1, `${m.name} was asked about the same nested repo again`)
-      assert.equal(serverIgnore.split('\n').filter(l => l === `/ext-${m.name}/`).length, 1, serverIgnore)
+      assert.deepEqual(readNestedRepoExcludes(m.dir), [`ext-${m.name}`])
       assert.ok(m.isIgnored(`ext-${m.name}/inner.md`))
     }
   })

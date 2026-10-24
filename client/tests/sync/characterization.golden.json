@@ -556,22 +556,22 @@
             "options": {
               "type": "warning",
               "buttons": [
-                ".git を取り除いて共有を続ける（推奨）",
-                "同期対象から除外する",
+                "このPCで増えたファイルは共有しない（おすすめ）",
+                ".git を削除して中身をすべて共有する",
                 "キャンセル"
               ],
               "defaultId": 0,
               "cancelId": 2,
-              "title": "共有中のフォルダに別のGit情報を検出",
-              "message": "「s1」の中に別のGit管理情報(.git)が見つかりました。",
-              "detail": "フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します"
+              "title": "共有中のフォルダに、別の場所から取り込んだ情報があります",
+              "message": "共有中のフォルダ「s1」の中に、GitHub など別の場所から取り込んだときの管理情報（隠しフォルダ「.git」）が見つかりました。",
+              "detail": "・「このPCで増えたファイルは共有しない」: すでに共有されているファイルは、これまでどおり全員と同期します。このPCでこのフォルダに増えたファイルは、ほかのメンバーには共有しません。ほかのメンバーの画面からは何も消えません\n・「.git を削除して中身をすべて共有する」: 隠しフォルダ「.git」（取り込み元とのつながりの記録）を削除し、中のファイルをすべて会社の全員に共有します。パスワードなど、共有してはいけない情報が入っていないか確かめてから選んでください\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。"
             }
           }
         ],
         "logs": [
           "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
-          "log: Git sync: Removed inner .git of \"s1\" (user chose to keep sharing)",
+          "log: Git sync: Removed inner .git of \"s1\" (user chose to share its files)",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
           "log: Git sync: Pulling with rebase...",
@@ -596,26 +596,24 @@
             "options": {
               "type": "warning",
               "buttons": [
-                ".git を取り除いて共有を続ける（推奨）",
-                "同期対象から除外する",
+                "このPCで増えたファイルは共有しない（おすすめ）",
+                ".git を削除して中身をすべて共有する",
                 "キャンセル"
               ],
               "defaultId": 0,
               "cancelId": 2,
-              "title": "共有中のフォルダに別のGit情報を検出",
-              "message": "「s2」の中に別のGit管理情報(.git)が見つかりました。",
-              "detail": "フォルダをコピーした際に紛れ込んだ可能性があります。\n\n・「取り除いて共有を続ける」: フォルダ内の .git だけを削除し、これまでどおり全員に共有します（ファイルは消えません）\n・「同期対象から除外する」: このフォルダを共有から外します。他のメンバーの画面からはこのフォルダが消えます\n・「キャンセル」: 何も変更せずに同期を中止します"
+              "title": "共有中のフォルダに、別の場所から取り込んだ情報があります",
+              "message": "共有中のフォルダ「s2」の中に、GitHub など別の場所から取り込んだときの管理情報（隠しフォルダ「.git」）が見つかりました。",
+              "detail": "・「このPCで増えたファイルは共有しない」: すでに共有されているファイルは、これまでどおり全員と同期します。このPCでこのフォルダに増えたファイルは、ほかのメンバーには共有しません。ほかのメンバーの画面からは何も消えません\n・「.git を削除して中身をすべて共有する」: 隠しフォルダ「.git」（取り込み元とのつながりの記録）を削除し、中のファイルをすべて会社の全員に共有します。パスワードなど、共有してはいけない情報が入っていないか確かめてから選んでください\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。"
             }
           }
         ],
         "logs": [
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
-          "log: Git sync: Removed gitlink for nested repo \"s2\"",
-          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Excluded 1 nested repo(s) on this computer (.git/info/exclude):",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
-          "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pushing to origin..."
+          "log: Git sync: Pulling with rebase..."
         ]
       },
       {
@@ -631,14 +629,14 @@
             "options": {
               "type": "warning",
               "buttons": [
-                "同期対象から除外して続行",
+                "共有せず、このPCだけに置く（おすすめ）",
                 "キャンセル"
               ],
               "defaultId": 0,
               "cancelId": 1,
-              "title": "外部Gitリポジトリを検出",
-              "message": "「ext」は別のGitリポジトリです。",
-              "detail": "このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。"
+              "title": "別の場所から取り込んだフォルダがあります",
+              "message": "「ext」は、GitHub など別の場所から取り込んだフォルダのようです。",
+              "detail": "このようなフォルダには、会社で共有してはいけない情報（パスワードなど）が入っていることがあるため、共有しません。\n\n・「共有せず、このPCだけに置く」: フォルダはこのPCにそのまま残り、ほかのメンバーには共有されません。ほかのメンバーの画面には何も起きません\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。"
             }
           }
         ],
@@ -664,24 +662,23 @@
             "options": {
               "type": "warning",
               "buttons": [
-                "同期対象から除外して続行",
+                "共有せず、このPCだけに置く（おすすめ）",
                 "キャンセル"
               ],
               "defaultId": 0,
               "cancelId": 1,
-              "title": "外部Gitリポジトリを検出",
-              "message": "「ext」は別のGitリポジトリです。",
-              "detail": "このフォルダを同期対象外(.gitignoreに追加)にして続行します。フォルダはこのPCに残りますが、他のメンバーには共有されません。\n\n中身を共有したい場合はキャンセルし、フォルダ内の隠しフォルダ「.git」を削除してからもう一度同期してください。"
+              "title": "別の場所から取り込んだフォルダがあります",
+              "message": "「ext」は、GitHub など別の場所から取り込んだフォルダのようです。",
+              "detail": "このようなフォルダには、会社で共有してはいけない情報（パスワードなど）が入っていることがあるため、共有しません。\n\n・「共有せず、このPCだけに置く」: フォルダはこのPCにそのまま残り、ほかのメンバーには共有されません。ほかのメンバーの画面には何も起きません\n・「キャンセル」: 何も変更せずに同期を中止します\n\n会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。"
             }
           }
         ],
         "logs": [
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
-          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Excluded 1 nested repo(s) on this computer (.git/info/exclude):",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
-          "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pushing to origin..."
+          "log: Git sync: Pulling with rebase..."
         ]
       },
       {
@@ -699,41 +696,39 @@
         "logs": [
           "log: Git sync: Declared .gitignore merge=union in .git/info/attributes",
           "log: Git sync: Detected SSH remote URL, migrating to HTTPS...",
-          "log: Git sync: Added 1 nested repo(s) to .gitignore:",
+          "log: Git sync: Excluded 1 nested repo(s) on this computer (.git/info/exclude):",
           "log: Git sync: Fetching from origin...",
           "log: Git sync: Local commit hash: <HASH>",
-          "log: Git sync: Pulling with rebase...",
-          "log: Git sync: Pushing to origin..."
+          "log: Git sync: Pulling with rebase..."
         ]
       }
     ],
     "final": {
       "serverTree": {
-        ".gitignore": "fdc7167402944086404c53e37bb90ce9a45c06a4",
+        ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
         "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
         "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
-        "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+        "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d",
+        "s2/x.md": "0cfbf08886fca9a91cb753ec8734c84fcbe52c9f"
       },
       "serverSubjects": [
-        "Sync from AI Company Builder",
-        "Sync from AI Company Builder",
-        "Sync from AI Company Builder",
         "Sync from AI Company Builder",
         "seed content",
         "seed"
       ],
       "members": {
         "a": {
-          "headIsServer": false,
+          "headIsServer": true,
           "status": "",
           "tree": {
-            ".gitignore": "1b12e688b7cff657f240dfc33b5a29cc2093c3cf",
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
             "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
             "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
-            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d",
+            "s2/x.md": "0cfbf08886fca9a91cb753ec8734c84fcbe52c9f"
           },
           "pendingPush": false,
-          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n",
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
           "userName": "a",
           "sparse": "(not sparse)",
           "backups": []
@@ -742,13 +737,14 @@
           "headIsServer": true,
           "status": "",
           "tree": {
-            ".gitignore": "fdc7167402944086404c53e37bb90ce9a45c06a4",
+            ".gitignore": "0de41882d779f04411357ea8c0714587042e393e",
             "README.md": "ccd18ea01cbf43e01ecd91648abfd3e1f807680d",
             "s1/inner.md": "5a470165186c5e241f1be866da6d968d566b141f",
-            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d"
+            "s1/x.md": "d00491fd7e5bb6fa28c517a0bb32b8b506539d4d",
+            "s2/x.md": "0cfbf08886fca9a91cb753ec8734c84fcbe52c9f"
           },
           "pendingPush": false,
-          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n\n# Auto-ignored: nested Git repositories (managed independently)\n/s2/\n\n# Auto-ignored: nested Git repositories (managed independently)\n/ext/\n/ext-b/\n",
+          "gitignore": ".backups/\n# AI-generated temp files\n.workspace/\n# Dependencies\nnode_modules/\n# Secrets — never sync (local only)\n.env\n.env.*\n# Keep templates shared\n!.env.example\n!.env.sample\n# Personal workspaces — never sync (local only)\n**/.personal/*\n!**/.personal/.gitignore\n",
           "userName": "b",
           "sparse": "(not sparse)",
           "backups": []

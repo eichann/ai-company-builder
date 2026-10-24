@@ -112,8 +112,8 @@ export const ESSENTIAL_GITIGNORE = [
 
 /** Every question sync can ask, keyed by the message box title. */
 export const QUESTIONS = {
-  sharedNestedRepo: { title: '共有中のフォルダに別のGit情報を検出', buttons: { 'keep-sharing': 0, exclude: 1, cancel: 2 } },
-  externalNestedRepo: { title: '外部Gitリポジトリを検出', buttons: { exclude: 0, cancel: 1 } },
+  sharedNestedRepo: { title: '共有中のフォルダに、別の場所から取り込んだ情報があります', buttons: { exclude: 0, 'keep-sharing': 1, cancel: 2 } },
+  externalNestedRepo: { title: '別の場所から取り込んだフォルダがあります', buttons: { exclude: 0, cancel: 1 } },
   deletedFiles: { title: 'ファイルの削除を検出', buttons: { 'sync-deletions': 0, restore: 1, cancel: 2 } },
   protectedConfig: { title: '管理者だけが変更できるファイル', buttons: { restore: 0, cancel: 1 } },
   writeDenied: { title: '編集できないファイルがあります', buttons: { restore: 0, cancel: 1 } },
@@ -124,7 +124,7 @@ export type Answer<K extends QuestionKind> = keyof (typeof QUESTIONS)[K]['button
 
 /** What a member answers when no answer was scripted: the documented default button. */
 export const DEFAULT_ANSWERS: { [K in QuestionKind]: Answer<K> } = {
-  sharedNestedRepo: 'keep-sharing',
+  sharedNestedRepo: 'exclude',
   externalNestedRepo: 'exclude',
   deletedFiles: 'sync-deletions',
   protectedConfig: 'restore',

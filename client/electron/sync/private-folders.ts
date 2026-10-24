@@ -25,6 +25,7 @@ import path from 'path'
 import type { SimpleGit } from 'simple-git'
 import type { MyPrivateScope, MyScopesResponse } from '../../../shared/types/private-folders'
 import { pathKey } from '../../shared/sparse-paths'
+import { folderExcludeLines, readExcludeBlock, writeExcludeBlock, type ExcludeBlock } from './local-excludes'
 
 export type { MyPrivateScope, MyScopesResponse }
 
@@ -186,65 +187,27 @@ export function privateFolderFor(absPath: string): { root: string; scope: MyPriv
 // .git/info/exclude
 // ---------------------------------------------------------------------------
 
-const EXCLUDE_BEGIN = '# >>> ACB private folders (managed by the app, local only) >>>'
-const EXCLUDE_END = '# <<< ACB private folders <<<'
-
-function escapePattern(p: string): string {
-  return p.replace(/[\\*?[\]!#]/g, c => `\\${c}`)
+const PRIVATE_EXCLUDES: ExcludeBlock = {
+  begin: '# >>> ACB private folders (managed by the app, local only) >>>',
+  end: '# <<< ACB private folders <<<',
 }
 
 /** The exclude lines for these folders: each anchored, in NFC and NFD (git matches the bytes it reads from disk). */
-export function privateExcludeLines(paths: readonly string[]): string[] {
-  const lines: string[] = []
-  const seen = new Set<string>()
-  for (const p of paths) {
-    for (const variant of [p, p.normalize('NFC'), p.normalize('NFD')]) {
-      const line = `/${escapePattern(variant)}/`
-      if (seen.has(line)) continue
-      seen.add(line)
-      lines.push(line)
-    }
-  }
-  return lines
-}
+export const privateExcludeLines = folderExcludeLines
 
 /**
  * Write the managed block of the company repository's .git/info/exclude so
  * it lists exactly `paths`. Lines outside the block are the member's (or
- * git's template) and are kept. Returns true when the file changed.
+ * git's template, or the nested-repository block) and are kept. Returns true
+ * when the file changed. See ./local-excludes.ts.
  */
 export function writePrivateExcludes(repoPath: string, paths: readonly string[]): boolean {
-  const file = path.join(repoPath, '.git', 'info', 'exclude')
-  let text = ''
-  try { text = fs.readFileSync(file, 'utf-8') } catch { /* none yet */ }
-  const lines = text.split('\n')
-  const begin = lines.indexOf(EXCLUDE_BEGIN)
-  const end = begin >= 0 ? lines.indexOf(EXCLUDE_END, begin) : -1
-  const outside = begin >= 0 && end >= 0 ? [...lines.slice(0, begin), ...lines.slice(end + 1)] : lines
-  while (outside.length > 0 && outside[outside.length - 1] === '') outside.pop()
-  const block = paths.length > 0 ? [EXCLUDE_BEGIN, ...privateExcludeLines(paths), EXCLUDE_END] : []
-  const next = [...outside, ...block].join('\n') + (outside.length + block.length > 0 ? '\n' : '')
-  if (next === text) return false
-  if (paths.length === 0 && begin < 0) return false
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, next)
-  return true
+  return writeExcludeBlock(repoPath, PRIVATE_EXCLUDES, paths)
 }
 
 /** The folders listed in the managed block (NFC, deduplicated). */
 export function readPrivateExcludes(repoPath: string): string[] {
-  let text = ''
-  try { text = fs.readFileSync(path.join(repoPath, '.git', 'info', 'exclude'), 'utf-8') } catch { return [] }
-  const lines = text.split('\n')
-  const begin = lines.indexOf(EXCLUDE_BEGIN)
-  const end = begin >= 0 ? lines.indexOf(EXCLUDE_END, begin) : -1
-  if (begin < 0 || end < 0) return []
-  const out = new Set<string>()
-  for (const line of lines.slice(begin + 1, end)) {
-    const m = /^\/(.+)\/$/.exec(line)
-    if (m) out.add(m[1].replace(/\\(.)/g, '$1').normalize('NFC'))
-  }
-  return [...out]
+  return readExcludeBlock(repoPath, PRIVATE_EXCLUDES)
 }
 
 // ---------------------------------------------------------------------------

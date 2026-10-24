@@ -879,7 +879,7 @@ ${promptContent}
         } else if (result.excludedNestedRepos && result.excludedNestedRepos.length > 0) {
           setSyncNotification({
             type: 'warning',
-            message: `外部Gitリポジトリを検出しました。同期対象から除外し、.gitignoreに追加しました（${result.excludedNestedRepos.length}件）: ${result.excludedNestedRepos.slice(0, 3).join(', ')}${result.excludedNestedRepos.length > 3 ? '...' : ''}`
+            message: `別の場所から取り込んだフォルダを、共有せずこのPCだけに置きました（${result.excludedNestedRepos.length}件）: ${result.excludedNestedRepos.slice(0, 3).join(', ')}${result.excludedNestedRepos.length > 3 ? '...' : ''}`
           })
         } else {
           setSyncNotification({
@@ -900,6 +900,7 @@ ${promptContent}
         (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) ||
         (result.untrackedPersonalFiles && result.untrackedPersonalFiles.length > 0) ||
         (result.outsideCheckoutFiles && result.outsideCheckoutFiles.length > 0) ||
+        (result.nestedRepoBackupFiles && result.nestedRepoBackupFiles.length > 0) ||
         (result.restoredFolders && result.restoredFolders.length > 0) ||
         (result.ignoredLargeFiles && result.ignoredLargeFiles.length > 0) ||
         (result.excludedNestedRepos && result.excludedNestedRepos.length > 0)

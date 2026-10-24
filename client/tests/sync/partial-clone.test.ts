@@ -17,6 +17,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { World, DEFAULT_SCOPES, type HarnessScope, type Member, type SyncOutcome } from '../sync-harness/world'
 import { settleAndCheck } from '../sync-harness/invariants'
+import { readNestedRepoExcludes } from '../../electron/sync/nested-repos'
 import { DOWNLOAD_NEEDS_NETWORK_MESSAGE, readSparseConfig } from '../../electron/sync/sparse'
 
 const CONCURRENCY = Number(process.env.SYNC_HARNESS_CONCURRENCY) || 4
@@ -367,8 +368,34 @@ describe('git:sync partial-clone members', { concurrency: CONCURRENCY }, () => {
     const out = ok(await p.sync(), 'p')
     assert.deepEqual(out.result.excludedNestedRepos, ['営業部/外部ツール'])
     const gitignore = world.serverFile('.gitignore')?.toString() ?? ''
-    for (const line of ['*.a-tmp', '*.p-tmp', '/営業部/外部ツール/']) assert.ok(gitignore.split('\n').includes(line), `.gitignore lacks ${line}`)
+    for (const line of ['*.a-tmp', '*.p-tmp']) assert.ok(gitignore.split('\n').includes(line), `.gitignore lacks ${line}`)
+    assert.ok(!gitignore.includes('外部ツール'), 'the nested repo is excluded on p\'s computer only')
+    assert.deepEqual(readNestedRepoExcludes(p.dir), ['営業部/外部ツール'])
     await settleAndCheck(world)
     assertNotDownloaded(world, p, '開発部/')
+  })
+
+  scenario('a nested repo excluded on this computer stays excluded across settings changes and reopening', async t => {
+    const { world, a, p } = await create(t)
+    p.initNestedRepo('営業部/外部ツール', { 'inner.md': 'clone\n' })
+    const first = ok(await p.sync(), 'p')
+    assert.deepEqual(first.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']])
+    // Settings: download another department and leave it out again (sparse
+    // reconciles), reopen the company (setupCompanyRemote on the clone).
+    assert.equal((await p.addDepartment('開発部')).success, true)
+    ok(await p.sync(), 'p')
+    assert.equal((await p.removeDepartment('開発部')).success, true)
+    await p.reopen()
+    a.write('営業部/提案書.md', 'by a\n')
+    ok(await a.sync(), 'a')
+    const later = ok(await p.sync(), 'p')
+    assert.deepEqual(later.dialogs, [], 'never asked again')
+    assert.deepEqual(readNestedRepoExcludes(p.dir), ['営業部/外部ツール'])
+    assert.equal(p.readText('営業部/外部ツール/inner.md'), 'clone\n')
+    assert.ok(p.exists('営業部/外部ツール/.git'))
+    assert.equal(world.serverFile('営業部/外部ツール/inner.md'), null)
+    assert.equal(p.readText('営業部/提案書.md'), 'by a\n')
+    await settleAndCheck(world)
+    assertNotDownloaded(world, p, '経理部/') // 開発部 was downloaded once on purpose
   })
 })

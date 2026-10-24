@@ -143,8 +143,13 @@ export interface GitResult {
   backupPath?: string
   restoredFolders?: string[]
   ignoredLargeFiles?: string[]
-  // Nested repos auto-detected and added to .gitignore during this sync
+  // Nested repos detected during this sync and excluded on this computer only
+  // (.git/info/exclude; never the shared .gitignore)
   excludedNestedRepos?: string[]
+  // Files of such a folder that a teammate shared at the same path: this
+  // computer's versions were copied to nestedRepoBackupPath before the pull
+  nestedRepoBackupFiles?: string[]
+  nestedRepoBackupPath?: string
   errorType?: 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'unknown' | string
   secretDetected?: boolean
   // Agent-execution config paths (.claude/settings.json, .mcp.json, ...) the
