@@ -4,8 +4,8 @@
  * shared/core; adapters (src/adapters) implement them — SQLite repositories,
  * the git repository store, the clock — and src/composition.ts wires them.
  *
- * Nothing in this folder imports Node, a database driver, Hono or git
- * (tests/unit/layering.test.ts).
+ * Nothing in this folder imports Node, a database driver, Hono or git —
+ * only other ports and shared/core types (tests/unit/layering.test.ts).
  *
  * The repositories are synchronous on purpose: better-sqlite3 is, and the
  * API's correctness leans on it — a check followed by a write inside one
@@ -23,5 +23,7 @@ export type * from './departments'
 export type * from './scopes'
 export type * from './private-folders'
 export type * from './client-activity'
+export type * from './push-rejections'
+export type * from './orphaned-scopes'
 export type * from './repo-store'
 export type * from './secret-cipher'

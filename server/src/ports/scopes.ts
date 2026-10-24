@@ -1,9 +1,14 @@
+import type { ScopeWithRules } from '../../shared/core/permissions'
+
 /**
- * Permission scopes, rules and department managers — the writes the
- * services make. Access decisions read through shared/core's
- * PermissionRepository.
+ * Permission scopes, rules and department managers (lib/permission-store.ts).
+ * Semantics: shared/core/permissions.ts.
  */
 export interface ScopeRepository {
+  /** Every scope of the company with its rules (rules oldest first). */
+  listWithRules(companyId: string): ScopeWithRules[]
+  /** Department ids in the company the user manages, by the departments' sort_order. */
+  managedDepartmentIds(companyId: string, userId: string): string[]
   /** The company scope, created with `everyone: read + write` the first time. Returns its id. */
   ensureCompanyScope(companyId: string, createdBy: string | null): string
   /** The department's scope at its folder (no rules: inherits). */

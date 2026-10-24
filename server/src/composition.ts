@@ -16,7 +16,9 @@ import { sqliteDepartmentRepository } from './adapters/sqlite/departments'
 import { sqliteScopeRepository } from './adapters/sqlite/scopes'
 import { sqlitePrivateFolderRepository } from './adapters/sqlite/private-folders'
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
+import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
+import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { randomIds, systemClock } from './adapters/system'
@@ -24,6 +26,7 @@ import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
 import { createDepartmentService } from './services/departments'
+import { createPermissionViewService } from './services/permission-views'
 
 export function createServices(conn: Database.Database) {
   const repos = {
@@ -34,6 +37,8 @@ export function createServices(conn: Database.Database) {
     scopes: sqliteScopeRepository(conn),
     privateFolders: sqlitePrivateFolderRepository(conn),
     clientActivity: sqliteClientActivityRepository(),
+    pushRejections: sqlitePushRejectionRepository(),
+    orphanedScopes: gitOrphanedScopeReader(),
   }
   const shared = {
     accounts: betterAuthAccountDirectory(),
@@ -48,6 +53,9 @@ export function createServices(conn: Database.Database) {
     companies: createCompanyService({ ...repos, ...shared, repoStore }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
+    permissionViews: createPermissionViewService({ ...repos, ...shared }),
+    accounts: shared.accounts,
+    repoStore,
   }
 }
 

@@ -6,6 +6,8 @@ import {
   ensureCompanyScope,
   ensureDepartmentScope,
   listDepartmentManagerIds,
+  listScopesWithRules,
+  managedDepartmentIds,
   moveScopeSubtree,
   removeManagerFromCompany,
   replaceDepartmentManagers,
@@ -15,6 +17,8 @@ import {
 /** lib/permission-store.ts (which db/index.ts also runs at startup), behind the port. */
 export function sqliteScopeRepository(conn: Database.Database): ScopeRepository {
   return {
+    listWithRules: companyId => listScopesWithRules(conn, companyId),
+    managedDepartmentIds: (companyId, userId) => managedDepartmentIds(conn, companyId, userId),
     ensureCompanyScope: (companyId, createdBy) => ensureCompanyScope(conn, companyId, createdBy),
     ensureDepartmentScope: (companyId, departmentId, folder, createdBy) => {
       ensureDepartmentScope(conn, companyId, departmentId, folder, createdBy)

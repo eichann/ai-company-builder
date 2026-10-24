@@ -61,4 +61,7 @@ export interface DepartmentRepository {
   /** One statement per item; items of other companies are ignored. Not atomic (it never was). */
   setSortOrders(companyId: string, items: Array<{ id: string; sortOrder: number }>, updatedAt: string): void
   delete(departmentId: string): void
+  count(companyId: string): number
+  /** Every department's id and folder (as stored), in no particular order. */
+  folders(companyId: string): Array<{ id: string; folder: string }>
 }

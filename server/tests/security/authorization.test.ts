@@ -19,7 +19,8 @@ describe('Role-based authorization', () => {
     const handlers = [...content.matchAll(/gitRoute\.(get|post|put|patch|delete)\('([^']+)'/g)].map(m => `${m[1]} ${m[2]}`)
     expect(handlers).toEqual(['get /repos/:companyId'])
     const body = content.slice(content.indexOf("gitRoute.get('/repos/:companyId'"))
-    expect(body).toMatch(/FROM memberships WHERE user_id = \? AND company_id = \?/)
+    // Membership through the access policy (services/access.ts → memberships)
+    expect(body).toMatch(/access\.memberOf\(companyId, user\.id\)/)
     expect(body).not.toMatch(/\bpath: repoPath\b|sshUrl,/)
   })
 
@@ -95,8 +96,8 @@ describe('Role-based authorization', () => {
 
     // Must have authorizeForCompany function
     expect(content).toMatch(/authorizeForCompany/)
-    // Must check memberships table
-    expect(content).toMatch(/memberships/)
+    // Must check the membership (the access policy reads the memberships table)
+    expect(content).toMatch(/access\.memberOf\(companyId, userId\)/)
     // Must return 403 for non-members
     expect(content).toMatch(/Forbidden.*403|403.*Forbidden/)
   })

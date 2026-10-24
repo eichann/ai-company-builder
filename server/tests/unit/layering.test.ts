@@ -5,7 +5,7 @@
  *                                                       ↑
  *                          adapters (SQLite, git, clock) ┘   wired in src/composition.ts
  *
- * - ports/ import nothing but each other.
+ * - ports/ import nothing but each other and shared/core (types).
  * - services/ import ports, other services, shared/core and the pure lib
  *   helpers listed below — never a database, Hono, git, the file system or
  *   an adapter.
@@ -43,10 +43,10 @@ function target(file: string, spec: string): string {
 const PURE_LIB = new Set(['lib/client-version', 'lib/write-loss', 'lib/overview'])
 
 describe('server layering', () => {
-  it('ports import only other ports', () => {
+  it('ports import only other ports and shared/core types', () => {
     for (const file of tsFiles(join(SRC, 'ports'))) {
       for (const spec of importsOf(file)) {
-        expect(target(file, spec), `${relative(SRC, file)}: ${spec}`).toMatch(/^ports\//)
+        expect(target(file, spec), `${relative(SRC, file)}: ${spec}`).toMatch(/^ports\/|^\.\.\/shared\/core\//)
       }
     }
   })
@@ -74,7 +74,7 @@ describe('server layering', () => {
   })
 
   // Grows with each route moved onto services.
-  const ROUTES_WITHOUT_SQL = ['companies.ts', 'departments.ts', 'invitations.ts']
+  const ROUTES_WITHOUT_SQL = ['companies.ts', 'departments.ts', 'git.ts', 'invitations.ts', 'permissions.ts']
 
   for (const name of ROUTES_WITHOUT_SQL) {
     it(`routes/${name} runs no SQL and does not touch the database connection`, () => {

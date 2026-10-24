@@ -26,6 +26,7 @@
  * never throws: it must not break or delay the push it observes.
  */
 import { db, generateId, now } from '../db'
+import type { PushRejectionQuery, PushRejectionRow } from '../ports/push-rejections'
 
 export const MAX_PATHS_PER_REJECTION = 50
 export const MAX_PATH_LENGTH = 512
@@ -130,23 +131,16 @@ export function observeRejectedPush(companyId: string, userId: string, body: Buf
   })
 }
 
-export interface PushRejectionRow {
-  id: string
-  userId: string
-  marker: string
-  paths: string[]
-  createdAt: string
-}
+export type { PushRejectionRow, PushRejectionQuery }
 
 export function listRecentPushRejections(companyId: string, limit = 20): PushRejectionRow[] {
   return queryPushRejections(companyId, { limit }).rows
 }
 
-export interface PushRejectionQuery {
-  userId?: string
-  marker?: string
-  limit?: number
-  offset?: number
+/** Every marker the company has rejections for, sorted (the admin panel's filter). */
+export function listRejectionMarkers(companyId: string): string[] {
+  return (db.prepare(`SELECT DISTINCT marker FROM push_rejections WHERE company_id = ? ORDER BY marker`)
+    .all(companyId) as Array<{ marker: string }>).map(r => r.marker)
 }
 
 /** Newest first, optionally filtered by member and/or marker; `total` counts every match. */

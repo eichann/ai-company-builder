@@ -93,5 +93,14 @@ export function sqliteDepartmentRepository(conn: Database.Database): DepartmentR
     delete(departmentId) {
       conn.prepare('DELETE FROM departments WHERE id = ?').run(departmentId)
     },
+
+    count(companyId) {
+      return (conn.prepare(`SELECT COUNT(*) AS n FROM departments WHERE company_id = ?`)
+        .get(companyId) as { n: number }).n
+    },
+
+    folders(companyId) {
+      return conn.prepare(`SELECT id, folder FROM departments WHERE company_id = ?`).all(companyId) as Array<{ id: string; folder: string }>
+    },
   }
 }
