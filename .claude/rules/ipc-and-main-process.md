@@ -15,6 +15,7 @@ paths:
   - "client/tests/ipc-*.test.ts"
   - "client/tests/ipc-harness/**"
   - "client/eslint.config.mjs"
+  - "client/tests/architecture-boundaries.test.ts"
 ---
 
 # Main process and IPC (client)
@@ -49,7 +50,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
 - Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`: the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
-  `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`.
+  `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
+  `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the
+  agent boundaries (CLAUDE.md "App modules point one way too").
 - Keep `main.ts` importable without side effects beyond registering handlers (startup stays in
   `app.whenReady`), because the IPC harness loads it under plain Node.
 
