@@ -1,6 +1,7 @@
 import { generateText } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import type { AuthMode } from '../shared/agent'
+import { AGENTS } from '../shared/agents/registry'
 import { generateCodexText, type CodexTextRequest } from './agents/codex-text'
 import { runClaudeOneShot } from './claude-oneshot'
 
@@ -19,7 +20,7 @@ export type CommitMessageRepoKind = 'company' | 'scope'
 export interface StagedChanges { nameStatus: string; stat: string }
 
 export const COMMIT_MESSAGE_TIMEOUT_MS = 30_000
-export const COMMIT_MESSAGE_API_MODEL = 'claude-haiku-5-5'
+export const COMMIT_MESSAGE_API_MODEL = AGENTS['api-key'].tasks.commitMessage!
 const MAX_NAME_STATUS_CHARS = 16_000
 const MAX_STAT_CHARS = 8_000
 const MAX_SUBJECT_CHARS = 72
@@ -128,7 +129,7 @@ const CLI_MESSAGES = {
 
 export const defaultCommitMessageAdapters: CommitMessageAdapters = {
   claude: ({ cli, cwd, env, system, input, signal }) =>
-    runClaudeOneShot({ cli, cwd, systemPrompt: system, input, signal, env, timeoutMs: COMMIT_MESSAGE_TIMEOUT_MS, messages: CLI_MESSAGES }),
+    runClaudeOneShot({ cli, cwd, model: AGENTS['claude-code'].tasks.commitMessage!, systemPrompt: system, input, signal, env, timeoutMs: COMMIT_MESSAGE_TIMEOUT_MS, messages: CLI_MESSAGES }),
   codex: request => generateCodexText(request),
   api: async ({ apiKey, system, input, signal }) => {
     const result = await generateText({

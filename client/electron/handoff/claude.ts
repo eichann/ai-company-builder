@@ -2,6 +2,9 @@ import { query, createSdkMcpServer, tool, type SDKUserMessage } from '@anthropic
 import { z } from 'zod'
 import { spawnAgentProcess } from '../agents/process'
 import { HANDOFF_SYSTEM, HANDOFF_TOOL, HANDOFF_TOOL_DESCRIPTION, HANDOFF_TIMEOUT_MS, handoffInputText, saveHandoffArguments, type HandoffRequest, type HandoffMetrics } from './contract'
+import { AGENTS } from '../../shared/agents/registry'
+
+const HANDOFF_MODEL = AGENTS['claude-code'].tasks.handoff!
 
 export async function writeClaudeHandoff(request: HandoffRequest & { cli: string }): Promise<HandoffMetrics> {
   const text = handoffInputText(request.input)
@@ -11,7 +14,7 @@ export async function writeClaudeHandoff(request: HandoffRequest & { cli: string
   const cancel = () => abortController.abort()
   request.signal.addEventListener('abort', cancel, { once: true })
   const timer = setTimeout(cancel, HANDOFF_TIMEOUT_MS)
-  const metrics: HandoffMetrics = { provider: 'claude-code', model: request.modelId || 'haiku', setupMs: 0, saveMs: 0, totalMs: 0, toolCalls: 0 }
+  const metrics: HandoffMetrics = { provider: 'claude-code', model: request.modelId || HANDOFF_MODEL, setupMs: 0, saveMs: 0, totalMs: 0, toolCalls: 0 }
   const server = createSdkMcpServer({ name: 'handoff', version: '1.0.0', tools: [
     tool(HANDOFF_TOOL, HANDOFF_TOOL_DESCRIPTION, { markdown: z.string() }, async args => {
       abortController.signal.throwIfAborted()
@@ -29,7 +32,7 @@ export async function writeClaudeHandoff(request: HandoffRequest & { cli: string
   }
   const response = query({ prompt: prompt(), options: {
     pathToClaudeCodeExecutable: request.cli, cwd: request.cwd, env, abortController,
-    model: request.modelId || 'haiku', systemPrompt: HANDOFF_SYSTEM, tools: [],
+    model: request.modelId || HANDOFF_MODEL, systemPrompt: HANDOFF_SYSTEM, tools: [],
     allowedTools: ['mcp__handoff__save_handoff'], mcpServers: { handoff: server }, strictMcpConfig: true,
     settingSources: [], persistSession: false, maxTurns: 2, thinking: { type: 'disabled' },
     extraArgs: { 'safe-mode': null, 'disable-slash-commands': null },

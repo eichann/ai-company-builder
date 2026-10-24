@@ -1,4 +1,7 @@
-export type AuthMode = 'claude-code' | 'codex' | 'api-key'
+import type { AgentId } from './agents/registry'
+
+/** The member's sign-in choice = an agent registry id (shared/agents/registry.ts). */
+export type AuthMode = AgentId
 export interface AgentSession {
   providerId: AuthMode
   id: string

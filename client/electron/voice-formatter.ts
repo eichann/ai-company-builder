@@ -1,6 +1,7 @@
 import { generateText } from 'ai'
 import { createAnthropic } from '@ai-sdk/anthropic'
 import type { AuthMode } from '../shared/agent'
+import { AGENTS } from '../shared/agents/registry'
 import { generateCodexText } from './agents/codex-text'
 import { polishVoice, VOICE_SYSTEM_PROMPT } from './voice-polisher'
 
@@ -19,7 +20,7 @@ const defaultAdapters = {
   codex: generateCodexText,
   api: async (apiKey: string, text: string, signal: AbortSignal, system: string) => {
     const result = await generateText({
-      model: createAnthropic({ apiKey })('claude-haiku-4-5-20251001'),
+      model: createAnthropic({ apiKey })(AGENTS['api-key'].tasks.voice!),
       system, prompt: JSON.stringify({ transcript: text }),
       abortSignal: signal, maxRetries: 0, maxOutputTokens: 4096,
     })

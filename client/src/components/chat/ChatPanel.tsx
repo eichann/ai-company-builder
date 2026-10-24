@@ -40,7 +40,7 @@ import {
   ShieldWarning,
   ClockCountdown,
 } from '@phosphor-icons/react'
-import { useAppStore, MODEL_EFFORT_OPTIONS, MODEL_LABELS, type AIModel, type AIEffort } from '../../stores/appStore'
+import { useAppStore, MODEL_EFFORT_OPTIONS, CLAUDE_MODELS, type AIModel, type AIEffort } from '../../stores/appStore'
 import { isPerfCutEnabled, isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
 import { SlashCommandDropdown, type SlashCommandItem } from './SlashCommandDropdown'
 import { markChatInputActivity } from '../../lib/chatInputActivity'
@@ -2464,13 +2464,7 @@ const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, ac
               className="h-7 min-w-[5.5rem] shrink text-[11px] font-medium rounded-md border border-gray-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-gray-700 dark:text-zinc-300 px-1.5 pr-6 appearance-none cursor-pointer hover:border-accent/50 focus:outline-none focus:ring-1 focus:ring-accent/50 transition-colors disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:border-gray-200 dark:disabled:hover:border-zinc-700"
               style={{ backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath d='M3 5l3 3 3-3' fill='none' stroke='%239CA3AF' stroke-width='1.5'/%3E%3C/svg%3E")`, backgroundRepeat: 'no-repeat', backgroundPosition: 'right 4px center' }}
             >
-              <option value="fable-5">{MODEL_LABELS['fable-5']}</option>
-              <option value="opus-5-5">{MODEL_LABELS['opus-5-5']}</option>
-              <option value="opus-5">{MODEL_LABELS['opus-5']}</option>
-              <option value="opus-4-8">{MODEL_LABELS['opus-4-8']}</option>
-              <option value="opus-4-6">{MODEL_LABELS['opus-4-6']}</option>
-              <option value="sonnet">{MODEL_LABELS.sonnet}</option>
-              <option value="haiku">{MODEL_LABELS.haiku}</option>
+              {CLAUDE_MODELS.map(m => <option key={m.id} value={m.id}>{m.label}</option>)}
             </select>
           )}
 
