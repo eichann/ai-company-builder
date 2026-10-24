@@ -22,8 +22,11 @@ import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 //   ?agent=codex  Codex instead of Claude Code
 //   ?history=long  two restored tabs with a 240-message conversation (windowed
 //                  rendering, 「以前のメッセージを表示」, code highlighting)
+//   ?history=edit  one restored conversation whose first message references
+//                  files (editing and resending a message)
 //   ?turn=manual   the reply streams only what window.__acbChat sends (the
 //                  Playwright UI tests drive it: tests/ui/chat-panel.spec.ts)
+//   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -31,6 +34,8 @@ const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
 try { localStorage.clear() } catch { /* preview only */ }
 const longHistory = params.get('history') === 'long'
+const editHistory = params.get('history') === 'edit'
+const signedOut = params.get('auth') === 'none'
 
 const CODE_SAMPLES: Array<[string, string]> = [
   ['ts', 'interface Quote { id: string; total: number }\nexport const sum = (qs: Quote[]) => qs.reduce((n, q) => n + q.total, 0)'],
@@ -55,6 +60,18 @@ function longSession() {
       content: `## 回答 ${i + 1}\n\n${lang} の例です。\n\n- 要点一\n- 要点二\n\n\`\`\`${lang}\n${code}\n\`\`\`\n\n| 項目 | 金額 |\n|---|---|\n| 保守 | 12,000円 |\n\n以上です。` })
   }
   return { id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messages, createdAt: new Date(now - 300 * 60_000).toISOString(), updatedAt: new Date(now).toISOString(), revision: 1 }
+}
+function editSession() {
+  const at = (n: number) => new Date(now - n * 60_000).toISOString()
+  return { id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', createdAt: at(10), updatedAt: at(6), revision: 1, messages: [
+    { id: 'eu1', role: 'user', content: '見積書を作って', timestamp: at(10), referenceFiles: ['営業部/価格表/2026-10改定.pdf'] },
+    { id: 'ea1', role: 'assistant', content: '見積書のたたき台を作りました。', timestamp: at(9) },
+    { id: 'eu2', role: 'user', content: '単価を見直して', timestamp: at(8) },
+    { id: 'ea2', role: 'assistant', content: '単価を10月版にしました。', timestamp: at(7) },
+  ] }
+}
+if (editHistory) {
+  try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '見積書の相談', sessionId: 'edit-history' }], activeIndex: 0 })) } catch { /* preview only */ }
 }
 if (longHistory) {
   try { localStorage.setItem('chatTabs:preview-company', JSON.stringify({ tabs: [{ title: '長い相談（240件）', sessionId: 'long-history' }, { title: '別の相談', sessionId: null }], activeIndex: 0 })) } catch { /* preview only */ }
@@ -86,13 +103,17 @@ const interactions = emitter<AgentInteractionRequest>()
 const interactionsClosed = emitter<AgentInteractionRequest>()
 installElectronAPI({
   getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
-  getClaudeCodeStatus: async () => ({ available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now }),
+  getClaudeCodeStatus: async () => signedOut
+    ? ({ available: false, authenticated: false, cliPath: null, version: null, error: 'Claude Code にログインしていません', checkedAt: now }) as never
+    : ({ available: true, authenticated: true, cliPath: '/usr/local/bin/claude', version: '2.1.304', error: null, checkedAt: now }),
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
-  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
+  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
+    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
-  getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession : null,
+  getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession
+    : editHistory && id === 'edit-history' ? editSession() as ChatSession : null,
   getAgentInteractions: async () => [],
   onAgentInteraction: interactions.subscribe,
   onAgentInteractionClosed: interactionsClosed.subscribe,
@@ -100,7 +121,11 @@ installElectronAPI({
   getPermissionMode: async () => 'auto',
   getHandoff: async () => ({ status: 'waiting', message: '', canUpdate: false, pendingTurns: 0 }),
   saveChatSession: async () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
-  flushChatSession: () => ({ status: 'saved', revision: 1 }) as ChatSaveReceipt,
+  // The synchronous save before a send, recorded in order with the requests.
+  flushChatSession: (_company: string, session: ChatSession) => {
+    if (manual) control.requests.push({ path: 'flushChatSession', body: JSON.parse(JSON.stringify(session)) })
+    return { status: 'saved', revision: 1 } as ChatSaveReceipt
+  },
   voiceInput: {
     capabilities: async () => ({ available: false, reason: 'プレビューでは音声入力を使えません', retryable: false }),
     devices: async () => ({ ok: true, devices: [] }),

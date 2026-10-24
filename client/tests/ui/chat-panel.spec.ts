@@ -232,3 +232,45 @@ test.describe('a long restored conversation', () => {
     await typed(page).toBe('別の相談の下書き')
   })
 })
+
+test('not signed in: 「設定を開く」 on the setup screen opens the agent settings, and closing them returns to it', async ({ page }) => {
+  await openPreview(page, 'chat-header', { auth: 'none' })
+  const openSettings = page.getByRole('button', { name: '設定を開く' })
+  await expect(page.getByText('Claude Code にログインしていません')).toBeVisible()
+  const settings = page.getByRole('dialog', { name: '相談の設定' })
+  await expect(settings).toHaveCount(0)
+  await openSettings.click()
+  await expect(settings).toBeVisible()
+  await expect(openSettings).toBeHidden()
+  await settings.getByRole('button', { name: '✕' }).click()
+  await expect(settings).toHaveCount(0)
+  await expect(openSettings).toBeVisible()
+})
+
+test('editing a message resends it like a normal send: saved first without the later messages, its file references kept', async ({ page }) => {
+  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  const first = page.getByText('見積書を作って', { exact: true })
+  await expect(first).toBeVisible({ timeout: 15_000 })
+  await first.hover()
+  await page.getByTitle('編集', { exact: true }).first().click()
+  await page.locator('textarea').locator('visible=true').fill('見積書をPDFで作って')
+  await page.getByRole('button', { name: '送信', exact: true }).click()
+  await turnStarted(page)
+
+  type Saved = { messages: Array<{ role: string; content: string }> }
+  type Body = { referenceFiles?: string[]; messages: Array<{ role: string; parts: Array<{ text?: string }> }> }
+  const requests = await chat(page, c => c.requests.map(r => ({ path: r.path, body: r.body })))
+  const chatIndex = requests.findIndex(r => r.path === '/api/chat')
+  // The synchronous save right before the request already holds the edit and nothing after it.
+  const save = requests.slice(0, chatIndex).reverse().find(r => r.path === 'flushChatSession')
+  expect(save, 'saved synchronously before sending').toBeTruthy()
+  const saved = (save!.body as unknown as Saved).messages
+  expect(saved.filter(m => m.role === 'user').map(m => m.content)).toEqual(['見積書をPDFで作って'])
+  expect(saved.some(m => m.content.includes('単価'))).toBe(false)
+  // The request: the edited text in place of the old message, with its file references.
+  const body = requests[chatIndex].body as unknown as Body
+  expect(body.referenceFiles).toEqual(['営業部/価格表/2026-10改定.pdf'])
+  expect(body.messages.filter(m => m.role === 'user').map(m => m.parts.map(p => p.text ?? '').join(''))).toEqual(['見積書をPDFで作って'])
+  await expect(page.getByText('単価を見直して')).toHaveCount(0)
+  await expect(page.locator('[title="営業部/価格表/2026-10改定.pdf"]').locator('visible=true')).toBeVisible()
+})

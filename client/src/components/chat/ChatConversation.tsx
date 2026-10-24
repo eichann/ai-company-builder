@@ -3,7 +3,7 @@ import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import { agentCan } from '../../../shared/agents/registry'
 import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
-import { useEffect, useCallback, memo } from 'react'
+import { useEffect, useCallback, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -176,8 +176,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentP
 
   // Send handler. While the AI works the message goes into the running turn
   // (steering) or waits for the turn to end; it no longer stops the AI.
-  const handleSend = useCallback(async (text: string, files?: File[], filePaths?: string[]) => {
+  // `editedMessageId`: an edited message is resent — the conversation is cut
+  // just before it and the new text sent in its place, through the same steps
+  // (synchronous save first, attachments staged) as any other message.
+  const sendTurn = useCallback(async (text: string, files?: File[], filePaths?: string[], editedMessageId?: string) => {
     if (!text.trim() && (!files || files.length === 0)) return
+    const editing = editedMessageId !== undefined
+    // An edit replaces part of the conversation: only while nothing runs.
+    if (editing && (status === 'streaming' || status === 'submitted')) return
+    let base = messagesRef.current
+    if (editing) {
+      const index = base.findIndex(m => m.id === editedMessageId)
+      if (index === -1) return
+      base = base.slice(0, index)
+    }
     perfMark('chat.send.start')
 
     // Ensure session ID exists before first message (don't wait for auto-save debounce)
@@ -203,13 +215,17 @@ export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentP
       parts: [{ type: 'text', text: text || '画像を確認してください' }],
     }
     timestampsRef.current.set(message.id, new Date())
-    if (!await saveRef.current([...messagesRef.current, message], true, true)) {
-      chatInputApiRef.current?.setValue(text)
+    // An edit leaves the composer (and its saved draft) alone; a failed save
+    // then keeps the conversation as it was and nothing is sent.
+    if (!await saveRef.current([...base, message], true, !editing)) {
+      if (!editing) chatInputApiRef.current?.setValue(text)
       return
     }
+    if (editing) setMessages(base)
     try { await sendMessage(message) }
     catch (e) { setHistoryError(e instanceof Error ? e.message : '送信できませんでした。相談は保存されています。') }
-  }, [status, sendMessage, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef])
+  }, [status, sendMessage, setMessages, currentSessionId, stageImages, stageFilePaths, appSessionIdRef, chatInputApiRef, messagesRef, saveRef, setCurrentSessionId, setHistoryError, timestampsRef, resetSuggestion, sendWhileRunning, lastTurnAbortedRef])
+  const handleSend = useCallback((text: string, files?: File[], filePaths?: string[]) => sendTurn(text, files, filePaths), [sendTurn])
 
   // The turn ended: waiting sends go out together (or back into the input).
   useQueuedSendFlush(steering, status, handleSend, setMessages, chatInputApiRef)
@@ -229,16 +245,17 @@ export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentP
     }
   }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
 
-  // Edit message handler: trim messages after edit point, resend
-  // Reads messages through the ref so the callback keeps its identity while
-  // streaming; depending on `messages` re-rendered every MessageItem per chunk.
+  // Edit message handler: resend from the edited message onward (sendTurn),
+  // keeping the edited message's file references.
+  // Reads through refs so the callback keeps its identity while streaming;
+  // depending on `messages` re-rendered every MessageItem per chunk.
+  const sendTurnRef = useRef(sendTurn)
+  sendTurnRef.current = sendTurn
+  const referenceFilesRef = useRef(messageReferenceFiles)
+  referenceFilesRef.current = messageReferenceFiles
   const handleEditMessage = useCallback((messageId: string, newText: string) => {
-    const current = messagesRef.current
-    const msgIndex = current.findIndex(m => m.id === messageId)
-    if (msgIndex === -1) return
-    setMessages(current.slice(0, msgIndex))
-    sendMessage({ text: newText })
-  }, [setMessages, sendMessage, messagesRef])
+    void sendTurnRef.current(newText, undefined, referenceFilesRef.current.get(messageId), messageId)
+  }, [])
 
   // ============================================================================
   // Render

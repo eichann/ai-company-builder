@@ -14,10 +14,10 @@ export interface ChatSession {
     images?: string[]
     referenceFiles?: string[]
     consultationReferences?: Array<{ id: string; title: string }>
-    /** Choice prompts in this reply, how the member answered, and where (`at`: offset in `content`). */
-    choicePrompts?: Array<ChoicePromptRecord & { at?: number }>
-    /** Extra instructions the member sent while this reply was being written (`at`: offset in `content`). */
-    steerInstructions?: Array<SteerRecord & { at?: number }>
+    /** Choice prompts in this reply, how the member answered, and where (`at`: offset in `content`; `seq`: part index, orders records at the same `at`). */
+    choicePrompts?: Array<ChoicePromptRecord & { at?: number; seq?: number }>
+    /** Extra instructions the member sent while this reply was being written (`at`, `seq` as above). */
+    steerInstructions?: Array<SteerRecord & { at?: number; seq?: number }>
   }>
   createdAt: string
   updatedAt: string

@@ -63,8 +63,30 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
 
   if (isChecking || !chatServer) return <ChatAuthChecking />
 
+  // The agent settings, over the conversations or over the setup screen.
+  const settingsOverlay = showSettings && (
+    <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
+      <AuthSettings
+        authMode={authMode}
+        claudeCodeAvailable={auth.claudeCodeAvailable}
+        claudeCodeError={auth.claudeCodeError}
+        onClose={() => {
+          setShowSettings(false)
+          auth.recheck()
+        }}
+      />
+    </div>
+  )
+
   if (!isReady) {
-    return <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={() => setShowSettings(true)} />
+    return (
+      <div className="h-full relative">
+        <div className={showSettings ? 'h-full invisible' : 'h-full'}>
+          <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />
+        </div>
+        {settingsOverlay}
+      </div>
+    )
   }
 
   return (
@@ -118,20 +140,7 @@ function CompanyChatPanel({ departmentPath, activeDepartment, slashCommands }: C
         ))}
       </div>
 
-      {/* Settings overlay */}
-      {showSettings && (
-        <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
-          <AuthSettings
-            authMode={authMode}
-            claudeCodeAvailable={auth.claudeCodeAvailable}
-            claudeCodeError={auth.claudeCodeError}
-            onClose={() => {
-              setShowSettings(false)
-              auth.recheck()
-            }}
-          />
-        </div>
-      )}
+      {settingsOverlay}
     </div>
     </OpenConsultationContext.Provider>
   )
