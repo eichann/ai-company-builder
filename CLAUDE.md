@@ -1172,8 +1172,9 @@ review: `client/tests/rule-parity-write-access.test.ts` (seeded generated
 companies: the chat guard's decision from `/me/write-access` + `/me/scopes` +
 `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
 gate; `RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
-(path keys, department folder names, skill names, AI instruction files — every
-copy on one corpus; regexes private to a component are read from its source)
+(path keys, department folder names, skill names, AI instruction files on one
+corpus — the rules themselves live in `shared/core`; the renderer dialogs must
+import `shared/core/names.ts`, checked from their source)
 and `server/tests/integration/admin-contract.test.ts` (every endpoint the admin
 calls, checked against `admin/src/lib/api.ts` with the TypeScript compiler,
 `tests/helpers/type-shape.ts`). Known differences are listed in each test
