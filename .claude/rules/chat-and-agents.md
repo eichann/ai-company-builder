@@ -220,11 +220,15 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
 
 ## AI action log (monitoring M1) and turn abort handles (M2)
 
-Contract `client/shared/agent-events.ts` (pure); tests `client/tests/agent-events.test.ts`,
-`client/tests/agent-tool-events.test.ts`. Sending to the server is not built yet.
+Tracker and target rules `client/shared/agent-events.ts` (pure); the event shape itself is the
+wire contract in `shared/types/agent-events.ts`, re-exported (the server's side:
+`agent-events.md`); tests `client/tests/agent-events.test.ts` (every tracker event passes the
+server's `parseAgentToolEvent` unchanged), `client/tests/agent-tool-events.test.ts`. Sending to
+the server is not built yet.
 
 - **One event per tool call** (`AgentToolEvent`, `version: 1`): id, callId (tool_use_id / Codex
-  item id), at, durationMs, conversationId (appSessionId), turnId, companyId, agent, model,
+  item id), at, durationMs, conversationId (appSessionId), turnId, companyId, department (the
+  chat's active department folder), agent, model,
   subagentType, tool, category (read / write / command / web / mcp-external / app-tool /
   subagent / question / other), target, decision (auto-allowed / member-allowed / member-denied /
   guard-denied / policy-default / policy-denied / stopped), guardReason (a code such as
@@ -242,7 +246,7 @@ Contract `client/shared/agent-events.ts` (pure); tests `client/tests/agent-event
   serialized events. Categories need no agent id (tool names do not collide); app MCP servers
   (`APP_MCP_SERVERS`) are `app-tool`, `ask_user` / `AskUserQuestion` are `question`.
 - **Where it is reported.** The host's `onToolEvent` (`AgentHostConfig`, plus `toolEventPaths`
-  for home / userData); the chat server only adds `toolEventContext` (company, root, turn id) to
+  for home / userData); the chat server only adds `toolEventContext` (company, root, turn id, department) to
   the request. Each turn builds a tracker with `agents/tool-events.ts` `turnToolEvents`; every
   emission is wrapped (a failing recorder never reaches the agent). Translation per agent:
   - Claude (`agents/claude-tool-events.ts`): the PreToolUse hook and canUseTool return a

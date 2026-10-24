@@ -73,6 +73,10 @@ GET  /api/config                                  setup state (no auth)
                               GET /push-rejections                            permission-rules.ts
                               /private-folders…, /me/private-folders, /me/scopes,
                               POST /paths/check                               private-folders.ts
+                              POST|GET /agent-events, /agent-events/summary,
+                              GET|PUT /agent-events/settings (+ /retention-preview),
+                              GET /agent-events/viewers                       agent-events.ts
+                                                                (AI action log: agent-events.md)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts

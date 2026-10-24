@@ -20,73 +20,19 @@
  */
 import type { AuthMode } from './agent'
 import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './choice-prompt'
+import {
+  AGENT_EVENT_VERSION,
+  type AgentToolEvent, type FileTarget, type GuardReason, type SensitiveLocation, type ToolCategory,
+  type ToolDecision, type ToolOutcome, type ToolTarget,
+} from '../../shared/types/agent-events'
 
-export const AGENT_EVENT_VERSION = 1
-
-export type ToolCategory = 'read' | 'write' | 'command' | 'web' | 'mcp-external' | 'app-tool' | 'subagent' | 'question' | 'other'
-
-/**
- * Who let the call run, or refused it:
- * - auto-allowed: the app allowed it without asking (read-only tools in
- *   canUseTool, the app's own tools, subagent launches);
- * - member-allowed / member-denied: the member answered an approval;
- * - guard-denied: one of the app's guards refused (see `guardReason`);
- * - policy-default: the app did not decide; the agent's own permission mode
- *   or sandbox did (and let it run);
- * - policy-denied: the agent's permission mode refused (Claude's
- *   PermissionDenied hook, when the CLI sends it);
- * - stopped: refused because the AI is stopped (M2, not used yet).
- */
-export type ToolDecision = 'auto-allowed' | 'member-allowed' | 'member-denied' | 'guard-denied' | 'policy-default' | 'policy-denied' | 'stopped'
-
-/** Why a guard refused or asked: a short code, never the message text. */
-export type GuardReason =
-  | 'read-only-folder' | 'not-downloaded' | 'reserved-path' | 'instruction-file' | 'git-clone' | 'git-init'
-  | 'private-read' | 'dangerous-command' | 'needs-approval' | 'outside-folder'
-
-export type ToolOutcome = 'ok' | 'error' | 'unfinished'
-
-/** Secret places outside (or inside) the company folder: the kind is kept, the path never. */
-export type SensitiveLocation = 'ssh' | 'env-file' | 'keychain' | 'credentials' | 'app-data'
-
-export type FileTarget =
-  | { kind: 'file'; path: string; sensitive?: SensitiveLocation }
-  | { kind: 'outside'; sensitive?: SensitiveLocation }
-
-export type ToolTarget =
-  | FileTarget
-  | { kind: 'files'; files: FileTarget[]; more?: number }
-  /** `programs`: program name, plus the subcommand for a few well-known tools (`git push`). */
-  | { kind: 'command'; programs: string[]; more?: number; redirect?: true }
-  | { kind: 'web'; host?: string }
-  | { kind: 'mcp'; server: string; tool?: string }
-  | { kind: 'subagent'; subagentType?: string }
-  | { kind: 'none' }
-
-export interface AgentToolEvent {
-  version: typeof AGENT_EVENT_VERSION
-  /** Unique per event (the server drops duplicates by it). */
-  id: string
-  /** The agent's own id of the call (tool_use_id, Codex item id), or one made up. */
-  callId: string
-  /** When the app first saw the call (ISO). */
-  at: string
-  durationMs?: number
-  /** The app's conversation (appSessionId). */
-  conversationId?: string
-  turnId?: string
-  companyId?: string
-  agent: AuthMode
-  model?: string
-  /** The subagent the call ran in (Claude's hook `agent_type`). */
-  subagentType?: string
-  tool: string
-  category: ToolCategory
-  target: ToolTarget
-  decision: ToolDecision
-  guardReason?: GuardReason
-  outcome?: ToolOutcome
-}
+// The wire contract — the event shape and the server's own validation
+// (`parseAgentToolEvent`) — lives in the repository's
+// shared/types/agent-events.ts. Its `agent` is the server's list of agents:
+// the tracker below assigns an AuthMode to it, so an agent id the server does
+// not know fails to compile here.
+export { AGENT_EVENT_VERSION }
+export type { AgentToolEvent, FileTarget, GuardReason, SensitiveLocation, ToolCategory, ToolDecision, ToolOutcome, ToolTarget }
 
 /**
  * Transient data part the chat server sends when the main process stopped a
@@ -430,6 +376,8 @@ export interface ToolEventContext extends TargetContext {
   conversationId?: string
   turnId?: string
   companyId?: string
+  /** The conversation's working department folder (company-relative). */
+  department?: string
   model?: string
 }
 
@@ -459,6 +407,9 @@ export function createToolEventTracker(
   const open = new Map<string, OpenCall>()
   const done = new Set<string>()
   let warned = false
+  // A department folder name as the event carries it (company-relative, NFC), or nothing.
+  const departmentPath = context.department?.normalize('NFC').replace(/\\/g, '/').split('/').filter(s => s && s !== '.').join('/')
+  const department = departmentPath && !departmentPath.split('/').includes('..') ? departmentPath : undefined
 
   const safe = <T>(fallback: T, run: () => T): T => {
     try { return run() } catch (error) {
@@ -484,6 +435,7 @@ export function createToolEventTracker(
       ...(context.conversationId ? { conversationId: context.conversationId } : {}),
       ...(context.turnId ? { turnId: context.turnId } : {}),
       ...(context.companyId ? { companyId: context.companyId } : {}),
+      ...(department ? { department } : {}),
       agent: context.agent,
       ...(context.model ? { model: context.model } : {}),
       ...(c.subagentType ? { subagentType: c.subagentType } : {}),

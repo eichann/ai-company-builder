@@ -74,6 +74,8 @@ export interface ToolEventContextInput {
   companyId?: string
   companyRoot?: string
   turnId?: string
+  /** The conversation's working department folder (the chat's activeDepartment). */
+  department?: string
 }
 
 export interface AgentHostConfig {

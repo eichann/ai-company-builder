@@ -6,6 +6,7 @@ import {
 } from '../shared/agent-events'
 import { COMPANY_FILES_SERVER } from '../electron/company-files/tools'
 import { CODEX_CHOICE_SERVER } from '../shared/choice-prompt'
+import { parseAgentToolEvent } from '../../shared/types/agent-events'
 import { createAgentEventRecorder, formatAgentEvent } from '../electron/services/agent-events'
 
 const ROOT = '/Users/m/会社'
@@ -125,6 +126,38 @@ test('no content, argument, URL path/query or message ever reaches a serialized 
   assert.equal(events.length, calls.length + 1)
   const serialized = JSON.stringify(events) + events.map(formatAgentEvent).join('\n')
   for (const secret of secrets) assert.ok(!serialized.includes(secret), `leaked: ${secret}`)
+})
+
+test('the server accepts every event the tracker makes, unchanged (shared/types parseAgentToolEvent)', () => {
+  const events: AgentToolEvent[] = []
+  const tracker = createToolEventTracker({
+    agent: 'claude-code', companyRoot: ROOT, cwd: `${ROOT}/営業部`, home: '/Users/m', conversationId: 'conv-1', turnId: 'turn-1',
+    companyId: 'co', model: 'claude-opus-5-5[1m]', department: '営業部', appDataDirs: ctx.appDataDirs,
+  }, e => events.push(e))
+  const calls: Array<[string, unknown]> = [
+    ['Read', { file_path: `${ROOT}/営業部/提案.md` }],
+    ['Glob', { pattern: '*.md', path: ROOT }],
+    ['Edit', { file_path: '/Users/m/.ssh/config' }],
+    ['MultiEdit', { file_path: `${ROOT}/a.md` }],
+    ['Bash', { command: 'sudo rm -rf x && git push origin main | tee log && npx @scope/pkg@1 && ./weird$name' }],
+    ['Bash', { command: 'a; b; c; d; e; f; g' }],
+    ['WebFetch', { url: 'https://Example.COM/a?b' }],
+    ['WebSearch', { query: 'x' }],
+    ['mcp__github__create_issue', {}],
+    ['mcp__acb_company_files__company_read_file', { path: 'x' }],
+    ['Agent', { subagent_type: 'general-purpose' }],
+    ['AskUserQuestion', { questions: [] }],
+    ['TodoWrite', {}],
+  ]
+  calls.forEach(([tool, input], i) => {
+    const id = tracker.decide(`toolu_${i}`, { tool, input, subagentType: i === 0 ? 'Explore' : undefined }, i % 3 ? 'auto-allowed' : 'guard-denied', i % 3 ? undefined : 'read-only-folder')
+    tracker.finish(id, i % 2 ? 'ok' : 'error', undefined, 12)
+  })
+  tracker.decide('open', { tool: 'Bash', input: { command: 'sleep 1' } }, 'member-allowed')
+  tracker.close()
+  assert.equal(events.length, calls.length + 1)
+  assert.equal(events[0].department, '営業部')
+  for (const event of events) assert.deepEqual(parseAgentToolEvent(JSON.parse(JSON.stringify(event))), event)
 })
 
 test('tracker: one event per call — refusals at once, allowed calls with their outcome, the rest unfinished at the end', () => {

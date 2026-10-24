@@ -208,7 +208,70 @@ export function initDatabase(conn: Database.Database = sqlite) {
       created_by TEXT
     );
 
+    -- The AI action log (monitoring M1, services/agent-events.ts): one row per
+    -- tool call an agent made in a member's app — metadata only, never content
+    -- (shared/types/agent-events.ts). id comes from the app (re-sends are
+    -- ignored), user_id from the session. at = the app's time, or received_at
+    -- when that was implausible (at_adjusted = 1; client_at keeps what it said).
+    -- target: the target as JSON; target_text: its searchable parts, one per
+    -- line; target_roots / department_key: first path segments (NFC, A–Z
+    -- folded) between newlines, for a manager's department scope.
+    CREATE TABLE IF NOT EXISTS agent_events (
+      seq INTEGER PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      received_at TEXT NOT NULL,
+      at TEXT NOT NULL,
+      client_at TEXT NOT NULL,
+      at_adjusted INTEGER NOT NULL DEFAULT 0,
+      version INTEGER NOT NULL,
+      call_id TEXT NOT NULL,
+      duration_ms INTEGER,
+      conversation_id TEXT,
+      turn_id TEXT,
+      department TEXT,
+      department_key TEXT,
+      agent TEXT NOT NULL,
+      model TEXT,
+      subagent_type TEXT,
+      tool TEXT NOT NULL,
+      category TEXT NOT NULL,
+      target_kind TEXT NOT NULL,
+      target TEXT NOT NULL,
+      target_text TEXT NOT NULL DEFAULT '',
+      target_roots TEXT NOT NULL DEFAULT '',
+      decision TEXT NOT NULL,
+      guard_reason TEXT,
+      outcome TEXT,
+      client_version TEXT,
+      UNIQUE (company_id, id)
+    );
+
+    -- The log's settings per company (defaults apply while no row exists).
+    CREATE TABLE IF NOT EXISTS agent_event_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      retention_days INTEGER NOT NULL DEFAULT 180,
+      viewers TEXT NOT NULL DEFAULT 'admins' CHECK (viewers IN ('admins', 'admins-and-managers')),
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
+    -- Every change of those settings: who, when, before → after (JSON).
+    CREATE TABLE IF NOT EXISTS agent_event_settings_history (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      before TEXT NOT NULL,
+      after TEXT NOT NULL
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
+    CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
+    CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);
+    CREATE INDEX IF NOT EXISTS idx_agent_event_settings_history_company ON agent_event_settings_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);

@@ -32,7 +32,8 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md`: names, who may change them |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 
-`shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `index.ts`).
+`shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
+`index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)
