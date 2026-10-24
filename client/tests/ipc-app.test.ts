@@ -212,6 +212,21 @@ test('skills: the scan (company-wide vs department, nested groups, private, nurt
   assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(outside, 'SKILL.md'), true), denied)
   assert.deepEqual(await h.invoke('skills:toggleNurturing', path.join(root, '.gitignore'), true), { success: false, error: 'Not a SKILL.md' })
   assert.deepEqual(await h.invoke('skills:list', outside, '', 'd'), { ...denied, skills: [] })
+  // The department folder stays under this company: no absolute path, no
+  // `..` (not even into another registered company), no link out.
+  writeFiles(outside, { '.claude/skills/leak/SKILL.md': skill('漏れ') })
+  const sibling = h.companyDir('skills-sibling')
+  writeFiles(sibling, { 'd/.claude/skills/other/SKILL.md': skill('他社') })
+  await h.invoke('fs:registerAllowedRoot', sibling)
+  const invalidFolder = { success: false, error: 'Invalid department folder', skills: [] }
+  for (const folder of [outside, '../skills-outside', '..', '営業/../../skills-outside', '..\\skills-outside', '../skills-sibling/d', '営業\0']) {
+    assert.deepEqual(await h.invoke('skills:list', root, folder, 'd'), invalidFolder, JSON.stringify(folder))
+  }
+  fs.symlinkSync(outside, path.join(root, 'linked-dept'))
+  assert.deepEqual(await h.invoke('skills:list', root, 'linked-dept', 'd'), { success: false, error: LINK_ESCAPE, skills: [] })
+  fs.unlinkSync(path.join(root, 'linked-dept'))
+  // A department folder that does not exist (yet) lists nothing, as before.
+  assert.deepEqual(await h.invoke('skills:list', root, '未作成', 'd'), { success: true, skills: [] })
   for (const channel of ['skills:publish', 'skills:makePrivate']) {
     assert.deepEqual(await h.invoke(channel, outside, 'a/.claude/skills/x/'), denied, channel)
     assert.deepEqual(await h.invoke(channel, root, '営業/.claude/skills/x/\n!.backups/'), { success: false, error: 'Invalid skill path' }, channel)
