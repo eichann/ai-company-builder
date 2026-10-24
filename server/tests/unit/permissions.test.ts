@@ -11,7 +11,7 @@ import {
   type PermissionRepository,
   type ScopeRule,
   type ScopeWithRules,
-} from '../../src/lib/permissions'
+} from '../../shared/core/permissions'
 
 const CO = 'co'
 

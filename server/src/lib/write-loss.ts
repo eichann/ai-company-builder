@@ -10,7 +10,7 @@ import {
   resolveAccess,
   type PermissionRepository,
   type ScopeWithRules,
-} from './permissions'
+} from '../../shared/core/permissions'
 
 export interface MemberRole {
   userId: string

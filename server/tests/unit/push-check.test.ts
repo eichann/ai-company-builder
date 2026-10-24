@@ -20,7 +20,7 @@ import {
 } from '../../src/lib/push-check/rules'
 import { everyoneWritesEverywhere, instructionFileAllowed, parsePushPolicy, reservedAncestorOf, writeGateFor, type PushPolicy } from '../../src/lib/push-check/policy'
 import { emptyFindings, renderReport } from '../../src/lib/push-check/report'
-import type { ScopeWithRules } from '../../src/lib/permissions'
+import type { ScopeWithRules } from '../../shared/core/permissions'
 
 const AWS = ['AKIA', 'ABCDEFGHIJKLMNOP'].join('')
 const PAT = ['ghp_', 'a'.repeat(36)].join('')

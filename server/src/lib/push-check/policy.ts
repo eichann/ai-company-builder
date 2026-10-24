@@ -32,8 +32,10 @@ import {
   type ScopeRule,
   type ScopeWithRules,
   type SubjectType,
-} from '../permissions'
-import { foldAsciiCase } from './rules'
+} from '../../../shared/core/permissions'
+import { foldAsciiCase, pathKey } from '../../../shared/core/paths'
+import { instructionFileInManagedFolder } from '../../../shared/core/instruction-files'
+import { reservedAncestorOf, reservedPrefixOf } from '../../../shared/core/reserved-paths'
 
 export const PUSH_POLICY_VERSION = 1
 
@@ -139,61 +141,26 @@ export function parsePushPolicy(text: string): PushPolicy {
 /**
  * May the pusher change the instruction file at `path` (as pushed, UTF-8;
  * relative to `scopePath` in a scope repository)? Only when it lies inside a
- * department folder they manage — any depth, NFC + A–Z folded. Root-level
- * ones never (owner/admin are decided before this is asked).
+ * department folder they manage — any depth, NFC + A–Z folded
+ * (shared/core/instruction-files.ts). Root-level ones never (owner/admin are
+ * decided before this is asked).
  */
 export function instructionFileAllowed(path: string, managedFolders: string[], scopePath?: string): boolean {
-  if (managedFolders.length === 0) return false
-  const key = reservedKey(scopePath !== undefined ? `${scopePath}/${path}` : path)
-  return managedFolders.some((f) => {
-    const folder = reservedKey(f)
-    return folder !== '' && key.startsWith(`${folder}/`)
-  })
+  return instructionFileInManagedFolder(scopePath !== undefined ? `${scopePath}/${path}` : path, managedFolders)
 }
 
-/**
- * When `path` (UTF-8, as pushed — a blob, symlink or gitlink, never a
- * folder: diff-tree -r lists no trees) is a strict ancestor of a reserved
- * private-folder path, the pusher's spelling of it; else null. A file or
- * symlink there would put the private folder's checkout on readers'
- * machines under — or through — something else.
- */
-export function reservedAncestorOf(path: string, reserved: string[]): string | null {
-  if (reserved.length === 0) return null
-  const key = reservedKey(path)
-  if (key === '') return null
-  return reserved.some(r => r.startsWith(`${key}/`)) ? path : null
-}
-
-/** NFC with A–Z folded: how reserved paths are compared (as the rest of the checker folds case). */
-export function reservedKey(path: string): string {
-  return foldAsciiCase(path.normalize('NFC').split('/').filter(s => s.length > 0).join('/'))
-}
+// The reserved-path comparisons live in shared/core/reserved-paths.ts (the
+// app's paths/check answers come from the same copy).
+export { reservedAncestorOf, reservedPrefixOf }
 
 /**
  * The reserved paths of a push to the COMPANY repository — every private
- * folder's path, as reservedKey()s. Nothing is reserved inside a scope
- * repository (private folders do not nest).
+ * folder's path, as pathKey()s (shared/core/paths.ts). Nothing is reserved
+ * inside a scope repository (private folders do not nest).
  */
 export function reservedPathsFor(policy: PushPolicy): string[] {
   if (policy.scopePath !== undefined) return []
-  return policy.scopes.filter(s => s.repoId !== null && s.path !== '').map(s => reservedKey(s.path))
-}
-
-/**
- * The reserved folder `path` (UTF-8, as pushed) is at or under — returned as
- * the pusher's own spelling of that prefix — or null.
- */
-export function reservedPrefixOf(path: string, reserved: string[]): string | null {
-  if (reserved.length === 0) return null
-  const segments = path.split('/')
-  const key = reservedKey(path).split('/')
-  for (const r of reserved) {
-    const rs = r.split('/')
-    if (rs.length > key.length) continue
-    if (rs.every((seg, i) => seg === key[i])) return segments.slice(0, rs.length).join('/')
-  }
-  return null
+  return policy.scopes.filter(s => s.repoId !== null && s.path !== '').map(s => pathKey(s.path))
 }
 
 /**

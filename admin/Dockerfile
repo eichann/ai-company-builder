@@ -36,6 +36,7 @@ RUN pnpm install --frozen-lockfile --filter @ai-company-builder/admin... \
 # dev: `next dev` with the source baked in (opt-in via --target dev)
 # ---------------------------------------------------------------------------
 FROM deps AS dev
+COPY shared ./shared
 COPY admin ./admin
 WORKDIR /app/admin
 EXPOSE 3100
@@ -46,6 +47,10 @@ CMD ["pnpm", "dev"]
 # ---------------------------------------------------------------------------
 FROM deps AS build
 ENV NEXT_TELEMETRY_DISABLED=1
+# The admin imports the shared rules (shared/core: folder names, path
+# comparisons) by relative path; they are compiled into the bundle, so only
+# the build needs them — the runtime image stays the standalone server.
+COPY shared ./shared
 COPY admin ./admin
 WORKDIR /app/admin
 RUN pnpm build

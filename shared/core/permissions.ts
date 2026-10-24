@@ -29,10 +29,12 @@
  * deliberately separate from data rights. A manager reads and writes exactly
  * what the rules give them.
  *
- * This module is pure: data comes in through PermissionRepository so it can be
- * unit-tested without SQLite or Hono (see lib/permission-store.ts for the
- * SQLite implementation).
+ * This module is pure (shared/core: no Node, database, Hono or git): data
+ * comes in through PermissionRepository (server/src/lib/permission-store.ts
+ * is the SQLite implementation). The API, the push checker and the desktop
+ * app evaluate access with this one copy.
  */
+import { compareScopePaths, isSameOrAncestorPath, normalizeRepoPath } from './paths'
 
 export type ScopeKind = 'company' | 'department' | 'folder'
 export type SubjectType = 'everyone' | 'role' | 'user'
@@ -53,7 +55,7 @@ export interface ScopeWithRules {
   departmentId: string | null
   /**
    * null = lives in the company's main repository. Set = a PRIVATE folder:
-   * its own scope repository (lib/private-folders.ts), served only to members
+   * its own scope repository (server/src/lib/private-folders.ts), served only to members
    * who may read this scope; the path is reserved in the main repository.
    */
   repoId: string | null
@@ -83,33 +85,15 @@ export interface AccessResult {
 export const FULL_ACCESS_ROLES: ReadonlySet<string> = new Set(['owner', 'admin'])
 
 /**
- * Normalise a repo-relative folder path: forward slashes, no leading/trailing
- * or repeated slashes, Unicode NFC (macOS hands out NFD file names, which would
- * otherwise never match a Japanese path stored from another platform).
- * Returns null for paths that escape the repository ('.' / '..' segments).
- * '' is the company root.
+ * Normalise a repo-relative folder path (paths.ts normalizeRepoPath): forward
+ * slashes, no leading/trailing or repeated slashes, Unicode NFC (macOS hands
+ * out NFD file names, which would otherwise never match a Japanese path
+ * stored from another platform). null for paths that escape the repository
+ * ('.' / '..' segments). '' is the company root.
  */
-export function normalizeScopePath(raw: string): string | null {
-  const segments = raw.normalize('NFC').replace(/\\/g, '/').split('/').filter(s => s.length > 0)
-  if (segments.some(s => s === '.' || s === '..')) return null
-  return segments.join('/')
-}
+export const normalizeScopePath = normalizeRepoPath
 
-/** True when `ancestor` is `path` itself or one of its parent folders ('' is everyone's ancestor). */
-export function isSameOrAncestorPath(ancestor: string, path: string): boolean {
-  if (ancestor === '') return true
-  return path === ancestor || path.startsWith(`${ancestor}/`)
-}
-
-/** Parents before children, siblings by name. */
-export function compareScopePaths(a: string, b: string): number {
-  const as = a === '' ? [] : a.split('/')
-  const bs = b === '' ? [] : b.split('/')
-  for (let i = 0; i < Math.min(as.length, bs.length); i++) {
-    if (as[i] !== bs[i]) return as[i] < bs[i] ? -1 : 1
-  }
-  return as.length - bs.length
-}
+export { compareScopePaths, isSameOrAncestorPath }
 
 /**
  * The deepest scope at or above `path` that has at least one rule — the scope

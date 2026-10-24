@@ -38,7 +38,8 @@ import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { permissionsRoute } from '../../src/routes/permissions'
-import { permissionRulesRoute, parseScopePath } from '../../src/routes/permission-rules'
+import { permissionRulesRoute } from '../../src/routes/permission-rules'
+import { parseScopePath } from '../../shared/core/names'
 import { replaceDepartmentManagers } from '../../src/lib/permission-store'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })

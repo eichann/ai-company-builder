@@ -62,7 +62,7 @@ import { gitHttpRoute } from '../../src/routes/git-http'
 import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/lib/permission-store'
-import { resolveAccess } from '../../src/lib/permissions'
+import { resolveAccess } from '../../shared/core/permissions'
 import { resetOrphanedScopeCache } from '../../src/lib/orphaned-scopes'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })

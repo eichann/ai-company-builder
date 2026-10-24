@@ -4,11 +4,10 @@
 // for constants private to a React component or a route module that opens
 // the database at import — the regex literal read from its source).
 //
-//   path key (NFC + A–Z fold)  client write-access / sparse-paths, shared
-//                              normalizeReservedPath, server private-folders
-//                              pathKey, push-check policy reservedKey, push-check
-//                              rules foldAsciiCase (bytewise, latin1 — by design)
-//   department folder names    server routes/departments.ts, admin lib/folder-name.ts,
+//   path key (NFC + A–Z fold)  client write-access / sparse-paths, shared/core
+//                              pathKey + normalizeReservedPath (server, contract),
+//                              push-check rules foldAsciiCase (bytewise, latin1 — by design)
+//   department folder names    shared/core names.ts (server), admin lib/folder-name.ts,
 //                              client NewFolderDialog.tsx
 //   skill folder names         client NewSkillWizard.tsx, CopySkillModal.tsx
 //   AI instruction files       client write-guard.ts vs push-check rules.ts / policy.ts
@@ -25,8 +24,9 @@ import { foldAsciiCase as clientFold, normalizeRepoPath } from '../shared/write-
 import { pathKey as sparsePathKey } from '../shared/sparse-paths'
 import { editorOverwriteBackupPlan } from '../shared/editor-disk-state'
 import { normalizeReservedPath } from '../../shared/types/private-folders'
-import { pathKey as serverPathKey } from '../../server/src/lib/private-folders'
-import { instructionFileAllowed, reservedKey } from '../../server/src/lib/push-check/policy'
+import { pathKey as serverPathKey } from '../../shared/core/paths'
+import { isValidFolderName as coreFolderName } from '../../shared/core/names'
+import { instructionFileAllowed } from '../../server/src/lib/push-check/policy'
 import { foldAsciiCase as hookFold, INSTRUCTION_FILE_RE } from '../../server/src/lib/push-check/rules'
 import * as adminFolderNameModule from '../../admin/src/lib/folder-name'
 import { isInstructionFile, mayChangeInstructionFile } from '../electron/write-guard'
@@ -61,8 +61,7 @@ test('path keys: every copy computes the same NFC + A–Z-folded key', () => {
       'client normalizeRepoPath + foldAsciiCase': clientFold(normalizeRepoPath(p) ?? '<null>'),
       'client sparse-paths pathKey': sparsePathKey(p),
       'shared normalizeReservedPath': normalizeReservedPath(p),
-      'server private-folders pathKey': serverPathKey(p),
-      'server push-check reservedKey': reservedKey(p),
+      'shared/core pathKey (server)': serverPathKey(p),
       // The push checker folds git's raw bytes read as latin1 (LC_ALL=C): UTF-8
       // multi-byte sequences never contain 0x41–0x5A, so on NFC input it is the
       // same function. It does not NFC-normalise: git hands it the bytes as pushed.
@@ -79,7 +78,6 @@ test('path keys: the intended differences between the copies', () => {
   assert.equal(normalizeReservedPath('a\\B'), 'a/b')
   assert.equal(clientFold(normalizeRepoPath('a\\B')!), 'a/b')
   assert.equal(serverPathKey('a\\B'), 'a\\b')
-  assert.equal(reservedKey('a\\B'), 'a\\b')
   // '.' / '..': the client's path normaliser refuses them; key functions keep them.
   assert.equal(normalizeRepoPath('a/../b'), null)
   assert.equal(serverPathKey('a/../b'), 'a/../b')
@@ -116,8 +114,7 @@ const FOLDER_NAMES: Array<[string, boolean]> = [
 
 test('department folder names: server, admin and the app accept exactly the same names', () => {
   const copies: Record<string, (s: string) => boolean> = {
-    'server routes/departments.ts isValidFolderName': (s) => regexFromSource('server/src/routes/departments.ts',
-      /export function isValidFolderName\(folder: string\): boolean \{\s*return (\/.+\/[a-z]*)\.test\(folder\)/).test(s),
+    'shared/core names.ts isValidFolderName (server)': coreFolderName,
     'admin lib/folder-name.ts isValidFolderName': adminFolderName,
     'client NewFolderDialog.tsx FOLDER_RE': (s) => regexFromSource('client/src/components/skill-ui/NewFolderDialog.tsx',
       /const FOLDER_RE = (\/.+\/[a-z]*)\n/).test(s),

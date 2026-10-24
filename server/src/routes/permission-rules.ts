@@ -38,7 +38,7 @@
  *   skip the outdated-app guard: only apps that handle private folders ever
  *   receive them.
  * - Rules for owner/admin (by role or by user) are refused: owners and admins
- *   always read and write everywhere (lib/permissions.ts), so such a rule
+ *   always read and write everywhere (shared/core/permissions.ts), so such a rule
  *   would only mislead. That is also why no edit can lock the company out.
  * - A scope with its own rules always keeps a rule for everyone: the PUT
  *   refuses a non-empty set without one (EVERYONE_RULE_REQUIRED); with the
@@ -98,17 +98,14 @@ import {
   resolveAccess,
   type ScopeRule,
   type SubjectType,
-} from '../lib/permissions'
+} from '../../shared/core/permissions'
 import { queryPushRejections } from '../lib/push-rejections'
 import { listRepoSubfolders, resolveRepoFolder } from '../lib/repo-folders'
-import { isValidFolderName } from './departments'
-import { findPrivateScope } from '../lib/permissions'
+import { isValidFolderName, parseScopePath } from '../../shared/core/names'
+import { findPrivateScope } from '../../shared/core/permissions'
 import { getPrivateFolder, listPrivateFolders, listPrivateSubfolders } from '../lib/private-folders'
 
 export const permissionRulesRoute = new Hono()
-
-const MAX_PATH_LENGTH = 1024
-const MAX_SEGMENT_BYTES = 255
 
 export const READ_RESTRICTION_UNAVAILABLE =
   'Restricting read access is not available yet: every rule lets its subject read. Set canWrite only (read restriction comes in a later update).'
@@ -156,31 +153,6 @@ function canEditAnything(actor: Actor): boolean {
 
 const forbiddenEdit = (c: Ctx) =>
   c.json({ error: 'Only owners, admins and the managers of this department can change its permissions' }, 403)
-
-/**
- * Validate a scope path from a request: '' or '/' is the company root;
- * otherwise repo-relative folder names separated by '/', no leading or
- * trailing slash, no '.' / '..', no hidden folders (their rules are built in:
- * .claude, .personal, …), no control characters. The top-level folder follows
- * the department folder-name rule. Returned in NFC.
- */
-export function parseScopePath(raw: unknown): { path: string } | { error: string } {
-  if (typeof raw !== 'string') return { error: 'path must be a string' }
-  if (raw === '' || raw === '/') return { path: '' }
-  if (raw.length > MAX_PATH_LENGTH) return { error: 'path is too long' }
-  if (raw.startsWith('/') || raw.endsWith('/')) return { error: 'path must be relative to the company folder, without leading or trailing slashes' }
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000-\u001f\u007f\\]/.test(raw)) return { error: 'path contains invalid characters' }
-  const segments = raw.normalize('NFC').split('/')
-  for (const s of segments) {
-    if (s === '') return { error: 'path must not contain empty segments' }
-    if (s === '.' || s === '..') return { error: 'path must not contain . or .. segments' }
-    if (s.startsWith('.')) return { error: 'Hidden folders have built-in rules and cannot be given permissions' }
-    if (Buffer.byteLength(s, 'utf8') > MAX_SEGMENT_BYTES) return { error: 'A folder name in path is too long' }
-  }
-  if (!isValidFolderName(segments[0])) return { error: 'Invalid folder name in path' }
-  return { path: segments.join('/') }
-}
 
 async function readJson(c: Ctx): Promise<Record<string, unknown> | null> {
   try {

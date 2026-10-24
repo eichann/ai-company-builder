@@ -39,7 +39,7 @@ import { db, initDatabase } from '../../src/db'
 import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/lib/permission-store'
-import { resolveAccess, type SubjectType } from '../../src/lib/permissions'
+import { resolveAccess, type SubjectType } from '../../shared/core/permissions'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
 

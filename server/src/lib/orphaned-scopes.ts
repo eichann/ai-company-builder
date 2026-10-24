@@ -33,8 +33,8 @@ import { db, now } from '../db'
 import { companyRepoPath } from './config'
 import { gitAsync } from './git-exec'
 import { listScopesWithRules } from './permission-store'
-import type { ScopeWithRules } from './permissions'
-import { foldAsciiCase } from './push-check/rules'
+import type { ScopeWithRules } from '../../shared/core/permissions'
+import { nameKey } from '../../shared/core/paths'
 
 // Output limit of the git calls here (rev-parse, one directory's ls-tree).
 const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
@@ -53,9 +53,7 @@ async function sharedBranchCommit(bare: string): Promise<string | null> {
 }
 
 /** How names are compared: NFC, A–Z folded. */
-export function folderMatchKey(name: string): string {
-  return foldAsciiCase(name.normalize('NFC'))
-}
+export const folderMatchKey = nameKey
 
 /**
  * The scope paths (of `paths`) that do not resolve to a folder at `commit`.

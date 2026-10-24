@@ -17,9 +17,9 @@ import {
   type PermissionRepository,
   type ScopeRule,
   type ScopeWithRules,
-} from '../../src/lib/permissions'
+} from '../../shared/core/permissions'
 import { reservedPathsFor, reservedPrefixOf, writeGateFor, parsePushPolicy, type PushPolicy } from '../../src/lib/push-check/policy'
-import { isPathUsable } from '../../src/lib/private-folders'
+import { isPathUsable } from '../../shared/core/reserved-paths'
 import {
   normalizeReservedPath,
   reservedPathCandidates,

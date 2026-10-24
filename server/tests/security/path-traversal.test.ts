@@ -15,7 +15,7 @@ vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn(),
 }))
 
-import { isValidFolderName } from '../../src/routes/departments'
+import { isValidFolderName } from '../../shared/core/names'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 

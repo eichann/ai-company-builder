@@ -13,6 +13,7 @@
  * Paths are company-relative, '/'-separated, Unicode NFC, without leading or
  * trailing slashes ('人事/評価').
  */
+import { normalizeReservedPath } from '../core/paths'
 
 // ----------------------------------------------------------------------------
 // GET /api/companies/:companyId/me/scopes
@@ -94,16 +95,9 @@ export const RESERVED_PATH_ALGORITHM = 'sha256-salt-nfc-asciilower-v1' as const
  * How reserved paths are compared: split on '/' (and '\\'), empty segments
  * dropped, each segment Unicode NFC with ASCII A–Z lowered to a–z (nothing
  * else is case-folded: not full-width Ａ, not É — exactly the comparison the
- * server's push check uses), joined with '/'.
+ * server's push check uses), joined with '/'. One copy: shared/core/paths.ts.
  */
-export function normalizeReservedPath(path: string): string {
-  return path
-    .normalize('NFC')
-    .split(/[/\\]/)
-    .filter(s => s.length > 0)
-    .map(s => s.replace(/[A-Z]+/g, m => m.toLowerCase()))
-    .join('/')
-}
+export { normalizeReservedPath }
 
 /** @deprecated The hashes are no longer sent; kept for one release. */
 export function reservedPathKeyInput(salt: string, path: string): string {

@@ -14,7 +14,13 @@
  * - the default sort compares UTF-16 code units = bytes, i.e. `sort` in C.
  * The skill auto-run check is the exception: it was JavaScript already and
  * decoded paths and contents as UTF-8; that is kept as it was.
+ *
+ * foldAsciiCase below is the bytewise twin of shared/core/paths.ts
+ * foldAsciiCase (same A–Z range, applied to git's raw bytes without NFC) —
+ * a separate copy on purpose; client/tests/rule-parity-names.test.ts pins
+ * the equivalence on NFC input.
  */
+import { INSTRUCTION_FILE_NAMES } from '../../../shared/core/instruction-files'
 
 export const ZERO_SHA = '0000000000000000000000000000000000000000'
 export const EMPTY_TREE = '4b825dc642cb6eb9a060e54bf8d69288fbee4904'
@@ -75,8 +81,15 @@ export function protectedPaths(changedLines: string[]): string[] {
  * gets the same protection — not a blanket refusal, which current apps
  * could not recover from (PROTECTED_CONFIG they can: restore the server's
  * version).
+ *
+ * The names come from shared/core/instruction-files.ts (the app's chat guard
+ * uses the same list); they are ASCII, so this bytewise, ASCII-only `i`
+ * match equals the core's A–Z-folded comparison.
  */
-export const INSTRUCTION_FILE_RE = /(^|\/)(CLAUDE\.md|CLAUDE\.local\.md|AGENTS\.md)$/i
+export const INSTRUCTION_FILE_RE = new RegExp(
+  `(^|/)(${INSTRUCTION_FILE_NAMES.map(n => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`,
+  'i',
+)
 
 export function instructionFilePaths(changedLines: string[]): string[] {
   return sortUnique(changedLines.filter(l => INSTRUCTION_FILE_RE.test(l)))

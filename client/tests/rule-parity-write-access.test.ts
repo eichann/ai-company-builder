@@ -30,7 +30,7 @@ import {
   writeAccessSummary,
   type ScopeRule,
   type ScopeWithRules,
-} from '../../server/src/lib/permissions'
+} from '../../shared/core/permissions'
 import {
   reservedAncestorOf,
   reservedPathsFor,
@@ -39,7 +39,9 @@ import {
   PUSH_POLICY_VERSION,
   type PushPolicy,
 } from '../../server/src/lib/push-check/policy'
-import { canWriteInPrivateFolder, isPathUsable, pathKey as serverPathKey } from '../../server/src/lib/private-folders'
+import { canWriteInPrivateFolder } from '../../server/src/lib/private-folders'
+import { isPathUsable } from '../../shared/core/reserved-paths'
+import { pathKey as serverPathKey } from '../../shared/core/paths'
 import { normalizeReservedPath, type MyPrivateScope } from '../../shared/types/private-folders'
 import { type WriteAccess } from '../shared/write-access'
 import { checkWritePath, decideReservedWrite, type WriteGuard } from '../electron/write-guard'

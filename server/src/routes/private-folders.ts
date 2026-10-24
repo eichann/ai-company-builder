@@ -48,7 +48,7 @@ import { getUserFromRequest, getUsersByIds } from '../lib/auth'
 import { getClientActivityForCompany, type OutdatedMember } from '../lib/client-activity'
 import { privateFoldersClientCutoff, supportsPrivateFolders } from '../lib/client-version'
 import { getMemberRole, listDepartmentManagerIds, listScopesWithRules, managedDepartmentIds } from '../lib/permission-store'
-import { FULL_ACCESS_ROLES, findPrivateScope, isSameOrAncestorPath, type ScopeWithRules } from '../lib/permissions'
+import { FULL_ACCESS_ROLES, findPrivateScope, isSameOrAncestorPath, type ScopeWithRules } from '../../shared/core/permissions'
 import {
   createPrivateFolder,
   folderAccess,
@@ -62,13 +62,12 @@ import {
   replacePrivateFolderRules,
   canWriteInPrivateFolder,
   deletePrivateFolder,
-  isPathUsable,
   type PrivateFolderRecord,
 } from '../lib/private-folders'
+import { isPathUsable } from '../../shared/core/reserved-paths'
 import { withCompanyLock } from '../lib/company-lock'
 import { resolveRepoFolder } from '../lib/repo-folders'
-import { isValidFolderName } from './departments'
-import { parseScopePath } from './permission-rules'
+import { isValidFolderName, parseScopePath } from '../../shared/core/names'
 import {
   MY_PRIVATE_FOLDER_VIEWERS_LIMIT,
   PATHS_CHECK_MAX_PATHS,

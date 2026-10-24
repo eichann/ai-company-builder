@@ -11,7 +11,7 @@ import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
 import { ensureCompanyScope, getMemberRole, listScopesWithRules, managedDepartmentIds } from '../lib/permission-store'
-import { canReadPrivateScope, type ScopeWithRules } from '../lib/permissions'
+import { canReadPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import {
   beginCompanyPush,
   beginScopePush,
