@@ -10,9 +10,8 @@ Maintainer note (stripped before it reaches Claude's context):
   `paths:` frontmatter and load only when Claude reads or edits a matching file. Keep each file
   under 200 lines; put long rationale and incident history in docs/architecture/ (internal,
   untracked, owner's machine only).
-- The 2026-10-24 restructuring (PR "docs: split CLAUDE.md into path-scoped rules") moved the old
-  1,663-line file; the PR body has the section-by-section mapping, and
-  docs/architecture/README.md keeps a copy.
+- The 2026-10-24 restructuring (PR #186) moved the old 1,663-line file; the PR body has the
+  section-by-section mapping, and docs/architecture/README.md keeps a copy.
 -->
 
 ## Project map
