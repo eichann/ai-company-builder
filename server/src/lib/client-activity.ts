@@ -28,7 +28,7 @@
  */
 import { db, now } from '../db'
 import { compareClientVersions, parseClientVersion, type ParsedClientVersion } from './client-version'
-import type { ClientActivityRow } from '../ports/client-activity'
+import type { ClientActivityRow, OutdatedMember } from '../ports/client-activity'
 
 export const CLIENT_VERSION_HEADER = 'X-ACB-Client-Version'
 export const CLIENT_PLATFORM_HEADER = 'X-ACB-Client-Platform'
@@ -117,21 +117,7 @@ export function getClientActivityForCompany(companyId: string): Map<string, Clie
   return new Map(rows.map(r => [r.user_id, r]))
 }
 
-/**
- * A member listed in a 409 OUTDATED_CLIENTS answer (the permission editor's
- * outdated-app guard, the first private folder): their app cannot handle the
- * change yet.
- */
-export interface OutdatedMember {
-  userId: string
-  name: string | null
-  email: string | null
-  role: string
-  clientVersion: string | null
-  /** clientVersion, or 不明 when unknown. */
-  version: string
-  lastSeenAt: string | null
-}
+export type { OutdatedMember }
 
 function latest(...values: Array<string | null>): string | null {
   let best: string | null = null

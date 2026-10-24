@@ -10,6 +10,22 @@ export interface ClientActivityRow {
   updated_at: string
 }
 
+/**
+ * A member listed in a 409 OUTDATED_CLIENTS answer (the permission editor's
+ * outdated-app guard, the first private folder): their app cannot handle the
+ * change yet.
+ */
+export interface OutdatedMember {
+  userId: string
+  name: string | null
+  email: string | null
+  role: string
+  clientVersion: string | null
+  /** clientVersion, or 不明 when unknown. */
+  version: string
+  lastSeenAt: string | null
+}
+
 /** Which app build each member last used, and when they last synced (lib/client-activity.ts). */
 export interface ClientActivityRepository {
   /** The company's rows, by user id. */

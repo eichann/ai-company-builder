@@ -1,3 +1,5 @@
+import type { PrivateFolderRecord } from './private-folders'
+
 /**
  * Where the companies' git repositories live, and the server's own changes
  * to them. The implementation (adapters/git-repo-store.ts) keeps bare
@@ -28,6 +30,12 @@ export interface RepoStore {
   listRootFolders(companyId: string): Promise<string[]>
   /** Files and folders under a folder of the shared branch, or null when it is not there. */
   countFilesInFolder(companyId: string, folder: string): Promise<{ files: number; folders: number } | null>
+  /** A folder path (NFC) as the shared branch spells it, or null when it is not a folder there. '' = ''. */
+  resolveFolder(companyId: string, path: string): Promise<string | null>
+  /** Sub-folder names (NFC, sorted) of a folder on the shared branch; null when it does not exist. */
+  listSubfolders(companyId: string, path: string): Promise<string[] | null>
+  /** Sub-folder names (NFC, sorted) of `path` (the private folder or a folder in it), from its own repository. */
+  listPrivateSubfolders(companyId: string, folder: PrivateFolderRecord, path: string): Promise<string[] | null>
 
   /** Add a department folder (`.gitkeep`, `.personal/.gitignore`), commit, push. False when the folder exists. */
   createDepartmentFolder(companyId: string, folder: string, commitMessage: string): Promise<boolean>

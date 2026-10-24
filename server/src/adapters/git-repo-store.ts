@@ -12,7 +12,8 @@ import { initBareRepo, internalGitEnv } from '../lib/git-server'
 import { gitAsync } from '../lib/git-exec'
 import { withCompanyLock } from '../lib/company-lock'
 import { companyRepoPath, REPOS_DIR, WORKDIR_DIR } from '../lib/config'
-import { countFilesInRepoFolder, listFoldersFromRepo } from '../lib/repo-folders'
+import { countFilesInRepoFolder, listFoldersFromRepo, listRepoSubfolders, resolveRepoFolder } from '../lib/repo-folders'
+import { listPrivateSubfolders } from '../lib/private-folders'
 
 // Watchdog for each git command of the seeding. The push runs the
 // pre-receive checker; a hung checker must fail the seeding, not leave the
@@ -260,6 +261,9 @@ export function localRepoStore(): RepoStore {
     companyRepoExists: companyId => existsSync(companyRepoPath(companyId)),
     listRootFolders: listFoldersFromRepo,
     countFilesInFolder: countFilesInRepoFolder,
+    resolveFolder: resolveRepoFolder,
+    listSubfolders: listRepoSubfolders,
+    listPrivateSubfolders,
     createDepartmentFolder,
     renameDepartmentFolder,
     deleteDepartmentFolder,

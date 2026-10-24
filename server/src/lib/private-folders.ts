@@ -50,6 +50,7 @@ import {
   type ScopeWithRules,
 } from '../../shared/core/permissions'
 import { pathKey } from '../../shared/core/paths'
+import type { PrivateFolderRecord } from '../ports/private-folders'
 
 type Conn = Database.Database
 
@@ -78,12 +79,7 @@ function overlaps(a: string, b: string): boolean {
 // Reads
 // ----------------------------------------------------------------------------
 
-export interface PrivateFolderRecord {
-  scope: ScopeWithRules
-  repoId: string
-  createdAt: string
-  createdBy: string | null
-}
+export type { PrivateFolderRecord }
 
 export function listPrivateFolders(conn: Conn, companyId: string, scopes = listScopesWithRules(conn, companyId)): PrivateFolderRecord[] {
   const rows = conn.prepare(`SELECT id, scope_id, created_at, created_by FROM scope_repos WHERE company_id = ?`)

@@ -27,6 +27,7 @@ import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
 import { createDepartmentService } from './services/departments'
 import { createPermissionViewService } from './services/permission-views'
+import { createPermissionEditorService } from './services/permission-editor'
 
 export function createServices(conn: Database.Database) {
   const repos = {
@@ -48,12 +49,20 @@ export function createServices(conn: Database.Database) {
   }
   const repoStore = localRepoStore()
 
+  const permissionViews = createPermissionViewService({ ...repos, ...shared })
+
   return {
     access: createAccessPolicy(repos.memberships),
     companies: createCompanyService({ ...repos, ...shared, repoStore }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
-    permissionViews: createPermissionViewService({ ...repos, ...shared }),
+    permissionViews,
+    permissionEditor: createPermissionEditorService({
+      ...repos,
+      ...shared,
+      repoStore,
+      managedFolders: permissionViews.managedFolders,
+    }),
     accounts: shared.accounts,
     repoStore,
   }
