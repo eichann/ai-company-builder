@@ -21,6 +21,11 @@ test('IPC inventory matches ipc-inventory.json (UPDATE_IPC_INVENTORY=1 to regene
   // Handlers registered in app.whenReady (voice input) count too.
   await h.startApp()
   const inventory = await buildInventory({ handle: [...h.fake.handlers.keys()], on: [...h.fake.listeners.keys()] })
+  // Every channel is in the contract (shared/ipc-contract.ts), and every
+  // contract channel has its handler / listener in main and its caller /
+  // listener in preload — whatever the golden file says.
+  assert.deepEqual(inventory.unmatched.notInContract, [], 'Channels used but missing from shared/ipc-contract.ts')
+  assert.deepEqual(inventory.unmatched.inContractButUnused, [], 'Contract channels without a main-process handler or a preload caller')
   const json = `${JSON.stringify(inventory, null, 2)}\n`
   if (process.env.UPDATE_IPC_INVENTORY) fs.writeFileSync(GOLDEN, json)
   assert.equal(json, fs.readFileSync(GOLDEN, 'utf-8'),

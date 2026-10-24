@@ -418,7 +418,7 @@
       "calls": [
         "invoke editor:backupBeforeOverwrite($0, $1)"
       ],
-      "declared": "(rootPath: string, filePath: string) => Promise<{ success: boolean; backupPath?: string; skipped?: 'missing' | 'outside-company' | 'internal'; error?: string }>"
+      "declared": "(rootPath: string, filePath: string) => Promise<EditorBackupResult>"
     },
     "backupList": {
       "calls": [
@@ -430,7 +430,7 @@
       "calls": [
         "invoke backup:openFolder($0)"
       ],
-      "declared": "(backupPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(backupPath: string) => Promise<SimpleResult>"
     },
     "backupRestore": {
       "calls": [
@@ -448,7 +448,7 @@
       "calls": [
         "invoke fs:copy($0, $1)"
       ],
-      "declared": "(sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(sourcePath: string, destPath: string) => Promise<SimpleResult>"
     },
     "createCompany": {
       "calls": [
@@ -478,7 +478,7 @@
       "calls": [
         "invoke fs:delete($0)"
       ],
-      "declared": "(path: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(path: string) => Promise<SimpleResult>"
     },
     "exists": {
       "calls": [
@@ -514,13 +514,13 @@
       "calls": [
         "invoke config:getAuthMode()"
       ],
-      "declared": "() => Promise<'claude-code' | 'codex' | 'api-key'>"
+      "declared": "() => Promise<AuthMode>"
     },
     "getChatServerInfo": {
       "calls": [
         "invoke chat-server:getInfo()"
       ],
-      "declared": "() => Promise<{ port: number; authToken: string } | null>"
+      "declared": "() => Promise<ChatServerInfo | null>"
     },
     "getChatSession": {
       "calls": [
@@ -538,13 +538,13 @@
       "calls": [
         "invoke config:getClaudeCodeStatus()"
       ],
-      "declared": "() => Promise<{ available: boolean authenticated: boolean cliPath: string | null version: string | null error: string | null checkedAt: number }>"
+      "declared": "() => Promise<ClaudeCodeStatus>"
     },
     "getCodexStatus": {
       "calls": [
         "invoke codex:status()"
       ],
-      "declared": "() => Promise<import('../shared/agent').CodexStatus>"
+      "declared": "() => Promise<CodexStatus>"
     },
     "getCompanies": {
       "calls": [
@@ -568,19 +568,19 @@
       "calls": [
         "invoke privateFolders:mine($0)"
       ],
-      "declared": "(companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[] } | { success: false; offline: boolean; error: string }>"
+      "declared": "(companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>"
     },
     "getPermissionMode": {
       "calls": [
         "invoke config:getPermissionMode()"
       ],
-      "declared": "() => Promise<PermissionMode>"
+      "declared": "() => Promise<\"auto\" | \"default\" | \"bypassPermissions\">"
     },
     "getPrivateFolderCreateContext": {
       "calls": [
         "invoke privateFolders:createContext($0, $1)"
       ],
-      "declared": "(companyId: string, parentPath: string) => Promise<{ success: true; context: PrivateFolderCreateContext } | { success: false; offline: boolean; error: string }>"
+      "declared": "(companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>"
     },
     "getServerUrl": {
       "calls": [
@@ -598,85 +598,85 @@
       "calls": [
         "invoke fs:stat($0)"
       ],
-      "declared": "(path: string) => Promise<{ success: boolean; data?: { isDirectory: boolean; isFile: boolean; size: number; mtime: string; ctime: string } }>"
+      "declared": "(path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>"
     },
     "getWriteAccess": {
       "calls": [
         "invoke writeAccess:get($0, $1)"
       ],
-      "declared": "(companyId: string, refresh?: boolean) => Promise<WriteAccess | null>"
+      "declared": "(companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>"
     },
     "gitBinaryStatus": {
       "calls": [
         "invoke git:getBinaryStatus()"
       ],
-      "declared": "() => Promise<{ bundled: boolean; binary: string }>"
+      "declared": "() => Promise<GitBinaryStatus>"
     },
     "gitCommitFileDiff": {
       "calls": [
         "invoke git:commitFileDiff($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, commitHash: string, filePath: string) => Promise<{ success: boolean diff: string error?: string }>"
+      "declared": "(repoPath: string, commitHash: string, filePath: string) => Promise<GitCommitFileDiffResult>"
     },
     "gitFileDiff": {
       "calls": [
         "invoke git:fileDiff($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<{ success: boolean diff: string isNewFile?: boolean isDeletedFile?: boolean error?: string }>"
+      "declared": "(repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<GitFileDiffResult>"
     },
     "gitGenerateSummary": {
       "calls": [
         "invoke git:generateSummary($0)"
       ],
-      "declared": "(repoPath: string) => Promise<{ success: boolean summary: string | null }>"
+      "declared": "(repoPath: string) => Promise<{ success: boolean; summary: string | null; }>"
     },
     "gitGrep": {
       "calls": [
         "invoke git:grep($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, query: string, folderPath: string) => Promise<{ success: boolean results: Array<{ file: string; line: number; text: string; column?: number }> truncated?: boolean timedOut?: boolean /** A newer search from this window replaced this one. */ cancelled?: boolean error?: string }>"
+      "declared": "(repoPath: string, query: string, folderPath: string) => Promise<GitGrepResult>"
     },
     "gitInspectCompanyFolder": {
       "calls": [
         "invoke git:inspectCompanyFolder($0, $1)"
       ],
-      "declared": "(folder: string, companyId: string) => Promise<{ success: boolean decision?: | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' } | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string } error?: string }>"
+      "declared": "(folder: string, companyId: string) => Promise<InspectCompanyFolderResult>"
     },
     "gitListFiles": {
       "calls": [
         "invoke git:listFiles($0, $1)"
       ],
-      "declared": "(repoPath: string, folderPath: string) => Promise<{ success: boolean files: string[] truncated?: boolean error?: string }>"
+      "declared": "(repoPath: string, folderPath: string) => Promise<GitListFilesResult>"
     },
     "gitLog": {
       "calls": [
         "invoke git:log($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, folderPath: string, limit?: number) => Promise<{ success: boolean commits: Array<{ hash: string hashShort: string message: string author: string date: string }> error?: string }>"
+      "declared": "(repoPath: string, folderPath: string, limit?: number | undefined) => Promise<GitLogResult>"
     },
     "gitPreview": {
       "calls": [
         "invoke git:preview($0)"
       ],
-      "declared": "(repoPath: string) => Promise<{ success: boolean hasChanges: boolean changes: { added: string[]; modified: string[]; deleted: string[] } totalCount: number error?: string }>"
+      "declared": "(repoPath: string) => Promise<GitPreviewResult>"
     },
     "gitRevertFile": {
       "calls": [
         "invoke git:revertFile($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<{ success: boolean error?: string }>"
+      "declared": "(repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<SimpleResult>"
     },
     "gitSetupCompanyRemote": {
       "calls": [
         "invoke git:setupCompanyRemote($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, companyId: string, selectedPaths?: string[]) => Promise<GitResult & { refused?: boolean }>"
+      "declared": "(repoPath: string, companyId: string, selectedPaths?: string[] | undefined) => Promise<GitResult & { refused?: boolean | undefined; }>"
     },
     "gitShowCommit": {
       "calls": [
         "invoke git:showCommit($0, $1, $2)"
       ],
-      "declared": "(repoPath: string, commitHash: string, folderPath?: string) => Promise<{ success: boolean files: Array<{ status: string; path: string }> error?: string }>"
+      "declared": "(repoPath: string, commitHash: string, folderPath?: string | undefined) => Promise<GitShowCommitResult>"
     },
     "gitSync": {
       "calls": [
@@ -694,25 +694,25 @@
       "calls": [
         "invoke skills:list($0, $1, $2, $3, $4)"
       ],
-      "declared": "(rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => Promise<SkillsResult>"
+      "declared": "(rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>"
     },
     "makeSkillPrivate": {
       "calls": [
         "invoke skills:makePrivate($0, $1)"
       ],
-      "declared": "(rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(rootPath: string, skillRelativePath: string) => Promise<SimpleResult>"
     },
     "moveFromExternal": {
       "calls": [
         "invoke fs:moveFromExternal($0, $1)"
       ],
-      "declared": "(sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(sourcePath: string, destPath: string) => Promise<SimpleResult>"
     },
     "moveItem": {
       "calls": [
         "invoke fs:move($0, $1)"
       ],
-      "declared": "(sourcePath: string, destPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(sourcePath: string, destPath: string) => Promise<SimpleResult>"
     },
     "onAgentInteraction": {
       "calls": [
@@ -731,7 +731,7 @@
     "onChatHistoryChanged": {
       "calls": [
         "on chatHistory:changed(<fn>)",
-        "off chatHistory:changed(<fn>)"
+        "removeListener chatHistory:changed(<fn>)"
       ],
       "declared": "(callback: (data: ChatHistoryChange) => void) => () => void"
     },
@@ -740,86 +740,86 @@
         "on chat-server:info(<fn>)",
         "removeListener chat-server:info(<fn>)"
       ],
-      "declared": "(callback: (info: { port: number; authToken: string }) => void) => () => void"
+      "declared": "(callback: (info: ChatServerInfo) => void) => () => void"
     },
     "onFileChange": {
       "calls": [
         "on fs:changes(<fn>)",
         "removeListener fs:changes(<fn>)"
       ],
-      "declared": "(callback: (data: { type: string; path: string }) => void) => () => void"
+      "declared": "(callback: (data: FileChangeEvent) => void) => () => void"
     },
     "onFileChanges": {
       "calls": [
         "on fs:changes(<fn>)",
         "removeListener fs:changes(<fn>)"
       ],
-      "declared": "(callback: (changes: Array<{ type: string; path: string }>) => void) => () => void"
+      "declared": "(callback: (changes: FileChangeEvent[]) => void) => () => void"
     },
     "onHandoffChanged": {
       "calls": [
         "on handoff:changed(<fn>)",
-        "off handoff:changed(<fn>)"
+        "removeListener handoff:changed(<fn>)"
       ],
-      "declared": "(callback: (scope: { companyId: string; sessionId: string }) => void) => () => void"
+      "declared": "(callback: (scope: { companyId: string; sessionId: string; }) => void) => () => void"
     },
     "onSetupProgress": {
       "calls": [
         "on setup:progress(<fn>)",
         "removeListener setup:progress(<fn>)"
       ],
-      "declared": "(callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void"
+      "declared": "(callback: (data: DownloadProgress) => void) => () => void"
     },
     "onSparseProgress": {
       "calls": [
         "on sparse:progress(<fn>)",
         "removeListener sparse:progress(<fn>)"
       ],
-      "declared": "(callback: (data: { repoPath: string; receivedBytes: number }) => void) => () => void"
+      "declared": "(callback: (data: DownloadProgress) => void) => () => void"
     },
     "onToolApprovalRequest": {
       "calls": [
         "on tool-approval-request(<fn>)",
         "removeListener tool-approval-request(<fn>)"
       ],
-      "declared": "(callback: (data: { toolUseId: string; toolName: string; toolInput: Record<string, unknown>; appSessionId?: string; reason?: string }) => void) => () => void"
+      "declared": "(callback: (data: ToolApprovalRequest) => void) => () => void"
     },
     "onWriteAccessChanged": {
       "calls": [
         "on writeAccess:changed(<fn>)",
-        "off writeAccess:changed(<fn>)"
+        "removeListener writeAccess:changed(<fn>)"
       ],
-      "declared": "(callback: (data: { companyId: string; access: WriteAccess }) => void) => () => void"
+      "declared": "(callback: (data: { companyId: string; access: WriteAccess; }) => void) => () => void"
     },
     "openExternal": {
       "calls": [
         "invoke shell:openExternal($0)"
       ],
-      "declared": "(url: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(url: string) => Promise<SimpleResult>"
     },
     "patchChatSession": {
       "calls": [
         "invoke chatHistory:patchSession($0, $1, $2)"
       ],
-      "declared": "(companyId: string, sessionId: string, patch: ChatMetadataPatch) => Promise<ChatSession | null>"
+      "declared": "(companyId: string, sessionId: string, patch: Partial<Pick<ChatSession, \"title\" | \"titleAutoGenerated\" | \"pinned\" | \"claudeSessionId\" | \"agentSession\">>) => Promise<ChatSession | null>"
     },
     "publishSkill": {
       "calls": [
         "invoke skills:publish($0, $1)"
       ],
-      "declared": "(rootPath: string, skillRelativePath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(rootPath: string, skillRelativePath: string) => Promise<SimpleResult>"
     },
     "readDirectory": {
       "calls": [
         "invoke fs:readDirectory($0)"
       ],
-      "declared": "(path: string) => Promise<Array<{ name: string; isDirectory: boolean; path: string }>>"
+      "declared": "(path: string) => Promise<DirectoryEntry[]>"
     },
     "readDirectoryTree": {
       "calls": [
         "invoke fs:readDirectoryTree($0, $1)"
       ],
-      "declared": "(path: string, maxDepth?: number) => Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<{ name: string; isDirectory: boolean; path: string; children?: unknown[] }> }>>"
+      "declared": "(path: string, maxDepth?: number | undefined) => Promise<DirectoryTreeNode[]>"
     },
     "readEnv": {
       "calls": [
@@ -843,13 +843,13 @@
       "calls": [
         "invoke fs:registerAllowedRoot($0)"
       ],
-      "declared": "(path: string) => Promise<{ success: boolean }>"
+      "declared": "(path: string) => Promise<{ success: boolean; }>"
     },
     "renameItem": {
       "calls": [
         "invoke fs:rename($0, $1)"
       ],
-      "declared": "(oldPath: string, newPath: string) => Promise<{ success: boolean; newPath?: string; error?: string }>"
+      "declared": "(oldPath: string, newPath: string) => Promise<{ success: boolean; newPath?: string | undefined; error?: string | undefined; }>"
     },
     "reservedPathRefusal": {
       "calls": [
@@ -897,13 +897,13 @@
       "calls": [
         "invoke config:setAuthMode($0)"
       ],
-      "declared": "(mode: 'claude-code' | 'codex' | 'api-key') => Promise<boolean>"
+      "declared": "(mode: AuthMode) => Promise<boolean>"
     },
     "setPermissionMode": {
       "calls": [
         "invoke config:setPermissionMode($0)"
       ],
-      "declared": "(mode: PermissionMode) => Promise<boolean>"
+      "declared": "(mode: \"auto\" | \"default\" | \"bypassPermissions\") => Promise<boolean>"
     },
     "setServerUrl": {
       "calls": [
@@ -921,31 +921,31 @@
       "calls": [
         "invoke auth:signOut()"
       ],
-      "declared": "() => Promise<{ success: boolean; error?: string }>"
+      "declared": "() => Promise<SimpleResult>"
     },
     "signUp": {
       "calls": [
         "invoke auth:signUp($0, $1, $2)"
       ],
-      "declared": "(email: string, password: string, name?: string) => Promise<AuthResult>"
+      "declared": "(email: string, password: string, name?: string | undefined) => Promise<AuthResult>"
     },
     "sparseGetExclusions": {
       "calls": [
         "invoke git:sparseGetExclusions($0)"
       ],
-      "declared": "(repoPath: string) => Promise<{ success: boolean; excluded: string[]; error?: string }>"
+      "declared": "(repoPath: string) => Promise<SparseExclusionsResult>"
     },
     "sparseSetExclusions": {
       "calls": [
         "invoke git:sparseSetExclusions($0, $1)"
       ],
-      "declared": "(repoPath: string, excluded: string[]) => Promise<{ success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }>"
+      "declared": "(repoPath: string, excluded: string[]) => Promise<SparseSetExclusionsResult>"
     },
     "sparseUncommittedChanges": {
       "calls": [
         "invoke git:sparseUncommittedChanges($0, $1)"
       ],
-      "declared": "(repoPath: string, folders: string[]) => Promise<{ success: boolean; files: string[]; error?: string }>"
+      "declared": "(repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>"
     },
     "startDrag": {
       "calls": [
@@ -957,25 +957,25 @@
       "calls": [
         "invoke tools:start($0, $1)"
       ],
-      "declared": "(toolPath: string, startCommand?: string) => Promise<{ success: boolean; port?: number; pid?: number; alreadyRunning?: boolean; error?: string }>"
+      "declared": "(toolPath: string, startCommand?: string | undefined) => Promise<StartToolResult>"
     },
     "stopTool": {
       "calls": [
         "invoke tools:stop($0)"
       ],
-      "declared": "(toolPath: string) => Promise<{ success: boolean; message?: string; error?: string }>"
+      "declared": "(toolPath: string) => Promise<StopToolResult>"
     },
     "toggleSkillNurturing": {
       "calls": [
         "invoke skills:toggleNurturing($0, $1)"
       ],
-      "declared": "(skillMdPath: string, makeNurturing: boolean) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>"
     },
     "unwatchCompany": {
       "calls": [
         "invoke fs:unwatch($0)"
       ],
-      "declared": "(rootPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(rootPath: string) => Promise<SimpleResult>"
     },
     "updateHandoff": {
       "calls": [
@@ -987,80 +987,259 @@
       "calls": [
         "invoke config:validateServerUrl($0)"
       ],
-      "declared": "(url: string) => Promise<{ valid: boolean; error?: string; serverName?: string; version?: string }>"
+      "declared": "(url: string) => Promise<ServerUrlValidation>"
     },
     "voiceInput.cancel": {
       "calls": [
         "invoke voice:cancel($0)"
       ],
-      "declared": null
+      "declared": "(requestId: string) => Promise<void>"
     },
     "voiceInput.capabilities": {
       "calls": [
         "invoke voice:capabilities()"
       ],
-      "declared": null
+      "declared": "() => Promise<VoiceCapabilities>"
     },
     "voiceInput.devices": {
       "calls": [
         "invoke voice:devices()"
       ],
-      "declared": null
+      "declared": "() => Promise<VoiceDeviceList>"
     },
     "voiceInput.getPrompt": {
       "calls": [
         "invoke voice:getPrompt()"
       ],
-      "declared": null
+      "declared": "() => Promise<VoicePromptSettings>"
     },
     "voiceInput.onEvent": {
       "calls": [
         "on voice:event(<fn>)",
         "removeListener voice:event(<fn>)"
       ],
-      "declared": null
+      "declared": "(callback: (event: VoiceEvent) => void) => () => void"
     },
     "voiceInput.resetPrompt": {
       "calls": [
         "invoke voice:resetPrompt()"
       ],
-      "declared": null
+      "declared": "() => Promise<VoicePromptSettings>"
     },
     "voiceInput.setPrompt": {
       "calls": [
         "invoke voice:setPrompt($0)"
       ],
-      "declared": null
+      "declared": "(instructions: string) => Promise<VoicePromptSettings>"
     },
     "voiceInput.start": {
       "calls": [
         "invoke voice:start($0, $1)"
       ],
-      "declared": null
+      "declared": "(requestId: string, deviceId?: string | undefined) => Promise<void>"
     },
     "voiceInput.stop": {
       "calls": [
         "invoke voice:stop($0)"
       ],
-      "declared": null
+      "declared": "(requestId: string) => Promise<void>"
     },
     "watchCompany": {
       "calls": [
         "invoke fs:watch($0)"
       ],
-      "declared": "(rootPath: string) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(rootPath: string) => Promise<SimpleResult>"
     },
     "writeEnv": {
       "calls": [
         "invoke env:write($0, $1)"
       ],
-      "declared": "(rootPath: string, vars: Record<string, string>) => Promise<{ success: boolean; error?: string }>"
+      "declared": "(rootPath: string, vars: Record<string, string>) => Promise<SimpleResult>"
     },
     "writeFile": {
       "calls": [
         "invoke fs:writeFile($0, $1)"
       ],
       "declared": "(path: string, content: string) => Promise<boolean>"
+    }
+  },
+  "contract": {
+    "channels": {
+      "invoke": [
+        "agent-interaction:list",
+        "agent-interaction:respond",
+        "api:createCompany",
+        "api:getCompanies",
+        "api:getDepartments",
+        "auth:getSession",
+        "auth:signIn",
+        "auth:signOut",
+        "auth:signUp",
+        "backup:list",
+        "backup:openFolder",
+        "backup:restore",
+        "chat-server:getInfo",
+        "chatHistory:deleteSession",
+        "chatHistory:getSession",
+        "chatHistory:getSummaries",
+        "chatHistory:patchSession",
+        "chatHistory:saveSession",
+        "chatHistory:search",
+        "codex:status",
+        "config:getApiKey",
+        "config:getAuthMode",
+        "config:getClaudeCodeStatus",
+        "config:getPermissionMode",
+        "config:getServerUrl",
+        "config:hasApiKey",
+        "config:setApiKey",
+        "config:setAuthMode",
+        "config:setPermissionMode",
+        "config:setServerUrl",
+        "config:validateServerUrl",
+        "dialog:selectDirectory",
+        "editor:backupBeforeOverwrite",
+        "env:read",
+        "env:write",
+        "fs:copy",
+        "fs:createDirectory",
+        "fs:delete",
+        "fs:exists",
+        "fs:move",
+        "fs:moveFromExternal",
+        "fs:readDirectory",
+        "fs:readDirectoryTree",
+        "fs:readFile",
+        "fs:readFileBinary",
+        "fs:registerAllowedRoot",
+        "fs:rename",
+        "fs:stat",
+        "fs:unwatch",
+        "fs:watch",
+        "fs:writeFile",
+        "git:commitFileDiff",
+        "git:fileDiff",
+        "git:folderSizes",
+        "git:generateSummary",
+        "git:getBinaryStatus",
+        "git:grep",
+        "git:inspectCompanyFolder",
+        "git:listFiles",
+        "git:log",
+        "git:preview",
+        "git:revertFile",
+        "git:setupCompanyRemote",
+        "git:showCommit",
+        "git:sparseGetExclusions",
+        "git:sparseSetExclusions",
+        "git:sparseUncommittedChanges",
+        "git:sync",
+        "handoff:complete",
+        "handoff:get",
+        "handoff:update",
+        "privateFolders:create",
+        "privateFolders:createContext",
+        "privateFolders:mine",
+        "privateFolders:reservedPathRefusal",
+        "shell:openExternal",
+        "skills:list",
+        "skills:makePrivate",
+        "skills:publish",
+        "skills:toggleNurturing",
+        "tool-approval-response",
+        "tools:start",
+        "tools:stop",
+        "voice:cancel",
+        "voice:capabilities",
+        "voice:devices",
+        "voice:getPrompt",
+        "voice:resetPrompt",
+        "voice:setPrompt",
+        "voice:start",
+        "voice:stop",
+        "writeAccess:get"
+      ],
+      "send": [
+        "fs:startDrag"
+      ],
+      "sync": [
+        "chatHistory:flushSession"
+      ],
+      "events": [
+        "agent-interaction:closed",
+        "agent-interaction:request",
+        "chat-server:info",
+        "chatHistory:changed",
+        "fs:changes",
+        "handoff:changed",
+        "setup:progress",
+        "sparse:progress",
+        "tool-approval-request",
+        "voice:event",
+        "writeAccess:changed"
+      ]
+    },
+    "types": {
+      "AuthResult": "export interface AuthResult { success: boolean data?: unknown error?: string }",
+      "AuthUser": "export interface AuthUser { id: string email: string name: string | null image: string | null emailVerified: boolean }",
+      "BackupInfo": "export interface BackupInfo { id: string timestamp: string reason: string files: string[] path: string }",
+      "BackupListResult": "export interface BackupListResult { success: boolean backups: BackupInfo[] error?: string }",
+      "BackupRestoreResult": "export interface BackupRestoreResult { success: boolean message?: string error?: string }",
+      "ChatServerInfo": "export interface ChatServerInfo { port: number; authToken: string }",
+      "ClaudeCodeStatus": "export interface ClaudeCodeStatus { available: boolean authenticated: boolean cliPath: string | null version: string | null error: string | null checkedAt: number }",
+      "CompaniesResult": "export interface CompaniesResult { success: boolean data?: CompanyInfo[] error?: string }",
+      "CompanyFolderDecisionView": "export type CompanyFolderDecisionView = | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' } | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string }",
+      "CompanyInfo": "export interface CompanyInfo { id: string name: string slug: string ownerId: string repoPath: string | null role: string createdAt: string updatedAt: string }",
+      "CompanyResult": "export interface CompanyResult { success: boolean data?: CompanyInfo error?: string }",
+      "DepartmentInfo": "export interface DepartmentInfo { id: string companyId: string parentId: string | null name: string nameEn: string | null folder: string icon: string color: string description: string | null sortOrder: number isActive: boolean createdAt: string updatedAt: string }",
+      "DepartmentsResult": "export interface DepartmentsResult { success: boolean data?: DepartmentInfo[] error?: string }",
+      "DirectoryEntry": "export interface DirectoryEntry { name: string; isDirectory: boolean; path: string }",
+      "DirectoryTreeNode": "export interface DirectoryTreeNode extends DirectoryEntry { children?: DirectoryTreeNode[] }",
+      "DownloadProgress": "export interface DownloadProgress { repoPath: string; receivedBytes: number }",
+      "EditorBackupResult": "export interface EditorBackupResult { success: boolean backupPath?: string skipped?: 'missing' | 'outside-company' | 'internal' error?: string }",
+      "ElectronAPI": "export interface ElectronAPI { voiceInput: VoiceInputAPI signUp: Invoke<'auth:signUp'> signIn: Invoke<'auth:signIn'> signOut: Invoke<'auth:signOut'> getSession: Invoke<'auth:getSession'> getCompanies: Invoke<'api:getCompanies'> createCompany: Invoke<'api:createCompany'> getDepartments: Invoke<'api:getDepartments'> selectDirectory: Invoke<'dialog:selectDirectory'> registerAllowedRoot: Invoke<'fs:registerAllowedRoot'> readDirectory: Invoke<'fs:readDirectory'> readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>> readFile: Invoke<'fs:readFile'> readFileBinary: Invoke<'fs:readFileBinary'> writeFile: Invoke<'fs:writeFile'> backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'> createDirectory: Invoke<'fs:createDirectory'> exists: Invoke<'fs:exists'> deleteItem: Invoke<'fs:delete'> renameItem: Invoke<'fs:rename'> moveItem: Invoke<'fs:move'> moveFromExternal: Invoke<'fs:moveFromExternal'> copyItem: Invoke<'fs:copy'> getStats: Invoke<'fs:stat'> startDrag: (...args: SendArgs<'fs:startDrag'>) => void watchCompany: Invoke<'fs:watch'> unwatchCompany: Invoke<'fs:unwatch'> onFileChange: (callback: (data: FileChangeEvent) => void) => () => void onFileChanges: Subscribe<'fs:changes'> readEnv: Invoke<'env:read'> writeEnv: Invoke<'env:write'> listSkills: Invoke<'skills:list'> publishSkill: Invoke<'skills:publish'> makeSkillPrivate: Invoke<'skills:makePrivate'> toggleSkillNurturing: Invoke<'skills:toggleNurturing'> startTool: Invoke<'tools:start'> stopTool: Invoke<'tools:stop'> openExternal: Invoke<'shell:openExternal'> getApiKey: Invoke<'config:getApiKey'> setApiKey: Invoke<'config:setApiKey'> hasApiKey: Invoke<'config:hasApiKey'> getCodexStatus: Invoke<'codex:status'> getAuthMode: Invoke<'config:getAuthMode'> setAuthMode: Invoke<'config:setAuthMode'> getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'> getPermissionMode: Invoke<'config:getPermissionMode'> setPermissionMode: Invoke<'config:setPermissionMode'> getServerUrl: Invoke<'config:getServerUrl'> setServerUrl: Invoke<'config:setServerUrl'> validateServerUrl: Invoke<'config:validateServerUrl'> onAgentInteraction: Subscribe<'agent-interaction:request'> onAgentInteractionClosed: Subscribe<'agent-interaction:closed'> getAgentInteractions: Invoke<'agent-interaction:list'> respondAgentInteraction: Invoke<'agent-interaction:respond'> onToolApprovalRequest: Subscribe<'tool-approval-request'> respondToolApproval: Invoke<'tool-approval-response'> getHandoff: Invoke<'handoff:get'> updateHandoff: Invoke<'handoff:update'> completeHandoffTurn: Invoke<'handoff:complete'> onHandoffChanged: Subscribe<'handoff:changed'> getChatSessionSummaries: Invoke<'chatHistory:getSummaries'> searchChatSessions: Invoke<'chatHistory:search'> getChatSession: Invoke<'chatHistory:getSession'> saveChatSession: Invoke<'chatHistory:saveSession'> flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt patchChatSession: Invoke<'chatHistory:patchSession'> deleteChatSession: Invoke<'chatHistory:deleteSession'> onChatHistoryChanged: Subscribe<'chatHistory:changed'> gitSync: Invoke<'git:sync'> getWriteAccess: Invoke<'writeAccess:get'> onWriteAccessChanged: Subscribe<'writeAccess:changed'> getMyPrivateFolders: Invoke<'privateFolders:mine'> getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'> createPrivateFolder: Invoke<'privateFolders:create'> gitPreview: Invoke<'git:preview'> gitGenerateSummary: Invoke<'git:generateSummary'> gitRevertFile: Invoke<'git:revertFile'> gitFileDiff: Invoke<'git:fileDiff'> gitCommitFileDiff: Invoke<'git:commitFileDiff'> gitListFiles: Invoke<'git:listFiles'> gitGrep: Invoke<'git:grep'> gitLog: Invoke<'git:log'> gitShowCommit: Invoke<'git:showCommit'> gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'> gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'> onSetupProgress: Subscribe<'setup:progress'> sparseGetExclusions: Invoke<'git:sparseGetExclusions'> sparseSetExclusions: Invoke<'git:sparseSetExclusions'> sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'> folderSizes: Invoke<'git:folderSizes'> reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'> onSparseProgress: Subscribe<'sparse:progress'> gitBinaryStatus: Invoke<'git:getBinaryStatus'> backupList: Invoke<'backup:list'> backupRestore: Invoke<'backup:restore'> backupOpenFolder: Invoke<'backup:openFolder'> getChatServerInfo: Invoke<'chat-server:getInfo'> onChatServerInfo: Subscribe<'chat-server:info'> }",
+      "EnvResult": "export interface EnvResult { success: boolean vars?: Record<string, string> error?: string }",
+      "EventChannel": "export type EventChannel = keyof IpcEventChannels",
+      "EventPayload": "export type EventPayload<C extends EventChannel> = IpcEventChannels[C]",
+      "FileChangeEvent": "export interface FileChangeEvent { type: string; path: string }",
+      "FileStats": "export interface FileStats { isDirectory: boolean; isFile: boolean; size: number; mtime: string; ctime: string }",
+      "FolderSizesResponse": "export type FolderSizesResponse = | { success: true path: string size: number | null folders: Array<{ name: string; path: string; size: number | null; files: number | null; hasChildren: boolean; private?: boolean }> measured: Record<string, number | null> offline: boolean } | { success: false; error: string }",
+      "GitBinaryStatus": "export interface GitBinaryStatus { bundled: boolean; binary: string }",
+      "GitCommitFileDiffResult": "export interface GitCommitFileDiffResult { success: boolean diff: string error?: string }",
+      "GitFileDiffResult": "export interface GitFileDiffResult { success: boolean diff: string isNewFile?: boolean isDeletedFile?: boolean error?: string }",
+      "GitFileStatus": "export type GitFileStatus = 'added' | 'modified' | 'deleted'",
+      "GitGrepResult": "export interface GitGrepResult { success: boolean results: Array<{ file: string; line: number; text: string; column?: number }> truncated?: boolean timedOut?: boolean cancelled?: boolean error?: string }",
+      "GitListFilesResult": "export interface GitListFilesResult { success: boolean files: string[] truncated?: boolean error?: string }",
+      "GitLogResult": "export interface GitLogResult { success: boolean commits: Array<{ hash: string hashShort: string message: string author: string date: string }> error?: string }",
+      "GitPreviewResult": "export interface GitPreviewResult { success: boolean hasChanges: boolean changes: { added: string[]; modified: string[]; deleted: string[] } totalCount: number error?: string }",
+      "GitResult": "export interface GitResult { success: boolean error?: string message?: string remoteUrl?: string pushFailed?: boolean hadConflicts?: boolean conflictFiles?: string[] deletedConflictFiles?: string[] backupPath?: string restoredFolders?: string[] ignoredLargeFiles?: string[] excludedNestedRepos?: string[] errorType?: 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'unknown' | string secretDetected?: boolean protectedFiles?: string[] restoredProtectedFiles?: string[] protectedBackupPath?: string writeDeniedFiles?: string[] restoredWriteDeniedFiles?: string[] writeDeniedBackupPath?: string personalFiles?: string[] untrackedPersonalFiles?: string[] outsideCheckoutFiles?: string[] outsideCheckoutBackupPath?: string }",
+      "GitShowCommitResult": "export interface GitShowCommitResult { success: boolean files: Array<{ status: string; path: string }> error?: string }",
+      "InspectCompanyFolderResult": "export interface InspectCompanyFolderResult { success: boolean decision?: CompanyFolderDecisionView error?: string }",
+      "InvokeArgs": "export type InvokeArgs<C extends InvokeChannel> = IpcInvokeChannels[C]['args']",
+      "InvokeChannel": "export type InvokeChannel = keyof IpcInvokeChannels",
+      "InvokeResult": "export type InvokeResult<C extends InvokeChannel> = IpcInvokeChannels[C]['result']",
+      "IpcEventChannels": "export interface IpcEventChannels { 'voice:event': [event: VoiceEvent] 'fs:changes': [changes: FileChangeEvent[]] 'writeAccess:changed': [data: { companyId: string; access: WriteAccess }] 'setup:progress': [data: DownloadProgress] 'sparse:progress': [data: DownloadProgress] 'agent-interaction:request': [request: AgentInteractionRequest] 'agent-interaction:closed': [request: AgentInteractionRequest] 'tool-approval-request': [data: ToolApprovalRequest] 'handoff:changed': [scope: { companyId: string; sessionId: string }] 'chatHistory:changed': [data: ChatHistoryChange] 'chat-server:info': [info: ChatServerInfo] }",
+      "IpcInvokeChannels": "export interface IpcInvokeChannels { 'voice:capabilities': { args: []; result: VoiceCapabilities } 'voice:devices': { args: []; result: VoiceDeviceList } 'voice:start': { args: [requestId: string, deviceId?: string]; result: void } 'voice:stop': { args: [requestId: string]; result: void } 'voice:cancel': { args: [requestId: string]; result: void } 'voice:getPrompt': { args: []; result: VoicePromptSettings } 'voice:setPrompt': { args: [instructions: string]; result: VoicePromptSettings } 'voice:resetPrompt': { args: []; result: VoicePromptSettings } 'auth:signUp': { args: [email: string, password: string, name?: string]; result: AuthResult } 'auth:signIn': { args: [email: string, password: string]; result: AuthResult } 'auth:signOut': { args: []; result: SimpleResult } 'auth:getSession': { args: []; result: SessionResult } 'api:getCompanies': { args: []; result: CompaniesResult } 'api:createCompany': { args: [name: string]; result: CompanyResult } 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult } 'dialog:selectDirectory': { args: []; result: string | null } 'fs:registerAllowedRoot': { args: [path: string]; result: { success: boolean } } 'fs:readDirectory': { args: [path: string]; result: DirectoryEntry[] } 'fs:readDirectoryTree': { args: [path: string, maxDepth: number]; result: DirectoryTreeNode[] } 'fs:readFile': { args: [path: string]; result: string | null } 'fs:readFileBinary': { args: [path: string]; result: ArrayBuffer | null } 'fs:writeFile': { args: [path: string, content: string]; result: boolean } 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult } 'fs:createDirectory': { args: [path: string]; result: boolean } 'fs:exists': { args: [path: string]; result: boolean } 'fs:delete': { args: [path: string]; result: SimpleResult } 'fs:rename': { args: [oldPath: string, newPath: string]; result: { success: boolean; newPath?: string; error?: string } } 'fs:move': { args: [sourcePath: string, destPath: string]; result: SimpleResult } 'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: SimpleResult } 'fs:copy': { args: [sourcePath: string, destPath: string]; result: SimpleResult } 'fs:stat': { args: [path: string]; result: { success: boolean; data?: FileStats } } 'fs:watch': { args: [rootPath: string]; result: SimpleResult } 'fs:unwatch': { args: [rootPath: string]; result: SimpleResult } 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult } 'writeAccess:get': { args: [companyId: string, refresh?: boolean]; result: WriteAccess | null } 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure } 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure } 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult } 'git:preview': { args: [repoPath: string]; result: GitPreviewResult } 'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } } 'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult } 'git:fileDiff': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: GitFileDiffResult } 'git:commitFileDiff': { args: [repoPath: string, commitHash: string, filePath: string]; result: GitCommitFileDiffResult } 'git:listFiles': { args: [repoPath: string, folderPath: string]; result: GitListFilesResult } 'git:grep': { args: [repoPath: string, query: string, folderPath: string]; result: GitGrepResult } 'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult } 'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult } 'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } } 'git:inspectCompanyFolder': { args: [folder: string, companyId: string]; result: InspectCompanyFolderResult } 'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult } 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult } 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult } 'git:folderSizes': { args: [repoPath: string, companyId: string, folder: string, measure: string[]]; result: FolderSizesResponse } 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null } 'git:getBinaryStatus': { args: []; result: GitBinaryStatus } 'backup:list': { args: [repoPath: string]; result: BackupListResult } 'backup:restore': { args: [repoPath: string, backupId: string, filePath: string]; result: BackupRestoreResult } 'backup:openFolder': { args: [backupPath: string]; result: SimpleResult } 'env:read': { args: [rootPath: string]; result: EnvResult } 'env:write': { args: [rootPath: string, vars: Record<string, string>]; result: SimpleResult } 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult } 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult } 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult } 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult } 'tools:start': { args: [toolPath: string, startCommand?: string]; result: StartToolResult } 'tools:stop': { args: [toolPath: string]; result: StopToolResult } 'shell:openExternal': { args: [url: string]; result: SimpleResult } 'config:getApiKey': { args: []; result: string | null } 'config:setApiKey': { args: [apiKey: string]; result: boolean } 'config:hasApiKey': { args: []; result: boolean } 'codex:status': { args: []; result: CodexStatus } 'config:getAuthMode': { args: []; result: AuthMode } 'config:setAuthMode': { args: [mode: AuthMode]; result: boolean } 'config:getClaudeCodeStatus': { args: []; result: ClaudeCodeStatus } 'config:getPermissionMode': { args: []; result: PermissionMode } 'config:setPermissionMode': { args: [mode: PermissionMode]; result: boolean } 'config:getServerUrl': { args: []; result: string | null } 'config:setServerUrl': { args: [url: string]; result: boolean } 'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation } 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] } 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean } 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean } 'handoff:get': { args: [company: string, id: string]; result: HandoffView } 'handoff:update': { args: [company: string, id: string]; result: void } 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void } 'chatHistory:getSummaries': { args: [companyId: string]; result: ChatSessionSummary[] } 'chatHistory:search': { args: [companyId: string, query: string]; result: string[] } 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null } 'chatHistory:saveSession': { args: [companyId: string, session: ChatSession]; result: ChatSaveReceipt } 'chatHistory:patchSession': { args: [companyId: string, sessionId: string, patch: ChatMetadataPatch]; result: ChatSession | null } 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean } 'chat-server:getInfo': { args: []; result: ChatServerInfo | null } }",
+      "IpcSendChannels": "export interface IpcSendChannels { 'fs:startDrag': { args: [filePath: string] } }",
+      "IpcSyncChannels": "export interface IpcSyncChannels { 'chatHistory:flushSession': { args: [companyId: string, session: ChatSession]; result: { result: ChatSaveReceipt; error?: undefined } | { error: string; result?: undefined } } }",
+      "PrivateFoldersFailure": "export type PrivateFoldersFailure = { success: false; offline: boolean; error: string }",
+      "SendArgs": "export type SendArgs<C extends SendChannel> = IpcSendChannels[C]['args']",
+      "SendChannel": "export type SendChannel = keyof IpcSendChannels",
+      "ServerUrlValidation": "export interface ServerUrlValidation { valid: boolean; error?: string; serverName?: string; version?: string }",
+      "SessionResult": "export interface SessionResult { success: boolean user: AuthUser | null }",
+      "SimpleResult": "export interface SimpleResult { success: boolean error?: string }",
+      "SkillInfo": "export interface SkillInfo { id: string name: string description: string departmentId: string skillPath: string group?: string isPrivate?: boolean isNurturing?: boolean files: { skillMd: string rules?: string[] references?: string[] scripts?: string[] tools?: ToolInfo[] } }",
+      "SkillsResult": "export interface SkillsResult { success: boolean skills: SkillInfo[] error?: string }",
+      "SparseExclusionsResult": "export interface SparseExclusionsResult { success: boolean; excluded: string[]; error?: string }",
+      "SparseSetExclusionsResult": "export interface SparseSetExclusionsResult { success: boolean; enabled?: boolean; excluded?: string[]; error?: string; offline?: boolean }",
+      "SparseUncommittedChangesResult": "export interface SparseUncommittedChangesResult { success: boolean; files: string[]; error?: string }",
+      "StartToolResult": "export interface StartToolResult { success: boolean; port?: number; pid?: number; alreadyRunning?: boolean; error?: string }",
+      "StopToolResult": "export interface StopToolResult { success: boolean; message?: string; error?: string }",
+      "SyncArgs": "export type SyncArgs<C extends SyncChannel> = IpcSyncChannels[C]['args']",
+      "SyncChannel": "export type SyncChannel = keyof IpcSyncChannels",
+      "SyncResult": "export type SyncResult<C extends SyncChannel> = IpcSyncChannels[C]['result']",
+      "ToolApprovalRequest": "export interface ToolApprovalRequest { toolUseId: string toolName: string toolInput: Record<string, unknown> appSessionId?: string reason?: string }",
+      "ToolInfo": "export interface ToolInfo { name: string displayName: string path: string hasPackageJson: boolean startCommand?: string }"
     }
   },
   "unmatched": {
@@ -1070,6 +1249,8 @@
     "preloadListenersWithoutSender": [],
     "exposedButNotDeclared": [],
     "declaredButNotExposed": [],
-    "preloadApiUnusedByRenderer": []
+    "preloadApiUnusedByRenderer": [],
+    "notInContract": [],
+    "inContractButUnused": []
   }
 }
