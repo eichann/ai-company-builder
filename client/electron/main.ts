@@ -4,7 +4,7 @@ import { AgentInteractions } from './agent-interactions'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { createCommitMessageGenerator } from './commit-message'
-import { app, BrowserWindow, ipcMain, dialog, net as electronNet, protocol, nativeImage, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, net as electronNet, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -22,21 +22,17 @@ import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
 import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
 import { folderSizesView, serverFolderSizes } from './sync/folder-sizes'
-import { notDownloadedFolderFor, notDownloadedFolders } from './sync/not-downloaded'
+import { notDownloadedFolders } from './sync/not-downloaded'
 import { createCompanyFilesApi } from './company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
-import { notDownloadedUserMessage } from '../shared/sparse-paths'
-import { companyPathOf, privateBackupsDir, readPrivateScopesCache, readableScopeOf } from './sync/private-folders'
+import { companyPathOf, readPrivateScopesCache, readableScopeOf } from './sync/private-folders'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin } from './sync/remote'
 import { previewChanges, withScratchIndex } from './sync/preview'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
 import { resolveGitBinary, resolveGitDir } from 'dugite'
-import chokidar from 'chokidar'
-import { CompanyWatcher, coveringRoot, type FileChange, type RawEventType } from './company-watcher'
 import { SkillsCache } from '../shared/skills-refresh'
-import { editorOverwriteBackupPlan, type EditorOverwriteBackupMetadata } from '../shared/editor-disk-state'
 import { localFileTarget } from './local-file-protocol'
 import net from 'net'
 import { HandoffStore } from './handoff/store'
@@ -53,7 +49,6 @@ import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import { AllowedRoots, type ValidateOptions } from './allowed-roots'
 import { isExternalUrlAllowed } from './external-url'
 import { typedIpc } from './ipc/registrar'
-import type { DirectoryTreeNode } from '../shared/ipc-contract'
 import { createConfigStore } from './services/config-store'
 import { createShellEnvironment } from './services/shell-env'
 import { createClaudeCli } from './services/claude-cli'
@@ -65,6 +60,7 @@ import { createToolApprovals, registerAgentInteractionsIpc } from './features/ag
 import { registerSettingsIpc } from './features/settings/ipc'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
+import { registerFsIpc } from './features/fs/ipc'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -84,34 +80,8 @@ function validatePath(inputPath: string, options?: ValidateOptions): string {
   return allowedRoots.validate(inputPath, options)
 }
 
-/**
- * Add a directory to the allowed roots.
- */
-function addAllowedRoot(dirPath: string): void {
-  allowedRoots.add(dirPath)
-}
-
-/**
- * Refuse an app file operation that would create or change something inside
- * a folder not downloaded on this computer (sparse exclusions): the member
- * cannot see the teammates' files there, and sync would hold the file back
- * instead of sharing it. The renderer disables these actions with the same
- * explanation; this is the backstop. Returns the message, or null to allow.
- */
-function notDownloadedRefusal(absPath: string): string | null {
-  const folder = notDownloadedFolderFor(absPath)
-  if (folder !== null) {
-    console.warn(`[fs] Refused a write into a folder that is not downloaded: ${absPath}`)
-    return notDownloadedUserMessage(folder.normalize('NFC'))
-  }
-  return null
-}
-
-// One recursive watcher per open company folder (see company-watcher.ts).
-const companyWatchers: Map<string, CompanyWatcher> = new Map()
-
 // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
-// as soon as a watcher event makes them stale (sendFileChanges) or the
+// as soon as a watcher event makes them stale (features/fs onFileChanges) or the
 // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
 const skillsCache = new SkillsCache<SkillInfo[]>(5000)
 
@@ -219,12 +189,8 @@ app.on('activate', () => {
   }
 })
 
-// Clean up file watchers on app quit (a native recursive watcher closes in
-// well under a millisecond; chokidar's per-directory watchers took 30+ s).
+// On quit (the company watchers close in their own handler, registered below).
 app.on('before-quit', () => {
-  companyWatchers.forEach((watcher) => watcher.close())
-  companyWatchers.clear()
-
   // Kill running skill tools so dev servers don't outlive the app.
   // Windows has no process groups/POSIX signals — kill the tree via taskkill.
   for (const [toolPath, tool] of runningTools) {
@@ -246,372 +212,17 @@ app.on('before-quit', () => {
   runningTools.clear()
 })
 
-// IPC Handlers for file system operations
-ipc.handle('dialog:selectDirectory', async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ['openDirectory', 'createDirectory'],
-  })
-  const selected = result.filePaths[0] || null
-  if (selected) {
-    addAllowedRoot(selected)
-  }
-  return selected
-})
-
-// Register a directory as allowed for file system access (called when company folder is set)
-ipc.handle('fs:registerAllowedRoot', async (_, dirPath: string) => {
-  if (dirPath && typeof dirPath === 'string') {
-    addAllowedRoot(dirPath)
-  }
-  return { success: true }
-})
-
-ipc.handle('fs:readDirectory', async (_, dirPath: string) => {
-  try {
-    const safePath = validatePath(dirPath)
-    const entries = await fs.promises.readdir(safePath, { withFileTypes: true })
-    return entries.map(entry => ({
-      name: entry.name,
-      isDirectory: entry.isDirectory(),
-      path: path.join(safePath, entry.name),
-    }))
-  } catch {
-    return []
-  }
-})
-
-const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
-
-
-ipc.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
-  try {
-    const safePath = validatePath(dirPath)
-    const readLevel = async (dir: string, depth: number): Promise<DirectoryTreeNode[]> => {
-      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
-      const results = await Promise.all(entries.map(async (entry) => {
-        const entryPath = path.join(dir, entry.name)
-        const isDir = entry.isDirectory()
-        const node: DirectoryTreeNode = {
-          name: entry.name,
-          isDirectory: isDir,
-          path: entryPath,
-        }
-        if (isDir && depth < maxDepth && !TREE_SKIP_DIRS.has(entry.name)) {
-          try {
-            node.children = await readLevel(entryPath, depth + 1)
-          } catch {
-            node.children = []
-          }
-        }
-        return node
-      }))
-      return results
-    }
-    return await readLevel(safePath, 0)
-  } catch {
-    return []
-  }
-})
-
-ipc.handle('fs:readFile', async (_, filePath: string) => {
-  try {
-    const safePath = validatePath(filePath)
-    return await fs.promises.readFile(safePath, 'utf-8')
-  } catch {
-    return null
-  }
-})
-
-ipc.handle('fs:readFileBinary', async (_, filePath: string) => {
-  try {
-    const safePath = validatePath(filePath)
-    const buffer = await fs.promises.readFile(safePath)
-    return buffer.buffer.slice(buffer.byteOffset, buffer.byteOffset + buffer.byteLength)
-  } catch {
-    return null
-  }
-})
-
-ipc.handle('fs:writeFile', async (_, filePath: string, content: string) => {
-  try {
-    const safePath = validatePath(filePath)
-    if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
-    await fs.promises.writeFile(safePath, content, 'utf-8')
-    return true
-  } catch {
-    return false
-  }
-})
-
-// Before the editor overwrites a file someone else changed since the tab
-// loaded it (the member confirmed): keep the disk version, byte for byte, in
-// .backups/<ts>_editor_overwrite/ — or .git/acb-private-backups/ for a file in
-// a private folder (never in that folder's working tree). Plan and rules:
-// shared/editor-disk-state.ts.
-ipc.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, filePath: string) => {
-  try {
-    const root = validatePath(rootPath)
-    const safePath = validatePath(filePath)
-    let bytes: Buffer
-    try {
-      bytes = await fs.promises.readFile(safePath)
-    } catch {
-      return { success: true, skipped: 'missing' as const }
-    }
-    let insideNestedRepo = false
-    for (let dir = path.dirname(safePath); dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
-      if (fs.existsSync(path.join(dir, '.git'))) { insideNestedRepo = true; break }
-    }
-    const cache = readPrivateScopesCache(root)
-    const plan = editorOverwriteBackupPlan({
-      rootPath: root,
-      filePath: safePath,
-      privateFolders: cache ? [...cache.scopes, ...(cache.pendingPublic ?? [])].map(s => s.path) : [],
-      insideNestedRepo,
-      now: new Date(),
-    })
-    if ('skip' in plan) return { success: true, skipped: plan.skip }
-    const backupDir = path.join(plan.privateFolder ? privateBackupsDir(root) : path.join(root, '.backups'), plan.folder)
-    // Inside the company by its real location too (.backups could be a link).
-    const target = validatePath(path.join(backupDir, ...plan.rel.split('/')))
-    await fs.promises.mkdir(path.dirname(target), { recursive: true })
-    await fs.promises.writeFile(target, bytes)
-    const metadata: EditorOverwriteBackupMetadata = {
-      timestamp: new Date().toISOString(),
-      reason: 'editor_overwrite',
-      files: [plan.rel],
-      privateFolder: plan.privateFolder,
-    }
-    await fs.promises.writeFile(path.join(backupDir, '_metadata.json'), JSON.stringify(metadata, null, 2))
-    return { success: true, backupPath: backupDir }
-  } catch (error) {
-    console.error('[editor] backup before overwrite failed:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('fs:createDirectory', async (_, dirPath: string) => {
-  try {
-    const safePath = validatePath(dirPath)
-    if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
-    await fs.promises.mkdir(safePath, { recursive: true })
-    return true
-  } catch {
-    return false
-  }
-})
-
-ipc.handle('fs:exists', async (_, targetPath: string) => {
-  try {
-    const safePath = validatePath(targetPath)
-    await fs.promises.access(safePath)
-    return true
-  } catch {
-    return false
-  }
-})
-
-// Delete file or folder
-ipc.handle('fs:delete', async (_, targetPath: string) => {
-  try {
-    // The entry itself: deleting a link removes the link, never its target.
-    const safePath = validatePath(targetPath, { followFinal: false })
-    const stat = await fs.promises.lstat(safePath)
-    if (stat.isDirectory()) {
-      await fs.promises.rm(safePath, { recursive: true })
-    } else {
-      await fs.promises.unlink(safePath)
-    }
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Rename file or folder
-ipc.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
-  try {
-    const safeOld = validatePath(oldPath, { followFinal: false })
-    const safeNew = validatePath(newPath)
-    const refused = notDownloadedRefusal(safeNew) ?? await reservedRefusal(safeNew)
-    if (refused) return { success: false, error: refused }
-    await fs.promises.rename(safeOld, safeNew)
-    return { success: true, newPath: safeNew }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Move file or folder
-ipc.handle('fs:move', async (_, sourcePath: string, destinationPath: string) => {
-  try {
-    const safeSrc = validatePath(sourcePath, { followFinal: false })
-    const safeDest = validatePath(destinationPath)
-    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
-    if (refused) return { success: false, error: refused }
-    await fs.promises.rename(safeSrc, safeDest)
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Move file from external location (e.g. Finder drop)
-// Source path is NOT validated (external), only destination is validated
-ipc.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationPath: string) => {
-  try {
-    const safeDest = validatePath(destinationPath)
-    const resolved = path.resolve(sourcePath)
-    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
-    if (refused) return { success: false, error: refused }
-
-    try {
-      await fs.promises.rename(resolved, safeDest)
-    } catch (err: unknown) {
-      if (err && typeof err === 'object' && 'code' in err && err.code === 'EXDEV') {
-        // Cross-volume: copy then delete original
-        const stat = await fs.promises.stat(resolved)
-        if (stat.isDirectory()) {
-          await fs.promises.cp(resolved, safeDest, { recursive: true })
-          await fs.promises.rm(resolved, { recursive: true, force: true })
-        } else {
-          await fs.promises.copyFile(resolved, safeDest)
-          await fs.promises.unlink(resolved)
-        }
-      } else {
-        throw err
-      }
-    }
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Copy file or folder
-ipc.handle('fs:copy', async (_, sourcePath: string, destinationPath: string) => {
-  try {
-    const safeSrc = validatePath(sourcePath)
-    const safeDest = validatePath(destinationPath)
-    const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
-    if (refused) return { success: false, error: refused }
-    const stat = await fs.promises.stat(safeSrc)
-    if (stat.isDirectory()) {
-      await fs.promises.cp(safeSrc, safeDest, { recursive: true })
-    } else {
-      await fs.promises.copyFile(safeSrc, safeDest)
-    }
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Get file/folder stats
-ipc.handle('fs:stat', async (_, targetPath: string) => {
-  try {
-    const safePath = validatePath(targetPath)
-    const stat = await fs.promises.stat(safePath)
-    return {
-      success: true,
-      data: {
-        isDirectory: stat.isDirectory(),
-        isFile: stat.isFile(),
-        size: stat.size,
-        mtime: stat.mtime.toISOString(),
-        ctime: stat.ctime.toISOString(),
-      }
-    }
-  } catch {
-    return { success: false }
-  }
-})
-
-// Native drag to external apps (browser, Finder, Slack, etc.)
-ipc.on('fs:startDrag', (event, filePath: string) => {
-  const safePath = validatePath(filePath)
-  event.sender.startDrag({
-    file: safePath,
-    icon: nativeImage.createFromDataURL(
-      'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='
-    ),
-  })
-})
-
-/**
- * Where recursive fs.watch is unavailable (Linux before Node 20): chokidar on
- * the company root, its events fed into the same classifier.
- */
-function chokidarFallback(root: string, onRaw: (type: RawEventType, rel: string) => void, onError: (error: unknown) => void) {
-  const watcher = chokidar.watch(root, {
-    // Same directories as the recursive watcher; non-regular files (sockets
-    // in temporary browser profiles) make fs.watch throw.
-    ignored: (targetPath, stats) =>
-      /(^|[\\/])(\.git|node_modules|\.workspace|\.backups)([\\/])/i.test(targetPath)
-      || !!(stats && !stats.isFile() && !stats.isDirectory()),
-    persistent: true,
-    ignoreInitial: true,
-    depth: 10,
-    followSymlinks: false,
-    ignorePermissionErrors: true,
-  })
-  watcher.on('error', onError)
-  const rel = (p: string) => path.relative(root, p)
-  watcher.on('add', p => onRaw('rename', rel(p)))
-  watcher.on('addDir', p => onRaw('rename', rel(p)))
-  watcher.on('unlink', p => onRaw('rename', rel(p)))
-  watcher.on('unlinkDir', p => onRaw('rename', rel(p)))
-  watcher.on('change', p => onRaw('change', rel(p)))
-  return { close: () => { void watcher.close() } }
-}
-
-function sendFileChanges(changes: FileChange[]): void {
+// The company folder on disk (features/fs): file tree, editor, watchers.
+const files = registerFsIpc(ipc, {
+  paths: allowedRoots,
+  shell: desktopShell,
+  window: appWindow,
+  reservedRefusal,
   // A skill the AI (or anything else) created, changed or removed is scanned
   // afresh by the next skills:list.
-  skillsCache.invalidateForChanges(changes)
-  if (mainWindow && !mainWindow.isDestroyed()) {
-    mainWindow.webContents.send('fs:changes', changes)
-  }
-}
-
-// Watch a company folder: one recursive watcher for the whole company, kept
-// open across department switches. Idempotent; a folder inside an already
-// watched one is covered by it.
-ipc.handle('fs:watch', async (_, rootPath: string) => {
-  try {
-    const safePath = validatePath(rootPath)
-    if (coveringRoot(companyWatchers.keys(), safePath)) return { success: true }
-    // A parent opened after a child replaces the child's watcher.
-    for (const [root, watcher] of companyWatchers) {
-      if (root.startsWith(safePath + path.sep)) {
-        watcher.close()
-        companyWatchers.delete(root)
-      }
-    }
-    const watcher = new CompanyWatcher({ root: safePath, onChanges: sendFileChanges, fallback: chokidarFallback })
-    watcher.start()
-    companyWatchers.set(safePath, watcher)
-    console.log(`[fs-watch] watching ${safePath} (${watcher.mode ?? 'retrying'})`)
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
+  onFileChanges: changes => skillsCache.invalidateForChanges(changes),
 })
-
-// Stop watching a company folder (the company was closed or switched).
-ipc.handle('fs:unwatch', async (_, rootPath: string) => {
-  try {
-    const safePath = validatePath(rootPath)
-    const watcher = companyWatchers.get(safePath)
-    if (watcher) {
-      watcher.close()
-      companyWatchers.delete(safePath)
-    }
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
+app.on('before-quit', () => files.closeWatchers())
 
 registerEnvIpc(ipc, { paths: allowedRoots })
 

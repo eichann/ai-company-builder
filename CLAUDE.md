@@ -312,7 +312,9 @@ domains); what has moved so far:
   on `electron/features/**`, `electron/services/**`, `electron/ipc/**`).
   Done: `settings` (config:*, codex:status), `env` (env:*), `backups`
   (backup:*), `auth` (auth:*, api:*), `chat-history` (chatHistory:*,
-  handoff:*), `agent-interactions` (agent-interaction:*, tool approvals).
+  handoff:*), `agent-interactions` (agent-interaction:*, tool approvals),
+  `fs` (fs:*, dialog:selectDirectory, editor:backupBeforeOverwrite; the
+  company watchers in `fs/watchers.ts`).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the

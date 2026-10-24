@@ -126,11 +126,11 @@
         "params": "url: string"
       },
       "dialog:selectDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": ""
       },
       "editor:backupBeforeOverwrite": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string, filePath: string"
       },
       "env:read": {
@@ -142,67 +142,67 @@
         "params": "rootPath: string, vars: EnvVars"
       },
       "fs:copy": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:createDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:delete": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:exists": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:move": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:moveFromExternal": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "sourcePath: string, destinationPath: string"
       },
       "fs:readDirectory": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:readDirectoryTree": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string, maxDepth: number = 2"
       },
       "fs:readFile": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       },
       "fs:readFileBinary": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       },
       "fs:registerAllowedRoot": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "dirPath: string"
       },
       "fs:rename": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "oldPath: string, newPath: string"
       },
       "fs:stat": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "targetPath: string"
       },
       "fs:unwatch": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string"
       },
       "fs:watch": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "rootPath: string"
       },
       "fs:writeFile": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string, content: string"
       },
       "git:commitFileDiff": {
@@ -376,7 +376,7 @@
         "params": "companyId: string, session: ChatSession"
       },
       "fs:startDrag": {
-        "file": "main.ts",
+        "file": "features/fs/ipc.ts",
         "params": "filePath: string"
       }
     },
@@ -391,7 +391,7 @@
         "features/chat-history/ipc.ts"
       ],
       "fs:changes": [
-        "main.ts"
+        "features/fs/ipc.ts"
       ],
       "handoff:changed": [
         "main.ts"
