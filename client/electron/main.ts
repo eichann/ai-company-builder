@@ -45,6 +45,7 @@ import { registerGitHistoryIpc } from './features/git-history/ipc'
 import { createAppGit } from './services/app-git'
 import { createCommitMessages } from './services/commit-messages'
 import { createAgentEventRecorder } from './services/agent-events'
+import { createAgentEventSender } from './services/agent-event-sender'
 import os from 'node:os'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -171,9 +172,6 @@ const agentInteractions = new AgentInteractions((owner, event, request) => {
 // The send stays unguarded, as it always was: a destroyed window rejects the approval.
 const toolApprovals = createToolApprovals(request => mainWindow?.webContents.send('tool-approval-request', request))
 registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: toolApprovals })
-// The AI action log (monitoring M1): in memory + the console for now.
-const agentEvents = createAgentEventRecorder({ home: os.homedir(), appDataDirs: [app.getPath('userData')] })
-
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
 const handoffStore = new HandoffStore(path.join(app.getPath('userData'), 'chat-handoffs'), localHistoryStore)
@@ -214,13 +212,27 @@ const writeAccessStore = createWriteAccessStore({
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
+// The AI action log (monitoring M1): the recorder (memory + console) and its
+// sender, which queues per signed-in account and company under
+// <userData>/agent-events and posts to the server (services/agent-event-sender.ts).
+const agentEventSender = createAgentEventSender({
+  dir: () => path.join(app.getPath('userData'), 'agent-events'),
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  userId: session.userId,
+})
+app.on('will-quit', () => agentEventSender.flushSync())
+const agentEvents = createAgentEventRecorder({ home: os.homedir(), appDataDirs: [app.getPath('userData')], sinks: [agentEventSender] })
+
 registerAuthIpc(ipc, {
   session,
   serverUrl: getServerApiUrl,
   onSignedOut: () => {
     writeAccessStore.clear()
     companyFilesApi.clear()
+    agentEventSender.signedOut()
   },
+  onSignedIn: () => agentEventSender.sessionStarted(),
 })
 
 // The app's git (binary, credentials, guarded configuration) and sync's

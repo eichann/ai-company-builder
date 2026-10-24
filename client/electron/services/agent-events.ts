@@ -3,17 +3,21 @@
 // chat server's `onToolEvent`. For now it keeps the latest events in memory
 // and writes one debug line per event (metadata only — the event holds no
 // content). Sending to the server (batched, kept on disk while offline) is
-// the next step: it plugs in as a `sink`.
+// a `sink`: services/agent-event-sender.ts.
 
 import type { AgentToolEvent, ToolTarget } from '../../shared/agent-events'
 
 export interface AgentEventSink {
   /** Must not throw; called once per event, in order. */
   add(event: AgentToolEvent): void
+  /** A chat turn ended (a good moment to send). Must not throw. */
+  turnEnded?(): void
 }
 
 export interface AgentEventRecorder {
   record(event: AgentToolEvent): void
+  /** A chat turn's response is over (the chat server's onChatActivity). */
+  turnEnded(): void
   /** The latest events, oldest first (bounded). */
   recent(): AgentToolEvent[]
   /** Folders an event marks as secret places (the member's home, the app's data). */
@@ -69,6 +73,13 @@ export function createAgentEventRecorder(options: AgentEventRecorderOptions = {}
         for (const sink of sinks) sink.add(event)
       } catch (error) {
         if (!warned) { warned = true; console.warn('[agent-events] recording failed:', error instanceof Error ? error.message : 'unknown') }
+      }
+    },
+    turnEnded() {
+      for (const sink of sinks) {
+        try { sink.turnEnded?.() } catch (error) {
+          if (!warned) { warned = true; console.warn('[agent-events] turn end failed:', error instanceof Error ? error.message : 'unknown') }
+        }
       }
     },
     recent: () => [...ring],

@@ -54,7 +54,11 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     getClaudeCodeCliPath: deps.claudeCli.path,
     getShellEnv: deps.shellEnv.env,
     buildSystemPrompt,
-    onChatActivity: (token, active) => deps.handoffs.setBusy(token, active),
+    onChatActivity: (token, active) => {
+      deps.handoffs.setBusy(token, active)
+      // A response is over: the AI action log goes out shortly after.
+      if (!active) deps.agentEvents.turnEnded()
+    },
     getWriteGuard: async (companyId, root) => {
       const [access] = await Promise.all([
         deps.writeAccess.refresh(companyId, { timeoutMs: 3000 }),

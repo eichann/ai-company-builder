@@ -11,6 +11,7 @@
 // tests (tests/ui/skill-layout.spec.ts) act as the AI / a teammate and see
 // which calls the screen made.
 import { createRoot } from 'react-dom/client'
+import { markAgentLogNoticeSeen } from '../src/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
@@ -22,6 +23,8 @@ const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const downloadOffline = params.get('download') === 'offline'
 try { localStorage.clear() } catch { /* preview only */ }
+// The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
+if (params.get('notice') !== '1') markAgentLogNoticeSeen('u_me')
 
 const ROOT = '/Users/demo/会社'
 const COMPANY = 'demo'

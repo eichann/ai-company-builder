@@ -224,7 +224,7 @@ Tracker and target rules `client/shared/agent-events.ts` (pure); the event shape
 wire contract in `shared/types/agent-events.ts`, re-exported (the server's side:
 `agent-events.md`); tests `client/tests/agent-events.test.ts` (every tracker event passes the
 server's `parseAgentToolEvent` unchanged), `client/tests/agent-tool-events.test.ts`. Sending to
-the server is not built yet.
+the server: `agent-events.md` ("Sending from the app").
 
 - **One event per tool call** (`AgentToolEvent`, `version: 1`): id, callId (tool_use_id / Codex
   item id), at, durationMs, conversationId (appSessionId), turnId, companyId, department (the
@@ -262,7 +262,7 @@ the server is not built yet.
   item status; titles, one-shots and hand-off are not logged.
 - Recorder `electron/services/agent-events.ts` (created in `main.ts`, injected into
   `features/chat/server-config.ts`): a bounded ring (500) and one `[agent-events]` console line
-  per event; `sinks` is the seam for sending to the server.
+  per event; its sink `services/agent-event-sender.ts` sends to the server (`agent-events.md`).
 - **Turn abort handles** (`chat-turns.ts` `track` / `abort(filter, reason)` / `abortAll`, returned
   by `startChatServer` as `turns`): every response runs under an AbortController that follows the
   request's signal (the renderer's stop) and goes into streamText, so each agent stops its usual

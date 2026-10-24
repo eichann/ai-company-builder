@@ -12,6 +12,8 @@ export interface AuthDeps {
   serverUrl: () => string
   /** After sign-out (also offline): drop everything cached for the old session. */
   onSignedOut: () => void
+  /** The server confirmed who is signed in (/api/me, after sign-in and when the session is restored). */
+  onSignedIn?: (userId: string) => void
 }
 
 function extractResponseMessageFromJson(data: unknown): string | undefined {
@@ -24,7 +26,7 @@ function extractResponseMessageFromJson(data: unknown): string | undefined {
   return undefined
 }
 
-export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSignedOut }: AuthDeps): void {
+export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSignedOut, onSignedIn }: AuthDeps): void {
   async function parseJsonResponseSafe(response: Response): Promise<{
     json: unknown | null
     nonJsonError?: string
@@ -130,13 +132,14 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
 
   ipc.handle('auth:getSession', async () => {
     try {
-      if (session.cookies().length === 0) {
+      const cookies = session.cookies()
+      if (cookies.length === 0) {
         return { success: false, user: null }
       }
 
       const response = await fetch(`${serverUrl()}/api/me`, {
         headers: {
-          'Cookie': session.cookies().join('; '),
+          'Cookie': cookies.join('; '),
         },
       })
 
@@ -146,6 +149,11 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
 
       const data = await response.json()
       if (data.success && data.data) {
+        // Only for the cookies this request carried (a sign-in meanwhile replaced them).
+        if (typeof data.data.id === 'string' && session.cookies() === cookies) {
+          session.setUserId(data.data.id)
+          try { onSignedIn?.(data.data.id) } catch (error) { console.warn('[auth] after sign-in:', error instanceof Error ? error.message : 'unknown') }
+        }
         return { success: true, user: data.data }
       }
       return { success: false, user: null }
