@@ -1,6 +1,6 @@
 // The member's own Claude Code CLI: where it is, and whether the app can use
-// it (the app never runs the SDK's bundled CLI — CLAUDE.md "Claude Code agent
-// stack").
+// it (the app never runs the SDK's bundled CLI — .claude/rules/chat-and-agents.md
+// "Claude Code agent stack").
 
 import fs from 'fs'
 import os from 'os'

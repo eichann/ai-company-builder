@@ -7,7 +7,7 @@
 // real bare repositories with several members.
 //
 // The step list and the guards each piece of defensive code stands for are
-// documented under "Architecture: Client Sync (git:sync)" in CLAUDE.md.
+// documented in .claude/rules/sync.md and .claude/rules/sync-guards.md.
 
 import fs from 'fs'
 import path from 'path'

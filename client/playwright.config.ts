@@ -7,7 +7,7 @@
 //   npx playwright test                 # build, serve, run everything
 //   npx playwright test chat-composer   # one spec file
 //
-// See CLAUDE.md "Renderer UI tests".
+// See .claude/rules/testing.md "Renderer UI tests".
 import { defineConfig, devices } from '@playwright/test'
 
 const PORT = 4179

@@ -6,8 +6,8 @@
 //
 // Every scenario in the first block runs for a full clone and for a
 // partial-clone member (first setup with the department picked), and ends
-// with settleAndCheck(world). See "Sparse checkout" in the guards table of
-// CLAUDE.md.
+// with settleAndCheck(world). See .claude/rules/download-choices.md and
+// the sparse guards in .claude/rules/sync-guards.md.
 
 import { describe, test, type TestContext } from 'node:test'
 import assert from 'node:assert/strict'

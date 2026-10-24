@@ -15,7 +15,7 @@
 // (electron/ipc/registrar.ts), so a handler's parameters and result must
 // match its channel here. tests/ipc-contract.test.ts checks at run time that
 // every channel here has exactly one handler and one preload caller, and
-// nothing else exists. To add a channel: CLAUDE.md "How to add an IPC channel".
+// nothing else exists. To add a channel: .claude/rules/ipc-and-main-process.md.
 //
 // Types only: nothing here runs, and nothing here depends on Electron, Node
 // or React — a different shell (Tauri) implements the same contract.

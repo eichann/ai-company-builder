@@ -2,7 +2,7 @@
 // not edit. The hook checks every commit in the pushed range, so sync must
 // rewrite the unpushed commits (the same recovery as PROTECTED_CONFIG): ask,
 // back up the member's version, put those paths back to the server version,
-// push the rest. See "Non-Negotiable Guards" in CLAUDE.md.
+// push the rest. See .claude/rules/sync-guards.md.
 //
 // The worlds run the real push checker: World.setScopes hands it the
 // permission snapshot git-http would write for each member's push.

@@ -1,7 +1,6 @@
 // The app's git: which binary (dugite's bundled git, else the system git),
 // HTTPS credentials through GIT_ASKPASS with the session token, and the
-// guarded configuration of sync/git-factory.ts (CLAUDE.md "Non-Negotiable
-// Guards"). Every git the app runs comes from here.
+// guarded configuration of sync/git-factory.ts (.claude/rules/sync-guards.md). Every git the app runs comes from here.
 
 import { execFileSync } from 'child_process'
 import fs from 'fs'

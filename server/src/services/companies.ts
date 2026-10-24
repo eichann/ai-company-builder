@@ -3,7 +3,7 @@
  * departments, permission scopes, seeded folders), renaming it, and who
  * belongs to it with which role.
  *
- * Role rules (CLAUDE.md "Accounts and roles"): only owners grant owner/admin;
+ * Role rules (.claude/rules/server.md "Accounts and roles"): only owners grant owner/admin;
  * the last owner can never be demoted; removing a member — or promoting them
  * to owner/admin — deletes every rule naming them in the company.
  */
@@ -22,7 +22,7 @@ import { ok, refuse, type Outcome } from './outcome'
 
 // Default departments for new companies
 // Folder names are intentionally the same as the Japanese department names —
-// the department folder pattern allows Japanese (see CLAUDE.md naming rules)
+// the department folder pattern allows Japanese (shared/core/names.ts)
 export const DEFAULT_DEPARTMENTS = [
   { name: '営業部', nameEn: 'Sales', folder: '営業部', icon: 'Storefront', color: '#3b82f6', description: '顧客対応、提案書作成、売上管理' },
   { name: '経理部', nameEn: 'Accounting', folder: '経理部', icon: 'ChartPie', color: '#10b981', description: '経費処理、月次決算、予算管理' },

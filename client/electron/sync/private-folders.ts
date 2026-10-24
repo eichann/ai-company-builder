@@ -10,8 +10,8 @@
 //
 // On disk a readable private folder is a clone of its scope repository at its
 // path inside the company checkout — a nested repository. This module keeps
-// that arrangement safe; git-sync.ts drives it (see "Private Folders (client
-// sync, stage 3b)" in CLAUDE.md):
+// that arrangement safe; git-sync.ts drives it (see
+// .claude/rules/private-folders-client.md):
 //
 //  - the last /me/scopes answer (readable folders only) is cached in the
 //    company's .git (acb-private-scopes.json): offline syncs and the chat

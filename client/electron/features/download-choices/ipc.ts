@@ -1,4 +1,4 @@
-// What this computer downloads (CLAUDE.md "Folder-Level Download Choices"):
+// What this computer downloads (.claude/rules/download-choices.md):
 // the persisted exclusions, applying them (a download in a partial clone,
 // reported as sparse:progress; readable private folders follow at once),
 // uncommitted changes in folders about to be left out, and folder sizes for

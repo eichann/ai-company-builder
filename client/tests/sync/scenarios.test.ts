@@ -1,5 +1,5 @@
 // Multi-member git:sync scenarios. Each scenario maps to a row of the
-// "Non-Negotiable Guards" table in CLAUDE.md (or to a documented step of the
+// guards in .claude/rules/sync-guards.md (or to a documented step of the
 // sync flow), runs the real extracted sync against a real bare repository
 // with the production pre-receive hook, and ends by settling (everyone syncs
 // twice) and checking the invariants in ../sync-harness/invariants.ts.

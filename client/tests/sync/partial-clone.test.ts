@@ -4,7 +4,7 @@
 // else exists as commits and trees only and is fetched lazily when git needs
 // it. Every sync guard has to keep working with blobs missing locally, and a
 // member must never end up downloading the departments they did not pick
-// just by syncing. See "First setup" and the guards table in CLAUDE.md.
+// just by syncing. See .claude/rules/download-choices.md and sync-guards.md.
 //
 // Partial members are created with World.addPartialMember, which runs the
 // app's own first setup (electron/sync/first-setup.ts) over file:// (git

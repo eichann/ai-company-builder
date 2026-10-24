@@ -4,7 +4,7 @@
 // teammates keep there; a file written at e.g. 営業部/提案書.md lands on the
 // path of a teammate's file the member never had. Sync must never share such
 // a file over the teammate's: it is held back in .backups/<ts>_outside_checkout/
-// (reason `outside_checkout`) and reported. See the guards table in CLAUDE.md.
+// (reason `outside_checkout`) and reported. See .claude/rules/sync-guards.md.
 //
 // Every scenario runs for a full clone with the department excluded in
 // settings and for a partial-clone member who did not pick it, and ends with

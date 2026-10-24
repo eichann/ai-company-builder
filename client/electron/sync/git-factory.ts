@@ -1,8 +1,7 @@
 // The one place that decides how the desktop app invokes git. main.ts's
 // createGit and the sync test harness both build their SimpleGit through
 // here, so the harness exercises exactly the configuration members run with —
-// every option below is a row of the "Non-Negotiable Guards" table in
-// CLAUDE.md.
+// every option below is a guard in .claude/rules/sync-guards.md.
 
 import fs from 'node:fs'
 import path from 'node:path'

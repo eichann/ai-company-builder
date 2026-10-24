@@ -1,7 +1,7 @@
 // Private folders (permission plan stage 3b): one sync button syncs the
 // company repository and then every private folder the member may read — its
 // own scope repository, cloned at its path inside the company folder.
-// See "Private Folders (client sync, stage 3b)" in CLAUDE.md.
+// See .claude/rules/private-folders-client.md.
 //
 // The worlds run the real push checker for both repositories: the company's
 // snapshot reserves every private folder's path ([RESERVED_PATH]), a scope

@@ -1,5 +1,5 @@
 /**
- * One file watcher per company folder (CLAUDE.md "File watching").
+ * One file watcher per company folder (.claude/rules/files-and-editor.md).
  *
  * A single native recursive `fs.watch` on the company root (FSEvents on macOS,
  * ReadDirectoryChangesW on Windows, inotify on Linux with Node ≥ 20), opened
