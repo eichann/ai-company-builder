@@ -2,15 +2,15 @@ import { Hono } from 'hono'
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
-import Database from 'better-sqlite3'
 import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
-import { AUTH_DB_PATH, REPOS_DIR } from '../lib/config'
+import { REPOS_DIR } from '../lib/config'
+import { services } from '../composition'
 import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
-import { ensureCompanyScope, getMemberRole, listScopesWithRules, managedDepartmentIds } from '../lib/permission-store'
+import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
 import { canReadPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import {
   beginCompanyPush,
@@ -22,10 +22,6 @@ import {
 } from '../lib/private-folders'
 
 export const gitHttpRoute = new Hono()
-
-// Auth DB for direct session lookup (Better Auth signs cookies, so we can't
-// use auth.api.getSession with raw tokens from Basic Auth)
-const authDb = new Database(AUTH_DB_PATH)
 
 // ============================================================================
 // Authentication: Extract user from Basic Auth header (session token as password)
@@ -43,27 +39,9 @@ function authenticateGitRequest(c: { req: { raw: Request; header: (name: string)
 
     if (!token) return null
 
-    // Look up session directly in auth.sqlite
-    const session = authDb.prepare(
-      'SELECT userId FROM session WHERE token = ? AND expiresAt > ?'
-    ).get(token, new Date().toISOString()) as { userId: string } | undefined
-
-    if (!session) return null
-
-    // Get user from auth.sqlite
-    const user = authDb.prepare(
-      'SELECT id, email, name, image, emailVerified FROM user WHERE id = ?'
-    ).get(session.userId) as { id: string; email: string; name: string | null; image: string | null; emailVerified: boolean } | undefined
-
-    if (!user) return null
-
-    return {
-      id: user.id,
-      email: user.email,
-      name: user.name ?? null,
-      image: user.image ?? null,
-      emailVerified: !!user.emailVerified,
-    }
+    // The session's user, looked up directly in auth.sqlite (Better Auth signs
+    // cookies, so auth.api.getSession cannot take a raw token from Basic Auth)
+    return services.accounts.bySessionToken(token)
   }
 
   return null
@@ -72,10 +50,7 @@ function authenticateGitRequest(c: { req: { raw: Request; header: (name: string)
 // Check if user has access to the company. Returns the member's role for that
 // company (owner / admin / member), or null when the user is not a member.
 function authorizeForCompany(userId: string, companyId: string): string | null {
-  const membership = db.prepare(
-    'SELECT role FROM memberships WHERE user_id = ? AND company_id = ?'
-  ).get(userId, companyId) as { role: string } | undefined
-  return membership ? membership.role : null
+  return services.access.memberOf(companyId, userId)?.role ?? null
 }
 
 // Sanitize company ID to prevent path traversal
@@ -476,11 +451,7 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
     const role = getMemberRole(db, companyId, userId)
     // Department folders this pusher manages: instruction files (CLAUDE.md,
     // AGENTS.md ...) inside them are theirs to change.
-    const managed = new Set(managedDepartmentIds(db, companyId, userId))
-    const managedFolders = managed.size === 0 ? [] : (db.prepare(`SELECT id, folder FROM departments WHERE company_id = ?`)
-      .all(companyId) as Array<{ id: string; folder: string }>)
-      .filter(d => managed.has(d.id))
-      .map(d => d.folder.normalize('NFC'))
+    const managedFolders = services.permissionViews.managedFolders(companyId, userId)
     return preparePushCheck({
       companyId,
       pusher: { id: userId, role },

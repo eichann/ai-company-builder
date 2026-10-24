@@ -29,6 +29,7 @@ import {
   type ScopeWithRules,
   type SubjectType,
 } from '../../shared/core/permissions'
+import type { ScopeRecord } from '../ports/scopes'
 
 type Conn = Database.Database
 
@@ -330,13 +331,7 @@ export function replaceDepartmentManagers(conn: Conn, departmentId: string, user
 //   department scopes stay (they follow the company / departments tables).
 // ----------------------------------------------------------------------------
 
-export interface ScopeRecord {
-  id: string
-  companyId: string
-  path: string
-  kind: ScopeKind
-  departmentId: string | null
-}
+export type { ScopeRecord }
 
 function toScopeRecord(row: ScopeRow): ScopeRecord {
   return { id: row.id, companyId: row.company_id, path: row.path, kind: row.kind, departmentId: row.department_id }

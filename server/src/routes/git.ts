@@ -1,7 +1,5 @@
 import { Hono } from 'hono'
 import { existsSync, mkdirSync } from 'fs'
-import { join } from 'path'
-import { db } from '../db'
 import { getUserFromRequest } from '../lib/auth'
 import { REPOS_DIR } from '../lib/config'
 import {
@@ -9,6 +7,7 @@ import {
   configureBareRepo,
   installPreReceiveHook,
 } from '../lib/git-server'
+import { services } from '../composition'
 
 /**
  * /api/git — what the desktop app needs to find its company's repository.
@@ -53,12 +52,10 @@ gitRoute.get('/repos/:companyId', async (c) => {
   const notFound = () => c.json({ success: false, error: 'Repository not found' }, 404)
 
   // Not a member: the same answer as for a repository that does not exist.
-  const membership = db.prepare('SELECT role FROM memberships WHERE user_id = ? AND company_id = ?')
-    .get(user.id, companyId)
+  const membership = services.access.memberOf(companyId, user.id)
   if (!membership || sanitizedId !== companyId) return notFound()
 
-  const repoPath = join(REPOS_DIR, `${sanitizedId}.git`)
-  if (!existsSync(repoPath)) return notFound()
+  if (!services.repoStore.companyRepoExists(sanitizedId)) return notFound()
 
   // Build the git remote URL. Without PUBLIC_URL, mirror the scheme the
   // client actually reached us with — hardcoding https breaks plain-HTTP

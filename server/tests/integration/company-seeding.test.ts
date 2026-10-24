@@ -78,7 +78,8 @@ vi.mock('../../src/lib/auth', () => ({
 import { execFileSync } from 'child_process'
 import { Hono } from 'hono'
 import { initDatabase } from '../../src/db'
-import { companiesRoute, setSeedGitTimeoutsForTests } from '../../src/routes/companies'
+import { companiesRoute } from '../../src/routes/companies'
+import { setSeedGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { departmentsRoute } from '../../src/routes/departments'
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 })

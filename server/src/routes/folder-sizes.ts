@@ -8,9 +8,8 @@
  * member's clone does not already have (every member has every tree).
  */
 import { Hono } from 'hono'
-import { db } from '../db'
 import { getUserFromRequest } from '../lib/auth'
-import { getMemberRole } from '../lib/permission-store'
+import { services } from '../composition'
 import { folderSizes } from '../lib/folder-sizes'
 
 export const folderSizesRoute = new Hono()
@@ -28,7 +27,7 @@ folderSizesRoute.get('/', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401)
   const companyId = c.req.param('companyId')
   if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  if (!getMemberRole(db, companyId, user.id)) return c.json({ error: 'Company not found or access denied' }, 404)
+  if (!services.access.memberOf(companyId, user.id)) return c.json({ error: 'Company not found or access denied' }, 404)
 
   const folder = c.req.query('path') ?? ''
   const measure = c.req.queries('measure') ?? []

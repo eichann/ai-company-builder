@@ -35,6 +35,7 @@ import { gitAsync } from './git-exec'
 import { listScopesWithRules } from './permission-store'
 import type { ScopeWithRules } from '../../shared/core/permissions'
 import { nameKey } from '../../shared/core/paths'
+import type { OrphanedScope } from '../ports/orphaned-scopes'
 
 // Output limit of the git calls here (rev-parse, one directory's ls-tree).
 const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
@@ -102,11 +103,7 @@ async function missingPaths(bare: string, commit: string, paths: string[]): Prom
   return missing
 }
 
-export interface OrphanedScope {
-  scope: ScopeWithRules
-  /** When the folder was first noticed missing (ISO 8601). */
-  since: string
-}
+export type { OrphanedScope }
 
 interface CacheEntry {
   key: string

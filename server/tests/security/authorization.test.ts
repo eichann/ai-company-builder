@@ -10,13 +10,17 @@ import { join } from 'path'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
+/** A 403 in the handler, or a check of services/access.ts that refuses with 403. */
+const FORBIDDEN = /403|access\.fullAccessMember\(|requireFullAccess\(|requireOwner\(/
+
 describe('Role-based authorization', () => {
   it('/api/git has no repository administration endpoints; repo info checks membership and returns no path', () => {
     const content = readFileSync(join(ROUTES_DIR, 'git.ts'), 'utf-8')
     const handlers = [...content.matchAll(/gitRoute\.(get|post|put|patch|delete)\('([^']+)'/g)].map(m => `${m[1]} ${m[2]}`)
     expect(handlers).toEqual(['get /repos/:companyId'])
     const body = content.slice(content.indexOf("gitRoute.get('/repos/:companyId'"))
-    expect(body).toMatch(/FROM memberships WHERE user_id = \? AND company_id = \?/)
+    // Membership through the access policy (services/access.ts → memberships)
+    expect(body).toMatch(/access\.memberOf\(companyId, user\.id\)/)
     expect(body).not.toMatch(/\bpath: repoPath\b|sshUrl,/)
   })
 
@@ -39,8 +43,8 @@ describe('Role-based authorization', () => {
       const handlerBody = content.slice(idx, idx + 1500)
       expect(
         handlerBody,
-        `${pattern} must call canEditDepartments or check role`
-      ).toMatch(/canEditDepartments|membership\.role/)
+        `${pattern} must check the owner/admin role`
+      ).toMatch(FORBIDDEN)
     }
   })
 
@@ -61,9 +65,10 @@ describe('Role-based authorization', () => {
     expect(postBody).toMatch(/owner.*admin|admin.*owner/)
     expect(deleteBody).toMatch(/owner.*admin|admin.*owner/)
 
-    // Both must return 403
-    expect(postBody).toMatch(/403/)
-    expect(deleteBody).toMatch(/403/)
+    // Both must answer 403: directly, or through the access policy's
+    // 403 checks (services/access.ts, covered in tests/unit/access-policy.test.ts)
+    expect(postBody).toMatch(FORBIDDEN)
+    expect(deleteBody).toMatch(FORBIDDEN)
   })
 
   it('invitation management must check owner/admin role', () => {
@@ -82,7 +87,7 @@ describe('Role-based authorization', () => {
 
       const body = content.slice(idx, idx + 1500)
       expect(body, `${handler} must check owner/admin role`).toMatch(/owner.*admin|admin.*owner/)
-      expect(body, `${handler} must return 403 for unauthorized`).toMatch(/403/)
+      expect(body, `${handler} must return 403 for unauthorized`).toMatch(FORBIDDEN)
     }
   })
 
@@ -91,8 +96,8 @@ describe('Role-based authorization', () => {
 
     // Must have authorizeForCompany function
     expect(content).toMatch(/authorizeForCompany/)
-    // Must check memberships table
-    expect(content).toMatch(/memberships/)
+    // Must check the membership (the access policy reads the memberships table)
+    expect(content).toMatch(/access\.memberOf\(companyId, userId\)/)
     // Must return 403 for non-members
     expect(content).toMatch(/Forbidden.*403|403.*Forbidden/)
   })
