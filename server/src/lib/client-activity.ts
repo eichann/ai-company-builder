@@ -28,6 +28,7 @@
  */
 import { db, now } from '../db'
 import { compareClientVersions, parseClientVersion, type ParsedClientVersion } from './client-version'
+import type { ClientActivityRow } from '../ports/client-activity'
 
 export const CLIENT_VERSION_HEADER = 'X-ACB-Client-Version'
 export const CLIENT_PLATFORM_HEADER = 'X-ACB-Client-Platform'
@@ -37,16 +38,7 @@ export const THROTTLE_MS = 60_000
 /** seen: any identified request; fetch: upload-pack completed; push: push accepted. */
 export type ActivityKind = 'seen' | 'fetch' | 'push'
 
-export interface ClientActivityRow {
-  user_id: string
-  company_id: string
-  client_version: string | null
-  client_platform: string | null
-  last_seen_at: string | null
-  last_fetch_at: string | null
-  last_push_at: string | null
-  updated_at: string
-}
+export type { ClientActivityRow }
 
 /**
  * Header values are client-controlled: keep them short and printable. Returns

@@ -1,163 +1,93 @@
 import { Hono } from 'hono'
-import { db, generateId, now } from '../db'
-import { getUserFromRequest, getUsersByIds } from '../lib/auth'
-import { randomBytes } from 'crypto'
-import { consumeInvitation } from '../lib/invitation-signup'
+import { getUserFromRequest } from '../lib/auth'
 import { toCamelCase } from '../lib/camel-case'
+import { services } from '../composition'
+import { MAX_INVITATION_DAYS, MIN_INVITATION_DAYS } from '../services/invitations'
+import { refusal } from './respond'
+
+export { MAX_INVITATION_DAYS, MIN_INVITATION_DAYS }
 
 export const invitationsRoute = new Hono()
+const { access, invitations } = services
 
-/** An invitation link is valid for an integer number of days in this range (default 7). */
-export const MIN_INVITATION_DAYS = 1
-export const MAX_INVITATION_DAYS = 30
-
-// Generate a secure token for invitation links
-function generateToken(): string {
-  return randomBytes(32).toString('hex')
-}
-
-// List invitations for a company
+// List invitations for a company (owner/admin)
 invitationsRoute.get('/companies/:companyId/invitations', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const companyId = c.req.param('companyId')
-
-  // Check if user is admin/owner of this company
-  const userMembership = db.prepare(`
-    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
-  `).get(user.id, companyId) as { role: string } | undefined
-
-  if (!userMembership || !['owner', 'admin'].includes(userMembership.role)) {
-    return c.json({ error: 'Only owners and admins can view invitations' }, 403)
-  }
-
-  const invitations = db.prepare(`
-    SELECT i.*, c.name as company_name
-    FROM invitations i
-    JOIN companies c ON i.company_id = c.id
-    WHERE i.company_id = ?
-    ORDER BY i.created_at DESC
-  `).all(companyId) as Record<string, unknown>[]
-
-  // Enrich with user info for created_by and used_by
-  const userIds = invitations
-    .flatMap(inv => [inv.created_by as string, inv.used_by as string | null])
-    .filter((id): id is string => !!id)
-  const usersMap = getUsersByIds([...new Set(userIds)])
+  const actor = access.fullAccessMember(c.req.param('companyId'), user.id, 'Only owners and admins can view invitations')
+  if (!actor.ok) return refusal(c, actor)
 
   return c.json({
     success: true,
-    data: invitations.map(inv => {
-      const createdByUser = usersMap.get(inv.created_by as string)
-      const usedByUser = inv.used_by ? usersMap.get(inv.used_by as string) : null
-      return {
-        ...toCamelCase(inv),
-        isExpired: new Date(inv.expires_at as string) < new Date(),
-        isUsed: !!inv.used_by,
-        createdByName: createdByUser?.name ?? null,
-        createdByEmail: createdByUser?.email ?? null,
-        usedByName: usedByUser?.name ?? null,
-        usedByEmail: usedByUser?.email ?? null,
-      }
-    }),
+    data: invitations.list(actor.value).map(item => ({
+      ...toCamelCase(item.invitation),
+      isExpired: item.isExpired,
+      isUsed: item.isUsed,
+      createdByName: item.createdBy?.name ?? null,
+      createdByEmail: item.createdBy?.email ?? null,
+      usedByName: item.usedBy?.name ?? null,
+      usedByEmail: item.usedBy?.email ?? null,
+    })),
   })
 })
 
-// Create a new invitation link
+// Create a new invitation link (owner/admin; admin links owners only)
 invitationsRoute.post('/companies/:companyId/invitations', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const companyId = c.req.param('companyId')
+  const actor = access.fullAccessMember(c.req.param('companyId'), user.id, 'Only owners and admins can create invitations')
+  if (!actor.ok) return refusal(c, actor)
 
-  // Check if user is admin/owner of this company
-  const userMembership = db.prepare(`
-    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
-  `).get(user.id, companyId) as { role: string } | undefined
-
-  if (!userMembership || !['owner', 'admin'].includes(userMembership.role)) {
-    return c.json({ error: 'Only owners and admins can create invitations' }, 403)
-  }
-
-  // Get company details
-  const company = db.prepare('SELECT * FROM companies WHERE id = ?').get(companyId) as { name: string } | undefined
-  if (!company) {
-    return c.json({ error: 'Company not found' }, 404)
-  }
+  const company = invitations.company(actor.value)
+  if (!company.ok) return refusal(c, company)
 
   const body = await c.req.json().catch(() => ({}))
   const { role = 'member', expiresInDays = 7 } = (body ?? {}) as { role?: unknown; expiresInDays?: unknown }
 
-  if (typeof role !== 'string' || !['admin', 'member'].includes(role)) {
+  if (role !== 'admin' && role !== 'member') {
     return c.json({ error: 'Invalid role. Must be "admin" or "member"' }, 400)
   }
-  // Only owners hand out admin (as everywhere else roles are granted).
-  if (role === 'admin' && userMembership.role !== 'owner') {
-    return c.json({ error: 'Only owners can invite admins' }, 403)
-  }
+  const allowed = invitations.mayInvite(actor.value, role)
+  if (!allowed.ok) return refusal(c, allowed)
   if (typeof expiresInDays !== 'number' || !Number.isInteger(expiresInDays)
     || expiresInDays < MIN_INVITATION_DAYS || expiresInDays > MAX_INVITATION_DAYS) {
     return c.json({ error: `expiresInDays must be an integer from ${MIN_INVITATION_DAYS} to ${MAX_INVITATION_DAYS}` }, 400)
   }
 
-  const id = generateId()
-  const token = generateToken()
-  const timestamp = now()
-  const expiresAt = new Date(Date.now() + expiresInDays * 24 * 60 * 60 * 1000).toISOString()
-
-  db.prepare(`
-    INSERT INTO invitations (id, company_id, token, role, created_by, expires_at, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(id, companyId, token, role, user.id, expiresAt, timestamp)
+  const created = invitations.create(actor.value, role, expiresInDays)
 
   return c.json({
     success: true,
     data: {
-      id,
-      token,
-      companyId,
-      companyName: company.name,
-      role,
-      expiresAt,
-      createdAt: timestamp,
+      id: created.id,
+      token: created.token,
+      companyId: created.companyId,
+      companyName: company.value.name,
+      role: created.role,
+      expiresAt: created.expiresAt,
+      createdAt: created.createdAt,
     },
   }, 201)
 })
 
-// Delete an invitation
+// Delete an invitation (owner/admin)
 invitationsRoute.delete('/companies/:companyId/invitations/:invitationId', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
 
-  const companyId = c.req.param('companyId')
-  const invitationId = c.req.param('invitationId')
+  const actor = access.fullAccessMember(c.req.param('companyId'), user.id, 'Only owners and admins can delete invitations')
+  if (!actor.ok) return refusal(c, actor)
 
-  // Check if user is admin/owner of this company
-  const userMembership = db.prepare(`
-    SELECT role FROM memberships WHERE user_id = ? AND company_id = ?
-  `).get(user.id, companyId) as { role: string } | undefined
-
-  if (!userMembership || !['owner', 'admin'].includes(userMembership.role)) {
-    return c.json({ error: 'Only owners and admins can delete invitations' }, 403)
-  }
-
-  // Check if invitation exists and belongs to this company
-  const invitation = db.prepare(`
-    SELECT id FROM invitations WHERE id = ? AND company_id = ?
-  `).get(invitationId, companyId)
-
-  if (!invitation) {
-    return c.json({ error: 'Invitation not found' }, 404)
-  }
-
-  db.prepare('DELETE FROM invitations WHERE id = ?').run(invitationId)
+  const deleted = invitations.delete(actor.value, c.req.param('invitationId'))
+  if (!deleted.ok) return refusal(c, deleted)
 
   return c.json({
     success: true,
@@ -167,33 +97,15 @@ invitationsRoute.delete('/companies/:companyId/invitations/:invitationId', async
 
 // Validate an invitation token (public endpoint)
 invitationsRoute.get('/invitations/:token', async (c) => {
-  const token = c.req.param('token')
-
-  const invitation = db.prepare(`
-    SELECT i.*, c.name as company_name
-    FROM invitations i
-    JOIN companies c ON i.company_id = c.id
-    WHERE i.token = ?
-  `).get(token) as Record<string, unknown> | undefined
-
-  if (!invitation) {
-    return c.json({ error: 'Invalid invitation link' }, 404)
-  }
-
-  if (invitation.used_by) {
-    return c.json({ error: 'This invitation has already been used' }, 410)
-  }
-
-  if (new Date(invitation.expires_at as string) < new Date()) {
-    return c.json({ error: 'This invitation has expired' }, 410)
-  }
+  const found = invitations.check(c.req.param('token'))
+  if (!found.ok) return refusal(c, found)
 
   return c.json({
     success: true,
     data: {
-      companyName: invitation.company_name,
-      role: invitation.role,
-      expiresAt: invitation.expires_at,
+      companyName: found.value.company_name,
+      role: found.value.role,
+      expiresAt: found.value.expires_at,
     },
   })
 })
@@ -205,58 +117,16 @@ invitationsRoute.post('/invitations/:token/accept', async (c) => {
     return c.json({ error: 'Unauthorized. Please log in first.' }, 401)
   }
 
-  const token = c.req.param('token')
-
-  const invitation = db.prepare(`
-    SELECT i.*, c.name as company_name
-    FROM invitations i
-    JOIN companies c ON i.company_id = c.id
-    WHERE i.token = ?
-  `).get(token) as Record<string, unknown> | undefined
-
-  if (!invitation) {
-    return c.json({ error: 'Invalid invitation link' }, 404)
-  }
-
-  if (invitation.used_by) {
-    return c.json({ error: 'This invitation has already been used' }, 410)
-  }
-
-  if (new Date(invitation.expires_at as string) < new Date()) {
-    return c.json({ error: 'This invitation has expired' }, 410)
-  }
-
-  // Check if user is already a member
-  const existingMembership = db.prepare(`
-    SELECT id FROM memberships WHERE user_id = ? AND company_id = ?
-  `).get(user.id, invitation.company_id)
-
-  if (existingMembership) {
-    return c.json({ error: 'You are already a member of this company' }, 409)
-  }
-
-  // Use the invitation (compare-and-set: once, and — if a sign-up claimed
-  // it — only by that account) and add the member, together.
-  const membershipId = generateId()
-  const timestamp = now()
-  const joined = db.transaction(() => {
-    if (!consumeInvitation(db, invitation.id as string, user.id)) return false
-    db.prepare(`
-      INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `).run(membershipId, user.id, invitation.company_id, invitation.role, timestamp, timestamp)
-    return true
-  })()
-  if (!joined) {
-    return c.json({ error: 'This invitation has already been used' }, 410)
-  }
+  const joined = invitations.accept(user.id, c.req.param('token'))
+  if (!joined.ok) return refusal(c, joined)
 
   return c.json({
     success: true,
     data: {
-      companyId: invitation.company_id,
-      companyName: invitation.company_name,
-      role: invitation.role,
+      companyId: joined.value.company_id,
+      companyName: joined.value.company_name,
+      role: joined.value.role,
     },
   })
 })
+
