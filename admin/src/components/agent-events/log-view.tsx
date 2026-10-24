@@ -235,41 +235,49 @@ function ConversationHeader({ onBack }: { onBack: () => void }) {
 function NotSendingNotice() {
   const { companyId } = useCompany()
   const activity = useQuery(`client-activity:${companyId}`, () => clientActivityApi.list(companyId))
+  const [open, setOpen] = useState(false)
   const behind = (activity.data ?? []).filter((m) => !m.supportsAgentEvents)
   if (behind.length === 0) return null
 
   return (
-    <section
-      aria-labelledby="not-sending-heading"
-      className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-3"
-    >
-      <div className="flex items-start gap-2.5">
-        <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
-        <div className="min-w-0 flex-1 space-y-2">
-          <div>
-            <h2 id="not-sending-heading" className="text-sm font-medium">
-              記録を送っていないアプリ（{behind.length}人）
-            </h2>
-            <p className="text-sm text-muted-foreground">
-              次のメンバーのアプリは古いか、版がわからないため、AI の操作が記録されていません。アプリを最新にしてもらうと、記録が届くようになります。
-            </p>
-          </div>
-          <ul className="flex flex-wrap gap-x-4 gap-y-1.5 text-sm">
-            {behind.map((m) => {
-              const name = m.name || m.email || '名前未設定'
-              return (
-                <li key={m.userId} className="flex items-center gap-1.5">
-                  <Avatar name={name} seed={m.userId} className="size-5 text-[10px]" />
-                  <span>{name}</span>
-                  <span className="text-xs text-muted-foreground">
-                    {m.clientVersion ? formatBuild(m.build, m.clientVersion) : 'アプリの版がわかりません'}
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        </div>
+    <section aria-labelledby="not-sending-heading" className="rounded-xl border border-warning/30 bg-warning/5 px-4 py-2.5">
+      <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+        <Warning size={16} className="shrink-0 text-warning" />
+        <h2 id="not-sending-heading" className="text-sm font-medium">
+          記録を送っていないアプリ（{behind.length}人）
+        </h2>
+        <p className="min-w-0 flex-1 text-sm text-muted-foreground">
+          古いアプリ（または版が不明なアプリ）からは AI の操作が届きません。最新にしてもらうと届くようになります。
+        </p>
+        <Button
+          type="button"
+          variant="ghost"
+          size="sm"
+          aria-expanded={open}
+          aria-controls="not-sending-list"
+          onClick={() => setOpen((v) => !v)}
+        >
+          {open ? '閉じる' : '一覧を表示'}
+        </Button>
       </div>
+      <ul
+        id="not-sending-list"
+        hidden={!open}
+        className="mt-2 flex flex-wrap gap-x-4 gap-y-1.5 border-t border-warning/20 pt-2 text-sm"
+      >
+        {behind.map((m) => {
+          const name = m.name || m.email || '名前未設定'
+          return (
+            <li key={m.userId} className="flex items-center gap-1.5">
+              <Avatar name={name} seed={m.userId} className="size-5 text-[10px]" />
+              <span>{name}</span>
+              <span className="text-xs text-muted-foreground">
+                {m.clientVersion ? formatBuild(m.build, m.clientVersion) : '版は不明'}
+              </span>
+            </li>
+          )
+        })}
+      </ul>
     </section>
   )
 }

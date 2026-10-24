@@ -128,7 +128,12 @@ members whose app is older.
   sent (no period), shown oldest first. Summary strip from `/summary` with the browser's
   `tzOffsetMinutes`. 「記録を送っていないアプリ」 (owner/admin): members whose
   `GET /client-activity` row has `supportsAgentEvents: false` (`lib/client-version.ts`
-  `supportsAgentEvents`: build older than `AGENT_EVENTS_CLIENT_COMMIT_DATE`, or unknown).
+  `supportsAgentEvents`: build older than `AGENT_EVENTS_CLIENT_COMMIT_DATE`, or unknown) —
+  one line with the count, the names behind 「一覧を表示」/「閉じる」 (closed by default,
+  `aria-expanded` / `aria-controls`), each with its build or 「版は不明」.
+- **Decision labels** say who decided: `policy-default` = 「AI の設定に任せた」 (the app did not
+  decide; the AI's own permission setting did — ask or allow), `guard-denied` =
+  「アプリの守りで拒否」; no 「ガード」/「設定どおり」 (pinned in the tests).
 - **Settings tab** (owner/admin, `?tab=settings`, `components/agent-events/settings-view.tsx`):
   retention 30 / 90 / 180 / 1年 / custom (7–3650), viewers as two radio cards each with its
   live `GET /viewers?mode=` list (shown for the selected card, and for the other on hover /

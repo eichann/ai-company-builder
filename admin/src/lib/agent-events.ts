@@ -48,20 +48,24 @@ export type DecisionTone = 'neutral' | 'allowed' | 'denied'
 
 export const DECISION_LABELS: Record<ToolDecision, { label: string; description: string; tone: DecisionTone }> = {
   'auto-allowed': {
-    label: '自動で許可',
+    label: 'アプリが自動で許可',
     description: '読むだけの操作やアプリの道具など、確認しなくてよいものとしてアプリが通しました。',
     tone: 'neutral',
   },
   'member-allowed': { label: '本人が許可', description: 'アプリが確認を求め、メンバー本人が許可しました。', tone: 'allowed' },
   'member-denied': { label: '本人が拒否', description: 'アプリが確認を求め、メンバー本人が断りました。', tone: 'denied' },
-  'guard-denied': { label: 'ガードが拒否', description: 'アプリの守り（閲覧のみのフォルダなど）が止めました。理由を併せて表示します。', tone: 'denied' },
+  'guard-denied': {
+    label: 'アプリの守りで拒否',
+    description: 'アプリの守り（閲覧のみのフォルダなど）が止めました。理由を併せて表示します。',
+    tone: 'denied',
+  },
   'policy-default': {
-    label: '設定どおり',
-    description: 'アプリは判断せず、AI 自身の権限の設定に従って動きました。',
+    label: 'AI の設定に任せた',
+    description: 'アプリは判断せず、AI 自身の権限の設定（確認する・許可する）に任せました。',
     tone: 'neutral',
   },
   'policy-denied': { label: 'AI の設定で拒否', description: 'AI 自身の権限の設定が止めました。', tone: 'denied' },
-  stopped: { label: '停止中のため拒否', description: '管理者が AI を止めていたため、実行されませんでした。', tone: 'denied' },
+  stopped: { label: 'AI の停止中のため拒否', description: '管理者が AI を止めていたため、実行されませんでした。', tone: 'denied' },
 }
 
 export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
