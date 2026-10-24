@@ -11,16 +11,16 @@
 // (both in shared/core — the app's client/shared/write-access.ts re-exports it), the cached GET /me/scopes answer
 // (canWriteInPrivateFolder) and POST /paths/check (isPathUsable) through the
 // app's path checker — i.e. checkWritePath + decideReservedWrite in
-// client/electron/write-guard.ts, wired like main.ts privateFolderGuardView.
+// client/electron/write-guard.ts, wired like features/private-folders/guards.ts guardView.
 //
 // Generated: scope trees with everyone / role / user rules, private folders,
 // owner / admin / members (a department manager is a member: managing grants
 // no file access), Japanese names, A–Z case variants, NFC and NFD spellings,
 // deep paths. Seeded, so a failure names its seed and the world.
 //
-// A mismatch is a bug in one of the two copies. Mismatches that are known and
-// reported (not fixed here) are listed in KNOWN_DIFFERENCES; anything else
-// fails. Each known difference must still occur, so fixing one makes this
+// A mismatch is a bug in one of the two sides. Mismatches that are known and
+// reported would be listed in KNOWN_DIFFERENCES (empty: both sides agree on
+// every generated decision); anything else fails. Each known difference must still occur, so fixing one makes this
 // test ask for its entry to be removed.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -205,14 +205,14 @@ async function clientDecision(scopes: ScopeWithRules[], user: { id: string; role
     .filter(s => s.repoId !== null && canReadPrivateScope(s, user.id, user.role))
     .map(s => ({ scopeId: s.id, path: s.path, cloneUrl: '', clonePath: '', canWrite: canWriteInPrivateFolder(scopes, s, CO, user.id, user.role) }))
   // POST /paths/check
-  const checker = createPathChecker(async (_companyId, paths) =>
-    paths.map(p => ({ path: p, usable: isPathUsable(scopes, user.id, user.role, normalizeReservedPath(p)) })))
+  const checker = createPathChecker(async (_companyId, paths, files) =>
+    paths.map(p => ({ path: p, usable: isPathUsable(scopes, user.id, user.role, normalizeReservedPath(p), { asFile: files?.includes(p) }) })))
   const guard: WriteGuard = {
     root: ROOT,
     getAccess: () => access,
     getPrivateFolderView: () => ({
-      // main.ts privateFolderGuardView (without its "exists on disk" shortcut).
-      reservedFolderOf: async (rel: string) => (readableScopeOf(myScopes, rel) ? null : checker.reservedFolderOf(CO, rel)),
+      // features/private-folders/guards.ts guardView (without its "exists on disk" shortcut).
+      reservedFolderOf: async (rel: string, options?: { file?: boolean }) => (readableScopeOf(myScopes, rel) ? null : checker.reservedFolderOf(CO, rel, options)),
       readOnlyFolderOf: (rel: string) => {
         const s = readableScopeOf(myScopes, rel)
         return s && !s.canWrite ? s.path : null
@@ -225,7 +225,7 @@ async function clientDecision(scopes: ScopeWithRules[], user: { id: string; role
 }
 
 // ---------------------------------------------------------------------------
-// Known, reported differences (not fixed here — see the PR description)
+// Known, reported differences
 // ---------------------------------------------------------------------------
 
 interface Mismatch {
@@ -238,15 +238,11 @@ interface Mismatch {
   scopes: ScopeWithRules[]
 }
 
-const KNOWN_DIFFERENCES: Array<{ id: string; describe: string; matches: (m: Mismatch) => boolean }> = [
-  {
-    id: 'file-above-private-folder',
-    describe: 'A FILE at a strict ancestor of a private folder (e.g. a file "人事" while "人事/評価" is private): '
-      + 'the push check refuses it ([RESERVED_PATH], reservedAncestorOf) but paths/check — and so the chat '
-      + 'guard — only knows "at or under", so the app lets the AI write it and sync recovers after the rejection.',
-    matches: m => m.server.via === 'reserved-ancestor' && m.client,
-  },
-]
+// None since R2: the three reported in #160 (a private folder typed in
+// another A–Z case, case-colliding scopes, a file above a private folder)
+// were fixed by adopting the server's semantics. A new entry needs a
+// reported reason; each entry must keep occurring.
+const KNOWN_DIFFERENCES: Array<{ id: string; describe: string; matches: (m: Mismatch) => boolean }> = []
 
 function describeMismatch(m: Mismatch): string {
   return [

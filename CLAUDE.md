@@ -1148,7 +1148,9 @@ member may only read used to be rejected at sync and moved to `.backups/`
   safety net there.
 - Private folders (`WriteGuard.getPrivateFolders`): a write that would
   create something at a folder name the member may not use (`decideReservedWrite`,
-  asking `POST …/paths/check` through sync's cached checker; unknown allows)
+  asking `POST …/paths/check` through sync's cached checker, the target as a
+  file — so a file named like a folder above a private folder is refused
+  too, as the push check refuses it; unknown allows)
   is refused with the server's sentence 「『<what the AI typed>』というフォルダ名は使えません。別の名前にしてください。」;
   a write into a private folder the member may only read (`canWrite: false`,
   from the cached `/me/scopes` answer) with the read-only message. Writes into a readable, writable private folder
@@ -1167,20 +1169,24 @@ member may only read used to be rejected at sync and moved to `.backups/`
 
 ### Rule parity tests (copies that must agree)
 
-Rules that exist as separate copies are held together by tests, not by
-review: `client/tests/rule-parity-write-access.test.ts` (seeded generated
+Since R2 the shared rules have one copy (`shared/core`, see "Shared rules"
+above); what can still drift — the app's decision built from several server
+answers, the push checker's bytewise twins, the admin's hand-written API
+types — is held together by tests, not by review:
+`client/tests/rule-parity-write-access.test.ts` (seeded generated
 companies: the chat guard's decision from `/me/write-access` + `/me/scopes` +
 `paths/check` must equal the push gate / `[RESERVED_PATH]` / scope-repository
-gate; `RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
+gate, and the push gate must not depend on the order of the scopes;
+`RULE_PARITY_SEEDS`, default 600), `client/tests/rule-parity-names.test.ts`
 (path keys, department folder names, skill names, AI instruction files on one
-corpus — the rules themselves live in `shared/core`; the renderer dialogs must
-import `shared/core/names.ts`, checked from their source)
-and `server/tests/integration/admin-contract.test.ts` (every endpoint the admin
-calls, checked against `admin/src/lib/api.ts` with the TypeScript compiler,
-`tests/helpers/type-shape.ts`). Known differences are listed in each test
-(`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES`) and must keep occurring: fixing one
-fails the test until its entry is removed. Changing a rule in one copy means
-changing the others in the same PR.
+corpus; the renderer dialogs must import `shared/core/names.ts`, checked from
+their source) and `server/tests/integration/admin-contract.test.ts` (every
+endpoint the admin calls, checked against `admin/src/lib/api.ts` with the
+TypeScript compiler, `tests/helpers/type-shape.ts`). No known differences are
+left (`KNOWN_DIFFERENCES` / `KNOWN_MISMATCHES` are empty); a new entry needs
+a reported reason and must keep occurring — fixing it fails the test until
+the entry is removed. Changing a rule means changing it in `shared/core`;
+the bytewise twins in the same PR.
 
 ---
 
@@ -1269,12 +1275,16 @@ Client sync (3b) and the UIs (3c) build on the contract in
     others — the salted hashes (`reserved`) are no longer sent: short
     Japanese folder names are cheap to brute-force against a known salt.
     `company_path_salts` is left in the schema, unused.
-  - `POST /paths/check` `{ paths: string[] }` (any member, ≤50 paths,
-    ≤60 paths per member per minute → 429 `RATE_LIMITED` + `Retry-After`)
-    → `{ results: [{ path, usable }] }`: `usable: false` exactly when the path
-    (any case/NFC — `normalizeReservedPath`) is at or under a private folder
-    the caller cannot read, i.e. where a push would get `[RESERVED_PATH]`; a
-    reader's paths inside it are usable. Same shape and work for every path,
+  - `POST /paths/check` `{ paths: string[], files?: string[] }` (any member,
+    ≤50 paths, ≤60 paths per member per minute → 429 `RATE_LIMITED` +
+    `Retry-After`) → `{ results: [{ path, usable }] }`: `usable: false`
+    exactly when a push of the path would get `[RESERVED_PATH]`: it is (any
+    case/NFC — `normalizeReservedPath`) at or under a private folder the
+    caller cannot read (a reader's paths inside it are usable), or — for a
+    path also listed in `files` (it will be a file or symlink, not a folder)
+    — a strict ancestor of any private folder, readable or not
+    (`isPathUsable` in `shared/core/reserved-paths.ts`). `files` is optional:
+    older apps send none and get the folder answer, older servers ignore it. Same shape and work for every path,
     never says which folder or why; paths are not logged. The app checks a
     path and its prefixes to name the folder it shows in
     `reservedPathMessage`. The push-time `[RESERVED_PATH]` check stays the
@@ -1384,9 +1394,12 @@ Builds on 3a's contract (`shared/types/private-folders.ts`). Code:
   `.git/acb-private-scopes.json` (companyId, version, scopes, `pendingPublic`).
   Offline syncs and the chat guard's read-only check use it.
 - **Names the member may not use** are known only per path, from the server:
-  `POST /api/companies/:id/paths/check { paths ≤ 50 }` → `{ results: [{ path,
+  `POST /api/companies/:id/paths/check { paths ≤ 50, files? }` → `{ results: [{ path,
   usable }] }` (60 paths per member per minute, 429 beyond; `usable: false` at or under a private folder the caller cannot
-  read). One checker per app (`gitSync.pathChecker`, 5-minute cache) serves
+  read, and for a path in `files` also above any private folder).
+  `reservedFolderOf(companyId, rel, { file: true })` asks the last segment
+  as a file (cached apart); only the chat guard does so today — sync and the
+  app's file operations ask folders, as before. One checker per app (`gitSync.pathChecker`, 5-minute cache) serves
   sync's hold-back, the app's file operations (`fs:*` backstop for paths that
   do not exist yet; `privateFolders:reservedPathRefusal` IPC for the file
   tree's new file / 新しいフォルダ… (公開) / rename / move) and the chat guard

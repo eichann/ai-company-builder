@@ -65,6 +65,13 @@ export const PATHS_CHECK_PATHS_PER_MINUTE = 60
 /** Body: company-relative paths, any spelling (compared as normalizeReservedPath). */
 export interface PathCheckRequest {
   paths: string[]
+  /**
+   * Optional: those of `paths` (same spelling) the caller will create as a
+   * FILE (or symlink), not a folder. Such a path is also unusable when a
+   * private folder lies below it — a push of a file there is refused with
+   * [RESERVED_PATH] for everyone. Servers before 2026-10-24 ignore it.
+   */
+  files?: string[]
 }
 
 export interface PathCheckResult {
@@ -75,7 +82,9 @@ export interface PathCheckResult {
    * private folder they cannot read, so a push would be refused with
    * [RESERVED_PATH]. Show reservedPathMessage(<the path or the folder the
    * member typed>). Paths inside a private folder the member CAN read are
-   * usable (they go to its own repository). The answer never says why.
+   * usable (they go to its own repository). A path listed in `files` is also
+   * unusable at a strict ancestor of any private folder. The answer never
+   * says why.
    */
   usable: boolean
 }

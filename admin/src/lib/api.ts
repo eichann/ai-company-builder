@@ -553,11 +553,14 @@ export interface Invitation {
   isUsed: boolean
 }
 
+/** POST /companies/:id/invitations (201): the new link only — no creator/use details yet. */
+export type CreatedInvitation = Pick<Invitation, 'id' | 'token' | 'companyId' | 'companyName' | 'role' | 'expiresAt' | 'createdAt'>
+
 export const invitationsApi = {
   list: (companyId: string) => getData<Invitation[]>(`/api/companies/${enc(companyId)}/invitations`),
 
   create: (companyId: string, role: 'admin' | 'member' = 'member', expiresInDays: number = 7) =>
-    getData<Invitation>(`/api/companies/${enc(companyId)}/invitations`, {
+    getData<CreatedInvitation>(`/api/companies/${enc(companyId)}/invitations`, {
       method: 'POST',
       body: { role, expiresInDays },
     }),

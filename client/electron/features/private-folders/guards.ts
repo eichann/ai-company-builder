@@ -28,7 +28,7 @@ export interface PrivateFolderGuards {
   authority(companyId: string): InstructionAuthority | undefined
   /** Private folders as the chat write guard sees them (cached /me/scopes, no network call). */
   guardView(root: string): {
-    reservedFolderOf(rel: string): Promise<string | null>
+    reservedFolderOf(rel: string, options?: { file?: boolean }): Promise<string | null>
     readOnlyFolderOf(rel: string): string | null
   } | undefined
   /** The server's sentence when creating `absPath` would use a folder name the member may not use; else null. */
@@ -89,9 +89,9 @@ export function createPrivateFolderGuards({ api, pathChecker }: PrivateFolderGua
       if (!cache) return undefined
       const readable = [...cache.scopes, ...(cache.pendingPublic ?? [])]
       return {
-        reservedFolderOf: async (rel: string) => {
+        reservedFolderOf: async (rel: string, options?: { file?: boolean }) => {
           if (readableScopeOf(readable, rel) || fs.existsSync(path.join(root, ...rel.split('/')))) return null
-          return pathChecker.reservedFolderOf(cache.companyId, rel).catch(() => null)
+          return pathChecker.reservedFolderOf(cache.companyId, rel, options).catch(() => null)
         },
         readOnlyFolderOf: (rel: string) => {
           const scope = readableScopeOf(cache.scopes, rel)

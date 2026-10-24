@@ -51,6 +51,7 @@ import {
   type ClientActivity,
   type ClientBuild,
   type Department,
+  type CreatedInvitation,
   type Invitation,
   type Member,
   type Overview,
@@ -492,7 +493,7 @@ function InviteForm({ companyId, onCreated, onDone }: { companyId: string; onCre
   const [role, setRole] = useState<'member' | 'admin'>('member')
   const [days, setDays] = useState('7')
   const [busy, setBusy] = useState(false)
-  const [created, setCreated] = useState<Invitation | null>(null)
+  const [created, setCreated] = useState<CreatedInvitation | null>(null)
 
   const create = async (e: React.FormEvent) => {
     e.preventDefault()

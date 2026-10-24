@@ -479,11 +479,13 @@ export function resetPathCheckBudgetForTests(): void {
   checkBudget.clear()
 }
 
-// { paths: string[] } → { results: [{ path, usable }] }
+// { paths: string[], files?: string[] } → { results: [{ path, usable }] }
 //
-// usable: false exactly when the path is at or under a private folder the
-// caller cannot read (a push there is refused with [RESERVED_PATH]); one
-// they can read answers true (its contents go to its own repository). The
+// usable: false exactly when a push of the path would be refused with
+// [RESERVED_PATH]: it is at or under a private folder the caller cannot read
+// (one they can read answers true: its contents go to its own repository),
+// or — for a path also listed in `files` (it will be a file, not a folder) —
+// a strict ancestor of any private folder (shared/core isPathUsable). The
 // answer is the same shape, wording and work whatever makes a path unusable,
 // says nothing about which folder, and the paths are never logged.
 privateFoldersRoute.post('/paths/check', async (c) => {
@@ -501,13 +503,21 @@ privateFoldersRoute.post('/paths/check', async (c) => {
       return c.json({ error: 'Each path must be a relative path inside the company folder' }, 400)
     }
   }
+  const rawFiles = body?.files
+  if (rawFiles !== undefined && (!Array.isArray(rawFiles) || rawFiles.length > PATHS_CHECK_MAX_PATHS || rawFiles.some(f => typeof f !== 'string'))) {
+    return c.json({ error: `files must be an array of at most ${PATHS_CHECK_MAX_PATHS} of the paths` }, 400)
+  }
+  const files = new Set<string>((rawFiles as string[] | undefined) ?? [])
   if (!takeCheckBudget(actor.companyId, actor.userId, raw.length)) {
     c.header('Retry-After', '60')
     return c.json({ error: 'Too many paths checked; try again in a minute', code: 'RATE_LIMITED' }, 429)
   }
   const scopes = listScopesWithRules(db, actor.companyId)
   const data: PathCheckResponse = {
-    results: (raw as string[]).map(path => ({ path, usable: isPathUsable(scopes, actor.userId, actor.role, normalizeReservedPath(path)) })),
+    results: (raw as string[]).map(path => ({
+      path,
+      usable: isPathUsable(scopes, actor.userId, actor.role, normalizeReservedPath(path), { asFile: files.has(path) }),
+    })),
   }
   c.header('Cache-Control', 'no-store')
   return c.json({ success: true, data })

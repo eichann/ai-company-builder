@@ -51,17 +51,30 @@ export function reservedAncestorOf(path: string, reserved: string[]): string | n
  * of theirs there would be refused with ([RESERVED_PATH]). A reader's paths
  * inside a private folder are usable (they go to its own repository).
  *
+ * `asFile`: the path will be a file (or symlink), not a folder. It is then
+ * also unusable when it is a strict ancestor of ANY private folder, readable
+ * or not — the push check refuses a file there for everyone
+ * (reservedAncestorOf). As a folder such a path is fine.
+ *
  * Every private folder is compared, whatever the outcome, so the answer
  * takes the same work for every path.
  */
-export function isPathUsable(scopes: ScopeWithRules[], userId: string, role: string, path: string): boolean {
+export function isPathUsable(
+  scopes: ScopeWithRules[],
+  userId: string,
+  role: string,
+  path: string,
+  options: { asFile?: boolean } = {},
+): boolean {
   const key = pathKey(path)
   let usable = true
   for (const s of scopes) {
     if (s.repoId === null) continue
-    const inside = isSameOrAncestorPath(pathKey(s.path), key)
+    const folder = pathKey(s.path)
+    const inside = isSameOrAncestorPath(folder, key)
     const readable = canReadPrivateScope(s, userId, role)
     if (inside && !readable) usable = false
+    if (options.asFile === true && key !== '' && folder.startsWith(`${key}/`)) usable = false
   }
   return usable
 }

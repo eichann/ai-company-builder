@@ -48,9 +48,11 @@ export interface PrivateFolderView {
    * The private folder — in the spelling of `rel` — that `rel` would write
    * into although the member cannot read it, or null. A write there is
    * refused with the server's [RESERVED_PATH] wording: sync would move the
-   * file to .backups/ instead of sharing it.
+   * file to .backups/ instead of sharing it. `file`: `rel` will be a file —
+   * also refused (named `rel`) when a private folder lies below it, as the
+   * push check refuses such a file.
    */
-  reservedFolderOf(rel: string): Promise<string | null>
+  reservedFolderOf(rel: string, options?: { file?: boolean }): Promise<string | null>
   /** The readable private folder `rel` lies in when the member may only read it (canWrite false), or null. */
   readOnlyFolderOf(rel: string): string | null
 }
@@ -242,7 +244,8 @@ export async function decideReservedWrite(guard: WriteGuard | undefined, toolNam
   for (const target of toolWriteTargets(toolName, toolInput)) {
     const rel = repoRelativePath(guard.root, target, cwd)
     if (!rel) continue
-    const reserved = await view.reservedFolderOf(rel).catch(() => null)
+    // Every target of these tools is a file.
+    const reserved = await view.reservedFolderOf(rel, { file: true }).catch(() => null)
     if (reserved !== null) {
       const folder = reserved.normalize('NFC')
       return { deny: true, path: rel, folder, message: reservedPathMessage(folder) }
