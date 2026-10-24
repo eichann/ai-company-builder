@@ -5,7 +5,7 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { createCommitMessageGenerator } from './commit-message'
-import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, net as electronNet, protocol, nativeImage, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -28,9 +28,6 @@ import { createCompanyFilesApi } from './company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
 import { notDownloadedUserMessage } from '../shared/sparse-paths'
 import { companyPathOf, privateBackupsDir, readPrivateScopesCache, readableScopeOf } from './sync/private-folders'
-
-/** backup:list ids of private folders' backups (kept in .git, privateBackupsDir). */
-const PRIVATE_BACKUP_ID_PREFIX = 'private:'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin } from './sync/remote'
@@ -50,7 +47,7 @@ import { writeCodexHandoff } from './handoff/codex'
 import type { HandoffCompletion } from '../shared/handoff'
 import { ChatHistoryStore } from './chat-history-store'
 import type { ChatSession, ChatMetadataPatch, ChatHistoryChange, ChatSaveReceipt } from '../shared/chat-history'
-import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../shared/permission-mode'
+import { normalizePermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
@@ -59,7 +56,14 @@ import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import { AllowedRoots, type ValidateOptions } from './allowed-roots'
 import { isExternalUrlAllowed } from './external-url'
 import { typedIpc } from './ipc/registrar'
-import type { ClaudeCodeStatus, DirectoryTreeNode } from '../shared/ipc-contract'
+import type { DirectoryTreeNode } from '../shared/ipc-contract'
+import { createConfigStore } from './services/config-store'
+import { createShellEnvironment } from './services/shell-env'
+import { createClaudeCli } from './services/claude-cli'
+import { desktopShell } from './electron-adapter'
+import { registerSettingsIpc } from './features/settings/ipc'
+import { registerEnvIpc } from './features/env/ipc'
+import { registerBackupsIpc } from './features/backups/ipc'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -131,273 +135,11 @@ app.on('second-instance', () => {
   mainWindow?.focus()
 })
 
-// Config file path for storing API keys
-const getConfigPath = () => path.join(app.getPath('userData'), 'config.json')
-
-interface AppConfig {
-  anthropicApiKey?: string
-  authMode?: 'claude-code' | 'codex' | 'api-key'
-  permissionMode?: PermissionMode
-  serverUrl?: string
-  docbaseCookie?: string
-}
-
-// ============================================================================
-// Shell PATH resolution for packaged app
-// ============================================================================
-
-/**
- * macOS .app bundles don't inherit the user's shell PATH.
- * Resolve the full PATH by querying the user's login shell.
- */
-let resolvedShellPath: string | null = null
-
-// Directories to append to PATH on Windows so the spawned Claude CLI can find
-// node/git and its own siblings. Unlike macOS .app bundles, Windows apps DO
-// inherit the user's PATH, so we keep it and only append known install dirs.
-function getWindowsExtraPathDirs(): string[] {
-  const home = os.homedir()
-  return [
-    path.join(home, '.local', 'bin'),               // native installer (claude.exe)
-    path.join(home, 'AppData', 'Roaming', 'npm'),   // npm global (claude.cmd)
-    path.join(home, '.npm-global'),
-    path.join(home, '.npm-global', 'bin'),
-  ].filter(p => {
-    try { return fs.existsSync(p) } catch { return false }
-  })
-}
-
-function getShellPath(): string {
-  if (resolvedShellPath) return resolvedShellPath
-
-  if (process.platform === 'win32') {
-    // Keep the inherited Windows PATH and append known Claude/npm locations,
-    // joined with ';' (path.delimiter). Never replace it with POSIX paths.
-    const current = process.env.Path || process.env.PATH || ''
-    resolvedShellPath = [current, ...getWindowsExtraPathDirs()]
-      .filter(Boolean)
-      .join(path.delimiter)
-    return resolvedShellPath
-  }
-
-  const staticPaths = [
-    '/usr/local/bin',
-    '/opt/homebrew/bin',
-    '/usr/bin',
-    '/bin',
-    '/usr/sbin',
-    '/sbin',
-    path.join(os.homedir(), '.local', 'bin'),
-    path.join(os.homedir(), '.npm-global', 'bin'),
-    path.join(os.homedir(), '.volta', 'bin'),
-    path.join(os.homedir(), '.nodenv', 'shims'),
-  ]
-
-  // Directories containing version subdirectories (e.g. v22.17.1/bin)
-  const versionManagerDirs = [
-    path.join(os.homedir(), '.nvm', 'versions', 'node'),
-    path.join(os.homedir(), '.local', 'share', 'fnm', 'node-versions'),
-    path.join(os.homedir(), '.nodenv', 'versions'),
-    path.join(os.homedir(), '.asdf', 'installs', 'nodejs'),
-    '/usr/local/n/versions/node',
-  ]
-
-  // NOTE: Do NOT use execSync here to query the user's shell PATH.
-  // execSync with stdio:'pipe' corrupts Electron's file descriptor table,
-  // causing spawn EBADF errors in subsequent child process creation.
-  // Instead, build PATH from known locations + version manager directories.
-
-  // Expand version manager directories to include all installed versions
-  const expandedPaths: string[] = [...staticPaths]
-  for (const versionsDir of versionManagerDirs) {
-    try {
-      if (!fs.existsSync(versionsDir)) continue
-      const versions = fs.readdirSync(versionsDir)
-      for (const ver of versions) {
-        expandedPaths.push(path.join(versionsDir, ver, 'bin'))
-      }
-    } catch { /* skip */ }
-  }
-
-  resolvedShellPath = expandedPaths.join(':')
-  return resolvedShellPath
-}
-
-/** Get env object with resolved PATH for spawn calls */
-function getShellEnv(): Record<string, string> {
-  if (process.platform === 'win32') {
-    const env: Record<string, string> = { ...process.env as Record<string, string> }
-    // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
-    delete env['CLAUDECODE']
-    // Windows env keys are case-insensitive; replace the EXISTING path key in
-    // place (usually 'Path') so the child doesn't get both 'Path' and 'PATH'.
-    const pathKey = Object.keys(env).find(k => k.toLowerCase() === 'path') ?? 'Path'
-    env[pathKey] = getShellPath()
-    return env
-  }
-  const env: Record<string, string> = { ...process.env as Record<string, string>, PATH: getShellPath() }
-  // Remove CLAUDECODE to avoid "nested session" detection when spawning Claude CLI
-  delete env['CLAUDECODE']
-  return env
-}
-
-// ============================================================================
-// Claude Code CLI detection & authentication
-// ============================================================================
-
-/** Cached result of Claude Code CLI detection */
-let cachedClaudeCodeStatus: ClaudeCodeStatus | null = null
-
-const CLAUDE_STATUS_TTL = 30_000 // Re-check every 30 seconds
-
-/**
- * Find the Claude Code CLI binary by searching common locations.
- * Returns the full path or null if not found.
- */
-function findClaudeCodeCli(): string | null {
-  // NOTE: Do NOT use execSync (e.g. `which claude`, `where claude.cmd`) here.
-  // execSync with stdio:'pipe' corrupts Electron's file descriptor table,
-  // causing spawn EBADF errors. Use fs.existsSync on known paths instead.
-
-  if (process.platform === 'win32') {
-    const home = os.homedir()
-    const winPaths = [
-      // Native installer (irm https://claude.ai/install.ps1 | iex) — preferred:
-      // a real .exe spawns directly without a shell, even from paths with spaces.
-      path.join(home, '.local', 'bin', 'claude.exe'),
-      // npm global install (npm i -g @anthropic-ai/claude-code)
-      path.join(home, 'AppData', 'Roaming', 'npm', 'claude.cmd'),
-      path.join(home, '.npm-global', 'claude.cmd'),
-      path.join(home, '.npm-global', 'bin', 'claude.cmd'),
-      // .cmd shim sometimes placed next to the native install
-      path.join(home, '.local', 'bin', 'claude.cmd'),
-    ]
-    for (const p of winPaths) {
-      if (fs.existsSync(p)) return p
-    }
-    return null
-  }
-
-  // macOS / Linux: search common paths
-  const commonPaths = [
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',               // Homebrew on Apple Silicon
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-    path.join(os.homedir(), '.npm-global', 'bin', 'claude'),
-  ]
-
-  for (const p of commonPaths) {
-    if (fs.existsSync(p)) return p
-  }
-
-  // Search Node version manager directories (nvm, fnm, volta, nodenv, asdf, n)
-  const versionManagerDirs = [
-    path.join(os.homedir(), '.nvm', 'versions', 'node'),       // nvm
-    path.join(os.homedir(), '.local', 'share', 'fnm', 'node-versions'), // fnm
-    path.join(os.homedir(), '.nodenv', 'versions'),             // nodenv
-    path.join(os.homedir(), '.asdf', 'installs', 'nodejs'),     // asdf
-    '/usr/local/n/versions/node',                                // n
-  ]
-
-  for (const versionsDir of versionManagerDirs) {
-    try {
-      if (!fs.existsSync(versionsDir)) continue
-      const versions = fs.readdirSync(versionsDir)
-      // Sort descending to prefer newer versions
-      versions.sort().reverse()
-      for (const ver of versions) {
-        const claudePath = path.join(versionsDir, ver, 'bin', 'claude')
-        if (fs.existsSync(claudePath)) return claudePath
-      }
-    } catch { /* skip */ }
-  }
-
-  // volta stores binaries directly in ~/.volta/bin
-  const voltaPath = path.join(os.homedir(), '.volta', 'bin', 'claude')
-  if (fs.existsSync(voltaPath)) return voltaPath
-
-  return null
-}
-
-/**
- * Check Claude Code CLI status: availability, path, version, and authentication.
- * Results are cached for CLAUDE_STATUS_TTL milliseconds.
- */
-function checkClaudeCodeStatus(forceRefresh = false): ClaudeCodeStatus {
-  if (!forceRefresh && cachedClaudeCodeStatus && Date.now() - cachedClaudeCodeStatus.checkedAt < CLAUDE_STATUS_TTL) {
-    return cachedClaudeCodeStatus
-  }
-
-  const status: ClaudeCodeStatus = {
-    available: false,
-    authenticated: false,
-    cliPath: null,
-    version: null,
-    error: null,
-    checkedAt: Date.now(),
-  }
-
-  // Step 1: Find the CLI binary
-  const cliPath = findClaudeCodeCli()
-  if (!cliPath) {
-    status.error = 'Claude Code CLIが見つかりません。`npm install -g @anthropic-ai/claude-code` でインストールしてください。'
-    cachedClaudeCodeStatus = status
-    return status
-  }
-  status.cliPath = cliPath
-
-  // Step 2: Mark as available if binary exists
-  // NOTE: Do NOT use execSync here (e.g. `claude --version`) — it corrupts
-  // Electron's file descriptor table and causes `spawn EBADF` on subsequent
-  // process spawns (e.g. when launching the Claude CLI for chat).
-  // Actual auth errors will surface at API call time with a clear message.
-  status.available = true
-  status.authenticated = true
-  status.version = 'installed'
-
-  cachedClaudeCodeStatus = status
-  return status
-}
-
-/**
- * Legacy compat: returns true if Claude Code CLI is available AND authenticated.
- */
-function isClaudeCodeAuthenticated(): boolean {
-  const status = checkClaudeCodeStatus()
-  return status?.available === true && status?.authenticated === true
-}
-
-/**
- * Get the resolved path to Claude Code CLI binary.
- * Returns the path or a platform-appropriate fallback.
- */
-function getClaudeCodeCliPath(): string {
-  const status = checkClaudeCodeStatus()
-  return status?.cliPath || (process.platform === 'win32' ? 'claude.cmd' : 'claude')
-}
-
-let cachedConfig: AppConfig | null = null
-
-function loadConfig(): AppConfig {
-  if (cachedConfig) return cachedConfig
-  try {
-    const configPath = getConfigPath()
-    if (fs.existsSync(configPath)) {
-      cachedConfig = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
-      return cachedConfig!
-    }
-  } catch {
-    // ignore
-  }
-  cachedConfig = {}
-  return cachedConfig
-}
-
-function saveConfig(config: AppConfig): void {
-  const configPath = getConfigPath()
-  fs.writeFileSync(configPath, JSON.stringify(config, null, 2))
-  cachedConfig = config
-}
+// Settings (<userData>/config.json), the environment for spawned processes,
+// and the member's Claude Code CLI (electron/services/).
+const config = createConfigStore(() => path.join(app.getPath('userData'), 'config.json'))
+const shellEnv = createShellEnvironment()
+const claudeCli = createClaudeCli()
 
 function createWindow() {
   const disableElectronSpellcheck =
@@ -427,7 +169,7 @@ function createWindow() {
   mainWindow.webContents.session.setSpellCheckerLanguages([])
 
   // Inject DocBase cookie for image.docbase.io requests (fixes 403 on DocBase images)
-  const appConfig = loadConfig()
+  const appConfig = config.load()
   if (appConfig.docbaseCookie) {
     const docbaseCookie = appConfig.docbaseCookie
     mainWindow.webContents.session.webRequest.onBeforeSendHeaders(
@@ -868,175 +610,9 @@ ipc.handle('fs:unwatch', async (_, rootPath: string) => {
   }
 })
 
-// .env file management
-interface EnvVars {
-  [key: string]: string
-}
+registerEnvIpc(ipc, { paths: allowedRoots })
 
-function parseEnvFile(content: string): EnvVars {
-  const result: EnvVars = {}
-  const lines = content.split('\n')
-  for (const line of lines) {
-    const trimmed = line.trim()
-    // Skip empty lines and comments
-    if (!trimmed || trimmed.startsWith('#')) continue
-    const eqIndex = trimmed.indexOf('=')
-    if (eqIndex > 0) {
-      const key = trimmed.slice(0, eqIndex).trim()
-      let value = trimmed.slice(eqIndex + 1).trim()
-      // Remove surrounding quotes if present
-      if ((value.startsWith('"') && value.endsWith('"')) ||
-          (value.startsWith("'") && value.endsWith("'"))) {
-        value = value.slice(1, -1)
-      }
-      result[key] = value
-    }
-  }
-  return result
-}
-
-function stringifyEnvFile(vars: EnvVars): string {
-  const lines: string[] = []
-  for (const [key, value] of Object.entries(vars)) {
-    // Quote values that contain spaces or special characters
-    const needsQuotes = /[\s#=]/.test(value)
-    const quotedValue = needsQuotes ? `"${value}"` : value
-    lines.push(`${key}=${quotedValue}`)
-  }
-  return lines.join('\n') + '\n'
-}
-
-ipc.handle('env:read', async (_, rootPath: string) => {
-  try {
-    const safePath = validatePath(rootPath)
-    const envPath = validatePath(path.join(safePath, '.env'))
-    if (!fs.existsSync(envPath)) {
-      return { success: true, vars: {} }
-    }
-    const content = await fs.promises.readFile(envPath, 'utf-8')
-    const vars = parseEnvFile(content)
-    return { success: true, vars }
-  } catch (error) {
-    console.error('Failed to read .env:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-ipc.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
-  try {
-    const safePath = validatePath(rootPath)
-    const envPath = validatePath(path.join(safePath, '.env'))
-    const content = stringifyEnvFile(vars)
-    await fs.promises.writeFile(envPath, content, 'utf-8')
-
-    // Self-heal: ensure secrets are never synced, even for older folders whose
-    // .gitignore predates the seed (or had the entries removed). The .env file
-    // holds API keys, so it must stay local-only.
-    const gitignorePath = validatePath(path.join(safePath, '.gitignore'))
-    let gitignoreContent = ''
-    if (fs.existsSync(gitignorePath)) {
-      gitignoreContent = fs.readFileSync(gitignorePath, 'utf-8')
-    }
-    const existingLines = gitignoreContent.split('\n').map((line) => line.trim())
-    const missing = ['.env', '.env.*', '!.env.example', '!.env.sample'].filter((p) => !existingLines.includes(p))
-    if (missing.length > 0) {
-      const prefix = gitignoreContent.length > 0 && !gitignoreContent.endsWith('\n') ? '\n' : ''
-      const header = existingLines.includes('# Secrets — never sync (local only)')
-        ? ''
-        : '# Secrets — never sync (local only)\n'
-      fs.appendFileSync(gitignorePath, prefix + header + missing.join('\n') + '\n')
-    }
-
-    return { success: true }
-  } catch (error) {
-    console.error('Failed to write .env:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// API Key management
-ipc.handle('config:getApiKey', () => {
-  const config = loadConfig()
-  return config.anthropicApiKey || null
-})
-
-ipc.handle('config:setApiKey', (_, apiKey: string) => {
-  const config = loadConfig()
-  config.anthropicApiKey = apiKey
-  saveConfig(config)
-  return true
-})
-
-ipc.handle('config:hasApiKey', () => {
-  const config = loadConfig()
-  return !!config.anthropicApiKey
-})
-
-// Auth mode management
-ipc.handle('codex:status', () => getCodexStatus(getShellEnv()))
-
-ipc.handle('config:getAuthMode', () => {
-  const config = loadConfig()
-  return config.authMode || 'claude-code'
-})
-
-ipc.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-key') => {
-  const config = loadConfig()
-  if (!['claude-code', 'codex', 'api-key'].includes(mode)) throw new Error('不明なAI接続方式です。')
-  config.authMode = mode
-  saveConfig(config)
-  return true
-})
-
-ipc.handle('config:getClaudeCodeStatus', () => {
-  const status = checkClaudeCodeStatus(true) // force refresh when explicitly requested
-  return status
-})
-
-ipc.handle('config:getPermissionMode', () => {
-  return normalizePermissionMode(loadConfig().permissionMode)
-})
-
-ipc.handle('config:setPermissionMode', (_, mode: PermissionMode) => {
-  if (!PERMISSION_MODES.includes(mode)) return false
-  const config = loadConfig()
-  config.permissionMode = mode
-  saveConfig(config)
-  return true
-})
-
-// Server URL configuration
-ipc.handle('config:getServerUrl', () => {
-  const config = loadConfig()
-  return config.serverUrl || process.env.API_URL || null
-})
-
-ipc.handle('config:setServerUrl', (_, url: string) => {
-  const config = loadConfig()
-  config.serverUrl = url
-  saveConfig(config)
-  return true
-})
-
-ipc.handle('config:validateServerUrl', async (_, url: string) => {
-  try {
-    const normalizedUrl = url.replace(/\/+$/, '')
-    const response = await fetch(`${normalizedUrl}/api/config`, {
-      signal: AbortSignal.timeout(10000),
-    })
-    if (!response.ok) {
-      return { valid: false, error: `Server responded with status ${response.status}` }
-    }
-    const data = await response.json()
-    if (data.success && data.data?.name === 'AI Company Builder') {
-      return { valid: true, serverName: data.data.name, version: data.data.version }
-    }
-    return { valid: false, error: 'Not an AI Company Builder server' }
-  } catch (error) {
-    const message = error instanceof Error ? error.message : 'Unknown error'
-    return { valid: false, error: `Could not connect: ${message}` }
-  }
-})
+registerSettingsIpc(ipc, { config, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
 
 const agentInteractions = new AgentInteractions((owner, event, request) => {
   const target = mainWindow?.webContents
@@ -1063,8 +639,8 @@ const handoffStore = new HandoffStore(path.join(app.getPath('userData'), 'chat-h
 const handoffs = new HandoffService(localHistoryStore, handoffStore, async (provider, request) => {
   const cwd = path.join(app.getPath('userData'), 'handoff-worker')
   fs.mkdirSync(cwd, { recursive: true })
-  const input = { ...request, cwd, env: getShellEnv() }
-  return provider === 'claude-code' ? writeClaudeHandoff({ ...input, cli: getClaudeCodeCliPath() }) : writeCodexHandoff(input)
+  const input = { ...request, cwd, env: shellEnv.env() }
+  return provider === 'claude-code' ? writeClaudeHandoff({ ...input, cli: claudeCli.path() }) : writeCodexHandoff(input)
 }, (companyId, sessionId) => { if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.webContents.isDestroyed()) mainWindow.webContents.send('handoff:changed', { companyId, sessionId }) })
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
@@ -1113,8 +689,7 @@ ipc.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string
 
 // Server API URL - read from config.json (set during first-launch setup) with env fallback
 function getServerApiUrl(): string {
-  const config = loadConfig()
-  return config.serverUrl || process.env.API_URL || ''
+  return config.serverUrl()
 }
 
 // Every fetch() to the server's origin carries X-ACB-Client-Version /
@@ -1491,13 +1066,10 @@ const commitMessageGenerator = (gitFor: (repoPath: string) => SimpleGit) => crea
     const nameStatus = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-status'])
     return { nameStatus, stat }
   },
-  settings: () => {
-    const config = loadConfig()
-    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
-  },
-  claudeReady: isClaudeCodeAuthenticated,
-  getCli: getClaudeCodeCliPath,
-  getEnv: getShellEnv,
+  settings: () => ({ authMode: config.authMode(), apiKey: config.load().anthropicApiKey }),
+  claudeReady: claudeCli.isAuthenticated,
+  getCli: claudeCli.path,
+  getEnv: shellEnv.env,
   getCwd: () => {
     const cwd = path.join(app.getPath('userData'), 'commit-message')
     fs.mkdirSync(cwd, { recursive: true })
@@ -2203,134 +1775,7 @@ ipc.handle('git:folderSizes', async (_, repoPath: string, companyId: string, fol
   }
 })
 
-// Get backup history
-ipc.handle('backup:list', async (_, unsafeRepoPath: string) => {
-  try {
-    const repoPath = validatePath(unsafeRepoPath)
-    // .backups/ in the working tree, and the private folders' backups kept
-    // inside .git (sync/private-folders.ts privateBackupsDir — never in the
-    // working tree, so they can never be staged into the company repository).
-    // The latter are listed with ids prefixed `private:`.
-    const backups: Array<{
-      id: string
-      timestamp: string
-      reason: string
-      files: string[]
-      path: string
-    }> = []
-
-    for (const { dir: backupsDir, idPrefix } of [
-      { dir: path.join(repoPath, '.backups'), idPrefix: '' },
-      { dir: privateBackupsDir(repoPath), idPrefix: PRIVATE_BACKUP_ID_PREFIX },
-    ]) {
-    if (!fs.existsSync(backupsDir)) continue
-    for (const entry of fs.readdirSync(backupsDir, { withFileTypes: true })) {
-      if (entry.isDirectory() && !entry.name.startsWith('.')) {
-        const backupPath = path.join(backupsDir, entry.name)
-        const metadataPath = path.join(backupPath, '_metadata.json')
-
-        let metadata: { timestamp?: string; reason?: string; conflictFiles?: string[] } = {}
-        if (fs.existsSync(metadataPath)) {
-          try {
-            metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'))
-          } catch {
-            // Ignore parse errors
-          }
-        }
-
-        // List files in backup (excluding _metadata.json)
-        const files: string[] = []
-        const listFiles = (dir: string, prefix = '') => {
-          const items = fs.readdirSync(dir, { withFileTypes: true })
-          for (const item of items) {
-            if (item.name === '_metadata.json') continue
-            const relativePath = prefix ? `${prefix}/${item.name}` : item.name
-            if (item.isDirectory()) {
-              listFiles(path.join(dir, item.name), relativePath)
-            } else {
-              files.push(relativePath)
-            }
-          }
-        }
-        listFiles(backupPath)
-
-        backups.push({
-          id: `${idPrefix}${entry.name}`,
-          timestamp: metadata.timestamp || entry.name,
-          reason: metadata.reason || 'unknown',
-          files: metadata.conflictFiles || files,
-          path: backupPath
-        })
-      }
-    }
-    }
-
-    // Sort by timestamp (newest first)
-    backups.sort((a, b) => b.timestamp.localeCompare(a.timestamp))
-
-    return { success: true, backups }
-  } catch (error) {
-    console.error('Backup list error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error', backups: [] }
-  }
-})
-
-// Restore a file from backup
-ipc.handle('backup:restore', async (_, repoPath: string, backupId: string, filePath: string) => {
-  try {
-    const safeRepoPath = validatePath(repoPath)
-    const isPrivate = backupId.startsWith(PRIVATE_BACKUP_ID_PREFIX)
-    const backupsDir = isPrivate ? privateBackupsDir(safeRepoPath) : path.join(safeRepoPath, '.backups')
-    const backupPath = path.join(backupsDir, isPrivate ? backupId.slice(PRIVATE_BACKUP_ID_PREFIX.length) : backupId)
-    if (!backupPath.startsWith(backupsDir + path.sep)) return { success: false, error: 'Invalid backup path' }
-    const srcPath = path.resolve(backupPath, filePath)
-    const destPath = path.resolve(safeRepoPath, filePath)
-
-    // Prevent path traversal via ../
-    if (!srcPath.startsWith(backupPath + path.sep)) {
-      return { success: false, error: 'Invalid backup path' }
-    }
-    if (!destPath.startsWith(safeRepoPath + path.sep)) {
-      return { success: false, error: 'Invalid destination path' }
-    }
-
-    if (!fs.existsSync(srcPath)) {
-      return { success: false, error: 'Backup file not found' }
-    }
-    // Links resolved, both stay inside the company folder.
-    validatePath(srcPath)
-    validatePath(destPath)
-
-    // Ensure destination directory exists
-    fs.mkdirSync(path.dirname(destPath), { recursive: true })
-
-    // Copy file
-    fs.copyFileSync(srcPath, destPath)
-
-    return { success: true, message: `Restored: ${filePath}` }
-  } catch (error) {
-    console.error('Backup restore error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Open backup folder in Finder/Explorer
-ipc.handle('backup:openFolder', async (_, backupPath: string) => {
-  try {
-    // Only a backup folder (what backup:list returns) inside a company:
-    // openPath on anything else could launch it (an .app, a script).
-    const safe = validatePath(backupPath)
-    const parent = path.basename(path.dirname(safe))
-    if ((parent !== '.backups' && parent !== 'acb-private-backups') || !fs.statSync(safe).isDirectory()) {
-      return { success: false, error: 'Not a backup folder' }
-    }
-    await shell.openPath(safe)
-    return { success: true }
-  } catch (error) {
-    console.error('Open folder error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
+registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
 
 // Default system prompt with thinking instructions
 const DEFAULT_SYSTEM_PROMPT = `あなたは会社の業務をサポートするAIアシスタントです。丁寧に日本語で回答してください。
@@ -2910,7 +2355,7 @@ ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string
     if (!fs.existsSync(nodeModulesPath)) {
       console.log('[tools:start] Installing dependencies...')
       try {
-        await execAsync('npm install', { cwd: toolPath, env: getShellEnv() })
+        await execAsync('npm install', { cwd: toolPath, env: shellEnv.env() })
       } catch (installErr) {
         console.error('[tools:start] npm install failed:', installErr)
         return { success: false, error: `npm install failed: ${installErr instanceof Error ? installErr.message : installErr}` }
@@ -2971,8 +2416,8 @@ ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string
     const logPath = path.join(toolPath, '.tool-output.log')
     const logFd = fs.openSync(logPath, 'w')
     const npmArgs = ['run', startCommand, '--', '--port', port.toString()]
-    // getShellEnv handles the Windows Path-key replacement; PORT rides along
-    const toolEnv = { ...getShellEnv(), PORT: port.toString() }
+    // shellEnv.env() handles the Windows Path-key replacement; PORT rides along
+    const toolEnv = { ...shellEnv.env(), PORT: port.toString() }
 
     console.log('[tools:start] About to spawn: npm', npmArgs.join(' '))
     let childProcess: ChildProcess
@@ -3089,7 +2534,7 @@ ipc.handle('shell:openExternal', async (_, url: string) => {
     // Web pages and mail only: file:, javascript: or an app's own scheme
     // would open local files or launch other programs.
     if (!isExternalUrlAllowed(url)) return { success: false, error: 'このリンクは開けません（http / https / mailto のみ開けます）。' }
-    await shell.openExternal(url)
+    await desktopShell.openExternal(url)
     return { success: true }
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -3101,10 +2546,7 @@ ipc.handle('shell:openExternal', async (_, url: string) => {
 // declaration makes no-use-before-define (TDZ) hold by construction.
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
-  registerVoiceInput(getClaudeCodeCliPath, getShellEnv, () => {
-    const config = loadConfig()
-    return { authMode: config.authMode || 'claude-code', apiKey: config.anthropicApiKey }
-  })
+  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: config.load().anthropicApiKey }))
   // Handle local-file:// protocol to serve local files (restricted to allowed directories)
   // `?v=<n>` (a per-path version the renderer bumps on file events) is dropped
   // before resolving; responses are never cached, so a replaced file shows.
@@ -3128,19 +2570,13 @@ app.whenReady().then(async () => {
   // Start embedded Hono chat server
   try {
     const serverConfig: ChatServerConfig = {
-      getAuthMode: () => {
-        const config = loadConfig()
-        return (config.authMode || 'claude-code') as 'claude-code' | 'codex' | 'api-key'
-      },
-      getApiKey: () => {
-        const config = loadConfig()
-        return config.anthropicApiKey
-      },
+      getAuthMode: () => config.authMode(),
+      getApiKey: () => config.load().anthropicApiKey,
       // Unset → 'auto'. A mode the user saved explicitly is kept as-is.
-      getPermissionMode: () => normalizePermissionMode(loadConfig().permissionMode),
-      isClaudeCodeAuthenticated,
-      getClaudeCodeCliPath,
-      getShellEnv,
+      getPermissionMode: () => normalizePermissionMode(config.load().permissionMode),
+      isClaudeCodeAuthenticated: claudeCli.isAuthenticated,
+      getClaudeCodeCliPath: claudeCli.path,
+      getShellEnv: shellEnv.env,
       buildSystemPrompt,
       onChatActivity: (token, active) => handoffs.setBusy(token, active),
       getWriteGuard: async (companyId, root) => {

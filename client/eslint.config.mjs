@@ -72,4 +72,18 @@ export default tseslint.config(
       'prefer-const': ['error', { ignoreReadBeforeAssign: true }],
     },
   },
+
+  // Main-process feature modules and services depend on interfaces
+  // (electron/features/ports.ts, electron/ipc/registrar.ts), never on
+  // Electron: only the shell (main.ts, preload.ts, electron-adapter.ts,
+  // voice-input.ts) imports it, so another desktop shell replaces that layer
+  // only. CLAUDE.md "Main process layout".
+  {
+    files: ['electron/features/**/*.ts', 'electron/services/**/*.ts', 'electron/ipc/**/*.ts'],
+    rules: {
+      'no-restricted-imports': ['error', {
+        paths: [{ name: 'electron', message: 'Feature modules take what they need from the shell through deps (electron/features/ports.ts).' }],
+      }],
+    },
+  },
 );
