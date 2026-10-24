@@ -7,6 +7,7 @@ import type { PrivateReadContext, PrivateReadState } from '../private-read-guard
 import type { ChoiceQuestion, ChoiceResult } from '../../shared/choice-prompt'
 import type { RateLimitSnapshot } from '../../shared/rate-limits'
 import type { AgentProgressEvent } from '../../shared/agent-progress'
+import type { AgentToolEvent } from '../../shared/agent-events'
 
 /**
  * Side information an agent reports while a turn runs (not part of the
@@ -56,6 +57,11 @@ export interface AgentConnection {
      * `promptSuggestions`), or null once the turn ended without one.
      */
     onPromptSuggestion?: (suggestion: string | null) => void
+    /**
+     * What this turn's tool events carry besides what the agent knows
+     * (shared/agent-events.ts). The events go to the host's `onToolEvent`.
+     */
+    toolEventContext?: ToolEventContextInput
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {
@@ -63,7 +69,22 @@ export interface AgentConnection {
   }
 }
 
+/** The per-turn part of an AI action log event the chat server knows (company, turn). */
+export interface ToolEventContextInput {
+  companyId?: string
+  companyRoot?: string
+  turnId?: string
+}
+
 export interface AgentHostConfig {
+  /**
+   * The AI action log (monitoring M1): every agent reports each tool call
+   * here, through a per-turn `createToolEventTracker` (shared/agent-events.ts).
+   * Must not throw or block; the agents also guard every call.
+   */
+  onToolEvent?: (event: AgentToolEvent) => void
+  /** Folders whose paths an event marks as secret places (home, the app's userData). */
+  toolEventPaths?: () => { home?: string; appDataDirs?: string[] }
   requestInteraction?: (request: AgentInteraction, appSessionId: string, signal: AbortSignal) => Promise<AgentInteractionResponse>
   getShellEnv: () => Record<string, string>
   requestToolApproval?: (

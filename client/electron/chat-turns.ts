@@ -3,6 +3,7 @@ import { createTurnSteering, type TurnSteering } from './agents/steering'
 import type { ChunkInjector } from './ui-stream-limits'
 import { STEER_PART_TYPE, canSteerText, type SteerRecord, type SteerResponse } from '../shared/steer'
 import { SUGGESTION_WAIT_MS, normalizeSuggestion } from '../shared/prompt-suggestion'
+import { TURN_STOPPED_PART_TYPE, type TurnStopReason } from '../shared/agent-events'
 
 interface Turn {
   steering: ReturnType<typeof createTurnSteering>
@@ -10,17 +11,61 @@ interface Turn {
 }
 interface SuggestionSlot { value: Promise<string | null>; settle: (value: string | null) => void }
 
+/** What `abort` can select a running turn by. */
+export interface TurnInfo {
+  appSessionId?: string
+  companyId?: string
+}
+interface RunningTurn {
+  info: TurnInfo
+  controller: AbortController
+  inject?: Pick<ChunkInjector, 'push'>
+}
+
+export interface ChatTurnsOptions {
+  /** Cancel the conversation's pending tool approvals and choice cards (agent-interactions). */
+  cancelInteractions?: (appSessionId: string) => void
+}
+
 /**
  * The chat server's per-conversation state for a running turn:
  * - steering: `POST /api/steer` pushes the member's extra instruction into the
  *   running agent and shows it in the reply (`data-steer` part) once accepted;
  * - prompt suggestions: `GET /api/prompt-suggestion/:id` waits (bounded) for
  *   the suggestion of the conversation's latest turn, which arrives after
- *   that turn's response stream has closed.
+ *   that turn's response stream has closed;
+ * - abort handles: every response (any agent) runs under an AbortController
+ *   that follows the request's signal (the renderer's stop) and that the main
+ *   process can trigger with `abort` / `abortAll` (monitoring M2). The signal
+ *   goes into streamText, so each agent stops the way it stops on the
+ *   renderer's stop (Claude: the provider kills the CLI; Codex: turn/interrupt).
  */
-export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
+export function createChatTurns(waitMs = SUGGESTION_WAIT_MS, hooks: ChatTurnsOptions = {}) {
   const turns = new Map<string, Turn>()
   const suggestions = new Map<string, SuggestionSlot>()
+  const running = new Set<RunningTurn>()
+
+  const stop = (turn: RunningTurn, reason: TurnStopReason) => {
+    if (turn.controller.signal.aborted) return
+    // The reason first, while the response is still open (transient: the
+    // renderer reads it in onData, history never stores it); the stream then
+    // ends with an `abort` chunk carrying the same reason.
+    try { turn.inject?.push({ type: TURN_STOPPED_PART_TYPE, data: { reason }, transient: true }) } catch { /* stream already over */ }
+    if (turn.info.appSessionId) {
+      try { hooks.cancelInteractions?.(turn.info.appSessionId) } catch (error) { console.warn('[chat-server] cancelling pending questions failed:', error instanceof Error ? error.message : 'unknown') }
+    }
+    turn.controller.abort(reason)
+  }
+
+  const abort = (filter: (info: TurnInfo) => boolean, reason: TurnStopReason = 'stopped-by-admin'): number => {
+    let stopped = 0
+    for (const turn of [...running]) {
+      if (!filter(turn.info) || turn.controller.signal.aborted) continue
+      stop(turn, reason)
+      stopped++
+    }
+    return stopped
+  }
 
   const slot = (): SuggestionSlot => {
     let settle!: (value: string | null) => void
@@ -66,6 +111,34 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS) {
         },
       }
     },
+
+    /**
+     * A response starts (any agent). `signal` replaces the request's signal
+     * everywhere the turn uses one; call `end()` when the response is over.
+     */
+    track(info: TurnInfo, requestSignal: AbortSignal, inject?: Pick<ChunkInjector, 'push'>) {
+      const controller = new AbortController()
+      const turn: RunningTurn = { info, controller, inject }
+      const follow = () => controller.abort(requestSignal.reason)
+      if (requestSignal.aborted) follow()
+      else requestSignal.addEventListener('abort', follow, { once: true })
+      running.add(turn)
+      return {
+        signal: controller.signal,
+        end() {
+          running.delete(turn)
+          requestSignal.removeEventListener('abort', follow)
+        },
+      }
+    },
+
+    /** Stop every running turn `filter` selects; returns how many were stopped. */
+    abort,
+
+    abortAll: (reason: TurnStopReason = 'stopped-by-admin'): number => abort(() => true, reason),
+
+    /** Turns currently running (for tests and diagnostics). */
+    runningCount: () => running.size,
 
     async steer(appSessionId: string, text: string): Promise<SteerResponse> {
       const turn = turns.get(appSessionId)

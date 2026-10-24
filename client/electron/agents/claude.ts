@@ -16,6 +16,8 @@ import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { createClaudeSteer, tapQuery } from './steering'
 import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../../shared/agents/registry'
+import { turnToolEvents } from './tool-events'
+import { recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -138,7 +140,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -146,12 +148,15 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
 
       // The mode the CLI actually runs tools in (it reports it on every hook call).
       let observedMode: string | undefined
-      // PreToolUse hook: request UI approval for dangerous patterns (works even in bypassPermissions)
+      // The AI action log for this turn (shared/agent-events.ts); undefined when nobody records.
+      const toolEvents = turnToolEvents(config, 'claude-code', { appSessionId, modelId, workingDirectory, toolEventContext })
+      // PreToolUse decision: request UI approval for dangerous patterns (works even in
+      // bypassPermissions). Each answer carries the decision it stands for (the action log).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      const preToolUseHook = async (input: any) => {
+      const decidePreToolUse = async (input: any): Promise<ToolVerdict<object>> => {
         if (typeof input.permission_mode === 'string') observedMode = input.permission_mode
         if (input.hook_event_name !== 'PreToolUse') {
-          return { continue: true }
+          return verdict({ continue: true })
         }
         // Background subagents outlive the turn, but the SDK closes the hook
         // control channel (CLI stdin) at the first result — their later hook
@@ -160,14 +165,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // synchronously instead. (Bash's own run_in_background is unaffected;
         // the tool name is 'Task' on some CLI versions and 'Agent' on others.)
         if (input.tool_name === 'Task' || input.tool_name === 'Agent') {
-          return {
+          return verdict({
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
               permissionDecision: 'allow',
               updatedInput: { ...(input.tool_input ?? {}), run_in_background: false },
             },
-          }
+          }, 'auto-allowed')
         }
         // Read-only folders (per-folder write rules): refuse before the tool
         // runs, with a reason the model relays to the member instead of
@@ -177,14 +182,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (!guarded.deny) guarded = await decideReservedWrite(writeGuard, String(input.tool_name), input.tool_input, toolCwd)
         if (guarded.deny) {
           console.log(`[hooks] Blocked write to read-only folder: ${input.tool_name} ${guarded.path}`)
-          return {
+          return verdict({
             continue: true,
             hookSpecificOutput: {
               hookEventName: 'PreToolUse',
               permissionDecision: 'deny',
               permissionDecisionReason: guarded.message,
             },
-          }
+          }, 'guard-denied', guarded.code)
         }
         // Private content → public places (private-read-guard.ts): once this
         // conversation has read a private folder, the member confirms every
@@ -200,14 +205,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               : { approved: false }
             if (!answer.approved) {
               console.log(`[hooks] Member declined a write after private reads: ${input.tool_name}`)
-              return {
+              return verdict({
                 continue: true,
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse',
                   permissionDecision: 'deny',
                   permissionDecisionReason: `${decision.message}ユーザーが許可しなかったため実行していません。別の方法で同じ操作をせず、ユーザーに確認してください。`,
                 },
-              }
+              }, config.requestToolApproval ? 'member-denied' : 'guard-denied', 'private-read')
             }
             confirmedPrivate = true
           }
@@ -229,44 +234,54 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
                 )
                 if (result.approved) {
                   console.log(`[hooks] User approved dangerous command: ${cmd}`)
-                  return {
+                  return verdict({
                     continue: true,
                     hookSpecificOutput: {
                       hookEventName: 'PreToolUse',
                       permissionDecision: 'allow',
                     },
-                  }
+                  }, 'member-allowed', 'dangerous-command')
                 }
               }
 
               // Auto-deny if no UI approval available or user denied
               console.log(`[hooks] Blocked dangerous command: ${cmd}`)
-              return {
+              return verdict({
                 continue: true,
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse',
                   permissionDecision: 'deny',
                   permissionDecisionReason: 'Blocked: dangerous pattern detected',
                 },
-              }
+              }, config.requestToolApproval ? 'member-denied' : 'guard-denied', 'dangerous-command')
             }
           }
         }
         // The member just confirmed this very call: do not ask twice.
         if (confirmedPrivate) {
-          return { continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: input.tool_input ?? {} } }
+          return verdict({ continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: input.tool_input ?? {} } }, 'member-allowed', 'private-read')
         }
         // No decision: leave it to the permission mode. Returning 'allow' here
         // skipped both the auto-mode classifier and the 'default' approval
         // prompt for every tool.
-        return { continue: true }
+        return verdict({ continue: true }, 'policy-default')
+      }
+      // The one place the PreToolUse decision is recorded.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const preToolUseHook = async (input: any) => {
+        const decided = await decidePreToolUse(input)
+        recordPreToolUse(toolEvents, input, decided)
+        return decided.result
       }
       // PostToolUse: what a Grep / shell command printed can be private content.
+      // With the action log, also how each call ended (PostToolUseFailure;
+      // PermissionDenied = the permission mode refused, when the CLI says so).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const postToolUseHook = async (input: any) => {
         if (privateReads && input.hook_event_name === 'PostToolUse') {
           noteToolResult(privateReads.context, privateReads.state, String(input.tool_name), input.tool_response)
         }
+        recordToolEnd(toolEvents, input)
         return { continue: true }
       }
 
@@ -280,31 +295,40 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       // except an explicit `ask` rule, which stays refused as before.
       const approvals = permissionMode !== 'bypassPermissions' && !!config.requestToolApproval
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const decideCanUseTool = async (toolName: string, toolInput: Record<string, unknown>, options: any): Promise<ToolVerdict<object>> => {
+        if (toolName === CLAUDE_CHOICE_TOOL) {
+          const answer = await answerAskUserQuestion(askUser, toolInput, options?.toolUseID, options?.signal)
+          return verdict(answer, answer.behavior === 'allow' ? 'member-allowed' : 'member-denied')
+        }
+        if (!approvals) return verdict({ behavior: 'deny' as const, message: 'この操作は確認が必要なため実行していません。' }, 'guard-denied', 'needs-approval')
+        // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
+        // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
+        const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name)))) {
+          return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
+        }
+        // Request approval from UI
+        const result = await config.requestToolApproval!(
+          toolName,
+          toolInput,
+          options.toolUseID || crypto.randomUUID(),
+          appSessionId,
+        )
+        if (result.approved) {
+          return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'member-allowed')
+        }
+        return verdict({
+          behavior: 'deny' as const,
+          message: 'ユーザーにより拒否されました',
+        }, 'member-denied')
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const canUseToolFn: any = approvals || askUser
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         ? async (toolName: string, toolInput: Record<string, unknown>, options: any) => {
-            if (toolName === CLAUDE_CHOICE_TOOL) return answerAskUserQuestion(askUser, toolInput, options?.toolUseID, options?.signal)
-            if (!approvals) return { behavior: 'deny' as const, message: 'この操作は確認が必要なため実行していません。' }
-            // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
-            // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
-            const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-            if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name)))) {
-              return { behavior: 'allow' as const, updatedInput: toolInput }
-            }
-            // Request approval from UI
-            const result = await config.requestToolApproval!(
-              toolName,
-              toolInput,
-              options.toolUseID || crypto.randomUUID(),
-              appSessionId,
-            )
-            if (result.approved) {
-              return { behavior: 'allow' as const, updatedInput: toolInput }
-            }
-            return {
-              behavior: 'deny' as const,
-              message: 'ユーザーにより拒否されました',
-            }
+            const decided = await decideCanUseTool(toolName, toolInput, options)
+            recordCanUseTool(toolEvents, toolName, toolInput, options?.toolUseID, decided)
+            return decided.result
           }
         : undefined
 
@@ -361,14 +385,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // shown in the subagent row; see shared/agent-progress.ts.
           ...(onEvent ? { agentProgressSummaries: true } : {}),
           // Both observers watch the same Query: usage/progress events, and
-          // steering + prompt suggestions (each wraps the iterator the provider reads).
-          ...(onEvent || onQueryCreated ? {
+          // steering + prompt suggestions (each wraps the iterator the provider reads);
+          // the action log closes this query's open calls when it ends.
+          ...(onEvent || onQueryCreated || toolEvents ? {
             onQueryCreated: (query: unknown) => {
               if (onEvent) tapSdkMessages(query, message => {
                 const event = claudeAgentEvent(message)
                 if (event) onEvent(event)
               })
               onQueryCreated?.(query as object)
+              if (toolEvents) tapQuery(query as object, () => {}, () => toolEvents.close())
             },
           } : {}),
           // Off unless the renderer can show it; the member's own
@@ -405,7 +431,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           },
           hooks: {
             PreToolUse: [{ hooks: [preToolUseHook] }],
-            ...(privateReads ? { PostToolUse: [{ hooks: [postToolUseHook] }] } : {}),
+            ...(privateReads || toolEvents ? { PostToolUse: [{ hooks: [postToolUseHook] }] } : {}),
+            ...(toolEvents ? { PostToolUseFailure: [{ hooks: [postToolUseHook] }], PermissionDenied: [{ hooks: [postToolUseHook] }] } : {}),
           },
           ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
         })

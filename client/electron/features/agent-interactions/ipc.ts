@@ -11,16 +11,18 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 export interface ToolApprovals {
   request(toolName: string, toolInput: Record<string, unknown>, toolUseId: string, appSessionId?: string, reason?: string): Promise<{ approved: boolean }>
   respond(toolUseId: string, approved: boolean): void
+  /** Deny every pending approval of one conversation (its turn was stopped). */
+  cancel(appSessionId: string): void
 }
 
 /** `notify` shows the request in the window (tool-approval-request). */
 export function createToolApprovals(notify: (request: ToolApprovalRequest) => void): ToolApprovals {
   // Tool approval IPC (chat-server → renderer → response)
-  const pendingApprovals = new Map<string, { resolve: (result: { approved: boolean }) => void }>()
+  const pendingApprovals = new Map<string, { resolve: (result: { approved: boolean }) => void; appSessionId?: string }>()
   return {
     request(toolName, toolInput, toolUseId, appSessionId, reason) {
       return new Promise((resolve) => {
-        pendingApprovals.set(toolUseId, { resolve })
+        pendingApprovals.set(toolUseId, { resolve, appSessionId })
         notify({
           toolUseId, toolName, toolInput, appSessionId, ...(reason ? { reason } : {}),
         })
@@ -38,6 +40,13 @@ export function createToolApprovals(notify: (request: ToolApprovalRequest) => vo
       if (pending) {
         pending.resolve({ approved })
         pendingApprovals.delete(toolUseId)
+      }
+    },
+    cancel(appSessionId) {
+      for (const [toolUseId, pending] of [...pendingApprovals]) {
+        if (pending.appSessionId !== appSessionId) continue
+        pendingApprovals.delete(toolUseId)
+        pending.resolve({ approved: false })
       }
     },
   }

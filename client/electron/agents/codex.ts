@@ -15,6 +15,8 @@ import { CODEX_ASK_USER_INSTRUCTIONS, codexAskUserTool } from './choice-tools'
 import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { fromCodexRateLimits } from '../../shared/rate-limits'
 import type { SteerTarget } from './steering'
+import { turnToolEvents } from './tool-events'
+import { recordCodexApproval, recordCodexItem } from './codex-tool-events'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -97,6 +99,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       const tools = new Map<string, string>()
       let tokenUsage: TokenUsage | undefined
       let timeout: ReturnType<typeof setTimeout> | undefined
+      // The AI action log for this turn (shared/agent-events.ts); titles run no tools.
+      const toolEvents = title ? undefined : turnToolEvents(config, 'codex', request)
       const emit = (part: Part) => { if (!ended) controller.enqueue(part) }
       // Plan usage for the header meter (shared/rate-limits.ts). Updates are sparse.
       const reportRateLimits = (snapshot: unknown) => {
@@ -123,6 +127,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         if (steerTarget) request.steering!.detach(steerTarget)
         if (error) emit({ type: 'error', error })
         ended = true
+        toolEvents?.close()
         interactionAbort.abort()
         clearTimeout(timeout)
         options.abortSignal?.removeEventListener('abort', abort)
@@ -161,9 +166,11 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       const answerRequest = async (message: RpcMessage) => {
         const params = message.params || {}
         if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
+          const asked = !title && !!config.requestToolApproval
           const approved = !title && config.requestToolApproval
             ? await config.requestToolApproval(message.method === 'item/commandExecution/requestApproval' ? 'Bash' : 'Write', params, crypto.randomUUID(), request.appSessionId)
             : { approved: false }
+          recordCodexApproval(toolEvents, message.method, params, { asked, approved: approved.approved })
           const decisions = params.availableDecisions as unknown[] | undefined
           const decision = approved.approved && (!decisions || decisions.includes('accept')) ? 'accept'
             : !decisions || decisions.includes('decline') ? 'decline' : 'cancel'
@@ -217,6 +224,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               }
               if (message.method === 'item/started' || message.method === 'item/completed') {
                 const item = p.item as { id: string; type: string; text?: string; command?: string; aggregatedOutput?: string; status?: string; server?: string; tool?: string; result?: unknown; arguments?: unknown }
+                recordCodexItem(toolEvents, message.method, item)
                 if (item.type === 'agentMessage' && message.method === 'item/completed') {
                   if (!openText.has(item.id)) {
                     emit({ type: 'text-start', id: item.id }); emit({ type: 'text-delta', id: item.id, delta: item.text || '' })

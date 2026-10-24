@@ -44,6 +44,8 @@ import { createPrivateFolderGuards } from './features/private-folders/guards'
 import { registerGitHistoryIpc } from './features/git-history/ipc'
 import { createAppGit } from './services/app-git'
 import { createCommitMessages } from './services/commit-messages'
+import { createAgentEventRecorder } from './services/agent-events'
+import os from 'node:os'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -169,6 +171,8 @@ const agentInteractions = new AgentInteractions((owner, event, request) => {
 // The send stays unguarded, as it always was: a destroyed window rejects the approval.
 const toolApprovals = createToolApprovals(request => mainWindow?.webContents.send('tool-approval-request', request))
 registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: toolApprovals })
+// The AI action log (monitoring M1): in memory + the console for now.
+const agentEvents = createAgentEventRecorder({ home: os.homedir(), appDataDirs: [app.getPath('userData')] })
 
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
@@ -301,6 +305,8 @@ app.whenReady().then(async () => {
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
       toolApprovals,
+      cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
+      agentEvents,
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
