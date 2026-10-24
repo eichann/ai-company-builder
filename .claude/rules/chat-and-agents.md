@@ -76,6 +76,36 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   `preload.ts` / `features/settings/ipc.ts`; regenerate `ipc-inventory.json` with
   `UPDATE_IPC_INVENTORY=1`) and run `agent-registry*.test.ts`.
 
+## The AI's environment (allowlist)
+
+`client/electron/agents/agent-env.ts`; tests `client/tests/agent-env.test.ts`.
+
+- AI processes never get the member's whole shell environment (a secret exported there —
+  `AWS_*`, `GITHUB_TOKEN`, `OPENAI_API_KEY`, database URLs — would be readable by the AI and every
+  command / MCP server it starts). `agentEnv()` keeps an allowlist: PATH, HOME, USER, LOGNAME,
+  SHELL, TMPDIR/TEMP/TMP, LANG/LANGUAGE/`LC_*`, TERM/COLORTERM, TZ, `XDG_*`, SSH_AUTH_SOCK,
+  GIT_SSH(_COMMAND), the proxy variables (either case), NODE_EXTRA_CA_CERTS / SSL_CERT_FILE /
+  SSL_CERT_DIR / REQUESTS_CA_BUNDLE / CURL_CA_BUNDLE, CLAUDE_CONFIG_DIR, CODEX_HOME,
+  `CLAUDE_CODE_*`, `CLAUDE_AGENT_SDK_*`, `ACB_*`, FORCE_COLOR, and the Windows essentials
+  (SystemRoot, ComSpec, PATHEXT, APPDATA, LOCALAPPDATA, USERPROFILE, ProgramFiles*, WINDIR, …).
+  Names compare case-insensitively. The CLIs sign in with their own stored login, not env.
+- Precedence: `ACB_SET_KEYS` (what the app / SDK set) always kept → deny always dropped (`TOKEN`,
+  `SECRET`, `PASSWORD`, `PASSPHRASE`, `CREDENTIAL`, `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`,
+  `COOKIE`, `DATABASE_URL`, … anywhere; `_KEY` / `_DSN` / `_PAT` endings; `AWS_`, `AZURE_`,
+  `GOOGLE_APPLICATION_`; CLAUDECODE, REDIS_URL, …) → allowlist or the member's pass-through
+  names kept → the rest dropped. A key the app starts setting that a deny rule matches goes into
+  `ACB_SET_KEYS`.
+- One place: `spawnAgentProcess` (`agents/process.ts`) filters the final env — after the provider
+  (which merges `ANTHROPIC_*` / `AWS_*` / `GOOGLE_*` from `process.env`) and the SDK — so Claude
+  Code (chat, titles, prompt suggestions, hand-off) and Codex (chat, one-shots, status) are covered.
+  `runClaudeOneShot` (commit messages, voice) spawns with `inheritEnv: false` through the same
+  function, and so do the API-key mode's commands (`chat-tools.ts`). Sync's git env is separate.
+- Escape hatch: Settings → AIに渡す環境変数 (`config.json` `agentEnvPassthrough`, this computer
+  only; `config:get/setAgentEnvPassthrough`): exact names, ≤ 50, deny still wins; empty by
+  default; the page says these become visible to the AI.
+- Dropped names (never values) are logged once each per app start: `[agent-env] not passed to AI
+  processes: …`.
+
 ## Claude Code agent stack
 
 - `@anthropic-ai/claude-agent-sdk` 0.3.304 (its `claudeCodeVersion` is CLI 2.1.304) under

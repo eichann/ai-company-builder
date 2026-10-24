@@ -37,7 +37,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`).
 - `electron/services/` — shared state as explicit objects instead of module variables:
-  `config-store.ts` (config.json, cached), `shell-env.ts` (PATH / env for spawned processes),
+  `config-store.ts` (config.json, cached), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
   `claude-cli.ts` (the member's `claude`, status cached 30 s), `session.ts` (server session
   cookies, memory only; every server client and git's token read them here), `app-git.ts` (every
   git the app runs: bundled-or-system binary, `GIT_ASKPASS` token, the guarded

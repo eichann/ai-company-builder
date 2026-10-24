@@ -5,6 +5,7 @@ import * as path from 'path'
 import { exec } from 'child_process'
 import crypto from 'crypto'
 import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
+import { agentEnv } from './agents/agent-env'
 
 // Approval callback type (optional, injected from chat-server)
 export type RequestApproval = (
@@ -196,7 +197,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
               cwd: workingDirectory,
               timeout: 30_000,
               maxBuffer: 1024 * 1024, // 1 MB
-              env: { ...process.env, FORCE_COLOR: '0' },
+              env: agentEnv({ ...process.env, FORCE_COLOR: '0' }),
             },
             (error, stdout, stderr) => {
               const out = truncate(stdout, 10_000) // 10 KB

@@ -11,6 +11,8 @@ export interface AppConfig {
   permissionMode?: PermissionMode
   serverUrl?: string
   docbaseCookie?: string
+  /** Extra environment variable names passed to AI processes (agents/agent-env.ts). */
+  agentEnvPassthrough?: string[]
 }
 
 export interface ConfigStore {

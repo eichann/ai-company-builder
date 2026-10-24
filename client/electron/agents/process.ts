@@ -1,5 +1,6 @@
 import fs from 'fs'
 import { spawn as nodeSpawn } from 'child_process'
+import { agentEnv } from './agent-env'
 // Windows spawn for the Claude CLI. Windows has no posix_spawn EBADF problem
 // and no /bin/sh or /dev/fd, so the macOS FD-closing shell wrapper does not
 // apply — we spawn directly. A native claude.exe spawns directly (and handles
@@ -35,7 +36,11 @@ function spawnOnWindows(opts: { command: string; args: string[]; cwd?: string; e
 
 // Spawn helper for Claude Code CLI that works around Electron's FD inheritance issues (EBADF on posix_spawn).
 // Repair standard FDs, force fork+exec, and close inherited Chromium FDs before exec.
-export function spawnAgentProcess(opts: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+// Every AI process starts here (Claude Code via the SDK's spawnClaudeCodeProcess, Codex
+// app-server, hand-off writers), so this is where its environment is cut down to the
+// allowlist (agent-env.ts) — after the SDK and the provider have merged in process.env.
+export function spawnAgentProcess(input: { command: string; args: string[]; cwd?: string; env?: Record<string, string | undefined>; signal?: AbortSignal }) {
+  const opts = { ...input, env: agentEnv(input.env ?? process.env) }
   if (process.platform === 'win32') return spawnOnWindows(opts)
   for (const fd of [0, 1, 2]) {
     try { fs.fstatSync(fd) }

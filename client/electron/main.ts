@@ -22,6 +22,7 @@ import { AllowedRoots } from './allowed-roots'
 import { typedIpc } from './ipc/registrar'
 import { createConfigStore } from './services/config-store'
 import { createShellEnvironment } from './services/shell-env'
+import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
 import { createMessageBoxHost, createWindowPort, desktopShell, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { createSession } from './services/session'
@@ -72,6 +73,9 @@ app.on('second-instance', () => {
 // and the member's Claude Code CLI (electron/services/).
 const config = createConfigStore(() => path.join(app.getPath('userData'), 'config.json'))
 const shellEnv = createShellEnvironment()
+// Every AI process gets an allowlisted environment plus the member's own
+// pass-through names (agents/agent-env.ts).
+configureAgentEnv({ passthroughNames: () => config.load().agentEnvPassthrough ?? [] })
 const claudeCli = createClaudeCli()
 
 // Skills and their web-app tools (features/skills, features/tools).

@@ -441,6 +441,9 @@ export interface IpcInvokeChannels {
   'config:getServerUrl': { args: []; result: string | null }
   'config:setServerUrl': { args: [url: string]; result: boolean }
   'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
+  // Extra environment variable names passed to AI processes (agents/agent-env.ts), this computer only
+  'config:getAgentEnvPassthrough': { args: []; result: string[] }
+  'config:setAgentEnvPassthrough': { args: [names: string[]]; result: { names: string[]; invalid: string[]; denied: string[] } }
 
   // Chat: choice prompts, tool approvals, hand-offs, history, the chat server
   'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
@@ -587,6 +590,8 @@ export interface ElectronAPI {
   getServerUrl: Invoke<'config:getServerUrl'>
   setServerUrl: Invoke<'config:setServerUrl'>
   validateServerUrl: Invoke<'config:validateServerUrl'>
+  getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
+  setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 
   onAgentInteraction: Subscribe<'agent-interaction:request'>
   onAgentInteractionClosed: Subscribe<'agent-interaction:closed'>

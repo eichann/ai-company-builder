@@ -196,6 +196,8 @@ const api: ElectronAPI = {
   getServerUrl: () => invoke('config:getServerUrl'),
   setServerUrl: (url: string) => invoke('config:setServerUrl', url),
   validateServerUrl: (url: string) => invoke('config:validateServerUrl', url),
+  getAgentEnvPassthrough: () => invoke('config:getAgentEnvPassthrough'),
+  setAgentEnvPassthrough: (names: string[]) => invoke('config:setAgentEnvPassthrough', names),
 
   onAgentInteraction: callback => subscribe('agent-interaction:request', callback),
   onAgentInteractionClosed: callback => subscribe('agent-interaction:closed', callback),
