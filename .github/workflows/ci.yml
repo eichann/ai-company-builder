@@ -1,14 +1,24 @@
 name: CI
 
+# Pull requests run only the jobs their changed paths need (job `changes`,
+# .github/scripts/changed-areas.sh) and a lighter sync soak. A push to main,
+# the nightly schedule and a manual run run every job with the full soak.
 on:
   pull_request:
     branches: [main]
   push:
     branches: [main]
+  schedule:
+    # Nightly full run (18:17 UTC = 03:17 JST), off the hour to avoid the
+    # scheduler's top-of-hour backlog.
+    - cron: '17 18 * * *'
+  workflow_dispatch:
 
-# A new push to the same PR / branch supersedes the run in progress.
+# A new push to the same PR / branch supersedes the run in progress. The event
+# is part of the group outside PRs so the nightly run and a push to main never
+# cancel each other.
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || format('{0}-{1}', github.event_name, github.ref) }}
   cancel-in-progress: true
 
 # Read-only token: no step publishes anything, and PRs from forks must work
@@ -17,6 +27,31 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    name: Changed paths
+    # Decides which jobs this run needs (see changed-areas.sh for the lists).
+    # Every gated job runs when this job's answer is missing (`!= 'false'`), so
+    # a failure here runs everything instead of skipping a check.
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      sync: ${{ steps.areas.outputs.sync }}
+      client: ${{ steps.areas.outputs.client }}
+      ui: ${{ steps.areas.outputs.ui }}
+      perf: ${{ steps.areas.outputs.perf }}
+      universal: ${{ steps.areas.outputs.universal }}
+      server: ${{ steps.areas.outputs.server }}
+      admin: ${{ steps.areas.outputs.admin }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - id: areas
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_REF: ${{ github.base_ref }}
+        run: .github/scripts/changed-areas.sh "$EVENT_NAME" "$BASE_REF"
+
   typecheck:
     name: Typecheck (all packages)
     runs-on: ubuntu-latest
@@ -37,6 +72,10 @@ jobs:
     # voice-helper / voice-polisher tests fail on ubuntu-latest because of a
     # real Linux-only bug in application code, which this CI-only change does
     # not fix. macOS also lets us run the AVFoundation Swift test.
+    needs: changes
+    # A job skipped by its `if` reports success, so the required check passes
+    # for a PR that does not touch what it tests.
+    if: ${{ !cancelled() && needs.changes.outputs.client != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -65,6 +104,8 @@ jobs:
     # Chromium: what the member sees and can do in the chat, the main screen,
     # the file tree, the editor and settings. macOS like test-client: the
     # app's platform, and the keyboard hints (⌘) the tests read.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.ui != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
@@ -99,26 +140,70 @@ jobs:
             client/test-results
           retention-days: 7
 
-  sync-harness:
-    name: Sync harness (macOS)
+  sync-harness-shard:
+    name: Sync harness ${{ matrix.shard }}/4 (macOS)
     # git:sync (client/electron/sync/) driven end to end: several members per
     # company against a real bare repository with the production pre-receive
     # hook, scripted dialog answers, the characterization recording, and a
     # seeded randomized soak. Separate from test-client so the two run in
     # parallel. macOS for the same reasons as test-client (the client's main
     # platform; /bin/sh is bash).
+    #
+    # Split over 4 runners by file groups balanced by duration
+    # (.github/scripts/sync-shard.mjs; the last shard also runs any file not
+    # listed there). The required check is the `sync-harness` job below.
+    #
+    # Soak: pull requests run one seed of each world (plain, mixed with
+    # partial clones, private folders) x 6 rounds; push to main, nightly and
+    # manual runs the full 3 + 2 + 2 seeds x 8 rounds.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.sync != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2, 3, 4]
     steps:
       - uses: actions/checkout@v7
       - uses: ./.github/actions/setup
       - run: git --version
-      - run: npx tsx --test tests/sync/*.test.ts
+      - name: Run this shard's test files
         working-directory: client
         env:
-          SYNC_SOAK_SEEDS: '1,2,3'
+          SHARD: ${{ matrix.shard }}
+          SYNC_SOAK_SEEDS: ${{ github.event_name == 'pull_request' && '1' || '1,2,3' }}
+          SYNC_SOAK_MIXED_SEEDS: ${{ github.event_name == 'pull_request' && '101' || '101,102' }}
+          SYNC_SOAK_PRIVATE_SEEDS: ${{ github.event_name == 'pull_request' && '201' || '201,202' }}
           SYNC_SOAK_MEMBERS: '3'
-          SYNC_SOAK_ROUNDS: '8'
+          SYNC_SOAK_ROUNDS: ${{ github.event_name == 'pull_request' && '6' || '8' }}
+        run: |
+          files=$(node ../.github/scripts/sync-shard.mjs "$SHARD")
+          echo "Shard $SHARD: $files"
+          # shellcheck disable=SC2086 # word splitting is the point
+          npx tsx --test $files
+
+  sync-harness:
+    name: Sync harness (macOS)
+    # The required status check: green when every shard passed, or when the
+    # shards were skipped because the PR does not touch sync; red for a failed
+    # or cancelled shard. On ubuntu so it costs no macOS runner.
+    needs: [changes, sync-harness-shard]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - env:
+          SHARDS: ${{ needs.sync-harness-shard.result }}
+          WANTED: ${{ needs.changes.outputs.sync }}
+        run: |
+          echo "shards: $SHARDS (sync changed: ${WANTED:-unknown})"
+          case "$SHARDS" in
+            success) exit 0 ;;
+            skipped) [ "$WANTED" = false ] && exit 0 ;;
+          esac
+          echo "::error::Sync harness shards did not pass ($SHARDS)"
+          exit 1
 
   perf-baselines:
     name: Performance baselines (macOS)
@@ -131,6 +216,8 @@ jobs:
     # stay in this job's log. Separate from test-client so a flaky timing is
     # visible as such. macOS like the other client jobs (recursive fs.watch
     # is FSEvents there, as on members' Macs).
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.perf != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 20
     steps:
@@ -150,43 +237,20 @@ jobs:
     # The mac app ships dugite's git as a universal binary merged from the
     # arm64 and x64 dugite-native archives (client/scripts/universal-git.mjs,
     # run as electron-builder's beforePack). An arm64-only git made Intel Macs
-    # fall back to Apple Git 2.39, whose push is broken. Runs only when the
-    # merge script, the client's package.json / lockfile or this workflow
-    # changes; the merge itself takes seconds.
+    # fall back to Apple Git 2.39, whose push is broken. On pull requests it
+    # runs only when the merge script, the client's package.json, the lockfile
+    # or the workflow changes (job `changes`); the merge itself takes seconds.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.universal != 'false' }}
     runs-on: macos-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      - name: Check for relevant changes
-        id: changed
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          BASE_REF: ${{ github.base_ref }}
-          BEFORE: ${{ github.event.before }}
-        run: |
-          if [ "$EVENT_NAME" = "pull_request" ]; then
-            base=$(git merge-base "origin/$BASE_REF" HEAD)
-          elif [ -n "$BEFORE" ] && git cat-file -e "$BEFORE^{commit}" 2>/dev/null; then
-            base="$BEFORE"
-          else
-            base=$(git rev-parse HEAD~1)
-          fi
-          if git diff --quiet "$base" HEAD -- client/scripts/universal-git.mjs client/package.json pnpm-lock.yaml .github/workflows/ci.yml; then
-            echo "run=false" >> "$GITHUB_OUTPUT"
-            echo "No changes to the bundled-git build inputs; skipping."
-          else
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          fi
-      - if: steps.changed.outputs.run == 'true'
-        uses: ./.github/actions/setup
+      - uses: ./.github/actions/setup
       - name: Merge the arm64 and x64 dugite-native archives
-        if: steps.changed.outputs.run == 'true'
         working-directory: client
         run: node scripts/universal-git.mjs --out "$RUNNER_TEMP/git-universal"
       - name: Every Mach-O is universal; both slices run
-        if: steps.changed.outputs.run == 'true'
         env:
           DIR: ${{ runner.temp }}/git-universal
         run: |
@@ -206,6 +270,8 @@ jobs:
 
   test-server:
     name: Server tests
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.server != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -219,6 +285,8 @@ jobs:
     # API client against contract fixtures + page rendering (loading / empty /
     # error states, role-dependent controls) in jsdom. A few seconds; no
     # browser download.
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.admin != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

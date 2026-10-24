@@ -887,6 +887,25 @@ SYNC_SOAK_SEEDS=1,2,3,4,5,6,7,8 SYNC_SOAK_MEMBERS=5 SYNC_SOAK_ROUNDS=15 \
   npx tsx --test tests/sync/soak.test.ts              # a bigger soak
 ```
 
+- **In CI** (`.github/workflows/ci.yml`) the harness runs on 4 macOS runners
+  ("Sync harness N/4 (macOS)"): file groups balanced by duration in
+  `.github/scripts/sync-shard.mjs` — the last shard also runs every file not
+  listed there, so a new test file needs no CI change (move it to another
+  group if it is long). The required check "Sync harness (macOS)" is a small
+  job that is green only when every shard passed (or all were skipped).
+  - **Soak**: pull requests run one seed of each world — `SYNC_SOAK_SEEDS=1`,
+    `SYNC_SOAK_MIXED_SEEDS=101`, `SYNC_SOAK_PRIVATE_SEEDS=201`, 3 members × 6
+    rounds. A push to main, the **nightly** run (cron 18:17 UTC) and a manual
+    run (workflow_dispatch) use the full soak: seeds `1,2,3` / `101,102` /
+    `201,202`, 3 members × 8 rounds. A seed that fails nightly reproduces
+    locally with the same variables.
+  - **Pull requests run the harness only when sync's inputs change**
+    (`.github/scripts/changed-areas.sh`: `client/electron/sync/`,
+    `protected-config.ts`, `write-guard.ts`, `client/shared/`, the harness and
+    tests, `server/src/lib/{push-check,git-server}/`, `permissions.ts`,
+    `git-exec.ts`, `server/src/templates/`, `shared/`, package manifests,
+    lockfile, the workflow). Sync code that starts importing something outside
+    those lists must add it there. Push to main and nightly run everything.
 - A `World` is one company: a bare server repo configured like
   `configureBareRepo` (`BARE_REPO_CONFIG`: deny non-fast-forwards / deletes,
   partial clone; the real hook
