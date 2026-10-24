@@ -167,6 +167,20 @@ describe('labels cover every value of the contract', () => {
     }
   })
 
+  it('decision labels say who decided, in plain words', () => {
+    expect(DECISION_LABELS['policy-default'].label).toBe('AI の設定に任せた')
+    expect(DECISION_LABELS['policy-default'].description).toMatch(/アプリは判断せず、AI 自身の権限の設定/)
+    expect(DECISION_LABELS['guard-denied'].label).toBe('アプリの守りで拒否')
+    for (const d of TOOL_DECISIONS) {
+      const { label, description } = DECISION_LABELS[d]
+      // No vague or technical words a member would not know.
+      expect(label, d).not.toMatch(/設定どおり|ガード|ポリシー|policy|guard/i)
+      expect(description, d).toMatch(/。$/)
+    }
+    const labels = TOOL_DECISIONS.map((d) => DECISION_LABELS[d].label)
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
   it('every denied decision is shown as a denial', () => {
     for (const d of TOOL_DECISIONS) expect(DECISION_LABELS[d].tone === 'denied', d).toBe(isDenied(d))
   })
@@ -277,19 +291,44 @@ describe('the log page', () => {
     renderInCompany(<AgentEventsPage />)
     expect(await screen.findByText(/会話の中身・ファイルの中身・コマンドの引数は記録しません/)).toBeInTheDocument()
     expect(await screen.findByText('営業部/提案書.md')).toBeInTheDocument()
-    expect(screen.getByText('ガードが拒否')).toBeInTheDocument()
+    expect(screen.getByText('アプリの守りで拒否')).toBeInTheDocument()
     expect(screen.getByText('理由: 閲覧のみのフォルダ')).toBeInTheDocument()
     expect(screen.getByText('非公開（表示できません）')).toBeInTheDocument()
     expect(screen.getByText('git push')).toBeInTheDocument()
     expect(screen.getByText('ファイルに出力')).toBeInTheDocument()
     expect(screen.getByText('秘密の置き場所: SSH の鍵（~/.ssh）')).toBeInTheDocument()
-    expect(screen.getByText('停止中のため拒否')).toBeInTheDocument()
+    expect(screen.getByText('AI の停止中のため拒否')).toBeInTheDocument()
     expect(screen.getAllByText('Claude Code（claude-opus-5-5）').length).toBeGreaterThan(0)
     // The summary and the apps that do not send the log.
     expect(await screen.findByText('4件')).toBeInTheDocument()
+    expect(await screen.findByRole('region', { name: /記録を送っていないアプリ（2人）/ })).toBeInTheDocument()
+  })
+
+  it('the apps that do not send the log: one line, the list behind a toggle', async () => {
+    setUrl('')
+    stubApi(ownerCaps, logRoutes())
+    renderInCompany(<AgentEventsPage />)
     const notice = await screen.findByRole('region', { name: /記録を送っていないアプリ（2人）/ })
-    expect(within(notice).getByText('鈴木 一郎')).toBeInTheDocument()
-    expect(within(notice).getByText('アプリの版がわかりません')).toBeInTheDocument()
+    const toggle = within(notice).getByRole('button', { name: '一覧を表示' })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    const list = document.getElementById(toggle.getAttribute('aria-controls')!)!
+    expect(list).not.toBeVisible()
+    expect(within(notice).queryByRole('listitem')).not.toBeInTheDocument()
+
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(toggle).toHaveAccessibleName('閉じる')
+    expect(list).toBeVisible()
+    expect(within(notice).getAllByRole('listitem')).toHaveLength(2)
+    expect(within(list).getByText('鈴木 一郎')).toBeInTheDocument()
+    // The version when known, else a short 「版は不明」.
+    expect(within(list).getByText(/^0\.0\.1（2026\/10\/0?1 版）$/)).toBeInTheDocument()
+    expect(within(list).getByText('版は不明')).toBeInTheDocument()
+    expect(within(notice).queryByText('アプリの版がわかりません')).not.toBeInTheDocument()
+
+    await userEvent.click(toggle)
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(list).not.toBeVisible()
   })
 
   it('filters go into the URL; a conversation opens in time order', async () => {
