@@ -1,5 +1,6 @@
 import { VoiceHelperPool } from './voice-helper'
-import { app, ipcMain, systemPreferences, type WebContents } from 'electron'
+import { app, ipcMain, systemPreferences, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
+import { typedIpc } from './ipc/registrar'
 import { mkdirSync } from 'node:fs'
 import path from 'node:path'
 import type { VoiceCapabilities, VoiceDeviceList } from '../shared/voice-input'
@@ -57,12 +58,13 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => Record<st
   const cancel = () => session.cancel()
   // 「整え方の指示」: per member on this PC, read at the start of each voice input.
   const prompts = createVoicePromptStore(path.join(app.getPath('userData'), 'voice-prompt.json'))
-  ipcMain.handle('voice:getPrompt', () => prompts.get())
-  ipcMain.handle('voice:setPrompt', (_event, instructions: unknown) => prompts.set(instructions))
-  ipcMain.handle('voice:resetPrompt', () => prompts.reset())
-  ipcMain.handle('voice:capabilities', capabilities)
-  ipcMain.handle('voice:devices', () => provider.devices())
-  ipcMain.handle('voice:start', async (event, id: unknown, deviceId?: unknown) => {
+  const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
+  ipc.handle('voice:getPrompt', () => prompts.get())
+  ipc.handle('voice:setPrompt', (_event, instructions: unknown) => prompts.set(instructions))
+  ipc.handle('voice:resetPrompt', () => prompts.reset())
+  ipc.handle('voice:capabilities', capabilities)
+  ipc.handle('voice:devices', () => provider.devices())
+  ipc.handle('voice:start', async (event, id: unknown, deviceId?: unknown) => {
     if (typeof id !== 'string' || !/^[\w-]{1,80}$/.test(id)) throw new Error('無効な音声入力IDです')
     if (deviceId !== undefined && (typeof deviceId !== 'string' || deviceId.length > 1024 || deviceId.includes('\0'))) throw new Error('無効なマイクIDです')
     if (session.busy) throw new Error('音声入力が既に動作中です')
@@ -79,7 +81,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => Record<st
     const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd, systemPrompt: prompts.systemPrompt() })
     await session.start(id, deviceId as string | undefined, formatter)
   })
-  ipcMain.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
-  ipcMain.handle('voice:cancel', (event, id: string) => { if (owner === event.sender) session.cancel(id) })
+  ipc.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })
+  ipc.handle('voice:cancel', (event, id: string) => { if (owner === event.sender) session.cancel(id) })
   app.on('before-quit', () => { provider.dispose(); cancel() })
 }

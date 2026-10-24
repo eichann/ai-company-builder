@@ -249,19 +249,55 @@ was changed for this — keep main.ts importable without side effects beyond
 registering handlers (startup stays inside `app.whenReady`).
 
 - `ipc-contract.test.ts` compares the whole IPC surface with
-  `tests/ipc-harness/ipc-inventory.json`: every `ipcMain.handle` / `.on`
-  channel with its parameters, every channel sent to the window, each
-  preload function's call(s) and declared type, and the unmatched ends
-  (handlers without a preload caller, preload functions the renderer never
-  calls — dead-code candidates). Adding, removing or re-wiring a channel
-  fails it on purpose: regenerate with
+  `tests/ipc-harness/ipc-inventory.json`: every `ipc.handle` / `.on`
+  channel with its parameters (main.ts, voice-input.ts and
+  `electron/features/**`), every channel sent to the window, each preload
+  function's call(s) and its type as the compiler resolves it from the
+  contract, the contract's channel lists and exported types, and the
+  unmatched ends (handlers without a preload caller, preload functions the
+  renderer never calls — dead-code candidates). It also asserts that the
+  contract and the running app agree exactly (`notInContract`,
+  `inContractButUnused` empty). Adding, removing or re-wiring a channel, or
+  changing a payload type, fails it on purpose: regenerate with
   `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and
   review the JSON diff in the PR.
+- `ipc-path-guard.test.ts`: every handler parameter named like a path
+  (path / root / folder / dir) is either listed as GUARDED — called with a
+  path outside every root, it must reach `AllowedRoots.validate` and must
+  not succeed — or EXEMPT with the reason (repository pathspecs, names sent
+  to the server, …). A new path parameter fails until it is classified.
 - The other files pin handler behaviour that lives in main.ts itself (the
   allowed-roots check, which refusal each handler applies, result shapes);
   logic one level down keeps its own tests. Run one file alone:
   `npx tsx --test tests/ipc-fs.test.ts` (`IPC_HARNESS_VERBOSE=1` prints
   main.ts's console).
+
+### IPC contract (client)
+
+Every renderer ↔ main channel is declared once, in
+`client/shared/ipc-contract.ts` (types only, no Electron): `IpcInvokeChannels`
+(`invoke` ↔ `handle`: args tuple + result), `IpcSendChannels`,
+`IpcSyncChannels` (`sendSync`, `event.returnValue`), `IpcEventChannels`
+(main → window payloads) and `ElectronAPI` (`window.electronAPI`, its methods
+typed from the channels). Both ends are checked by the compiler:
+`electron/preload.ts` builds `window.electronAPI` as an `ElectronAPI` through
+typed `invoke` / `send` / `sendSync` / `subscribe` helpers, and the main
+process registers through `typedIpc(ipcMain)` (`electron/ipc/registrar.ts`,
+an `IpcRegistrar` — no Electron import), so a handler's parameters and result
+must fit its channel. The renderer keeps calling `window.electronAPI.x(...)`;
+preview pages fake it with `Window['electronAPI']` (tests/ui/fixtures).
+
+How to add an IPC channel:
+1. Add it to `shared/ipc-contract.ts` (channel → `{ args, result }`, or the
+   event payload) and its `ElectronAPI` method (`Invoke<'channel'>`, or a
+   hand-written signature when the method adapts its arguments).
+2. Implement the method in `electron/preload.ts` with named parameters
+   (`(path: string) => invoke('fs:x', path)` — no `...args`).
+3. Register the handler with `ipc.handle('channel', …)` — a string literal,
+   on a variable named `ipc` — in main.ts / the feature module. A local path
+   from the renderer goes through the allowed-roots validator, and the
+   parameter goes into GUARDED (or EXEMPT) in `tests/ipc-path-guard.test.ts`.
+4. Regenerate `tests/ipc-harness/ipc-inventory.json` and review the diff.
 
 ### File Naming Rules
 

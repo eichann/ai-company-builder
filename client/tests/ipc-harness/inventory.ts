@@ -20,8 +20,29 @@ import ts from 'typescript'
 import * as electronFake from './fake-electron.ts'
 
 const CLIENT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
-/** Main-process files that talk to Electron's IPC directly. */
-export const MAIN_IPC_FILES = ['electron/main.ts', 'electron/voice-input.ts']
+/** The IPC contract: channel types and window.electronAPI (ElectronAPI). */
+export const CONTRACT_FILE = 'shared/ipc-contract.ts'
+
+/**
+ * Main-process files that register IPC handlers or send to the window:
+ * main.ts, voice-input.ts and every module under electron/features/.
+ */
+export function mainIpcFiles(): string[] {
+  const files = ['electron/main.ts', 'electron/voice-input.ts']
+  const walk = (rel: string) => {
+    const dir = path.join(CLIENT, rel)
+    if (!fs.existsSync(dir)) return
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      const child = `${rel}/${entry.name}`
+      if (entry.isDirectory()) walk(child)
+      else if (entry.name.endsWith('.ts') && !entry.name.endsWith('.d.ts')) files.push(child)
+    }
+  }
+  walk('electron/features')
+  return files
+}
+/** Variables holding the main process's IPC (Electron's, or the typed registrar). */
+const IPC_TARGETS = new Set(['ipcMain', 'ipc'])
 
 export interface MainChannel { file: string; params: string }
 
@@ -33,6 +54,14 @@ export interface Inventory {
     send: Record<string, string[]>
   }
   preload: Record<string, { calls: string[]; declared: string | null }>
+  /**
+   * shared/ipc-contract.ts: the channels it lists per kind, and every type it
+   * exports as written (a change to a payload's shape shows up here).
+   */
+  contract: {
+    channels: ContractChannels
+    types: Record<string, string>
+  }
   unmatched: {
     handlersWithoutPreloadCaller: string[]
     preloadCallsWithoutHandler: string[]
@@ -41,7 +70,38 @@ export interface Inventory {
     exposedButNotDeclared: string[]
     declaredButNotExposed: string[]
     preloadApiUnusedByRenderer: string[]
+    /** Channels the running app uses but the contract does not list, or the other way round. */
+    notInContract: string[]
+    inContractButUnused: string[]
   }
+}
+
+export interface ContractChannels { invoke: string[]; send: string[]; sync: string[]; events: string[] }
+
+/** The channel names (members) of the contract's channel interfaces, and its exported types' text. */
+export function contractFromSource(): Inventory['contract'] {
+  const source = parse(CONTRACT_FILE)
+  const kinds: Record<string, keyof ContractChannels> = {
+    IpcInvokeChannels: 'invoke', IpcSendChannels: 'send', IpcSyncChannels: 'sync', IpcEventChannels: 'events',
+  }
+  const channels: ContractChannels = { invoke: [], send: [], sync: [], events: [] }
+  const types: Record<string, string> = {}
+  for (const statement of source.statements) {
+    if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue
+    const exported = statement.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
+    if (!exported) continue
+    // Comments inside a declaration are not part of its shape.
+    types[statement.name.text] = squash(statement.getText().replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))
+    const kind = kinds[statement.name.text]
+    if (kind && ts.isInterfaceDeclaration(statement)) {
+      for (const member of statement.members) {
+        const name = member.name && literalText(member.name)
+        if (name) channels[kind].push(name)
+      }
+    }
+  }
+  for (const list of Object.values(channels)) list.sort()
+  return { channels, types: sorted(types) }
 }
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim()
@@ -61,22 +121,23 @@ function literalText(node: ts.Node | undefined): string | null {
 /** ipcMain.handle / ipcMain.on registrations and .send(<literal>) calls, from source. */
 export function staticMainChannels(): Inventory['main'] {
   const out: Inventory['main'] = { handle: {}, on: {}, send: {} }
-  for (const rel of MAIN_IPC_FILES) {
+  for (const rel of mainIpcFiles()) {
+    const where = path.relative('electron', rel)
     const visit = (node: ts.Node) => {
       if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
         const name = node.expression.name.text
         const target = node.expression.expression.getText()
         const channel = literalText(node.arguments[0])
-        if (target === 'ipcMain' && (name === 'handle' || name === 'on') && channel !== null) {
+        if (IPC_TARGETS.has(target) && (name === 'handle' || name === 'on') && channel !== null) {
           const fn = node.arguments[1]
           const params = fn && (ts.isArrowFunction(fn) || ts.isFunctionExpression(fn))
             ? fn.parameters.slice(1).map(p => squash(p.getText())).join(', ')
             : `<${fn ? squash(fn.getText()) : ''}>`
-          out[name][channel] = { file: path.basename(rel), params }
+          out[name][channel] = { file: where, params }
         }
         if (name === 'send' && channel !== null) {
           const files = out.send[channel] ?? []
-          if (!files.includes(path.basename(rel))) files.push(path.basename(rel))
+          if (!files.includes(where)) files.push(where)
           out.send[channel] = files
         }
       }
@@ -87,26 +148,37 @@ export function staticMainChannels(): Inventory['main'] {
   return out
 }
 
-/** Members of `interface Window { electronAPI: {...} }` in preload.ts: dotted name → type text. */
+/**
+ * Members of `ElectronAPI` (shared/ipc-contract.ts, what preload.ts declares
+ * as `Window['electronAPI']`): dotted name → the member's type as the
+ * compiler resolves it (contract aliases expanded into parameters and
+ * result), so a change to a channel's types shows up here.
+ */
 function declaredPreloadApi(): Record<string, string> {
+  const file = path.join(CLIENT, CONTRACT_FILE)
+  const program = ts.createProgram([file], {
+    strict: true, noEmit: true, skipLibCheck: true,
+    target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Bundler,
+  })
+  const checker = program.getTypeChecker()
+  const moduleSymbol = checker.getSymbolAtLocation(program.getSourceFile(file)!)!
+  const apiSymbol = checker.getExportsOfModule(moduleSymbol).find(s => s.name === 'ElectronAPI')
+  if (!apiSymbol) throw new Error(`${CONTRACT_FILE} exports no ElectronAPI`)
+  const flags = ts.TypeFormatFlags.NoTruncation | ts.TypeFormatFlags.WriteArrowStyleSignature
   const out: Record<string, string> = {}
-  const walkType = (prefix: string, type: ts.TypeNode | undefined) => {
-    if (!type || !ts.isTypeLiteralNode(type)) return
-    for (const member of type.members) {
-      if (!ts.isPropertySignature(member) || !member.name) continue
-      const name = prefix + member.name.getText()
-      out[name] = squash(member.type?.getText() ?? '')
+  const walk = (prefix: string, type: ts.Type) => {
+    for (const member of type.getProperties()) {
+      const memberType = checker.getTypeOfSymbol(member)
+      const signatures = memberType.getCallSignatures()
+      const name = prefix + member.name
+      out[name] = squash(signatures.length === 1
+        ? checker.signatureToString(signatures[0], undefined, flags)
+        : checker.typeToString(memberType, undefined, flags))
+      // A nested API object (voiceInput): its methods too.
+      if (signatures.length === 0 && memberType.getProperties().length > 0) walk(`${name}.`, memberType)
     }
   }
-  const visit = (node: ts.Node) => {
-    if (ts.isInterfaceDeclaration(node) && node.name.text === 'Window') {
-      for (const member of node.members) {
-        if (ts.isPropertySignature(member) && member.name.getText() === 'electronAPI') walkType('', member.type)
-      }
-    }
-    ts.forEachChild(node, visit)
-  }
-  visit(parse('electron/preload.ts'))
+  walk('', checker.getDeclaredTypeOfSymbol(apiSymbol))
   return out
 }
 
@@ -199,10 +271,21 @@ export async function buildInventory(registered: { handle: string[]; on: string[
   const listened = new Set(parsedCalls.filter(c => c.method === 'on').map(c => c.channel))
   const sendMatchers = Object.keys(main.send).map(p => ({ p, re: channelMatcher(p) }))
   const used = rendererUses()
+  const contract = contractFromSource()
+  // What the running app uses, per contract kind: handlers (+ the preload's
+  // invokes), ipcMain.on listeners (+ the preload's send / sendSync), and the
+  // events the preload listens to (each a channel main sends, see below).
+  const usedByKind = {
+    invoke: new Set([...Object.keys(main.handle), ...invoked]),
+    message: new Set([...Object.keys(main.on), ...sentToMain]),
+    events: listened,
+  }
+  const contractMessages = new Set([...contract.channels.send, ...contract.channels.sync])
 
   return {
     main: { handle: sorted(main.handle), on: sorted(main.on), send: sorted(main.send) },
     preload: sorted(preload),
+    contract,
     unmatched: {
       handlersWithoutPreloadCaller: Object.keys(main.handle).filter(c => !invoked.has(c)).sort(),
       preloadCallsWithoutHandler: [
@@ -215,6 +298,17 @@ export async function buildInventory(registered: { handle: string[]; on: string[
       exposedButNotDeclared: Object.keys(calls).filter(n => !(n in declared) && !(n.split('.')[0] in declared)).sort(),
       declaredButNotExposed: Object.keys(declared).filter(n => !(n in calls) && !Object.keys(calls).some(k => k.startsWith(`${n}.`))).sort(),
       preloadApiUnusedByRenderer: Object.keys(calls).filter(n => !used.has(n)).sort(),
+      notInContract: [
+        ...[...usedByKind.invoke].filter(c => !contract.channels.invoke.includes(c)).map(c => `invoke ${c}`),
+        ...[...usedByKind.message].filter(c => !contractMessages.has(c)).map(c => `send/sendSync ${c}`),
+        ...[...usedByKind.events].filter(c => !contract.channels.events.includes(c)).map(c => `event ${c}`),
+        ...Object.keys(main.send).filter(p => !contract.channels.events.some(c => channelMatcher(p).test(c))).map(c => `event ${c} (sent by main)`),
+      ].sort(),
+      inContractButUnused: [
+        ...contract.channels.invoke.filter(c => !main.handle[c] || !invoked.has(c)).map(c => `invoke ${c}`),
+        ...[...contractMessages].filter(c => !main.on[c] || !sentToMain.has(c)).map(c => `send/sendSync ${c}`),
+        ...contract.channels.events.filter(c => !listened.has(c) || !sendMatchers.some(m => m.re.test(c))).map(c => `event ${c}`),
+      ].sort(),
     },
   }
 }

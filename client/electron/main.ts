@@ -5,7 +5,7 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
 import { createCommitMessageGenerator } from './commit-message'
-import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, net as electronNet, protocol, nativeImage, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import os from 'os'
@@ -58,6 +58,11 @@ import type { InstructionAuthority } from './write-guard'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import { AllowedRoots, type ValidateOptions } from './allowed-roots'
 import { isExternalUrlAllowed } from './external-url'
+import { typedIpc } from './ipc/registrar'
+import type { ClaudeCodeStatus, DirectoryTreeNode } from '../shared/ipc-contract'
+
+// Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
+const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
 
 // Allowed directory roots for file system access control
 // Paths are added when the user selects a directory via dialog or sets up a
@@ -241,14 +246,7 @@ function getShellEnv(): Record<string, string> {
 // ============================================================================
 
 /** Cached result of Claude Code CLI detection */
-let cachedClaudeCodeStatus: {
-  available: boolean
-  authenticated: boolean
-  cliPath: string | null
-  version: string | null
-  error: string | null
-  checkedAt: number
-} | null = null
+let cachedClaudeCodeStatus: ClaudeCodeStatus | null = null
 
 const CLAUDE_STATUS_TTL = 30_000 // Re-check every 30 seconds
 
@@ -325,12 +323,12 @@ function findClaudeCodeCli(): string | null {
  * Check Claude Code CLI status: availability, path, version, and authentication.
  * Results are cached for CLAUDE_STATUS_TTL milliseconds.
  */
-function checkClaudeCodeStatus(forceRefresh = false): typeof cachedClaudeCodeStatus {
+function checkClaudeCodeStatus(forceRefresh = false): ClaudeCodeStatus {
   if (!forceRefresh && cachedClaudeCodeStatus && Date.now() - cachedClaudeCodeStatus.checkedAt < CLAUDE_STATUS_TTL) {
     return cachedClaudeCodeStatus
   }
 
-  const status: typeof cachedClaudeCodeStatus = {
+  const status: ClaudeCodeStatus = {
     available: false,
     authenticated: false,
     cliPath: null,
@@ -460,7 +458,7 @@ protocol.registerSchemesAsPrivileged([
 ])
 
 // IPC handler for renderer to request chat server info on demand
-ipcMain.handle('chat-server:getInfo', () => {
+ipc.handle('chat-server:getInfo', () => {
   return chatServerInfo
 })
 
@@ -504,7 +502,7 @@ app.on('before-quit', () => {
 })
 
 // IPC Handlers for file system operations
-ipcMain.handle('dialog:selectDirectory', async () => {
+ipc.handle('dialog:selectDirectory', async () => {
   const result = await dialog.showOpenDialog({
     properties: ['openDirectory', 'createDirectory'],
   })
@@ -516,14 +514,14 @@ ipcMain.handle('dialog:selectDirectory', async () => {
 })
 
 // Register a directory as allowed for file system access (called when company folder is set)
-ipcMain.handle('fs:registerAllowedRoot', async (_, dirPath: string) => {
+ipc.handle('fs:registerAllowedRoot', async (_, dirPath: string) => {
   if (dirPath && typeof dirPath === 'string') {
     addAllowedRoot(dirPath)
   }
   return { success: true }
 })
 
-ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
+ipc.handle('fs:readDirectory', async (_, dirPath: string) => {
   try {
     const safePath = validatePath(dirPath)
     const entries = await fs.promises.readdir(safePath, { withFileTypes: true })
@@ -540,15 +538,15 @@ ipcMain.handle('fs:readDirectory', async (_, dirPath: string) => {
 const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 
 
-ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
+ipc.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: number = 2) => {
   try {
     const safePath = validatePath(dirPath)
-    const readLevel = async (dir: string, depth: number): Promise<Array<{ name: string; isDirectory: boolean; path: string; children?: Array<unknown> }>> => {
+    const readLevel = async (dir: string, depth: number): Promise<DirectoryTreeNode[]> => {
       const entries = await fs.promises.readdir(dir, { withFileTypes: true })
       const results = await Promise.all(entries.map(async (entry) => {
         const entryPath = path.join(dir, entry.name)
         const isDir = entry.isDirectory()
-        const node: { name: string; isDirectory: boolean; path: string; children?: Array<unknown> } = {
+        const node: DirectoryTreeNode = {
           name: entry.name,
           isDirectory: isDir,
           path: entryPath,
@@ -570,7 +568,7 @@ ipcMain.handle('fs:readDirectoryTree', async (_, dirPath: string, maxDepth: numb
   }
 })
 
-ipcMain.handle('fs:readFile', async (_, filePath: string) => {
+ipc.handle('fs:readFile', async (_, filePath: string) => {
   try {
     const safePath = validatePath(filePath)
     return await fs.promises.readFile(safePath, 'utf-8')
@@ -579,7 +577,7 @@ ipcMain.handle('fs:readFile', async (_, filePath: string) => {
   }
 })
 
-ipcMain.handle('fs:readFileBinary', async (_, filePath: string) => {
+ipc.handle('fs:readFileBinary', async (_, filePath: string) => {
   try {
     const safePath = validatePath(filePath)
     const buffer = await fs.promises.readFile(safePath)
@@ -589,7 +587,7 @@ ipcMain.handle('fs:readFileBinary', async (_, filePath: string) => {
   }
 })
 
-ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
+ipc.handle('fs:writeFile', async (_, filePath: string, content: string) => {
   try {
     const safePath = validatePath(filePath)
     if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
@@ -605,7 +603,7 @@ ipcMain.handle('fs:writeFile', async (_, filePath: string, content: string) => {
 // .backups/<ts>_editor_overwrite/ — or .git/acb-private-backups/ for a file in
 // a private folder (never in that folder's working tree). Plan and rules:
 // shared/editor-disk-state.ts.
-ipcMain.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, filePath: string) => {
+ipc.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, filePath: string) => {
   try {
     const root = validatePath(rootPath)
     const safePath = validatePath(filePath)
@@ -647,7 +645,7 @@ ipcMain.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, fileP
   }
 })
 
-ipcMain.handle('fs:createDirectory', async (_, dirPath: string) => {
+ipc.handle('fs:createDirectory', async (_, dirPath: string) => {
   try {
     const safePath = validatePath(dirPath)
     if (notDownloadedRefusal(safePath) || await reservedRefusal(safePath)) return false
@@ -658,7 +656,7 @@ ipcMain.handle('fs:createDirectory', async (_, dirPath: string) => {
   }
 })
 
-ipcMain.handle('fs:exists', async (_, targetPath: string) => {
+ipc.handle('fs:exists', async (_, targetPath: string) => {
   try {
     const safePath = validatePath(targetPath)
     await fs.promises.access(safePath)
@@ -669,7 +667,7 @@ ipcMain.handle('fs:exists', async (_, targetPath: string) => {
 })
 
 // Delete file or folder
-ipcMain.handle('fs:delete', async (_, targetPath: string) => {
+ipc.handle('fs:delete', async (_, targetPath: string) => {
   try {
     // The entry itself: deleting a link removes the link, never its target.
     const safePath = validatePath(targetPath, { followFinal: false })
@@ -686,7 +684,7 @@ ipcMain.handle('fs:delete', async (_, targetPath: string) => {
 })
 
 // Rename file or folder
-ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
+ipc.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
   try {
     const safeOld = validatePath(oldPath, { followFinal: false })
     const safeNew = validatePath(newPath)
@@ -700,7 +698,7 @@ ipcMain.handle('fs:rename', async (_, oldPath: string, newPath: string) => {
 })
 
 // Move file or folder
-ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string) => {
+ipc.handle('fs:move', async (_, sourcePath: string, destinationPath: string) => {
   try {
     const safeSrc = validatePath(sourcePath, { followFinal: false })
     const safeDest = validatePath(destinationPath)
@@ -715,7 +713,7 @@ ipcMain.handle('fs:move', async (_, sourcePath: string, destinationPath: string)
 
 // Move file from external location (e.g. Finder drop)
 // Source path is NOT validated (external), only destination is validated
-ipcMain.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationPath: string) => {
+ipc.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationPath: string) => {
   try {
     const safeDest = validatePath(destinationPath)
     const resolved = path.resolve(sourcePath)
@@ -746,7 +744,7 @@ ipcMain.handle('fs:moveFromExternal', async (_, sourcePath: string, destinationP
 })
 
 // Copy file or folder
-ipcMain.handle('fs:copy', async (_, sourcePath: string, destinationPath: string) => {
+ipc.handle('fs:copy', async (_, sourcePath: string, destinationPath: string) => {
   try {
     const safeSrc = validatePath(sourcePath)
     const safeDest = validatePath(destinationPath)
@@ -765,7 +763,7 @@ ipcMain.handle('fs:copy', async (_, sourcePath: string, destinationPath: string)
 })
 
 // Get file/folder stats
-ipcMain.handle('fs:stat', async (_, targetPath: string) => {
+ipc.handle('fs:stat', async (_, targetPath: string) => {
   try {
     const safePath = validatePath(targetPath)
     const stat = await fs.promises.stat(safePath)
@@ -785,7 +783,7 @@ ipcMain.handle('fs:stat', async (_, targetPath: string) => {
 })
 
 // Native drag to external apps (browser, Finder, Slack, etc.)
-ipcMain.on('fs:startDrag', (event, filePath: string) => {
+ipc.on('fs:startDrag', (event, filePath: string) => {
   const safePath = validatePath(filePath)
   event.sender.startDrag({
     file: safePath,
@@ -834,7 +832,7 @@ function sendFileChanges(changes: FileChange[]): void {
 // Watch a company folder: one recursive watcher for the whole company, kept
 // open across department switches. Idempotent; a folder inside an already
 // watched one is covered by it.
-ipcMain.handle('fs:watch', async (_, rootPath: string) => {
+ipc.handle('fs:watch', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
     if (coveringRoot(companyWatchers.keys(), safePath)) return { success: true }
@@ -856,7 +854,7 @@ ipcMain.handle('fs:watch', async (_, rootPath: string) => {
 })
 
 // Stop watching a company folder (the company was closed or switched).
-ipcMain.handle('fs:unwatch', async (_, rootPath: string) => {
+ipc.handle('fs:unwatch', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
     const watcher = companyWatchers.get(safePath)
@@ -908,7 +906,7 @@ function stringifyEnvFile(vars: EnvVars): string {
   return lines.join('\n') + '\n'
 }
 
-ipcMain.handle('env:read', async (_, rootPath: string) => {
+ipc.handle('env:read', async (_, rootPath: string) => {
   try {
     const safePath = validatePath(rootPath)
     const envPath = validatePath(path.join(safePath, '.env'))
@@ -924,7 +922,7 @@ ipcMain.handle('env:read', async (_, rootPath: string) => {
   }
 })
 
-ipcMain.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
+ipc.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
   try {
     const safePath = validatePath(rootPath)
     const envPath = validatePath(path.join(safePath, '.env'))
@@ -957,32 +955,32 @@ ipcMain.handle('env:write', async (_, rootPath: string, vars: EnvVars) => {
 })
 
 // API Key management
-ipcMain.handle('config:getApiKey', () => {
+ipc.handle('config:getApiKey', () => {
   const config = loadConfig()
   return config.anthropicApiKey || null
 })
 
-ipcMain.handle('config:setApiKey', (_, apiKey: string) => {
+ipc.handle('config:setApiKey', (_, apiKey: string) => {
   const config = loadConfig()
   config.anthropicApiKey = apiKey
   saveConfig(config)
   return true
 })
 
-ipcMain.handle('config:hasApiKey', () => {
+ipc.handle('config:hasApiKey', () => {
   const config = loadConfig()
   return !!config.anthropicApiKey
 })
 
 // Auth mode management
-ipcMain.handle('codex:status', () => getCodexStatus(getShellEnv()))
+ipc.handle('codex:status', () => getCodexStatus(getShellEnv()))
 
-ipcMain.handle('config:getAuthMode', () => {
+ipc.handle('config:getAuthMode', () => {
   const config = loadConfig()
   return config.authMode || 'claude-code'
 })
 
-ipcMain.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-key') => {
+ipc.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-key') => {
   const config = loadConfig()
   if (!['claude-code', 'codex', 'api-key'].includes(mode)) throw new Error('不明なAI接続方式です。')
   config.authMode = mode
@@ -990,16 +988,16 @@ ipcMain.handle('config:setAuthMode', (_, mode: 'claude-code' | 'codex' | 'api-ke
   return true
 })
 
-ipcMain.handle('config:getClaudeCodeStatus', () => {
+ipc.handle('config:getClaudeCodeStatus', () => {
   const status = checkClaudeCodeStatus(true) // force refresh when explicitly requested
   return status
 })
 
-ipcMain.handle('config:getPermissionMode', () => {
+ipc.handle('config:getPermissionMode', () => {
   return normalizePermissionMode(loadConfig().permissionMode)
 })
 
-ipcMain.handle('config:setPermissionMode', (_, mode: PermissionMode) => {
+ipc.handle('config:setPermissionMode', (_, mode: PermissionMode) => {
   if (!PERMISSION_MODES.includes(mode)) return false
   const config = loadConfig()
   config.permissionMode = mode
@@ -1008,19 +1006,19 @@ ipcMain.handle('config:setPermissionMode', (_, mode: PermissionMode) => {
 })
 
 // Server URL configuration
-ipcMain.handle('config:getServerUrl', () => {
+ipc.handle('config:getServerUrl', () => {
   const config = loadConfig()
   return config.serverUrl || process.env.API_URL || null
 })
 
-ipcMain.handle('config:setServerUrl', (_, url: string) => {
+ipc.handle('config:setServerUrl', (_, url: string) => {
   const config = loadConfig()
   config.serverUrl = url
   saveConfig(config)
   return true
 })
 
-ipcMain.handle('config:validateServerUrl', async (_, url: string) => {
+ipc.handle('config:validateServerUrl', async (_, url: string) => {
   try {
     const normalizedUrl = url.replace(/\/+$/, '')
     const response = await fetch(`${normalizedUrl}/api/config`, {
@@ -1044,13 +1042,13 @@ const agentInteractions = new AgentInteractions((owner, event, request) => {
   const target = mainWindow?.webContents
   if (target && !target.isDestroyed() && target.id === owner) target.send(`agent-interaction:${event}`, request)
 })
-ipcMain.handle('agent-interaction:list', event => agentInteractions.list(event.sender.id))
-ipcMain.handle('agent-interaction:respond', (event, id: string, response: AgentInteractionResponse) => agentInteractions.respond(event.sender.id, id, response))
+ipc.handle('agent-interaction:list', event => agentInteractions.list(event.sender.id))
+ipc.handle('agent-interaction:respond', (event, id: string, response: AgentInteractionResponse) => agentInteractions.respond(event.sender.id, id, response))
 
 // Tool approval IPC (chat-server → renderer → response)
 const pendingApprovals = new Map<string, { resolve: (result: { approved: boolean }) => void }>()
 
-ipcMain.handle('tool-approval-response', (_, toolUseId: string, approved: boolean) => {
+ipc.handle('tool-approval-response', (_, toolUseId: string, approved: boolean) => {
   const pending = pendingApprovals.get(toolUseId)
   if (pending) {
     pending.resolve({ approved })
@@ -1072,9 +1070,9 @@ try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cl
 app.on('before-quit', () => handoffs.dispose())
 // History writes are coalesced and asynchronous; whatever is still pending is written now.
 app.on('will-quit', () => localHistoryStore.flushSync())
-ipcMain.handle('handoff:get', (_, company: string, id: string) => { handoffs.touch(company, id); return handoffs.view(company, id) })
-ipcMain.handle('handoff:update', (_, company: string, id: string) => handoffs.requestUpdate(company, id))
-ipcMain.handle('handoff:complete', (_, company: string, id: string, receipt: HandoffCompletion) => handoffs.complete(company, id, receipt))
+ipc.handle('handoff:get', (_, company: string, id: string) => { handoffs.touch(company, id); return handoffs.view(company, id) })
+ipc.handle('handoff:update', (_, company: string, id: string) => handoffs.requestUpdate(company, id))
+ipc.handle('handoff:complete', (_, company: string, id: string, receipt: HandoffCompletion) => handoffs.complete(company, id, receipt))
 // Targeted change events: a tab re-reads only its own session's metadata and the
 // sidebar re-reads the summaries (no message bodies), never the whole history.
 function broadcastChatHistoryChanged(change: ChatHistoryChange): void {
@@ -1082,9 +1080,9 @@ function broadcastChatHistoryChanged(change: ChatHistoryChange): void {
     mainWindow.webContents.send('chatHistory:changed', change)
   }
 }
-ipcMain.handle('chatHistory:getSummaries', (_, companyId: string) => localHistoryStore.summaries(companyId))
-ipcMain.handle('chatHistory:search', (_, companyId: string, query: string) => localHistoryStore.search(companyId, query))
-ipcMain.handle('chatHistory:getSession', (_, companyId: string, sessionId: string) =>
+ipc.handle('chatHistory:getSummaries', (_, companyId: string) => localHistoryStore.summaries(companyId))
+ipc.handle('chatHistory:search', (_, companyId: string, query: string) => localHistoryStore.search(companyId, query))
+ipc.handle('chatHistory:getSession', (_, companyId: string, sessionId: string) =>
   localHistoryStore.get(companyId, sessionId))
 // The receipt, not the stored session: sending the whole conversation back on
 // every autosave cost as much IPC as the save itself.
@@ -1094,19 +1092,19 @@ function persistChatSession(companyId: string, session: ChatSession): ChatSaveRe
   if (result.status === 'saved') broadcastChatHistoryChanged({ companyId, sessionId: session.id, kind: 'save' })
   return { status: result.status, revision: result.session.revision ?? 0 }
 }
-ipcMain.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSession) =>
+ipc.handle('chatHistory:saveSession', (_, companyId: string, session: ChatSession) =>
   persistChatSession(companyId, session))
 // Used only during unload, when an asynchronous renderer request cannot be awaited.
-ipcMain.on('chatHistory:flushSession', (event, companyId: string, session: ChatSession) => {
+ipc.on('chatHistory:flushSession', (event, companyId: string, session: ChatSession) => {
   try { event.returnValue = { result: persistChatSession(companyId, session) } }
   catch (error) { event.returnValue = { error: error instanceof Error ? error.message : '保存に失敗しました。' } }
 })
-ipcMain.handle('chatHistory:patchSession', (_, companyId: string, sessionId: string, patch: ChatMetadataPatch) => {
+ipc.handle('chatHistory:patchSession', (_, companyId: string, sessionId: string, patch: ChatMetadataPatch) => {
   const result = localHistoryStore.patch(companyId, sessionId, patch)
   broadcastChatHistoryChanged({ companyId, sessionId, kind: 'patch' })
   return result
 })
-ipcMain.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string) => {
+ipc.handle('chatHistory:deleteSession', (_, companyId: string, sessionId: string) => {
   localHistoryStore.delete(companyId, sessionId)
   handoffs.invalidate(companyId, sessionId)
   broadcastChatHistoryChanged({ companyId, sessionId, kind: 'delete', deletedSessionId: sessionId })
@@ -1172,7 +1170,7 @@ const writeAccessStore = createWriteAccessStore({
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: () => authCookies, log: console })
 
 // Auth API handlers
-ipcMain.handle('auth:signUp', async (_, email: string, password: string, name?: string) => {
+ipc.handle('auth:signUp', async (_, email: string, password: string, name?: string) => {
   try {
     const response = await fetch(`${getServerApiUrl()}/api/auth/sign-up/email`, {
       method: 'POST',
@@ -1205,7 +1203,7 @@ ipcMain.handle('auth:signUp', async (_, email: string, password: string, name?: 
   }
 })
 
-ipcMain.handle('auth:signIn', async (_, email: string, password: string) => {
+ipc.handle('auth:signIn', async (_, email: string, password: string) => {
   try {
     const response = await fetch(`${getServerApiUrl()}/api/auth/sign-in/email`, {
       method: 'POST',
@@ -1238,7 +1236,7 @@ ipcMain.handle('auth:signIn', async (_, email: string, password: string) => {
   }
 })
 
-ipcMain.handle('auth:signOut', async () => {
+ipc.handle('auth:signOut', async () => {
   try {
     await fetch(`${getServerApiUrl()}/api/auth/sign-out`, {
       method: 'POST',
@@ -1261,7 +1259,7 @@ ipcMain.handle('auth:signOut', async () => {
   }
 })
 
-ipcMain.handle('auth:getSession', async () => {
+ipc.handle('auth:getSession', async () => {
   try {
     if (authCookies.length === 0) {
       return { success: false, user: null }
@@ -1289,7 +1287,7 @@ ipcMain.handle('auth:getSession', async () => {
 })
 
 // Companies API handlers
-ipcMain.handle('api:getCompanies', async () => {
+ipc.handle('api:getCompanies', async () => {
   try {
     const response = await fetch(`${getServerApiUrl()}/api/companies`, {
       headers: {
@@ -1308,7 +1306,7 @@ ipcMain.handle('api:getCompanies', async () => {
   }
 })
 
-ipcMain.handle('api:createCompany', async (_, name: string) => {
+ipc.handle('api:createCompany', async (_, name: string) => {
   try {
     const response = await fetch(`${getServerApiUrl()}/api/companies`, {
       method: 'POST',
@@ -1330,7 +1328,7 @@ ipcMain.handle('api:createCompany', async (_, name: string) => {
   }
 })
 
-ipcMain.handle('api:getDepartments', async (_, companyId: string) => {
+ipc.handle('api:getDepartments', async (_, companyId: string) => {
   try {
     const response = await fetch(`${getServerApiUrl()}/api/companies/${encodeURIComponent(companyId)}/departments`, {
       headers: {
@@ -1472,7 +1470,7 @@ function createGit(repoPath: string, extraEnv?: Record<string, string>): SimpleG
 
 // Report which git binary is in use (bundled dugite git vs system fallback),
 // so the UI can warn when the bundled binary failed (e.g. arch mismatch).
-ipcMain.handle('git:getBinaryStatus', async () => {
+ipc.handle('git:getBinaryStatus', async () => {
   const { binary, fallback } = getResolvedGit()
   return { bundled: !fallback, binary }
 })
@@ -1511,7 +1509,7 @@ const generateCommitMessage = commitMessageGenerator(createGit)
 // Preview changes before sync. Strictly read-only: it never stages — a
 // staged file inside a not-downloaded folder slipped past sync's
 // outside-checkout hold-back and was shared (sync/preview.ts).
-ipcMain.handle('git:preview', async (_, repoPath: string) => {
+ipc.handle('git:preview', async (_, repoPath: string) => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
@@ -1538,7 +1536,7 @@ ipcMain.handle('git:preview', async (_, repoPath: string) => {
 })
 
 // Revert a file's changes (git checkout HEAD -- <file> or git rm for new files)
-ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+ipc.handle('git:revertFile', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
@@ -1565,7 +1563,7 @@ ipcMain.handle('git:revertFile', async (_, repoPath: string, filePath: string, f
 
 // Get diff for a specific file (what the next sync would share: the file on
 // disk against HEAD — preview does not stage)
-ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+ipc.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
@@ -1590,7 +1588,7 @@ ipcMain.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fil
 })
 
 // Get diff for a specific file in a specific commit
-ipcMain.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: string, filePath: string) => {
+ipc.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: string, filePath: string) => {
   try {
     const safePath = validatePath(repoPath)
     const git: SimpleGit = createGit(safePath)
@@ -1604,7 +1602,7 @@ ipcMain.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: str
 })
 
 // Generate change summary (async, called separately from preview)
-ipcMain.handle('git:generateSummary', async (_, repoPath: string) => {
+ipc.handle('git:generateSummary', async (_, repoPath: string) => {
   try {
     const safePath = validatePath(repoPath)
     // Staged into a throwaway copy of the index: preview never stages.
@@ -1640,7 +1638,7 @@ function searchGitCommand() {
 
 // File names in a folder ('' = the whole company) for Cmd+P: tracked and
 // untracked (not ignored), downloaded folders and readable private folders.
-ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
+ipc.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
   try {
     const safePath = validatePath(repoPath)
     const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
@@ -1653,7 +1651,7 @@ ipcMain.handle('git:listFiles', async (_, repoPath: string, folderPath: string) 
 })
 
 // Git log filtered by folder path (no --follow: see gitLogArgs)
-ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
+ipc.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
   try {
     const git: SimpleGit = createGit(validatePath(repoPath))
     const raw = await git.raw(gitLogArgs(folderPath, limit))
@@ -1665,7 +1663,7 @@ ipcMain.handle('git:log', async (_, repoPath: string, folderPath: string, limit:
 })
 
 // Show files changed in a specific commit, filtered by folder
-ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
+ipc.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
   try {
     const git: SimpleGit = createGit(validatePath(repoPath))
     const result = await git.raw(showCommitArgs(commitHash, folderPath))
@@ -1689,7 +1687,7 @@ ipcMain.handle('git:showCommit', async (_, repoPath: string, commitHash: string,
 // there), lines cut around the match. A new search from the same window stops
 // the previous one.
 const runningGreps = new Map<number, AbortController>()
-ipcMain.handle('git:grep', async (event, repoPath: string, query: string, folderPath: string) => {
+ipc.handle('git:grep', async (event, repoPath: string, query: string, folderPath: string) => {
   const senderId = event.sender.id
   runningGreps.get(senderId)?.abort()
   const controller = new AbortController()
@@ -1725,7 +1723,7 @@ const gitSync = createGitSync({
   log: console,
 })
 
-ipcMain.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
+ipc.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
   try {
     repoPath = validatePath(repoPath)
   } catch (error) {
@@ -1777,7 +1775,7 @@ async function reservedRefusal(absPath: string): Promise<string | null> {
 // folder named like a private folder the member cannot read is refused with
 // the server's [RESERVED_PATH] sentence (only the name the member typed).
 // The fs:* handlers refuse the same paths as a backstop (notDownloadedRefusal).
-ipcMain.handle('privateFolders:reservedPathRefusal', async (_, targetPath: string) => {
+ipc.handle('privateFolders:reservedPathRefusal', async (_, targetPath: string) => {
   try {
     return await reservedRefusal(validatePath(targetPath))
   } catch {
@@ -1785,7 +1783,7 @@ ipcMain.handle('privateFolders:reservedPathRefusal', async (_, targetPath: strin
   }
 })
 
-ipcMain.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
+ipc.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
   if (typeof companyId !== 'string' || !companyId) return null
   const cached = writeAccessStore.get(companyId)
   if (cached && !refresh) return cached
@@ -1836,15 +1834,15 @@ function waitAtMost(pending: Promise<void>, timeoutMs: number): Promise<void> {
   let timer: ReturnType<typeof setTimeout> | undefined
   return Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs) })]).finally(() => clearTimeout(timer))
 }
-ipcMain.handle('privateFolders:mine', async (_, companyId: string) => {
+ipc.handle('privateFolders:mine', async (_, companyId: string) => {
   if (typeof companyId !== 'string' || !companyId) return { success: false, offline: false, error: 'companyId is required' }
   return privateFoldersApi.mine(companyId)
 })
-ipcMain.handle('privateFolders:createContext', async (_, companyId: string, parentPath: string) => {
+ipc.handle('privateFolders:createContext', async (_, companyId: string, parentPath: string) => {
   if (typeof companyId !== 'string' || !companyId || typeof parentPath !== 'string') return { success: false, offline: false, error: 'Invalid arguments' }
   return privateFoldersApi.createContext(companyId, parentPath)
 })
-ipcMain.handle('privateFolders:create', async (_, companyId: string, input: CreatePrivateFolderRequest) => {
+ipc.handle('privateFolders:create', async (_, companyId: string, input: CreatePrivateFolderRequest) => {
   if (typeof companyId !== 'string' || !companyId || !input || typeof input.name !== 'string' || typeof input.parentPath !== 'string') {
     return { success: false, offline: false, error: 'Invalid arguments' }
   }
@@ -1885,7 +1883,7 @@ async function companyFolderDecision(folder: string, remoteUrl: string): Promise
 // Offline, only a clone of this company (recognised by its origin's path,
 // /api/git-http/<companyId>) can be opened — work goes on without the server;
 // everything else needs it for the first download.
-ipcMain.handle('git:inspectCompanyFolder', async (_, folder: string, companyId: string) => {
+ipc.handle('git:inspectCompanyFolder', async (_, folder: string, companyId: string) => {
   let safe: string
   try {
     safe = validatePath(folder)
@@ -1915,7 +1913,7 @@ ipcMain.handle('git:inspectCompanyFolder', async (_, folder: string, companyId: 
 // While it runs, the bytes arriving in .git/objects/pack are reported to the
 // window as 'setup:progress' events: a first download of a large company
 // takes minutes, and the setup screen shows it moving.
-ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, companyId: string, selectedPaths?: string[]) => {
+ipc.handle('git:setupCompanyRemote', async (event, repoPath: string, companyId: string, selectedPaths?: string[]) => {
   let stopProgress: (() => void) | null = null
   try {
     repoPath = validatePath(repoPath)
@@ -2127,7 +2125,7 @@ ipcMain.handle('git:setupCompanyRemote', async (event, repoPath: string, company
 
 
 // Read the persisted exclusion list for a repo.
-ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
+ipc.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
   try {
     const safe = validatePath(repoPath)
     return { success: true, excluded: readSparseConfig(safe).excluded }
@@ -2143,7 +2141,7 @@ ipcMain.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
 // While it runs, the bytes arriving in .git/objects/pack (a download in a
 // partial clone) are reported to the window as 'sparse:progress' events, so
 // the panel can show the download moving.
-ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, excluded: string[]) => {
+ipc.handle('git:sparseSetExclusions', async (event, repoPath: string, excluded: string[]) => {
   let stopProgress: (() => void) | null = null
   try {
     const safe = validatePath(repoPath)
@@ -2175,7 +2173,7 @@ ipcMain.handle('git:sparseSetExclusions', async (event, repoPath: string, exclud
 // Files inside these folders with changes not committed yet: the settings
 // panel asks before leaving such a folder out (the next sync would move them
 // to .backups/ instead of sharing them).
-ipcMain.handle('git:sparseUncommittedChanges', async (_, repoPath: string, folders: string[]) => {
+ipc.handle('git:sparseUncommittedChanges', async (_, repoPath: string, folders: string[]) => {
   try {
     const safe = validatePath(repoPath)
     return { success: true, files: await uncommittedChangesIn(createGit(safe), Array.isArray(folders) ? folders : []) }
@@ -2186,7 +2184,7 @@ ipcMain.handle('git:sparseUncommittedChanges', async (_, repoPath: string, folde
 
 // One level of the company's folder tree with sizes, for the settings panel
 // (server sizes; local names only when the server cannot be reached).
-ipcMain.handle('git:folderSizes', async (_, repoPath: string, companyId: string, folder: string, measure: string[]) => {
+ipc.handle('git:folderSizes', async (_, repoPath: string, companyId: string, folder: string, measure: string[]) => {
   try {
     const safe = validatePath(repoPath)
     const fetchSizes = companyId ? serverFolderSizes({ baseUrl: getServerApiUrl(), companyId, cookies: authCookies }) : null
@@ -2206,7 +2204,7 @@ ipcMain.handle('git:folderSizes', async (_, repoPath: string, companyId: string,
 })
 
 // Get backup history
-ipcMain.handle('backup:list', async (_, unsafeRepoPath: string) => {
+ipc.handle('backup:list', async (_, unsafeRepoPath: string) => {
   try {
     const repoPath = validatePath(unsafeRepoPath)
     // .backups/ in the working tree, and the private folders' backups kept
@@ -2278,7 +2276,7 @@ ipcMain.handle('backup:list', async (_, unsafeRepoPath: string) => {
 })
 
 // Restore a file from backup
-ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, filePath: string) => {
+ipc.handle('backup:restore', async (_, repoPath: string, backupId: string, filePath: string) => {
   try {
     const safeRepoPath = validatePath(repoPath)
     const isPrivate = backupId.startsWith(PRIVATE_BACKUP_ID_PREFIX)
@@ -2317,7 +2315,7 @@ ipcMain.handle('backup:restore', async (_, repoPath: string, backupId: string, f
 })
 
 // Open backup folder in Finder/Explorer
-ipcMain.handle('backup:openFolder', async (_, backupPath: string) => {
+ipc.handle('backup:openFolder', async (_, backupPath: string) => {
   try {
     // Only a backup folder (what backup:list returns) inside a company:
     // openPath on anything else could launch it (an .app, a script).
@@ -2754,7 +2752,7 @@ async function scanSkills(rootPath: string, departmentFolder: string, department
 }
 
 // List skills for a department (scans 3 hierarchy levels)
-ipcMain.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
+ipc.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
   try {
     rootPath = validatePath(rootPath)
     // A forced refresh (watcher event, sync, the member's own change) rescans.
@@ -2779,7 +2777,7 @@ function skillGitignoreEntry(value: unknown): string {
 }
 
 // Publish a skill (remove from .gitignore, one-way / irreversible)
-ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: string) => {
+ipc.handle('skills:publish', async (_, rootPath: string, skillRelativePath: string) => {
   try {
     rootPath = validatePath(rootPath)
     skillGitignoreEntry(skillRelativePath)
@@ -2812,7 +2810,7 @@ ipcMain.handle('skills:publish', async (_, rootPath: string, skillRelativePath: 
 })
 
 // Add skill to .gitignore (used when creating a new skill)
-ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
+ipc.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
   try {
     rootPath = validatePath(rootPath)
     skillGitignoreEntry(skillRelativePath)
@@ -2840,7 +2838,7 @@ ipcMain.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePa
 })
 
 // Toggle nurturing status in SKILL.md frontmatter
-ipcMain.handle('skills:toggleNurturing', async (_, unsafeSkillMdPath: string, makeNurturing: boolean) => {
+ipc.handle('skills:toggleNurturing', async (_, unsafeSkillMdPath: string, makeNurturing: boolean) => {
   try {
     const skillMdPath = validatePath(unsafeSkillMdPath)
     if (path.basename(skillMdPath) !== 'SKILL.md') return { success: false, error: 'Not a SKILL.md' }
@@ -2883,7 +2881,7 @@ ipcMain.handle('skills:toggleNurturing', async (_, unsafeSkillMdPath: string, ma
 })
 
 // Start a tool (Web app)
-ipcMain.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev') => {
+ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev') => {
   try {
     // A skill's tool folder (<…>/.claude/skills/<skill>/tools/<tool>) inside
     // a company, and one of the scripts the skills scan offers: this runs
@@ -3042,7 +3040,7 @@ ipcMain.handle('tools:start', async (_, unsafeToolPath: string, startCommand: st
 })
 
 // Stop a running tool
-ipcMain.handle('tools:stop', async (_, toolPath: string) => {
+ipc.handle('tools:stop', async (_, toolPath: string) => {
   try {
     toolPath = typeof toolPath === 'string' ? path.resolve(toolPath) : ''
     const runningTool = runningTools.get(toolPath)
@@ -3086,7 +3084,7 @@ ipcMain.handle('tools:stop', async (_, toolPath: string) => {
 })
 
 // Open URL in external browser
-ipcMain.handle('shell:openExternal', async (_, url: string) => {
+ipc.handle('shell:openExternal', async (_, url: string) => {
   try {
     // Web pages and mail only: file:, javascript: or an app's own scheme
     // would open local files or launch other programs.
