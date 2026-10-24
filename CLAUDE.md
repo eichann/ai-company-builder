@@ -139,8 +139,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   too. Push to main and the nightly run execute everything.
 - `docs/` holds internal notes and stays uncommitted: this is a public (AGPL) repository, and
   `.git/info/exclude` ignores `/docs/*` except the published `docs/self-hosting/` and
-  `docs/images/`. Durable knowledge goes into these rule files (or the owner's memory notes), not
-  into new tracked docs.
+  `docs/images/` (a few older notes are still tracked; leave them, add no new ones). Durable
+  knowledge goes into these rule files (or the owner's memory notes), not into new tracked docs.
 - Use the commit / PR attribution lines the harness provides; this file adds none of its own.
 - When you change behaviour described in a rule file, update the rule in the same PR, and keep
   the code comments that point to a rule file accurate.
