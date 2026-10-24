@@ -99,6 +99,14 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`,
   `electron-adapter.ts`, `voice-input.ts`); features and services get ports injected, so another
   desktop shell can replace it. ESLint enforces this. → `ipc-and-main-process.md`
+- **App modules point one way too** (`client/tests/architecture-boundaries.test.ts`, over the
+  whole tree): `client/shared` is pure (imports only itself and `shared/`); `electron/agents/`
+  never imports the shell, `chat-server.ts`, features, services or sync — the host injects what
+  an agent needs (`AgentHostConfig`); one agent's implementation (`agents/claude`, `codex*`,
+  `anthropic-api`) is reached through `agents/registry.ts` (exceptions: `main.ts`, that agent's
+  `handoff/` module); agent ids are compared only inside the agent modules (the per-agent UI
+  and a few named legacy spots are listed exceptions, each with its reason). New code goes where
+  its layer is; widen an exception only with a reason the owner would accept.
 - **Agents and models come from the registry** (`client/shared/agents/registry.ts`, factories
   in `client/electron/agents/registry.ts`): callers ask `capabilities` instead of branching on an
   agent id, and every model id lives there (a test fails on a literal elsewhere), so adding a
@@ -146,6 +154,9 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   `docs/images/` (a few older notes are still tracked; leave them, add no new ones). Durable
   knowledge goes into these rule files (or the owner's memory notes), not into new tracked docs.
 - Use the commit / PR attribution lines the harness provides; this file adds none of its own.
+- `.claude/settings.json` runs `.claude/hooks/check-edited-file.sh` after every Edit / Write:
+  ESLint on that file and, for app code, the boundary test (a few seconds). When it reports a
+  problem, fix the code rather than the check.
 - When you change behaviour described in a rule file, update the rule in the same PR, and keep
   the code comments that point to a rule file accurate.
 
