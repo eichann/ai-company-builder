@@ -7,10 +7,7 @@ import { app, BrowserWindow, ipcMain, net as electronNet, protocol, type IpcMain
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { exec, spawn, ChildProcess } from 'child_process'
-import { promisify } from 'util'
 
-const execAsync = promisify(exec)
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import { createGitSync } from './sync/git-sync'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
@@ -18,9 +15,7 @@ import { createFetchSyncServerApi } from './sync/server-api'
 import { notDownloadedFolders } from './sync/not-downloaded'
 import { createCompanyFilesApi } from './company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
-import { SkillsCache } from '../shared/skills-refresh'
 import { localFileTarget } from './local-file-protocol'
-import net from 'net'
 import { HandoffStore } from './handoff/store'
 import { HandoffService } from './handoff/service'
 import { writeClaudeHandoff } from './handoff/claude'
@@ -31,7 +26,6 @@ import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
 import { AllowedRoots, type ValidateOptions } from './allowed-roots'
-import { isExternalUrlAllowed } from './external-url'
 import { typedIpc } from './ipc/registrar'
 import { createConfigStore } from './services/config-store'
 import { createShellEnvironment } from './services/shell-env'
@@ -46,6 +40,8 @@ import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
 import { registerSyncIpc } from './features/sync/ipc'
+import { registerSkillsIpc } from './features/skills/ipc'
+import { registerToolsIpc } from './features/tools/ipc'
 import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { registerPrivateFoldersIpc } from './features/private-folders/ipc'
@@ -72,19 +68,6 @@ function validatePath(inputPath: string, options?: ValidateOptions): string {
   return allowedRoots.validate(inputPath, options)
 }
 
-// Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
-// as soon as a watcher event makes them stale (features/fs onFileChanges) or the
-// renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
-const skillsCache = new SkillsCache<SkillInfo[]>(5000)
-
-// Running tool processes map
-interface RunningTool {
-  process: ChildProcess
-  port: number
-  toolPath: string
-}
-const runningTools: Map<string, RunningTool> = new Map()
-
 // ESM equivalent of __dirname
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -105,6 +88,10 @@ app.on('second-instance', () => {
 const config = createConfigStore(() => path.join(app.getPath('userData'), 'config.json'))
 const shellEnv = createShellEnvironment()
 const claudeCli = createClaudeCli()
+
+// Skills and their web-app tools (features/skills, features/tools).
+const skills = registerSkillsIpc(ipc, { paths: allowedRoots })
+const tools = registerToolsIpc(ipc, { paths: allowedRoots, shellEnv, shell: desktopShell })
 
 function createWindow() {
   const disableElectronSpellcheck =
@@ -181,28 +168,8 @@ app.on('activate', () => {
   }
 })
 
-// On quit (the company watchers close in their own handler, registered below).
-app.on('before-quit', () => {
-  // Kill running skill tools so dev servers don't outlive the app.
-  // Windows has no process groups/POSIX signals — kill the tree via taskkill.
-  for (const [toolPath, tool] of runningTools) {
-    const pid = tool.process.pid
-    if (!pid) continue
-    console.log('[before-quit] stopping tool:', toolPath)
-    if (process.platform === 'win32') {
-      try {
-        spawn('taskkill', ['/pid', pid.toString(), '/f', '/t'], { windowsHide: true })
-      } catch { /* best effort on quit */ }
-    } else {
-      try {
-        process.kill(-pid, 'SIGTERM')
-      } catch {
-        try { tool.process.kill('SIGTERM') } catch { /* already gone */ }
-      }
-    }
-  }
-  runningTools.clear()
-})
+// On quit: stop the skill tools (the company watchers close in their own handler, registered below).
+app.on('before-quit', () => tools.stopAll())
 
 registerEnvIpc(ipc, { paths: allowedRoots })
 
@@ -309,7 +276,7 @@ const files = registerFsIpc(ipc, {
   reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath),
   // A skill the AI (or anything else) created, changed or removed is scanned
   // afresh by the next skills:list.
-  onFileChanges: changes => skillsCache.invalidateForChanges(changes),
+  onFileChanges: changes => skills.invalidateForChanges(changes),
 })
 app.on('before-quit', () => files.closeWatchers())
 
@@ -475,620 +442,6 @@ references/ フォルダ内のファイルを参照する場合はここに記�
 
   return prompt
 }
-
-// Tool (Web app) info
-interface ToolInfo {
-  name: string           // Folder name
-  displayName: string    // From package.json or folder name
-  path: string           // Absolute path
-  hasPackageJson: boolean
-  startCommand?: string  // "dev" or "start"
-}
-
-// Skills listing handler
-interface SkillInfo {
-  id: string
-  name: string
-  description: string
-  departmentId: string
-  skillPath: string
-  group: string
-  isPrivate?: boolean
-  isNurturing?: boolean
-  files: {
-    skillMd: string
-    rules?: string[]
-    references?: string[]
-    scripts?: string[]
-    tools?: ToolInfo[]
-  }
-}
-
-// Parse YAML frontmatter from SKILL.md
-function parseSkillFrontmatter(content: string): { name?: string; description?: string; status?: string } {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (!frontmatterMatch) return {}
-
-  const frontmatter = frontmatterMatch[1]
-  const result: { name?: string; description?: string; status?: string } = {}
-
-  // Parse name
-  const nameMatch = frontmatter.match(/^name:\s*(.+)$/m)
-  if (nameMatch) {
-    result.name = nameMatch[1].trim()
-  }
-
-  // Parse description
-  const descMatch = frontmatter.match(/^description:\s*(.+)$/m)
-  if (descMatch) {
-    result.description = descMatch[1].trim()
-  }
-
-  // Parse status
-  const statusMatch = frontmatter.match(/^status:\s*(.+)$/m)
-  if (statusMatch) {
-    result.status = statusMatch[1].trim()
-  }
-
-  return result
-}
-
-// Gitignore cache per rootPath to avoid repeated file reads
-const gitignoreCache = new Map<string, { lines: string[]; mtime: number }>()
-
-function getGitignoreLines(rootPath: string): string[] {
-  const gitignorePath = path.join(rootPath, '.gitignore')
-  try {
-    if (!fs.existsSync(gitignorePath)) return []
-    const stat = fs.statSync(gitignorePath)
-    const cached = gitignoreCache.get(rootPath)
-    if (cached && cached.mtime === stat.mtimeMs) return cached.lines
-    const content = fs.readFileSync(gitignorePath, 'utf-8')
-    const lines = content.split('\n').map(l => l.trim())
-    gitignoreCache.set(rootPath, { lines, mtime: stat.mtimeMs })
-    return lines
-  } catch {
-    return []
-  }
-}
-
-function invalidateGitignoreCache(rootPath: string): void {
-  gitignoreCache.delete(rootPath)
-}
-
-function invalidateSkillsCache(rootPath: string, departmentFolder?: string): void {
-  skillsCache.invalidate(rootPath, departmentFolder)
-}
-
-/** Scan a single .claude/skills/ directory and return SkillInfo[] */
-async function scanSkillsInDir(
-  skillsDir: string,
-  rootPath: string,
-  departmentId: string,
-  group: string,
-  gitignoreRelativePrefix: string,
-): Promise<SkillInfo[]> {
-  if (!fs.existsSync(skillsDir)) return []
-
-  const gitignoreLines = getGitignoreLines(rootPath)
-  const entries = await fs.promises.readdir(skillsDir, { withFileTypes: true })
-  const skills: SkillInfo[] = []
-
-  for (const entry of entries) {
-    if (!entry.isDirectory()) continue
-    if (entry.name.startsWith('.')) continue
-
-    const skillPath = path.join(skillsDir, entry.name)
-    const skillMdPath = path.join(skillPath, 'SKILL.md')
-
-    if (!fs.existsSync(skillMdPath)) continue
-
-    try {
-      const skillMdContent = await fs.promises.readFile(skillMdPath, 'utf-8')
-      const frontmatter = parseSkillFrontmatter(skillMdContent)
-
-      const rulesDir = path.join(skillPath, 'rules')
-      const scriptsDir = path.join(skillPath, 'scripts')
-      const referencesDir = path.join(skillPath, 'references')
-
-      const files: SkillInfo['files'] = { skillMd: skillMdPath }
-
-      if (fs.existsSync(rulesDir)) {
-        const rulesEntries = await fs.promises.readdir(rulesDir)
-        files.rules = rulesEntries.filter(f => f.endsWith('.md')).map(f => path.join(rulesDir, f))
-      }
-
-      if (fs.existsSync(scriptsDir)) {
-        const scriptsEntries = await fs.promises.readdir(scriptsDir)
-        files.scripts = scriptsEntries.filter(f => !f.startsWith('.')).map(f => path.join(scriptsDir, f))
-      }
-
-      if (fs.existsSync(referencesDir)) {
-        const refsEntries = await fs.promises.readdir(referencesDir)
-        files.references = refsEntries.filter(f => !f.startsWith('.')).map(f => path.join(referencesDir, f))
-      }
-
-      const toolsDir = path.join(skillPath, 'tools')
-      if (fs.existsSync(toolsDir)) {
-        const toolsEntries = await fs.promises.readdir(toolsDir, { withFileTypes: true })
-        const tools: ToolInfo[] = []
-
-        for (const toolEntry of toolsEntries) {
-          if (!toolEntry.isDirectory()) continue
-          if (toolEntry.name.startsWith('.')) continue
-          if (toolEntry.name === 'node_modules') continue
-
-          const toolEntryPath = path.join(toolsDir, toolEntry.name)
-          const packageJsonPath = path.join(toolEntryPath, 'package.json')
-          const hasPackageJson = fs.existsSync(packageJsonPath)
-
-          let displayName = toolEntry.name
-          let startCommand: string | undefined
-
-          if (hasPackageJson) {
-            try {
-              const pkgContent = await fs.promises.readFile(packageJsonPath, 'utf-8')
-              const pkg = JSON.parse(pkgContent)
-              displayName = pkg.name || toolEntry.name
-              if (pkg.scripts?.dev) {
-                startCommand = 'dev'
-              } else if (pkg.scripts?.start) {
-                startCommand = 'start'
-              }
-            } catch {
-              // Ignore package.json parse errors
-            }
-          }
-
-          tools.push({
-            name: toolEntry.name,
-            displayName,
-            path: toolEntryPath,
-            hasPackageJson,
-            startCommand,
-          })
-        }
-
-        if (tools.length > 0) files.tools = tools
-      }
-
-      const skillRelativePath = `${gitignoreRelativePrefix}.claude/skills/${entry.name}/`
-      const isPrivate = gitignoreLines.some(line => line === skillRelativePath)
-
-      skills.push({
-        id: `${departmentId}-${group.replace(/\s*\/\s*/g, '-').replace(/\s+/g, '-').toLowerCase()}-${entry.name}`,
-        name: frontmatter.name || entry.name,
-        description: frontmatter.description || '',
-        departmentId,
-        skillPath,
-        group,
-        isPrivate,
-        isNurturing: frontmatter.status === 'nurturing',
-        files,
-      })
-    } catch (err) {
-      console.error(`Failed to parse skill ${entry.name}:`, err)
-    }
-  }
-
-  return skills
-}
-
-/**
- * Recursively find all directories containing `.claude/skills/` under a base directory.
- * Returns array of { skillsDir, relativePath } where relativePath is relative to baseDir.
- */
-async function findSkillsDirs(baseDir: string, maxDepth = 5): Promise<{ skillsDir: string; relativePath: string }[]> {
-  const results: { skillsDir: string; relativePath: string }[] = []
-  const SKIP_DIRS = new Set(['.git', '.claude', '.backups', 'node_modules', '.next', 'dist', 'build', '__pycache__'])
-
-  async function walk(dir: string, relPath: string, depth: number) {
-    if (depth > maxDepth) return
-
-    // Check if this directory has .claude/skills/
-    const skillsDir = path.join(dir, '.claude', 'skills')
-    if (fs.existsSync(skillsDir)) {
-      results.push({ skillsDir, relativePath: relPath })
-    }
-
-    // Recurse into subdirectories
-    try {
-      const entries = await fs.promises.readdir(dir, { withFileTypes: true })
-      for (const entry of entries) {
-        if (!entry.isDirectory()) continue
-        if (entry.name.startsWith('.') || SKIP_DIRS.has(entry.name)) continue
-        await walk(path.join(dir, entry.name), relPath ? `${relPath}/${entry.name}` : entry.name, depth + 1)
-      }
-    } catch {
-      // Ignore permission/readdir errors
-    }
-  }
-
-  await walk(baseDir, '', 0)
-  return results
-}
-
-/**
- * Scan skills across hierarchy:
- * 1. Company root: {rootPath}/.claude/skills/ → group "全社"
- * 2. Department + nested: {rootPath}/{dept}/**\/.claude/skills/ → group "{deptName}" or "{deptName} / {path}"
- */
-async function scanSkills(rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string): Promise<SkillInfo[]> {
-  const deptDisplayName = departmentName || departmentFolder
-  const allSkills: SkillInfo[] = []
-
-  // Level 1: Company root (.claude/skills/) — only when company-wide tab
-  if (!departmentFolder) {
-    const rootSkillsDir = path.join(rootPath, '.claude', 'skills')
-    const rootSkills = await scanSkillsInDir(rootSkillsDir, rootPath, departmentId, '全社', '')
-    allSkills.push(...rootSkills)
-  }
-
-  // Level 2+: Department and all nested subdirectories (skip when company-wide)
-  if (departmentFolder) {
-    const deptDir = path.join(rootPath, departmentFolder)
-    if (fs.existsSync(deptDir)) {
-      const found = await findSkillsDirs(deptDir)
-      for (const { skillsDir, relativePath } of found) {
-        const groupName = relativePath
-          ? `${deptDisplayName} / ${relativePath.split('/').pop()}`
-          : deptDisplayName
-        const gitignorePrefix = relativePath
-          ? `${departmentFolder}/${relativePath}/`
-          : `${departmentFolder}/`
-        const skills = await scanSkillsInDir(skillsDir, rootPath, departmentId, groupName, gitignorePrefix)
-        allSkills.push(...skills)
-      }
-    }
-  }
-
-  return allSkills
-}
-
-// List skills for a department (scans 3 hierarchy levels)
-ipc.handle('skills:list', async (_, rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) => {
-  try {
-    rootPath = validatePath(rootPath)
-    // A forced refresh (watcher event, sync, the member's own change) rescans.
-    if (options?.force) invalidateSkillsCache(rootPath, departmentFolder)
-    const cached = skillsCache.get(rootPath, departmentFolder)
-    if (cached) return { success: true, skills: cached }
-
-    const skills = await scanSkills(rootPath, departmentFolder, departmentId, departmentName)
-    skillsCache.set(rootPath, departmentFolder, skills)
-
-    return { success: true, skills }
-  } catch (error) {
-    console.error('Skills list error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error', skills: [] }
-  }
-})
-
-/** A skill folder as a .gitignore line: one line, never a way to add others. */
-function skillGitignoreEntry(value: unknown): string {
-  if (typeof value !== 'string' || !value.trim() || /[\r\n]/.test(value)) throw new Error('Invalid skill path')
-  return value
-}
-
-// Publish a skill (remove from .gitignore, one-way / irreversible)
-ipc.handle('skills:publish', async (_, rootPath: string, skillRelativePath: string) => {
-  try {
-    rootPath = validatePath(rootPath)
-    skillGitignoreEntry(skillRelativePath)
-    const gitignorePath = validatePath(path.join(rootPath, '.gitignore'))
-    if (!fs.existsSync(gitignorePath)) return { success: true }
-
-    const content = fs.readFileSync(gitignorePath, 'utf-8')
-    const lines = content.split('\n')
-    const filtered = lines.filter(l => l.trim() !== skillRelativePath)
-
-    // Remove empty "# Private skills" header if no more entries follow
-    const cleanedLines: string[] = []
-    for (let i = 0; i < filtered.length; i++) {
-      if (filtered[i].trim() === '# Private skills') {
-        const nextNonEmpty = filtered.slice(i + 1).find(l => l.trim() !== '')
-        if (!nextNonEmpty || !nextNonEmpty.includes('.claude/skills/')) {
-          continue
-        }
-      }
-      cleanedLines.push(filtered[i])
-    }
-    fs.writeFileSync(gitignorePath, cleanedLines.join('\n'))
-    invalidateGitignoreCache(rootPath)
-    invalidateSkillsCache(rootPath)
-    return { success: true }
-  } catch (error) {
-    console.error('Publish skill error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Add skill to .gitignore (used when creating a new skill)
-ipc.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
-  try {
-    rootPath = validatePath(rootPath)
-    skillGitignoreEntry(skillRelativePath)
-    const gitignorePath = validatePath(path.join(rootPath, '.gitignore'))
-    const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
-    const lines = content.split('\n')
-
-    if (!lines.some(l => l.trim() === skillRelativePath)) {
-      const header = '# Private skills'
-      const headerIndex = lines.findIndex(l => l.trim() === header)
-      if (headerIndex >= 0) {
-        lines.splice(headerIndex + 1, 0, skillRelativePath)
-      } else {
-        lines.push('', header, skillRelativePath)
-      }
-      fs.writeFileSync(gitignorePath, lines.join('\n'))
-      invalidateGitignoreCache(rootPath)
-      invalidateSkillsCache(rootPath)
-    }
-    return { success: true }
-  } catch (error) {
-    console.error('Make private error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Toggle nurturing status in SKILL.md frontmatter
-ipc.handle('skills:toggleNurturing', async (_, unsafeSkillMdPath: string, makeNurturing: boolean) => {
-  try {
-    const skillMdPath = validatePath(unsafeSkillMdPath)
-    if (path.basename(skillMdPath) !== 'SKILL.md') return { success: false, error: 'Not a SKILL.md' }
-    if (!fs.existsSync(skillMdPath)) {
-      return { success: false, error: 'SKILL.md not found' }
-    }
-
-    let content = fs.readFileSync(skillMdPath, 'utf-8')
-    const frontmatterMatch = content.match(/^(---\n)([\s\S]*?)\n(---)/)
-    if (!frontmatterMatch) {
-      return { success: false, error: 'No frontmatter found' }
-    }
-
-    const [fullMatch, opening, body, closing] = frontmatterMatch
-    const lines = body.split('\n')
-
-    if (makeNurturing) {
-      // Add status: nurturing if not present
-      const statusIndex = lines.findIndex(l => /^status:/.test(l))
-      if (statusIndex >= 0) {
-        lines[statusIndex] = 'status: nurturing'
-      } else {
-        lines.push('status: nurturing')
-      }
-    } else {
-      // Remove status line
-      const filtered = lines.filter(l => !/^status:/.test(l))
-      lines.length = 0
-      lines.push(...filtered)
-    }
-
-    const newFrontmatter = `${opening}${lines.join('\n')}\n${closing}`
-    content = content.replace(fullMatch, newFrontmatter)
-    fs.writeFileSync(skillMdPath, content)
-    return { success: true }
-  } catch (error) {
-    console.error('Toggle nurturing error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Start a tool (Web app)
-ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev') => {
-  try {
-    // A skill's tool folder (<…>/.claude/skills/<skill>/tools/<tool>) inside
-    // a company, and one of the scripts the skills scan offers: this runs
-    // `npm install` and `npm run` there.
-    const toolPath = validatePath(unsafeToolPath)
-    const root = allowedRoots.rootOf(toolPath)
-    const rel = root ? path.relative(root, toolPath).split(path.sep).join('/') : ''
-    if (!/(^|\/)\.claude\/skills\/[^/]+\/tools\/[^/]+$/.test(rel)) return { success: false, error: 'Not a skill tool folder' }
-    if (startCommand !== 'dev' && startCommand !== 'start') return { success: false, error: 'Unknown start command' }
-    console.log('[tools:start] toolPath:', toolPath, 'command:', startCommand)
-
-    // Check if already running
-    if (runningTools.has(toolPath)) {
-      const existing = runningTools.get(toolPath)!
-      return { success: true, port: existing.port, alreadyRunning: true }
-    }
-
-    // Check if package.json exists
-    const packageJsonPath = path.join(toolPath, 'package.json')
-    if (!fs.existsSync(packageJsonPath)) {
-      return { success: false, error: 'No package.json found' }
-    }
-
-    // Check if node_modules exists, if not run npm install
-    const nodeModulesPath = path.join(toolPath, 'node_modules')
-    if (!fs.existsSync(nodeModulesPath)) {
-      console.log('[tools:start] Installing dependencies...')
-      try {
-        await execAsync('npm install', { cwd: toolPath, env: shellEnv.env() })
-      } catch (installErr) {
-        console.error('[tools:start] npm install failed:', installErr)
-        return { success: false, error: `npm install failed: ${installErr instanceof Error ? installErr.message : installErr}` }
-      }
-    }
-    console.log('[tools:start] node_modules exists:', fs.existsSync(nodeModulesPath))
-
-    // Find an available port (start from 3100 to avoid conflicts)
-    const basePort = 3100
-    let port = basePort
-    const maxPort = 3200
-
-    const isPortInUse = async (p: number): Promise<boolean> => {
-      return new Promise((resolve) => {
-        const server = net.createServer()
-        server.once('error', () => resolve(true))
-        server.once('listening', () => {
-          server.close(() => resolve(false))
-        })
-        server.listen(p)
-      })
-    }
-
-    const waitForPort = (p: number, timeoutMs: number): Promise<boolean> => {
-      return new Promise((resolve) => {
-        const start = Date.now()
-        const check = () => {
-          const socket = new net.Socket()
-          socket.once('connect', () => {
-            socket.destroy()
-            resolve(true)
-          })
-          socket.once('error', () => {
-            socket.destroy()
-            if (Date.now() - start > timeoutMs) {
-              resolve(false)
-            } else {
-              setTimeout(check, 200)
-            }
-          })
-          socket.connect(p, '127.0.0.1')
-        }
-        check()
-      })
-    }
-
-    while (port < maxPort) {
-      if (!(await isPortInUse(port))) break
-      port++
-    }
-
-    if (port >= maxPort) {
-      return { success: false, error: 'No available port found' }
-    }
-    console.log('[tools:start] Using port:', port)
-
-    // Start the tool — write stdout/stderr to log file to avoid EBADF with pipes
-    const logPath = path.join(toolPath, '.tool-output.log')
-    const logFd = fs.openSync(logPath, 'w')
-    const npmArgs = ['run', startCommand, '--', '--port', port.toString()]
-    // shellEnv.env() handles the Windows Path-key replacement; PORT rides along
-    const toolEnv = { ...shellEnv.env(), PORT: port.toString() }
-
-    console.log('[tools:start] About to spawn: npm', npmArgs.join(' '))
-    let childProcess: ChildProcess
-    if (process.platform === 'win32') {
-      // npm is npm.cmd on Windows: batch files cannot be spawned directly
-      // (Node blocks it since CVE-2024-27980). Run through cmd.exe with
-      // spaced args quoted — same pattern as the chat-server claude spawn.
-      // No `detached`: tools:stop kills the tree from this cmd.exe pid via
-      // taskkill /t.
-      const quoted = ['npm', ...npmArgs]
-        .map(a => (/[\s"]/.test(a) ? `"${a.replace(/"/g, '""')}"` : a))
-        .join(' ')
-      childProcess = spawn(process.env.ComSpec || 'cmd.exe', ['/d', '/s', '/c', quoted], {
-        cwd: toolPath,
-        stdio: ['ignore', logFd, logFd],
-        env: toolEnv,
-        windowsVerbatimArguments: true,
-        windowsHide: true,
-      })
-    } else {
-      // Force fork+exec instead of posix_spawn to avoid EBADF in Electron
-      // (Electron's main process inherits Chromium FDs that lack FD_CLOEXEC)
-      childProcess = spawn('npm', npmArgs, {
-        cwd: toolPath,
-        stdio: ['ignore', logFd, logFd],
-        detached: true,
-        env: toolEnv,
-        ...(process.getuid ? { uid: process.getuid(), gid: process.getgid!() } : {}),
-      })
-    }
-    console.log('[tools:start] Spawn succeeded, pid:', childProcess.pid)
-
-    // Close the log fd in the parent (child has its own copy)
-    fs.closeSync(logFd)
-
-    // Store the running tool
-    runningTools.set(toolPath, {
-      process: childProcess,
-      port,
-      toolPath,
-    })
-
-    // Handle process exit
-    childProcess.on('exit', (code) => {
-      console.log(`Tool process exited with code ${code}:`, toolPath)
-      runningTools.delete(toolPath)
-    })
-
-    childProcess.on('error', (err) => {
-      console.error('Tool process error:', err)
-      runningTools.delete(toolPath)
-    })
-
-    // Wait for the server to be ready (port listening), with timeout
-    const isReady = await waitForPort(port, 5000)
-    if (!isReady) {
-      console.warn(`[tools:start] Port ${port} not ready after timeout, proceeding anyway`)
-    }
-
-    return { success: true, port, pid: childProcess.pid }
-  } catch (error) {
-    console.error('[tools:start] Error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Stop a running tool
-ipc.handle('tools:stop', async (_, toolPath: string) => {
-  try {
-    toolPath = typeof toolPath === 'string' ? path.resolve(toolPath) : ''
-    const runningTool = runningTools.get(toolPath)
-    if (!runningTool) {
-      return { success: true, message: 'Tool was not running' }
-    }
-
-    // Kill the process
-    if (runningTool.process.pid) {
-      // On Windows, we need to kill the process tree
-      if (process.platform === 'win32') {
-        // Await taskkill so a failure is visible instead of silently
-        // leaving an orphaned dev server holding files and the port
-        await new Promise<void>((resolve) => {
-          const tk = spawn('taskkill', ['/pid', runningTool.process.pid!.toString(), '/f', '/t'], { windowsHide: true })
-          tk.on('exit', (code) => {
-            if (code !== 0) console.warn(`[tools:stop] taskkill exited with ${code} for pid ${runningTool.process.pid}`)
-            resolve()
-          })
-          tk.on('error', (err) => {
-            console.error('[tools:stop] taskkill failed:', err)
-            resolve()
-          })
-        })
-      } else {
-        // On Unix, kill the process group
-        try {
-          process.kill(-runningTool.process.pid, 'SIGTERM')
-        } catch {
-          runningTool.process.kill('SIGTERM')
-        }
-      }
-    }
-
-    runningTools.delete(toolPath)
-    return { success: true }
-  } catch (error) {
-    console.error('Tool stop error:', error)
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
-
-// Open URL in external browser
-ipc.handle('shell:openExternal', async (_, url: string) => {
-  try {
-    // Web pages and mail only: file:, javascript: or an app's own scheme
-    // would open local files or launch other programs.
-    if (!isExternalUrlAllowed(url)) return { success: false, error: 'このリンクは開けません（http / https / mailto のみ開けます）。' }
-    await desktopShell.openExternal(url)
-    return { success: true }
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
-  }
-})
 
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the

@@ -320,7 +320,9 @@ domains); what has moved so far:
   `guards.ts`: readable folders / instruction-file authority for the chat
   guards, the reserved-name refusal for file operations), `company-setup`
   (git:inspectCompanyFolder, git:setupCompanyRemote), `download-choices`
-  (git:sparse*, git:folderSizes).
+  (git:sparse*, git:folderSizes), `skills` (skills:*; the scan and its
+  cache), `tools` (tools:start/stop, shell:openExternal; running tools are
+  stopped on quit).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the

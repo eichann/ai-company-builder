@@ -302,23 +302,23 @@
         "params": "targetPath: string"
       },
       "shell:openExternal": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "url: string"
       },
       "skills:list": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }"
       },
       "skills:makePrivate": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, skillRelativePath: string"
       },
       "skills:publish": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "rootPath: string, skillRelativePath: string"
       },
       "skills:toggleNurturing": {
-        "file": "main.ts",
+        "file": "features/skills/ipc.ts",
         "params": "unsafeSkillMdPath: string, makeNurturing: boolean"
       },
       "tool-approval-response": {
@@ -326,11 +326,11 @@
         "params": "toolUseId: string, approved: boolean"
       },
       "tools:start": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "unsafeToolPath: string, startCommand: string = 'dev'"
       },
       "tools:stop": {
-        "file": "main.ts",
+        "file": "features/tools/ipc.ts",
         "params": "toolPath: string"
       },
       "voice:cancel": {
