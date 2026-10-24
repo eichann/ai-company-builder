@@ -5,7 +5,7 @@ import { AGENTS } from '../shared/agents/registry'
 /** The default prompt (fixed part + default 「整え方の指示」); members may edit the latter. */
 export const VOICE_SYSTEM_PROMPT = composeVoicePrompt()
 
-const VOICE_MESSAGES = {
+export const VOICE_MESSAGES = {
   cancelled: 'キャンセルしました',
   timedOut: '文章の整形がタイムアウトしました',
   spawnFailed: 'Claude Codeを起動できません。インストール状況をご確認ください',

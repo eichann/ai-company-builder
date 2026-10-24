@@ -92,19 +92,14 @@ test('a corrupt or oversized saved file falls back to the default', () => {
 test('Claude, Codex and API formatting all receive the composed prompt', async () => {
   const systemPrompt = composeVoicePrompt('独自の指示')
   const seen: Record<string, string> = {}
-  const adapters = {
-    claude: async (_cli: string, _cwd: string, _text: string, _signal: AbortSignal, _env?: NodeJS.ProcessEnv, system?: string) => { seen.claude = system!; return 'ok' },
-    codex: async (request: { system: string }) => { seen.codex = request.system; return 'ok' },
-    api: async (_key: string, _text: string, _signal: AbortSignal, system: string) => { seen.api = system; return 'ok' },
-  }
+  const names = { 'claude-code': 'claude', codex: 'codex', 'api-key': 'api' } as const
+  const adapters = async (agent: keyof typeof names, request: { system: string }) => { seen[names[agent]] = request.system; return 'ok' }
   const base = { apiKey: 'k', getCli: () => '/fake/claude', cwd: '/tmp', env: {}, systemPrompt }
   for (const authMode of ['claude-code', 'codex', 'api-key'] as const) {
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    await createVoiceFormatter({ ...base, authMode }, adapters as any)('原文', new AbortController().signal)
+    await createVoiceFormatter({ ...base, authMode }, adapters)('原文', new AbortController().signal)
   }
   assert.deepEqual(seen, { claude: systemPrompt, codex: systemPrompt, api: systemPrompt })
   // Without a configured prompt the built-in default is used.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  await createVoiceFormatter({ ...base, systemPrompt: undefined, authMode: 'codex' }, adapters as any)('原文', new AbortController().signal)
+  await createVoiceFormatter({ ...base, systemPrompt: undefined, authMode: 'codex' }, adapters)('原文', new AbortController().signal)
   assert.equal(seen.codex, VOICE_SYSTEM_PROMPT)
 })

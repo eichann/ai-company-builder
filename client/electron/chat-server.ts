@@ -3,7 +3,6 @@ import type { CompanyFileTools } from './company-files/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
-import { createCodexConnection } from './agents/codex'
 import type { AgentSession, AuthMode } from '../shared/agent'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
@@ -19,19 +18,18 @@ import {
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
 import type { AgentEvent, AgentHostConfig, AskUser } from './agents/connection'
 import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
-import { createClaudeConnection } from './agents/claude'
-import { createApiConnection } from './agents/anthropic-api'
-import type { ClaudeConnectionConfig } from './agents/claude'
+import { createAgentConnection, type AgentHost } from './agents/registry'
+import { AGENTS, isAgentId, type AgentId } from '../shared/agents/registry'
 import { createFileSystemTools, createSkillTools } from './chat-tools'
 import type { WriteGuard } from './write-guard'
 import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createPrivateReadState, seedFromMessages, type PrivateReadContext } from './private-read-guard'
-import { RATE_LIMITS_PART_TYPE, type RateLimitProvider, type RateLimitSnapshot } from '../shared/rate-limits'
+import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import crypto from 'crypto'
 import net from 'net'
 
-export interface ChatServerConfig extends ClaudeConnectionConfig {
+export interface ChatServerConfig extends AgentHost {
   createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
   /**
    * Read-only company files for this turn (company-files/tools.ts): the tools
@@ -42,8 +40,7 @@ export interface ChatServerConfig extends ClaudeConnectionConfig {
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
   onChatActivity?: (token: string, active: boolean) => void
-  getApiKey: () => string | undefined
-  getAuthMode: () => 'claude-code' | 'codex' | 'api-key'
+  getAuthMode: () => AuthMode
   buildSystemPrompt: (workingDirectory?: string) => string
   /**
    * The write guard for a chat in this company (write-guard.ts): refreshes the
@@ -89,7 +86,7 @@ export function externalRepositoryInstruction(companyRootPath?: string): string 
 export function createAskUser(
   requestInteraction: AgentHostConfig['requestInteraction'],
   appSessionId: string | undefined,
-  agent: 'claude-code' | 'codex',
+  agent: AgentId,
   inject: Pick<ChunkInjector, 'push'>,
 ): AskUser | undefined {
   if (!requestInteraction || !appSessionId) return undefined
@@ -132,7 +129,7 @@ export async function startChatServer(config: ChatServerConfig) {
 
   // Plan usage limits per agent (shared/rate-limits.ts): the account's, not a
   // conversation's, so every tab's header meter shows the latest one.
-  const rateLimitSnapshots = new Map<RateLimitProvider, RateLimitSnapshot>()
+  const rateLimitSnapshots = new Map<AgentId, RateLimitSnapshot>()
 
   // Current native session for each ACB conversation (provider-tagged).
   const agentSessionMap = new Map<string, AgentSession>()
@@ -197,8 +194,9 @@ export async function startChatServer(config: ChatServerConfig) {
     } = body
 
     const authMode = requestedAuthMode || config.getAuthMode()
-    if (!['claude-code', 'codex', 'api-key'].includes(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
-    const connection = authMode === 'codex' ? createCodexConnection(config) : authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
+    if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
+    const connection = createAgentConnection(authMode, config)
+    const can = AGENTS[authMode].capabilities
 
     // Native agents own their system prompts; ACB supplies only workspace context.
     // API key mode: build full system prompt as before.
@@ -255,23 +253,24 @@ export async function startChatServer(config: ChatServerConfig) {
     }
     if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
-    // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user): CLI agents only.
+    // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user), per the agent registry.
     const injector = createChunkInjector()
-    const askUser = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
+    const askUser = connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
-    // Steering for the CLI agents; next-prompt suggestions for Claude Code.
-    const turn = appSessionId && connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
-      ? chatTurns.open(appSessionId, injector, { suggestions: authMode === 'claude-code' && promptSuggestions !== false }) : undefined
+    // Steering and next-prompt suggestions ride on the running turn.
+    const turn = appSessionId && connection.ownsConversation && (can.steering || can.promptSuggestions)
+      ? chatTurns.open(appSessionId, injector, { suggestions: can.promptSuggestions && promptSuggestions !== false }) : undefined
     // Usage limits and subagent progress reach the renderer as transient data
     // parts (useChat onData), never stored in the transcript.
-    const onEvent = connection.ownsConversation && (authMode === 'claude-code' || authMode === 'codex')
+    const onEvent = connection.ownsConversation && (can.rateLimits || can.subagentProgress)
       ? (event: AgentEvent) => {
         if (event.type === 'rate-limits') {
+          if (!can.rateLimits) return
           const snapshot = event.update(rateLimitSnapshots.get(authMode))
           if (!snapshot) return
           rateLimitSnapshots.set(authMode, snapshot)
           injector.push({ type: RATE_LIMITS_PART_TYPE, data: snapshot, transient: true })
-        } else {
+        } else if (can.subagentProgress) {
           injector.push({ type: AGENT_PROGRESS_PART_TYPE, data: event.progress, transient: true })
         }
       } : undefined
@@ -425,8 +424,9 @@ export async function startChatServer(config: ChatServerConfig) {
       return c.json({ error: 'No messages provided' }, 400)
     }
 
-    const authMode = body.authMode || config.getAuthMode()
-    const connection = authMode === 'codex' ? createCodexConnection(config) : authMode === 'claude-code' ? createClaudeConnection(config) : createApiConnection(config)
+    const requested = body.authMode || config.getAuthMode()
+    // Anything the registry does not know gets the API connection, as it always did.
+    const connection = createAgentConnection(isAgentId(requested) ? requested : 'api-key', config)
     const authenticationError = connection.authenticationError()
     if (authenticationError) return c.json({ error: authenticationError }, 401)
     const model = connection.createTitleModel({ modelId: body.modelId })
@@ -508,7 +508,7 @@ ${transcript}
   // (null until an agent reported one since the app started).
   app.get('/api/rate-limits', (c) => {
     const provider = c.req.query('provider')
-    const snapshot = provider === 'claude-code' || provider === 'codex' ? rateLimitSnapshots.get(provider) : undefined
+    const snapshot = isAgentId(provider) && AGENTS[provider].capabilities.rateLimits ? rateLimitSnapshots.get(provider) : undefined
     return c.json({ rateLimits: snapshot ?? null })
   })
 

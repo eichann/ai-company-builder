@@ -4,18 +4,23 @@ import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import {
-  buildCommitMessageInput, commitMessageProviders, createCommitMessageGenerator, defaultCommitMessageAdapters,
-  extractCommitMessage, sanitizeCommitMessage, COMMIT_MESSAGE_SYSTEM_PROMPT, type CommitMessageAdapters, type CommitMessageGeneratorDeps,
+  buildCommitMessageInput, commitMessageProviders, createCommitMessageGenerator, defaultCommitMessageAdapter,
+  extractCommitMessage, sanitizeCommitMessage, COMMIT_MESSAGE_SYSTEM_PROMPT, type CommitMessageGeneratorDeps,
 } from '../electron/commit-message'
 import type { AuthMode } from '../shared/agent'
+import type { AgentId } from '../shared/agents/registry'
+import type { OneShotTextRequest } from '../electron/agents/registry'
+
+// Fakes per agent, keyed by the short names the calls are logged under.
+type Fake = (request: OneShotTextRequest) => Promise<string>
+const SHORT: Record<AgentId, 'claude' | 'codex' | 'api'> = { 'claude-code': 'claude', codex: 'codex', 'api-key': 'api' }
 
 const staged = { nameStatus: 'M\t営業部/提案書.md\nA\t経理部/予算.xlsx\n', stat: ' 営業部/提案書.md | 2 +-\n 2 files changed\n' }
 const quiet = { info: () => {}, warn: () => {} }
 const tag = (s: string) => `<commit_message>\n${s}\n</commit_message>`
 
-function deps(over: Partial<CommitMessageGeneratorDeps> & { authMode?: AuthMode; apiKey?: string; claude?: boolean } = {}, adapters: Partial<CommitMessageAdapters> = {}) {
+function deps(over: Partial<CommitMessageGeneratorDeps> & { authMode?: AuthMode; apiKey?: string; claude?: boolean } = {}, adapters: Partial<Record<'claude' | 'codex' | 'api', Fake>> = {}) {
   const calls: string[] = []
-  const fail = (name: string) => async () => { calls.push(name); throw new Error(`${name} down`) }
   const d: CommitMessageGeneratorDeps = {
     readStaged: async () => staged,
     settings: () => ({ authMode: over.authMode ?? 'claude-code', apiKey: over.apiKey }),
@@ -24,49 +29,58 @@ function deps(over: Partial<CommitMessageGeneratorDeps> & { authMode?: AuthMode;
     getEnv: () => ({}),
     getCwd: () => '/tmp',
     log: quiet,
-    adapters: {
-      claude: fail('claude'), codex: fail('codex'), api: fail('api'),
-      ...Object.fromEntries(Object.entries(adapters).map(([k, fn]) => [k, async (...args: unknown[]) => { calls.push(k); return (fn as (...a: unknown[]) => Promise<string>)(...args) }])),
-    } as CommitMessageAdapters,
+    adapter: async (agent, request) => {
+      const name = SHORT[agent]
+      calls.push(name)
+      const fake = adapters[name]
+      if (!fake) throw new Error(`${name} down`)
+      return fake(request)
+    },
     ...over,
   }
   return { generate: createCommitMessageGenerator(d), calls }
 }
 
 test('provider order: the chosen sign-in first, then whatever else is ready', () => {
+  // Readiness as before: Claude Code when signed in, the API with a key, Codex always tried.
+  const ready = (r: { claude: boolean; apiKey: boolean }) => (agent: AgentId) => agent === 'codex' || (agent === 'claude-code' ? r.claude : r.apiKey)
+  const providers = (kind: 'company' | 'scope', mode: AuthMode, r: { claude: boolean; apiKey: boolean }) => commitMessageProviders(kind, mode, ready(r)).map(a => SHORT[a])
   const all = { claude: true, apiKey: true }
-  assert.deepEqual(commitMessageProviders('company', 'claude-code', all), ['claude', 'api'])
-  assert.deepEqual(commitMessageProviders('company', 'codex', all), ['codex', 'claude', 'api'])
-  assert.deepEqual(commitMessageProviders('company', 'api-key', all), ['api', 'claude'])
-  assert.deepEqual(commitMessageProviders('company', 'claude-code', { claude: false, apiKey: false }), [])
-  assert.deepEqual(commitMessageProviders('company', 'codex', { claude: false, apiKey: false }), ['codex'])
-  assert.deepEqual(commitMessageProviders('company', 'api-key', { claude: true, apiKey: false }), ['claude'])
+  assert.deepEqual(providers('company', 'claude-code', all), ['claude', 'api'])
+  assert.deepEqual(providers('company', 'codex', all), ['codex', 'claude', 'api'])
+  assert.deepEqual(providers('company', 'api-key', all), ['api', 'claude'])
+  assert.deepEqual(providers('company', 'claude-code', { claude: false, apiKey: false }), [])
+  assert.deepEqual(providers('company', 'codex', { claude: false, apiKey: false }), ['codex'])
+  assert.deepEqual(providers('company', 'api-key', { claude: true, apiKey: false }), ['claude'])
   // A private folder's clone: the API key only, exactly as before.
-  assert.deepEqual(commitMessageProviders('scope', 'claude-code', all), ['api'])
-  assert.deepEqual(commitMessageProviders('scope', 'codex', all), ['api'])
-  assert.deepEqual(commitMessageProviders('scope', 'claude-code', { claude: true, apiKey: false }), [])
+  assert.deepEqual(providers('scope', 'claude-code', all), ['api'])
+  assert.deepEqual(providers('scope', 'codex', all), ['api'])
+  assert.deepEqual(providers('scope', 'claude-code', { claude: true, apiKey: false }), [])
+  // A stored value the app does not know: Claude Code's order, as before.
+  assert.deepEqual(providers('company', 'bogus' as AuthMode, all), ['claude', 'api'])
 })
 
 test('a Claude Code member without an API key gets an AI message (the file list as data)', async () => {
-  let seen: { input: unknown; system: string; cli: string } | undefined
-  const { generate, calls } = deps({}, { claude: async (req: { input: unknown; system: string; cli: string }) => { seen = req; return tag('提案書と予算を更新') } })
+  let seen: OneShotTextRequest | undefined
+  const { generate, calls } = deps({}, { claude: async req => { seen = req; return tag('提案書と予算を更新') } })
   assert.equal(await generate('/repo'), '提案書と予算を更新')
   assert.deepEqual(calls, ['claude'])
-  assert.equal(seen?.cli, '/fake/claude')
+  assert.equal(seen?.host.getCli(), '/fake/claude')
+  assert.equal(seen?.job, 'commitMessage')
   assert.equal(seen?.system, COMMIT_MESSAGE_SYSTEM_PROMPT)
   assert.deepEqual(seen?.input, { nameStatus: staged.nameStatus, stat: staged.stat, truncated: false })
 })
 
 test('routing per auth mode, with fallback on failure', async () => {
-  const codex = deps({ authMode: 'codex', apiKey: 'k' }, { codex: async (req: { text: string; developerInstructions?: string }) => {
-    assert.deepEqual(JSON.parse(req.text).nameStatus, staged.nameStatus)
-    assert.match(req.developerInstructions ?? '', /コミットメッセージ/)
+  const codex = deps({ authMode: 'codex', apiKey: 'k' }, { codex: async req => {
+    assert.deepEqual((req.input as { nameStatus: string }).nameStatus, staged.nameStatus)
+    assert.match(req.instructions ?? '', /コミットメッセージ/)
     return tag('Codexの要約')
   } })
   assert.equal(await codex.generate('/repo'), 'Codexの要約')
   assert.deepEqual(codex.calls, ['codex'])
 
-  const api = deps({ authMode: 'api-key', apiKey: 'k' }, { api: async (req: { apiKey: string }) => { assert.equal(req.apiKey, 'k'); return tag('APIの要約') } })
+  const api = deps({ authMode: 'api-key', apiKey: 'k' }, { api: async req => { assert.equal(req.host.apiKey, 'k'); return tag('APIの要約') } })
   assert.equal(await api.generate('/repo'), 'APIの要約')
   assert.deepEqual(api.calls, ['api'])
 
@@ -111,7 +125,7 @@ test('no AI, nothing staged, or every provider failing → null', async () => {
 
 test('timeout → null, even when the adapter ignores the abort signal', async () => {
   let aborted = false
-  const { generate } = deps({ timeoutMs: 50 }, { claude: (req: { signal: AbortSignal }) => {
+  const { generate } = deps({ timeoutMs: 50 }, { claude: req => {
     req.signal.addEventListener('abort', () => { aborted = true })
     return new Promise<string>(() => {})
   } })
@@ -199,7 +213,7 @@ process.stdin.on('end', () => console.log(JSON.stringify({ result: '前置き\\n
     const generate = createCommitMessageGenerator({
       readStaged: async () => staged, settings: () => ({ authMode: 'claude-code' }), claudeReady: () => true,
       getCli: () => f.cli, getEnv: () => ({ ...process.env as Record<string, string> }), getCwd: () => f.cwd,
-      adapters: defaultCommitMessageAdapters, log: quiet,
+      adapter: defaultCommitMessageAdapter, log: quiet,
     })
     assert.equal(await generate('/repo'), '更新: 営業部/提案書.md')
   } finally { f.dispose() }
@@ -212,7 +226,7 @@ test('Claude Code adapter: a hanging or failing CLI → null', async () => {
       const generate = createCommitMessageGenerator({
         readStaged: async () => staged, settings: () => ({ authMode: 'claude-code' }), claudeReady: () => true,
         getCli: () => f.cli, getEnv: () => ({ ...process.env as Record<string, string> }), getCwd: () => f.cwd,
-        adapters: defaultCommitMessageAdapters, log: quiet, timeoutMs: 1500,
+        adapter: defaultCommitMessageAdapter, log: quiet, timeoutMs: 1500,
       })
       assert.equal(await generate('/repo'), null)
     } finally { f.dispose() }

@@ -1,9 +1,6 @@
-import { generateText } from 'ai'
-import { createAnthropic } from '@ai-sdk/anthropic'
 import type { AuthMode } from '../shared/agent'
-import { AGENTS } from '../shared/agents/registry'
-import { generateCodexText, type CodexTextRequest } from './agents/codex-text'
-import { runClaudeOneShot } from './claude-oneshot'
+import { AGENTS, AGENT_IDS, isAgentId, type AgentId } from '../shared/agents/registry'
+import { oneShotUnavailable, runOneShotText, type OneShotHost, type OneShotTextRequest } from './agents/registry'
 
 /**
  * Sync's commit message, written by the AI the member already signs in with.
@@ -14,13 +11,13 @@ import { runClaudeOneShot } from './claude-oneshot'
  * its fixed message: generating a message must never fail or stall a sync.
  */
 
-export type CommitMessageProvider = 'claude' | 'codex' | 'api'
+/** The agent writing the message (an agent registry id). */
+export type CommitMessageProvider = AgentId
 export type CommitMessageRepoKind = 'company' | 'scope'
 
 export interface StagedChanges { nameStatus: string; stat: string }
 
 export const COMMIT_MESSAGE_TIMEOUT_MS = 30_000
-export const COMMIT_MESSAGE_API_MODEL = AGENTS['api-key'].tasks.commitMessage!
 const MAX_NAME_STATUS_CHARS = 16_000
 const MAX_STAT_CHARS = 8_000
 const MAX_SUBJECT_CHARS = 72
@@ -54,7 +51,8 @@ export function extractCommitMessage(raw: string | null | undefined): string | n
   return sanitizeCommitMessage(blocks[blocks.length - 1][1])
 }
 
-const CODEX_DEVELOPER_INSTRUCTIONS = 'コミットメッセージの作成だけを行い、ツール・スキルを使用しないでください。'
+/** For agents with tools of their own (Codex): do only this. */
+const COMMIT_MESSAGE_DEVELOPER_INSTRUCTIONS = 'コミットメッセージの作成だけを行い、ツール・スキルを使用しないでください。'
 
 /** The JSON the model receives: the staged file list, capped in size. */
 export function buildCommitMessageInput(changes: StagedChanges) {
@@ -103,43 +101,32 @@ export function sanitizeCommitMessage(raw: string | null | undefined): string | 
 }
 
 /**
- * Which providers to try, in order: the member's chosen sign-in first, then
- * whatever else is ready. A private folder's clone (scope) keeps exactly the
- * behaviour sync had before: only an API key (Anthropic), never a CLI sign-in
- * that could be another vendor (Codex) — its file names go nowhere new.
+ * Which agents to try, in order: the member's chosen sign-in first, then the
+ * agents the registry marks as commit-message fallbacks (registry order) —
+ * each only when it can run (`ready`). A private folder's clone (scope) keeps
+ * exactly the behaviour sync had before: only agents allowed to see a private
+ * folder's file names (the API key), never a CLI sign-in that could be
+ * another vendor (Codex) — its file names go nowhere new.
  */
-export function commitMessageProviders(kind: CommitMessageRepoKind, authMode: AuthMode, ready: { claude: boolean; apiKey: boolean }): CommitMessageProvider[] {
-  if (kind === 'scope') return ready.apiKey ? ['api'] : []
-  const order: CommitMessageProvider[] = authMode === 'codex' ? ['codex', 'claude', 'api']
-    : authMode === 'api-key' ? ['api', 'claude']
-      : ['claude', 'api']
-  return order.filter(p => p === 'codex' || (p === 'claude' ? ready.claude : ready.apiKey))
+export function commitMessageProviders(kind: CommitMessageRepoKind, authMode: AuthMode, ready: (agent: AgentId) => boolean): CommitMessageProvider[] {
+  const can = (id: AgentId, capability: 'commitMessageFallback' | 'privateFolderCommitMessages') => AGENTS[id].capabilities[capability]
+  // A stored value the app does not know is treated as Claude Code, as it always was.
+  const own: AgentId = isAgentId(authMode) ? authMode : 'claude-code'
+  const order = kind === 'scope'
+    ? AGENT_IDS.filter(id => can(id, 'privateFolderCommitMessages'))
+    : [own, ...AGENT_IDS.filter(id => id !== own && can(id, 'commitMessageFallback'))]
+  return order.filter(id => AGENTS[id].capabilities.oneShotText && ready(id))
 }
 
-export interface CommitMessageAdapters {
-  claude: (req: { cli: string; cwd: string; env: Record<string, string>; system: string; input: unknown; signal: AbortSignal }) => Promise<string>
-  codex: (req: CodexTextRequest) => Promise<string>
-  api: (req: { apiKey: string; system: string; input: unknown; signal: AbortSignal }) => Promise<string>
-}
+/** Runs one agent's one-shot job (agents/registry.ts); tests inject their own. */
+export type CommitMessageAdapter = (agent: AgentId, request: OneShotTextRequest) => Promise<string>
 
 const CLI_MESSAGES = {
   cancelled: 'cancelled', timedOut: 'timed out', spawnFailed: 'Claude Code could not be started',
   stdinFailed: 'stdin failed', tooLong: 'output too long', exitFailed: 'Claude Code exited with an error', invalid: 'no usable result',
 }
 
-export const defaultCommitMessageAdapters: CommitMessageAdapters = {
-  claude: ({ cli, cwd, env, system, input, signal }) =>
-    runClaudeOneShot({ cli, cwd, model: AGENTS['claude-code'].tasks.commitMessage!, systemPrompt: system, input, signal, env, timeoutMs: COMMIT_MESSAGE_TIMEOUT_MS, messages: CLI_MESSAGES }),
-  codex: request => generateCodexText(request),
-  api: async ({ apiKey, system, input, signal }) => {
-    const result = await generateText({
-      model: createAnthropic({ apiKey })(COMMIT_MESSAGE_API_MODEL),
-      system, prompt: JSON.stringify(input),
-      abortSignal: signal, maxRetries: 0, maxOutputTokens: 600,
-    })
-    return result.text
-  },
-}
+export const defaultCommitMessageAdapter: CommitMessageAdapter = runOneShotText
 
 export interface CommitMessageGeneratorDeps {
   readStaged: (repoPath: string) => Promise<StagedChanges>
@@ -150,7 +137,7 @@ export interface CommitMessageGeneratorDeps {
   getEnv: () => Record<string, string>
   /** A neutral working directory (never the company folder). */
   getCwd: () => string
-  adapters?: CommitMessageAdapters
+  adapter?: CommitMessageAdapter
   timeoutMs?: number
   log?: Pick<Console, 'info' | 'warn'>
 }
@@ -158,7 +145,7 @@ export interface CommitMessageGeneratorDeps {
 export type CommitMessageGenerator = (repoPath: string, opts?: { kind?: CommitMessageRepoKind }) => Promise<string | null>
 
 export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): CommitMessageGenerator {
-  const adapters = deps.adapters ?? defaultCommitMessageAdapters
+  const adapter = deps.adapter ?? defaultCommitMessageAdapter
   const timeoutMs = deps.timeoutMs ?? COMMIT_MESSAGE_TIMEOUT_MS
   const log = deps.log ?? console
   return async (repoPath, opts = {}) => {
@@ -173,9 +160,8 @@ export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): 
     })
     const attempt = async (): Promise<{ message: string; provider: CommitMessageProvider } | null> => {
       const { authMode, apiKey } = deps.settings()
-      let claudeReady = false
-      try { claudeReady = deps.claudeReady() } catch { /* treated as not ready */ }
-      const providers = commitMessageProviders(kind, authMode, { claude: claudeReady, apiKey: !!apiKey })
+      const host: OneShotHost = { getCli: deps.getCli, cwd: '', env: {}, apiKey, claudeReady: deps.claudeReady }
+      const providers = commitMessageProviders(kind, authMode, agent => !oneShotUnavailable(agent, host))
       if (!providers.length) { log.info('[commit-message] no AI available, using the fixed message'); return null }
       const changes = await deps.readStaged(repoPath)
       if (!changes.stat.trim()) return null
@@ -184,17 +170,12 @@ export function createCommitMessageGenerator(deps: CommitMessageGeneratorDeps): 
       for (const provider of providers) {
         if (controller.signal.aborted) return null
         try {
-          let raw: string
-          if (provider === 'claude') {
-            raw = await adapters.claude({ cli: deps.getCli(), cwd: deps.getCwd(), env: deps.getEnv(), system, input, signal: controller.signal })
-          } else if (provider === 'codex') {
-            raw = await adapters.codex({
-              env: deps.getEnv(), cwd: deps.getCwd(), system, text: JSON.stringify(input), signal: controller.signal,
-              developerInstructions: CODEX_DEVELOPER_INSTRUCTIONS,
-            })
-          } else {
-            raw = await adapters.api({ apiKey: apiKey!, system, input, signal: controller.signal })
-          }
+          const raw = await adapter(provider, {
+            job: 'commitMessage', system, input, signal: controller.signal,
+            host: { ...host, cwd: deps.getCwd(), env: deps.getEnv() },
+            timeoutMs: COMMIT_MESSAGE_TIMEOUT_MS, maxOutputTokens: 600, cliMessages: CLI_MESSAGES,
+            instructions: COMMIT_MESSAGE_DEVELOPER_INSTRUCTIONS,
+          })
           if (controller.signal.aborted) return null
           const message = extractCommitMessage(raw)
           if (message) return { message, provider }

@@ -3,6 +3,7 @@ import path from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { ChatSession, ChatSaveResult, ChatMetadataPatch, ChatSessionSummary } from '../shared/chat-history'
 import { normalizeSearchText, summarizeSession } from '../shared/chat-history-summary'
+import { isAgentId } from '../shared/agents/registry'
 
 interface HistoryFile {
   sessions: ChatSession[]
@@ -449,7 +450,7 @@ export class ChatHistoryStore {
       session.pinnedAt = patch.pinned ? new Date().toISOString() : undefined
     }
     if (patch.agentSession !== undefined) {
-      if (patch.agentSession !== null && (!['claude-code', 'codex', 'api-key'].includes(patch.agentSession.providerId) || typeof patch.agentSession.id !== 'string' || !patch.agentSession.id)) throw new Error('不正なAIセッションです。')
+      if (patch.agentSession !== null && (!isAgentId(patch.agentSession.providerId) || typeof patch.agentSession.id !== 'string' || !patch.agentSession.id)) throw new Error('不正なAIセッションです。')
       session.agentSession = patch.agentSession
     }
     if (typeof patch.claudeSessionId === 'string') session.claudeSessionId = patch.claudeSessionId

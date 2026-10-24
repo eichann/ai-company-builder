@@ -1,3 +1,4 @@
+import type { AgentId } from '../../shared/agents/registry'
 /** Shared, bounded input/output contract for both native agents. */
 export const HANDOFF_HEADINGS = ['目的', '決定事項・制約', '現在の状態', '未解決事項', '次に行うこと', '参照先'] as const
 export const HANDOFF_MAX_BYTES = 8 * 1024
@@ -25,7 +26,7 @@ export interface HandoffInput {
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
 }
 export interface HandoffMetrics {
-  provider: 'claude-code' | 'codex'
+  provider: AgentId
   model: string
   setupMs: number
   saveMs: number
