@@ -315,7 +315,10 @@ domains); what has moved so far:
   handoff:*), `agent-interactions` (agent-interaction:*, tool approvals),
   `fs` (fs:*, dialog:selectDirectory, editor:backupBeforeOverwrite; the
   company watchers in `fs/watchers.ts`), `git-history` (git:preview, diffs,
-  revert, summary, log, showCommit, listFiles, grep, getBinaryStatus).
+  revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
+  `sync` (git:sync, writeAccess:get), `private-folders` (privateFolders:*;
+  `guards.ts`: readable folders / instruction-file authority for the chat
+  guards, the reserved-name refusal for file operations).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the

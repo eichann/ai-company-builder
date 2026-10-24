@@ -3,7 +3,7 @@ import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
-import { app, BrowserWindow, ipcMain, dialog, net as electronNet, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, net as electronNet, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath, pathToFileURL } from 'url'
@@ -21,8 +21,7 @@ import { folderSizesView, serverFolderSizes } from './sync/folder-sizes'
 import { notDownloadedFolders } from './sync/not-downloaded'
 import { createCompanyFilesApi } from './company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from './company-files/tools'
-import { companyPathOf, readPrivateScopesCache, readableScopeOf } from './sync/private-folders'
-import { reservedPathMessage } from '../../shared/types/private-folders'
+import { readPrivateScopesCache } from './sync/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin } from './sync/remote'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
@@ -38,15 +37,13 @@ import { normalizePermissionMode } from '../shared/permission-mode'
 import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
-import type { InstructionAuthority } from './write-guard'
-import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import { AllowedRoots, type ValidateOptions } from './allowed-roots'
 import { isExternalUrlAllowed } from './external-url'
 import { typedIpc } from './ipc/registrar'
 import { createConfigStore } from './services/config-store'
 import { createShellEnvironment } from './services/shell-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createWindowPort, desktopShell } from './electron-adapter'
+import { createMessageBoxHost, createWindowPort, desktopShell } from './electron-adapter'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
 import { registerChatHistoryIpc } from './features/chat-history/ipc'
@@ -55,6 +52,9 @@ import { registerSettingsIpc } from './features/settings/ipc'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
+import { registerSyncIpc } from './features/sync/ipc'
+import { registerPrivateFoldersIpc } from './features/private-folders/ipc'
+import { createPrivateFolderGuards } from './features/private-folders/guards'
 import { registerGitHistoryIpc } from './features/git-history/ipc'
 import { createAppGit } from './services/app-git'
 import { createCommitMessages } from './services/commit-messages'
@@ -209,18 +209,6 @@ app.on('before-quit', () => {
   runningTools.clear()
 })
 
-// The company folder on disk (features/fs): file tree, editor, watchers.
-const files = registerFsIpc(ipc, {
-  paths: allowedRoots,
-  shell: desktopShell,
-  window: appWindow,
-  reservedRefusal,
-  // A skill the AI (or anything else) created, changed or removed is scanned
-  // afresh by the next skills:list.
-  onFileChanges: changes => skillsCache.invalidateForChanges(changes),
-})
-app.on('before-quit', () => files.closeWatchers())
-
 registerEnvIpc(ipc, { paths: allowedRoots })
 
 registerSettingsIpc(ipc, { config, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
@@ -302,13 +290,7 @@ registerGitHistoryIpc(ipc, { paths: allowedRoots, git: appGit, commitMessagesFor
 // tests/sync-harness). This wires the app's git, dialogs and server API in.
 const gitSync = createGitSync({
   createGit,
-  dialog: createMessageBoxSyncDialog({
-    hasWindow: () => !!mainWindow && !mainWindow.isDestroyed(),
-    showMessageBox: (options) => {
-      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null
-      return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
-    },
-  }),
+  dialog: createMessageBoxSyncDialog(createMessageBoxHost(() => mainWindow)),
   api: createFetchSyncServerApi({ baseUrl: getServerApiUrl, cookies: session.cookies }),
   generateCommitMessage,
   now: () => new Date(),
@@ -316,137 +298,25 @@ const gitSync = createGitSync({
   log: console,
 })
 
-ipc.handle('git:sync', async (_, repoPath: string, companyId: string, commitMessage: string) => {
-  try {
-    repoPath = validatePath(repoPath)
-  } catch (error) {
-    return { success: false, error: error instanceof Error ? error.message : String(error), errorType: 'unknown' as const }
-  }
-  const result = await gitSync(repoPath, companyId, commitMessage)
-  // Rules may have changed since the last look: refresh the chat guard / badges.
-  if (result.success && companyId) void writeAccessStore.refresh(companyId)
-  return result
-})
-
-// Private folders as the chat write guard sees them, from the cached
-// /me/scopes answer sync keeps in the company's .git (no network call).
-function privateFolderGuardView(root: string) {
-  const cache = readPrivateScopesCache(root)
-  if (!cache) return undefined
-  const readable = [...cache.scopes, ...(cache.pendingPublic ?? [])]
-  return {
-    reservedFolderOf: async (rel: string) => {
-      if (readableScopeOf(readable, rel) || fs.existsSync(path.join(root, ...rel.split('/')))) return null
-      return gitSync.pathChecker.reservedFolderOf(cache.companyId, rel).catch(() => null)
-    },
-    readOnlyFolderOf: (rel: string) => {
-      const scope = readableScopeOf(cache.scopes, rel)
-      return scope && !scope.canWrite ? scope.path : null
-    },
-  }
-}
-
-/**
- * Refuse creating something at a folder name the member may not use (a
- * private folder they cannot read — the server answers POST …/paths/check;
- * sync's shared, cached checker). Only for paths that do not exist yet (an
- * editor save never waits on it); unknown answers allow — sync's hold-back
- * and the server's [RESERVED_PATH] stay the safety net. The message is the
- * server's own wording, naming only what the member typed.
- */
-async function reservedRefusal(absPath: string): Promise<string | null> {
-  if (fs.existsSync(absPath)) return null
-  const where = companyPathOf(absPath)
-  if (!where) return null
-  const folder = await gitSync.pathChecker.reservedFolderOf(where.companyId, where.rel).catch(() => null)
-  if (folder === null) return null
-  console.warn('[fs] Refused a write into a folder name that cannot be used')
-  return reservedPathMessage(folder)
-}
-
-// The file tree asks before creating / renaming / moving to a path: a
-// folder named like a private folder the member cannot read is refused with
-// the server's [RESERVED_PATH] sentence (only the name the member typed).
-// The fs:* handlers refuse the same paths as a backstop (notDownloadedRefusal).
-ipc.handle('privateFolders:reservedPathRefusal', async (_, targetPath: string) => {
-  try {
-    return await reservedRefusal(validatePath(targetPath))
-  } catch {
-    return null
-  }
-})
-
-ipc.handle('writeAccess:get', async (_, companyId: string, refresh?: boolean) => {
-  if (typeof companyId !== 'string' || !companyId) return null
-  const cached = writeAccessStore.get(companyId)
-  if (cached && !refresh) return cached
-  return (await writeAccessStore.refresh(companyId)) ?? null
-})
+registerSyncIpc(ipc, { paths: allowedRoots, gitSync, writeAccess: writeAccessStore })
 
 // Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
-// icons. Only the person's dialog creates them — never the chat (no tool).
+// icons; the guards the chat and the file operations ask (features/private-folders).
 const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: session.cookies })
-// The private folders this member may read, per company, for the chat's
-// private-read guard (private-read-guard.ts). Refreshed at every chat turn;
-// a failed refresh keeps the last answer (unknown = local reads are not recognised).
-const readablePrivateFolders = new Map<string, string[]>()
-const privateFolderRefreshes = new Map<string, Promise<void>>()
-function refreshReadablePrivateFolders(companyId: string, timeoutMs: number): Promise<void> {
-  let pending = privateFolderRefreshes.get(companyId)
-  if (!pending) {
-    pending = privateFoldersApi.mine(companyId)
-      .then(result => { if (result.success) readablePrivateFolders.set(companyId, result.folders.map(f => f.path.normalize('NFC'))) })
-      .catch(() => {})
-      .finally(() => privateFolderRefreshes.delete(companyId))
-    privateFolderRefreshes.set(companyId, pending)
-  }
-  return waitAtMost(pending, timeoutMs)
-}
-// Who may change CLAUDE.md / AGENTS.md (write-guard.ts): role + managed
-// department folders from /me/capabilities. A server without the folders
-// leaves a non-admin's authority unknown (never blocks; the push check stays).
-const instructionAuthority = new Map<string, InstructionAuthority>()
-const authorityRefreshes = new Map<string, Promise<void>>()
-function refreshInstructionAuthority(companyId: string, timeoutMs: number): Promise<void> {
-  let pending = authorityRefreshes.get(companyId)
-  if (!pending) {
-    pending = privateFoldersApi.capabilities(companyId)
-      .then(result => {
-        if (!result.success) return
-        if (result.role === 'owner' || result.role === 'admin' || result.managedDepartmentFolders) {
-          instructionAuthority.set(companyId, { role: result.role, managedFolders: result.managedDepartmentFolders ?? [] })
-        } else instructionAuthority.delete(companyId)
-      })
-      .catch(() => {})
-      .finally(() => authorityRefreshes.delete(companyId))
-    authorityRefreshes.set(companyId, pending)
-  }
-  return waitAtMost(pending, timeoutMs)
-}
-function waitAtMost(pending: Promise<void>, timeoutMs: number): Promise<void> {
-  let timer: ReturnType<typeof setTimeout> | undefined
-  return Promise.race([pending, new Promise<void>(resolve => { timer = setTimeout(resolve, timeoutMs) })]).finally(() => clearTimeout(timer))
-}
-ipc.handle('privateFolders:mine', async (_, companyId: string) => {
-  if (typeof companyId !== 'string' || !companyId) return { success: false, offline: false, error: 'companyId is required' }
-  return privateFoldersApi.mine(companyId)
+const privateFolderGuards = createPrivateFolderGuards({ api: privateFoldersApi, pathChecker: gitSync.pathChecker })
+registerPrivateFoldersIpc(ipc, { paths: allowedRoots, api: privateFoldersApi, guards: privateFolderGuards })
+
+// The company folder on disk (features/fs): file tree, editor, watchers.
+const files = registerFsIpc(ipc, {
+  paths: allowedRoots,
+  shell: desktopShell,
+  window: appWindow,
+  reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath),
+  // A skill the AI (or anything else) created, changed or removed is scanned
+  // afresh by the next skills:list.
+  onFileChanges: changes => skillsCache.invalidateForChanges(changes),
 })
-ipc.handle('privateFolders:createContext', async (_, companyId: string, parentPath: string) => {
-  if (typeof companyId !== 'string' || !companyId || typeof parentPath !== 'string') return { success: false, offline: false, error: 'Invalid arguments' }
-  return privateFoldersApi.createContext(companyId, parentPath)
-})
-ipc.handle('privateFolders:create', async (_, companyId: string, input: CreatePrivateFolderRequest) => {
-  if (typeof companyId !== 'string' || !companyId || !input || typeof input.name !== 'string' || typeof input.parentPath !== 'string') {
-    return { success: false, offline: false, error: 'Invalid arguments' }
-  }
-  return privateFoldersApi.create(companyId, {
-    parentPath: input.parentPath,
-    name: input.name,
-    ...(Array.isArray(input.viewers) ? { viewers: input.viewers.filter(v => typeof v === 'string') } : {}),
-    ...(Array.isArray(input.editors) ? { editors: input.editors.filter(v => typeof v === 'string') } : {}),
-    ...(input.force === true ? { force: true } : {}),
-  })
-})
+app.on('before-quit', () => files.closeWatchers())
 
 const SETUP_OFFLINE_MESSAGE = 'サーバーに接続できませんでした。インターネット接続を確認して、もう一度お試しください。'
 
@@ -1603,8 +1473,8 @@ app.whenReady().then(async () => {
       getWriteGuard: async (companyId, root) => {
         const [access] = await Promise.all([
           writeAccessStore.refresh(companyId, { timeoutMs: 3000 }),
-          refreshReadablePrivateFolders(companyId, 3000),
-          refreshInstructionAuthority(companyId, 3000),
+          privateFolderGuards.refreshReadable(companyId, 3000),
+          privateFolderGuards.refreshAuthority(companyId, 3000),
         ])
         if (!access) console.warn(`[write-access] ${companyId}: unknown at chat start; edits to read-only folders are not blocked in the chat`)
         // getAccess reads the live cache, so a refresh during a long chat applies at once.
@@ -1612,9 +1482,9 @@ app.whenReady().then(async () => {
           root,
           getAccess: () => writeAccessStore.get(companyId),
           getNotDownloaded: () => notDownloadedFolders(root),
-          getPrivateFolders: () => readablePrivateFolders.get(companyId),
-          getInstructionAuthority: () => instructionAuthority.get(companyId),
-          getPrivateFolderView: () => privateFolderGuardView(root),
+          getPrivateFolders: () => privateFolderGuards.readable(companyId),
+          getInstructionAuthority: () => privateFolderGuards.authority(companyId),
+          getPrivateFolderView: () => privateFolderGuards.guardView(root),
         }
       },
       createCompanyFiles: (companyId, root, signal) => {

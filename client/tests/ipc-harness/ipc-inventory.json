@@ -270,7 +270,7 @@
         "params": "repoPath: string, folders: string[]"
       },
       "git:sync": {
-        "file": "main.ts",
+        "file": "features/sync/ipc.ts",
         "params": "repoPath: string, companyId: string, commitMessage: string"
       },
       "handoff:complete": {
@@ -286,19 +286,19 @@
         "params": "company: string, id: string"
       },
       "privateFolders:create": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string, input: CreatePrivateFolderRequest"
       },
       "privateFolders:createContext": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string, parentPath: string"
       },
       "privateFolders:mine": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "companyId: string"
       },
       "privateFolders:reservedPathRefusal": {
-        "file": "main.ts",
+        "file": "features/private-folders/ipc.ts",
         "params": "targetPath: string"
       },
       "shell:openExternal": {
@@ -366,7 +366,7 @@
         "params": "id: string"
       },
       "writeAccess:get": {
-        "file": "main.ts",
+        "file": "features/sync/ipc.ts",
         "params": "companyId: string, refresh?: boolean"
       }
     },

@@ -4,6 +4,7 @@
 
 import { dialog, nativeImage, shell, type BrowserWindow, type WebContents } from 'electron'
 import type { DesktopShell, WindowPort } from './features/ports'
+import type { MessageBoxHost } from './sync/message-box-dialog'
 
 export const desktopShell: DesktopShell = {
   openPath: (target) => shell.openPath(target),
@@ -31,6 +32,18 @@ export function createWindowPort(getWindow: () => BrowserWindow | null): WindowP
     send(channel, ...payload) {
       const win = getWindow()
       if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, ...payload)
+    },
+  }
+}
+
+/** Sync's questions as native message boxes, on the window when there is one. */
+export function createMessageBoxHost(getWindow: () => BrowserWindow | null): MessageBoxHost {
+  return {
+    hasWindow: () => { const win = getWindow(); return !!win && !win.isDestroyed() },
+    showMessageBox: (options) => {
+      const current = getWindow()
+      const win = current && !current.isDestroyed() ? current : null
+      return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
     },
   }
 }
