@@ -17,11 +17,13 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const GROUPS = [
-  ['private-folders.test.ts#1/2', 'folder-exclusions.test.ts'],
-  ['private-folders.test.ts#2/2', 'scenarios.test.ts'],
+  ['private-folders.test.ts#1/2', 'folder-exclusions.test.ts', 'characterization.test.ts'],
+  ['private-folders.test.ts#2/2', 'scenarios.test.ts', 'findings.test.ts'],
   ['partial-clone.test.ts', 'outside-checkout.test.ts', 'write-denied.test.ts', 'large-files.test.ts'],
-  // + every file not listed above (harness self-test, user hooks, new files)
-  ['soak.test.ts', 'characterization.test.ts', 'findings.test.ts'],
+  // + every file not listed above (harness self-test, user hooks, new files).
+  // The soak's three worlds run one after another (~170 s on a PR, more with
+  // the full soak), so nothing else long goes here.
+  ['soak.test.ts'],
 ]
 
 const shard = Number(process.argv[2])
