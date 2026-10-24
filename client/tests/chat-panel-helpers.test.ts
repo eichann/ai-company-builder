@@ -13,6 +13,7 @@ import { persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs
 import { draftWith, mergeQueuedSends, steerPartId, unreadSteerParts, withoutSteerParts } from '../src/components/chat/queuedSends'
 import { STEER_PART_TYPE } from '../shared/steer'
 import { CHOICE_PART_TYPE } from '../shared/choice-prompt'
+import { agentInputMessages } from '../electron/agents/session'
 
 const T = new Date('2026-10-24T01:02:03.000Z')
 
@@ -37,6 +38,28 @@ test('a reply becomes one history message: text, thinking, tool markers, choice 
   // And back: the instruction and the answered prompt return where they were.
   const restored = sessionMessageToUIMessage(stored)
   assert.deepEqual(restored.parts.map(p => p.type), ['reasoning', 'text', STEER_PART_TYPE, 'text', CHOICE_PART_TYPE, 'text'])
+})
+
+test('a question and an instruction at the same offset come back in the order they happened (old history keeps its order)', () => {
+  const steer = { type: STEER_PART_TYPE, id: 'steer-s1', data: { id: 's1', text: '10月版で' } }
+  const choice = { type: CHOICE_PART_TYPE, id: 'choice-c1', data: { id: 'c1', questions: [{ question: 'Q?', header: 'H', multiSelect: false, options: [{ label: 'A' }] }], answers: [{ selected: ['A'] }] } }
+  const live = { id: 'a1', role: 'assistant', parts: [{ type: 'text', text: '確認します。' }, steer, choice, { type: 'text', text: '完了。' }] } as unknown as UIMessage
+  // Through a history file (JSON), as when a conversation is reopened.
+  const stored = JSON.parse(JSON.stringify(uiMessageToSessionMessage(live, T))) as ReturnType<typeof uiMessageToSessionMessage>
+  assert.equal(stored.steerInstructions?.[0].at, stored.choicePrompts?.[0].at)
+  const order = (m: UIMessage) => m.parts.map(p => (p as { id?: string }).id ?? p.type)
+  const restored = sessionMessageToUIMessage(stored)
+  assert.deepEqual(order(restored), ['text', 'steer-s1', 'choice-c1', 'text'])
+  // Another agent reads the restored conversation in the same order as the live one.
+  const texts = (m: UIMessage) => agentInputMessages([m])[0].parts.map(p => (p as { text: string }).text)
+  assert.deepEqual(texts(restored), texts(live))
+  // Saved again unchanged (fingerprints stay stable).
+  assert.equal(JSON.stringify(uiMessageToSessionMessage(restored, T)), JSON.stringify(stored))
+
+  // Records written before `seq` existed: the order they were stored in, as before.
+  const withoutSeq = <T extends { seq?: number }>(records: T[] | undefined) => records?.map(r => { const copy = { ...r }; delete copy.seq; return copy })
+  const old = { ...stored, choicePrompts: withoutSeq(stored.choicePrompts), steerInstructions: withoutSeq(stored.steerInstructions) }
+  assert.deepEqual(order(sessionMessageToUIMessage(old)), ['text', 'choice-c1', 'steer-s1', 'text'])
 })
 
 test('sessionMessageFor reuses the conversion for the same message object, timestamp and attachments', () => {

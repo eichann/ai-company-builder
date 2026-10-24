@@ -20,9 +20,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const choicePrompts: StoredChoicePrompt[] = []
   const steerInstructions: StoredSteer[] = []
   for (const part of msg.parts) {
-    const choice = storedChoiceFromPart(part as { type: string; data?: unknown }, content.length, choicePrompts)
+    // seq: the record's place among this reply's questions and instructions.
+    const seq = choicePrompts.length + steerInstructions.length
+    const choice = storedChoiceFromPart(part as { type: string; data?: unknown }, content.length, choicePrompts, seq)
     if (choice) { choicePrompts.push(choice); continue }
-    const steer = storedSteerFromPart(part as { type: string; data?: unknown }, content.length, steerInstructions)
+    const steer = storedSteerFromPart(part as { type: string; data?: unknown }, content.length, steerInstructions, seq)
     if (steer) { steerInstructions.push(steer); continue }
     const p = part as { type: string; toolName?: string; output?: unknown; data?: ConsultationReference }
     const ref = p.type === 'data-consultation-reference' ? p.data : referenceFromTool(p.toolName || p.type.replace(/^tool-/, ''), p.output)
