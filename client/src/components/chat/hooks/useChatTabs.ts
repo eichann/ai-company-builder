@@ -1,0 +1,130 @@
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { newChatTab, persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, type ChatTab } from '../chatTabsStorage'
+
+/**
+ * The open chat tabs of a company: restored from localStorage, remembered on
+ * every change, a conversation deleted anywhere closes its tab. Every tab
+ * stays mounted (streams, drafts and questions keep running).
+ *
+ * `tabsRef` mirrors `tabs` for callbacks that must stay stable; per-tab
+ * callbacks (`tabCallbacks`) are cached by tab id so a memoised chat whose own
+ * props did not change does not re-render when another tab's title changes.
+ */
+export function useChatTabs(companyId: string | undefined, newChatTitle: string) {
+  // Synchronously hydrate the tab list from localStorage during the first
+  // render so multi-tab users see the right tab count immediately — no
+  // 1-tab→N-tab flicker. Uses a ref so tabs and activeTabId share the same
+  // freshly-generated UUIDs (the persisted entry only stores titles + session ids).
+  const initialChatStateRef = useRef<{ tabs: ChatTab[]; activeTabId: string } | null>(null)
+  if (initialChatStateRef.current === null) {
+    initialChatStateRef.current = restoreChatTabs(companyId ? safeReadChatTabs(companyId) : null, newChatTitle)
+  }
+
+  // Tab management state
+  const [tabs, setTabs] = useState<ChatTab[]>(initialChatStateRef.current.tabs)
+  const [activeTabId, setActiveTabId] = useState<string>(initialChatStateRef.current.activeTabId)
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+
+  const createNewTab = useCallback(() => {
+    const newTab = newChatTab(newChatTitle)
+    setTabs(prev => [...prev, newTab])
+    setActiveTabId(newTab.id)
+  }, [newChatTitle])
+
+  const openSession = useCallback((sessionId: string) => {
+    const existing = tabsRef.current.find(tab => tab.sessionId === sessionId)
+    if (existing) { setActiveTabId(existing.id); return }
+    const tab = newChatTab(newChatTitle, sessionId)
+    tabsRef.current = [...tabsRef.current, tab]
+    setTabs(tabsRef.current)
+    setActiveTabId(tab.id)
+  }, [newChatTitle])
+
+  useEffect(() => {
+    if (!companyId) return
+    return window.electronAPI.onChatHistoryChanged(({ companyId: changedCompanyId, deletedSessionId }) => {
+      if (changedCompanyId !== companyId || !deletedSessionId) return
+      const remaining = tabsRef.current.filter(tab => tab.sessionId !== deletedSessionId)
+      if (remaining.length === tabsRef.current.length) return
+      if (!remaining.length) remaining.push(newChatTab(newChatTitle))
+      tabsRef.current = remaining
+      setTabs(remaining)
+      setActiveTabId(id => remaining.some(tab => tab.id === id) ? id : remaining[0].id)
+    })
+  }, [companyId, newChatTitle])
+
+  const closeTab = useCallback((closingTabId: string) => {
+    const prev = tabsRef.current
+    if (prev.length <= 1) return
+    const closedIndex = prev.findIndex(tab => tab.id === closingTabId)
+    const newTabs = prev.filter(tab => tab.id !== closingTabId)
+    tabsRef.current = newTabs
+    setTabs(newTabs)
+    setActiveTabId(current => {
+      if (closingTabId !== current) return current
+      const newActive = newTabs[Math.min(closedIndex, newTabs.length - 1)]
+      return newActive.id
+    })
+  }, [])
+
+  const updateTabTitle = useCallback((targetTabId: string, title: string) => {
+    // Same title → same array: no re-render of the tab bar, sidebar or chats.
+    setTabs(prev => prev.some(tab => tab.id === targetTabId && tab.title !== title)
+      ? prev.map(tab => tab.id === targetTabId ? { ...tab, title } : tab)
+      : prev)
+  }, [])
+
+  const updateTabSessionId = useCallback((targetTabId: string, sessionId: string | null) => {
+    setTabs(prev => {
+      const idx = prev.findIndex(tab => tab.id === targetTabId)
+      if (idx === -1 || prev[idx].sessionId === sessionId) return prev
+      const next = prev.slice()
+      next[idx] = { ...next[idx], sessionId }
+      return next
+    })
+  }, [])
+
+  // Stable props for the memoised chats: a tab whose own props did not change
+  // (another tab's title, the active tab switching elsewhere) does not re-render.
+  const tabCallbacksRef = useRef(new Map<string, { title: (title: string) => void; sessionId: (sessionId: string | null) => void }>())
+  const tabCallbacks = (tabId: string) => {
+    let callbacks = tabCallbacksRef.current.get(tabId)
+    if (!callbacks) {
+      callbacks = { title: title => updateTabTitle(tabId, title), sessionId: sessionId => updateTabSessionId(tabId, sessionId) }
+      tabCallbacksRef.current.set(tabId, callbacks)
+    }
+    return callbacks
+  }
+
+  // Handle cross-company changes (not the initial mount — that's already
+  // hydrated synchronously above). tabRestoredForId gates the persist effect
+  // so a transient state during a switch can't clobber the stored entry.
+  const [tabRestoredForId, setTabRestoredForId] = useState<string | null>(null)
+  const isFirstTabMountRef = useRef(true)
+  useEffect(() => {
+    if (!companyId) {
+      setTabRestoredForId(null)
+      return
+    }
+    if (tabRestoredForId === companyId) return
+    const targetCompanyId = companyId
+    const wasFirstMount = isFirstTabMountRef.current
+    isFirstTabMountRef.current = false
+
+    if (!wasFirstMount) {
+      const restored = restoreChatTabs(safeReadChatTabs(targetCompanyId), newChatTitle)
+      setTabs(restored.tabs)
+      setActiveTabId(restored.activeTabId)
+    }
+    setTabRestoredForId(targetCompanyId)
+  }, [companyId, tabRestoredForId, newChatTitle])
+
+  // Persist the tab list whenever it changes, gated on restoration completion.
+  useEffect(() => {
+    if (!companyId || tabRestoredForId !== companyId) return
+    safeWriteChatTabs(companyId, persistedChatTabs(tabs, activeTabId))
+  }, [companyId, tabRestoredForId, tabs, activeTabId])
+
+  return { tabs, activeTabId, setActiveTabId, createNewTab, openSession, closeTab, tabCallbacks }
+}

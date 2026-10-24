@@ -26,6 +26,7 @@ import { forgetPrivateReads, noteCompanyFileResult, privateReadStateFor, createP
 import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-limits'
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
+import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
 import net from 'net'
 
@@ -173,24 +174,10 @@ export async function startChatServer(config: ChatServerConfig) {
       agentSession: bodyAgentSession,
       authMode: requestedAuthMode,
       promptSuggestions,
-    }: {
+    }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
-      workingDirectory?: string
-      activeDepartment?: { name: string; folder: string }
       skillInfo?: { skillFolderPath: string }
-      images?: Array<{ mediaType: string; data: string }>
-      modelId?: string
-      effort?: string
-      referenceFiles?: string[]
-      appSessionId?: string
-      companyId?: string
-      companyRootPath?: string
-      claudeSessionId?: string
-      agentSession?: AgentSession | null
-      authMode?: AuthMode
-      /** The member's setting (Settings → 入力候補); absent = on. */
-      promptSuggestions?: boolean
     } = body
 
     const authMode = requestedAuthMode || config.getAuthMode()
@@ -418,7 +405,7 @@ export async function startChatServer(config: ChatServerConfig) {
   // GET /api/session/:appSessionId — return CLI session ID for persistence
   // POST /api/generate-title — generate a concise title for a chat session using Haiku
   app.post('/api/generate-title', async (c) => {
-    const body = await c.req.json() as { messages: Array<{ role: 'user' | 'assistant'; content: string }>; authMode?: AuthMode; modelId?: string }
+    const body = await c.req.json() as GenerateTitleRequest
     const inputMessages = Array.isArray(body?.messages) ? body.messages : []
     if (inputMessages.length === 0) {
       return c.json({ error: 'No messages provided' }, 400)
@@ -466,7 +453,7 @@ ${transcript}
       if (!title) {
         return c.json({ error: 'Empty title' }, 500)
       }
-      return c.json({ title })
+      return c.json({ title } satisfies GenerateTitleResponse)
     } catch (e) {
       console.error('[chat-server] generate-title failed:', e)
       return c.json({ error: 'Generation failed' }, 500)
@@ -484,14 +471,14 @@ ${transcript}
   // GET /api/prompt-suggestion/:appSessionId — the next-prompt suggestion of
   // the latest turn; waits for it (bounded), since it follows the response.
   app.get('/api/prompt-suggestion/:appSessionId', async (c) => {
-    return c.json({ suggestion: await chatTurns.suggestion(c.req.param('appSessionId')) })
+    return c.json({ suggestion: await chatTurns.suggestion(c.req.param('appSessionId')) } satisfies PromptSuggestionResponse)
   })
 
   app.get('/api/session/:appSessionId', (c) => {
     const id = c.req.param('appSessionId')
     const session = agentSessionMap.get(id)
     const claudeSessionId = session?.providerId === 'claude-code' ? session.id : null
-    return c.json({ claudeSessionId, agentSession: session || null })
+    return c.json({ claudeSessionId, agentSession: session || null } satisfies SessionInfoResponse)
   })
 
   // DELETE /api/session/:appSessionId — clear Claude CLI session mapping (on new chat / tab close)
@@ -509,7 +496,7 @@ ${transcript}
   app.get('/api/rate-limits', (c) => {
     const provider = c.req.query('provider')
     const snapshot = isAgentId(provider) && AGENTS[provider].capabilities.rateLimits ? rateLimitSnapshots.get(provider) : undefined
-    return c.json({ rateLimits: snapshot ?? null })
+    return c.json({ rateLimits: snapshot ?? null } satisfies RateLimitsResponse)
   })
 
   // Find port in 3300-3400 range (distinct from tool ports 3100-3200)

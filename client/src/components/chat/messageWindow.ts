@@ -1,4 +1,4 @@
-// Windowed rendering of a conversation (MessageList in ChatPanel.tsx).
+// Windowed rendering of a conversation (MessageList in ChatMessageList.tsx).
 //
 // Opening a long conversation used to render every message at once: markdown
 // costs ~10 ms per 2 KB reply and ~230 ms per 60 KB one, so the largest real
