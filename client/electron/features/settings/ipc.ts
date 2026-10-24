@@ -1,10 +1,12 @@
 // Settings: the API key, which AI the member signs in with (and whether its
-// CLI is there), the chat's permission mode, the server URL.
+// CLI is there), the chat's permission mode, the server URL, and which extra
+// environment variable names AI processes may see.
 //   config:*, codex:status
 
 import type { CodexStatus } from '../../../shared/agent'
 import { isAgentId } from '../../../shared/agents/registry'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../../../shared/permission-mode'
+import { normalizePassthroughNames, refusedPassthroughNames } from '../../agents/agent-env'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
@@ -74,6 +76,22 @@ export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void
     current.serverUrl = url
     config.save(current)
     return true
+  })
+
+  // Extra variable names the member lets AI processes see (agents/agent-env.ts).
+  // Secret-looking names are refused, never stored; names only, never values.
+  ipc.handle('config:getAgentEnvPassthrough', () => {
+    const stored = config.load().agentEnvPassthrough
+    return normalizePassthroughNames(Array.isArray(stored) ? stored : [])
+  })
+
+  ipc.handle('config:setAgentEnvPassthrough', (_, names: string[]) => {
+    const list = Array.isArray(names) ? names.filter((name): name is string => typeof name === 'string').map(name => name.trim()).filter(Boolean) : []
+    const { invalid, denied } = refusedPassthroughNames(list)
+    const current = config.load()
+    current.agentEnvPassthrough = normalizePassthroughNames(list)
+    config.save(current)
+    return { names: current.agentEnvPassthrough, invalid, denied }
   })
 
   ipc.handle('config:validateServerUrl', async (_, url: string) => {

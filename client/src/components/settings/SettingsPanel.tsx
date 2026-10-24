@@ -1,10 +1,11 @@
 import { VoiceShortcutSettings } from './VoiceShortcutSettings'
 import { VoicePromptSettings } from './VoicePromptSettings'
 import { PromptSuggestionSettings } from './PromptSuggestionSettings'
+import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
 
@@ -22,7 +23,7 @@ interface SettingsPanelProps {
   initialTab?: TabType
 }
 
-export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'voice' | 'suggestions'
+export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -37,6 +38,7 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
     items: [
       { id: 'apikeys', label: 'APIキー', icon: <Key size={16} /> },
       { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
+      { id: 'aienv', label: 'AIに渡す環境変数', icon: <ShieldCheck size={16} /> },
     ],
   },
   {
@@ -343,6 +345,11 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                 <SectionHeader title="音声入力" description="相談画面で使う音声入力の設定です。" />
                 <Card className="p-5"><VoiceShortcutSettings /></Card>
                 <Card className="p-5"><VoicePromptSettings /></Card>
+              </div>
+            ) : activeTab === 'aienv' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
+                <Card className="p-5"><AgentEnvSettings /></Card>
               </div>
             ) : activeTab === 'suggestions' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">

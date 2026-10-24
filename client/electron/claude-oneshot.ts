@@ -1,4 +1,5 @@
 import { spawnVoiceProcess } from './voice-process'
+import { agentEnv } from './agents/agent-env'
 
 /**
  * One isolated, non-persistent `claude -p` call: the caller's model (Haiku), no tools, no MCP, no
@@ -38,8 +39,8 @@ export function runClaudeOneShot(request: ClaudeOneShotRequest): Promise<string>
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(new Error(messages.cancelled)); return }
     const child = spawnVoiceProcess(cli, ['-p', '--model', model, ...CLAUDE_ONESHOT_FLAGS, '--system-prompt', systemPrompt], {
-      cwd, env: { ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' },
-    })
+      cwd, env: agentEnv({ ...env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }),
+    }, { inheritEnv: false })
     let output = ''
     let settled = false
     let timeout: ReturnType<typeof setTimeout> | undefined

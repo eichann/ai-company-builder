@@ -48,6 +48,18 @@ test('settings: defaults, validation, persisted in userData/config.json', async 
   await h.invoke('config:setPermissionMode', 'auto')
 })
 
+test('settings: extra environment names for AI processes — empty by default, secrets and patterns refused', async () => {
+  const configFile = path.join(h.userData, 'config.json')
+  assert.deepEqual(await h.invoke('config:getAgentEnvPassthrough'), [])
+  assert.deepEqual(await h.invoke('config:setAgentEnvPassthrough', [' JAVA_HOME ', 'java_home', 'GITHUB_TOKEN', 'AWS_PROFILE', 'MY_*', 'PYTHONPATH']), {
+    names: ['JAVA_HOME', 'PYTHONPATH'], invalid: ['MY_*'], denied: ['GITHUB_TOKEN', 'AWS_PROFILE'],
+  })
+  assert.deepEqual(await h.invoke('config:getAgentEnvPassthrough'), ['JAVA_HOME', 'PYTHONPATH'])
+  assert.deepEqual(JSON.parse(fs.readFileSync(configFile, 'utf-8')).agentEnvPassthrough, ['JAVA_HOME', 'PYTHONPATH'])
+  await h.invoke('config:setAgentEnvPassthrough', [])
+  assert.deepEqual(await h.invoke('config:getAgentEnvPassthrough'), [])
+})
+
 test('config:validateServerUrl: only an ACB server is valid', async () => {
   h.server.on('GET', '/api/config', { json: { success: true, data: { name: 'AI Company Builder', version: '1.2.3' } } })
   assert.deepEqual(await h.invoke('config:validateServerUrl', `${SERVER_URL}//`), { valid: true, serverName: 'AI Company Builder', version: '1.2.3' })
