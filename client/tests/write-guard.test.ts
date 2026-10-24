@@ -209,6 +209,28 @@ test('cloning a repository into the company folder outside .workspace/ is refuse
   assert.equal(defaultCloneDir('host:path/to/z.git'), 'z')
 })
 
+test('a new git init inside the company folder outside .workspace/ is refused (sync would not share it)', () => {
+  const g = guard(undefined)
+  const deny = (command: string, cwd = ROOT) => decideToolWrite(g, 'Bash', { command }, cwd)
+  const d = deny('git init 営業部/ツール')
+  assert.equal(d.deny, true)
+  if (d.deny) {
+    assert.equal(d.path, '営業部/ツール')
+    assert.equal(d.message, '新しいGitリポジトリは、会社フォルダ直下の「.workspace/」の中に作ってください（.workspace/ は共有されません）。会社フォルダの他の場所に作ると、同期のたびにメンバーに確認が表示され、中身は共有されません。例: git init .workspace/ツール')
+  }
+  assert.equal(deny('git init', `${ROOT}/営業部`).deny, true)
+  assert.equal(deny('mkdir -p 営業部/x && cd 営業部/x && git init -b main').deny, true)
+  assert.equal(deny('git -C 営業部 init .').deny, true)
+  assert.equal(deny('git init .workspace').deny, true) // .workspace itself would become the repository
+  // Allowed: the company folder itself, under .workspace/, outside the company, unknown targets, other subcommands.
+  assert.equal(deny('git init').deny, false)
+  assert.equal(deny('git init .workspace/tool').deny, false)
+  assert.equal(deny('git init', `${ROOT}/.workspace/tool`).deny, false)
+  assert.equal(deny('git init /tmp/x').deny, false)
+  assert.equal(deny('git init "$DIR"').deny, false)
+  assert.equal(deny('git submodule init', `${ROOT}/営業部`).deny, false)
+})
+
 test('the chat instructions tell the AI where external repositories go', () => {
   assert.match(externalRepositoryInstruction('/Users/me/会社/'), /「\/Users\/me\/会社\/\.workspace\/」の中に置いてください/)
   assert.match(externalRepositoryInstruction(), /会社フォルダ直下の「\.workspace\/」/)

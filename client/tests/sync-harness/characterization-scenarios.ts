@@ -67,7 +67,7 @@ export const CHARACTERIZATIONS: Record<string, Characterization> = {
     options: { members: [{ name: 'a' }, { name: 'b' }], seed: { 's1/x.md': '1\n', 's2/x.md': '2\n' } },
     run: async (w, rec) => {
       const [a, b] = w.members
-      a.initNestedRepo('s1')
+      a.initNestedRepo('s1').willAnswer('sharedNestedRepo', 'keep-sharing')
       await rec.sync(a)
       a.initNestedRepo('s2').willAnswer('sharedNestedRepo', 'exclude')
       await rec.sync(a)

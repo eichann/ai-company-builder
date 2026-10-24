@@ -64,8 +64,8 @@ server's `[RESERVED_PATH]` and sync's recovery are the safety net.
   shared `.gitignore` negation (`!評価/`, `!*`) outranks `info/exclude`, once staged the clone as
   a gitlink and blocked the reader's sync for good. Exclusion pathspecs cannot be used (git
   refuses an `add` naming an ignored path). `assertPrivacy` checks this in every harness world.
-- Large-file scan and nested-repository detection skip readable private paths (they would write
-  the name into the shared `.gitignore`); a nested repository at a reserved name moves whole to
+- Large-file scan and nested-repository detection skip readable private paths (the scan would
+  name a file in the shared `.gitignore`, detection would ask about the clone); a nested repository at a reserved name moves whole to
   `.backups/<ts>_reserved_path/`. A large file inside a private folder is ignored in that scope
   repository's own `.gitignore`.
 - `[RESERVED_PATH]` is resolved without a dialog and the files leave their place: before staging
@@ -108,6 +108,7 @@ server's `[RESERVED_PATH]` and sync's recovery are the safety net.
 - `shared/package.json` is `"type": "module"` so tsx (harness) sees named exports of the shared
   contract the client imports directly.
 - Private paths may appear in the member's local console log only; it is not sent anywhere.
-- Deferred: exclusions / partial clone inside a private folder; moving a private folder;
-  nested-repository exclusions in `.git/info/exclude` instead of the shared `.gitignore` (owner
-  decision pending: it changes behaviour for every member and the characterization transcript).
+- Deferred: exclusions / partial clone inside a private folder; moving a private folder.
+- Nested-repository exclusions live in `.git/info/exclude` since 2026-10-24 (`sync-guards.md`),
+  in their own managed block next to this one; neither writer touches the other's block. Inside
+  a private folder's clone they go into the clone's own `.git/info/exclude`.

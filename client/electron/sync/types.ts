@@ -10,14 +10,14 @@ import type { PathCheckResult } from './path-check'
 export interface SyncDialog {
   /**
    * False when there is no window to ask in. Sync then takes its no-UI path:
-   * nested repos are excluded silently, deletions sync without a warning,
+   * nested repos are excluded on this computer silently, deletions sync without a warning,
    * and a protected-config or write-denied rejection is reported
    * without recovery.
    */
   canAsk(): boolean
-  /** A folder that is already shared contains its own .git. */
+  /** A folder that is already shared contains its own .git. 'exclude' (default): this computer only; 'keep-sharing': remove the inner .git and share the files. */
   confirmSharedNestedRepo(repo: string): Promise<'keep-sharing' | 'exclude' | 'cancel'>
-  /** A folder that is not shared yet is its own Git repository. */
+  /** A folder that is not shared yet is its own Git repository. 'exclude' (default): this computer only. */
   confirmExternalNestedRepo(repo: string): Promise<'exclude' | 'cancel'>
   /** Tracked files were deleted locally. */
   confirmDeletedFiles(files: string[]): Promise<'sync-deletions' | 'restore' | 'cancel'>

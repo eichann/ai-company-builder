@@ -303,14 +303,16 @@ export function cloneMessage(name: string): string {
   return `外部のGitリポジトリは、会社フォルダ直下の「.workspace/」の中に置いてください（.workspace/ は共有されません）。会社フォルダの他の場所に置くと、会社の全員に共有されたり、同期が止まったりします。例: git clone <URL> .workspace/${name}`
 }
 
+type ShellWord = { word: string; literal: boolean }
+
 /**
- * Where each `git clone` / `gh repo clone` in a shell command would put the
- * repository: the target as written plus the directory it is relative to
- * (`cwd`, a literal `cd` before it, `git -C`). Clones whose target cannot be
- * worked out (expansions, `cd $X`) are left out.
+ * Each `git <sub>` (and `gh repo clone`, as sub 'clone') in a shell command:
+ * the words after the subcommand and the directory it runs in (`cwd`, a
+ * literal `cd` before it, `git -C`). Invocations whose directory cannot be
+ * worked out (`cd $X`) are left out.
  */
-export function gitCloneTargets(command: string, cwd?: string): Array<{ target: string; cwd?: string; name: string }> {
-  const found: Array<{ target: string; cwd?: string; name: string }> = []
+function gitInvocations(command: string, cwd?: string): Array<{ sub: string; rest: ShellWord[]; here?: string }> {
+  const found: Array<{ sub: string; rest: ShellWord[]; here?: string }> = []
   let dir = cwd
   let dirKnown = true
   const join = (base: string | undefined, p: string) => (p.startsWith('/') || !base ? p : `${base}/${p}`)
@@ -324,7 +326,6 @@ export function gitCloneTargets(command: string, cwd?: string): Array<{ target: 
       else dirKnown = false
       continue
     }
-    let rest: typeof words
     let here = dir
     let hereKnown = dirKnown
     if (/(^|\/)git$/.test(head)) {
@@ -337,23 +338,42 @@ export function gitCloneTargets(command: string, cwd?: string): Array<{ target: 
           else hereKnown = false
         } else if (w === '-c' || w === '--git-dir' || w === '--work-tree' || w === '--namespace') i++
       }
-      if (words[i]?.word !== 'clone') continue
-      rest = words.slice(i + 1)
+      if (!words[i] || !hereKnown) continue
+      found.push({ sub: words[i].word, rest: words.slice(i + 1), here })
     } else if (/(^|\/)gh$/.test(head) && words[1]?.word === 'repo' && words[2]?.word === 'clone') {
       const dash = words.findIndex(w => w.word === '--')
-      rest = words.slice(3, dash >= 0 ? dash : undefined)
-    } else continue
-    if (!hereKnown) continue
-    const positional: typeof words = []
-    for (let k = 0; k < rest.length; k++) {
-      const w = rest[k].word
-      if (w === '--') { positional.push(...rest.slice(k + 1)); break }
-      if (w.startsWith('-')) {
-        if (CLONE_VALUE_OPTIONS.has(w)) k++
-        continue
-      }
-      positional.push(rest[k])
+      if (hereKnown) found.push({ sub: 'clone', rest: words.slice(3, dash >= 0 ? dash : undefined), here })
     }
+  }
+  return found
+}
+
+/** Positional words of a subcommand, skipping options (and the values of `valueOptions`). */
+function positionalWords(rest: ShellWord[], valueOptions: Set<string>): ShellWord[] {
+  const positional: ShellWord[] = []
+  for (let k = 0; k < rest.length; k++) {
+    const w = rest[k].word
+    if (w === '--') { positional.push(...rest.slice(k + 1)); break }
+    if (w.startsWith('-')) {
+      if (valueOptions.has(w)) k++
+      continue
+    }
+    positional.push(rest[k])
+  }
+  return positional
+}
+
+/**
+ * Where each `git clone` / `gh repo clone` in a shell command would put the
+ * repository: the target as written plus the directory it is relative to
+ * (`cwd`, a literal `cd` before it, `git -C`). Clones whose target cannot be
+ * worked out (expansions, `cd $X`) are left out.
+ */
+export function gitCloneTargets(command: string, cwd?: string): Array<{ target: string; cwd?: string; name: string }> {
+  const found: Array<{ target: string; cwd?: string; name: string }> = []
+  for (const { sub, rest, here } of gitInvocations(command, cwd)) {
+    if (sub !== 'clone') continue
+    const positional = positionalWords(rest, CLONE_VALUE_OPTIONS)
     const repo = positional[0]
     if (!repo) continue
     const target = positional[1]
@@ -364,15 +384,60 @@ export function gitCloneTargets(command: string, cwd?: string): Array<{ target: 
   return found
 }
 
-/** Refuse a clone into the company folder outside `.workspace/`. */
+/** Options of `git init` that take a separate value. */
+const INIT_VALUE_OPTIONS = new Set(['-b', '--initial-branch', '--template', '--separate-git-dir', '--object-format', '--ref-format'])
+
+export function initMessage(name: string): string {
+  return `新しいGitリポジトリは、会社フォルダ直下の「.workspace/」の中に作ってください（.workspace/ は共有されません）。会社フォルダの他の場所に作ると、同期のたびにメンバーに確認が表示され、中身は共有されません。例: git init .workspace/${name}`
+}
+
+/**
+ * Where each `git init` in a shell command would create a repository: its
+ * directory argument (default `.`) and the directory it is relative to.
+ * Targets that cannot be worked out (expansions, `cd $X`) are left out.
+ */
+export function gitInitTargets(command: string, cwd?: string): Array<{ target: string; cwd?: string; name: string }> {
+  const found: Array<{ target: string; cwd?: string; name: string }> = []
+  for (const { sub, rest, here } of gitInvocations(command, cwd)) {
+    if (sub !== 'init') continue
+    const target = positionalWords(rest, INIT_VALUE_OPTIONS)[0]
+    if (target && !target.literal) continue
+    const word = target ? target.word : '.'
+    const lastPart = (p?: string) => p?.replace(/[\\/]+$/, '').split(/[\\/]/).filter(x => x && x !== '.' && x !== '..').pop()
+    const name = lastPart(word) ?? lastPart(here) ?? 'repo'
+    found.push({ target: word, cwd: here, name })
+  }
+  return found
+}
+
+/** Is a repository at this company-relative path inside `.workspace/` (not `.workspace` itself)? */
+function inWorkspace(rel: string): boolean {
+  const segments = rel.normalize('NFC').split('/')
+  return segments[0] === '.workspace' && segments.length > 1
+}
+
+/**
+ * Refuse a clone, or a new `git init`, into the company folder outside
+ * `.workspace/`. Sync would not share such a repository (it asks the member
+ * and keeps it on that computer), so the AI is sent to `.workspace/` first.
+ * `git init` of the company folder itself (re-initialising it) is left alone.
+ */
 export function checkGitClone(root: string, command: string, cwd?: string): GuardDecision {
-  if (!/\bclone\b/.test(command)) return { deny: false }
-  for (const clone of gitCloneTargets(command, cwd)) {
-    const rel = repoRelativePath(root, clone.target, clone.cwd ?? root)
-    if (rel === null) continue // outside the company: not shared
-    const segments = rel.normalize('NFC').split('/')
-    if (segments[0] === '.workspace' && segments.length > 1) continue
-    return { deny: true, path: rel, folder: segments.slice(0, -1).join('/'), message: cloneMessage(clone.name) }
+  if (/\bclone\b/.test(command)) {
+    for (const clone of gitCloneTargets(command, cwd)) {
+      const rel = repoRelativePath(root, clone.target, clone.cwd ?? root)
+      if (rel === null) continue // outside the company: not shared
+      if (inWorkspace(rel)) continue
+      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: cloneMessage(clone.name) }
+    }
+  }
+  if (/\binit\b/.test(command)) {
+    for (const init of gitInitTargets(command, cwd)) {
+      const rel = repoRelativePath(root, init.target, init.cwd ?? root)
+      if (rel === null || rel === '') continue // outside the company, or the company folder itself
+      if (inWorkspace(rel)) continue
+      return { deny: true, path: rel, folder: rel.normalize('NFC').split('/').slice(0, -1).join('/'), message: initMessage(init.name) }
+    }
   }
   return { deny: false }
 }

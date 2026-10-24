@@ -55,8 +55,10 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 2    retry a PENDING_PUSH left by a failed sync
 3    ensure .gitignore essentials: .backups/, .workspace/, node_modules/, .env*,
      **/.personal/* + !**/.personal/.gitignore
-4    files >100 MB → a literal line in .gitignore (large-files.ts; details below)
-5    nested git repositories → ask the member BEFORE changing anything
+5    nested git repositories → ask the member BEFORE changing anything; "don't share" (default)
+     → this computer's .git/info/exclude, never the shared .gitignore (nested-repos.ts)
+4    files >100 MB → a literal line in .gitignore (large-files.ts; details below). Runs after 5,
+     so a repository kept local is already ignored and never named
 6    git fetch --progress origin
 6.5  hold back files created in not-downloaded folders → .backups/<ts>_outside_checkout/
 6.3  company repo: stop (nothing changed) if origin/main turned a readable private folder or an
@@ -66,6 +68,9 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 8    warn about files deleted locally (sync / restore / cancel)
 9    git add --sparse . → unstage anything under .backups/, .workspace/ or a private folder
      (index only) → commit (AI message, below) → record localHash
+9.5  files at paths of a locally excluded nested repo that origin/main now has (a teammate's
+     same-path folder) and that differ → copied to .backups/<ts>_nested_repo/ (the pull would
+     overwrite them: they are ignored); a failed check stops before the pull
 10   git pull --rebase --progress origin main  (stopped mid-rebase → 11)
 11   conflict loop until the rebase finishes:
        a back up the local version of newly conflicted files
@@ -98,8 +103,8 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
 - Stage the server version with `git add -f`, and pass `--sparse` to every index update on a
   path sync did not just check out (conflict `add -f` / `rm`, nested-repo and `.personal`
   untracking, the protected-config restore). Both were found by the harness: without them the
-  same pick failed on every sync. After the rebase, excluded nested repos are untracked again
-  (one extra commit) so the exclusion holds within the same sync.
+  same pick failed on every sync. After the rebase, gitlinks of excluded nested repos are
+  untracked again (one extra commit; a backstop, the server refuses gitlinks anyway).
 - Back up with `git cat-file -p <localHash>:<file>` into a Buffer (`binaryCatFile`), never
   `git show` (a string corrupts pptx/png). Fallbacks: `:3:<file>` when the file is gone at
   `localHash`; an *earlier* local version that a pick replaces goes to
@@ -148,7 +153,9 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
 - `.backups/` (gitignored, local only): `<ts>/` conflict copies + `_metadata.json`
   (`conflictFiles`, `deletedConflictFiles`); `<ts>_protected/`, `_write_denied/`,
   `_outside_checkout/` (`folders`, `files`, `serverFiles`), `_reserved_path/` (+ `reasons`),
-  `_editor_overwrite/` (disk version an editor tab overwrote).
+  `_editor_overwrite/` (disk version an editor tab overwrote), `_nested_repo/` (reason
+  `nested_repo_overwrite`, `repos`, `files`: this computer's version of files in a locally
+  excluded nested repo that a teammate shared at the same path).
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
   `_write_denied`, `_editor_overwrite`, `_made_public`, `_private_folder_existing`,
   `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.

@@ -37,7 +37,16 @@ import {
 } from '../protected-config'
 import { classifyConflicts } from './conflicts'
 import { pushLandedDespiteError } from './push-landed'
-import { findNestedGitRepos } from './nested-repos'
+import {
+  backUpBeforeServerOverwrite,
+  findNestedGitRepos,
+  gitlinksUnder,
+  legacySharedExclusions,
+  nestedRepoOverwriteMessage,
+  readNestedRepoExcludes,
+  writeNestedRepoExcludes,
+  type NestedRepoOverwriteResult,
+} from './nested-repos'
 import { findLargeFiles, largeFilePattern } from './large-files'
 import { ensureGitignoreUnionMerge, tidyMergedGitignores } from './gitignore-merge'
 import { ensurePromisorConfig, setRemoteUrl } from './remote'
@@ -90,6 +99,8 @@ interface SyncSideEffects {
   outsideCheckout: OutsideCheckoutResult | null
   /** Files in a reserved (private) folder name, moved to .backups/ before staging or after a [RESERVED_PATH] rejection. */
   reserved: ReservedHoldBack | null
+  /** This computer's versions of files in excluded nested repositories, backed up before a teammate's same-path files replaced them. */
+  nestedRepoOverwrite?: NestedRepoOverwriteResult | null
 }
 
 /**
@@ -325,12 +336,108 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       gitignoreContent = seed
     }
 
+    // Detect nested Git repositories (e.g. user ran `git init` in a subfolder,
+    // or copied in a cloned repo). Left alone, `git add` would record them as
+    // gitlinks (160000 mode) and other members pulling would see empty folders.
+    // Newly found repos require the user's choice BEFORE anything is modified:
+    // the pre-consent `rm --cached` of the 2026-07-29 incident untracked a
+    // whole shared folder (653 files) and surfaced as a terrifying "653 files
+    // deleted" warning even though nothing was gone from disk.
+    // "Don't share" (the default) is this member's own choice: it goes into
+    // .git/info/exclude (./nested-repos.ts), never the shared .gitignore, and
+    // untracks only gitlinks — teammates' files at the same path keep syncing.
+    const newlyExcludedNestedRepos: string[] = []
+    // Every nested repo the member has chosen to exclude (now or earlier).
+    const excludedNestedRepoPaths: string[] = []
+    // Gitlinks this sync untracked (their staged deletions are not the member's).
+    const untrackedGitlinks: string[] = []
+    // Folders excluded on this computer only (block of .git/info/exclude), still on disk.
+    let localExcluded: string[] = []
+    try {
+      // Private folders' clones are legitimate nested repositories (their
+      // origin was checked when they were placed), and a nested repository
+      // at a reserved folder name is moved to .backups/ below — neither is
+      // offered for exclusion.
+      const nestedRepos: string[] = []
+      for (const repo of await findNestedGitRepos(repoPath)) {
+        if (isUnderAny(privatePaths, repo)) continue
+        if (opts.checkUsable && [...(await opts.checkUsable(pathPrefixes(repo))).values()].includes(false)) continue
+        nestedRepos.push(repo)
+      }
+      // Local exclusions of folders that are gone (the member deleted the
+      // clone) are dropped; a folder whose .git was removed stays excluded
+      // until the member deletes it — nothing starts being shared on its own.
+      localExcluded = readNestedRepoExcludes(repoPath)
+        .filter(repo => { try { return fs.lstatSync(path.join(repoPath, repo)).isDirectory() } catch { return false } })
+      if (nestedRepos.length > 0) {
+        const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
+        // `/<path>/` lines older apps wrote into the shared .gitignore: kept
+        // (removing one would share the folder for everyone) and honoured.
+        const legacy = legacySharedExclusions(currentGitignore)
+        const alreadyExcluded = (repo: string) => legacy.has(repo.normalize('NFC')) || localExcluded.includes(repo.normalize('NFC'))
+        const newRepos = nestedRepos.filter(repo => !alreadyExcluded(repo))
+        const canAsk = deps.dialog.canAsk()
+
+        for (const repo of newRepos) {
+          if (!canAsk) {
+            // No window to ask: keep it on this computer only (the default).
+            newlyExcludedNestedRepos.push(repo)
+            continue
+          }
+
+          // A folder that is already shared (tracked files in HEAD) most
+          // likely picked up a stray .git from a copied clone.
+          const isShared = (await git.raw(['ls-files', '--', repo])).trim().length > 0
+
+          if (isShared) {
+            const choice = await deps.dialog.confirmSharedNestedRepo(repo)
+            if (choice === 'cancel') {
+              return { success: false, error: `同期を中止しました（「${repo}」に別のGitリポジトリが含まれています）` }
+            }
+            if (choice === 'keep-sharing') {
+              fs.rmSync(path.join(repoPath, repo, '.git'), { recursive: true, force: true })
+              log.log(`Git sync: Removed inner .git of "${repo}" (user chose to share its files)`)
+              continue // stays shared — no exclusion
+            }
+            // 'exclude' → excluded on this computer below
+          } else {
+            const choice = await deps.dialog.confirmExternalNestedRepo(repo)
+            if (choice === 'cancel') {
+              return { success: false, error: `同期を中止しました（「${repo}」は外部Gitリポジトリです）` }
+            }
+          }
+          newlyExcludedNestedRepos.push(repo)
+        }
+
+        // Mutations happen only after the user has chosen. Unstage gitlinks
+        // of excluded repos (previously excluded ones too); ordinary files
+        // there stay tracked.
+        const excludedRepos = nestedRepos.filter(repo => newlyExcludedNestedRepos.includes(repo) || alreadyExcluded(repo))
+        excludedNestedRepoPaths.push(...excludedRepos)
+        for (const repo of excludedRepos) {
+          const gitlinks = await gitlinksUnder(git, repo)
+          if (gitlinks.length === 0) continue
+          await git.raw(['rm', '--cached', '-q', '--sparse', '--', ...gitlinks])
+          untrackedGitlinks.push(...gitlinks)
+          log.log(`Git sync: Removed gitlink for nested repo "${repo}"`)
+        }
+      }
+      if (writeNestedRepoExcludes(repoPath, [...localExcluded, ...newlyExcludedNestedRepos]) && newlyExcludedNestedRepos.length > 0) {
+        log.log(`Git sync: Excluded ${newlyExcludedNestedRepos.length} nested repo(s) on this computer (.git/info/exclude):`, newlyExcludedNestedRepos)
+      }
+    } catch (nestedRepoError) {
+      log.warn('Git sync: Nested repo detection failed:', nestedRepoError)
+    }
+
     // Detect large files (>100MB) and add to .gitignore: only the files git
     // lists (index entries + untracked files no rule ignores) are stat'ed,
     // never the whole folder, and "already ignored" is git's answer, not a
     // substring of the file. A private folder's clone is its own repository:
     // a large file there must not be named in the company's shared
-    // .gitignore. See ./large-files.ts.
+    // .gitignore. See ./large-files.ts. Runs after the nested-repository
+    // step: a repository kept on this computer is ignored by then (so a large
+    // file in it is never named in the shared .gitignore), and one whose .git
+    // the member removed is scanned as the plain files it now is.
     let ignoredLargeFiles: string[] = []
     try {
       ignoredLargeFiles = await findLargeFiles(git, repoPath, {
@@ -347,94 +454,6 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
         ignoredLargeFiles.map(largeFilePattern).join('\n') + '\n'
       await fs.promises.appendFile(gitignorePath, largeFilesSection)
       log.log(`Git sync: Ignored ${ignoredLargeFiles.length} large file(s):`, ignoredLargeFiles)
-    }
-
-    // Detect nested Git repositories (e.g. user ran `git init` in a subfolder,
-    // or copied in a cloned repo). Left alone, `git add` would record them as
-    // gitlinks (160000 mode) and other members pulling would see empty folders.
-    // Newly found repos require the user's choice BEFORE anything is modified:
-    // the pre-consent `rm --cached` of the 2026-07-29 incident untracked a
-    // whole shared folder (653 files) and surfaced as a terrifying "653 files
-    // deleted" warning even though nothing was gone from disk.
-    const newlyExcludedNestedRepos: string[] = []
-    // Every nested repo the member has chosen to exclude (now or earlier).
-    const excludedNestedRepoPaths: string[] = []
-    try {
-      // Private folders' clones are legitimate nested repositories (their
-      // origin was checked when they were placed), and a nested repository
-      // at a reserved folder name is moved to .backups/ below — neither is
-      // offered for exclusion (that would write the name into the shared
-      // .gitignore).
-      const nestedRepos: string[] = []
-      for (const repo of await findNestedGitRepos(repoPath)) {
-        if (isUnderAny(privatePaths, repo)) continue
-        if (opts.checkUsable && [...(await opts.checkUsable(pathPrefixes(repo))).values()].includes(false)) continue
-        nestedRepos.push(repo)
-      }
-      if (nestedRepos.length > 0) {
-        const currentGitignore = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
-        const existingPatterns = new Set(currentGitignore.split('\n').map(l => l.trim()))
-        const newRepos = nestedRepos.filter(repo => !existingPatterns.has(`/${repo}/`))
-        const canAsk = deps.dialog.canAsk()
-
-        for (const repo of newRepos) {
-          if (!canAsk) {
-            // No window to ask — legacy behavior (exclude silently)
-            newlyExcludedNestedRepos.push(repo)
-            continue
-          }
-
-          // A folder that is already shared (tracked files in HEAD) most
-          // likely picked up a stray .git from a copied clone. Excluding it
-          // would delete it from every member's machine — the right fix is
-          // usually to drop the inner .git and keep sharing.
-          const isShared = (await git.raw(['ls-files', '--', repo])).trim().length > 0
-
-          if (isShared) {
-            const choice = await deps.dialog.confirmSharedNestedRepo(repo)
-            if (choice === 'cancel') {
-              return { success: false, error: `同期を中止しました（「${repo}」に別のGitリポジトリが含まれています）` }
-            }
-            if (choice === 'keep-sharing') {
-              fs.rmSync(path.join(repoPath, repo, '.git'), { recursive: true, force: true })
-              log.log(`Git sync: Removed inner .git of "${repo}" (user chose to keep sharing)`)
-              continue // stays shared — no exclusion
-            }
-            // 'exclude' → exclude below
-          } else {
-            const choice = await deps.dialog.confirmExternalNestedRepo(repo)
-            if (choice === 'cancel') {
-              return { success: false, error: `同期を中止しました（「${repo}」は外部Gitリポジトリです）` }
-            }
-          }
-          newlyExcludedNestedRepos.push(repo)
-        }
-
-        // Mutations happen only after the user has chosen. Unstage gitlinks
-        // for excluded repos (previously consented ones too — `rm --cached`
-        // errors silently when the path isn't tracked).
-        const excludedRepos = nestedRepos.filter(
-          repo => newlyExcludedNestedRepos.includes(repo) || existingPatterns.has(`/${repo}/`)
-        )
-        excludedNestedRepoPaths.push(...excludedRepos)
-        for (const repo of excludedRepos) {
-          try {
-            await git.raw(['rm', '--cached', '-rf', '--sparse', repo])
-            log.log(`Git sync: Removed gitlink for nested repo "${repo}"`)
-          } catch {
-            // Not tracked yet — fine.
-          }
-        }
-
-        if (newlyExcludedNestedRepos.length > 0) {
-          const trailingNewline = currentGitignore.endsWith('\n') || currentGitignore === '' ? '' : '\n'
-          const section = `${trailingNewline}\n# Auto-ignored: nested Git repositories (managed independently)\n${newlyExcludedNestedRepos.map(repo => `/${repo}/`).join('\n')}\n`
-          await fs.promises.appendFile(gitignorePath, section)
-          log.log(`Git sync: Added ${newlyExcludedNestedRepos.length} nested repo(s) to .gitignore:`, newlyExcludedNestedRepos)
-        }
-      }
-    } catch (nestedRepoError) {
-      log.warn('Git sync: Nested repo detection failed:', nestedRepoError)
     }
 
     // 1. Fetch from origin
@@ -554,13 +573,11 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
 
     const restoredFolders: string[] = []
 
-    // 2. Check for deleted files before staging. Deletions staged by the
-    //    consented nested-repo exclusion above are intentional — keep them
-    //    out of the warning dialog (and never "restore" them).
+    // 2. Check for deleted files before staging. Gitlinks untracked by the
+    //    nested-repo exclusion above are intentional — keep them out of the
+    //    warning dialog (and never "restore" them).
     const preAddStatus = await git.status()
-    const deletedFiles = preAddStatus.deleted.filter(
-      f => !newlyExcludedNestedRepos.some(repo => f === repo || f.startsWith(`${repo}/`))
-    )
+    const deletedFiles = preAddStatus.deleted.filter(f => !untrackedGitlinks.includes(f))
 
     // If files were deleted locally, warn the user before syncing
     if (deletedFiles.length > 0 && deps.dialog.canAsk()) {
@@ -598,6 +615,27 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     // Record local commit hash before rebase attempt
     const localHash = (await git.revparse(['HEAD'])).trim()
     log.log(`Git sync: Local commit hash: ${localHash}`)
+
+    // 3.9. A folder excluded on this computer only may be shared by a
+    //      teammate at the same path: the pull would silently overwrite this
+    //      computer's (ignored) files there. Back them up first; stop if that
+    //      cannot be checked (the commit stays local, nothing else changed).
+    const overwriteGuarded = [...new Set([...excludedNestedRepoPaths, ...localExcluded, ...newlyExcludedNestedRepos])]
+    if (overwriteGuarded.length > 0) {
+      try {
+        effects.nestedRepoOverwrite = await backUpBeforeServerOverwrite({
+          git, repoPath, repos: overwriteGuarded, backupPath: `${backupPath}_nested_repo`,
+          backupPrefix: opts.backupPrefix, now: deps.now(), log,
+        })
+      } catch (backupError) {
+        log.error('Git sync: Could not back up files of excluded nested repositories:', backupError)
+        const msg = backupError instanceof Error ? backupError.message : String(backupError)
+        return {
+          success: false,
+          error: `共有していないフォルダのファイルを確認できなかったため、同期を中止しました。変更はこのPCに保存されています。\n${msg}`,
+        }
+      }
+    }
 
     // 4. Pull with rebase
     let hadConflicts = false
@@ -862,19 +900,15 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
       log.warn('Git sync: Could not tidy merged .gitignore files:', tidyError)
     }
 
-    // 4.45. Taking the server version of a conflicted file can track a
-    //       teammate's file again inside a folder the member excluded (a
-    //       shared folder with a stray .git, answered "exclude"). Untrack it
-    //       again now, as the member already chose — otherwise only the next
-    //       sync does, and the team needs an extra round to converge.
+    // 4.45. Never let a gitlink of an excluded nested repository through
+    //       (the rebase replays only commits made after it was untracked,
+    //       and the server refuses gitlinks, so this is a backstop).
     if (excludedNestedRepoPaths.length > 0 && (await git.revparse(['HEAD'])).trim() !== localHash) {
       try {
         const retracked: string[] = []
-        for (const repo of excludedNestedRepoPaths) {
-          if ((await git.raw(['ls-files', '--', repo])).trim()) retracked.push(repo)
-        }
+        for (const repo of excludedNestedRepoPaths) retracked.push(...await gitlinksUnder(git, repo))
         if (retracked.length > 0) {
-          await git.raw(['rm', '--cached', '-r', '-q', '--sparse', '--', ...retracked])
+          await git.raw(['rm', '--cached', '-q', '--sparse', '--', ...retracked])
           await git.commit(`Stop sharing nested Git repositories: ${retracked.join(', ')}`)
           log.log('Git sync: Untracked excluded nested repos again after merging:', retracked)
         }
@@ -1492,6 +1526,9 @@ export type GitSyncResult = Awaited<ReturnType<typeof runSync>> & {
   /** Files created inside a folder that is not checked out, moved to outsideCheckoutBackupPath instead of being shared. */
   outsideCheckoutFiles?: string[]
   outsideCheckoutBackupPath?: string
+  /** Files of an excluded nested repository a teammate's same-path files replaced; this computer's versions are in nestedRepoBackupPath. */
+  nestedRepoBackupFiles?: string[]
+  nestedRepoBackupPath?: string
   /** Files in a folder named like a private folder ([RESERVED_PATH]), moved to reservedPathBackupPath instead of being shared. */
   reservedPathFiles?: string[]
   reservedPathBackupPath?: string
@@ -1532,6 +1569,11 @@ function withSideEffects(result: RunResult, effects: SyncSideEffects): GitSyncRe
   if (held) {
     notes.push(outsideCheckoutMessage(held))
     Object.assign(fields, { outsideCheckoutFiles: held.files, outsideCheckoutBackupPath: held.backupPath })
+  }
+  const overwritten = effects.nestedRepoOverwrite
+  if (overwritten) {
+    notes.push(nestedRepoOverwriteMessage(overwritten))
+    Object.assign(fields, { nestedRepoBackupFiles: overwritten.files, nestedRepoBackupPath: overwritten.backupPath })
   }
   const reserved = effects.reserved
   if (reserved && reserved.files.length > 0) {

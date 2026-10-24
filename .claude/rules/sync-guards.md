@@ -70,10 +70,29 @@ what git actually sees through the factory.
 
 ## Shared files
 
-- Nested repositories: ask **before** any mutation; cancelling changes nothing. For a folder
-  that is already shared the default is "remove the inner .git and keep sharing" (the
-  pre-consent version untracked a whole folder: a "653 files deleted" warning). Scenarios:
-  "nested repo inside a shared folder → …", "new nested repo … cancel changes nothing".
+- Nested repositories: ask **before** any mutation; cancelling changes nothing (the
+  pre-consent version untracked a whole folder: a "653 files deleted" warning). Owner decision
+  2026-10-24: the default, for a new repository and for a shared folder with a stray `.git`, is
+  "don't share" — **this computer only**, a managed block of `.git/info/exclude` (NFC + NFD,
+  `sync/nested-repos.ts` on `sync/local-excludes.ts`, which the private-folder block shares
+  without either clobbering the other), never the shared `.gitignore`. A line there applied
+  one member's choice to every teammate (a teammate's folder at that path stopped syncing),
+  showed the name to everyone, and the old default for a shared folder (remove the `.git`,
+  share everything) could upload someone's clone, secrets included. Removing the `.git` and
+  sharing stays as a non-default button; the old "exclude for everyone" option is gone; the
+  no-window path also excludes locally. Only gitlinks are untracked: teammates' files at the
+  same path stay shared, and before the pull this computer's differing (ignored) files there
+  are copied to `.backups/<ts>_nested_repo/` — git would overwrite them silently. A local
+  exclusion is dropped when its folder is gone (not when only its `.git` is). Dialogs end
+  with 「会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらってください。」.
+- Legacy: `/<path>/` lines older apps wrote into the shared `.gitignore` (under "# Auto-ignored:
+  nested Git repositories") are **never removed automatically** — that would start sharing
+  those folders for everyone — and still count as "already excluded". An owner can delete such
+  a line by hand once nobody needs it (each member's next sync then asks again and keeps the
+  repository local). Scenarios: "nested repo inside a shared folder → …", "new nested repo …",
+  "a folder one member keeps local still syncs for a teammate…", "a nested-repo line an older
+  app wrote…", "no window…", "deleting the nested repository…"; partial-clone "…stays excluded
+  across settings changes and reopening"; findings "concurrent nested-repo exclusions converge…".
 - `.gitignore` merges with the `union` driver, declared in the repository-local
   `.git/info/attributes` (never committed, outranks `.gitattributes`, any depth;
   `sync/gitignore-merge.ts`). After replayed commits, duplicate lines the merge added are removed

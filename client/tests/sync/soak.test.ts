@@ -212,9 +212,9 @@ async function soak(seed: number, t: { after: (fn: () => void) => void; diagnost
       m.write(`.claude/skills/s${n}/SKILL.md`, rnd.chance(0.5) ? `---\nname: s${n}\nhooks: {}\n---\n` : `---\nname: s${n}\n---\nbody\n`)
       log(`${m.name} (${m.role}) adds skill s${n}`)
     } else if (roll < 83) {
-      // A new nested repo is excluded through .gitignore (merged with the
-      // union driver); a stray .git inside an already shared folder is
-      // removed or the folder excluded, as the member answers.
+      // A new nested repo is kept on the member's computer only
+      // (.git/info/exclude); a stray .git inside an already shared folder is
+      // removed (its files shared) or kept local, as the member answers.
       const shared = [...new Set(tracked(m).filter(f => f.includes('/') && !f.startsWith('.')).map(f => f.split('/')[0]))]
       if (rnd.chance(0.5) || shared.length === 0) {
         m.initNestedRepo(`ext-${n}`)

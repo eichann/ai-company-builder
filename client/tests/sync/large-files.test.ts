@@ -125,13 +125,28 @@ describe('git:sync large files', { concurrency: CONCURRENCY }, () => {
   scenario('a large file in a shared folder that has a stray .git ("keep sharing") is still ignored', async t => {
     const world = World.create(t, { members: [{ name: 'a' }], largeFileThreshold: LIMIT, seed: { 'shared/a.md': 'a\n' } })
     const [a] = world.members
-    a.initNestedRepo('shared', { 'inner.md': 'inner\n' })
+    a.initNestedRepo('shared', { 'inner.md': 'inner\n' }).willAnswer('sharedNestedRepo', 'keep-sharing')
     a.write('shared/big.bin', LARGE)
     const out = ok(await a.sync(), 'a')
     assert.deepEqual(out.result.ignoredLargeFiles, ['shared/big.bin'])
-    assert.equal(a.exists('shared/.git'), false, 'default answer: keep sharing')
+    assert.equal(a.exists('shared/.git'), false, 'answered: remove the .git and share')
     assert.equal(world.serverFile('shared/big.bin'), null)
     assert.equal(world.serverFile('shared/inner.md')?.toString(), 'inner\n')
+    await settleAndCheck(world)
+  })
+
+  scenario('a large file inside a nested repo kept on this computer is never named in the shared .gitignore', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'b' }], largeFileThreshold: LIMIT })
+    const [a, b] = world.members
+    const before = world.serverFile('.gitignore')?.toString()
+    a.initNestedRepo('ext-tool', { 'inner.md': 'inner\n' })
+    a.write('ext-tool/model.bin', LARGE).write('top.bin', LARGE)
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['externalNestedRepo', 'exclude']])
+    assert.deepEqual(out.result.ignoredLargeFiles, ['top.bin'], 'the kept-local repository is already ignored when the scan runs')
+    assert.equal(serverIgnore(world), `${before}\n# Auto-ignored: Large files (>100MB)\n/top.bin\n`)
+    assert.ok(!serverIgnore(world).includes('ext-tool'))
+    ok(await b.sync(), 'b')
     await settleAndCheck(world)
   })
 

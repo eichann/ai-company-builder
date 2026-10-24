@@ -55,6 +55,13 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`) are refused unless the
   member may change them (owner/admin; a manager inside their department), mirroring the push
   checker (`mayChangeInstructionFile`).
+- External repositories go to `.workspace/` (never shared): Bash `git clone` / `gh repo clone`
+  and a new `git init` whose target resolves inside the company folder outside `.workspace/<x>`
+  are refused (`checkGitClone`; re-initialising the company folder itself is allowed), with a
+  `.workspace/<name>` suggestion. The chat's system prompt says so first
+  (`externalRepositoryInstruction`, also in api-key mode). Sync's nested-repository step is the
+  safety net: such a repository is kept on that computer by default (`sync-guards.md`).
+  Tests: `client/tests/write-guard.test.ts`.
 - Private folders (`WriteGuard.getPrivateFolders`): creating something at a name the member may
   not use (`decideReservedWrite`, via sync's cached `paths/check`, the target asked as a file too)
   → 「『<what the AI typed>』というフォルダ名は使えません。別の名前にしてください。」; a write into a

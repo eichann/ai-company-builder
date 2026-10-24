@@ -75,7 +75,7 @@ const SECURITY_POLICY = `
  */
 export function externalRepositoryInstruction(companyRootPath?: string): string {
   const where = companyRootPath ? `「${companyRootPath.replace(/[\\/]+$/, '')}/.workspace/」` : '会社フォルダ直下の「.workspace/」'
-  return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone すると全員に共有されたり同期が止まったりするため、アプリが止めます。`
+  return `【外部のGitリポジトリ】GitHub などの外部のリポジトリを clone するとき、また新しく git init するときは、必ず${where}の中に置いてください（例: git clone <URL> .workspace/<名前>）。.workspace/ は会社の全員には共有されません。会社フォルダの他の場所（部署のフォルダなど）に clone・git init しようとするとアプリが止めます。それ以外の場所にできたリポジトリは同期で共有されず、同期のたびにメンバーへの確認が表示されます。中身を会社として管理したい場合は、管理者に『外部リポジトリ』として登録してもらうようユーザーに伝えてください。`
 }
 
 /**
@@ -206,6 +206,8 @@ export async function startChatServer(config: ChatServerConfig) {
       }
     } else {
       finalSystemPrompt = (systemPrompt || config.buildSystemPrompt(workingDirectory)) + SECURITY_POLICY
+      // Its executeCommand runs the same clone / init guard (chat-tools.ts).
+      if (workingDirectory) finalSystemPrompt += `\n\n${externalRepositoryInstruction(companyRootPath)}`
     }
 
     // A different provider/model starts from visible history, never an older native session.
