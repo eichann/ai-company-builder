@@ -314,13 +314,16 @@ domains); what has moved so far:
   (backup:*), `auth` (auth:*, api:*), `chat-history` (chatHistory:*,
   handoff:*), `agent-interactions` (agent-interaction:*, tool approvals),
   `fs` (fs:*, dialog:selectDirectory, editor:backupBeforeOverwrite; the
-  company watchers in `fs/watchers.ts`).
+  company watchers in `fs/watchers.ts`), `git-history` (git:preview, diffs,
+  revert, summary, log, showCommit, listFiles, grep, getBinaryStatus).
 - `electron/services/` — state shared across features, as explicit objects
   instead of module variables: `config-store.ts` (config.json, cached),
   `shell-env.ts` (PATH / env for spawned processes), `claude-cli.ts` (the
   member's `claude`, status cached 30 s), `session.ts` (the server session
   cookies, memory only — every server client and git's token read them
-  here).
+  here), `app-git.ts` (every git the app runs: bundled-or-system binary,
+  GIT_ASKPASS token, the guarded `sync/git-factory.ts` configuration),
+  `commit-messages.ts` (sync's AI commit message).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports.
 - `main.ts` — the composition root: creates the services and stores, calls
   each `register…Ipc`, owns the window and the app lifecycle. Startup stays

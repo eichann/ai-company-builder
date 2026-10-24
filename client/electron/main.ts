@@ -3,21 +3,17 @@ import { recoveryContext } from './handoff/recovery-context'
 import { AgentInteractions } from './agent-interactions'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
-import { createCommitMessageGenerator } from './commit-message'
 import { app, BrowserWindow, ipcMain, dialog, net as electronNet, protocol, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
 import path from 'path'
 import fs from 'fs'
-import os from 'os'
 import { fileURLToPath, pathToFileURL } from 'url'
-import { exec, execFileSync, spawn, ChildProcess } from 'child_process'
+import { exec, spawn, ChildProcess } from 'child_process'
 import { promisify } from 'util'
 
 const execAsync = promisify(exec)
 import { startChatServer, type ChatServerConfig } from './chat-server'
 import type { SimpleGit } from 'simple-git'
 import { createGitSync } from './sync/git-sync'
-import { configuredGitCommand, createConfiguredGit } from './sync/git-factory'
-import { commitFileDiffArgs, companySearchScope, gitLogArgs, grepCompany, listCompanyFiles, normalizeSearchFolder, parseGitLog, showCommitArgs } from './git-search'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createFetchSyncServerApi } from './sync/server-api'
 import { isDownloadFailure, readSparseConfig, setSparseExclusions, uncommittedChangesIn } from './sync/sparse'
@@ -29,9 +25,7 @@ import { companyPathOf, readPrivateScopesCache, readableScopeOf } from './sync/p
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { checkoutSelectedDepartments } from './sync/first-setup'
 import { configureOrigin } from './sync/remote'
-import { previewChanges, withScratchIndex } from './sync/preview'
 import { decideCompanyFolder, inspectLocalFolder, sameCompanyRemote, watchPackBytes, type CompanyFolderDecision } from './sync/company-folder'
-import { resolveGitBinary, resolveGitDir } from 'dugite'
 import { SkillsCache } from '../shared/skills-refresh'
 import { localFileTarget } from './local-file-protocol'
 import net from 'net'
@@ -41,7 +35,7 @@ import { writeClaudeHandoff } from './handoff/claude'
 import { writeCodexHandoff } from './handoff/codex'
 import { ChatHistoryStore } from './chat-history-store'
 import { normalizePermissionMode } from '../shared/permission-mode'
-import { BUILD_INFO, gitIdentityConfig, installServerFetchIdentity } from './client-identity'
+import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { createPrivateFoldersApi } from './private-folders-api'
 import type { InstructionAuthority } from './write-guard'
@@ -61,6 +55,9 @@ import { registerSettingsIpc } from './features/settings/ipc'
 import { registerEnvIpc } from './features/env/ipc'
 import { registerBackupsIpc } from './features/backups/ipc'
 import { registerFsIpc } from './features/fs/ipc'
+import { registerGitHistoryIpc } from './features/git-history/ipc'
+import { createAppGit } from './services/app-git'
+import { createCommitMessages } from './services/commit-messages'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -285,337 +282,21 @@ registerAuthIpc(ipc, {
   },
 })
 
-// ============================================================================
-// Git HTTPS authentication via GIT_ASKPASS
-// ============================================================================
-
-/** Path to the GIT_ASKPASS helper script */
-let gitAskPassPath: string | null = null
-
-/**
- * Create a GIT_ASKPASS helper script that outputs the session token.
- * Git calls this script when HTTPS authentication is needed.
- */
-function getGitAskPassPath(): string {
-  if (gitAskPassPath && fs.existsSync(gitAskPassPath)) return gitAskPassPath
-
-  // Use a path without spaces to avoid issues with GIT_ASKPASS execution
-  const dir = path.join(os.tmpdir(), 'acb-git-helpers')
-  fs.mkdirSync(dir, { recursive: true })
-
-  const isWindows = process.platform === 'win32'
-  const scriptPath = path.join(dir, isWindows ? 'git-askpass.bat' : 'git-askpass.sh')
-
-  if (isWindows) {
-    fs.writeFileSync(scriptPath, '@echo %GIT_TOKEN%\r\n')
-  } else {
-    fs.writeFileSync(scriptPath, '#!/bin/sh\necho "$GIT_TOKEN"\n')
-    fs.chmodSync(scriptPath, 0o755)
-  }
-
-  gitAskPassPath = scriptPath
-  return scriptPath
-}
-
-// Resolve git binary: try dugite's bundled git first, fall back to system git.
-// The mac build ships a universal (arm64 + x86_64) bundled git
-// (scripts/universal-git.mjs). The system-git fallback is a last resort only:
-// Apple Git 2.39 at /usr/bin/git has a broken chunked HTTP push and known
-// CVEs, which is what Intel Macs ran while the bundled git was arm64-only.
-function resolveGitBinaryWithFallback(): { binary: string; envOverrides: Record<string, string>; fallback: boolean } {
-  const dugiteBinary = resolveGitBinary()
-  try {
-    // Quick check: can the bundled binary actually execute?
-    const version = execFileSync(dugiteBinary, ['--version'], {
-      timeout: 3000,
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'ignore'],
-    }).trim()
-    console.log(`[git] Using bundled git: ${dugiteBinary} (${version}, ${process.platform}-${process.arch})`)
-    const gitDir = resolveGitDir()
-    return {
-      binary: dugiteBinary,
-      envOverrides: {
-        GIT_EXEC_PATH: path.join(gitDir, 'libexec', 'git-core'),
-        // GIT_TEMPLATE_DIR is set by the git factory for every binary: an
-        // empty app-owned directory, so init/clone copy no templates.
-      },
-      fallback: false,
-    }
-  } catch (error) {
-    // Bundled git failed (e.g. arch mismatch) — fall back to system git
-    const reason = error instanceof Error ? error.message : String(error)
-    console.warn(`[git] Bundled git ${dugiteBinary} failed on ${process.platform}-${process.arch} (${reason}); falling back to system git`)
-    const systemPaths = ['/usr/bin/git', '/usr/local/bin/git', '/opt/homebrew/bin/git']
-    for (const p of systemPaths) {
-      if (fs.existsSync(p)) {
-        console.log(`[git] Using system git: ${p}`)
-        return { binary: p, envOverrides: {}, fallback: true }
-      }
-    }
-    // Last resort: hope 'git' is in PATH
-    console.warn('[git] No system git found, using PATH lookup')
-    return { binary: 'git', envOverrides: {}, fallback: true }
-  }
-}
-
-// Cache the resolved git binary (checked once at startup)
-let _resolvedGit: ReturnType<typeof resolveGitBinaryWithFallback> | null = null
-function getResolvedGit() {
-  if (!_resolvedGit) _resolvedGit = resolveGitBinaryWithFallback()
-  return _resolvedGit
-}
-
-// Create a simpleGit instance with HTTPS token authentication
-function createGit(repoPath: string, extraEnv?: Record<string, string>): SimpleGit {
-  const { binary, envOverrides } = getResolvedGit()
-  return createConfiguredGit(repoPath, {
-    binary,
-    askPassPath: getGitAskPassPath(),
-    token: session.gitToken(),
-    // App-owned hooks/ and templates/ (empty): the member's git hooks and
-    // init.templateDir never run in the app (sync/git-factory.ts appGitDirs).
-    appGitDir: path.join(app.getPath('userData'), 'git'),
-    envOverrides: extraEnv ? { ...envOverrides, ...extraEnv } : envOverrides,
-    // X-ACB-Client-Version / X-ACB-Client-Platform on git's HTTP requests,
-    // so the server records which build synced (electron/client-identity.ts).
-    extraConfig: gitIdentityConfig(),
-  })
-}
-
-// Report which git binary is in use (bundled dugite git vs system fallback),
-// so the UI can warn when the bundled binary failed (e.g. arch mismatch).
-ipc.handle('git:getBinaryStatus', async () => {
-  const { binary, fallback } = getResolvedGit()
-  return { bundled: !fallback, binary }
-})
-
-// Sync's commit message (electron/commit-message.ts): written by the AI the
-// member signs in with — Claude Code (`claude -p --model haiku`, isolated),
-// Codex, or the API key — from the staged file list only (name-status +
-// stat, no contents). No AI, a failure or 30 s without an answer → null, and
-// sync commits its fixed message. A private folder's clone uses the API key
-// only, as before.
-// `gitFor` picks the index: the member's own for sync, a throwaway copy for
-// the preview's summary (git:generateSummary — preview never stages).
-const commitMessageGenerator = (gitFor: (repoPath: string) => SimpleGit) => createCommitMessageGenerator({
-  readStaged: async (repoPath) => {
-    const git: SimpleGit = gitFor(repoPath)
-    // core.quotePath=false: Japanese names as text, not octal escapes.
-    const stat = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--stat'])
-    const nameStatus = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-status'])
-    return { nameStatus, stat }
-  },
-  settings: () => ({ authMode: config.authMode(), apiKey: config.load().anthropicApiKey }),
-  claudeReady: claudeCli.isAuthenticated,
-  getCli: claudeCli.path,
-  getEnv: shellEnv.env,
-  getCwd: () => {
-    const cwd = path.join(app.getPath('userData'), 'commit-message')
-    fs.mkdirSync(cwd, { recursive: true })
-    return cwd
-  },
+// The app's git (binary, credentials, guarded configuration) and sync's
+// commit messages (electron/services/).
+const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(app.getPath('userData'), 'git') })
+const createGit = appGit.create
+const commitMessageGenerator = createCommitMessages({
+  config,
+  claudeCli,
+  shellEnv,
+  cwd: () => path.join(app.getPath('userData'), 'commit-message'),
 })
 const generateCommitMessage = commitMessageGenerator(createGit)
 
-// Preview changes before sync. Strictly read-only: it never stages — a
-// staged file inside a not-downloaded folder slipped past sync's
-// outside-checkout hold-back and was shared (sync/preview.ts).
-ipc.handle('git:preview', async (_, repoPath: string) => {
-  try {
-    const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-    const { added, modified, deleted } = await previewChanges(git)
-
-    const totalCount = added.length + modified.length + deleted.length
-
-    return {
-      success: true,
-      hasChanges: totalCount > 0,
-      changes: { added, modified, deleted },
-      totalCount,
-    }
-  } catch (err) {
-    console.error('Git preview error:', err)
-    return {
-      success: false,
-      hasChanges: false,
-      changes: { added: [], modified: [], deleted: [] },
-      totalCount: 0,
-      error: err instanceof Error ? err.message : 'Preview failed',
-    }
-  }
-})
-
-// Revert a file's changes (git checkout HEAD -- <file> or git rm for new files)
-ipc.handle('git:revertFile', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
-  try {
-    const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-
-    if (fileStatus === 'added') {
-      // New file: drop it from the index if it is there (preview no longer
-      // stages, so it usually is not) and delete it
-      await git.raw(['rm', '--cached', '--quiet', '--ignore-unmatch', '--sparse', '--', filePath])
-      const fullPath = validatePath(path.join(safePath, filePath), { followFinal: false })
-      if (fs.existsSync(fullPath)) {
-        fs.unlinkSync(fullPath)
-      }
-    } else {
-      // Modified or deleted: restore from HEAD
-      await git.raw(['checkout', 'HEAD', '--', filePath])
-    }
-
-    return { success: true }
-  } catch (err) {
-    console.error('Git revert file error:', err)
-    return { success: false, error: err instanceof Error ? err.message : 'Revert failed' }
-  }
-})
-
-// Get diff for a specific file (what the next sync would share: the file on
-// disk against HEAD — preview does not stage)
-ipc.handle('git:fileDiff', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
-  try {
-    const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-
-    if (fileStatus === 'added') {
-      // New file: show entire content as addition
-      const content = fs.readFileSync(validatePath(path.join(safePath, filePath)), 'utf-8')
-      return { success: true, diff: content, isNewFile: true }
-    } else if (fileStatus === 'deleted') {
-      // Deleted file: show entire content as deletion
-      const content = await git.show([`HEAD:${filePath}`])
-      return { success: true, diff: content, isDeletedFile: true }
-    } else {
-      // Modified: show unified diff
-      const diff = await git.diff(['HEAD', '-U3', '--', filePath])
-      return { success: true, diff }
-    }
-  } catch (err) {
-    console.error('Git file diff error:', err)
-    return { success: false, error: err instanceof Error ? err.message : 'Diff failed', diff: '' }
-  }
-})
-
-// Get diff for a specific file in a specific commit
-ipc.handle('git:commitFileDiff', async (_, repoPath: string, commitHash: string, filePath: string) => {
-  try {
-    const safePath = validatePath(repoPath)
-    const git: SimpleGit = createGit(safePath)
-    // A hex commit id only: `--output=<file>` here made git write a file.
-    const diff = await git.raw(commitFileDiffArgs(commitHash, filePath))
-    return { success: true, diff }
-  } catch (err) {
-    console.error('Git commit file diff error:', err)
-    return { success: false, error: err instanceof Error ? err.message : 'Diff failed', diff: '' }
-  }
-})
-
-// Generate change summary (async, called separately from preview)
-ipc.handle('git:generateSummary', async (_, repoPath: string) => {
-  try {
-    const safePath = validatePath(repoPath)
-    // Staged into a throwaway copy of the index: preview never stages.
-    const summary = await withScratchIndex({
-      git: createGit(safePath),
-      repoPath: safePath,
-      makeGit: env => createGit(safePath, env),
-      fn: async scratch => {
-        await scratch.raw(['add', '--sparse', '.'])
-        return commitMessageGenerator(() => scratch)(safePath)
-      },
-    })
-    return { success: true, summary: summary || null }
-  } catch {
-    return { success: false, summary: null }
-  }
-})
-
-// Search tab / Cmd+P / history panel: electron/git-search.ts (limits, what
-// is searched, no lazy fetch). The same git configuration as createGit, for a
-// process whose output is streamed and stopped early.
-function searchGitCommand() {
-  const { binary, envOverrides } = getResolvedGit()
-  return configuredGitCommand({
-    binary,
-    askPassPath: getGitAskPassPath(),
-    token: '', // read-only local commands: no server access
-    appGitDir: path.join(app.getPath('userData'), 'git'),
-    envOverrides,
-    extraConfig: gitIdentityConfig(),
-  })
-}
-
-// File names in a folder ('' = the whole company) for Cmd+P: tracked and
-// untracked (not ignored), downloaded folders and readable private folders.
-ipc.handle('git:listFiles', async (_, repoPath: string, folderPath: string) => {
-  try {
-    const safePath = validatePath(repoPath)
-    const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
-    const { files, truncated } = await listCompanyFiles(searchGitCommand(), scope)
-    return { success: true, files, truncated }
-  } catch (err) {
-    console.error('Git ls-files error:', err)
-    return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
-  }
-})
-
-// Git log filtered by folder path (no --follow: see gitLogArgs)
-ipc.handle('git:log', async (_, repoPath: string, folderPath: string, limit: number = 50) => {
-  try {
-    const git: SimpleGit = createGit(validatePath(repoPath))
-    const raw = await git.raw(gitLogArgs(folderPath, limit))
-    return { success: true, commits: parseGitLog(raw) }
-  } catch (err) {
-    console.error('Git log error:', err)
-    return { success: false, commits: [], error: err instanceof Error ? err.message : 'Failed' }
-  }
-})
-
-// Show files changed in a specific commit, filtered by folder
-ipc.handle('git:showCommit', async (_, repoPath: string, commitHash: string, folderPath?: string) => {
-  try {
-    const git: SimpleGit = createGit(validatePath(repoPath))
-    const result = await git.raw(showCommitArgs(commitHash, folderPath))
-    const files: Array<{ status: string; path: string }> = []
-    for (const line of result.trim().split('\n')) {
-      if (!line) continue
-      const [status, ...pathParts] = line.split('\t')
-      if (status && pathParts.length > 0) {
-        files.push({ status: status.charAt(0), path: pathParts.join('\t') })
-      }
-    }
-    return { success: true, files }
-  } catch (err) {
-    console.error('Git show error:', err)
-    return { success: false, files: [], error: err instanceof Error ? err.message : 'Failed' }
-  }
-})
-
-// Content search in a folder ('' = the whole company): fixed string, A–Z
-// case-insensitive, ≤20 matches per file and ≤500 in all (git is stopped
-// there), lines cut around the match. A new search from the same window stops
-// the previous one.
-const runningGreps = new Map<number, AbortController>()
-ipc.handle('git:grep', async (event, repoPath: string, query: string, folderPath: string) => {
-  const senderId = event.sender.id
-  runningGreps.get(senderId)?.abort()
-  const controller = new AbortController()
-  runningGreps.set(senderId, controller)
-  try {
-    const safePath = validatePath(repoPath)
-    const scope = companySearchScope(safePath, normalizeSearchFolder(folderPath))
-    const { matches, truncated, timedOut } = await grepCompany(searchGitCommand(), scope, String(query ?? ''), controller.signal)
-    return { success: true, results: matches, truncated, timedOut, cancelled: controller.signal.aborted }
-  } catch (err: unknown) {
-    console.error('Git grep error:', err)
-    return { success: false, results: [], error: err instanceof Error ? err.message : 'Failed' }
-  } finally {
-    if (runningGreps.get(senderId) === controller) runningGreps.delete(senderId)
-  }
-})
+// The working tree and its history for the sync preview, the diff views,
+// the search tab and Cmd+P (features/git-history).
+registerGitHistoryIpc(ipc, { paths: allowedRoots, git: appGit, commitMessagesFor: commitMessageGenerator })
 
 // git:sync lives in ./sync/git-sync.ts (testable without Electron — see
 // tests/sync-harness). This wires the app's git, dialogs and server API in.

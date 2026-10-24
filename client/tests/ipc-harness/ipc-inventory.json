@@ -206,11 +206,11 @@
         "params": "filePath: string, content: string"
       },
       "git:commitFileDiff": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, commitHash: string, filePath: string"
       },
       "git:fileDiff": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:folderSizes": {
@@ -218,15 +218,15 @@
         "params": "repoPath: string, companyId: string, folder: string, measure: string[]"
       },
       "git:generateSummary": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string"
       },
       "git:getBinaryStatus": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": ""
       },
       "git:grep": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, query: string, folderPath: string"
       },
       "git:inspectCompanyFolder": {
@@ -234,19 +234,19 @@
         "params": "folder: string, companyId: string"
       },
       "git:listFiles": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, folderPath: string"
       },
       "git:log": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, folderPath: string, limit: number = 50"
       },
       "git:preview": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string"
       },
       "git:revertFile": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted'"
       },
       "git:setupCompanyRemote": {
@@ -254,7 +254,7 @@
         "params": "repoPath: string, companyId: string, selectedPaths?: string[]"
       },
       "git:showCommit": {
-        "file": "main.ts",
+        "file": "features/git-history/ipc.ts",
         "params": "repoPath: string, commitHash: string, folderPath?: string"
       },
       "git:sparseGetExclusions": {
