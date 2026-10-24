@@ -18,6 +18,7 @@ Maintainer note (stripped before it reaches Claude's context):
 
 ```
 server/   Hono API + git smart-HTTP server (port 3001). SQLite via better-sqlite3.
+  src/routes → services → ports ← adapters, wired in src/composition.ts; lib/ (git, push-check)
 admin/    Next.js admin console (port 3100), production build in Docker.
 client/   Electron desktop app (renderer on Vite, port 5173).
   electron/            main process: main.ts (composition root), features/<domain>/ipc.ts,
@@ -98,12 +99,15 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - **Electron is imported only in the shell layer** (`main.ts`, `preload.ts`,
   `electron-adapter.ts`, `voice-input.ts`); features and services get ports injected, so another
   desktop shell can replace it. ESLint enforces this. → `ipc-and-main-process.md`
-- **Vendors and models**: choose agents, models and defaults through the agent layer
-  (`client/electron/agents/`, `client/src/lib/aiModels.ts`); when an agent registry exists, add
-  vendors only there instead of branching on vendor names elsewhere. → `chat-and-agents.md`
+- **Agents and models come from the registry** (`client/shared/agents/registry.ts`, factories
+  in `client/electron/agents/registry.ts`): callers ask `capabilities` instead of branching on an
+  agent id, and every model id lives there (a test fails on a literal elsewhere), so adding a
+  vendor or a model generation touches a handful of files. → `chat-and-agents.md`
 - **Security guards are tested; keep them.** Each guard in the rule files names the test that
   fails without it. If a guard seems to be in the way, raise it with the owner rather than
   weakening it — each one exists because of an observed failure.
+- **Server layers point one way**: routes (HTTP) → services (rules) → ports ← adapters; only
+  `src/composition.ts` imports adapters (`tests/unit/layering.test.ts`). → `server.md`
 - **Server request handlers stay async.** No `execFileSync` / `spawnSync` in `server/src`
   (`tests/security/no-exec-sync.test.ts`): one synchronous git call froze every company's
   requests for 42 s. → `server.md`

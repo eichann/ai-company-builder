@@ -1,6 +1,8 @@
 ---
 paths:
   - "server/src/routes/private-folders.ts"
+  - "server/src/services/private-folders.ts"
+  - "server/src/adapters/sqlite/private-folders.ts"
   - "server/src/lib/private-folders.ts"
   - "server/src/lib/git-server/scope-repo.ts"
   - "server/src/lib/client-version.ts"
@@ -19,7 +21,11 @@ paths:
 Read restriction exists only for **private folders**, which are private from the start (no
 carve-out of existing folders; move files into a new private folder instead). Each one is its own
 bare repository (a "scope repository"); its path is reserved in the company repository. The
-contract for clients and UIs is `shared/types/private-folders.ts`. Client side:
+contract for clients and UIs is `shared/types/private-folders.ts`. Code: `routes/private-folders.ts`
+(HTTP, the `/paths/check` budget) → `services/private-folders.ts` (rules, views, first-folder
+gate under the company lock) → `PrivateFolderRepository` (`adapters/sqlite/private-folders.ts` →
+`lib/private-folders.ts`: rows, scope repositories, race protections, archives).
+`canWriteInPrivateFolder` lives in `shared/core/permissions.ts`. Client side:
 `private-folders-client.md`. Full text and history: `docs/architecture/private-folders.md`.
 
 ## Names never leak (owner decision B)

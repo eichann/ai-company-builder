@@ -1,6 +1,11 @@
 ---
 paths:
   - "client/electron/agents/**"
+  - "client/shared/agents/**"
+  - "client/shared/agent.ts"
+  - "client/tests/agent-registry*.test.ts"
+  - "client/electron/handoff/**"
+  - "client/electron/voice-formatter.ts"
   - "client/electron/chat-server.ts"
   - "client/electron/chat-turns.ts"
   - "client/electron/chat-tools.ts"
@@ -28,12 +33,48 @@ paths:
 
 # Chat agents (Claude Code, Codex)
 
-The chat runs the member's own Claude Code or Codex in their checkout of the company repository.
-Pick agents, models and defaults through `client/electron/agents/` and `client/src/lib/aiModels.ts`
-rather than branching on vendor names in callers; when an agent registry is introduced, it
-becomes the one place to add a vendor. Related: `chat-write-guard.md` (what the AI may write),
+The chat runs the member's own Claude Code or Codex (or the API key) in their checkout of the
+company repository. Agents, models and what each agent can do come from the agent registry;
+callers ask capabilities instead of branching on agent ids. Related: `chat-write-guard.md` (what the AI may write),
 `company-files.md` (read-only server files), `chat-ui-and-history.md`. Full text:
-`docs/architecture/chat-and-agents.md` (internal).
+`docs/architecture/chat-and-agents.md`, `agent-registry.md` (internal).
+
+## Agent registry (R4)
+
+- `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
+  (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
+  (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
+  job (`tasks`: chat / title / commitMessage / voice / handoff) and `capabilities`
+  (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
+  imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
+  commitMessageFallback, privateFolderCommitMessages, liveModelCatalog).
+- **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and
+  fails on a model id literal anywhere under `client/electron`, `client/src`, `client/shared`.
+  A model generation update is a registry-only change. (The API-key mode deliberately uses
+  `claude-haiku-5-5` for commit messages but `claude-haiku-4-5-20251001` for voice and titles.)
+- `client/electron/agents/registry.ts` is how each agent starts: `createAgentConnection(id,
+  host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting),
+  `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`.
+  `client/tests/agent-registry-factories.test.ts`: every capability-gated factory an agent claims
+  exists, and none it does not.
+- Role profiles (`AgentProfile`: role, allowedTools, settingSources, sandbox, cwd) are the shape
+  for the coming reader/worker split. No agent implements one yet, so any set field throws —
+  a caller can never believe a restriction is in force when it is not. Implement a profile
+  inside the agent's factory; callers stay agent-agnostic.
+- Commit messages: the member's agent, then `commitMessageFallback` agents in registry order
+  (Claude Code, API key — Codex is never picked on the member's behalf); a private folder's clone
+  only `privateFolderCommitMessages` (the API key). Voice formatting: the member's agent only.
+- Renderer: `agentCan(id, cap)`, `hasRateLimits(id)`, `agentShortLabel(id)`; subagent rows read
+  `parentToolCallId` from any provider's metadata. Per-agent UI stays per agent on purpose: the
+  sign-in cards (`ChatAuthSettings.tsx`) and header model pickers (`ChatHeader.tsx`).
+- Adding an agent: (1) its id in `AuthMode` (`client/shared/agent.ts`); (2) its descriptor in
+  `shared/agents/registry.ts` (`AGENT_IDS` + `AGENTS`); (3) its connection in
+  `electron/agents/<agent>.ts` (`AgentConnection`, plus one-shot / hand-off writers for the
+  capabilities it claims); (4) its factories in `electron/agents/registry.ts`; (5) its sign-in
+  card in `ChatAuthSettings.tsx` (and a header picker if its models are neither a static list nor
+  a live catalog). Then fix what `tsc` flags (the literal `setAuthMode` param types in
+  `preload.ts` / `features/settings/ipc.ts`; regenerate `ipc-inventory.json` with
+  `UPDATE_IPC_INVENTORY=1`) and run `agent-registry*.test.ts`.
 
 ## Claude Code agent stack
 
@@ -53,8 +94,10 @@ becomes the one place to add a vendor. Related: `chat-write-guard.md` (what the 
 - The provider drops `rate_limit_event` and `system/task_progress`, so `claude.ts` taps the SDK
   Query in `onQueryCreated` (`tapSdkMessages`), composed with the steering tap (`tapQuery`) in the
   same callback — keep both when editing it. Agents report through `onEvent`; the chat server
-  sends *transient* data parts (`data-rate-limits`, `data-agent-progress`, read in `useChat`
-  `onData`, never stored) and keeps the latest usage per agent for `GET /api/rate-limits`.
+  sends *transient* data parts (`data-rate-limits`, `data-agent-progress`, handled in the
+  renderer's `useStreamingChat`, never stored) and keeps the latest usage per agent for `GET /api/rate-limits`
+  (agents with `capabilities.rateLimits`). Choice prompts, steering, suggestions, rate limits and
+  subagent progress are gated by capabilities in `chat-server.ts`.
 - Usage meter (`client/shared/rate-limits.ts`, `RateLimitMeter.tsx`): Claude's windows come in
   the undocumented `rate_limit_info.unifiedWindows`, `utilization` as a fraction (0.24 = 24%);
   Codex from `account/rateLimits/read` once per turn plus `account/rateLimits/updated`
@@ -62,8 +105,9 @@ becomes the one place to add a vendor. Related: `chat-write-guard.md` (what the 
   (owner's decision).
 - `agentProgressSummaries: true`: the running subagent row shows the latest
   `task_progress.summary` (`tool_use_id` = the Agent call). Codex has no subagent rows.
-- Defaults for members who never chose: Opus 5.5 + effort medium (`DEFAULT_AI_MODEL`,
-  `DEFAULT_AI_EFFORT`); only an explicit choice is saved; Codex keeps its own default effort.
+- Defaults for members who never chose come from the registry (Opus 5.5 + effort medium;
+  `src/lib/aiModels.ts` is a view of the Claude Code entry); only an explicit choice is saved;
+  Codex keeps its own default effort.
 - Settings sources are `['user', 'project']`; that is why shared agent config is protected at
   push (`push-check.md`).
 
@@ -95,7 +139,8 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
 
 ## Instructions while the AI works (steering)
 
-`client/shared/steer.ts`, `agents/steering.ts`, `chat-turns.ts`.
+`client/shared/steer.ts`, `agents/steering.ts`, `chat-turns.ts`; renderer side `useSteering` /
+`useQueuedSendFlush` (`chat-ui-and-history.md`).
 
 - During a turn the input stays enabled; sending does not stop the AI. The renderer posts
   `POST /api/steer { appSessionId, text }`; the turn's `TurnSteering` hands it to the agent; it is
@@ -110,7 +155,7 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
   turn is `interrupt`ed before it runs tools; the renderer then sends the text as the next message.
 - Codex: `turn/steer { threadId, expectedTurnId, input }` while the turn is active; an error =
   `not-delivered`.
-- Fallback (api-key mode, attachments, slash commands, no attached turn yet, `unavailable` /
+- Fallback (an agent without `capabilities.steering` — the api-key mode —, attachments, slash commands, no attached turn yet, `unavailable` /
   `not-delivered`): the message waits (「応答が終わったら送ります：…」, 取り消す puts it back) and
   all waiting messages go out as one when the turn ends; after a stop or error they return to the
   input. Choice prompts, approvals and both write guards work unchanged under streaming input.

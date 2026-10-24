@@ -27,7 +27,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 |---|---|
 | `paths.ts` | `foldAsciiCase`, `normalizeRepoPath`, `pathKey` (NFC + A–Z fold), `nameKey`, `normalizeReservedPath` (paths/check contract; `\` is a separator), `isSameOrAncestorPath`, `compareScopePaths` |
 | `names.ts` | department folder names (`isValidFolderName`, `suggestFolderName`; also private-folder names), skill names (`isValidSkillName`, …), `parseScopePath` (permission API) |
-| `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, … |
+| `permissions.ts` | the permission model: `resolveAccess`, `writeAccessSummary`, `canReadPrivateScope`, `canWriteInPrivateFolder`, `FULL_ACCESS_ROLES`, … |
 | `reserved-paths.ts` | `reservedPrefixOf` / `reservedAncestorOf` (push check `[RESERVED_PATH]`), `isPathUsable` (`POST …/paths/check`) |
 | `instruction-files.ts` | `CLAUDE.md` / `CLAUDE.local.md` / `AGENTS.md`: names, who may change them |
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |

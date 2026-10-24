@@ -59,7 +59,8 @@ forever — the "permanently unable to sync" shape).
 ## Who is pushing, and the snapshot
 
 - The checker reads no database (it also runs in the client's sync harness). git-http — the code
-  that authenticated the pusher — sets `ACB_PUSHER_ROLE` / `ACB_PUSHER_ID` / `ACB_PUSHER_EMAIL`,
+  that authenticated the pusher (session via `AccountDirectory.bySessionToken`, membership via the
+  access policy, managed folders via `permission-views`) — sets `ACB_PUSHER_ROLE` / `ACB_PUSHER_ID` / `ACB_PUSHER_EMAIL`,
   `ACB_NODE`, and writes a per-request **snapshot** (pusher, scopes, rules, managed folders,
   reserved paths, `scopePath` for a scope repo; 0600 temp file, path in `ACB_PUSH_POLICY`,
   removed when the request ends; `preparePushCheck` in `lib/git-server`).

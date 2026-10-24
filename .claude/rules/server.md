@@ -5,10 +5,47 @@ paths:
   - "server/package.json"
 ---
 
-# Server (Hono API): routes, accounts, departments, database
+# Server (Hono API): layers, routes, accounts, departments, database
 
 Push checking is in `push-check.md`, private folders in `private-folders.md`, read-only file
-access in `company-files.md`. Full text and incidents: `docs/architecture/server.md` (internal).
+access in `company-files.md`. Full text and incidents: `docs/architecture/server.md`,
+`server-layers.md` (internal).
+
+## Layers (R5)
+
+```
+routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service, map the answer
+  → services/   business rules; authorization through services/access.ts (shared/core roles)
+    → ports/    interfaces (repositories, RepoStore, CompanyLock, Clock/IdGenerator,
+                AccountDirectory, SecretCipher, Transactions)
+        ↑ adapters/   sqlite/* repositories, git-repo-store.ts, accounts.ts, system.ts,
+                      company-files.ts, local-secret-cipher.ts
+src/composition.ts — the only module that imports adapters; routes take `services` from it
+```
+
+- `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
+  shared/core types), services only ports / services / shared / pure lib, only the composition
+  root imports adapters, and routes run no SQL and do not import `db` (all routes except
+  `git-http.ts`, which still hands its connection to lib for the push snapshot and scope pushes).
+- Repository ports are synchronous on purpose (better-sqlite3): a check followed by a write in
+  one handler cannot interleave with another request. Keep check-then-write sequences inside one
+  synchronous stretch or a `transactions.run(...)`. A move to Postgres would turn these
+  signatures into Promises at this one seam.
+- Services return `Outcome<T>` (`services/outcome.ts`): a value or a refusal (`bad-request` /
+  `forbidden` / `not-found` / `conflict` / `gone` / `unavailable`) carrying the exact API error
+  body; `routes/respond.ts` maps it to the status code. Keep each endpoint's check order
+  (who → body → rules) when moving code, so the same request keeps the same status.
+- Moving SQL into a repository: copy the statement unchanged (columns, `ORDER BY` tie-breaks,
+  transaction boundaries). Statements are prepared per call, so building repositories before
+  `initDatabase()` is safe.
+- `AccountDirectory.bySessionToken` (`adapters/accounts.ts`) is the one place that reads Better
+  Auth's session table directly (git over HTTP sends the token as the Basic-auth password).
+- `SecretCipher` (`ports/secret-cipher.ts`): encrypt/decrypt bound to a context;
+  `adapters/local-secret-cipher.ts` is the local AES-256-GCM implementation (context as AAD,
+  `v1.` envelope), used by nothing yet — the key broker's KMS cipher plugs in here.
+- Static security tests (`tests/security/authorization.test.ts`) accept the access-policy calls
+  (`access.memberOf(`, `requireFullAccess(`, `requireOwner(`) as the membership / 403 checks;
+  the behavioural checks live in `tests/integration/authorization.test.ts`.
 
 ## Route map (mounted in `server/src/index.ts`)
 
@@ -68,11 +105,19 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   `expiresInDays`: integer 1–30 (default 7).
 - Permission model: `resolveAccess` / `writeAccessSummary` / `canReadPrivateScope` live in
   `shared/core/permissions.ts` (moved from `server/src/lib/permissions.ts` in R2); storage in
-  `lib/permission-store.ts`. With the default seed (`everyone: read + write` on the company
+  `lib/permission-store.ts` behind `ScopeRepository`. Reads: `services/permission-views.ts`
+  (`/overview`, `/permissions`, `/me/capabilities`, `/me/write-access`, `managedFolders` for
+  git-http's snapshot). Editor: `services/permission-editor.ts` (`canEditPath`, subjects, the
+  outdated-app guard `guardWrite` — mutation + write-loss check in one `transactions.run`,
+  rolled back by throwing, 409 `OUTDATED_CLIENTS`). With the default seed (`everyone: read + write` on the company
   scope) nothing is restricted. Managers (`departments/:id/managers`) may manage their
   departments' private folders and instruction files.
 
-## Departments (`routes/departments.ts`)
+## Departments
+
+Code: `routes/departments.ts` (HTTP) → `services/departments.ts` (rules) → `DepartmentRepository`
+/ `ScopeRepository` (SQLite) and `RepoStore` (`adapters/git-repo-store.ts`: shared-branch reads
+from the bare repo via `lib/repo-folders.ts`, working-clone mutations under `withCompanyLock`).
 
 - The file system is the source of truth; the DB holds display settings (order, icon, color,
   display name); the admin UI can also perform file operations.
@@ -85,8 +130,9 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   → update DB. Delete: confirm → rm -rf + git add -A → commit → push → delete from DB.
   Departments containing a private folder cannot be deleted or renamed; a reserved name is refused.
 - Mutations work in the working clone (`data/workdirs/<companyId>`, pulled first) under a
-  per-company promise-chain lock (`withCompanyLock`, `lib/company-lock.ts`). Company creation
-  seeds the default department folders the same way (async, under the lock, before the 201;
+  per-company promise-chain lock (`withCompanyLock`, `lib/company-lock.ts`, port `CompanyLock`).
+  Company creation (`services/companies.ts` → `adapters/git-repo-store.ts`, timeouts adjustable
+  with `setSeedGitTimeoutsForTests`) seeds the default department folders the same way (async, under the lock, before the 201;
   `gitAsync` with `timeoutMs`: 60 s per local step, 300 s for the push, which kills git's whole
   process group, hook included, and fails the seeding while the company is still created).
 

@@ -158,11 +158,14 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
 ## Commit message (step 9)
 
 Written by the AI the member signs in with (`commit-message.ts`, generator built in
-`services/commit-messages.ts`): the chosen auth mode first — Claude Code as a one-shot
-`claude -p --model haiku` (`claude-oneshot.ts`), Codex (`generateCodexText`) or the API key
-(`claude-haiku-5-5`) — then whichever other is ready. Input is only `git diff --cached
+`services/commit-messages.ts`, every agent through the registry's `runOneShotText`): the
+member's own agent first, then the `commitMessageFallback` agents in registry order (Claude
+Code, then the API key; Codex is never picked on the member's behalf). Models per agent are the
+registry's `tasks.commitMessage` (Claude Code: a one-shot `claude -p --model haiku` via
+`claude-oneshot.ts`; API key: `claude-haiku-5-5`). Input is only `git diff --cached
 --name-status` + `--stat` (`core.quotePath=false`, capped) as JSON data; only the answer's
 `<commit_message>` block is used, sanitised (72-char subject, ≤ 20 body lines, ≤ 2,000 chars).
 No AI, a failure, no tagged block or 30 s → 「Sync from AI Company Builder」. The message is never
-logged. A private folder's clone (`kind: 'scope'`) uses the API key only, so its file names never
-go to a CLI sign-in or another vendor.
+logged. A private folder's clone (`kind: 'scope'`) uses only `privateFolderCommitMessages` agents (the
+API key), so its file names never go to a CLI sign-in or another vendor. Log lines name the agent
+id (`[commit-message] claude-code failed …`).

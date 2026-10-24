@@ -17,6 +17,8 @@ local. Full text: `docs/architecture/chat-and-agents.md` (internal).
 
 ## Server (`server/src/routes/company-files.ts`, logic `server/src/lib/company-files.ts`)
 
+Membership is checked through the access policy; the view is built via `adapters/company-files.ts`.
+
 Contract: `shared/types/company-files.ts`. Any member, under `/api/companies/:companyId/files`:
 
 - `GET /tree?path=&depth=` — ≤ 10 levels, ≤ 2000 entries, `truncated`.

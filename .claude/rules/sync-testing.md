@@ -33,7 +33,10 @@ the machine is shared — CI runs all of it.
 - 4 macOS shards ("Sync harness N/4 (macOS)"), files balanced by duration in
   `.github/scripts/sync-shard.mjs`; the last shard also runs every unlisted file, so a new test
   file needs no CI change (list it in a group if it is long). `private-folders.test.ts` is split
-  over two shards with `SYNC_HARNESS_PART=k/n`. The required check "Sync harness (macOS)" is green
+  over two shards with `SYNC_HARNESS_PART=k/n` (`<file>#k/n` in the groups), and the soak worlds
+  are split with `soak.test.ts@<worlds>` (the other worlds' seeds set to `none`): shard 2 runs
+  `soak.test.ts@plain`, shard 4 `soak.test.ts@mixed,private`. The script fails if a soak world is
+  in zero or two shards, or a listed file no longer exists. The required check "Sync harness (macOS)" is green
   only when every shard passed (or all were skipped).
 - Soak on PRs: one seed per world (`SYNC_SOAK_SEEDS=1`, `SYNC_SOAK_MIXED_SEEDS=101`,
   `SYNC_SOAK_PRIVATE_SEEDS=201`, 3 members × 6 rounds). Push to main, nightly (18:17 UTC) and
