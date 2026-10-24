@@ -134,7 +134,7 @@ test('AI instruction files: owners/admins anywhere, managers inside their depart
   const d = decideToolWrite(member, 'Edit', { file_path: `${ROOT}/CLAUDE.md` }, ROOT)
   assert.equal(d.deny, true)
   if (d.deny) assert.equal(d.message, 'このファイル（CLAUDE.md）はAIへの指示ファイルのため、管理者（部署内は部署の責任者）だけが変更できます。変更が必要な場合は、管理者か部署の責任者に依頼してください。')
-  for (const p of ['営業部/CLAUDE.md', '営業部/sub/agents.md', 'Claude.md', 'x/AGENTS.MD']) {
+  for (const p of ['営業部/CLAUDE.md', '営業部/sub/agents.md', 'Claude.md', 'x/AGENTS.MD', 'AGENTS.override.md', '営業部/agents.Override.md']) {
     assert.equal(decideToolWrite(member, 'Write', { file_path: `${ROOT}/${p}` }, ROOT).deny, true, p)
   }
   assert.equal(decideToolWrite(member, 'Bash', { command: 'echo x >> CLAUDE.md' }, ROOT).deny, true)

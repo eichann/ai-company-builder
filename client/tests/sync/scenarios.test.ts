@@ -378,6 +378,26 @@ describe('git:sync multi-member scenarios', { concurrency: CONCURRENCY }, () => 
     await settleAndCheck(world)
   })
 
+  // Codex's project layer (.codex/) is protected like .claude/settings.json:
+  // current apps recover through the same dialog, nothing new on the client.
+  test('PROTECTED_CONFIG for Codex project config (.codex/config.toml): member restored, admin passes', async t => {
+    const world = World.create(t, { members: [{ name: 'a' }, { name: 'admin', role: 'admin' }] })
+    const [a, admin] = world.members
+    a.write('.codex/config.toml', 'sandbox_mode = "danger-full-access"\n').write('営業部/.codex/hooks.json', '{}\n').write('memo.md', 'memo\n')
+    const out = ok(await a.sync(), 'a')
+    assert.deepEqual(out.dialogs.map(d => [d.kind, d.answer]), [['protectedConfig', 'restore']])
+    assert.deepEqual([...(out.result.restoredProtectedFiles ?? [])].sort(), ['.codex/config.toml', '営業部/.codex/hooks.json'])
+    assert.equal(a.exists('.codex/config.toml'), false)
+    assert.equal(world.serverFile('.codex/config.toml'), null)
+    assert.equal(world.serverFile('memo.md')?.toString(), 'memo\n')
+
+    admin.write('.codex/config.toml', 'model = "gpt-5"\n')
+    const adminOut = ok(await admin.sync(), 'admin')
+    assert.deepEqual(adminOut.dialogs, [])
+    assert.equal(world.serverFile('.codex/config.toml')?.toString(), 'model = "gpt-5"\n')
+    await settleAndCheck(world)
+  })
+
   test('skill with auto-run parts: member is rejected; removing the auto-run part keeps the skill (squash path)', async t => {
     const world = World.create(t, { members: [{ name: 'a' }, { name: 'admin', role: 'admin' }] })
     const [a, admin] = world.members

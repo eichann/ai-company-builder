@@ -6,7 +6,7 @@
  *   names.ts              department / skill folder names, scope paths
  *   permissions.ts        the permission model (resolveAccess, writeAccessSummary)
  *   reserved-paths.ts     private-folder paths reserved in the company repository
- *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md
+ *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
  *
  * Dependency rule: nothing here imports anything outside shared/core — no

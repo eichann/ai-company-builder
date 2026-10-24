@@ -1,5 +1,6 @@
 /**
- * AI instruction files — CLAUDE.md, CLAUDE.local.md, AGENTS.md at any depth,
+ * AI instruction files — CLAUDE.md, CLAUDE.local.md, AGENTS.md and
+ * AGENTS.override.md (Codex reads it instead of AGENTS.md) at any depth,
  * A–Z case-insensitive. Claude Code / Codex load them into every chat in or
  * below their folder, so whoever writes one steers every teammate's AI there.
  * Owner/admin may change them anywhere; a department manager inside a
@@ -16,12 +17,15 @@
 import { FULL_ACCESS_ROLES } from './permissions'
 import { foldAsciiCase, pathKey } from './paths'
 
-/** CLAUDE.local.md is personal by convention, but once shared it is loaded like CLAUDE.md for everyone. */
-export const INSTRUCTION_FILE_NAMES: readonly string[] = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md']
+/**
+ * CLAUDE.local.md is personal by convention, but once shared it is loaded like CLAUDE.md for
+ * everyone. AGENTS.override.md: Codex reads it in place of AGENTS.md in the same folder.
+ */
+export const INSTRUCTION_FILE_NAMES: readonly string[] = ['CLAUDE.md', 'CLAUDE.local.md', 'AGENTS.md', 'AGENTS.override.md']
 
 const FOLDED_NAMES = new Set(INSTRUCTION_FILE_NAMES.map(foldAsciiCase))
 
-/** CLAUDE.md / CLAUDE.local.md / AGENTS.md at any depth, A–Z case-insensitive. */
+/** CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md at any depth, A–Z case-insensitive. */
 export function isInstructionFile(repoPath: string): boolean {
   const name = repoPath.normalize('NFC').split('/').pop() ?? ''
   return FOLDED_NAMES.has(foldAsciiCase(name))

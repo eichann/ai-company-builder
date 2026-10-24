@@ -106,7 +106,7 @@ what git actually sees through the factory.
   "push accepted by the server but the push call fails…", "push that never reached the server…".
 - Rejection recovery rewrites unpushed commits, never retries or reverts on top (the hook checks
   every commit). `client/tests/protected-config.test.ts`, `client/tests/sync/write-denied.test.ts`,
-  scenarios "PROTECTED_CONFIG …", "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
+  scenarios "PROTECTED_CONFIG …" (incl. Codex's `.codex/`, same dialog), "PERSONAL_PATH …", "secret …", `private-folders.test.ts`
   "[LOCAL_ONLY_PATH] …".
 
 ## Remote, sparse checkout and not-downloaded folders

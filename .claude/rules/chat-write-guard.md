@@ -52,7 +52,7 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - Checked first, regardless of write access: a folder **not downloaded** on this computer
   (`WriteGuard.getNotDownloaded`) →
   「このフォルダ（コンテンツ/動画）はダウンロードしていないため、ここには保存できません。必要ならユーザーに設定でダウンロードしてもらってください。」
-- AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`) are refused unless the
+- AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`) are refused unless the
   member may change them (owner/admin; a manager inside their department), mirroring the push
   checker (`mayChangeInstructionFile`).
 - External repositories go to `.workspace/` (never shared): Bash `git clone` / `gh repo clone`

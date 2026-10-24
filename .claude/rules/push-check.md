@@ -39,7 +39,11 @@ rule (the guards table rows): `docs/architecture/sync.md` (internal).
   (`shared-core.md`).
 - The legacy shell hook stays at `server/tests/fixtures/pre-receive-hook.legacy.sh`;
   `push-check-differential.test.ts` requires identical stdout / stderr / exit status on a corpus,
-  except the one intended change (secrets in intermediate commits). `hook-locale.test.ts` pushes
+  except two intended changes, each with its own expectation helper: secrets in intermediate
+  commits (`attemptSecretOnlyInIntermediateCommit`) and Codex's project layer
+  (`attemptNewlyProtected`: owner/admin identical, other roles rejected with exactly the listed
+  paths). Rules the legacy hook never had (instruction files, `.backups/`, write permission,
+  reserved paths) stay out of that corpus and have their own tests. `hook-locale.test.ts` pushes
   under UTF-8 locales.
 
 ## Messages are a wire format
@@ -81,11 +85,15 @@ Deletions are always allowed except where noted (they are how something gets uns
 
 - **Protected agent config** (`[PROTECTED_CONFIG]`, owner/admin only): add / modify / delete /
   rename of `.claude/settings.json`, `.claude/settings.local.json`, `.mcp.json`, anything under
-  `.claude/hooks/`, or a file/symlink named `.claude` — any depth, case-insensitive. A missing
-  role fails closed for these paths. Why: in non-interactive mode Claude Code runs a project
-  `UserPromptSubmit` hook and starts `.mcp.json` stdio servers without a prompt, so any member
-  could run commands on every teammate's machine. Sharing an MCP server is legitimate, so the
-  rule restricts *who*. Test: `protected-config-hook.test.ts`.
+  `.claude/hooks/`, a file/symlink named `.claude`, anything under `.codex/`, or a file/symlink
+  named `.codex` — any depth, case-insensitive. A missing role fails closed for these paths.
+  Why: in non-interactive mode Claude Code runs a project `UserPromptSubmit` hook and starts
+  `.mcp.json` stdio servers without a prompt, so any member could run commands on every
+  teammate's machine. Codex (0.153) loads every `.codex/` from the project root down to its
+  working directory once the member has trusted the folder — `config.toml` (sandbox and
+  permission profiles incl. network and file access, MCP servers, inline hooks), `hooks.json`,
+  `rules/` — so the whole folder is protected (added 2026-10-25). Sharing an MCP server is
+  legitimate, so the rule restricts *who*. Test: `protected-config-hook.test.ts`.
 - **Skills / subagents / commands with auto-run parts**: `.md` under `.claude/skills/`,
   `.claude/agents/`, `.claude/commands/` (any depth) may be changed by anyone unless the new blob
   has frontmatter `hooks`, `mcpServers`, `lspServers` or `monitors` (any YAML spelling: quoted,
@@ -95,8 +103,8 @@ Deletions are always allowed except where noted (they are how something gets uns
   (substituted arguments can re-pair backticks). Contents unreadable, or `ACB_NODE` unusable →
   every changed path there is rejected for non-admins. Text that is not the syntax (`!important`,
   `if ! grep`, prose) passes. Test: `skill-autorun-hook.test.ts`.
-- **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, any depth,
-  case-insensitive): owner/admin anywhere; a department manager inside a department folder they
+- **AI instruction files** (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md` —
+  Codex reads it in place of `AGENTS.md` — any depth, case-insensitive): owner/admin anywhere; a department manager inside a department folder they
   manage (`managedFolders` in the snapshot; root-level ones owner/admin only — owner decision
   案B). Others are rejected in their own sub-list of `[PROTECTED_CONFIG]`, which current apps
   already recover from. In a scope repo the path is judged as `<scopePath>/<path>`. Why: these
