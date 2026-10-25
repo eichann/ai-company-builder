@@ -21,6 +21,7 @@
 import { repoRelativePath } from '../shared/write-access'
 import { excludedFolderOf } from '../shared/sparse-paths'
 import { bashWriteTargets } from './write-guard'
+import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
 
 export interface PrivateReadContext {
   /** The company's checkout root (absolute). */
@@ -207,7 +208,11 @@ export type PrivateWriteDecision =
 
 const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
-/** The app's own MCP servers: read-only, never send anything out (acb_review only shows a request to the member). */
+/**
+ * The app's own MCP servers: read-only, never send anything out (acb_review only
+ * shows a request to the member). Not the web research (`acb_web`): its question
+ * goes out to the web.
+ */
 const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations', 'acb_review']
 
 /** Never shared: the app's scratch area and personal folders (see .claude/rules/sync.md, .gitignore essentials). */
@@ -225,6 +230,10 @@ export function publicWriteMessage(place: string): string {
 
 export function sendOutMessage(what: string): string {
   return `${PREFIX}外部に送信する可能性のある操作（${what}）をしようとしています。非公開の内容が含まれていないか確認してください。`
+}
+
+export function webResearchMessage(): string {
+  return `${PREFIX}Webで調べるために、AIが書いた質問を外部（検索やWebサイト）に送ろうとしています。質問に非公開の内容が含まれていないか確認してください。`
 }
 
 export function shellWriteMessage(command: string): string {
@@ -279,6 +288,7 @@ export function decidePrivateWrite(ctx: PrivateReadContext | undefined, state: P
     const what = typeof toolInput?.url === 'string' ? `${toolName}: ${toolInput.url}` : typeof toolInput?.query === 'string' ? `${toolName}: ${toolInput.query}` : toolName
     return { ask: true, message: sendOutMessage(what) }
   }
+  if (toolName === WEB_RESEARCH_TOOL_ID) return { ask: true, message: webResearchMessage() }
   const mcp = /^mcp__(.+?)__/.exec(toolName)
   if (mcp && !APP_MCP_SERVERS.includes(mcp[1])) return { ask: true, message: sendOutMessage(toolName) }
   return { ask: false }

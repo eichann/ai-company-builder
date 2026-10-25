@@ -215,3 +215,28 @@ test('missing workspace does not make the shared temporary directory writable', 
   assert.equal(rpc.calls.find(c => c.method === 'thread/start')!.params.sandbox, 'read-only')
   rpc.complete(); await response
 })
+
+test('web research: the app tool is served, Codex web search is off, and its calls are reported under the app name', async () => {
+  const { rpc, connection } = setup()
+  const parts: unknown[] = []
+  const model = connection.createChatModel({ workingDirectory: '/company', webResearch: { execute: async () => 'r' } }) as Model
+  const { stream } = await model.doStream({ prompt })
+  const reader = stream.getReader()
+  const pump = (async () => { for (;;) { const next = await reader.read(); if (next.done) break; parts.push(next.value) } })()
+  for (let i = 0; i < 50 && !rpc.calls.some(c => c.method === 'turn/start'); i++) await tick()
+  const config = rpc.calls.find(c => c.method === 'thread/start')!.params.config as { web_search?: string; mcp_servers?: Record<string, { url?: string; tool_timeout_sec?: number }> }
+  assert.equal(config.web_search, 'disabled')
+  assert.match(config.mcp_servers!.acb_web.url!, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/)
+  assert.equal(config.mcp_servers!.acb_web.tool_timeout_sec, 180)
+  rpc.onMessage({ method: 'item/started', params: { threadId: 'thread-a', item: { id: 'w', type: 'mcpToolCall', server: 'acb_web', tool: 'web_research', arguments: { question: 'q' } } } })
+  rpc.complete()
+  await pump
+  assert.ok(parts.some(p => (p as { type?: string; toolName?: string }).type === 'tool-call' && (p as { toolName?: string }).toolName === 'mcp__acb_web__web_research'))
+
+  // Without it: no change to today's thread configuration.
+  const plain = setup()
+  const response = (plain.connection.createChatModel({ workingDirectory: '/company' }) as Model).doGenerate({ prompt })
+  await tick()
+  assert.equal(plain.rpc.calls.find(c => c.method === 'thread/start')!.params.config, undefined)
+  plain.rpc.complete(); await response
+})

@@ -6,7 +6,7 @@
 
 import type { ToolCall, ToolEventTracker } from '../../shared/agent-events'
 
-interface CodexItem { id?: unknown; type?: unknown; command?: unknown; cwd?: unknown; changes?: unknown; server?: unknown; tool?: unknown; status?: unknown }
+interface CodexItem { id?: unknown; type?: unknown; command?: unknown; cwd?: unknown; changes?: unknown; server?: unknown; tool?: unknown; arguments?: unknown; status?: unknown }
 
 /** The item as the action log sees it (undefined: not a tool call). */
 export function codexToolCall(item: CodexItem): ToolCall | undefined {
@@ -14,7 +14,8 @@ export function codexToolCall(item: CodexItem): ToolCall | undefined {
   switch (item.type) {
     case 'commandExecution': return { tool: 'Bash', input: { command: item.command }, cwd }
     case 'fileChange': return { tool: 'Write', input: { changes: item.changes } }
-    case 'mcpToolCall': return { tool: `mcp__${String(item.server)}__${String(item.tool)}` }
+    // The arguments only reach describeTarget, which keeps the web research's host and nothing else.
+    case 'mcpToolCall': return { tool: `mcp__${String(item.server)}__${String(item.tool)}`, input: item.arguments }
     case 'webSearch': return { tool: 'WebSearch' }
     default: return undefined
   }

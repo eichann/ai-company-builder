@@ -225,3 +225,46 @@ test('without an approval handler the write after a private read is denied, not 
   const d = await pre({ hook_event_name: 'PreToolUse', tool_name: 'Edit', tool_input: { file_path: `${ROOT}/a.md` } })
   assert.equal(d.hookSpecificOutput.permissionDecision, 'deny')
 })
+
+// --- 「Web で調べる」 (web-research.md) ------------------------------------
+
+const webTools = { execute: async () => 'result' }
+
+test('web research stays an outbound tool: asked after a private read, with its own wording', () => {
+  const before = decidePrivateWrite(ctx(), createPrivateReadState(), 'mcp__acb_web__web_research', { question: 'q' }, ROOT)
+  assert.equal(before.ask, false)
+  const after = decidePrivateWrite(ctx(), marked(), 'mcp__acb_web__web_research', { question: 'q', urls: ['https://example.com'] }, ROOT)
+  assert.equal(after.ask, true)
+  if (after.ask) assert.match(after.message, /^この会話では非公開フォルダの内容を読んでいます。Webで調べるために、AIが書いた質問を外部（検索やWebサイト）に送ろうとしています。質問に非公開の内容が含まれていないか確認してください。$/)
+})
+
+test('Claude chat with web research: the tool is offered and allowed, the CLI web tools are denied for the session', async () => {
+  const { connection, read } = capture({ getPermissionMode: () => 'default', requestToolApproval: async () => ({ approved: false }) })
+  connection.createChatModel({ appSessionId: 'conv-w', workingDirectory: ROOT, webResearch: webTools })
+  const options = read()
+  assert.deepEqual(options.settings, { permissions: { deny: ['WebFetch', 'WebSearch'] } })
+  assert.ok(options.allowedTools.includes('mcp__acb_web__web_research'))
+  assert.ok(options.mcpServers.acb_web)
+  // Not asked (no private read): canUseTool lets it run without a prompt.
+  const allowed = await options.canUseTool('mcp__acb_web__web_research', { question: 'q' }, { toolUseID: 'w1' })
+  assert.equal(allowed.behavior, 'allow')
+
+  // Without web research: today's behaviour (no deny, no tool, asked like any other MCP tool).
+  const plain = capture({ getPermissionMode: () => 'default', requestToolApproval: async () => ({ approved: false }) })
+  plain.connection.createChatModel({ appSessionId: 'conv-p', workingDirectory: ROOT })
+  assert.equal(plain.read().settings, undefined)
+  assert.equal(plain.read().mcpServers, undefined)
+  const asked = await plain.read().canUseTool('mcp__acb_web__web_research', { question: 'q' }, { toolUseID: 'w2' })
+  assert.equal(asked.behavior, 'deny')
+})
+
+test('Claude chat: after a private read the member is asked before web research runs', async () => {
+  const asked: unknown[][] = []
+  const { connection, read } = capture({ requestToolApproval: async (...args) => { asked.push(args); return { approved: false } } })
+  connection.createChatModel({ appSessionId: 'conv-wp', workingDirectory: ROOT, webResearch: webTools, privateReads: { context: ctx(), state: marked() } })
+  const pre = read().hooks.PreToolUse[0].hooks[0]
+  const denied = await pre({ hook_event_name: 'PreToolUse', tool_name: 'mcp__acb_web__web_research', tool_input: { question: '評価の内容' }, tool_use_id: 'w3' })
+  assert.equal(denied.hookSpecificOutput.permissionDecision, 'deny')
+  assert.equal(asked.length, 1)
+  assert.match(String(asked[0][4]), /Webで調べるために/)
+})

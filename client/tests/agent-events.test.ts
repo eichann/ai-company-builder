@@ -90,6 +90,15 @@ test('commands: file redirection and tee are flagged; fd duplication and /dev/nu
   assert.deepEqual(describeCommand('git status 2>&1 | head').programs, ['git status', 'head'])
 })
 
+test('the app\'s web research is a web call: the first given page\'s host, never the question', () => {
+  assert.equal(categorizeTool('mcp__acb_web__web_research'), 'web')
+  assert.ok(!APP_MCP_SERVERS.includes('acb_web'))
+  assert.equal(categorizeTool('mcp__acb_web__other'), 'mcp-external')
+  assert.deepEqual(describeTarget('mcp__acb_web__web_research', { question: '社外秘', urls: ['https://u:p@Docs.Example.com/a?t=1', 'https://b.example.com'] }, ctx), { kind: 'web', host: 'docs.example.com' })
+  assert.deepEqual(describeTarget('mcp__acb_web__web_research', { question: 'https://leak.example.com/in-question' }, ctx), { kind: 'web' })
+  assert.deepEqual(describeTarget('mcp__acb_web__web_research', { question: 'q', urls: ['file:///etc/passwd'] }, ctx), { kind: 'web' })
+})
+
 test('targets: web host only, MCP server, subagent type; nothing for questions', () => {
   assert.deepEqual(describeTarget('WebFetch', { url: 'https://user:pw@Docs.Example.com:8443/a/b?token=x#f', prompt: 'p' }, ctx), { kind: 'web', host: 'docs.example.com' })
   assert.deepEqual(describeTarget('WebFetch', { url: 'file:///etc/passwd' }, ctx), { kind: 'web' })
@@ -114,6 +123,7 @@ test('no content, argument, URL path/query or message ever reaches a serialized 
     ['Bash', { command: `echo '${secrets[4]}' > /tmp/out` }],
     ['WebFetch', { url: `https://example.com${secrets[5]}?token=${secrets[2]}`, prompt: secrets[4] }],
     ['WebSearch', { query: secrets[4] }],
+    ['mcp__acb_web__web_research', { question: `${secrets[4]} ${secrets[3]}`, urls: [`https://example.com${secrets[5]}?token=${secrets[2]}`] }],
     ['Write', { file_path: `${ROOT}/a.md`, content: `${secrets[4]} ${secrets[0]}` }],
     ['Edit', { file_path: `/Users/m${secrets[5]}.md`, old_string: secrets[3], new_string: secrets[4] }],
     ['mcp__mail__send', { to: secrets[7], body: secrets[4] }],
@@ -146,6 +156,8 @@ test('the server accepts every event the tracker makes, unchanged (shared/types 
     ['Bash', { command: 'a; b; c; d; e; f; g' }],
     ['WebFetch', { url: 'https://Example.COM/a?b' }],
     ['WebSearch', { query: 'x' }],
+    ['mcp__acb_web__web_research', { question: 'q', urls: ['https://Docs.Example.com/x'] }],
+    ['mcp__acb_web__web_research', { question: 'q' }],
     ['mcp__github__create_issue', {}],
     ['mcp__acb_company_files__company_read_file', { path: 'x' }],
     ['Agent', { subagent_type: 'general-purpose' }],

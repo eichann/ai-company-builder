@@ -10,6 +10,9 @@ import type { ChatServerConfig } from '../../chat-server'
 import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import { companyFilesInstructions, createCompanyFileTools } from '../../company-files/tools'
+import { createWebResearchBudget, createWebResearchTools } from '../../web-research/tools'
+import { WEB_RESEARCH_INSTRUCTIONS } from '../../../shared/web-research'
+import { runWebReader } from '../../agents/registry'
 import { ConsultationReferences } from '../../consultations/service'
 import type { HandoffService } from '../../handoff/service'
 import type { HandoffStore } from '../../handoff/store'
@@ -45,6 +48,8 @@ export interface ChatServerConfigDeps {
 }
 
 export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerConfig {
+  // 「Web で調べる」: calls per conversation, for the app's lifetime.
+  const webResearchBudget = createWebResearchBudget()
   return {
     getAuthMode: () => deps.config.authMode(),
     getApiKey: () => deps.config.load().anthropicApiKey,
@@ -84,6 +89,14 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         instructions: companyFilesInstructions(notDownloaded),
       }
     },
+    createWebResearch: ({ agent, conversationId, signal }) => ({
+      tools: createWebResearchTools({
+        budget: webResearchBudget, conversationId, signal,
+        // The member's own agent, read when the call runs (CLI path, environment).
+        run: (input, readerSignal) => runWebReader(agent, { input, signal: readerSignal, host: { getCli: deps.claudeCli.path, env: deps.shellEnv.env() } }),
+      }),
+      instructions: WEB_RESEARCH_INSTRUCTIONS,
+    }),
     createReferences: (company, id, signal) => new ConsultationReferences(deps.history, deps.handoffStore).forTurn(company, id, signal),
     prepareRecovery: (company, id, messages) => recoveryContext(deps.history.get(company, id), deps.handoffStore.read(company, id), messages),
     onRecovery: (company, id, recovery) => deps.handoffs.recordRecovery(company, id, recovery),

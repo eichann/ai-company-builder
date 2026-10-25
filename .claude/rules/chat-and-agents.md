@@ -51,23 +51,25 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `client/shared/agents/registry.ts` (pure; main, renderer and tests import it): per agent id
   (`claude-code` / `codex` / `api-key`; `AuthMode` is an alias of `AgentId`) → labels, models
   (id, label, efforts, context, exact CLI string), defaults (Opus 5.5 + medium), the model per
-  job (`tasks`: chat / title / commitMessage / voice / handoff) and `capabilities`
+  job (`tasks`: chat / title / commitMessage / voice / handoff / webReader) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
-  commitMessageFallback, privateFolderCommitMessages, liveModelCatalog).
+  webReader, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog).
 - **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and
   fails on a model id literal anywhere under `client/electron`, `client/src`, `client/shared`.
   A model generation update is a registry-only change. (The API-key mode deliberately uses
   `claude-haiku-5-5` for commit messages but `claude-haiku-4-5-20251001` for voice and titles.)
 - `client/electron/agents/registry.ts` is how each agent starts: `createAgentConnection(id,
   host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting),
-  `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`.
+  `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`, `runWebReader(id,
+  request)` (「Web で調べる」's reader, `web-research.md`).
   `client/tests/agent-registry-factories.test.ts`: every capability-gated factory an agent claims
   exists, and none it does not.
-- Role profiles (`AgentProfile`: role, allowedTools, settingSources, sandbox, cwd) are the shape
-  for the coming reader/worker split. No agent implements one yet, so any set field throws —
-  a caller can never believe a restriction is in force when it is not. Implement a profile
-  inside the agent's factory; callers stay agent-agnostic.
+- Role profiles (`AgentProfile`: role, allowedTools, settingSources, sandbox, cwd) on a chat
+  connection: no agent implements one, so any set field throws — a caller can never believe a
+  restriction is in force when it is not. Implement a profile inside the agent's factory;
+  callers stay agent-agnostic. The Web reader is not a profile: it is a one-shot job with its
+  restrictions built in (`runWebReader`, `agents/web-reader.ts`).
 - Commit messages: the member's agent, then `commitMessageFallback` agents in registry order
   (Claude Code, API key — Codex is never picked on the member's behalf); a private folder's clone
   only `privateFolderCommitMessages` (the API key). Voice formatting: the member's agent only.
@@ -147,6 +149,11 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   Codex keeps its own default effort.
 - Settings sources are `['user', 'project']`; that is why shared agent config is protected at
   push (`push-check.md`).
+- 「Web で調べる」 (`web-research.md`): agents with `webReader` get the app tool `web_research`
+  (`acb_web`) and lose their own web tools — Claude through flag `settings: { permissions: {
+  deny: ['WebFetch', 'WebSearch'] } }` (whole session, subagents too), Codex through
+  `web_search: 'disabled'` in the thread config. A separate reader (the member's agent, light
+  model, web tools only, no settings, empty temp folder) reads the web.
 
 ## Choice prompts (the AI asks, the member picks)
 
@@ -274,7 +281,8 @@ the server: `agent-events.md` ("Sending from the app").
   ≤ 5 programs per compound command, the web host, the MCP server + tool, the subagent type.
   No prompt, content, argument, URL path/query or message — a test feeds secrets and checks the
   serialized events. Categories need no agent id (tool names do not collide); app MCP servers
-  (`APP_MCP_SERVERS`) are `app-tool`, `ask_user` / `AskUserQuestion` are `question`.
+  (`APP_MCP_SERVERS`) are `app-tool`, `ask_user` / `AskUserQuestion` are `question`, the app's
+  `mcp__acb_web__web_research` is `web` (target: the first given URL's host, never the question).
 - **Where it is reported.** The host's `onToolEvent` (`AgentHostConfig`, plus `toolEventPaths`
   for home / userData); the chat server only adds `toolEventContext` (company, root, turn id, department) to
   the request. Each turn builds a tracker with `agents/tool-events.ts` `turnToolEvents`; every
@@ -285,7 +293,8 @@ the server: `agent-events.md` ("Sending from the app").
     (`policy-denied`) are installed when a recorder is set; the query's end closes the turn.
   - Codex (`agents/codex-tool-events.ts`): command / file-change approvals (member's answer,
     paired by `itemId`), `item/started` / `item/completed` (Codex's own policy otherwise;
-    `declined` = `policy-denied`); `finish()` closes the turn.
+    `declined` = `policy-denied`; an MCP call's arguments reach only `describeTarget`);
+    `finish()` closes the turn.
   - API key (`chat-tools.ts` `logCall`): inside the five tools.
 - Limits: a call Claude's auto-mode classifier refuses without the PermissionDenied hook ends as
   `unfinished` (decision `policy-default`); Codex's sandbox decisions are not visible beyond the

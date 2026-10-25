@@ -42,8 +42,8 @@ test('Claude Code: xhigh is demoted to high where the CLI model does not take it
 })
 
 test('per-feature models are unchanged', () => {
-  assert.deepEqual(AGENTS['claude-code'].tasks, { chat: 'claude-opus-5-5[1m]', title: 'haiku', commitMessage: 'haiku', voice: 'haiku', handoff: 'haiku' })
-  assert.deepEqual(AGENTS.codex.tasks, { commitMessage: 'gpt-5.6-luna', voice: 'gpt-5.6-luna', handoff: 'gpt-5.6-luna' })
+  assert.deepEqual(AGENTS['claude-code'].tasks, { chat: 'claude-opus-5-5[1m]', title: 'haiku', commitMessage: 'haiku', voice: 'haiku', handoff: 'haiku', webReader: 'haiku' })
+  assert.deepEqual(AGENTS.codex.tasks, { commitMessage: 'gpt-5.6-luna', voice: 'gpt-5.6-luna', handoff: 'gpt-5.6-luna', webReader: 'gpt-5.6-luna' })
   assert.deepEqual(AGENTS['api-key'].tasks, {
     chat: 'claude-sonnet-4-20250514', title: 'claude-haiku-4-5-20251001',
     commitMessage: 'claude-haiku-5-5', voice: 'claude-haiku-4-5-20251001',
@@ -84,7 +84,7 @@ test('capabilities that depend on others are consistent', () => {
     const c = AGENTS[id].capabilities
     // Steering, suggestions, choice prompts, progress, MCP tools and hand-off
     // memos all ride on a native agent's own turn / session.
-    for (const key of ['steering', 'promptSuggestions', 'choicePrompts', 'subagentProgress', 'rateLimits', 'companyFilesMcp', 'references', 'handoff'] as const) {
+    for (const key of ['steering', 'promptSuggestions', 'choicePrompts', 'subagentProgress', 'rateLimits', 'companyFilesMcp', 'references', 'handoff', 'webReader'] as const) {
       if (c[key]) assert.ok(c.ownsConversation, `${id}.${key} needs ownsConversation`)
     }
     if (c.privateReadGuard) assert.ok(c.ownsConversation, `${id}.privateReadGuard`)
@@ -92,6 +92,7 @@ test('capabilities that depend on others are consistent', () => {
     const tasks = AGENTS[id].tasks
     if (c.oneShotText) assert.ok(tasks.commitMessage && tasks.voice, `${id}: one-shot models`)
     if (c.handoff) assert.ok(tasks.handoff, `${id}: hand-off model`)
+    if (c.webReader) assert.ok(tasks.webReader, `${id}: Web reader model`)
   }
 })
 
