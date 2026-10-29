@@ -186,7 +186,7 @@ test('a choice question waits above the input of its own conversation, survives 
   await expect(page.getByText('選択肢の質問 · 回答済み')).toBeVisible()
 })
 
-test('a reply that finishes while the member is elsewhere waits under 「結果が届いています」 until they have looked at it and moved on', async ({ page }) => {
+test('a reply that finishes while the member is elsewhere is marked 新着 at the top of 「開いている相談」 until they have looked at it and moved on', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual' })
   await send(page, '議事録をまとめて')
   await turnStarted(page)
@@ -195,16 +195,18 @@ test('a reply that finishes while the member is elsewhere waits under 「結果�
   await expect(sidebar.getByRole('region', { name: 'AIが作業中' })).toContainText('議事録をまとめて')
   await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
   await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', 'まとめました。'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
-  const results = sidebar.getByRole('region', { name: '結果が届いています' })
-  await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toContainText('返事が届いています')
+  const open = sidebar.getByRole('region', { name: '開いている相談' })
+  await expect(open.getByRole('button').first()).toHaveAccessibleName(/^議事録をまとめて/)
+  await expect(row).toContainText('新着')
+  await expect(row).toContainText('返事が届いています')
 
-  // Reading it keeps it there; moving on to another conversation leaves it open to continue.
+  // Reading it keeps the mark; moving on to another conversation clears it, still open to continue.
   await row.click()
   await expect(page.getByText('まとめました。').locator('visible=true')).toBeVisible()
-  await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+  await expect(row).toContainText('新着')
   await sidebar.getByRole('button', { name: /^新しい会話/ }).click()
-  await expect(results).toHaveCount(0)
-  await expect(sidebar.getByRole('region', { name: '開いている相談' }).getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+  await expect(row).not.toContainText('新着')
+  await expect(open.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
 })
 
 test.describe('a long restored conversation', () => {

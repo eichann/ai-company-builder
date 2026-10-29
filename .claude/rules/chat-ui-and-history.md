@@ -55,11 +55,11 @@ one place an added agent brings its own controls; everything else asks the regis
   `src/lib/consultationStatus.ts` — needs-you (pending approval or agent question, which wins over
   working), working (with a plain-Japanese line for the running tool or the subagent progress
   line; never the command text or message bodies), failed, unseen (a turn ended while the tab was
-  not active; cleared when the member leaves the tab after looking, which leaves it 開いている相談) or idle — and publishes it to
+  not active; cleared when the member leaves the tab after looking, which clears the 新着 mark) or idle — and publishes it to
   `consultationStatusStore` (keyed by tab id) only when it changes, so streaming does not
   re-render the list per chunk. `groupConversationRows` orders the groups あなたの番 › ピン留め ›
-  結果が届いています › 止まっています › AIが作業中 › 開いている相談 (idle open tabs: new ones and ones
-  read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
+  止まっています › AIが作業中 › 開いている相談 (idle open tabs: new ones, unread replies first with a
+  「新着」 mark, and ones read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
   a pinned conversation leaves ピン留め only for あなたの番. Tests:
   `client/tests/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.

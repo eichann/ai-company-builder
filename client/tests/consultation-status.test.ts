@@ -47,7 +47,7 @@ test('after a turn: failed, unseen (finished while away) or idle', () => {
 
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'c', title: id, messageCount: 3, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 
-test('groups: あなたの番 › ピン留め › 結果 › 止まっています › 作業中 › 開いている相談 › 終わったもの; pinned keeps its place unless it is the member\'s turn', () => {
+test('groups: あなたの番 › ピン留め › 止まっています › 作業中 › 開いている相談 (unread first) › 終わったもの; pinned keeps its place unless it is the member\'s turn', () => {
   const sessions = [session('ask', { pinned: true }), session('pin', { pinned: true }), session('result'), session('broken'), session('busy'), session('idle'), session('old')]
   const tabs = ['ask', 'pin', 'result', 'broken', 'busy', 'idle'].map(id => ({ id: `tab-${id}`, title: id, sessionId: id }))
   const status: Record<string, ConsultationStatus> = {
@@ -62,10 +62,9 @@ test('groups: あなたの番 › ピン留め › 結果 › 止まっていま
   assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.key)]), [
     ['あなたの番', ['tab-ask']],
     ['ピン留め', ['tab-pin']],
-    ['結果が届いています', ['tab-result']],
     ['止まっています', ['tab-broken']],
     ['AIが作業中', ['tab-busy']],
-    ['開いている相談', ['tab-idle']],
+    ['開いている相談', ['tab-result', 'tab-idle']],
     ['終わったもの', ['old']],
   ])
 })
