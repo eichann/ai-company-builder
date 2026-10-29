@@ -91,7 +91,7 @@ company-wide skills behind slash commands with `{ force: true }` (coalesced 120 
   Closing a tab whose save was cancelled asks before discarding.
 - Preview: `client/tests/editor-tabs-ui.html?view=external`.
 
-## Document review (`src/features/doc-review/`; UI still in `components/skill-ui/MarkdownReview.tsx`)
+## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 
 A Markdown preview can be reviewed: comments on selected text, replies, resolved marks. Everything
 lives in sidecar files next to the document, one writer per file so teammates never conflict in
@@ -109,7 +109,9 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
-  components never call `window.electronAPI`). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
+  components never call `window.electronAPI`); state in `hooks/useMarkdownReview.ts` and
+  `hooks/useTextSelection.ts`; banners, side panel, popover, history and the snapshot diff in
+  `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
