@@ -9,6 +9,6 @@
     "./**/*.ts",
     "../*-ui.tsx",
     // Declares Window['electronAPI'] (the typed fake in fixtures/electron-api.ts).
-    "../../electron/preload.ts"
+    "../../src/shared/ipc/electron-api.ts"
   ]
 }

@@ -241,12 +241,7 @@ const api: ElectronAPI = {
   onChatServerInfo: callback => subscribe('chat-server:info', callback),
 }
 
+// The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).
 contextBridge.exposeInMainWorld('electronAPI', api)
-
-declare global {
-  interface Window {
-    electronAPI: ElectronAPI
-  }
-}
 
 export {}

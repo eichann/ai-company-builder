@@ -149,8 +149,8 @@ export function staticMainChannels(): Inventory['main'] {
 }
 
 /**
- * Members of `ElectronAPI` (shared/ipc-contract.ts, what preload.ts declares
- * as `Window['electronAPI']`): dotted name → the member's type as the
+ * Members of `ElectronAPI` (shared/ipc-contract.ts, what preload.ts implements
+ * and src/shared/ipc/electron-api.ts declares as `Window['electronAPI']`): dotted name → the member's type as the
  * compiler resolves it (contract aliases expanded into parameters and
  * result), so a change to a channel's types shows up here.
  */

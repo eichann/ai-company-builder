@@ -66,7 +66,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
 (`window.electronAPI`). The compiler checks both ends: `preload.ts` builds `window.electronAPI`
 as an `ElectronAPI` through typed `invoke` / `send` / `sendSync` / `subscribe` helpers, and main
 registers through `typedIpc(ipcMain)` (`electron/ipc/registrar.ts`, an `IpcRegistrar`, no
-Electron import). Preview pages fake it with `Window['electronAPI']` (`tests/ui/fixtures`).
+Electron import). The renderer types `window.electronAPI` itself (`src/shared/ipc/electron-api.ts`,
+`declare global`), so it does not depend on `preload.ts`; preview pages fake it with
+`Window['electronAPI']` (`tests/ui/fixtures`).
 
 How to add a channel:
 1. Add it to `shared/ipc-contract.ts` (channel → `{ args, result }`, or the event payload) and its
