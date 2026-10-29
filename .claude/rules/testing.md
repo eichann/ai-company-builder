@@ -6,6 +6,7 @@ paths:
   - "client/playwright.config.ts"
   - "client/scripts/check-bundle-size.mjs"
   - "client/tests/*.test.ts"
+  - "client/src/**/*.test.ts"
 ---
 
 # Client tests: node tests, renderer UI tests, performance baselines
@@ -16,10 +17,24 @@ IPC harness: `ipc-and-main-process.md`. Parity tests: `shared-core.md`. Full tex
 
 ## Node tests
 
-`client/tests/*.test.ts` run with node:test via tsx: `cd client && npx tsx --test tests/<name>.test.ts`.
-Pure logic belongs here. CI job "Client tests (macOS)" runs `npx tsx --test tests/*.test.ts`
-plus two Swift tests (`audio-level`, `input-route`). macOS on purpose: the POSIX spawn wrappers
-run `exec N>&-` through `/bin/sh`, which on Ubuntu is dash and fails on multi-digit fds.
+Node tests run with node:test via tsx. Two places:
+
+- **Renderer tests sit next to their code** (`client/src/**/*.test.ts`, e.g.
+  `src/features/doc-review/model.test.ts` beside `model.ts`; `renderer-structure.md`). New
+  renderer tests go there; tests under `client/tests/` that cover renderer code move next to it
+  when that code moves to `features/`. Run one: `cd client && npx tsx --test src/<path>.test.ts`.
+  They are type-checked with the app (`tsconfig.json` includes `src`) and are not bundled
+  (nothing imports them).
+- **`client/tests/*.test.ts`**: the main process, `client/shared`, whole-tree checks
+  (`architecture-boundaries.test.ts`) and renderer tests not yet moved:
+  `cd client && npx tsx --test tests/<name>.test.ts`. `sync/`, `sync-harness/`, `ipc-harness/`,
+  `ui/`, `perf/` and the preview pages stay under `client/tests/`.
+
+CI job "Client tests (macOS)" runs `npx tsx --test tests/*.test.ts` plus every
+`src/**/*.test.ts` (listed with `find`: CI's Node 20 test runner does not expand globs, and bash
+without globstar reads `**` as `*`; keep file names free of spaces), then two Swift tests
+(`audio-level`, `input-route`). macOS on purpose: the POSIX spawn wrappers run `exec N>&-`
+through `/bin/sh`, which on Ubuntu is dash and fails on multi-digit fds.
 
 ## Renderer UI tests (Playwright)
 
