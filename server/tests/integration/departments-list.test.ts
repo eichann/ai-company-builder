@@ -1,6 +1,6 @@
 /**
  * Integration Test: the department list is read from the bare repository and
- * never blocks the event loop; mutations on the working clone are serialized
+ * never blocks the event loop; the server's own commits are serialized
  * per company.
  *
  * GET /departments used to `git pull` (or clone) the server's working clone

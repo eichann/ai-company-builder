@@ -1,9 +1,11 @@
 /**
- * Per-company serialization of working-clone operations
- * (`data/workdirs/<companyId>`): department create / rename / delete, private
- * folder creation, company seeding. A run registers itself before awaiting
- * the previous one, so two queued requests can never wake up together and run
- * git in the same working directory concurrently.
+ * Per-company serialization of the server's own changes to a company's
+ * repositories: department create / rename / delete and company seeding
+ * (commits built in the bare repository, lib/bare-commit.ts), private folder
+ * creation. A run registers itself before awaiting the previous one, so two
+ * queued requests can never wake up together and both build on the same
+ * branch tip. Members' pushes are not serialized here: a commit that lost
+ * that race is rebuilt on the new tip (lib/bare-commit.ts).
  */
 const companyLocks = new Map<string, Promise<void>>()
 

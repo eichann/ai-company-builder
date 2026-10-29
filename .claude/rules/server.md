@@ -121,24 +121,38 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
 
 Code: `routes/departments.ts` (HTTP) → `services/departments.ts` (rules) → `DepartmentRepository`
 / `ScopeRepository` (SQLite) and `RepoStore` (`adapters/git-repo-store.ts`: shared-branch reads
-from the bare repo via `lib/repo-folders.ts`, working-clone mutations under `withCompanyLock`).
+from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
+`lib/bare-commit.ts` under `withCompanyLock`).
 
 - The file system is the source of truth; the DB holds display settings (order, icon, color,
   display name); the admin UI can also perform file operations.
 - Listing (and `POST /sync`, stats): `git ls-tree` the shared branch (`main`, else `master`) of
   the company's bare repo — the non-hidden root directories — then return the DB rows (by
-  `sort_order`) whose folder is among them. Read-only requests never pull or clone the server's
-  working clone: a synchronous `git pull` on every list call once froze the whole process (all
-  API and git-http traffic) for 42 s on a 7.7 GB clone.
-- Create: mkdir → git add → commit → push → save to DB. Edit: git mv (if renamed) → commit → push
-  → update DB. Delete: confirm → rm -rf + git add -A → commit → push → delete from DB.
-  Departments containing a private folder cannot be deleted or renamed; a reserved name is refused.
-- Mutations work in the working clone (`data/workdirs/<companyId>`, pulled first) under a
-  per-company promise-chain lock (`withCompanyLock`, `lib/company-lock.ts`, port `CompanyLock`).
-  Company creation (`services/companies.ts` → `adapters/git-repo-store.ts`, timeouts adjustable
-  with `setSeedGitTimeoutsForTests`) seeds the default department folders the same way (async, under the lock, before the 201;
-  `gitAsync` with `timeoutMs`: 60 s per local step, 300 s for the push, which kills git's whole
-  process group, hook included, and fails the seeding while the company is still created).
+  `sort_order`) whose folder is among them. Nothing is ever pulled or checked out: a synchronous
+  `git pull` of the old working clone on every list call once froze the whole process (all API
+  and git-http traffic) for 42 s on a 7.7 GB clone.
+- Mutations have no working tree (`lib/bare-commit.ts`): a department folder is one entry of the
+  shared branch's root tree, so create adds an entry (`.gitkeep`, `.personal/.gitignore` blobs,
+  `mktree`), rename relabels it (its tree is reused), delete drops it; `commit-tree` (parent = the
+  tip read, author/committer "AI Company Builder"), then a push from the bare repo to itself with
+  `internalGitEnv()` — receive-pack runs the pre-receive checker (`push-check.md`). A member's
+  push in between (the ref update loses) → the edit is redone on the new tip, up to 5 times.
+  Then the DB is updated. Why: the old working clone (`data/workdirs/<companyId>`: pull,
+  `git mv`, `git add -A`) took 119 s for a 1 MB rename in a 13 GB company; now ~1 s, mostly the
+  checker's start-up (`tests/integration/department-commits.test.ts`).
+- A target name is taken when a root entry (folder or file) has the same `nameKey` (NFC, A–Z
+  folded); a case-only rename is allowed. The source is found by exact name, then NFC (a Mac
+  commits NFD). Delete reports the files / folders under the folder, hidden entries skipped
+  (`countFilesInTree`, the count the old on-disk walk made). Missing source: rename and delete
+  change nothing (true / 0, 0). Departments containing a private folder cannot be deleted or
+  renamed; a reserved name is refused.
+- All of it runs under a per-company promise-chain lock (`withCompanyLock`,
+  `lib/company-lock.ts`, port `CompanyLock`). Company creation (`services/companies.ts` →
+  `adapters/git-repo-store.ts`) seeds the default department folders the same way (root commit;
+  async, under the lock, before the 201). `gitAsync` with `timeoutMs` (adjustable with
+  `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
+  process group, hook included, and fails the change (a seeding failure still creates the
+  company).
 
 ## Async only
 
@@ -153,7 +167,8 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
   (Better Auth). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
-  (`<DATA_DIR>/repos`) and the working clones (`<DATA_DIR>/workdirs`).
+  (`<DATA_DIR>/repos`). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.
 

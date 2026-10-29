@@ -3,13 +3,14 @@ import type { PrivateFolderRecord } from './private-folders'
 /**
  * Where the companies' git repositories live, and the server's own changes
  * to them. The implementation (adapters/git-repo-store.ts) keeps bare
- * repositories under REPOS_DIR and working clones under WORKDIR_DIR, runs git
- * asynchronously (never execFileSync in a request) and serializes
- * working-clone work per company (lib/company-lock.ts).
+ * repositories under REPOS_DIR, runs git asynchronously (never execFileSync
+ * in a request) and serializes the server's own changes per company
+ * (lib/company-lock.ts).
  *
- * Reads come from the shared branch of the bare repository (no working
- * clone, no pull). Writes happen in the working clone — pulled first, under
- * the company lock — and are pushed as the server's own push.
+ * Reads come from the shared branch of the bare repository (no checkout, no
+ * pull). Writes are commits built in the bare repository itself (no working
+ * tree: about a second whatever the company's size), under the company lock,
+ * published as the server's own push through the pre-receive checker.
  */
 export interface RepoStore {
   /**

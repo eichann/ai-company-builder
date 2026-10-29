@@ -3,8 +3,8 @@
  * settings (order, icon, color, display name), scope = permission rules,
  * managers = who may edit them (.claude/rules/server.md "Departments").
  *
- * Folder changes go through the RepoStore (working clone, company lock,
- * async git); the rows follow only once the folder change succeeded. A
+ * Folder changes go through the RepoStore (commits built in the bare
+ * repository, company lock, async git); the rows follow only once the folder change succeeded. A
  * private folder's path is reserved: no department may take it, and a
  * department containing one can be neither renamed nor deleted.
  */
@@ -105,7 +105,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     },
 
     /**
-     * Create the folder (working clone), then the row and its permission
+     * Create the folder (a commit on the shared branch), then the row and its permission
      * scope (no rules: inherits from the company). Throws when git fails.
      */
     async create(member: Member, body: CreateDepartmentInput): Promise<Outcome<DepartmentRow>> {
@@ -136,7 +136,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     /**
      * Update display settings; a new folder name renames the folder first
-     * (only a rename touches the working clone). Private folders do not move
+     * (only a rename touches the repository). Private folders do not move
      * with a rename (their own repositories, every reader's checkout), so a
      * department containing one cannot be renamed, and the new name may not
      * be reserved. Throws when the repository is missing or git fails.
@@ -191,7 +191,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     },
 
     /**
-     * Delete the folder (working clone), then the row with the department's
+     * Delete the folder (a commit on the shared branch), then the row with the department's
      * scopes, their rules and its managers. Throws when git fails.
      */
     async delete(member: Member, existing: DepartmentRow): Promise<{ deletedFiles: number; deletedFolders: number }> {

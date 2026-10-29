@@ -13,7 +13,7 @@ export const randomIds: IdGenerator = {
   newToken: () => randomBytes(32).toString('hex'),
 }
 
-/** The process-wide lock the RepoStore's working-clone work also takes. */
+/** The process-wide lock the RepoStore's own commits also take. */
 export const processCompanyLock: CompanyLock = {
   run: (companyId, fn) => withCompanyLock(companyId, fn),
 }

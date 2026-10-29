@@ -67,7 +67,9 @@ forever — the "permanently unable to sync" shape).
 - A snapshot is always enforced; an unreadable one rejects with `[HOOK_ERROR]`; no resolvable
   pusher denies every changed path unless writing is open to everyone.
 - The server's own pushes (department folders, company creation) carry `ACB_INTERNAL_PUSH=1`
-  (`internalGitEnv`) and skip only the write check. git-http strips both variables from what it
+  (`internalGitEnv`) and skip only the write check. They are commits built in the bare
+  repository and pushed from it to itself (`lib/bare-commit.ts`), so receive-pack runs this hook
+  on them like on any push: every content rule applies. git-http strips both variables from what it
   inherits, so a client cannot select either. Local-transport pushes (tests, an operator) carry
   neither and are not write-checked.
 
