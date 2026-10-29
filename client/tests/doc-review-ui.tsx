@@ -3,7 +3,8 @@
 // banner, side panel, comment popover, replies, resolve) on a Markdown file shown as a
 // preview, with the preload API mocked by an in-memory folder. 提案書.md
 // already has a completed review by 佐藤; the member is 山田 (demo@example.com).
-// Open /tests/doc-review-ui.html?theme=light|dark (&request=1: a review request exists)
+// Open /tests/doc-review-ui.html?theme=light|dark (&request=1: a review request exists;
+// &history=1: more completed reviews, one all resolved, one whose text is gone)
 // window.__acbFiles is the "disk" (path → content), for the spec to read the
 // sidecar files the review writes.
 import { createRoot } from 'react-dom/client'
@@ -49,6 +50,28 @@ const files: Record<string, string> = {
       }],
     },
   }, null, 2),
+}
+
+// ?history=1: two more completed reviews — 鈴木's, all resolved, and 田中's, whose
+// text is no longer in the document (「位置不明」). Opening must not change either file.
+function completedReview(id: string, name: string, email: string, text: string, resolved: boolean) {
+  return JSON.stringify({
+    version: 1,
+    review: {
+      id, reviewerName: name, reviewerEmail: email, status: 'completed',
+      createdAt: '2026-10-18T01:00:00.000Z', completedAt: '2026-10-18T02:00:00.000Z',
+      comments: [{
+        id: `c-${id}`, authorName: name, severity: 'should_fix', selectedText: text,
+        startOffset: 0, endOffset: text.length, body: `${name}の指摘`, createdAt: '2026-10-18T01:30:00.000Z',
+        resolved, replies: [],
+      }],
+      snapshot: DOC_TEXT,
+    },
+  }, null, 2)
+}
+if (params.get('history') === '1') {
+  files[`${DOC}.review.b2000000-0000-4000-8000-000000000002.json`] = completedReview('b2000000-0000-4000-8000-000000000002', '鈴木', 'suzuki@example.com', '担当は営業部です', true)
+  files[`${DOC}.review.c3000000-0000-4000-8000-000000000003.json`] = completedReview('c3000000-0000-4000-8000-000000000003', '田中', 'tanaka@example.com', '旧い見出しの文言', false)
 }
 
 // ?request=1: someone asked for a review of 提案書.md (the button is hidden; the file can still exist).

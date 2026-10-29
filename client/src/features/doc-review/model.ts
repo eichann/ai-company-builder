@@ -139,6 +139,20 @@ export function mergeRepliesIntoReviews(reviews: Review[], allReplies: CommentRe
   }))
 }
 
+/**
+ * For display only: a completed review's comment is 「位置不明」 (`orphaned`) when
+ * its text is no longer in the document. Never written back — members fix the
+ * document from these reviews, so opening one must not change anyone's file.
+ * Unknown document text (it could not be read) keeps what the file says.
+ */
+export function markOrphanedComments(reviews: Review[], documentText: string | null): Review[] {
+  if (documentText === null) return reviews
+  return reviews.map(review => review.status !== 'completed' ? review : {
+    ...review,
+    comments: review.comments.map(c => ({ ...c, orphaned: !documentText.includes(c.selectedText) })),
+  })
+}
+
 export function getReviewRequestFilePath(filePath: string): string {
   return `${filePath}.review-request.json`
 }
