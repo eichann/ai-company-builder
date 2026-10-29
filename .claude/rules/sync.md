@@ -66,8 +66,9 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 6.6  company repo: new files under a name the member may not use → .backups/<ts>_reserved_path/
 7    reconcile the sparse checkout with the member's exclusions (download-choices.md)
 8    warn about files deleted locally (sync / restore / cancel)
-9    git add --sparse . → unstage anything under .backups/, .workspace/ or a private folder
-     (index only) → commit (AI message, below) → record localHash
+9    keep the app's temporary save files ignored (.git/info/exclude block) → git add --sparse .
+     → unstage anything under .backups/, .workspace/ or a private folder, and any temporary
+     save file (index only) → commit (AI message, below) → record localHash
 9.5  files at paths of a locally excluded nested repo that origin/main now has (a teammate's
      same-path folder) and that differ → copied to .backups/<ts>_nested_repo/ (the pull would
      overwrite them: they are ignored); a failed check stops before the pull

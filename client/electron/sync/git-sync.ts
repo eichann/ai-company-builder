@@ -72,6 +72,14 @@ import {
   syncReadOnlyScope,
 } from './private-sync'
 import type { SyncDeps } from './types'
+import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
+import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
+
+/** This computer's ignore rule for the app's temporary save files (.git/info/exclude). */
+const TEMP_SAVE_EXCLUDES: ExcludeBlock = {
+  begin: '# >>> ACB temporary save files (managed by the app, local only) >>>',
+  end: '# <<< ACB temporary save files <<<',
+}
 
 export type { SyncDeps, SyncDialog, SyncServerApi, SyncLogger } from './types'
 
@@ -156,12 +164,20 @@ async function runSync(deps: SyncDeps, repoPath: string, companyId: string, comm
     // ignored path), so whatever of that kind reached the index is unstaged
     // right after the add — index only, nothing on disk is touched — before
     // anything is committed.
+    // The document review's temporary save files (`.<name>.acb-tmp-…`, there for
+    // milliseconds) are ignored on this computer only and unstaged if a shared
+    // .gitignore negation re-included them (client/shared/temp-save-file.ts).
     const localOnly = ['.backups', '.workspace', ...privatePaths]
     const stageAll = async () => {
+      try {
+        writeExcludeLines(repoPath, TEMP_SAVE_EXCLUDES, [TEMP_SAVE_EXCLUDE_PATTERN])
+      } catch (excludeError) {
+        log.warn('Git sync: Could not write .git/info/exclude (temporary save files):', excludeError)
+      }
       await git.raw(['add', '--sparse', '.'])
       const staged = (await git.raw(['diff', '--cached', '--name-only', '--no-renames', '-z', '--diff-filter=AMT']).catch(() => ''))
         .split('\0').filter(Boolean)
-      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f))
+      const stray = staged.filter(f => isUnderAny(localOnly, f) || isLocalOnlyPath(f) || isTempSaveFile(f))
       if (stray.length > 0) {
         log.warn('Git sync: Unstaging local-only paths that reached the index:', stray.length)
         for (let i = 0; i < stray.length; i += 200) {

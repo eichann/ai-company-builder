@@ -93,6 +93,14 @@ what git actually sees through the factory.
   "a folder one member keeps local still syncs for a teammate…", "a nested-repo line an older
   app wrote…", "no window…", "deleting the nested repository…"; partial-clone "…stays excluded
   across settings changes and reopening"; findings "concurrent nested-repo exclusions converge…".
+- The app's temporary save files (`.<name>.acb-tmp-<random>`: the document review writes one
+  next to a sidecar and renames it over, `client/shared/temp-save-file.ts`) are never shared. A
+  sync in that moment would commit a half-written file, and the next one its removal. Every
+  sync (company repository and each private clone) keeps the pattern `.*.acb-tmp-*` in its own
+  managed block of `.git/info/exclude` (`writeExcludeLines`, `sync/local-excludes.ts`), never
+  the shared `.gitignore`; one that still reached the index (a shared `!.*` outranks
+  `info/exclude`) is unstaged after the `git add`, like `.backups/`. The file stays on disk
+  untouched. Tests: `client/tests/sync/temp-save-files.test.ts`, `client/tests/temp-save-file.test.ts`.
 - `.gitignore` merges with the `union` driver, declared in the repository-local
   `.git/info/attributes` (never committed, outranks `.gitattributes`, any depth;
   `sync/gitignore-merge.ts`). After replayed commits, duplicate lines the merge added are removed
