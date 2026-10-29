@@ -14,6 +14,7 @@ paths:
   - "client/src/lib/editorTabs.ts"
   - "client/src/components/skill-ui/**"
   - "client/src/features/doc-review/**"
+  - "client/src/features/skills/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
@@ -77,6 +78,9 @@ Main drops stale scans in `sendFileChanges`; the renderer rescans the shown list
 company-wide skills behind slash commands with `{ force: true }` (coalesced 120 ms, deferred
 ≤ 1 s while typing in chat) and after every successful sync, keeping the list on screen.
 `.claude/commands` / `.claude/agents` are not listed.
+The renderer reaches skills only through `src/features/skills/api.ts`: ports `SkillReads` (list,
+read a file), `SkillToolRuns` (start / stop a skill's tool) and `SkillOutbound` (open the tool's
+page in the browser).
 
 ## External changes to open files (`client/shared/editor-disk-state.ts`, `TabbedEditorPanel`)
 

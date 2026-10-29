@@ -236,6 +236,10 @@ function rendererUses(): Set<string> {
         if (m[1]) used.add('voiceInput')
       }
     }
+    // A data-access module's port (src/shared/ipc/electron-api.ts) names the methods it calls.
+    for (const m of text.matchAll(/\bElectronPort<([^>]+)>/g)) {
+      for (const name of m[1].matchAll(/'(\w+)'/g)) used.add(name[1])
+    }
   }
   return used
 }

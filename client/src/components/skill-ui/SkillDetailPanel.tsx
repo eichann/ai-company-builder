@@ -20,6 +20,7 @@ import {
   Flask
 } from '@phosphor-icons/react'
 import type { Skill, SkillTool } from '../../types'
+import { startSkillTool, stopSkillTool } from '../../features/skills/api'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -397,7 +398,7 @@ function ToolsTab({
     setLoadingTools(prev => new Set(prev).add(tool.path))
 
     try {
-      const result = await window.electronAPI.startTool(tool.path, tool.startCommand)
+      const result = await startSkillTool(tool.path, tool.startCommand)
       if (result.success && result.port) {
         setRunningTools(prev => new Map(prev).set(tool.path, result.port!))
       } else {
@@ -418,7 +419,7 @@ function ToolsTab({
     setLoadingTools(prev => new Set(prev).add(tool.path))
 
     try {
-      const result = await window.electronAPI.stopTool(tool.path)
+      const result = await stopSkillTool(tool.path)
       if (result.success) {
         setRunningTools(prev => {
           const next = new Map(prev)

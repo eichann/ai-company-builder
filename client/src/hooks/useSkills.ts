@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import type { Skill } from '../types'
+import { listSkills } from '../features/skills/api'
 
 interface UseSkillsOptions {
   rootPath: string
@@ -37,7 +38,7 @@ export function useSkills({ rootPath, departmentFolder, departmentId, department
     setError(null)
 
     try {
-      const result = await window.electronAPI.listSkills(rootPath, departmentFolder, departmentId, departmentName, { force })
+      const result = await listSkills(rootPath, departmentFolder, departmentId, departmentName, { force })
       if (request !== requestRef.current) return
 
       if (result.success) {

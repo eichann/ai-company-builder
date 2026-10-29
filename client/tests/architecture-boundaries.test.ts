@@ -207,9 +207,10 @@ test('renderer src/shared never imports src/features or src/app', () => {
 
 /**
  * Renderer files that still call window.electronAPI directly (2026-10-29:
- * 44; 43 since the document review got its api.ts). Never add one: new IPC calls go into the feature's api.ts or
- * src/shared/ipc/. Remove a file here when it stops calling it; a move-only
- * PR renames its entry. The count may only go down.
+ * 44; 43 with doc-review's api.ts, 39 with skills' api.ts). Never add one:
+ * new IPC calls go into the feature's api.ts or src/shared/ipc/. Remove a
+ * file here when it stops calling it; a move-only PR renames its entry. The
+ * count may only go down.
  */
 const DIRECT_IPC_FILES: readonly string[] = [
   'src/App.tsx',
@@ -236,18 +237,14 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/components/settings/VoicePromptSettings.tsx',
   'src/components/skill-ui/BackupHistorySlideOver.tsx',
   'src/components/skill-ui/CommitHistoryPanel.tsx',
-  'src/components/skill-ui/CopySkillModal.tsx',
   'src/components/skill-ui/FileSearchModal.tsx',
   'src/components/skill-ui/FileTreePanel.tsx',
   'src/components/skill-ui/NewFolderDialog.tsx',
   'src/components/skill-ui/SearchPanel.tsx',
   'src/components/skill-ui/SkillCentricLayout.tsx',
-  'src/components/skill-ui/SkillDetailPanel.tsx',
   'src/components/skill-ui/TabbedEditorPanel.tsx',
-  'src/components/skill-ui/ToolViewer.tsx',
   'src/hooks/useDepartments.ts',
   'src/hooks/usePrivateFolders.ts',
-  'src/hooks/useSkills.ts',
   'src/hooks/useSparseCheckout.ts',
   'src/hooks/useWriteAccess.ts',
   'src/lib/fileEvents.ts',
@@ -256,7 +253,7 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/stores/appStore.ts',
   'src/stores/authStore.ts',
 ]
-const DIRECT_IPC_CEILING = 43
+const DIRECT_IPC_CEILING = 39
 
 /** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
 const isDataLayer = (clientPath: string) =>

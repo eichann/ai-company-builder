@@ -5,6 +5,7 @@ import {
   Wrench,
 } from '@phosphor-icons/react'
 import type { SkillTool } from '../../types'
+import { openInBrowser } from '../../features/skills/api'
 
 interface ToolViewerProps {
   tool: SkillTool
@@ -18,7 +19,7 @@ export function ToolViewer({ tool, port, color, onClose }: ToolViewerProps) {
   const url = `http://localhost:${port}`
 
   const handleOpenExternal = async () => {
-    await window.electronAPI.openExternal(url)
+    await openInBrowser(url)
   }
 
   return (

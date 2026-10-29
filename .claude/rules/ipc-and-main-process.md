@@ -91,7 +91,9 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 
 - `ipc-contract.test.ts` compares the whole IPC surface with `ipc-inventory.json` (every handler
   and its parameters in main.ts, voice-input.ts and `features/**`, every window event, each
-  preload function's calls and compiler-resolved type, unmatched ends = dead-code candidates) and
+  preload function's calls and compiler-resolved type, unmatched ends = dead-code candidates; the
+  renderer "uses" a method by calling it on `window.electronAPI` or naming it in an
+  `ElectronPort<…>`) and
   asserts contract and running app agree (`notInContract`, `inContractButUnused` empty).
   Changing a channel or payload fails it on purpose: regenerate with
   `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and review the JSON diff.
