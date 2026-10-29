@@ -44,7 +44,11 @@ test.describe('a running turn', () => {
     await expect(header.getByRole('combobox').first()).toBeEnabled()
     await send(page, '見積書を作って')
     await expect(page.getByRole('button', { name: /^サブエージェント 過去の見積書と価格表を調べる ツール 4件（実行中 1）/ })).toBeVisible()
-    await expect(page.getByText('価格表の10月改定分と過去の見積書の単価を照らし合わせています')).toBeVisible()
+    const progress = '価格表の10月改定分と過去の見積書の単価を照らし合わせています'
+    await expect(page.getByTitle(progress)).toBeVisible()
+    // The conversation list shows the same line under 「AIが作業中」.
+    const working = page.getByRole('complementary', { name: 'AIへの相談' }).getByRole('region', { name: 'AIが作業中' })
+    await expect(working.getByRole('button', { name: /^見積書を作って/ })).toContainText(progress)
     await expect(header.getByRole('button', { name: '停止' })).toBeVisible()
     await expect(header.getByRole('combobox', { name: '応答中はモデルを変更できません' })).toBeDisabled()
   })
@@ -163,9 +167,13 @@ test('a choice question waits above the input of its own conversation, survives 
   await expect(card).toBeVisible()
 
   // Another conversation does not show it; coming back does, and the reply kept streaming meanwhile.
-  const sidebar = page.getByRole('complementary', { name: '相談一覧' })
-  await sidebar.getByRole('button', { name: '新しい相談', exact: true }).click()
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
   await expect(card).toHaveCount(0)
+  // The waiting conversation is listed under 「あなたの番」 with its question.
+  const yourTurn = sidebar.getByRole('region', { name: 'あなたの番' })
+  await expect(yourTurn.getByRole('button', { name: /^提案書を作って/ })).toBeVisible()
+  await expect(sidebar.getByText('あなたの番 1')).toBeVisible()
   await chat(page, c => { c.send({ type: 'text-start', id: 't2' }); c.text('t2', '（回答をお待ちしています）'); c.send({ type: 'text-end', id: 't2' }) })
   await sidebar.getByRole('button', { name: /^提案書を作って/ }).click()
   await expect(card).toBeVisible()
@@ -176,6 +184,27 @@ test('a choice question waits above the input of its own conversation, survives 
   await expect(card).toHaveCount(0)
   expect(await chat(page, c => c.answers)).toEqual([{ id: 'ask-toolu_ask', response: { choices: [{ selected: ['PDF'] }] } }])
   await expect(page.getByText('選択肢の質問 · 回答済み')).toBeVisible()
+})
+
+test('a reply that finishes while the member is elsewhere waits under 「結果が届いています」 until they have looked at it and moved on', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await send(page, '議事録をまとめて')
+  await turnStarted(page)
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  const row = sidebar.getByRole('button', { name: /^議事録をまとめて/ })
+  await expect(sidebar.getByRole('region', { name: 'AIが作業中' })).toContainText('議事録をまとめて')
+  await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
+  await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', 'まとめました。'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
+  const results = sidebar.getByRole('region', { name: '結果が届いています' })
+  await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toContainText('返事が届いています')
+
+  // Reading it keeps it there; moving on to another conversation finishes it.
+  await row.click()
+  await expect(page.getByText('まとめました。').locator('visible=true')).toBeVisible()
+  await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+  await sidebar.getByRole('button', { name: /^新しい会話/ }).click()
+  await expect(results).toHaveCount(0)
+  await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
 })
 
 test.describe('a long restored conversation', () => {
@@ -209,8 +238,10 @@ test.describe('a long restored conversation', () => {
 
   test('both restored tabs are listed; switching keeps each tab\'s draft, keeps the other tab mounted and reopens at the latest message', async ({ page }) => {
     await openPreview(page, 'chat-header', { history: 'long' })
-    const sidebar = page.getByRole('complementary', { name: '相談一覧' })
-    await expect(sidebar.getByRole('heading', { name: '開いている相談 2件' })).toBeVisible()
+    const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+    // Both restored tabs are idle: 「終わったもの」, open ones first and marked.
+    await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByText('開いています')).toHaveCount(1)
+    await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByText('表示中')).toHaveCount(1)
     await expect(page.getByRole('button', { name: /^以前のメッセージを表示/ })).toBeVisible({ timeout: 15_000 })
     await list(page).evaluate(el => { el.scrollTop = 0 })
 
