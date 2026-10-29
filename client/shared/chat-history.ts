@@ -54,6 +54,8 @@ export interface ChatSessionSummary {
   updatedAt: string
   /** Number of stored messages. */
   messageCount: number
+  /** The member has sent at least one message (absent: treat as sent). */
+  sent?: boolean
   /** One line from the last non-empty message, tool markers removed (≤120 characters). */
   preview: string
   draftInput?: string

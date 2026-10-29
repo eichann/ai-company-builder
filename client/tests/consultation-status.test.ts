@@ -70,7 +70,7 @@ test('groups: あなたの番 › ピン留め › 止まっています › 作
 })
 
 test('new and read conversations stay 開いている相談 until closed; an empty closed one leaves no history row', () => {
-  const sessions = [session('draft', { messageCount: 1, draftInput: '見積の' }), session('empty', { messageCount: 1 }), session('sent')]
+  const sessions = [session('draft', { messageCount: 1, sent: false, draftInput: '見積の' }), session('empty', { messageCount: 1, sent: false }), session('sent', { sent: true })]
   const tabs = [{ id: 'tab-blank', title: '新しい会話', sessionId: null }, { id: 'tab-draft', title: 'draft', sessionId: 'draft' }]
   const groups = groupConversationRows(buildConversationRows(sessions, tabs, ''), () => undefined)
   assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.key)]), [
