@@ -68,6 +68,11 @@ editor, review, search, history, backups).
    directly; a feature's `api.ts` (or `shared/ipc/`) does. Existing direct calls are an explicit
    list in the boundary test that may only shrink. The IPC contract itself (channels, arguments,
    `client/shared/ipc-contract.ts`) does not change for this: `ipc-and-main-process.md`.
+   **Small ports, never one client object** (owner, 2026-10-29): an `api.ts` names only the
+   methods it uses (`ElectronPort<'readFile' | …>`, `src/shared/ipc/electron-api.ts`), grouped
+   by what they can do — read on this computer, write on this computer, send outside — so a
+   later plugin bridge can be handed exactly one group. No wrapper of the whole API, and no
+   stand-in that pretends something exists: what a setup lacks is a capability the UI reads.
 5. **A screen component composes named hooks.** State, effects and IPC go into hooks named after
    their concern (`useDepartmentSelection`, `useEditorPersistence`); presentational parts take
    props and render; React-free computation is a pure function in `model.ts`. The chat panel

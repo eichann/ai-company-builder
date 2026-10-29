@@ -1,5 +1,5 @@
 // Typed fake of the preload API for preview pages (runs in the browser).
-// `Window['electronAPI']` is declared by electron/preload.ts (part of the
+// `Window['electronAPI']` is declared by src/shared/ipc/electron-api.ts (part of the
 // tests/ui/tsconfig.json program), so a fixture that implements a method with
 // the wrong shape fails `tsc -p tests/ui`.
 // Anything not implemented answers like an idle app: `on…` subscriptions
