@@ -11,6 +11,7 @@ import {
 import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
 import type { DepartmentConfig, Skill } from '../../types'
 import { COMPANY_TAB_ID } from './DepartmentTabs'
+import { listSkills, readSkillFile } from '../../features/skills/api'
 
 interface CopySkillModalProps {
   rootPath: string
@@ -75,7 +76,7 @@ export function CopySkillModal({
       const source = sources.find(s => s.id === selectedSourceId)
       if (!source) return
 
-      const result = await window.electronAPI.listSkills(
+      const result = await listSkills(
         rootPath,
         source.folder,
         source.id,
@@ -119,7 +120,7 @@ export function CopySkillModal({
     }
 
     setIsLoadingPreview(true)
-    window.electronAPI.readFile(selectedSkill.files.skillMd)
+    readSkillFile(selectedSkill.files.skillMd)
       .then((content: string | null) => {
         setPreviewContent(content)
       })
