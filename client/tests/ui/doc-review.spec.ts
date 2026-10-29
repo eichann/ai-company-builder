@@ -1,7 +1,7 @@
 // The document review in the editor (tests/doc-review-ui.tsx): what the member
 // sees and the sidecar files it writes. The pure rules (file names, the email
 // hash, reply merging, unseen tracking, text matching) are pinned by
-// src/components/skill-ui/MarkdownReview.test.ts; here: the hook, the
+// src/features/doc-review/model.test.ts; here: the hook, the
 // components and the editor wired together, and the files' exact shape on disk.
 import { test, expect, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'

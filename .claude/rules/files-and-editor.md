@@ -13,6 +13,7 @@ paths:
   - "client/src/lib/line-diff.ts"
   - "client/src/lib/editorTabs.ts"
   - "client/src/components/skill-ui/**"
+  - "client/src/features/doc-review/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
@@ -90,7 +91,7 @@ company-wide skills behind slash commands with `{ force: true }` (coalesced 120 
   Closing a tab whose save was cancelled asks before discarding.
 - Preview: `client/tests/editor-tabs-ui.html?view=external`.
 
-## Document review (`components/skill-ui/MarkdownReview.tsx`, moving to `src/features/doc-review/`)
+## Document review (`src/features/doc-review/`; UI still in `components/skill-ui/MarkdownReview.tsx`)
 
 A Markdown preview can be reviewed: comments on selected text, replies, resolved marks. Everything
 lives in sidecar files next to the document, one writer per file so teammates never conflict in
@@ -107,7 +108,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   notification). Not the chat's 「確認をお願いする」 (`request_review`).
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
-- Tests: `client/src/components/skill-ui/MarkdownReview.test.ts` (names, hash, merging, unseen,
+- Rules and shapes: `model.ts` (pure). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 

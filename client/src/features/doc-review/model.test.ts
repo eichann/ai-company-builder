@@ -17,7 +17,7 @@ import {
   type CommentReply,
   type ResolutionEntry,
   type Review,
-} from './MarkdownReview'
+} from './model'
 
 const DOC = '/Users/demo/会社/営業部/提案書.md'
 const ID = '0b8f6a52-2d4c-4b8e-9a0e-3f1c2d4e5f60'
