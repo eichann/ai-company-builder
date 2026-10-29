@@ -206,6 +206,8 @@ const control = {
     interactions.emit({ id: `ask-${toolCallId}`, appSessionId: currentSessionId ?? '', kind: 'choices', agent: 'claude-code', toolCallId, questions })
   },
   answers: [] as Array<{ id: string; response: AgentInteractionResponse }>,
+  /** Files the chat asked the main screen to open (a review request's files). */
+  opened: [] as string[],
   answered(id: string, response: AgentInteractionResponse) {
     control.answers.push({ id, response })
     const toolCallId = id.replace(/^ask-/, '')
@@ -264,7 +266,7 @@ const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(
   <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
     <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-      <ChatPanel departmentPath="/tmp/acb-preview" />
+      <ChatPanel departmentPath="/tmp/acb-preview" onOpenFile={path => { control.opened.push(path) }} />
     </div>
   </div>,
 )

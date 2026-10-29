@@ -1,6 +1,7 @@
 import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { referenceSchemas, referenceDescriptions, type ReferenceToolName } from '../consultations/tools'
 import { COMPANY_FILES_SERVER, COMPANY_FILE_TOOL_NAMES, companyFileDescriptions, companyFileSchemas, companyFileToolId } from '../company-files/tools'
+import { REVIEW_SERVER, REVIEW_TOOL, REVIEW_TOOL_ID, reviewDescription, reviewSchema } from '../review/tools'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -140,7 +141,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -304,7 +305,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
         // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
         const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name)))) {
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID)) {
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
         }
         // Request approval from UI
@@ -344,13 +345,16 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
         // App-provided (not the company repository's .mcp.json, which is protected config).
         const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
+        const reviewServer = review ? createSdkMcpServer({ name: REVIEW_SERVER, tools: [tool(REVIEW_TOOL, reviewDescription, reviewSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await review.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })] }) : undefined
         const mcpServers = {
           ...(referenceServer ? { acb_consultations: referenceServer } : {}),
           ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
+          ...(reviewServer ? { [REVIEW_SERVER]: reviewServer } : {}),
         }
         const allowedTools = [
           ...(referenceServer ? Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) : []),
           ...(companyFilesServer ? COMPANY_FILE_TOOL_NAMES.map(companyFileToolId) : []),
+          ...(reviewServer ? [REVIEW_TOOL_ID] : []),
         ]
         const state = { missingSession: false, autoRejected: false }
         // Steering + prompt suggestions (steering.ts): watch the query the

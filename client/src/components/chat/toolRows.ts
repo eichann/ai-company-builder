@@ -34,6 +34,7 @@ export function getToolDisplayName(toolName: string): string {
     mcp__acb_company_files__company_list: '会社のフォルダを一覧',
     AskUserQuestion: 'ユーザーに質問',
     mcp__acb_ask__ask_user: 'ユーザーに質問',
+    mcp__acb_review__request_review: '確認をお願いする',
     readFile: 'ファイル読取',
     writeFile: 'ファイル書込',
     listDirectory: 'ディレクトリ一覧',

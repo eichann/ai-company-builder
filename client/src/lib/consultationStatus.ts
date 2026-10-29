@@ -2,6 +2,8 @@ import type { UIMessage } from 'ai'
 import type { AgentInteraction } from '../../shared/agent-interaction'
 import { getToolDisplayName, isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } from '../components/chat/toolRows'
 import type { buildConversationRows } from './conversationRows'
+import { pendingReviewOf } from './reviewRequest'
+import { REVIEW_TOOL_ID } from '../../shared/review-request'
 
 /**
  * Whose turn a conversation is and what its AI is doing (the 「AIへの相談」
@@ -11,8 +13,8 @@ import type { buildConversationRows } from './conversationRows'
  */
 
 export type ConsultationState = 'needs-you' | 'working' | 'unseen' | 'failed' | 'idle'
-/** Why it is the member's turn: a permission, or a question to answer. */
-export type NeedsYouKind = 'approve' | 'question'
+/** Why it is the member's turn: a permission, a question to answer, or work to review (「確認をお願いします」). */
+export type NeedsYouKind = 'approve' | 'question' | 'review'
 
 export interface ConsultationStatus {
   state: ConsultationState
@@ -85,6 +87,7 @@ export function toolActivity(toolName: string, input: unknown, rootPath?: string
   if (SUBAGENT_TOOL_NAMES.has(toolName)) return at('手分けして作業しています', text(inp.description))
   if (toolName.startsWith('mcp__acb_consultations__')) return '過去の相談を見ています'
   if (toolName === 'TodoWrite') return '作業の段取りを立てています'
+  if (toolName === REVIEW_TOOL_ID) return '確認のお願いを出しています'
   if (toolName === 'Skill') return at('スキルを使っています', text(inp.skill) || text(inp.command))
   return `${getToolDisplayName(toolName)}を使っています`
 }
@@ -132,6 +135,9 @@ export function deriveConsultationStatus(inputs: StatusInputs): ConsultationStat
     return { state: 'working', line: workingLine(inputs.lastMessage, inputs.progressLine, inputs.rootPath) }
   }
   if (inputs.status === 'error') return { state: 'failed', line: 'エラーで止まりました' }
+  // The AI asked for a review and stopped: the member's turn until they answer (even after a restart).
+  const review = pendingReviewOf(inputs.lastMessage)
+  if (review) return { state: 'needs-you', kind: 'review', line: `確認をお願いします：${review.title}` }
   if (inputs.unseen) return { state: 'unseen', line: '返事が届いています' }
   return IDLE_STATUS
 }

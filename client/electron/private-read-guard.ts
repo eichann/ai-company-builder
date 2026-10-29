@@ -207,8 +207,8 @@ export type PrivateWriteDecision =
 
 const FILE_TOOLS: Record<string, string> = { Write: 'file_path', Edit: 'file_path', MultiEdit: 'file_path', NotebookEdit: 'notebook_path' }
 
-/** The app's own MCP servers: read-only, never send anything out. */
-const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations']
+/** The app's own MCP servers: read-only, never send anything out (acb_review only shows a request to the member). */
+const APP_MCP_SERVERS = ['acb_company_files', 'acb_consultations', 'acb_review']
 
 /** Never shared: the app's scratch area and personal folders (see .claude/rules/sync.md, .gitignore essentials). */
 function isUnsharedPath(rel: string): boolean {

@@ -1,6 +1,7 @@
 import type { AgentSession } from './agent'
 import type { ChoicePromptRecord } from './choice-prompt'
 import type { SteerRecord } from './steer'
+import type { ReviewRecord } from './review-request'
 export interface ChatSession {
   id: string
   companyId: string
@@ -18,6 +19,8 @@ export interface ChatSession {
     choicePrompts?: Array<ChoicePromptRecord & { at?: number; seq?: number }>
     /** Extra instructions the member sent while this reply was being written (`at`, `seq` as above). */
     steerInstructions?: Array<SteerRecord & { at?: number; seq?: number }>
+    /** 「確認をお願いします」 requests in this reply (review-request.ts); shown after its text. */
+    reviewRequests?: ReviewRecord[]
   }>
   createdAt: string
   updatedAt: string

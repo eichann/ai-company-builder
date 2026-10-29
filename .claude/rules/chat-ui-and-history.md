@@ -53,7 +53,8 @@ one place an added agent brings its own controls; everything else asks the regis
 - The conversation list (`ChatSidebar.tsx`, 「AIへの相談」) shows each open tab's live status.
   `useConsultationStatus` (after the send function) derives it with the pure
   `src/lib/consultationStatus.ts` — needs-you (pending approval or agent question, which wins over
-  working), working (with a plain-Japanese line for the running tool or the subagent progress
+  working; or, once the turn has ended, a 「確認をお願いします」 request in the latest reply — kind
+  `review`, eye icon, see `chat-and-agents.md`), working (with a plain-Japanese line for the running tool or the subagent progress
   line; never the command text or message bodies), failed, unseen (a turn ended while the tab was
   not active; cleared when the member leaves the tab after looking, which clears the 新着 mark) or idle — and publishes it to
   `consultationStatusStore` (keyed by tab id) only when it changes, so streaming does not
@@ -102,6 +103,10 @@ one place an added agent brings its own controls; everything else asks the regis
   (body search in main, NFKC), `getSession`; save/flush return a `ChatSaveReceipt` (status +
   revision), not the conversation. `chatHistory:changed` carries `{ sessionId, kind: save |
   patch | delete }`; a tab re-reads only a `patch` of its own conversation.
+- A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
+  record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
+  `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
+  text).
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail

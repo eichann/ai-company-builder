@@ -1,5 +1,7 @@
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import type { CompanyFileTools } from './company-files/tools'
+import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
+import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -247,6 +249,12 @@ export async function startChatServer(config: ChatServerConfig) {
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
     // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user), per the agent registry.
     const injector = createChunkInjector()
+    // 「確認をお願いする」 (review/tools.ts): the AI hands its work to the member and
+    // stops; the accepted request becomes a part of the reply (the card, stored with it).
+    const review = connection.ownsConversation && workingDirectory
+      ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
+      : undefined
+    if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
     const askUser = connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
@@ -268,7 +276,7 @@ export async function startChatServer(config: ChatServerConfig) {
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
     const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder }
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

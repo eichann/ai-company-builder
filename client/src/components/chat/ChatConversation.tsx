@@ -3,7 +3,10 @@ import { AgentInteractionCard } from './AgentInteractionCard'
 import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import { agentCan } from '../../../shared/agents/registry'
 import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
-import { useEffect, useCallback, useRef, memo } from 'react'
+import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
+import { REVIEW_CONFIRM_MESSAGE } from '../../../shared/review-request'
+import { pendingReviewOf } from '../../lib/reviewRequest'
+import { ReviewActionsContext, type ReviewActions } from './review-context'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
 import { CircleNotch } from '@phosphor-icons/react'
@@ -238,6 +241,14 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
 
   useConsultationStatus({ tabId, isActive, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
 
+  // 「確認をお願いします」 (ReviewRequestCard): the request in the latest reply waits for the member.
+  const pendingReviewId = running ? undefined : pendingReviewOf(messages[messages.length - 1])?.id
+  const reviewActions = useMemo<ReviewActions>(() => ({
+    pendingId: pendingReviewId,
+    confirm: () => { void handleSend(REVIEW_CONFIRM_MESSAGE) },
+    requestChanges: () => chatInputApiRef.current?.focus(),
+  }), [pendingReviewId, handleSend, chatInputApiRef])
+
   // Start new chat and auto-send when skill execution is triggered (only active tab)
   useEffect(() => {
     if (!isActive || !historyReadyRef.current) return
@@ -304,17 +315,19 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
           <CircleNotch size={24} className="text-ink-muted animate-spin" />
         </div>
       ) : (
-        <MessageList
-          messages={messages}
-          status={status}
-          messagesEndRef={messagesEndRef}
-          containerRef={messagesContainerRef}
-          timestamps={timestampsRef.current}
-          messageImages={messageImages}
-          messageReferenceFiles={messageReferenceFiles}
-          onRegenerate={regenerate}
-          onEditSubmit={handleEditMessage}
-        />
+        <ReviewActionsContext.Provider value={reviewActions}>
+          <MessageList
+            messages={messages}
+            status={status}
+            messagesEndRef={messagesEndRef}
+            containerRef={messagesContainerRef}
+            timestamps={timestampsRef.current}
+            messageImages={messageImages}
+            messageReferenceFiles={messageReferenceFiles}
+            onRegenerate={regenerate}
+            onEditSubmit={handleEditMessage}
+          />
+        </ReviewActionsContext.Provider>
       )}
 
       {models.agentUnavailable && (

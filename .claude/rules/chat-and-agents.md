@@ -32,6 +32,10 @@ paths:
   - "client/tests/steering.test.ts"
   - "client/tests/prompt-suggestion.test.ts"
   - "client/tests/chat-composer-ui.*"
+  - "client/electron/review/**"
+  - "client/shared/review-request.ts"
+  - "client/src/components/chat/ReviewRequestCard.tsx"
+  - "client/tests/review-request.test.ts"
 ---
 
 # Chat agents (Claude Code, Codex)
@@ -172,6 +176,32 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
   show at once. Pending cards survive tab switches; closing the tab cancels them.
 - Preview `client/tests/choice-prompt-ui.html` (`?theme=dark`, `?state=answered`); tests
   `client/tests/choice-prompt.test.ts`.
+
+## 「確認をお願いする」 (the AI hands its work to the member and stops)
+
+`client/shared/review-request.ts` (limits, paths, the record), `electron/review/tools.ts` (the
+tool), renderer `ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`.
+
+- The app tool `request_review` on MCP server `acb_review` (`mcp__acb_review__request_review`):
+  Claude Code gets it as an in-process SDK MCP server (in `allowedTools`, auto-allowed in
+  `canUseTool`, never asks), Codex as a request-scoped loopback endpoint closed with the turn.
+  Only when `connection.ownsConversation` and there is a working folder; `REVIEW_INSTRUCTIONS`
+  is appended to the system prompt. M1 logs it as an app tool (server + tool name, never text).
+- Input: `title` (required, ≤ 120), `files` (≤ 10, company-relative; an absolute path is
+  accepted only inside the company folder, `..` / `~` / outside → refused), `points` (≤ 5),
+  `message`. **Non-blocking (owner decision 2026-10-29):** the call checks its input and returns
+  at once, telling the AI to stop and end its reply; nothing is written anywhere.
+- When the AI should call it: a skill says to get the member's confirmation before going on
+  (the main use: e.g. 「骨子ができたら request_review で確認を頼んで止まる」, with the tool in
+  the skill's allowed tools), the member asked to see something first, or a document others will
+  read is complete and involves a judgement. Not otherwise — 「あなたの番」 must stay meaningful.
+  Following it is up to the model; a skill that needs a hard stop must not rely on it alone.
+- An accepted request is injected as a `data-review-request` part (`createChunkInjector`) and
+  stored with the reply as `reviewRequests`, so the card and 「あなたの番」 survive a restart.
+  The latest reply's request is pending until the member sends anything: 「この内容で進めて」
+  sends `REVIEW_CONFIRM_MESSAGE`, 「直してほしい」 focuses the composer, a file opens in the
+  editor (`OpenFileContext`, the main screen's opener). Tests: `client/tests/review-request.test.ts`,
+  `tests/ui/chat-panel.spec.ts`.
 
 ## Instructions while the AI works (steering)
 

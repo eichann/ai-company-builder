@@ -18,6 +18,7 @@ type Control = {
   finish(): void
   ask(toolCallId?: string): void
   answers: Array<{ id: string; response: unknown }>
+  opened: string[]
 }
 declare global { interface Window { __acbChat: Control } }
 
@@ -207,6 +208,36 @@ test('a reply that finishes while the member is elsewhere is marked 新着 at th
   await sidebar.getByRole('button', { name: /^新しい会話/ }).click()
   await expect(row).not.toContainText('新着')
   await expect(open.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+})
+
+test('「確認をお願いします」: the AI asks for a review and stops; 「あなたの番」 until the member answers, files open in the editor', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await send(page, '企画書を書いて')
+  await turnStarted(page)
+  await chat(page, c => {
+    c.send({ type: 'text-start', id: 't1' }); c.text('t1', '骨子を作りました。'); c.send({ type: 'text-end', id: 't1' })
+    c.send({ type: 'data-review-request', id: 'review-r1', data: { id: 'r1', title: '企画書の骨子', files: ['営業部/企画/骨子.md'], points: ['価格の前提'] } })
+    c.finish()
+  })
+  const card = page.getByRole('group', { name: '確認をお願いします' }).locator('visible=true')
+  await expect(card).toContainText('企画書の骨子')
+  await expect(card).toContainText('価格の前提')
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  const mine = sidebar.getByRole('region', { name: 'あなたの番' })
+  await expect(mine.getByRole('button', { name: /^企画書を書いて/ })).toContainText('確認をお願いします：企画書の骨子')
+  await expect(sidebar.getByText('あなたの番 1')).toBeVisible()
+
+  // A file opens in the editor (the main screen's opener, with the company folder).
+  await card.getByRole('button', { name: '営業部/企画/骨子.md' }).click()
+  expect(await chat(page, c => c.opened)).toEqual(['/tmp/acb-preview/営業部/企画/骨子.md'])
+
+  // 「この内容で進めて」 answers it: the next turn starts with the fixed message.
+  await card.getByRole('button', { name: 'この内容で進めて' }).click()
+  await turnStarted(page)
+  await expect(page.getByText('確認しました。この内容で次に進めてください。').locator('visible=true')).toBeVisible()
+  await expect(mine).toHaveCount(0)
+  await expect(card).toContainText('返事済み')
+  await expect(card.getByRole('button', { name: 'この内容で進めて' })).toHaveCount(0)
 })
 
 test.describe('a long restored conversation', () => {

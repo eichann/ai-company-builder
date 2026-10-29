@@ -6,6 +6,7 @@ import {
 } from '../shared/agent-events'
 import { COMPANY_FILES_SERVER } from '../electron/company-files/tools'
 import { CODEX_CHOICE_SERVER } from '../shared/choice-prompt'
+import { REVIEW_SERVER } from '../electron/review/tools'
 import { parseAgentToolEvent } from '../../shared/types/agent-events'
 import { createAgentEventRecorder, formatAgentEvent } from '../electron/services/agent-events'
 
@@ -26,6 +27,7 @@ test('categories: Claude, Codex (app names) and the API-key tools; MCP servers b
   assert.equal(categorizeTool('mcp__acb_ask__ask_user'), 'question')
   assert.equal(categorizeTool('mcp__acb_company_files__company_search'), 'app-tool')
   assert.equal(categorizeTool('mcp__acb_consultations__read_consultation'), 'app-tool')
+  assert.equal(categorizeTool('mcp__acb_review__request_review'), 'app-tool')
   assert.equal(categorizeTool('mcp__github__create_issue'), 'mcp-external')
   assert.equal(categorizeTool('readFile'), 'read')
   assert.equal(categorizeTool('writeFile'), 'write')
@@ -38,6 +40,7 @@ test('the app MCP server list matches the servers the app starts', () => {
   assert.ok(APP_MCP_SERVERS.includes(COMPANY_FILES_SERVER))
   assert.ok(APP_MCP_SERVERS.includes(CODEX_CHOICE_SERVER))
   assert.ok(APP_MCP_SERVERS.includes('acb_consultations'))
+  assert.ok(APP_MCP_SERVERS.includes(REVIEW_SERVER))
 })
 
 test('paths: company-relative NFC; outside only says so, with the kind of secret place', () => {
