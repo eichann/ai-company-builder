@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { ChatCircleDots, CheckCircle, CircleNotch, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
+import { ChatCircleDots, CheckCircle, CircleNotch, Eye, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 import { ConfirmDialog } from '../common/ConfirmDialog'
 
@@ -18,12 +18,14 @@ interface Props {
   onHide: () => void
 }
 
-/** The row's state at a glance: amber when it is the member's turn (shield: a permission, bubble: a question). */
+/** The row's state at a glance: amber when it is the member's turn (shield: a permission, eye: a review, bubble: a question). */
 function StatusIcon({ status }: { status?: ConsultationStatus }) {
   switch (status?.state) {
     case 'needs-you': return status.kind === 'approve'
       ? <ShieldWarning size={14} weight="fill" aria-hidden className="shrink-0 text-amber-500" />
-      : <ChatCircleDots size={14} weight="fill" aria-hidden className="shrink-0 text-amber-500" />
+      : status.kind === 'review'
+        ? <Eye size={14} weight="bold" aria-hidden className="shrink-0 text-amber-500" />
+        : <ChatCircleDots size={14} weight="fill" aria-hidden className="shrink-0 text-amber-500" />
     case 'working': return <CircleNotch size={14} aria-hidden className="shrink-0 animate-spin text-accent" />
     case 'unseen': return <Sparkle size={14} weight="fill" aria-hidden className="shrink-0 text-emerald-500" />
     case 'failed': return <WarningCircle size={14} weight="fill" aria-hidden className="shrink-0 text-red-500" />

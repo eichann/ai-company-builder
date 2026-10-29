@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
 import { OpenConsultationContext } from './consultation-context'
+import { OpenFileContext } from './review-context'
 import { type SlashCommandItem } from './SlashCommandDropdown'
 import { ChatSidebar } from './ChatSidebar'
 import { ChatPanelChat } from './ChatConversation'
@@ -21,6 +22,8 @@ interface ChatPanelProps {
   departmentPath?: string  // Working directory for AI (company root path)
   activeDepartment?: { name: string; folder: string }  // Currently selected department (undefined = company-wide)
   slashCommands?: SlashCommandItem[]
+  /** Opens a company file (absolute path) in the editor: a review request's files (ReviewRequestCard). */
+  onOpenFile?: (absolutePath: string) => void
 }
 
 export function ChatPanel(props: ChatPanelProps) {
@@ -30,7 +33,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, onOpenFile }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -98,6 +101,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
         else window.alert("この相談は削除されたか、参照できません。")
       }).catch(() => window.alert("相談を開けませんでした。"))
     }}>
+    <OpenFileContext.Provider value={onOpenFile}>
     <div ref={panelRef} className="h-full relative flex min-w-0">
       {sidebarOpen && <>
         {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
@@ -146,6 +150,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
       {/* Once per account on this PC: the AI action log goes to the administrators. */}
       {!showSettings && <AgentLogNotice userId={userId} />}
     </div>
+    </OpenFileContext.Provider>
     </OpenConsultationContext.Provider>
   )
 }

@@ -20,6 +20,7 @@
  */
 import type { AuthMode } from './agent'
 import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './choice-prompt'
+import { REVIEW_SERVER } from './review-request'
 import {
   AGENT_EVENT_VERSION,
   type AgentToolEvent, type FileTarget, type GuardReason, type SensitiveLocation, type ToolCategory,
@@ -48,10 +49,10 @@ export type TurnStopReason = 'stopped-by-admin' | 'app-quit'
 
 /**
  * MCP servers the app itself provides (acb_consultations, acb_company_files,
- * acb_ask): category 'app-tool'. Pinned against the electron constants in
+ * acb_review, acb_ask): category 'app-tool'. Pinned against the electron constants in
  * tests/agent-events.test.ts.
  */
-export const APP_MCP_SERVERS: readonly string[] = ['acb_consultations', 'acb_company_files', CODEX_CHOICE_SERVER]
+export const APP_MCP_SERVERS: readonly string[] = ['acb_consultations', 'acb_company_files', REVIEW_SERVER, CODEX_CHOICE_SERVER]
 
 /**
  * Tool names → category. Claude Code's own names; Codex calls are reported

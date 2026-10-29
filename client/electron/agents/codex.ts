@@ -1,5 +1,6 @@
 import { startReferenceMcp } from '../consultations/mcp'
 import { COMPANY_FILES_SERVER, startCompanyFilesMcp } from '../company-files/tools'
+import { REVIEW_SERVER, startReviewMcp } from '../review/tools'
 import { MissingAgentSession } from './recovery'
 import type { AgentInteraction } from '../../shared/agent-interaction'
 import { readQuestions, describePermissions } from './codex-interactions'
@@ -83,6 +84,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       if (process.platform === 'win32') throw new Error(CODEX_WINDOWS_UNSUPPORTED)
       let referenceMcp: Awaited<ReturnType<typeof startReferenceMcp>> | undefined
       let companyFilesMcp: Awaited<ReturnType<typeof startCompanyFilesMcp>> | undefined
+      let reviewMcp: Awaited<ReturnType<typeof startReviewMcp>> | undefined
       let askMcp: Awaited<ReturnType<typeof startLoopbackMcp>> | undefined
       // ask_user calls Codex has started and not yet asked (oldest first): links the card to its tool row.
       const askItems: string[] = []
@@ -133,6 +135,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         options.abortSignal?.removeEventListener('abort', abort)
         referenceMcp?.close()
         companyFilesMcp?.close()
+        reviewMcp?.close()
         askMcp?.close()
         rpc?.close()
         controller.close()
@@ -231,7 +234,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                   }
                   emit({ type: 'text-end', id: item.id }); openText.delete(item.id)
                 }
-                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === CODEX_CHOICE_SERVER)
+                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === REVIEW_SERVER || item.server === CODEX_CHOICE_SERVER)
                 if (appTool && item.server === CODEX_CHOICE_SERVER && item.tool === CODEX_CHOICE_TOOL) {
                   if (message.method === 'item/started' && !tools.has(item.id)) askItems.push(item.id)
                   else if (message.method === 'item/completed') { const at = askItems.indexOf(item.id); if (at >= 0) askItems.splice(at, 1) }
@@ -259,6 +262,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             }
             if (!title && request.references) referenceMcp = await startReferenceMcp(request.references)
             if (!title && request.companyFiles && !ended) companyFilesMcp = await startCompanyFilesMcp(request.companyFiles)
+            if (!title && request.review && !ended) reviewMcp = await startReviewMcp(request.review)
             const askUser = request.askUser
             if (!title && askUser && !ended) {
               askMcp = await startLoopbackMcp(CODEX_CHOICE_SERVER, [codexAskUserTool(
@@ -267,7 +271,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                 interactionAbort.signal,
               )], { toolTimeoutSec: Math.ceil(CHOICE_TIMEOUT_MS / 1000) + 60 })
             }
-            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); askMcp?.close(); return }
+            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); reviewMcp?.close(); askMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
             // The full snapshot once per turn; `account/rateLimits/updated` follows as usage changes.
@@ -282,6 +286,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             const mcpServers = {
               ...(referenceMcp ? { acb_consultations: referenceMcp.config } : {}),
               ...(companyFilesMcp ? { [COMPANY_FILES_SERVER]: companyFilesMcp.config } : {}),
+              ...(reviewMcp ? { [REVIEW_SERVER]: reviewMcp.config } : {}),
               ...(askMcp ? { [CODEX_CHOICE_SERVER]: askMcp.config } : {}),
             }
             const params = { ...(Object.keys(mcpServers).length > 0 ? { config: { mcp_servers: mcpServers } } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: !title && request.workingDirectory ? 'workspace-write' : 'read-only', approvalPolicy: title ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: system || undefined }

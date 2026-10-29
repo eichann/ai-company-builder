@@ -1296,6 +1296,7 @@ ${promptContent}
             departmentPath={currentCompany?.rootPath}
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
+            onOpenFile={handleFileSearchSelect}
           />
         </div>
       </div>

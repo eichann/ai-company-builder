@@ -7,6 +7,7 @@ import {
   CaretUp,
   Check,
   CircleNotch,
+  Eye,
   File,
   FolderOpen,
   ListChecks,
@@ -22,6 +23,8 @@ import { ChoicePromptRecordView } from './ChoicePrompt'
 import { CHOICE_PART_TYPE, readChoiceRecord } from '../../../shared/choice-prompt'
 import { useAgentProgress } from './agentStatusStore'
 import { STEER_PART_TYPE, readSteerRecord } from '../../../shared/steer'
+import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, readReviewRecord } from '../../../shared/review-request'
+import { ReviewRequestCard } from './ReviewRequestCard'
 import { SteerInstructionView } from './SteerInstruction'
 import {
   GROUP_PAGE_SIZE,
@@ -59,6 +62,7 @@ const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
   Task: Robot,
   AskUserQuestion: ListChecks,
   mcp__acb_ask__ask_user: ListChecks,
+  [REVIEW_TOOL_ID]: Eye,
 }
 
 function StatusIcon({ state }: { state: string }) {
@@ -309,6 +313,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === CHOICE_PART_TYPE) {
           const record = readChoiceRecord((part as { data?: unknown }).data)
           return record ? <ChoicePromptRecordView key={item.key} record={record} /> : null
+        }
+        if (part.type === REVIEW_PART_TYPE) {
+          const record = readReviewRecord((part as { data?: unknown }).data)
+          return record ? <ReviewRequestCard key={item.key} record={record} /> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)
