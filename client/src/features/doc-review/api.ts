@@ -12,10 +12,22 @@ import {
   type ReviewFileData,
 } from './model'
 import { tempSaveFileName } from '../../../shared/temp-save-file'
+import type { ElectronPort } from '../../shared/ipc/electron-api'
+
+/**
+ * The two capabilities this module uses, as small ports over the IPC contract
+ * (src/shared/ipc/electron-api.ts): reading files on this computer, and
+ * changing them. Nothing here sends anything outside the computer. Every
+ * function defaults to window.electronAPI; tests pass their own.
+ */
+export type ReviewReads = ElectronPort<'readFile' | 'readDirectory' | 'exists'>
+export type ReviewWrites = ElectronPort<'writeFile' | 'renameItem' | 'deleteItem'>
+/** Saving reads the file first (merge, never overwrite an unreadable one), so it needs both. */
+export type ReviewFiles = ReviewReads & ReviewWrites
 
 /** The document's text, or null when it cannot be read. */
-export function readDocument(filePath: string): Promise<string | null> {
-  return window.electronAPI.readFile(filePath)
+export function readDocument(filePath: string, reads: ReviewReads = window.electronAPI): Promise<string | null> {
+  return reads.readFile(filePath)
 }
 
 // ============================================================================
@@ -28,10 +40,10 @@ export function readDocument(filePath: string): Promise<string | null> {
 // when multiple people review the same document.
 // ============================================================================
 
-export async function readAllReviews(filePath: string): Promise<Review[]> {
+export async function readAllReviews(filePath: string, reads: ReviewReads = window.electronAPI): Promise<Review[]> {
   try {
     const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-    const entries = await window.electronAPI.readDirectory(dir)
+    const entries = await reads.readDirectory(dir)
     if (!entries) return []
 
     const baseName = filePath.substring(filePath.lastIndexOf('/') + 1)
@@ -44,7 +56,7 @@ export async function readAllReviews(filePath: string): Promise<Review[]> {
     const reviews: Review[] = []
     for (const entry of reviewFiles) {
       try {
-        const content = await window.electronAPI.readFile(entry.path)
+        const content = await reads.readFile(entry.path)
         if (content) {
           const data = JSON.parse(content) as ReviewFileData
           reviews.push(data.review)
@@ -66,32 +78,32 @@ export async function readAllReviews(filePath: string): Promise<Review[]> {
  * Returns what was written. Throws ReviewSaveError; a file that is there but
  * cannot be read or parsed is never overwritten.
  */
-export function saveReview(filePath: string, review: Review, base: Review | null): Promise<Review> {
+export function saveReview(filePath: string, review: Review, base: Review | null, files: ReviewFiles = window.electronAPI): Promise<Review> {
   const path = getReviewFilePath(filePath, review.id)
   return oneAtATime(path, async () => {
-    const onDisk = await readJsonSidecar<ReviewFileData>(path)
+    const onDisk = await readJsonSidecar<ReviewFileData>(path, files)
     const toWrite = onDisk?.review && base ? mergeReviewEdits(base, onDisk.review, review) : review
     const data: ReviewFileData = { version: 1, review: toWrite }
-    await writeSidecar(path, JSON.stringify(data, null, 2))
+    await writeSidecar(path, JSON.stringify(data, null, 2), files)
     return toWrite
   })
 }
 
 /** Deletes the reviewer's own (cancelled) review. Throws ReviewSaveError when it stays. */
-export async function deleteReviewFile(filePath: string, reviewId: string): Promise<void> {
+export async function deleteReviewFile(filePath: string, reviewId: string, files: ReviewFiles = window.electronAPI): Promise<void> {
   const reviewFilePath = getReviewFilePath(filePath, reviewId)
   await oneAtATime(reviewFilePath, () => retrying(reviewFilePath, async () => {
-    const result = await window.electronAPI.deleteItem(reviewFilePath)
-    return result.success || !await window.electronAPI.exists(reviewFilePath)
+    const result = await files.deleteItem(reviewFilePath)
+    return result.success || !await files.exists(reviewFilePath)
   }))
   // Clean up reply files: remove replies and resolutions referencing this review
-  await cleanupRepliesForReview(filePath, reviewId)
+  await cleanupRepliesForReview(filePath, reviewId, files)
 }
 
-async function cleanupRepliesForReview(filePath: string, reviewId: string): Promise<void> {
+async function cleanupRepliesForReview(filePath: string, reviewId: string, files: ReviewFiles): Promise<void> {
   try {
     const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-    const entries = await window.electronAPI.readDirectory(dir)
+    const entries = await files.readDirectory(dir)
     if (!entries) return
 
     const baseName = filePath.substring(filePath.lastIndexOf('/') + 1)
@@ -103,17 +115,17 @@ async function cleanupRepliesForReview(filePath: string, reviewId: string): Prom
 
     for (const entry of replyFiles) {
       try {
-        const content = await window.electronAPI.readFile(entry.path)
+        const content = await files.readFile(entry.path)
         if (!content) continue
         const data = JSON.parse(content) as ReplyFileData
         const filteredReplies = data.replies.filter(r => r.reviewId !== reviewId)
         const filteredResolutions = (data.resolutions || []).filter(r => r.reviewId !== reviewId)
         if (filteredReplies.length === 0 && filteredResolutions.length === 0) {
           // Reply file is empty — delete it
-          await window.electronAPI.deleteItem(entry.path)
+          await files.deleteItem(entry.path)
         } else if (filteredReplies.length !== data.replies.length || filteredResolutions.length !== (data.resolutions || []).length) {
           // Some entries removed — rewrite
-          await window.electronAPI.writeFile(entry.path, JSON.stringify({
+          await files.writeFile(entry.path, JSON.stringify({
             ...data,
             replies: filteredReplies,
             resolutions: filteredResolutions,
@@ -138,10 +150,10 @@ async function cleanupRepliesForReview(filePath: string, reviewId: string): Prom
 // conflict-free in git.
 // ============================================================================
 
-export async function readAllReplies(filePath: string): Promise<{ replies: CommentReply[]; resolutions: ResolutionEntry[] }> {
+export async function readAllReplies(filePath: string, reads: ReviewReads = window.electronAPI): Promise<{ replies: CommentReply[]; resolutions: ResolutionEntry[] }> {
   try {
     const dir = filePath.substring(0, filePath.lastIndexOf('/'))
-    const entries = await window.electronAPI.readDirectory(dir)
+    const entries = await reads.readDirectory(dir)
     if (!entries) return { replies: [], resolutions: [] }
 
     const baseName = filePath.substring(filePath.lastIndexOf('/') + 1)
@@ -155,7 +167,7 @@ export async function readAllReplies(filePath: string): Promise<{ replies: Comme
     const allResolutions: ResolutionEntry[] = []
     for (const entry of replyFiles) {
       try {
-        const content = await window.electronAPI.readFile(entry.path)
+        const content = await reads.readFile(entry.path)
         if (content) {
           const data = JSON.parse(content) as ReplyFileData
           allReplies.push(...data.replies)
@@ -181,13 +193,14 @@ export function updateMyReplies(
   replyKey: string,
   author: { authorName: string; authorEmail: string },
   change: (data: ReplyFileData) => void,
+  files: ReviewFiles = window.electronAPI,
 ): Promise<void> {
   const path = getReplyFilePath(filePath, replyKey)
   return oneAtATime(path, async () => {
-    const data: ReplyFileData = await readJsonSidecar<ReplyFileData>(path)
+    const data: ReplyFileData = await readJsonSidecar<ReplyFileData>(path, files)
       ?? { version: 1, authorName: author.authorName, authorEmail: author.authorEmail, replies: [] }
     change(data)
-    await writeSidecar(path, JSON.stringify(data, null, 2))
+    await writeSidecar(path, JSON.stringify(data, null, 2), files)
   })
 }
 
@@ -221,25 +234,25 @@ async function retrying(path: string, attempt: () => Promise<boolean>): Promise<
  * reads half a file. fs:writeFile only says yes/no, so every failure is retried
  * (a busy file on Windows, a moment of a full disk); a refused folder fails fast.
  */
-function writeSidecar(path: string, content: string): Promise<void> {
+function writeSidecar(path: string, content: string, files: ReviewFiles): Promise<void> {
   return retrying(path, async () => {
     const slash = path.lastIndexOf('/')
     const temp = `${path.slice(0, slash)}/${tempSaveFileName(path.slice(slash + 1), Math.random().toString(36).slice(2, 10))}`
-    if (!await window.electronAPI.writeFile(temp, content)) {
-      await window.electronAPI.deleteItem(temp)
+    if (!await files.writeFile(temp, content)) {
+      await files.deleteItem(temp)
       return false
     }
-    const moved = await window.electronAPI.renameItem(temp, path)
-    if (!moved.success) await window.electronAPI.deleteItem(temp)
+    const moved = await files.renameItem(temp, path)
+    if (!moved.success) await files.deleteItem(temp)
     return moved.success
   })
 }
 
 /** The parsed file, null when it does not exist; throws when it is there but unreadable. */
-async function readJsonSidecar<T>(path: string): Promise<T | null> {
-  const content = await window.electronAPI.readFile(path)
+async function readJsonSidecar<T>(path: string, files: ReviewReads): Promise<T | null> {
+  const content = await files.readFile(path)
   if (content === null) {
-    if (await window.electronAPI.exists(path)) throw new ReviewSaveError(path)
+    if (await files.exists(path)) throw new ReviewSaveError(path)
     return null
   }
   try {
@@ -268,9 +281,9 @@ function oneAtATime<T>(path: string, run: () => Promise<T>): Promise<T> {
 // SlackメンバーIDと紐づけてメンション送信する想定。
 // ============================================================================
 
-export async function readReviewRequestFile(filePath: string): Promise<{ requestedBy: string; requestedAt: string } | null> {
+export async function readReviewRequestFile(filePath: string, reads: ReviewReads = window.electronAPI): Promise<{ requestedBy: string; requestedAt: string } | null> {
   try {
-    const content = await window.electronAPI.readFile(getReviewRequestFilePath(filePath))
+    const content = await reads.readFile(getReviewRequestFilePath(filePath))
     if (!content) return null
     return JSON.parse(content)
   } catch {
@@ -278,16 +291,16 @@ export async function readReviewRequestFile(filePath: string): Promise<{ request
   }
 }
 
-export async function writeReviewRequestFile(filePath: string, requestedBy: string): Promise<void> {
-  await window.electronAPI.writeFile(
+export async function writeReviewRequestFile(filePath: string, requestedBy: string, files: ReviewFiles = window.electronAPI): Promise<void> {
+  await files.writeFile(
     getReviewRequestFilePath(filePath),
     JSON.stringify({ requestedBy, requestedAt: new Date().toISOString() }, null, 2),
   )
 }
 
-export async function deleteReviewRequestFile(filePath: string): Promise<void> {
+export async function deleteReviewRequestFile(filePath: string, files: ReviewFiles = window.electronAPI): Promise<void> {
   try {
-    await window.electronAPI.deleteItem(getReviewRequestFilePath(filePath))
+    await files.deleteItem(getReviewRequestFilePath(filePath))
   } catch {
     // ignore — file may not exist
   }
