@@ -31,13 +31,13 @@ export interface CommentReply {
   commentId?: string
 }
 
-interface ResolutionEntry {
+export interface ResolutionEntry {
   reviewId: string
   commentId: string
   resolved: boolean
 }
 
-interface ReplyFileData {
+export interface ReplyFileData {
   version: number
   authorName: string
   authorEmail: string
@@ -70,7 +70,7 @@ export interface Review {
   snapshot?: string
 }
 
-interface ReviewFileData {
+export interface ReviewFileData {
   version: number
   review: Review
 }
@@ -110,7 +110,7 @@ function SeverityBadge({ severity, size = 'sm' }: { severity: CommentSeverity; s
 // when multiple people review the same document.
 // ============================================================================
 
-function getReviewFilePath(filePath: string, reviewId: string): string {
+export function getReviewFilePath(filePath: string, reviewId: string): string {
   return `${filePath}.review.${reviewId}.json`
 }
 
@@ -213,7 +213,7 @@ async function cleanupRepliesForReview(filePath: string, reviewId: string): Prom
 // conflict-free in git.
 // ============================================================================
 
-function emailToHash(email: string): string {
+export function emailToHash(email: string): string {
   // Simple deterministic hash for file naming
   let hash = 0
   for (let i = 0; i < email.length; i++) {
@@ -222,7 +222,7 @@ function emailToHash(email: string): string {
   return Math.abs(hash).toString(36)
 }
 
-function getReplyFilePath(filePath: string, emailHash: string): string {
+export function getReplyFilePath(filePath: string, emailHash: string): string {
   return `${filePath}.reply.${emailHash}.json`
 }
 
@@ -274,7 +274,7 @@ async function writeMyReplies(filePath: string, emailHash: string, data: ReplyFi
 }
 
 /** Merge replies and resolutions from separate files into review comments */
-function mergeRepliesIntoReviews(reviews: Review[], allReplies: CommentReply[], allResolutions: ResolutionEntry[]): Review[] {
+export function mergeRepliesIntoReviews(reviews: Review[], allReplies: CommentReply[], allResolutions: ResolutionEntry[]): Review[] {
   if (allReplies.length === 0 && allResolutions.length === 0) return reviews
 
   // Build a lookup: reviewId+commentId → replies[]
@@ -331,7 +331,7 @@ function mergeRepliesIntoReviews(reviews: Review[], allReplies: CommentReply[], 
 // SlackメンバーIDと紐づけてメンション送信する想定。
 // ============================================================================
 
-function getReviewRequestFilePath(filePath: string): string {
+export function getReviewRequestFilePath(filePath: string): string {
   return `${filePath}.review-request.json`
 }
 

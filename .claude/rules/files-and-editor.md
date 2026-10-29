@@ -20,6 +20,8 @@ paths:
   - "client/tests/file-tree-model.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
+  - "client/tests/doc-review-ui.*"
+  - "client/tests/ui/doc-review.spec.ts"
   - "client/tests/skills-refresh.test.ts"
 ---
 
@@ -87,6 +89,27 @@ company-wide skills behind slash commands with `{ force: true }` (coalesced 120 
   `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder).
   Closing a tab whose save was cancelled asks before discarding.
 - Preview: `client/tests/editor-tabs-ui.html?view=external`.
+
+## Document review (`components/skill-ui/MarkdownReview.tsx`, moving to `src/features/doc-review/`)
+
+A Markdown preview can be reviewed: comments on selected text, replies, resolved marks. Everything
+lives in sidecar files next to the document, one writer per file so teammates never conflict in
+git. These names and JSON shapes are stored in company folders and read by every member's app
+and by the AI: **do not change them by one character** (no renamed key, no reordered key).
+
+- `<doc>.review.<uuid>.json` — `{ version: 1, review: { id, reviewerName, reviewerEmail, status
+  (in_progress | completed), createdAt, completedAt, comments[], snapshot? } }`, written only by
+  the reviewer; `snapshot` (the document at completion) feeds 「変更を確認」.
+- `<doc>.reply.<emailToHash(email)>.json` — `{ version, authorName, authorEmail, replies[],
+  resolutions? }`: everyone else's replies and resolved marks (`{ reviewId, commentId,
+  resolved }`, last one wins over the review file). `emailToHash` must keep its output.
+- `<doc>.review-request.json` — `{ requestedBy, requestedAt }` (button hidden, kept for a Slack
+  notification). Not the chat's 「確認をお願いする」 (`request_review`).
+- The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
+  (`localStorage review-seen:<doc path>`).
+- Tests: `client/src/components/skill-ui/MarkdownReview.test.ts` (names, hash, merging, unseen,
+  text matching) and `client/tests/ui/doc-review.spec.ts` on the preview
+  `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
 ## Search, Cmd+P and folder history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)
 
