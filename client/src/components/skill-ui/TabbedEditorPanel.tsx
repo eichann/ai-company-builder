@@ -25,9 +25,9 @@ import {
   ReviewSidePanel,
   CommentPopover,
   MarkdownDiffView,
-  markReviewSeen,
   type MarkdownDiffViewHandle,
 } from './MarkdownReview'
+import { markReviewSeen } from '../../features/doc-review/model'
 import { useAuthStore } from '../../stores/authStore'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { ReadOnlyBadge } from './ReadOnlyBadge'
