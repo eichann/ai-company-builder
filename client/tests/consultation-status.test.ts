@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { UIMessage } from 'ai'
 import { deriveConsultationStatus, groupConversationRows, runningSubagentId, shortPath, toolActivity, type ConsultationStatus } from '../src/lib/consultationStatus'
-import { buildConversationRows } from '../src/lib/conversationRows'
+import { buildConversationRows, isEmptyConversation } from '../src/lib/conversationRows'
 import type { ChatSessionSummary } from '../shared/chat-history'
 
 const ROOT = '/Users/demo/会社'
@@ -45,9 +45,9 @@ test('after a turn: failed, unseen (finished while away) or idle', () => {
   assert.deepEqual(derive({}), { state: 'idle', line: '' })
 })
 
-const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'c', title: id, messageCount: 1, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
+const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'c', title: id, messageCount: 3, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 
-test('groups: あなたの番 › ピン留め › 結果 › 止まっています › 作業中 › 終わったもの; pinned keeps its place unless it is the member\'s turn', () => {
+test('groups: あなたの番 › ピン留め › 止まっています › 作業中 › 開いている相談 (unread first) › 終わったもの; pinned keeps its place unless it is the member\'s turn', () => {
   const sessions = [session('ask', { pinned: true }), session('pin', { pinned: true }), session('result'), session('broken'), session('busy'), session('idle'), session('old')]
   const tabs = ['ask', 'pin', 'result', 'broken', 'busy', 'idle'].map(id => ({ id: `tab-${id}`, title: id, sessionId: id }))
   const status: Record<string, ConsultationStatus> = {
@@ -62,9 +62,23 @@ test('groups: あなたの番 › ピン留め › 結果 › 止まっていま
   assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.key)]), [
     ['あなたの番', ['tab-ask']],
     ['ピン留め', ['tab-pin']],
-    ['結果が届いています', ['tab-result']],
     ['止まっています', ['tab-broken']],
     ['AIが作業中', ['tab-busy']],
-    ['終わったもの', ['tab-idle', 'old']],
+    ['開いている相談', ['tab-result', 'tab-idle']],
+    ['終わったもの', ['old']],
   ])
+})
+
+test('new and read conversations stay 開いている相談 until closed; an empty closed one leaves no history row', () => {
+  const sessions = [session('draft', { messageCount: 1, sent: false, draftInput: '見積の' }), session('empty', { messageCount: 1, sent: false }), session('sent', { sent: true })]
+  const tabs = [{ id: 'tab-blank', title: '新しい会話', sessionId: null }, { id: 'tab-draft', title: 'draft', sessionId: 'draft' }]
+  const groups = groupConversationRows(buildConversationRows(sessions, tabs, ''), () => undefined)
+  assert.deepEqual(groups.map(g => [g.label, g.rows.map(r => r.key)]), [
+    ['開いている相談', ['tab-blank', 'tab-draft']],
+    ['終わったもの', ['sent']],
+  ])
+  assert.equal(isEmptyConversation(undefined), true)
+  assert.equal(isEmptyConversation(sessions[0]), false)
+  assert.equal(isEmptyConversation(sessions[1]), true)
+  assert.equal(isEmptyConversation(sessions[2]), false)
 })
