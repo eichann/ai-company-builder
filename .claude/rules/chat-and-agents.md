@@ -114,6 +114,13 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   default; the page says these become visible to the AI.
 - Dropped names (never values) are logged once each per app start: `[agent-env] not passed to AI
   processes: …`.
+- The API-key mode's key is never in any env: main passes it in-process (`createAnthropic`), and
+  it rests encrypted in `config.json` (`anthropicApiKeyEncrypted`, Electron `safeStorage` through
+  the shell's `SecretBox`; `services/api-key-store.ts`). A plain `anthropicApiKey` from an older
+  version is encrypted on first access and removed. No OS encryption (Linux `basic_text`, no
+  keyring) → saving a key is refused with a message, never stored in plain text. The renderer
+  gets only `config:getApiKeyStatus` (`set`, `last4`, flags), never the key; never log the key or
+  its length. Tests: `tests/api-key-store.test.ts`, `tests/ipc-app.test.ts`.
 
 ## Project config the agents load from the company folder
 

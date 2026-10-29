@@ -8,11 +8,14 @@ import { isAgentId } from '../../../shared/agents/registry'
 import { normalizePermissionMode, PERMISSION_MODES, type PermissionMode } from '../../../shared/permission-mode'
 import { normalizePassthroughNames, refusedPassthroughNames } from '../../agents/agent-env'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import type { ApiKeyStore } from '../../services/api-key-store'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 
 export interface SettingsDeps {
   config: ConfigStore
+  /** The encrypted API key (status and save only reach the renderer). */
+  apiKey: Pick<ApiKeyStore, 'status' | 'save'>
   claudeCli: ClaudeCli
   /** Codex CLI presence and login (agents/codex.ts). */
   codexStatus: () => Promise<CodexStatus>
@@ -21,21 +24,13 @@ export interface SettingsDeps {
 export function registerSettingsIpc(ipc: IpcRegistrar, deps: SettingsDeps): void {
   const { config } = deps
 
-  // API Key management
-  ipc.handle('config:getApiKey', () => {
-    return config.load().anthropicApiKey || null
-  })
+  // The API key: the renderer only ever gets its status (set, last four
+  // characters), never the key (services/api-key-store.ts).
+  ipc.handle('config:getApiKeyStatus', () => deps.apiKey.status())
 
-  ipc.handle('config:setApiKey', (_, apiKey: string) => {
-    const current = config.load()
-    current.anthropicApiKey = apiKey
-    config.save(current)
-    return true
-  })
+  ipc.handle('config:setApiKey', (_, apiKey: string) => deps.apiKey.save(apiKey))
 
-  ipc.handle('config:hasApiKey', () => {
-    return !!config.load().anthropicApiKey
-  })
+  ipc.handle('config:hasApiKey', () => deps.apiKey.status().set)
 
   // Auth mode management
   ipc.handle('codex:status', () => deps.codexStatus())

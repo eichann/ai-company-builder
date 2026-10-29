@@ -106,6 +106,23 @@ export interface SimpleResult {
   error?: string
 }
 
+/**
+ * The API key as the renderer may see it: never the key itself
+ * (electron/services/api-key-store.ts keeps it encrypted, main decrypts it
+ * only where it is used).
+ */
+export interface ApiKeyStatus {
+  set: boolean
+  /** The key's last four characters, to recognise it. */
+  last4?: string
+  /** False: this computer cannot encrypt it (no keychain), so a new key cannot be saved. */
+  encryptionAvailable: boolean
+  /** A key from an older version still in plain text (encryption unavailable here). */
+  storedInPlainText?: boolean
+  /** A stored key this computer cannot decrypt (copied settings, reset keychain): enter it again. */
+  unreadable?: boolean
+}
+
 export interface DirectoryEntry { name: string; isDirectory: boolean; path: string }
 /** `children` down to the requested depth (absent below it, and for files). */
 export interface DirectoryTreeNode extends DirectoryEntry { children?: DirectoryTreeNode[] }
@@ -434,8 +451,8 @@ export interface IpcInvokeChannels {
   'shell:openExternal': { args: [url: string]; result: SimpleResult }
 
   // Settings
-  'config:getApiKey': { args: []; result: string | null }
-  'config:setApiKey': { args: [apiKey: string]; result: boolean }
+  'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
+  'config:setApiKey': { args: [apiKey: string]; result: SimpleResult }
   'config:hasApiKey': { args: []; result: boolean }
   'codex:status': { args: []; result: CodexStatus }
   'config:getAuthMode': { args: []; result: AuthMode }
@@ -581,7 +598,7 @@ export interface ElectronAPI {
   openExternal: Invoke<'shell:openExternal'>
 
   // Config
-  getApiKey: Invoke<'config:getApiKey'>
+  getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
   setApiKey: Invoke<'config:setApiKey'>
   hasApiKey: Invoke<'config:hasApiKey'>
   getCodexStatus: Invoke<'codex:status'>

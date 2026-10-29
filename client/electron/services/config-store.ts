@@ -1,12 +1,20 @@
 // The app's settings on this computer: <userData>/config.json, read once and
-// cached; every save rewrites the file and the cache.
+// cached; every save rewrites the file (atomically, owner-only) and the cache.
 
 import fs from 'fs'
+import { atomicWrite } from '../chat-history-store'
 import type { AuthMode } from '../../shared/agent'
 import type { PermissionMode } from '../../shared/permission-mode'
 
 export interface AppConfig {
+  /**
+   * Legacy: the API key in plain text (app versions before the key moved to
+   * `anthropicApiKeyEncrypted`). Read only by services/api-key-store.ts, which
+   * migrates it away; never write it.
+   */
   anthropicApiKey?: string
+  /** The API key encrypted by the OS (safeStorage), base64. Only services/api-key-store.ts reads it. */
+  anthropicApiKeyEncrypted?: string
   authMode?: AuthMode
   permissionMode?: PermissionMode
   serverUrl?: string
@@ -47,7 +55,7 @@ export function createConfigStore(configPath: () => string): ConfigStore {
   return {
     load,
     save(config) {
-      fs.writeFileSync(configPath(), JSON.stringify(config, null, 2))
+      atomicWrite(configPath(), JSON.stringify(config, null, 2))
       cachedConfig = config
     },
     authMode: () => load().authMode || 'claude-code',

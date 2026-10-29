@@ -1,5 +1,6 @@
 import { CODEX_LOGIN_HELP } from '../../../shared/agent'
 import type { AuthMode, CodexStatus } from '../../../shared/agent'
+import type { ApiKeyStatus } from '../../../shared/ipc-contract'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
 import { useState, useEffect, useRef } from 'react'
@@ -30,7 +31,9 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
     finally { setCheckingCodex(false) }
   }
   useEffect(() => { if (authMode === 'codex') void refreshCodex() }, [authMode])
+  // A new key typed here; the saved one never comes back to the renderer, only its status.
   const [apiKey, setApiKey] = useState('')
+  const [apiKeyStatus, setApiKeyStatus] = useState<ApiKeyStatus | null>(null)
   const [saving, setSaving] = useState(false)
   const [showApiKey, setShowApiKey] = useState(false)
   const [permissionMode, setPermissionMode] = useState<PermissionMode>(DEFAULT_PERMISSION_MODE)
@@ -45,10 +48,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
   }
 
   async function loadCurrentKey() {
-    const key = await window.electronAPI.getApiKey()
-    if (key) {
-      setApiKey('sk-ant-' + '*'.repeat(20))
-    }
+    setApiKeyStatus(await window.electronAPI.getApiKeyStatus())
   }
 
   async function loadPermissionMode() {
@@ -60,10 +60,14 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
   async function handleSave() {
     setSaving(true)
     try {
-      await window.electronAPI.setAuthMode(authMode)
-      if (authMode === 'api-key' && apiKey && !apiKey.includes('*')) {
-        await window.electronAPI.setApiKey(apiKey)
+      if (authMode === 'api-key' && apiKey.trim()) {
+        const saved = await window.electronAPI.setApiKey(apiKey)
+        if (!saved.success) {
+          setSaveError(saved.error ?? 'APIキーを保存できませんでした。')
+          return
+        }
       }
+      await window.electronAPI.setAuthMode(authMode)
       if (permissionMode !== loadedPermissionModeRef.current) await window.electronAPI.setPermissionMode(permissionMode)
       onClose()
     } catch (error) {
@@ -178,6 +182,18 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
             <label className="block text-xs font-medium tracking-wide uppercase text-ink-muted">
               {t('chatSettings.apiKey')}
             </label>
+            {apiKeyStatus?.set && (
+              <p className="text-xs text-ink-muted">設定済み（…{apiKeyStatus.last4}）。変更するときだけ新しいキーを入力してください。</p>
+            )}
+            {apiKeyStatus?.unreadable && (
+              <p className="text-xs text-amber-400">保存されているキーをこのコンピューターでは読み取れません。もう一度入力してください。</p>
+            )}
+            {apiKeyStatus?.storedInPlainText && (
+              <p className="text-xs text-amber-400">このコンピューターではキーを暗号化できないため、以前のバージョンで保存したキーが暗号化されないまま残っています。</p>
+            )}
+            {apiKeyStatus && !apiKeyStatus.encryptionAvailable && (
+              <p role="alert" className="text-xs text-amber-400">このコンピューターでは APIキーを安全に保存する仕組み（キーチェーン）が使えないため、新しいキーは保存できません。</p>
+            )}
             <div className="relative">
               <input
                 type={showApiKey ? 'text' : 'password'}
@@ -278,7 +294,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
       <div className="flex-shrink-0 p-4 border-t border-white/[0.04]">
         <button
           onClick={handleSave}
-          disabled={saving || (authMode === 'api-key' && !apiKey) || (authMode === 'codex' && (checkingCodex || !codexStatus?.authenticated || !codexStatus.models.length))}
+          disabled={saving || (authMode === 'api-key' && !apiKey.trim() && !apiKeyStatus?.set) || (authMode === 'codex' && (checkingCodex || !codexStatus?.authenticated || !codexStatus.models.length))}
           className="
             w-full py-3 rounded-xl
             bg-accent hover:bg-accent/90

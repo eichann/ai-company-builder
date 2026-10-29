@@ -181,7 +181,7 @@ const api: ElectronAPI = {
     invoke('shell:openExternal', url),
 
   // Config operations
-  getApiKey: () => invoke('config:getApiKey'),
+  getApiKeyStatus: () => invoke('config:getApiKeyStatus'),
   setApiKey: (apiKey: string) => invoke('config:setApiKey', apiKey),
   hasApiKey: () => invoke('config:hasApiKey'),
   getCodexStatus: () => invoke('codex:status'),
