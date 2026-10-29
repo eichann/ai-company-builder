@@ -42,8 +42,9 @@ test('Claude Code: xhigh is demoted to high where the CLI model does not take it
 })
 
 test('per-feature models are unchanged', () => {
-  assert.deepEqual(AGENTS['claude-code'].tasks, { chat: 'claude-opus-5-5[1m]', title: 'haiku', commitMessage: 'haiku', voice: 'haiku', handoff: 'haiku', webReader: 'haiku' })
-  assert.deepEqual(AGENTS.codex.tasks, { commitMessage: 'gpt-5.6-luna', voice: 'gpt-5.6-luna', handoff: 'gpt-5.6-luna', webReader: 'gpt-5.6-luna' })
+  // The Web reader: Claude on the chat's Opus; Codex on its catalog default (owner decision 2026-10-29).
+  assert.deepEqual(AGENTS['claude-code'].tasks, { chat: 'claude-opus-5-5[1m]', title: 'haiku', commitMessage: 'haiku', voice: 'haiku', handoff: 'haiku', webReader: 'claude-opus-5-5[1m]' })
+  assert.deepEqual(AGENTS.codex.tasks, { commitMessage: 'gpt-5.6-luna', voice: 'gpt-5.6-luna', handoff: 'gpt-5.6-luna' })
   assert.deepEqual(AGENTS['api-key'].tasks, {
     chat: 'claude-sonnet-4-20250514', title: 'claude-haiku-4-5-20251001',
     commitMessage: 'claude-haiku-5-5', voice: 'claude-haiku-4-5-20251001',
@@ -92,7 +93,8 @@ test('capabilities that depend on others are consistent', () => {
     const tasks = AGENTS[id].tasks
     if (c.oneShotText) assert.ok(tasks.commitMessage && tasks.voice, `${id}: one-shot models`)
     if (c.handoff) assert.ok(tasks.handoff, `${id}: hand-off model`)
-    if (c.webReader) assert.ok(tasks.webReader, `${id}: Web reader model`)
+    // A Web reader needs a model: its own entry, or a live catalog to take the default from (Codex).
+    if (c.webReader) assert.ok(tasks.webReader || c.liveModelCatalog, `${id}: Web reader model`)
   }
 })
 

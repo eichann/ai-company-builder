@@ -189,12 +189,13 @@ export function writeAgentHandoff(id: AgentId, request: HandoffRequest, host: { 
 
 /**
  * Ask the Web reader of an agent that claims `webReader` (the member's own
- * agent, its `tasks.webReader` model), in a new empty folder removed
- * afterwards. Rejects with a `WebReaderError` (web-reader.ts).
+ * agent, its `tasks.webReader` model — none: the agent's catalog default), in
+ * a new empty folder removed afterwards. Rejects with a `WebReaderError`
+ * (web-reader.ts).
  */
 export function runWebReader(id: AgentId, request: WebReaderRequest): Promise<WebReaderResult> {
   const run = AGENTS[id].capabilities.webReader ? AGENT_FACTORIES[id].runWebReader : undefined
-  const model = AGENTS[id].tasks.webReader
-  if (!run || !model) return Promise.reject(new Error(`${AGENTS[id].label}: no Web reader`))
+  const model = AGENTS[id].tasks.webReader ?? ''
+  if (!run) return Promise.reject(new Error(`${AGENTS[id].label}: no Web reader`))
   return inEmptyFolder(cwd => run({ ...request, model, cwd, timeoutMs: request.timeoutMs ?? WEB_READER_TIMEOUT_MS }))
 }

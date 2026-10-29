@@ -227,7 +227,7 @@ test('web research: the app tool is served, Codex web search is off, and its cal
   const config = rpc.calls.find(c => c.method === 'thread/start')!.params.config as { web_search?: string; mcp_servers?: Record<string, { url?: string; tool_timeout_sec?: number }> }
   assert.equal(config.web_search, 'disabled')
   assert.match(config.mcp_servers!.acb_web.url!, /^http:\/\/127\.0\.0\.1:\d+\/mcp$/)
-  assert.equal(config.mcp_servers!.acb_web.tool_timeout_sec, 180)
+  assert.equal(config.mcp_servers!.acb_web.tool_timeout_sec, 360)
   rpc.onMessage({ method: 'item/started', params: { threadId: 'thread-a', item: { id: 'w', type: 'mcpToolCall', server: 'acb_web', tool: 'web_research', arguments: { question: 'q' } } } })
   rpc.complete()
   await pump

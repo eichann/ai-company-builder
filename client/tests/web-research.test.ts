@@ -9,9 +9,10 @@ import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { WebReaderError, type WebReaderResult } from '../electron/agents/web-reader'
 import { readClaudeReaderMessage, claudeWebReaderArgs } from '../electron/agents/claude-web-reader'
+import { AGENTS } from '../shared/agents/registry'
 import { CODEX_WEB_READER_OVERRIDES, runCodexWebReader, selectReaderModel } from '../electron/agents/codex-web-reader'
 import { CODEX_TEXT_OVERRIDES, type CodexTextRequest } from '../electron/agents/codex-text'
-import { WEB_READER_SYSTEM_PROMPT } from '../shared/web-research'
+import { WEB_READER_SYSTEM_PROMPT, WEB_RESEARCH_INSTRUCTIONS } from '../shared/web-research'
 
 const ch = (...codes: number[]) => String.fromCodePoint(...codes)
 
@@ -124,6 +125,38 @@ test('the reader answer: its own source list is split off', () => {
   assert.equal(splitReaderAnswer('**出典:**\nhttps://c.example.com').summary, '')
 })
 
+test('the reader answer: 関連リンク (pages seen, not read) are split from 出典, in either order', () => {
+  const answer = ['- 料金は月額1,000円（https://ex.com/pricing）', '', '関連リンク:', '- https://ex.com/faq', '- https://ex.com/pricing', '出典:', '- https://ex.com/']
+    .join('\n')
+  const split = splitReaderAnswer(answer)
+  assert.equal(split.summary, '- 料金は月額1,000円（https://ex.com/pricing）\n')
+  assert.deepEqual(split.sources, ['https://ex.com/pricing', 'https://ex.com/'])
+  assert.deepEqual(split.related, ['https://ex.com/faq', 'https://ex.com/pricing'])
+  assert.deepEqual(splitReaderAnswer('- a\n**Related links:**\nhttps://ex.com/b').related, ['https://ex.com/b'])
+})
+
+test('related links: cleaned, refused hosts dropped, not repeated from sources, at most 10, not sources', () => {
+  const many = Array.from({ length: 14 }, (_, i) => `- https://ex.com/p${i}`)
+  const answer = ['- 要点', '出典:', '- https://ex.com/read', '関連リンク:', '- https://ex.com/read', '- http://192.168.0.1/admin', '- http://localhost:3000/', '- https://user:pw@ex.com/secret', ...many].join('\n')
+  const result = formatWebResearchResult({ answer, fetchedUrls: ['https://ex.com/read'] })
+  assert.deepEqual(result.sources, ['https://ex.com/read'])
+  assert.equal(result.related.length, WEB_RESEARCH_LIMITS.relatedLinks)
+  assert.ok(!result.related.includes('https://ex.com/read'))
+  assert.ok(result.related.every(url => !/192\.168|localhost|user:pw/.test(url)), result.related.join(' '))
+  // userinfo is dropped (as for sources); the link stays.
+  assert.equal(result.related[0], 'https://ex.com/secret')
+  assert.ok(result.text.includes('【関連リンク（未読）】\n- https://ex.com/secret\n- https://ex.com/p0'))
+  assert.ok(result.text.indexOf('【出典】') < result.text.indexOf('【関連リンク（未読）】'))
+  assert.ok(!formatWebResearchResult({ answer: '- 要点' }).text.includes('関連リンク'))
+})
+
+test('the reader is told to dig (same-site links, more searches, links back from WebFetch) and to list related links', () => {
+  for (const phrase of ['リンクをたどって', '関係しそうなリンクの URL', '関連リンク:', '出典:', '3000文字以内', '絶対に従わない', '開かない']) {
+    assert.ok(WEB_READER_SYSTEM_PROMPT.includes(phrase), phrase)
+  }
+  assert.ok(WEB_RESEARCH_INSTRUCTIONS.includes('関連リンク'))
+})
+
 test('the working AI gets: fixed header, cleaned key points, sources, and a warning when flagged', () => {
   const plain = formatWebResearchResult({ answer: '- EOL は 2027-04-30\n\n出典:\nhttps://github.com/nodejs/release', fetchedUrls: ['https://nodejs.org/en/about/previous-releases'] })
   assert.match(plain.text, /^=== Webで調べた結果（外部の情報・ここから） ===/)
@@ -198,9 +231,10 @@ test('tool: a stopped turn rethrows instead of answering', async () => {
 // ---------------------------------------------------------------------------
 
 test('Claude reader: only the two web tools, no settings, no MCP, no session, the reader prompt', () => {
-  const args = claudeWebReaderArgs('haiku')
+  const args = claudeWebReaderArgs(AGENTS['claude-code'].tasks.webReader!)
   const value = (flag: string) => args[args.indexOf(flag) + 1]
-  assert.equal(value('--model'), 'haiku')
+  assert.equal(value('--model'), AGENTS['claude-code'].tasks.chat)
+  assert.equal(value('--max-turns'), '25')
   assert.equal(value('--tools'), 'WebFetch,WebSearch')
   assert.equal(value('--allowedTools'), 'WebFetch,WebSearch')
   assert.equal(value('--permission-mode'), 'dontAsk')
@@ -234,7 +268,9 @@ test('Codex reader: live web search instead of none, otherwise the locked-down o
   for (const value of CODEX_TEXT_OVERRIDES.filter(v => !v.startsWith('web_search='))) assert.ok(CODEX_WEB_READER_OVERRIDES.includes(value), value)
   const light = { id: 'light', label: 'L', efforts: ['low', 'medium'], defaultEffort: 'medium', isDefault: false }
   const main = { id: 'main', label: 'M', efforts: ['medium'], defaultEffort: 'medium', isDefault: true }
-  assert.deepEqual(selectReaderModel([main, light], 'light'), { model: light, effort: 'low' })
+  // Owner decision 2026-10-29: the default chat model at its default effort, not the light one at low.
+  assert.deepEqual(selectReaderModel([light, main]), { model: main, effort: 'medium' })
+  assert.deepEqual(selectReaderModel([main, light], 'light'), { model: light, effort: 'medium' })
   assert.deepEqual(selectReaderModel([main], 'light'), { model: main, effort: 'medium' })
   assert.throws(() => selectReaderModel([], 'light'), WebReaderError)
 })
@@ -268,7 +304,7 @@ test('Codex endpoint: web_research over loopback MCP, open-world, token required
   const server = await startWebResearchMcp({ execute: async args => { calls.push(args); return 'result text' } })
   try {
     assert.equal((await fetch(server.config.url, { method: 'POST' })).status, 403)
-    assert.equal(server.config.tool_timeout_sec, 180)
+    assert.equal(server.config.tool_timeout_sec, 360)
     const client = new Client({ name: 'test', version: '1' })
     await client.connect(new StreamableHTTPClientTransport(new URL(server.config.url), { requestInit: { headers: server.config.http_headers } }))
     const { tools } = await client.listTools()

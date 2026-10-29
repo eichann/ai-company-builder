@@ -167,8 +167,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - 「Web で調べる」 (`web-research.md`): agents with `webReader` get the app tool `web_research`
   (`acb_web`) and lose their own web tools — Claude through flag `settings: { permissions: {
   deny: ['WebFetch', 'WebSearch'] } }` (whole session, subagents too), Codex through
-  `web_search: 'disabled'` in the thread config. A separate reader (the member's agent, light
-  model, web tools only, no settings, empty temp folder) reads the web.
+  `web_search: 'disabled'` in the thread config. A separate reader (the member's agent on its
+  strong chat model, web tools only, no settings, empty temp folder) reads the web and digs into
+  linked pages.
 
 ## Choice prompts (the AI asks, the member picks)
 

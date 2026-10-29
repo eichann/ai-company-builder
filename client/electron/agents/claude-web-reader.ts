@@ -3,7 +3,7 @@
  * `claude -p` with exactly the two web tools (WebFetch, WebSearch), allowed
  * without asking (`dontAsk` refuses anything else), no settings from anywhere
  * (`--setting-sources ""`, `--safe-mode`: no CLAUDE.md, skills, hooks,
- * plugins, MCP), no slash commands, no session file, a small turn limit, an
+ * plugins, MCP), no slash commands, no session file, a turn limit, an
  * empty temporary folder as cwd, and the question as JSON on stdin (data,
  * never shell source). Verified against CLI 2.1.304: the init message lists
  * only WebFetch and WebSearch, and WebFetch runs under --safe-mode.
@@ -21,7 +21,8 @@ import { WEB_READER_SYSTEM_PROMPT, checkWebUrl } from '../../shared/web-research
 import { WEB_READER_MAX_ANSWER, WEB_READER_MAX_OUTPUT, WebReaderError, type WebReaderJob, type WebReaderResult } from './web-reader'
 
 const READER_TOOLS = ['WebFetch', 'WebSearch'] as const
-const MAX_TURNS = 8
+/** Room to search, read the given pages and follow their links (owner decision 2026-10-29). */
+const MAX_TURNS = 25
 const MAX_LINE = 2_000_000
 
 export function claudeWebReaderArgs(model: string): string[] {
