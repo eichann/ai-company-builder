@@ -108,7 +108,8 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   notification). Not the chat's 「確認をお願いする」 (`request_review`).
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
-- Rules and shapes: `model.ts` (pure). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
+- Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
+  components never call `window.electronAPI`). Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
