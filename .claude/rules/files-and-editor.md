@@ -114,7 +114,8 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   computed in memory (`markOrphanedComments`); completed reviews stay even when all comments are
   resolved and remain in レビュー履歴. Only the reviewer's own actions write their review file;
   replies and resolved marks go to the member's own reply file.
-- Saving (`api.ts`): every sidecar write goes to `.<name>.acb-tmp-<random>` next to it and is
+- Saving (`api.ts`): every sidecar write goes to `.<name>.acb-tmp-<random>` next to it
+  (`client/shared/temp-save-file.ts`; sync never commits one, `sync-guards.md`) and is
   renamed over the target (nobody — sync, the AI — reads half a file), retried twice (150 / 400
   ms; `fs:writeFile` only answers yes/no), one save at a time per file, and the reply file is
   changed on what is on disk at that moment. The reviewer's file changed since last read (sync

@@ -11,6 +11,7 @@ import {
   type Review,
   type ReviewFileData,
 } from './model'
+import { tempSaveFileName } from '../../../shared/temp-save-file'
 
 /** The document's text, or null when it cannot be read. */
 export function readDocument(filePath: string): Promise<string | null> {
@@ -223,7 +224,7 @@ async function retrying(path: string, attempt: () => Promise<boolean>): Promise<
 function writeSidecar(path: string, content: string): Promise<void> {
   return retrying(path, async () => {
     const slash = path.lastIndexOf('/')
-    const temp = `${path.slice(0, slash)}/.${path.slice(slash + 1)}.acb-tmp-${Math.random().toString(36).slice(2, 10)}`
+    const temp = `${path.slice(0, slash)}/${tempSaveFileName(path.slice(slash + 1), Math.random().toString(36).slice(2, 10))}`
     if (!await window.electronAPI.writeFile(temp, content)) {
       await window.electronAPI.deleteItem(temp)
       return false

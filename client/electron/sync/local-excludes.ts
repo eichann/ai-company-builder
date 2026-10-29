@@ -42,6 +42,11 @@ export function folderExcludeLines(paths: readonly string[]): string[] {
  * paths removes the block. Returns true when the file changed.
  */
 export function writeExcludeBlock(repoPath: string, block: ExcludeBlock, paths: readonly string[]): boolean {
+  return writeExcludeLines(repoPath, block, folderExcludeLines(paths))
+}
+
+/** Make `block` hold exactly these gitignore lines (same placement rules as writeExcludeBlock). */
+export function writeExcludeLines(repoPath: string, block: ExcludeBlock, patterns: readonly string[]): boolean {
   const file = excludeFile(repoPath)
   let text = ''
   try { text = fs.readFileSync(file, 'utf-8') } catch { /* none yet */ }
@@ -49,7 +54,7 @@ export function writeExcludeBlock(repoPath: string, block: ExcludeBlock, paths: 
   if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop()
   const begin = lines.indexOf(block.begin)
   const end = begin >= 0 ? lines.indexOf(block.end, begin) : -1
-  const body = paths.length > 0 ? [block.begin, ...folderExcludeLines(paths), block.end] : []
+  const body = patterns.length > 0 ? [block.begin, ...patterns, block.end] : []
   let next: string[]
   if (begin >= 0 && end >= 0) {
     next = [...lines.slice(0, begin), ...body, ...lines.slice(end + 1)]
