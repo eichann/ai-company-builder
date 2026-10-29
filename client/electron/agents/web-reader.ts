@@ -32,7 +32,7 @@ export interface WebReaderRequest {
 
 /** What the factory hands the agent's reader. */
 export interface WebReaderJob extends WebReaderRequest {
-  /** The registry's `tasks.webReader`. */
+  /** The registry's `tasks.webReader`; '' → the agent's catalog default. */
   model: string
   /** A fresh empty folder, removed afterwards. */
   cwd: string
@@ -58,7 +58,8 @@ export class WebReaderError extends Error {
   }
 }
 
-export const WEB_READER_TIMEOUT_MS = 120_000
+/** Opus digging through several pages (owner decision 2026-10-29); outer limits must stay above it. */
+export const WEB_READER_TIMEOUT_MS = 300_000
 /** Anything more from the CLI is not a reader's answer. */
 export const WEB_READER_MAX_OUTPUT = 8_000_000
 export const WEB_READER_MAX_ANSWER = 100_000

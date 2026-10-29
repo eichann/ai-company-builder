@@ -106,7 +106,7 @@ export interface AgentTaskModels {
   readonly voice?: string
   /** Hand-off memos. */
   readonly handoff?: string
-  /** The Web reader (`capabilities.webReader`). */
+  /** The Web reader (`capabilities.webReader`); absent → the agent's catalog default (Codex). */
   readonly webReader?: string
 }
 
@@ -145,8 +145,10 @@ const CLAUDE_MODELS = [
 
 export type ClaudeModelId = typeof CLAUDE_MODELS[number]['id']
 
-/** The CLI alias for the small fast model (titles, `claude -p` one-shots, hand-off memos, the Web reader). */
+/** The CLI alias for the small fast model (titles, `claude -p` one-shots, hand-off memos). */
 const CLAUDE_LIGHT_MODEL = 'haiku'
+/** The chat default; also the Web reader's (owner decision 2026-10-29: a light reader did not dig). */
+const CLAUDE_CHAT_MODEL = 'claude-opus-5-5[1m]'
 
 const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
   id: 'claude-code',
@@ -156,12 +158,12 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
   defaultModel: 'opus-5-5',
   defaultEffort: 'medium',
   tasks: {
-    chat: 'claude-opus-5-5[1m]',
+    chat: CLAUDE_CHAT_MODEL,
     title: CLAUDE_LIGHT_MODEL,
     commitMessage: CLAUDE_LIGHT_MODEL,
     voice: CLAUDE_LIGHT_MODEL,
     handoff: CLAUDE_LIGHT_MODEL,
-    webReader: CLAUDE_LIGHT_MODEL,
+    webReader: CLAUDE_CHAT_MODEL,
   },
   capabilities: {
     ownsConversation: true,
@@ -207,7 +209,7 @@ export function claudeCliEffort(cliModel: string, effort?: AgentEffort): AgentEf
 // Codex
 // ---------------------------------------------------------------------------
 
-/** The lightweight model verified for Japanese dictation (voice, commit messages, hand-off memos, the Web reader). */
+/** The lightweight model verified for Japanese dictation (voice, commit messages, hand-off memos). */
 const CODEX_LIGHT_MODEL = 'gpt-5.6-luna'
 
 const CODEX: AgentDescriptor = {
@@ -223,8 +225,8 @@ const CODEX: AgentDescriptor = {
     voice: CODEX_LIGHT_MODEL,
     // Required: hand-off memos fail when the account does not have it.
     handoff: CODEX_LIGHT_MODEL,
-    // Preferred; the catalog's default when the account does not have it.
-    webReader: CODEX_LIGHT_MODEL,
+    // No webReader entry: the Web reader runs on the catalog's default chat
+    // model at its default effort (owner decision 2026-10-29: not the light one).
   },
   capabilities: {
     ownsConversation: true,

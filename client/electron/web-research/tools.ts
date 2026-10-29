@@ -101,7 +101,7 @@ export function createWebResearchTools(options: WebResearchToolsOptions): WebRes
         const result = await options.run(checked.input, signal)
         const formatted = formatWebResearchResult({ answer: result.answer, fetchedUrls: result.fetchedUrls })
         // Counts only: never the question, the answer or a URL.
-        log(`[web-research] reader answered in ${Date.now() - started} ms (${result.fetchedUrls.length} pages, ${result.searches} searches, ${formatted.sources.length} sources${formatted.flags.length ? `, flags: ${formatted.flags.join(',')}` : ''})`)
+        log(`[web-research] reader answered in ${Date.now() - started} ms (${result.fetchedUrls.length} pages, ${result.searches} searches, ${formatted.sources.length} sources, ${formatted.related.length} related${formatted.flags.length ? `, flags: ${formatted.flags.join(',')}` : ''})`)
         return formatted.text
       } catch (error) {
         if (options.signal?.aborted) throw error
@@ -114,7 +114,8 @@ export function createWebResearchTools(options: WebResearchToolsOptions): WebRes
 }
 
 /** Codex's per-call limit: the reader's 2 minutes plus start-up. */
-export const WEB_RESEARCH_TOOL_TIMEOUT_SEC = 180
+/** Above WEB_READER_TIMEOUT_MS (300 s), so Codex never gives up before the reader does. */
+export const WEB_RESEARCH_TOOL_TIMEOUT_SEC = 360
 
 /** Codex: the tool behind a request-scoped loopback MCP endpoint. */
 export function startWebResearchMcp(tools: WebResearchTools) {
