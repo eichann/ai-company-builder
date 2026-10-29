@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
-// Preview of the document review in the editor (MarkdownReview: banner, side
-// panel, comment popover, replies, resolve) on a Markdown file shown as a
+// Preview of the document review in the editor (src/features/doc-review:
+// banner, side panel, comment popover, replies, resolve) on a Markdown file shown as a
 // preview, with the preload API mocked by an in-memory folder. 提案書.md
 // already has a completed review by 佐藤; the member is 山田 (demo@example.com).
 // Open /tests/doc-review-ui.html?theme=light|dark

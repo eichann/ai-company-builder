@@ -16,17 +16,14 @@ import remarkGfm from 'remark-gfm'
 import type { EditorView } from '@codemirror/view'
 import { CodeEditor } from './CodeEditor'
 import { getFileIcon } from './FileIcons'
-import {
-  useMarkdownReview,
-  useTextSelection,
-  ReviewBanner,
-  CompletedReviewBanner,
-  ReviewHistoryDropdown,
-  ReviewSidePanel,
-  CommentPopover,
-  MarkdownDiffView,
-  type MarkdownDiffViewHandle,
-} from './MarkdownReview'
+import { useMarkdownReview } from '../../features/doc-review/hooks/useMarkdownReview'
+import { useTextSelection } from '../../features/doc-review/hooks/useTextSelection'
+import { ReviewBanner } from '../../features/doc-review/components/ReviewBanner'
+import { CompletedReviewBanner } from '../../features/doc-review/components/CompletedReviewBanner'
+import { ReviewHistoryDropdown } from '../../features/doc-review/components/ReviewHistoryDropdown'
+import { ReviewSidePanel } from '../../features/doc-review/components/ReviewSidePanel'
+import { CommentPopover } from '../../features/doc-review/components/CommentPopover'
+import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../features/doc-review/components/MarkdownDiffView'
 import { markReviewSeen } from '../../features/doc-review/model'
 import { useAuthStore } from '../../stores/authStore'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
