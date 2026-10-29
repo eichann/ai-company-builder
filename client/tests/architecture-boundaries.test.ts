@@ -19,19 +19,28 @@
 //                             else asks the registry (`agentCan`, AGENTS[id]).
 //                             Known exceptions are listed with their reason and
 //                             must keep occurring.
+//   src/features/<name>/      renderer features (.claude/rules/renderer-structure.md):
+//                             never import another feature; app/ composes them.
+//                             Listed exceptions only, each with its reason.
+//   src/shared/               never imports src/features or src/app
+//   window.electronAPI        in the renderer only through a data layer
+//                             (src/features/<name>/api.ts, src/shared/ipc/);
+//                             the files that still call it directly are a
+//                             list that may only shrink.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { readdirSync, readFileSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const CLIENT = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
-function sourceFiles(dir: string): string[] {
+function sourceFiles(dir: string, { tests = false } = {}): string[] {
+  if (!existsSync(dir)) return []
   return readdirSync(dir).flatMap(name => {
     const p = join(dir, name)
-    if (statSync(p).isDirectory()) return name === 'node_modules' ? [] : sourceFiles(p)
-    return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [p] : []
+    if (statSync(p).isDirectory()) return name === 'node_modules' ? [] : sourceFiles(p, { tests })
+    return /\.tsx?$/.test(name) && (tests || !/\.test\.tsx?$/.test(name)) ? [p] : []
   })
 }
 
@@ -52,8 +61,9 @@ function importsOf(file: string): string[] {
   return specs.map(m => m[1])
 }
 
-/** Client-relative path of a relative import ('electron/agents/claude'), or `pkg:<specifier>`. */
+/** Client-relative path of a relative or `@/` import ('electron/agents/claude'), or `pkg:<specifier>`. */
 function target(file: string, spec: string): string {
+  if (spec.startsWith('@/')) return `src/${spec.slice(2)}`.replace(/\.tsx?$/, '') // tsconfig / Vite alias
   if (!spec.startsWith('.')) return `pkg:${spec}`
   return relative(CLIENT, resolve(dirname(file), spec)).replace(/\.tsx?$/, '')
 }
@@ -149,4 +159,137 @@ test('agent ids are compared only inside the agent modules', () => {
 test('the checks see real imports (self-test)', () => {
   const chatServer = join(CLIENT, 'electron', 'chat-server.ts')
   assert.ok(importsOf(chatServer).some(s => target(chatServer, s) === 'electron/agents/registry'))
+})
+
+// ---- Renderer (client/src) — .claude/rules/renderer-structure.md ----
+
+/** 'editor' for anything under src/features/editor/, else null. */
+const featureOf = (clientPath: string): string | null => /^src\/features\/([^/]+)\//.exec(clientPath)?.[1] ?? null
+
+/**
+ * Feature → feature imports allowed on purpose, as 'from -> to': reason.
+ * Each must keep occurring; add one only with a reason the owner would
+ * accept (otherwise let app/ compose the two through props).
+ */
+const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {}
+
+/** Feature pairs a set of (importing file, imported path) edges crosses. */
+function crossFeatureImports(edges: Array<[file: string, imported: string]>): Array<[pair: string, where: string]> {
+  const out: Array<[string, string]> = []
+  for (const [file, imported] of edges) {
+    const from = featureOf(file)
+    const to = featureOf(imported)
+    if (from && to && from !== to) out.push([`${from} -> ${to}`, `${file}: ${imported}`])
+  }
+  return out
+}
+
+test('a renderer feature never imports another feature', () => {
+  const files = sourceFiles(join(CLIENT, 'src', 'features'), { tests: true })
+  const edges = files.flatMap(f => importsOf(f).map(s => [rel(f), target(f, s)] as [string, string]))
+  const found = new Set<string>()
+  const unexpected: string[] = []
+  for (const [pair, where] of crossFeatureImports(edges)) {
+    if (pair in FEATURE_IMPORT_EXCEPTIONS) found.add(pair)
+    else unexpected.push(`${pair} (${where})`)
+  }
+  assert.deepEqual(unexpected, [], 'compose the two features in src/app/ instead, or move the shared part to src/shared/')
+  const stale = Object.keys(FEATURE_IMPORT_EXCEPTIONS).filter(p => !found.has(p))
+  assert.deepEqual(stale, [], 'remove exceptions that no longer occur')
+})
+
+const sharedMayImport = (t: string) => !/^src\/(features|app)(\/|$)/.test(t)
+
+test('renderer src/shared never imports src/features or src/app', () => {
+  const files = sourceFiles(join(CLIENT, 'src', 'shared'), { tests: true })
+  assert.deepEqual(violations(files, sharedMayImport), [])
+})
+
+/**
+ * Renderer files that still call window.electronAPI directly (2026-10-29:
+ * 44). Never add one: new IPC calls go into the feature's api.ts or
+ * src/shared/ipc/. Remove a file here when it stops calling it; a move-only
+ * PR renames its entry. The count may only go down.
+ */
+const DIRECT_IPC_FILES: readonly string[] = [
+  'src/App.tsx',
+  'src/components/auth/CompanySelector.tsx',
+  'src/components/auth/LoginScreen.tsx',
+  'src/components/auth/ServerSetupScreen.tsx',
+  'src/components/chat/ChatAuthSettings.tsx',
+  'src/components/chat/ChatPanel.tsx',
+  'src/components/chat/ChatSidebar.tsx',
+  'src/components/chat/HandoffControl.tsx',
+  'src/components/chat/hooks/useAgentAuth.ts',
+  'src/components/chat/hooks/useAgentInteractions.ts',
+  'src/components/chat/hooks/useChatHistory.ts',
+  'src/components/chat/hooks/useChatServer.ts',
+  'src/components/chat/hooks/useChatTabs.ts',
+  'src/components/chat/hooks/useConversation.ts',
+  'src/components/chat/hooks/useTitleGeneration.ts',
+  'src/components/chat/remoteImage.ts',
+  'src/components/chat/VoiceInputControl.tsx',
+  'src/components/common/DiffViewer.tsx',
+  'src/components/settings/AgentEnvSettings.tsx',
+  'src/components/settings/DownloadFoldersSection.tsx',
+  'src/components/settings/SettingsPanel.tsx',
+  'src/components/settings/VoicePromptSettings.tsx',
+  'src/components/skill-ui/BackupHistorySlideOver.tsx',
+  'src/components/skill-ui/CommitHistoryPanel.tsx',
+  'src/components/skill-ui/CopySkillModal.tsx',
+  'src/components/skill-ui/FileSearchModal.tsx',
+  'src/components/skill-ui/FileTreePanel.tsx',
+  'src/components/skill-ui/MarkdownReview.tsx',
+  'src/components/skill-ui/NewFolderDialog.tsx',
+  'src/components/skill-ui/SearchPanel.tsx',
+  'src/components/skill-ui/SkillCentricLayout.tsx',
+  'src/components/skill-ui/SkillDetailPanel.tsx',
+  'src/components/skill-ui/TabbedEditorPanel.tsx',
+  'src/components/skill-ui/ToolViewer.tsx',
+  'src/hooks/useDepartments.ts',
+  'src/hooks/usePrivateFolders.ts',
+  'src/hooks/useSkills.ts',
+  'src/hooks/useSparseCheckout.ts',
+  'src/hooks/useWriteAccess.ts',
+  'src/lib/fileEvents.ts',
+  'src/lib/microphoneSelection.ts',
+  'src/lib/voiceAvailability.ts',
+  'src/stores/appStore.ts',
+  'src/stores/authStore.ts',
+]
+const DIRECT_IPC_CEILING = 44
+
+/** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
+const isDataLayer = (clientPath: string) =>
+  /^src\/features\/[^/]+\/api(\.tsx?$|\/)/.test(clientPath) || /^src\/shared\/ipc\//.test(clientPath)
+
+/** window.electronAPI, window['electronAPI'], or `const { electronAPI } = window`. */
+const ELECTRON_API_USE = /\bwindow\s*(?:\?\.|\.)\s*electronAPI\b|\bwindow\s*\[\s*['"]electronAPI['"]\s*\]|\{[^}]*\belectronAPI\b[^}]*\}\s*=\s*window\b/
+
+test('window.electronAPI only in the data layer and the shrinking list of older files', () => {
+  assert.ok(DIRECT_IPC_FILES.length <= DIRECT_IPC_CEILING, 'the list of direct window.electronAPI callers may only shrink')
+  const files = sourceFiles(join(CLIENT, 'src'))
+  assert.ok(files.length > 0)
+  const using = files.map(rel).filter(f => ELECTRON_API_USE.test(stripComments(readFileSync(join(CLIENT, f), 'utf8'))))
+  const unexpected = using.filter(f => !isDataLayer(f) && !DIRECT_IPC_FILES.includes(f))
+  assert.deepEqual(unexpected, [], 'call IPC from the feature\'s api.ts (or src/shared/ipc/) instead (renderer-structure.md)')
+  const stale = DIRECT_IPC_FILES.filter(f => !using.includes(f))
+  assert.deepEqual(stale, [], 'remove files that no longer call window.electronAPI (and lower DIRECT_IPC_CEILING)')
+})
+
+test('the renderer checks catch violations (self-test)', () => {
+  assert.deepEqual(crossFeatureImports([
+    ['src/features/editor/TabbedEditor.tsx', 'src/features/doc-review/model'],
+    ['src/features/editor/hooks/useX.ts', 'src/features/editor/model'],
+    ['src/app/AppShell.tsx', 'src/features/editor/TabbedEditor'],
+  ]).map(([pair]) => pair), ['editor -> doc-review'])
+  assert.equal(target(join(CLIENT, 'src/shared/lib/x.ts'), '@/features/chat/api'), 'src/features/chat/api')
+  assert.equal(sharedMayImport(target(join(CLIENT, 'src/shared/lib/x.ts'), '../../features/chat/api')), false)
+  assert.equal(sharedMayImport(target(join(CLIENT, 'src/shared/lib/x.ts'), '../../app/AppShell')), false)
+  assert.equal(sharedMayImport(target(join(CLIENT, 'src/shared/lib/x.ts'), '../../stores/appStore')), true)
+  for (const use of ['window.electronAPI.readFile(p)', 'window?.electronAPI', "window['electronAPI']", 'const { electronAPI } = window']) {
+    assert.ok(ELECTRON_API_USE.test(use), use)
+  }
+  assert.ok(isDataLayer('src/features/doc-review/api.ts') && isDataLayer('src/shared/ipc/client.ts'))
+  assert.ok(!isDataLayer('src/features/doc-review/hooks/useApi.ts'))
 })

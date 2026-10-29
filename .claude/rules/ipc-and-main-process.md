@@ -52,7 +52,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
   `no-restricted-imports` forbids `electron` in `features/**`, `services/**`, `ipc/**`;
   `client/tests/architecture-boundaries.test.ts` checks the same over the whole tree, plus the
-  agent boundaries (CLAUDE.md "App modules point one way too").
+  agent boundaries (CLAUDE.md "App modules point one way too") and the renderer's (no feature →
+  feature imports, `src/shared` ↛ `src/features` / `src/app`, `window.electronAPI` only in the
+  data layer or the shrinking list of older files: `renderer-structure.md`).
 - Keep `main.ts` importable without side effects beyond registering handlers (startup stays in
   `app.whenReady`), because the IPC harness loads it under plain Node.
 
