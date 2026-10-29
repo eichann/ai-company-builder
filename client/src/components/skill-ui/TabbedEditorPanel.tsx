@@ -19,6 +19,7 @@ import { getFileIcon } from './FileIcons'
 import { useMarkdownReview } from '../../features/doc-review/hooks/useMarkdownReview'
 import { useTextSelection } from '../../features/doc-review/hooks/useTextSelection'
 import { ReviewBanner } from '../../features/doc-review/components/ReviewBanner'
+import { ReviewSaveError } from '../../features/doc-review/components/ReviewSaveError'
 import { CompletedReviewBanner } from '../../features/doc-review/components/CompletedReviewBanner'
 import { ReviewHistoryDropdown } from '../../features/doc-review/components/ReviewHistoryDropdown'
 import { ReviewSidePanel } from '../../features/doc-review/components/ReviewSidePanel'
@@ -1077,6 +1078,7 @@ export function TabbedEditorPanel({
           <PdfPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <div className="h-full flex flex-col">
+            {review.saveError && <ReviewSaveError failure={review.saveError} onDismiss={review.dismissSaveError} />}
             {/* Review banner */}
             {review.isReviewing && review.activeReview && (
               <ReviewBanner

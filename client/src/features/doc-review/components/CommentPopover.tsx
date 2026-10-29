@@ -11,7 +11,8 @@ export function CommentPopover({
 }: {
   position: { x: number; y: number }
   selectedText?: string
-  onSubmit: (body: string, severity: CommentSeverity) => void
+  /** Resolves to false when not saved: the text stays for another try. */
+  onSubmit: (body: string, severity: CommentSeverity) => Promise<boolean> | void
   onClose: () => void
 }) {
   const [body, setBody] = useState('')
@@ -23,9 +24,9 @@ export function CommentPopover({
     return () => clearTimeout(timer)
   }, [])
 
-  const handleSubmit = () => {
+  const handleSubmit = async () => {
     if (body.trim()) {
-      onSubmit(body.trim(), severity)
+      if (await onSubmit(body.trim(), severity) === false) return
       setBody('')
     }
   }

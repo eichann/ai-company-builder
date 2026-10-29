@@ -181,3 +181,116 @@ test('opening and viewing reviews changes no file: all-resolved reviews stay, �
   expect(await disk(page)).toEqual(before)
   expectNoPageErrors(state)
 })
+
+// ---- Saves that fail, and what the member sees (api.test.ts pins the retries) ----
+
+const failNextWrites = (page: Page, n: number) => page.evaluate(count => (window as unknown as { __acbFailWrites: (n: number) => void }).__acbFailWrites(count), n)
+const saveAlert = (page: Page) => page.getByRole('alert').filter({ hasText: '保存できませんでした' })
+
+async function startOwnReview(page: Page) {
+  await expect(page.getByRole('button', { name: 'レビュー履歴 (1)' })).toBeVisible()
+  await page.getByRole('button', { name: 'レビューする' }).click()
+  await expect(page.getByText('レビュー中 — テキストを選択してコメントを追加')).toBeVisible()
+}
+
+test('a comment that cannot be saved: plain message, the text stays; pressing コメント again saves it', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review')
+  await startOwnReview(page)
+  await selectText(page, '担当は営業部です')
+  const box = page.getByPlaceholder('コメントを入力... (⌘+Enter で送信)')
+  await box.fill('部署名を正式名称に')
+  await failNextWrites(page, 3) // every retry fails
+  await page.getByRole('button', { name: 'コメント', exact: true }).click()
+  await expect(saveAlert(page)).toHaveText('コメントを保存できませんでした。書いた内容は残っています。少し待ってから、もう一度「コメント」を押してください。')
+  await expect(box).toHaveValue('部署名を正式名称に')
+  await expect(page.getByText('(1件')).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'コメント', exact: true }).click()
+  await expect(saveAlert(page)).toHaveCount(0)
+  await expect(box).toHaveCount(0)
+  await expect(page.getByText('部署名を正式名称に')).toBeVisible()
+  const files = await disk(page)
+  const mine = Object.entries(files).find(([p]) => p.includes('.review.') && !p.includes(SATO_REVIEW))!
+  expect(JSON.parse(mine[1]).review.comments.map((c: { body: string }) => c.body)).toEqual(['部署名を正式名称に'])
+  expect(Object.keys(files).filter(p => p.includes('.acb-tmp-'))).toEqual([])
+  expectNoPageErrors(state)
+})
+
+test('a brief failure is retried without the member noticing', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review')
+  await startOwnReview(page)
+  await selectText(page, '担当は営業部です')
+  await page.getByPlaceholder('コメントを入力... (⌘+Enter で送信)').fill('一度だけ失敗')
+  await failNextWrites(page, 2)
+  await page.getByRole('button', { name: 'コメント', exact: true }).click()
+  await expect(page.getByText('一度だけ失敗')).toBeVisible()
+  await expect(saveAlert(page)).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('a reply that cannot be saved keeps the reply box and its text', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review')
+  await page.getByRole('button', { name: 'レビュー履歴 (1)' }).click()
+  await page.getByRole('button', { name: /佐藤/ }).click()
+  await page.getByRole('button', { name: '返信', exact: true }).click()
+  const box = page.getByPlaceholder('返信... (⌘+Enter)')
+  await box.fill('前年の実績を追記します')
+  await failNextWrites(page, 3)
+  await page.getByRole('button', { name: '返信', exact: true }).first().click()
+  await expect(saveAlert(page)).toHaveText('返信を保存できませんでした。書いた内容は残っています。少し待ってから、もう一度「返信」を押してください。')
+  await expect(box).toHaveValue('前年の実績を追記します')
+  await page.getByRole('button', { name: '返信', exact: true }).first().click()
+  await expect(box).toHaveCount(0)
+  await expect(page.getByText('前年の実績を追記します')).toBeVisible()
+  await expect(saveAlert(page)).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
+test('completing fails: the review stays open with 「もう一度試す」, which completes it', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review')
+  await startOwnReview(page)
+  await failNextWrites(page, 3)
+  await page.getByRole('button', { name: 'レビュー完了' }).click()
+  await expect(saveAlert(page)).toHaveText(/^レビューを保存できませんでした。少し待ってから「もう一度試す」を押してください。/)
+  await expect(page.getByText('レビュー中 — テキストを選択してコメントを追加')).toBeVisible()
+  await saveAlert(page).getByRole('button', { name: 'もう一度試す' }).click()
+  await expect(saveAlert(page)).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'レビュー履歴 (2)' })).toBeVisible()
+  expectNoPageErrors(state)
+})
+
+test('the reviewer\'s file changed underneath (another computer, the AI): a new comment keeps the other one', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review')
+  await startOwnReview(page)
+  const path = Object.keys(await disk(page)).find(p => p.includes('.review.') && !p.includes(SATO_REVIEW))!
+  await page.evaluate(p => {
+    const files = (window as unknown as { __acbFiles: Record<string, string> }).__acbFiles
+    const data = JSON.parse(files[p])
+    data.review.comments.push({
+      id: 'from-elsewhere', authorName: '山田', severity: 'note', selectedText: '来期', startOffset: 7, endOffset: 9,
+      body: '別のパソコンで書いたコメント', createdAt: '2026-10-29T00:00:00.000Z', resolved: false, replies: [],
+    })
+    files[p] = JSON.stringify(data, null, 2)
+  }, path)
+  await selectText(page, '担当は営業部です')
+  await page.getByPlaceholder('コメントを入力... (⌘+Enter で送信)').fill('このパソコンのコメント')
+  await page.getByRole('button', { name: 'コメント', exact: true }).click()
+  await expect(page.getByText('別のパソコンで書いたコメント')).toBeVisible()
+  await expect(page.getByText('このパソコンのコメント')).toBeVisible()
+  const saved = JSON.parse((await disk(page))[path])
+  expect(saved.review.comments.map((c: { body: string }) => c.body)).toEqual(['このパソコンのコメント', '別のパソコンで書いたコメント'])
+  expectNoPageErrors(state)
+})
+
+test('switching documents while the previous one still loads shows only the current one\'s reviews', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review', { second: '1', slow: '1' })
+  await page.getByText('議事録.md').click()
+  await page.getByRole('button', { name: 'レビュー履歴 (1)' }).click()
+  await expect(page.getByRole('button', { name: /高橋/ })).toBeVisible()
+  await page.getByRole('button', { name: 'レビュー履歴 (1)' }).click() // closes the list
+  await page.waitForTimeout(1200) // the slow listing for 提案書.md has finished by now
+  await page.getByRole('button', { name: 'レビュー履歴 (1)' }).click()
+  await expect(page.getByRole('button', { name: /高橋/ })).toBeVisible()
+  await expect(page.getByRole('button', { name: /佐藤/ })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

@@ -16,6 +16,7 @@ import {
   markOrphanedComments,
   markReviewSeen,
   mergeRepliesIntoReviews,
+  mergeReviewEdits,
   type CommentReply,
   type ResolutionEntry,
   type Review,
@@ -176,4 +177,24 @@ test('markOrphanedComments: completed reviews only, in memory; unknown document 
   assert.equal(done.comments[0].orphaned, undefined, 'the loaded review object is not modified')
   const unknown = [done]
   assert.equal(markOrphanedComments(unknown, null), unknown)
+})
+
+test('mergeReviewEdits: the reviewer\'s file changed elsewhere', () => {
+  const base: Review = { ...review('r1', [{ id: 'a' }, { id: 'b' }, { id: 'c' }]), status: 'in_progress', completedAt: null }
+  const mine: Review = { ...base, comments: [...base.comments.filter(c => c.id !== 'c'), { ...base.comments[0], id: 'new-here' }] }
+  assert.equal(mergeReviewEdits(base, base, mine), mine, 'unchanged on disk: this app\'s version')
+
+  const edited = { ...base.comments[1], body: '書き直した' }
+  const onDisk: Review = { ...base, comments: [base.comments[0], { ...base.comments[2] }, { ...base.comments[0], id: 'new-there' }] }
+  // there: b removed, new-there added; here: c removed, new-here added
+  assert.deepEqual(mergeReviewEdits(base, onDisk, mine).comments.map(c => c.id), ['a', 'new-here', 'new-there'])
+  // b removed there but edited here: the edit wins
+  const mineEdited: Review = { ...mine, comments: [base.comments[0], edited] }
+  assert.deepEqual(mergeReviewEdits(base, onDisk, mineEdited).comments.map(c => c.id), ['a', 'b', 'new-there'])
+
+  const completedThere: Review = { ...onDisk, status: 'completed', completedAt: '2026-10-29T09:00:00.000Z', snapshot: '全文' }
+  const merged = mergeReviewEdits(base, completedThere, mine)
+  assert.equal(merged.status, 'completed')
+  assert.equal(merged.completedAt, '2026-10-29T09:00:00.000Z')
+  assert.equal(merged.snapshot, '全文')
 })

@@ -4,9 +4,12 @@
 // preview, with the preload API mocked by an in-memory folder. 提案書.md
 // already has a completed review by 佐藤; the member is 山田 (demo@example.com).
 // Open /tests/doc-review-ui.html?theme=light|dark (&request=1: a review request exists;
-// &history=1: more completed reviews, one all resolved, one whose text is gone)
+// &history=1: more completed reviews, one all resolved, one whose text is gone;
+// &second=1: a second document tab; &slow=1: a slow folder listing).
+// window.__acbFailWrites(n) makes the next n writes fail.
 // window.__acbFiles is the "disk" (path → content), for the spec to read the
 // sidecar files the review writes.
+import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -77,14 +80,45 @@ if (params.get('history') === '1') {
 // ?request=1: someone asked for a review of 提案書.md (the button is hidden; the file can still exist).
 if (params.get('request') === '1') files[`${DOC}.review-request.json`] = JSON.stringify({ requestedBy: '佐藤', requestedAt: '2026-10-21T00:00:00.000Z' }, null, 2)
 
+// ?second=1: a second document in another folder, 総務/議事録.md, with 高橋's completed review.
+const DOC2 = `${ROOT}/総務/議事録.md`
+if (params.get('second') === '1') {
+  files[DOC2] = '# 議事録\n\n次回は11月です。'
+  files[`${DOC2}.review.d4000000-0000-4000-8000-000000000004.json`] = completedReview('d4000000-0000-4000-8000-000000000004', '高橋', 'takahashi@example.com', '次回は11月です', false)
+}
+// ?slow=1: listing 営業部 takes 800 ms (a slow disk), for switching documents mid-load.
+const slowDir = params.get('slow') === '1' ? DIR : null
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+// window.__acbFailWrites(n): the next n file writes fail (a busy or refused file).
+let failWrites = 0
 installElectronAPI({
   readFile: async p => (p in files ? files[p] : null),
-  writeFile: async (p, content) => { files[p] = content; return true },
-  deleteItem: async p => { delete files[p]; return { success: true } },
-  readDirectory: async dir => Object.keys(files)
-    .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
-    .map(p => ({ name: p.slice(dir.length + 1), path: p, isDirectory: false })),
+  exists: async p => p in files,
+  writeFile: async (p, content) => {
+    if (failWrites > 0) { failWrites--; return false }
+    files[p] = content
+    return true
+  },
+  renameItem: async (from, to) => {
+    if (!(from in files)) return { success: false, error: 'ENOENT' }
+    files[to] = files[from]
+    delete files[from]
+    return { success: true, newPath: to }
+  },
+  deleteItem: async p => {
+    if (!(p in files)) return { success: false, error: 'ENOENT' }
+    delete files[p]
+    return { success: true }
+  },
+  readDirectory: async dir => {
+    if (dir === slowDir) await sleep(800)
+    return Object.keys(files)
+      .filter(p => p.startsWith(`${dir}/`) && !p.slice(dir.length + 1).includes('/'))
+      .map(p => ({ name: p.slice(dir.length + 1), path: p, isDirectory: false }))
+  },
 })
+Object.assign(window, { __acbFailWrites: (n: number) => { failWrites = n } })
 Object.assign(window, { __acbFiles: files })
 
 localStorage.setItem('mdViewMode', 'preview')
@@ -92,11 +126,13 @@ useAppStore.setState({ currentCompany: { id: 'demo', name: '株式会社デモ',
 useAuthStore.setState({ user: { id: 'u-yamada', email: 'demo@example.com', name: '山田', image: null, emailVerified: true } })
 
 function Preview() {
+  const [active, setActive] = useState(DOC)
+  const open = params.get('second') === '1' ? [DOC, DOC2] : [DOC]
   return (
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
       <div className="bg-amber-50 px-4 py-2 text-xs text-amber-900">表示確認用の人工データです。</div>
       <div className="h-[560px] w-[1000px]">
-        <TabbedEditorPanel openFiles={[DOC]} activeFilePath={DOC} onSelectFile={() => {}} onCloseFile={() => {}} />
+        <TabbedEditorPanel openFiles={open} activeFilePath={active} onSelectFile={setActive} onCloseFile={() => {}} />
       </div>
     </main>
   )
