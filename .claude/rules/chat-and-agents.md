@@ -113,6 +113,21 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - Dropped names (never values) are logged once each per app start: `[agent-env] not passed to AI
   processes: …`.
 
+## Project config the agents load from the company folder
+
+- Claude Code: `settingSources: ['user', 'project']` — `.claude/settings*.json`, `.mcp.json`,
+  `.claude/hooks/`, skills / agents / commands. Codex: every `.codex/` between the project root
+  and `cwd` (`config.toml`, `hooks.json`, `rules/`), but only when the member has trusted the
+  folder in Codex (`[projects."<path>"] trust_level` in their `~/.codex/config.toml`); the app
+  never sets trust, and `thread/start` passes `sandbox` / `approvalPolicy` / `mcp_servers` but
+  nothing that turns the project layer off. Codex documents no key or flag that ignores a trusted
+  project's `.codex/` (`project_root_markers` only changes root detection), so the app leaves it
+  loading; shared config is legitimate when an owner/admin writes it.
+- The enforcement is the push checker: these paths are `[PROTECTED_CONFIG]` (owner/admin only,
+  `push-check.md`). The chat write guard does not refuse AI edits to them (only instruction
+  files); a member's AI edit is caught at sync by the protected-config dialog. `AGENTS.md` /
+  `AGENTS.override.md` are instruction files (`chat-write-guard.md`).
+
 ## Claude Code agent stack
 
 - `@anthropic-ai/claude-agent-sdk` 0.3.304 (its `claudeCodeVersion` is CLI 2.1.304) under

@@ -62,8 +62,15 @@ export function dedupe(lines: string[]): string[] {
  * Windows read .Claude/Settings.json as .claude/settings.json); a file or
  * symlink named `.claude` itself counts too (a link to another folder would
  * otherwise create a .claude around the check).
+ *
+ * Codex's project layer is the whole `.codex/` folder, at any depth (it
+ * walks from the project root to the working directory): `config.toml`
+ * (sandbox / permission profiles, network, MCP servers, inline hooks),
+ * `hooks.json`, `rules/`, `agents/` — loaded without a prompt once the
+ * member trusts the folder. Protected as a whole, and a file or symlink
+ * named `.codex` too, like `.claude`.
  */
-export const PROTECTED_RE = /(^|\/)\.mcp\.json$|(^|\/)\.claude$|(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.claude\/hooks(\/|$)/i
+export const PROTECTED_RE = /(^|\/)\.mcp\.json$|(^|\/)\.claude$|(^|\/)\.claude\/settings(\.local)?\.json$|(^|\/)\.claude\/hooks(\/|$)|(^|\/)\.codex(\/|$)/i
 
 export function protectedPaths(changedLines: string[]): string[] {
   return sortUnique(changedLines.filter(l => PROTECTED_RE.test(l)))
@@ -71,7 +78,7 @@ export function protectedPaths(changedLines: string[]): string[] {
 
 /**
  * Instruction files Claude Code (CLAUDE.md, CLAUDE.local.md) and Codex
- * (AGENTS.md) load into every chat in or below their folder, at any depth,
+ * (AGENTS.md, and AGENTS.override.md, which Codex reads in its place) load into every chat in or below their folder, at any depth,
  * case-insensitive. Whoever writes one steers every teammate's AI there (a
  * prompt injection that runs with the member's permissions), so they are
  * protected like agent config — with one difference (owner decision 案B):

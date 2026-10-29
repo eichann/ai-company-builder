@@ -154,14 +154,14 @@ test('skill folder names: one rule, used by the wizard and the copy dialog', () 
 })
 
 // ---------------------------------------------------------------------------
-// AI instruction files (CLAUDE.md, CLAUDE.local.md, AGENTS.md)
+// AI instruction files (CLAUDE.md, CLAUDE.local.md, AGENTS.md, AGENTS.override.md)
 // ---------------------------------------------------------------------------
 
 test('AI instruction files: the chat guard and the push check name the same files and the same managers', () => {
   const files = [
     'CLAUDE.md', 'claude.md', 'Claude.MD', 'CLAUDE.local.md', 'claude.LOCAL.md', 'AGENTS.md', 'agents.md', '営業部/CLAUDE.md',
     'a/b/c/AGENTS.md', 'CLAUDE.md.bak', 'MY-CLAUDE.md', 'CLAUDE.markdown', 'CLAUDE', 'ＣＬＡＵＤＥ.md', 'AGENT.md', 'claude.md/x.txt',
-    'CLAUDE.local.md.txt', 'docs/agents.MD',
+    'CLAUDE.local.md.txt', 'docs/agents.MD', 'AGENTS.override.md', 'x/agents.OVERRIDE.md', 'AGENTS.override.md.bak', 'AGENTS-override.md',
   ]
   for (const f of files) {
     // The push checker matches git's bytes read as latin1.

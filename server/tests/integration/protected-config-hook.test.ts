@@ -177,6 +177,36 @@ describe('pre-receive hook: protected agent config', () => {
     expect(pushAs(m.clone, 'owner').ok).toBe(true)
   })
 
+  // Intended change (2026-10-25): Codex's project layer. Codex loads every
+  // .codex/ between the project root and its working directory once the
+  // member trusts the folder (config.toml: sandbox / permission profiles,
+  // network, MCP servers, hooks; hooks.json; rules/), so it weighs what
+  // .claude/settings.json and .mcp.json weigh. AGENTS.override.md is read
+  // in place of AGENTS.md: an instruction file.
+  it('Codex project config (.codex/ at any depth/case, .codex itself) and AGENTS.override.md: owner/admin only', () => {
+    const m = setup({ 'README.md': 'hi\n' })
+    writeFile(m.clone, '.codex/config.toml', 'model = "x"\n')
+    writeFile(m.clone, '営業部/.Codex/hooks.json', '{}\n')
+    writeFile(m.clone, 'sales/.codex/rules/default.rules', 'x\n')
+    writeFile(m.clone, 'docs/AGENTS.override.md', 'o\n')
+    writeFile(m.clone, 'docs/codex-notes.md', 'fine\n')
+    commitAll(m.clone, 'codex config')
+    const rejected = pushAs(m.clone, 'member')
+    expect(rejected.ok).toBe(false)
+    expect(protectedPathsIn(rejected.output)).toEqual([
+      '.codex/config.toml', 'sales/.codex/rules/default.rules', '営業部/.Codex/hooks.json', 'docs/AGENTS.override.md',
+    ])
+    expect(pushAs(m.clone, 'admin').ok).toBe(true)
+
+    // A symlink named .codex (it could point at a folder elsewhere).
+    const l = setup({ 'README.md': 'hi\n' })
+    symlinkSync('elsewhere', join(l.clone, '.codex'))
+    commitAll(l.clone, 'codex link')
+    const link = pushAs(l.clone, 'member')
+    expect(link.ok).toBe(false)
+    expect(protectedPathsIn(link.output)).toEqual(['.codex'])
+  })
+
   it('initial push (zero old SHA): member with protected file rejected, without accepted', () => {
     const a = setup()
     writeFile(a.clone, 'README.md', 'hi\n')

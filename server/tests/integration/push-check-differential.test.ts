@@ -220,6 +220,34 @@ function attemptSecretOnlyInIntermediateCommit(repo: Repo, a: Attempt, expectedE
   }
 }
 
+/**
+ * The second intended difference: paths the legacy hook did not protect and
+ * the push checker does — Codex's project layer (`.codex/` at any depth, a
+ * file or symlink named `.codex`). Owner/admin runs must still match the
+ * legacy hook byte for byte (both accept); every other role is rejected
+ * with a PROTECTED_CONFIG section listing exactly `expectedEntries`, where
+ * the legacy hook accepted. Never applied.
+ */
+function attemptNewlyProtected(repo: Repo, a: Attempt, expectedEntries: string[]): void {
+  const stdin = a.updates.map(([ref, sha]) => `${repo.ref(ref)} ${sha} ${ref}\n`).join('')
+  for (const { label, env } of ROLE_ENVS) {
+    const legacy = runHook(legacyHook, repo.bare, stdin, env)
+    const next = runHook(newHook, repo.bare, stdin, env)
+    const what = `${a.label} [${label}]`
+    expect({ what, status: legacy.status }).toEqual({ what, status: 0 })
+    if (env.ACB_PUSHER_ROLE === 'owner' || env.ACB_PUSHER_ROLE === 'admin') {
+      expect({ what, status: next.status, stdout: next.stdout, stderr: next.stderr })
+        .toEqual({ what, status: legacy.status, stdout: legacy.stdout, stderr: legacy.stderr })
+    } else {
+      expect({ what, status: next.status }).toEqual({ what, status: 1 })
+      expect(next.stderr).toContain('[PROTECTED_CONFIG]')
+      const entries = next.stderr.split('\n').filter(l => l.startsWith('  - ')).map(l => l.slice(4).trimEnd())
+      expect({ what, entries }).toEqual({ what, entries: expectedEntries })
+    }
+    compared++
+  }
+}
+
 function tree(base: Tree, changes: Record<string, Entry | null>): Tree {
   const t = new Map(base)
   for (const [k, v] of Object.entries(changes)) {
@@ -409,6 +437,22 @@ describe('push checker vs legacy shell hook: identical output and status', () =>
     for (let i = 0; i < 3000; i++) many[`many/dir${i % 30}/file-with-a-longish-name-${i}.md`] = i === 2500 ? `${GOOGLE}\n` : `f${i}\n`
     const mb = repo.commit(tree(base, many), [c0])
     attempt(repo, { label: 'new branch with 3000 files', updates: [['refs/heads/many', mb]] }, ROLE_ENVS.slice(0, 1))
+  })
+
+  it("Codex's project layer: newly protected (intended difference)", () => {
+    const repo = new Repo('codex')
+    const base: Tree = new Map<string, Entry>([['README.md', 'hi\n']])
+    const c0 = repo.commit(base, [])
+    attempt(repo, { label: 'seed', updates: [['refs/heads/main', c0]] })
+    const codex = repo.commit(tree(base, {
+      '.codex/config.toml': 'model = "x"\n',
+      'a/.Codex/hooks.json': '{}\n',
+      'b/.codex': { mode: '120000', content: 'elsewhere' },
+      'codex-notes.md': 'fine\n',
+      '.codexrc': 'fine\n',
+    }), [c0])
+    attemptNewlyProtected(repo, { label: 'Codex project config (.codex/ at any depth/case, .codex symlink)', updates: [['refs/heads/main', codex]] },
+      ['.codex/config.toml', 'a/.Codex/hooks.json', 'b/.codex'])
   })
 
   it('several refs in one push, deletions, malformed input', () => {

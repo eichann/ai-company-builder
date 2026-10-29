@@ -34,9 +34,18 @@ describe('path rules (bytewise, A–Z case-insensitive)', () => {
     ])
   })
 
-  it('instruction files: CLAUDE.md, CLAUDE.local.md, AGENTS.md at any depth and case', () => {
-    expect(instructionFilePaths(['CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD', 'notCLAUDE.md', 'CLAUDE.md.bak', 'e/CLAUDE.md/x'])).toEqual([
-      'CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD',
+  it("Codex's project layer: anything under .codex/ at any depth and case, and .codex itself", () => {
+    expect(protectedPaths([
+      '.codex/config.toml', 'a/b/.Codex/hooks.json', '.codex/rules/x.rules', '.codex/agents/r.toml', '.codex',
+      'x/.codex', '.codexrc', 'my.codex/config.toml', 'codex/config.toml', '.codex.toml', 'a/.codexx/b',
+    ])).toEqual([
+      '.codex', '.codex/agents/r.toml', '.codex/config.toml', '.codex/rules/x.rules', 'a/b/.Codex/hooks.json', 'x/.codex',
+    ])
+  })
+
+  it('instruction files: CLAUDE.md, CLAUDE.local.md, AGENTS.md, AGENTS.override.md at any depth and case', () => {
+    expect(instructionFilePaths(['CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD', 'notCLAUDE.md', 'CLAUDE.md.bak', 'e/CLAUDE.md/x', 'f/AGENTS.override.md', 'g/agents.OVERRIDE.md', 'AGENTSxoverride.md'])).toEqual([
+      'CLAUDE.md', 'a/claude.md', 'b/.claude/CLAUDE.md', 'c/CLAUDE.local.md', 'd/agents.MD', 'f/AGENTS.override.md', 'g/agents.OVERRIDE.md',
     ])
   })
 
