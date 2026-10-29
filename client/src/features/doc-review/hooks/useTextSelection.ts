@@ -4,7 +4,8 @@ import { findTextInMarkdown, type CommentSeverity } from '../model'
 export function useTextSelection(
   isReviewing: boolean,
   markdownContent: string,
-  onAddComment: (selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity) => void,
+  // Resolves to false when the comment could not be saved: the popover then stays open with the text.
+  onAddComment: (selectedText: string, startOffset: number, endOffset: number, body: string, severity: CommentSeverity) => Promise<boolean> | void,
 ) {
   const [popover, setPopover] = useState<{ x: number; y: number; text: string; start: number; end: number } | null>(null)
   const isReviewingRef = useRef(isReviewing)
@@ -33,12 +34,13 @@ export function useTextSelection(
     })
   }, [markdownContent])
 
-  const handleSubmitComment = useCallback((body: string, severity: CommentSeverity) => {
-    if (popover) {
-      onAddComment(popover.text, popover.start, popover.end, body, severity)
-      setPopover(null)
-      window.getSelection()?.removeAllRanges()
-    }
+  const handleSubmitComment = useCallback(async (body: string, severity: CommentSeverity): Promise<boolean> => {
+    if (!popover) return false
+    const saved = await onAddComment(popover.text, popover.start, popover.end, body, severity)
+    if (saved === false) return false
+    setPopover(null)
+    window.getSelection()?.removeAllRanges()
+    return true
   }, [popover, onAddComment])
 
   const closePopover = useCallback(() => {

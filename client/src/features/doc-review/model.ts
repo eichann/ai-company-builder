@@ -139,6 +139,33 @@ export function mergeRepliesIntoReviews(reviews: Review[], allReplies: CommentRe
   }))
 }
 
+const sameJson = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
+
+/**
+ * The reviewer's save when their review file changed since this app last read
+ * or wrote it (`base`): sync brought their edits from another computer, or the
+ * AI edited the file. Comments added there are kept, comments removed there and
+ * untouched here stay removed, and the rest is this app's version. A review
+ * completed there stays completed.
+ */
+export function mergeReviewEdits(base: Review, onDisk: Review, mine: Review): Review {
+  if (sameJson(base, onDisk)) return mine
+  const baseById = new Map(base.comments.map(c => [c.id, c]))
+  const onDiskIds = new Set(onDisk.comments.map(c => c.id))
+  const mineIds = new Set(mine.comments.map(c => c.id))
+  const kept = mine.comments.filter(c => {
+    const before = baseById.get(c.id)
+    return !(before && !onDiskIds.has(c.id) && sameJson(before, c))
+  })
+  const addedThere = onDisk.comments.filter(c => !baseById.has(c.id) && !mineIds.has(c.id))
+  const completedThere = onDisk.status === 'completed' && mine.status !== 'completed'
+  return {
+    ...mine,
+    ...(completedThere ? { status: onDisk.status, completedAt: onDisk.completedAt, snapshot: onDisk.snapshot } : {}),
+    comments: [...kept, ...addedThere],
+  }
+}
+
 /**
  * For display only: a completed review's comment is 「位置不明」 (`orphaned`) when
  * its text is no longer in the document. Never written back — members fix the

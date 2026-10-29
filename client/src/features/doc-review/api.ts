@@ -4,6 +4,7 @@ import {
   getReplyFilePath,
   getReviewFilePath,
   getReviewRequestFilePath,
+  mergeReviewEdits,
   type CommentReply,
   type ReplyFileData,
   type ResolutionEntry,
@@ -58,19 +59,30 @@ export async function readAllReviews(filePath: string): Promise<Review[]> {
   }
 }
 
-export async function writeReview(filePath: string, review: Review): Promise<void> {
-  const reviewFilePath = getReviewFilePath(filePath, review.id)
-  const data: ReviewFileData = { version: 1, review }
-  await window.electronAPI.writeFile(reviewFilePath, JSON.stringify(data, null, 2))
+/**
+ * Saves the reviewer's own review. When the file changed since `base` (what this
+ * app last read or wrote), both sides' edits are merged (`mergeReviewEdits`).
+ * Returns what was written. Throws ReviewSaveError; a file that is there but
+ * cannot be read or parsed is never overwritten.
+ */
+export function saveReview(filePath: string, review: Review, base: Review | null): Promise<Review> {
+  const path = getReviewFilePath(filePath, review.id)
+  return oneAtATime(path, async () => {
+    const onDisk = await readJsonSidecar<ReviewFileData>(path)
+    const toWrite = onDisk?.review && base ? mergeReviewEdits(base, onDisk.review, review) : review
+    const data: ReviewFileData = { version: 1, review: toWrite }
+    await writeSidecar(path, JSON.stringify(data, null, 2))
+    return toWrite
+  })
 }
 
+/** Deletes the reviewer's own (cancelled) review. Throws ReviewSaveError when it stays. */
 export async function deleteReviewFile(filePath: string, reviewId: string): Promise<void> {
   const reviewFilePath = getReviewFilePath(filePath, reviewId)
-  try {
-    await window.electronAPI.deleteItem(reviewFilePath)
-  } catch {
-    // ignore
-  }
+  await oneAtATime(reviewFilePath, () => retrying(reviewFilePath, async () => {
+    const result = await window.electronAPI.deleteItem(reviewFilePath)
+    return result.success || !await window.electronAPI.exists(reviewFilePath)
+  }))
   // Clean up reply files: remove replies and resolutions referencing this review
   await cleanupRepliesForReview(filePath, reviewId)
 }
@@ -158,18 +170,92 @@ export async function readAllReplies(filePath: string): Promise<{ replies: Comme
   }
 }
 
-export async function readMyReplies(filePath: string, emailHash: string): Promise<ReplyFileData | null> {
-  try {
-    const content = await window.electronAPI.readFile(getReplyFilePath(filePath, emailHash))
-    if (!content) return null
-    return JSON.parse(content) as ReplyFileData
-  } catch {
-    return null
+/**
+ * Read-modify-write of the member's own reply file, one change at a time per
+ * file, always on what is on disk now (another window or a sync may have
+ * changed it). Throws ReviewSaveError; an unreadable file is never overwritten.
+ */
+export function updateMyReplies(
+  filePath: string,
+  replyKey: string,
+  author: { authorName: string; authorEmail: string },
+  change: (data: ReplyFileData) => void,
+): Promise<void> {
+  const path = getReplyFilePath(filePath, replyKey)
+  return oneAtATime(path, async () => {
+    const data: ReplyFileData = await readJsonSidecar<ReplyFileData>(path)
+      ?? { version: 1, authorName: author.authorName, authorEmail: author.authorEmail, replies: [] }
+    change(data)
+    await writeSidecar(path, JSON.stringify(data, null, 2))
+  })
+}
+
+// ============================================================================
+// Saving safely
+// ============================================================================
+
+/** A sidecar could not be saved (after retries). The hook shows it to the member. */
+export class ReviewSaveError extends Error {
+  constructor(readonly path: string) {
+    super(`Could not save ${path}`)
   }
 }
 
-export async function writeMyReplies(filePath: string, emailHash: string, data: ReplyFileData): Promise<void> {
-  await window.electronAPI.writeFile(getReplyFilePath(filePath, emailHash), JSON.stringify(data, null, 2))
+const RETRY_DELAYS_MS = [150, 400]
+const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
+
+/** Runs `attempt` until it reports success, waiting between tries; then throws. */
+async function retrying(path: string, attempt: () => Promise<boolean>): Promise<void> {
+  for (let i = 0; ; i++) {
+    let ok = false
+    try { ok = await attempt() } catch { ok = false }
+    if (ok) return
+    if (i >= RETRY_DELAYS_MS.length) throw new ReviewSaveError(path)
+    await sleep(RETRY_DELAYS_MS[i])
+  }
+}
+
+/**
+ * Writes next to the target, then renames over it, so a sync or the AI never
+ * reads half a file. fs:writeFile only says yes/no, so every failure is retried
+ * (a busy file on Windows, a moment of a full disk); a refused folder fails fast.
+ */
+function writeSidecar(path: string, content: string): Promise<void> {
+  return retrying(path, async () => {
+    const slash = path.lastIndexOf('/')
+    const temp = `${path.slice(0, slash)}/.${path.slice(slash + 1)}.acb-tmp-${Math.random().toString(36).slice(2, 10)}`
+    if (!await window.electronAPI.writeFile(temp, content)) {
+      await window.electronAPI.deleteItem(temp)
+      return false
+    }
+    const moved = await window.electronAPI.renameItem(temp, path)
+    if (!moved.success) await window.electronAPI.deleteItem(temp)
+    return moved.success
+  })
+}
+
+/** The parsed file, null when it does not exist; throws when it is there but unreadable. */
+async function readJsonSidecar<T>(path: string): Promise<T | null> {
+  const content = await window.electronAPI.readFile(path)
+  if (content === null) {
+    if (await window.electronAPI.exists(path)) throw new ReviewSaveError(path)
+    return null
+  }
+  try {
+    return JSON.parse(content) as T
+  } catch {
+    throw new ReviewSaveError(path)
+  }
+}
+
+const queues = new Map<string, Promise<unknown>>()
+
+/** Runs saves to the same file one after another, so two quick clicks never lose one. */
+function oneAtATime<T>(path: string, run: () => Promise<T>): Promise<T> {
+  const next = (queues.get(path) ?? Promise.resolve()).catch(() => {}).then(run)
+  queues.set(path, next)
+  void next.catch(() => {}).finally(() => { if (queues.get(path) === next) queues.delete(path) })
+  return next
 }
 
 // ============================================================================

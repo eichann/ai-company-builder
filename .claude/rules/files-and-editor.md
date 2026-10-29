@@ -114,13 +114,23 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   computed in memory (`markOrphanedComments`); completed reviews stay even when all comments are
   resolved and remain in レビュー履歴. Only the reviewer's own actions write their review file;
   replies and resolved marks go to the member's own reply file.
+- Saving (`api.ts`): every sidecar write goes to `.<name>.acb-tmp-<random>` next to it and is
+  renamed over the target (nobody — sync, the AI — reads half a file), retried twice (150 / 400
+  ms; `fs:writeFile` only answers yes/no), one save at a time per file, and the reply file is
+  changed on what is on disk at that moment. The reviewer's file changed since last read (sync
+  from another computer, the AI) is merged (`mergeReviewEdits`). A sidecar that exists but cannot
+  be read or parsed is never overwritten. A load for a document no longer shown is dropped.
+- A save that still fails changes nothing on screen and says so in plain Japanese
+  (`components/ReviewSaveError.tsx`): a comment or reply keeps its text in its box (press the
+  button again); other actions offer 「もう一度試す」.
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
   components never call `window.electronAPI`); state in `hooks/useMarkdownReview.ts` and
   `hooks/useTextSelection.ts`; banners, side panel, popover, history and the snapshot diff in
   `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
-  text matching) and `client/tests/ui/doc-review.spec.ts` on the preview
+  text matching, merging edits), `api.test.ts` (atomic write, retries, unreadable files, one at a
+  time) and `client/tests/ui/doc-review.spec.ts` on the preview
   `client/tests/doc-review-ui.html` (the files written, byte for byte as 2-space JSON).
 
 ## Search, Cmd+P and folder history (`client/electron/git-search.ts`, `features/git-history/ipc.ts`)

@@ -65,7 +65,8 @@ export function ReviewSidePanel({
   onDeleteComment?: (commentId: string) => void
   onToggleResolved: (commentId: string) => void
   onClickComment: (comment: ReviewComment) => void
-  onAddReply?: (commentId: string, body: string) => void
+  /** Resolves to false when not saved: the reply box stays open with the text. */
+  onAddReply?: (commentId: string, body: string) => Promise<boolean> | void
   readOnly?: boolean
 }) {
   const [replyingTo, setReplyingTo] = useState<string | null>(null)
@@ -170,7 +171,7 @@ export function ReviewSidePanel({
             {replyingTo === comment.id && onAddReply ? (
               <div className="px-3">
                 <ReplyInput
-                  onSubmit={(body) => { onAddReply(comment.id, body); setReplyingTo(null) }}
+                  onSubmit={async (body) => { if (await onAddReply(comment.id, body) !== false) setReplyingTo(null) }}
                   onCancel={() => setReplyingTo(null)}
                 />
               </div>
