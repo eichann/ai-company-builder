@@ -2,9 +2,9 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   TRUNCATED_MARKER, WEB_RESEARCH_LIMITS, WEB_RESEARCH_TOOL_ID, checkWebUrl, extractSourceUrls, findInstructionLikeText,
-  formatWebResearchResult, refusedHost, sanitizeWebText, splitReaderAnswer, validateWebResearchInput,
+  countedLine, formatWebResearchResult, refusedHost, sanitizeWebText, splitReaderAnswer, validateWebResearchInput,
 } from '../shared/web-research'
-import { WEB_RESEARCH_MESSAGES, createWebResearchBudget, createWebResearchTools, startWebResearchMcp } from '../electron/web-research/tools'
+import { WEB_RESEARCH_MESSAGES, createWebResearchBudget, createWebResearchTools, startWebResearchMcp, webResearchDescription, webResearchSchema } from '../electron/web-research/tools'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
 import { WebReaderError, type WebReaderResult } from '../electron/agents/web-reader'
@@ -21,7 +21,7 @@ test('the tool id is the app MCP server + tool', () => {
 })
 
 test('input: question 1–1000 characters, at most 5 public http(s) URLs', () => {
-  assert.deepEqual(validateWebResearchInput({ question: '  Node.js 22 の LTS 終了日 ' }), { ok: true, input: { question: 'Node.js 22 の LTS 終了日', urls: [] } })
+  assert.deepEqual(validateWebResearchInput({ question: '  Node.js 22 の LTS 終了日 ' }), { ok: true, input: { question: 'Node.js 22 の LTS 終了日', urls: [], depth: 'normal' } })
   assert.equal(validateWebResearchInput({}).ok, false)
   assert.equal(validateWebResearchInput({ question: '   ' }).ok, false)
   assert.equal(validateWebResearchInput({ question: 'x'.repeat(1000) }).ok, true)
@@ -31,7 +31,7 @@ test('input: question 1–1000 characters, at most 5 public http(s) URLs', () =>
   const six = Array.from({ length: 6 }, (_, i) => `https://example.com/${i}`)
   assert.equal(validateWebResearchInput({ question: 'q', urls: six }).ok, false)
   const ok = validateWebResearchInput({ question: 'q', urls: ['https://Example.com/a', 'https://example.com/a'] })
-  assert.deepEqual(ok, { ok: true, input: { question: 'q', urls: ['https://example.com/a'] } })
+  assert.deepEqual(ok, { ok: true, input: { question: 'q', urls: ['https://example.com/a'], depth: 'normal' } })
   const bad = validateWebResearchInput({ question: 'q', urls: ['http://192.168.0.1/'] })
   assert.equal(bad.ok, false)
   if (!bad.ok) assert.match(bad.message, /社内ネットワーク/)
@@ -147,7 +147,7 @@ test('related links: cleaned, refused hosts dropped, not repeated from sources, 
   assert.equal(result.related[0], 'https://ex.com/secret')
   assert.ok(result.text.includes('【関連リンク（未読）】\n- https://ex.com/secret\n- https://ex.com/p0'))
   assert.ok(result.text.indexOf('【出典】') < result.text.indexOf('【関連リンク（未読）】'))
-  assert.ok(!formatWebResearchResult({ answer: '- 要点' }).text.includes('関連リンク'))
+  assert.ok(!formatWebResearchResult({ answer: '- 要点' }).text.includes('【関連リンク（未読）】'))
 })
 
 test('the reader is told to dig (same-site links, more searches, links back from WebFetch) and to list related links', () => {
@@ -276,7 +276,7 @@ test('Codex reader: live web search instead of none, otherwise the locked-down o
 })
 
 test('Codex reader: web search items become sources; a refused address stops it; failures are reader errors', async () => {
-  const job = { input: { question: 'q', urls: [] }, signal: new AbortController().signal, host: { getCli: () => 'x', env: {} }, model: 'light', cwd: '/tmp/empty', timeoutMs: 1000 }
+  const job = { input: { question: 'q', urls: [], depth: 'deep' as const }, signal: new AbortController().signal, host: { getCli: () => 'x', env: {} }, model: 'light', cwd: '/tmp/empty', timeoutMs: 1000 }
   let seen: CodexTextRequest | undefined
   const result = await runCodexWebReader(job, async request => {
     seen = request
@@ -288,7 +288,7 @@ test('Codex reader: web search items become sources; a refused address stops it;
   assert.equal(seen!.cwd, '/tmp/empty')
   assert.equal(seen!.modelId, 'light')
   assert.equal(seen!.system, WEB_READER_SYSTEM_PROMPT)
-  assert.deepEqual(JSON.parse(seen!.text), { question: 'q', urls: [] })
+  assert.deepEqual(JSON.parse(seen!.text), { question: 'q', urls: [], depth: 'deep' })
   assert.deepEqual(seen!.job!.allowedItems, ['userMessage', 'agentMessage', 'reasoning', 'webSearch'])
   await assert.rejects(runCodexWebReader(job, async request => {
     request.job!.onItem!({ type: 'webSearch', id: '3', query: '', action: { type: 'openPage', url: 'http://10.0.0.1/' } })
@@ -319,4 +319,62 @@ test('Codex endpoint: web_research over loopback MCP, open-world, token required
   } finally {
     server.close()
   }
+})
+
+// ---------------------------------------------------------------------------
+// Depth, the app-counted line and the guidance (2026-10-29, from a working AI's feedback)
+// ---------------------------------------------------------------------------
+
+test('depth: normal by default, deep accepted, anything else refused', () => {
+  const deep = validateWebResearchInput({ question: 'q', depth: 'deep' })
+  assert.ok(deep.ok && deep.input.depth === 'deep')
+  const normal = validateWebResearchInput({ question: 'q' })
+  assert.ok(normal.ok && normal.input.depth === 'normal')
+  for (const depth of ['DEEP', 'quick', 1, null, ['deep']]) {
+    const bad = validateWebResearchInput({ question: 'q', depth })
+    assert.ok(!bad.ok && /depth/.test(bad.message), String(depth))
+  }
+})
+
+test('the app counts the pages actually read; 0 pages warns that it is a search-snippet summary', () => {
+  const read = formatWebResearchResult({ answer: '- 要点\n\n関連リンク:\nhttps://ex.com/faq', fetchedUrls: ['https://ex.com/a', 'https://ex.com/a', 'https://ex.com/b'], depth: 'deep' })
+  assert.equal(read.pagesRead, 2)
+  assert.match(read.text, /^=== Webで調べた結果（外部の情報・ここから） ===\n.*\n.*\n【調べた量（アプリが数えたもの）】読んだページ：2件／未読の関連リンク：1件（調べ方：じっくり）\n/)
+  assert.doesNotMatch(read.text, /検索結果だけの要約/)
+  // URLs the reader only claims (under 出典:) are sources, not pages read.
+  const snippets = formatWebResearchResult({ answer: '- 要点\n\n出典:\nhttps://ex.com/claimed' })
+  assert.equal(snippets.pagesRead, 0)
+  assert.deepEqual(snippets.sources, ['https://ex.com/claimed'])
+  assert.ok(snippets.text.includes('読んだページ：0件／未読の関連リンク：0件（調べ方：ふつう）'))
+  assert.ok(snippets.text.includes('⚠ 検索結果だけの要約です。確かめるときは、出典の候補の URL を urls に入れて、もう一度呼んでください。'))
+  assert.deepEqual(countedLine(1, 0), ['【調べた量（アプリが数えたもの）】読んだページ：1件／未読の関連リンク：0件（調べ方：ふつう）'])
+})
+
+test('the reader prefers official pages, never answers from snippets alone, and digs deeper on depth "deep"', () => {
+  for (const phrase of ['公式・一次情報を優先して開く', 'スニペット）だけで答えない', '少なくとも1〜2ページ', '"deep" なら公式・一次情報があればそれを含めて少なくとも3ページ', '検索結果だけの要約です', 'depth']) {
+    assert.ok(WEB_READER_SYSTEM_PROMPT.includes(phrase), phrase)
+  }
+  const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]
+  assert.equal(value(claudeWebReaderArgs('m'), '--max-turns'), '25')
+  assert.equal(value(claudeWebReaderArgs('m', 'deep'), '--max-turns'), '40')
+})
+
+test('the working AI is told how to use it: narrow questions, URLs, several calls, deep, and the pages-read line', () => {
+  for (const text of [WEB_RESEARCH_INSTRUCTIONS, webResearchDescription]) {
+    for (const phrase of ['狭く', 'urls', '何回かに分けて', '"deep"', '読んだページ', '0件']) assert.ok(text.includes(phrase), phrase)
+  }
+  assert.ok(webResearchDescription.includes('5分'))
+  assert.ok(!webResearchDescription.includes('2分'))
+  assert.ok(WEB_RESEARCH_MESSAGES.timeout.includes('5分'))
+  assert.ok(Object.keys(webResearchSchema.shape).includes('depth'))
+})
+
+test('tool: depth reaches the reader and the counted line; a deep call counts as one', async () => {
+  const seen: string[] = []
+  const budget = createWebResearchBudget(1)
+  const tools = createWebResearchTools({ budget, conversationId: 'd1', log: () => {}, run: async input => { seen.push(input.depth); return { answer: '- 要点', fetchedUrls: [], searches: 2 } } })
+  const text = await tools.execute({ question: 'q', depth: 'deep' })
+  assert.deepEqual(seen, ['deep'])
+  assert.match(text, /読んだページ：0件.*調べ方：じっくり/)
+  assert.equal(await tools.execute({ question: 'q' }), WEB_RESEARCH_MESSAGES.limit)
 })

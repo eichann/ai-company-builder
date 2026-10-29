@@ -17,15 +17,15 @@
 import { createInterface } from 'node:readline'
 import { spawnVoiceProcess } from '../voice-process'
 import { agentEnv } from './agent-env'
-import { WEB_READER_SYSTEM_PROMPT, checkWebUrl } from '../../shared/web-research'
+import { WEB_READER_SYSTEM_PROMPT, checkWebUrl, type WebResearchDepth } from '../../shared/web-research'
 import { WEB_READER_MAX_ANSWER, WEB_READER_MAX_OUTPUT, WebReaderError, type WebReaderJob, type WebReaderResult } from './web-reader'
 
 const READER_TOOLS = ['WebFetch', 'WebSearch'] as const
-/** Room to search, read the given pages and follow their links (owner decision 2026-10-29). */
-const MAX_TURNS = 25
+/** Room to search, read the given pages and follow their links (owner decision 2026-10-29); deep reads ≥ 3 pages. */
+export const WEB_READER_MAX_TURNS: Record<WebResearchDepth, number> = { normal: 25, deep: 40 }
 const MAX_LINE = 2_000_000
 
-export function claudeWebReaderArgs(model: string): string[] {
+export function claudeWebReaderArgs(model: string, depth: WebResearchDepth = 'normal'): string[] {
   return [
     '-p', '--model', model,
     '--safe-mode',
@@ -36,7 +36,7 @@ export function claudeWebReaderArgs(model: string): string[] {
     '--setting-sources', '',
     '--disable-slash-commands',
     '--no-session-persistence',
-    '--max-turns', String(MAX_TURNS),
+    '--max-turns', String(WEB_READER_MAX_TURNS[depth]),
     '--output-format', 'stream-json', '--verbose',
     '--system-prompt', WEB_READER_SYSTEM_PROMPT,
   ]
@@ -88,7 +88,7 @@ export function runClaudeWebReader(job: WebReaderJob): Promise<WebReaderResult> 
     if (job.signal.aborted) { reject(new WebReaderError('cancelled', 'cancelled')); return }
     let cli: string
     try { cli = job.host.getCli() } catch { reject(new WebReaderError('unavailable', 'no Claude Code CLI')); return }
-    const child = spawnVoiceProcess(cli, claudeWebReaderArgs(job.model), {
+    const child = spawnVoiceProcess(cli, claudeWebReaderArgs(job.model, job.input.depth), {
       cwd: job.cwd, env: agentEnv({ ...job.host.env, CLAUDE_CODE_DISABLE_AUTO_MEMORY: '1' }),
     }, { inheritEnv: false })
     const state: StreamState = { fetchedUrls: [], searches: 0 }

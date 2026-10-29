@@ -20,13 +20,14 @@ follows links on the same site when the given pages are not enough. The app clea
 not instructions. Owner decisions: the reader is the member's own agent on its strong chat model
 (2026-10-29, replacing the light model, which read the given page but did not dig: Claude: the
 registry's chat Opus, `tasks.webReader`; Codex: no `tasks.webReader`, the catalog's default at
-its default effort); 25 turns / 300 s per call; a per-conversation call limit. Not now: admin settings for it,
+its default effort); 25 turns (40 for `depth: "deep"`) / 300 s per call; a per-conversation call limit (a deep call counts as one). From a working AI's feedback (2026-10-29): the reader prefers official / primary sources and never answers from search snippets alone; the app counts the pages actually read and says so first. Not now: admin settings for it,
 an M2 stop, logging the reader's own fetches separately, rewriting company skills.
 
 ## Pieces
 
 - `client/shared/web-research.ts` (pure): ids (`acb_web` / `web_research`,
-  `WEB_RESEARCH_TOOL_ID`), limits, `validateWebResearchInput` (question 1–1000 chars; ≤ 5 URLs,
+  `WEB_RESEARCH_TOOL_ID`), limits, `validateWebResearchInput` (question 1–1000 chars; `depth`
+  `normal` (default) / `deep`, anything else refused; ≤ 5 URLs,
   http/https, ≤ 2048 chars, no `user:pass@`; refused hosts: localhost / `*.localhost`, `.local`,
   `.internal`, `.lan`, `.home.arpa`, `.intranet`, `.corp`, single-label names, private /
   loopback / link-local / CGNAT / benchmark / multicast IPv4 (WHATWG URL normalizes `2130706433`,
@@ -34,16 +35,23 @@ an M2 stop, logging the reader's own fetches separately, rewriting company skill
   blocks, tags, common entities, zero-width / bidi / Unicode tag characters / other controls
   except `\n` `\t`, NFC, blank-line runs, 6000 chars + 「（長いため省略しました）」),
   `findInstructionLikeText` (conservative English + Japanese phrase list → flag labels; a flag,
-  never a filter), source extraction, `formatWebResearchResult` (fixed header, ⚠ line when
+  never a filter), source extraction, `formatWebResearchResult` (fixed header, then the
+  app-counted line `countedLine` — 「【調べた量（アプリが数えたもの）】読んだページ：N件／未読の関連リンク：M件（調べ方：ふつう|じっくり）」,
+  N = distinct pages the reader actually fetched (Claude WebFetch calls, Codex opened pages —
+  never URLs it only cites), with 「⚠ 検索結果だけの要約です。…もう一度呼んでください。」 when N = 0 —, ⚠ line when
   flagged, 【要点】, 【出典】, 【関連リンク（未読）】 when the reader listed any — `splitReaderAnswer`
   reads 「出典:」 and 「関連リンク:」 in either order; `relatedLinksOf`: cleaned like sources,
   refused hosts dropped (`checkWebUrl`), not repeated from the sources, ≤ 10, never counted as
   sources —, fence lines; a fake fence line inside the content is dropped),
-  the reader's system prompt (dig: read the given URLs, follow relevant same-site links —
+  the reader's system prompt (input JSON includes `depth`; prefer official / primary sources
+  and open them; never answer from search snippets alone — open ≥ 1–2 pages, ≥ 3 incl. official
+  ones for `deep`; say so first when no page could be opened; dig: read the given URLs, follow relevant same-site links —
   pricing, specs, FAQ, docs, news — and search again when needed; ask WebFetch for the relevant
   facts plus the page's relevant links; stop once answered; key points ≤ 3000 chars, then
-  「出典:」 and 「関連リンク:」) and the working AI's instruction paragraph (it may call again
-  with related links to dig further). The 6000-char cap on the cleaned key points stays (twice
+  「出典:」 and 「関連リンク:」) and the working AI's instruction paragraph (narrow questions,
+  pass URLs when known, split broad topics into several calls, `depth: "deep"` when it matters,
+  read the 「読んだページ」 line and call again with URLs when it is 0 or the answer matters;
+  related links for digging further). The tool description says the same (and up to ~5 minutes). The 6000-char cap on the cleaned key points stays (twice
   the reader's limit).
 - Registry: capability `webReader` (Claude Code, Codex; not the API key) and task model
   `webReader`; factory `runWebReader` (`CAPABILITY_FACTORIES`), entry point
@@ -54,7 +62,7 @@ an M2 stop, logging the reader's own fetches separately, rewriting company skill
 - Claude (`agents/claude-web-reader.ts`): `claude -p --model <tasks.webReader> --safe-mode --tools
   WebFetch,WebSearch --allowedTools WebFetch,WebSearch --permission-mode dontAsk
   --strict-mcp-config --setting-sources "" --disable-slash-commands --no-session-persistence
-  --max-turns 25 --output-format stream-json --verbose --system-prompt …`, input JSON on stdin,
+  --max-turns 25|40 (`WEB_READER_MAX_TURNS[depth]`) --output-format stream-json --verbose --system-prompt …`, input JSON on stdin,
   env via `agentEnv` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, spawned like the one-shots
   (`spawnVoiceProcess`, `inheritEnv: false`), stderr drained unread. The stream is read line by
   line: an init message listing any other tool, any other tool call, or a WebFetch to a refused
