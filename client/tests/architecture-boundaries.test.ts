@@ -207,7 +207,7 @@ test('renderer src/shared never imports src/features or src/app', () => {
 
 /**
  * Renderer files that still call window.electronAPI directly (2026-10-29:
- * 44). Never add one: new IPC calls go into the feature's api.ts or
+ * 44; 43 since the document review got its api.ts). Never add one: new IPC calls go into the feature's api.ts or
  * src/shared/ipc/. Remove a file here when it stops calling it; a move-only
  * PR renames its entry. The count may only go down.
  */
@@ -239,7 +239,6 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/components/skill-ui/CopySkillModal.tsx',
   'src/components/skill-ui/FileSearchModal.tsx',
   'src/components/skill-ui/FileTreePanel.tsx',
-  'src/components/skill-ui/MarkdownReview.tsx',
   'src/components/skill-ui/NewFolderDialog.tsx',
   'src/components/skill-ui/SearchPanel.tsx',
   'src/components/skill-ui/SkillCentricLayout.tsx',
@@ -257,7 +256,7 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/stores/appStore.ts',
   'src/stores/authStore.ts',
 ]
-const DIRECT_IPC_CEILING = 44
+const DIRECT_IPC_CEILING = 43
 
 /** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
 const isDataLayer = (clientPath: string) =>
