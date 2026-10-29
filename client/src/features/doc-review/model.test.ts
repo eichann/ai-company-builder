@@ -13,6 +13,7 @@ import {
   hasUnseenReviews,
   replyFileKey,
   isReviewSidecarFile,
+  markOrphanedComments,
   markReviewSeen,
   mergeRepliesIntoReviews,
   type CommentReply,
@@ -163,4 +164,16 @@ test('findTextInMarkdown: a selection across collapsed whitespace maps both ends
   assert.equal(two.slice(found!.start, found!.end), 'a\n\nb')
   // Surrounding whitespace in the selection is not part of the match.
   assert.deepEqual(findTextInMarkdown('x  y\tz', ' y z '), { start: 3, end: 6 })
+})
+
+test('markOrphanedComments: completed reviews only, in memory; unknown document text keeps the file\'s value', () => {
+  const done = review('r1', [{ id: 'c1' }])
+  const open: Review = { ...review('r2', [{ id: 'c2' }]), status: 'in_progress', completedAt: null }
+  const [d, o] = markOrphanedComments([done, open], '# 提案書\n\n別の文章')
+  assert.equal(d.comments[0].orphaned, true)
+  assert.equal(o, open, 'an in-progress review is left as it is')
+  assert.equal(markOrphanedComments([done], '来期の数字')[0].comments[0].orphaned, false)
+  assert.equal(done.comments[0].orphaned, undefined, 'the loaded review object is not modified')
+  const unknown = [done]
+  assert.equal(markOrphanedComments(unknown, null), unknown)
 })

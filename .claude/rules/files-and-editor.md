@@ -109,6 +109,11 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - `<doc>.review-request.json` — `{ requestedBy, requestedAt }` (button hidden, kept for a Slack
   notification; `readReviewRequestFile` & co. in `api.ts`). Not the chat's 「確認をお願いする」
   (`request_review`, `client/shared/review-request.ts`).
+- **Opening or viewing a document never writes or deletes a sidecar** (owner, 2026-10-29: members
+  fix the document from the reviews, so everyone must still be able to read them). 「位置不明」 is
+  computed in memory (`markOrphanedComments`); completed reviews stay even when all comments are
+  resolved and remain in レビュー履歴. Only the reviewer's own actions write their review file;
+  replies and resolved marks go to the member's own reply file.
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and

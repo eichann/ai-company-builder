@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect } from 'react'
 import {
   replyFileKey,
+  markOrphanedComments,
   mergeRepliesIntoReviews,
   type CommentReply,
   type CommentSeverity,
@@ -46,36 +47,9 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
       // Merge external replies and resolutions into reviews
       const allReviews = mergeRepliesIntoReviews(allReviewsRaw, replyData.replies, replyData.resolutions)
 
-      // Mark orphaned comments and auto-delete fully resolved reviews
-      const cleaned: Review[] = []
-      for (const r of allReviews) {
-        if (r.status !== 'completed') {
-          cleaned.push(r)
-          continue
-        }
-        // Mark each comment as orphaned or not based on whether its text still exists
-        const updatedComments = r.comments.map(c => ({
-          ...c,
-          orphaned: !docContent?.includes(c.selectedText),
-        }))
-        const nonOrphanedUnresolved = updatedComments.filter(c => !c.orphaned && !c.resolved)
-        const orphanedUnresolved = updatedComments.filter(c => c.orphaned && !c.resolved)
-        // Auto-delete completed reviews where all non-orphaned comments are resolved
-        // and there are no unresolved orphaned comments (to prevent silent loss)
-        if (nonOrphanedUnresolved.length === 0 && orphanedUnresolved.length === 0) {
-          await deleteReviewFile(docPath, r.id)
-          continue
-        }
-        // Persist orphaned flag if changed
-        const hasChanges = r.comments.some((c, i) => c.orphaned !== updatedComments[i].orphaned)
-        if (hasChanges) {
-          const updatedReview = { ...r, comments: updatedComments }
-          await writeReview(docPath, updatedReview)
-          cleaned.push(updatedReview)
-        } else {
-          cleaned.push({ ...r, comments: updatedComments })
-        }
-      }
+      // Opening a document only reads: 「位置不明」 is computed here, and completed
+      // reviews stay (all resolved too) because members fix the document from them.
+      const cleaned = markOrphanedComments(allReviews, docContent)
 
       setReviews(prev => {
         if (JSON.stringify(prev) === JSON.stringify(cleaned)) return prev

@@ -160,3 +160,24 @@ test('starting a review removes an existing review request', async ({ page }) =>
   await expect.poll(hasRequest).toBe(false)
   expectNoPageErrors(state)
 })
+
+test('opening and viewing reviews changes no file: all-resolved reviews stay, 「位置不明」 is shown, not written', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review', { history: '1' })
+  const before = await disk(page)
+  await expect(page.getByRole('button', { name: 'レビュー履歴 (3)' })).toBeVisible()
+
+  const views: Array<[name: string, shows: string]> = [
+    ['佐藤', '根拠となる数字を添えてください'],
+    ['鈴木', '1件のコメント（1件解決済み）'],
+    ['田中', '位置不明'],
+  ]
+  for (const [name, shows] of views) {
+    await page.getByRole('button', { name: /^レビュー履歴/ }).click()
+    await page.getByRole('button', { name: new RegExp(name) }).click()
+    await expect(page.getByText(shows)).toBeVisible()
+    await page.getByRole('button', { name: '閉じる' }).click()
+  }
+  await page.waitForLoadState('networkidle')
+  expect(await disk(page)).toEqual(before)
+  expectNoPageErrors(state)
+})
