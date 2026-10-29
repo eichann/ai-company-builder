@@ -83,8 +83,15 @@ jobs:
       - uses: ./.github/actions/setup
       # node:test via tsx. tests/*-ui.tsx + *-ui.html are browser preview
       # pages, driven by the Playwright job (ui-client), not node tests.
-      - run: npx tsx --test tests/*.test.ts
+      # Renderer tests sit next to their code (src/**/*.test.ts,
+      # renderer-structure.md). find lists them: Node 20's test runner does
+      # not expand globs and bash without globstar reads ** as *.
+      - name: Node tests (tests/ and colocated src/)
         working-directory: client
+        run: |
+          colocated=$(find src -name '*.test.ts' | sort)
+          echo "Colocated renderer tests: ${colocated:-none}"
+          npx tsx --test tests/*.test.ts $colocated
       # Built without -O so Swift's assert() stays active.
       - name: Swift audio level test
         working-directory: client

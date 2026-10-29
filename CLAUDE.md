@@ -71,6 +71,7 @@ pnpm typecheck               # all packages (CI runs this on every PR)
 pnpm lint                    # all packages; CI lints changed files only
 
 cd client && npx tsx --test tests/<name>.test.ts          # one client test file
+cd client && npx tsx --test src/features/<f>/<name>.test.ts  # one renderer test (next to its code)
 cd client && npx tsx --test tests/sync/<name>.test.ts     # one sync-harness file
 cd client && npx playwright test <spec>                   # one renderer UI spec
 cd server && npx vitest run tests/<path>                  # one server test file
