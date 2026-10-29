@@ -127,7 +127,9 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and
-  components never call `window.electronAPI`); state in `hooks/useMarkdownReview.ts` and
+  components never call `window.electronAPI`), over two small ports — `ReviewReads` (readFile,
+  readDirectory, exists) and `ReviewWrites` (writeFile, renameItem, deleteItem); nothing is sent
+  outside the computer; state in `hooks/useMarkdownReview.ts` and
   `hooks/useTextSelection.ts`; banners, side panel, popover, history and the snapshot diff in
   `components/`. Tests: `client/src/features/doc-review/model.test.ts` (names, hash, merging, unseen,
   text matching, merging edits), `api.test.ts` (atomic write, retries, unreadable files, one at a
