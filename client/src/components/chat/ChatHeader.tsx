@@ -158,7 +158,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           <Plus size={16} className="text-gray-500 dark:text-zinc-400" />
         </button>
 
-        <button onClick={onToggleSidebar} aria-label="相談一覧を開閉" aria-expanded={sidebarOpen} title="相談一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
+        <button onClick={onToggleSidebar} aria-label="AIへの相談の一覧を開閉" aria-expanded={sidebarOpen} title="AIへの相談の一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
           <SidebarSimple size={16} />
         </button>
 

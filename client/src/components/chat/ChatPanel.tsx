@@ -100,7 +100,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     }}>
     <div ref={panelRef} className="h-full relative flex min-w-0">
       {sidebarOpen && <>
-        {compact && <button aria-label="相談一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
+        {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
         <div className={compact ? 'absolute inset-y-0 left-0 z-30 shadow-xl' : 'shrink-0'}>
           <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId}
             onSelectTab={id => { setActiveTabId(id); if (compact) setSidebarOpen(false) }}
@@ -121,6 +121,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
           >
             <div className={showSettings && tab.id === activeTabId ? 'h-full invisible' : 'h-full'}>
               <ChatPanelChat
+                tabId={tab.id}
                 isActive={tab.id === activeTabId}
                 departmentPath={departmentPath}
                 activeDepartment={stableDepartment}

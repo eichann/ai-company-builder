@@ -22,6 +22,7 @@ import { useAgentInteractions, useToolApprovals } from './hooks/useAgentInteract
 import { useQueuedSendFlush, useSteering } from './hooks/useSteering'
 import { usePromptSuggestion } from './hooks/usePromptSuggestion'
 import { useChatAutoScroll } from './hooks/useChatAutoScroll'
+import { useConsultationStatus } from './hooks/useConsultationStatus'
 import { useAgentModelSelection } from './hooks/useAgentModelSelection'
 import { useRateLimitsRefresh, useStreamingChat } from './hooks/useStreamingChat'
 import { ChatHeader } from './ChatHeader'
@@ -35,6 +36,8 @@ import { QueuedSendList } from './QueuedSendList'
 // presentational parts (ChatHeader, MessageList, ChatInput, banners).
 
 export interface ChatPanelChatProps {
+  /** The tab this conversation is shown in (its status in the 「AIへの相談」 list). */
+  tabId: string
   isActive: boolean
   departmentPath?: string
   activeDepartment?: { name: string; folder: string }
@@ -53,7 +56,7 @@ export interface ChatPanelChatProps {
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -232,6 +235,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ isActive, departmentP
 
   const running = status === 'submitted' || status === 'streaming'
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
+
+  useConsultationStatus({ tabId, isActive, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
 
   // Start new chat and auto-send when skill execution is triggered (only active tab)
   useEffect(() => {
