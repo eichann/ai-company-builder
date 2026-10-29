@@ -8,6 +8,8 @@ export interface LoopbackTool {
   name: string
   description: string
   inputSchema: ZodRawShape
+  /** Default: read-only, closed world. The Web research tool reaches the open web. */
+  annotations?: { readOnlyHint?: boolean; destructiveHint?: boolean; openWorldHint?: boolean }
   execute(args: Record<string, unknown>): Promise<string>
 }
 
@@ -26,7 +28,7 @@ export async function startLoopbackMcp(serverName: string, tools: LoopbackTool[]
     const mcp = new McpServer({ name: serverName, version: '1.0.0' })
     for (const t of tools) mcp.registerTool(t.name, {
       description: t.description, inputSchema: t.inputSchema,
-      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false },
+      annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false, ...t.annotations },
     }, async (args: Record<string, unknown>) => ({ content: [{ type: 'text' as const, text: await t.execute(args) }] }))
     const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined, enableJsonResponse: true })
     active.add(mcp)

@@ -70,7 +70,8 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - Private-read guard (`private-read-guard.ts`, pure; fed by the hooks in `agents/claude.ts` and
   `chat-server.ts`): once a conversation has *read* something inside a private folder (locally or
   via `company_read_file` / `company_search`), the app asks the member before the AI writes into
-  a public place of the company or sends anything out (web, MCP). Best-effort by design (Bash it
+  a public place of the company or sends anything out (web, MCP, the app's 「Web で調べる」
+  `mcp__acb_web__web_research`, whose question goes out — `web-research.md`). Best-effort by design (Bash it
   cannot parse, scripts, a resumed conversation can slip past); the server's `[RESERVED_PATH]`
   keeps private content out of the company repository either way.
 

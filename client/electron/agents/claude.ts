@@ -2,6 +2,8 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { referenceSchemas, referenceDescriptions, type ReferenceToolName } from '../consultations/tools'
 import { COMPANY_FILES_SERVER, COMPANY_FILE_TOOL_NAMES, companyFileDescriptions, companyFileSchemas, companyFileToolId } from '../company-files/tools'
 import { REVIEW_SERVER, REVIEW_TOOL, REVIEW_TOOL_ID, reviewDescription, reviewSchema } from '../review/tools'
+import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema } from '../web-research/tools'
+import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
 import { wrapLanguageModel } from 'ai'
 import { MissingAgentSession } from './recovery'
 import { claudeCode } from 'ai-sdk-provider-claude-code'
@@ -29,6 +31,9 @@ export interface ClaudeConnectionConfig extends AgentHostConfig {
 
 }
 
+
+/** Claude Code's own web tools, denied when the app's web research is given. */
+export const CLAUDE_BUILTIN_WEB_TOOLS = ['WebFetch', 'WebSearch'] as const
 
 const DANGEROUS_PATTERNS: RegExp[] = [
   // Direct deletion commands
@@ -141,7 +146,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -304,8 +309,10 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (!approvals) return verdict({ behavior: 'deny' as const, message: 'この操作は確認が必要なため実行していません。' }, 'guard-denied', 'needs-approval')
         // Read-only tools: auto-allow. Every allow echoes updatedInput: older CLIs
         // (e.g. 2.0.x, the ones that also lack auto) reject an allow without it.
+        // Web research changes nothing in the company; after private reads the
+        // PreToolUse hook has already asked the member (private-read-guard.ts).
         const readOnlyTools = ['Read', 'ListDirectory', 'Glob', 'Grep', 'View']
-        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID)) {
+        if (readOnlyTools.includes(toolName) || (references && Object.keys(referenceSchemas).some(name => toolName === `mcp__acb_consultations__${name}`)) || (companyFiles && COMPANY_FILE_TOOL_NAMES.some(name => toolName === companyFileToolId(name))) || (review && toolName === REVIEW_TOOL_ID) || (webResearch && toolName === WEB_RESEARCH_TOOL_ID)) {
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'auto-allowed')
         }
         // Request approval from UI
@@ -346,15 +353,19 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // App-provided (not the company repository's .mcp.json, which is protected config).
         const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
         const reviewServer = review ? createSdkMcpServer({ name: REVIEW_SERVER, tools: [tool(REVIEW_TOOL, reviewDescription, reviewSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await review.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })] }) : undefined
+        // 「Web で調べる」: a separate reader reads the web (web-research/tools.ts).
+        const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
         const mcpServers = {
           ...(referenceServer ? { acb_consultations: referenceServer } : {}),
           ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
           ...(reviewServer ? { [REVIEW_SERVER]: reviewServer } : {}),
+          ...(webResearchServer ? { [WEB_RESEARCH_SERVER]: webResearchServer } : {}),
         }
         const allowedTools = [
           ...(referenceServer ? Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) : []),
           ...(companyFilesServer ? COMPANY_FILE_TOOL_NAMES.map(companyFileToolId) : []),
           ...(reviewServer ? [REVIEW_TOOL_ID] : []),
+          ...(webResearchServer ? [WEB_RESEARCH_TOOL_ID] : []),
         ]
         const state = { missingSession: false, autoRejected: false }
         // Steering + prompt suggestions (steering.ts): watch the query the
@@ -384,6 +395,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // (status `allowed_warning`), which heavy members hit most days.
           env: onPromptSuggestion ? { ...config.getShellEnv(), CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : config.getShellEnv(),
           settingSources: ['user', 'project'],
+          // With the app's web research, the CLI's own web tools are off for the
+          // whole session, subagents included (a deny beats any allow, in every
+          // permission mode; WebFetch / WebSearch also bypass the sandbox's
+          // network allowlist, so this is the only reliable switch). Not
+          // `disallowedTools`: the provider ignores it whenever allowedTools is set.
+          ...(webResearch ? { settings: { permissions: { deny: [...CLAUDE_BUILTIN_WEB_TOOLS] } } } : {}),
           streamingInput: 'always',
           // One-line progress for running subagents (task_progress.summary),
           // shown in the subagent row; see shared/agent-progress.ts.

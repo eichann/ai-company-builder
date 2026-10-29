@@ -74,6 +74,12 @@ export interface AgentCapabilities {
   /** Short isolated text jobs: commit messages, voice formatting. */
   readonly oneShotText: boolean
   /**
+   * A separate Web reader (web-research.ts): the agent's own CLI with only its
+   * web tools, no settings, in an empty folder. The chat then gets the app's
+   * `web_research` tool and loses its built-in web tools.
+   */
+  readonly webReader: boolean
+  /**
    * Used when the member's own agent cannot write the commit message (or is
    * not signed in). A CLI that may belong to another vendor is never picked
    * on the member's behalf.
@@ -100,6 +106,8 @@ export interface AgentTaskModels {
   readonly voice?: string
   /** Hand-off memos. */
   readonly handoff?: string
+  /** The Web reader (`capabilities.webReader`). */
+  readonly webReader?: string
 }
 
 export interface AgentDescriptor<ModelId extends string = string> {
@@ -137,7 +145,7 @@ const CLAUDE_MODELS = [
 
 export type ClaudeModelId = typeof CLAUDE_MODELS[number]['id']
 
-/** The CLI alias for the small fast model (titles, `claude -p` one-shots, hand-off memos). */
+/** The CLI alias for the small fast model (titles, `claude -p` one-shots, hand-off memos, the Web reader). */
 const CLAUDE_LIGHT_MODEL = 'haiku'
 
 const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
@@ -153,6 +161,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     commitMessage: CLAUDE_LIGHT_MODEL,
     voice: CLAUDE_LIGHT_MODEL,
     handoff: CLAUDE_LIGHT_MODEL,
+    webReader: CLAUDE_LIGHT_MODEL,
   },
   capabilities: {
     ownsConversation: true,
@@ -168,6 +177,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     privateReadGuard: true,
     handoff: true,
     oneShotText: true,
+    webReader: true,
     commitMessageFallback: true,
     privateFolderCommitMessages: false,
     liveModelCatalog: false,
@@ -197,7 +207,7 @@ export function claudeCliEffort(cliModel: string, effort?: AgentEffort): AgentEf
 // Codex
 // ---------------------------------------------------------------------------
 
-/** The lightweight model verified for Japanese dictation (voice, commit messages, hand-off memos). */
+/** The lightweight model verified for Japanese dictation (voice, commit messages, hand-off memos, the Web reader). */
 const CODEX_LIGHT_MODEL = 'gpt-5.6-luna'
 
 const CODEX: AgentDescriptor = {
@@ -213,6 +223,8 @@ const CODEX: AgentDescriptor = {
     voice: CODEX_LIGHT_MODEL,
     // Required: hand-off memos fail when the account does not have it.
     handoff: CODEX_LIGHT_MODEL,
+    // Preferred; the catalog's default when the account does not have it.
+    webReader: CODEX_LIGHT_MODEL,
   },
   capabilities: {
     ownsConversation: true,
@@ -228,6 +240,7 @@ const CODEX: AgentDescriptor = {
     privateReadGuard: false,
     handoff: true,
     oneShotText: true,
+    webReader: true,
     commitMessageFallback: false,
     privateFolderCommitMessages: false,
     liveModelCatalog: true,
@@ -264,6 +277,8 @@ const API_KEY: AgentDescriptor = {
     privateReadGuard: false,
     handoff: false,
     oneShotText: true,
+    // The app's own loop has no web tools to replace.
+    webReader: false,
     commitMessageFallback: true,
     privateFolderCommitMessages: true,
     liveModelCatalog: false,

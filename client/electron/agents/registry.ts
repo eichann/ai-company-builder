@@ -20,6 +20,9 @@ import { runClaudeOneShot, type ClaudeOneShotMessages } from '../claude-oneshot'
 import { writeClaudeHandoff } from '../handoff/claude'
 import { writeCodexHandoff } from '../handoff/codex'
 import type { HandoffMetrics, HandoffRequest } from '../handoff/contract'
+import { runClaudeWebReader } from './claude-web-reader'
+import { runCodexWebReader } from './codex-web-reader'
+import { WEB_READER_TIMEOUT_MS, inEmptyFolder, type WebReaderJob, type WebReaderRequest, type WebReaderResult } from './web-reader'
 
 /** What any connection may need from the app (the chat server's config is one). */
 export interface AgentHost extends ClaudeConnectionConfig {
@@ -27,12 +30,12 @@ export interface AgentHost extends ClaudeConnectionConfig {
 }
 
 /**
- * A role-specific configuration a caller may ask for — e.g. a Web-research
- * reader (no tools, no company files) next to the worker that edits files.
- * The shape is fixed now so callers ask for a role without branching on the
- * agent; no agent implements one yet, so `createAgentConnection` refuses any
+ * A role-specific configuration a caller may ask for on a chat connection.
+ * The shape is fixed so callers ask for a role without branching on the
+ * agent; no agent implements one, so `createAgentConnection` refuses any
  * profile that sets a field (a caller must never believe a restriction is in
- * force when it is not).
+ * force when it is not). The Web reader is not a profile: it is a one-shot
+ * job with its restrictions built in (`runWebReader`, web-reader.ts).
  */
 export interface AgentProfile {
   /** A name for logs and for the agent's own choices ('reader', 'worker', …). */
@@ -93,6 +96,8 @@ export interface AgentFactories {
   oneShotUnavailable?: (host: OneShotHost) => string | undefined
   /** `capabilities.handoff`. */
   writeHandoff?: (request: HandoffRequest, host: { getCli: () => string }) => Promise<HandoffMetrics>
+  /** `capabilities.webReader`: the restricted reader (web-reader.ts), in the folder and with the model it is given. */
+  runWebReader?: (job: WebReaderJob) => Promise<WebReaderResult>
 }
 
 const model = (id: AgentId, request: OneShotTextRequest) => request.model ?? AGENTS[id].tasks[request.job]
@@ -112,6 +117,7 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
       return ready ? undefined : 'Claude Code CLIが認証されていません。'
     },
     writeHandoff: (request, host) => writeClaudeHandoff({ ...request, cli: host.getCli() }),
+    runWebReader: job => runClaudeWebReader(job),
   },
   codex: {
     createConnection: host => createCodexConnection(host),
@@ -123,6 +129,7 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
       ...(request.onMetrics ? { onMetrics: request.onMetrics } : {}),
     }),
     writeHandoff: request => writeCodexHandoff(request),
+    runWebReader: job => runCodexWebReader(job),
   },
   'api-key': {
     createConnection: host => createApiConnection(host),
@@ -145,6 +152,7 @@ export const AGENT_FACTORIES: { readonly [K in AgentId]: AgentFactories } = {
 export const CAPABILITY_FACTORIES = {
   oneShotText: 'oneShotText',
   handoff: 'writeHandoff',
+  webReader: 'runWebReader',
 } as const satisfies Partial<Record<keyof AgentCapabilities, keyof AgentFactories>>
 
 function assertProfileSupported(id: AgentId, profile: AgentProfile | undefined) {
@@ -179,3 +187,14 @@ export function writeAgentHandoff(id: AgentId, request: HandoffRequest, host: { 
   return write(request, host)
 }
 
+/**
+ * Ask the Web reader of an agent that claims `webReader` (the member's own
+ * agent, its `tasks.webReader` model), in a new empty folder removed
+ * afterwards. Rejects with a `WebReaderError` (web-reader.ts).
+ */
+export function runWebReader(id: AgentId, request: WebReaderRequest): Promise<WebReaderResult> {
+  const run = AGENTS[id].capabilities.webReader ? AGENT_FACTORIES[id].runWebReader : undefined
+  const model = AGENTS[id].tasks.webReader
+  if (!run || !model) return Promise.reject(new Error(`${AGENTS[id].label}: no Web reader`))
+  return inEmptyFolder(cwd => run({ ...request, model, cwd, timeoutMs: request.timeoutMs ?? WEB_READER_TIMEOUT_MS }))
+}

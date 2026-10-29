@@ -66,7 +66,7 @@ same empty search, absent from every listing.
   which is protected config). Claude Code: an in-process SDK MCP server per query, tools in
   `allowedTools` and auto-allowed in `canUseTool` (read-only). Codex: a per-turn loopback
   Streamable-HTTP endpoint (`agents/loopback-mcp.ts`, random bearer token, 127.0.0.1, closed with
-  the turn) in `thread/start`'s `config.mcp_servers`. The chat's system prompt gets a short
+  the turn; tools are annotated read-only / closed-world unless they say otherwise) in `thread/start`'s `config.mcp_servers`. The chat's system prompt gets a short
   paragraph listing the folders not downloaded (`companyFilesInstructions` in `tools.ts`).
   The api-key mode does not get these tools.
 - Not yet: pptx / pdf / xlsx are not searchable (text extraction is on hold).

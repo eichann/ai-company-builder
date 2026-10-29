@@ -2,6 +2,7 @@ import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/too
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
+import type { WebResearchTools } from './web-research/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
 import { resumeSession, agentInputMessages } from './agents/session'
@@ -40,6 +41,13 @@ export interface ChatServerConfig extends AgentHost {
    * and the system-prompt paragraph that tells the AI when to use them.
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
+  /**
+   * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
+   * agent as a separate Web reader, limited per conversation. Given only to
+   * agents that own the conversation and claim `webReader`; the agent then
+   * turns its own web tools off.
+   */
+  createWebResearch?: (request: { agent: AgentId; conversationId: string; signal: AbortSignal }) => { tools: WebResearchTools; instructions: string } | undefined
   prepareRecovery?: (company: string, id: string, messages: UIMessage[]) => { context: string; usedMemo: boolean }
   onRecovery?: (company: string, id: string, recovery: HandoffRecovery) => void
   persistAgentSession?: (company: string, id: string, session: AgentSession) => void
@@ -246,6 +254,10 @@ export async function startChatServer(config: ChatServerConfig) {
       },
     }
     if (companyFiles) finalSystemPrompt = (finalSystemPrompt || '') + companyFiles.instructions
+    // The per-conversation limit needs a conversation id; a request without one counts on its own.
+    const webResearch = connection.ownsConversation && can.webReader
+      ? config.createWebResearch?.({ agent: authMode, conversationId: appSessionId || crypto.randomUUID(), signal: c.req.raw.signal }) : undefined
+    if (webResearch) finalSystemPrompt = (finalSystemPrompt || '') + webResearch.instructions
     const privateReads = privateContext ? { context: privateContext, state: privateState } : undefined
     // Choice prompts (Claude Code's AskUserQuestion, Codex's ask_user), per the agent registry.
     const injector = createChunkInjector()
@@ -276,7 +288,7 @@ export async function startChatServer(config: ChatServerConfig) {
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
     const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder }
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

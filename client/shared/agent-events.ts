@@ -21,6 +21,7 @@
 import type { AuthMode } from './agent'
 import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './choice-prompt'
 import { REVIEW_SERVER } from './review-request'
+import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL } from './web-research'
 import {
   AGENT_EVENT_VERSION,
   type AgentToolEvent, type FileTarget, type GuardReason, type SensitiveLocation, type ToolCategory,
@@ -50,7 +51,8 @@ export type TurnStopReason = 'stopped-by-admin' | 'app-quit'
 /**
  * MCP servers the app itself provides (acb_consultations, acb_company_files,
  * acb_review, acb_ask): category 'app-tool'. Pinned against the electron constants in
- * tests/agent-events.test.ts.
+ * tests/agent-events.test.ts. The app's web research (`acb_web`) is not one
+ * of them: it reaches the web, so it is 'web'.
  */
 export const APP_MCP_SERVERS: readonly string[] = ['acb_consultations', 'acb_company_files', REVIEW_SERVER, CODEX_CHOICE_SERVER]
 
@@ -80,6 +82,8 @@ export function categorizeTool(toolName: string): ToolCategory {
   const mcp = parseMcpToolName(toolName)
   if (mcp) {
     if (mcp.server === CODEX_CHOICE_SERVER && mcp.tool === CODEX_CHOICE_TOOL) return 'question'
+    // 「Web で調べる」 (web-research.ts): the app's tool, but what it does is reach the web.
+    if (mcp.server === WEB_RESEARCH_SERVER && mcp.tool === WEB_RESEARCH_TOOL) return 'web'
     return APP_MCP_SERVERS.includes(mcp.server) ? 'app-tool' : 'mcp-external'
   }
   return Object.prototype.hasOwnProperty.call(TOOL_CATEGORIES, toolName) ? TOOL_CATEGORIES[toolName] : 'other'
@@ -331,7 +335,8 @@ export function describeTarget(toolName: string, input: unknown, ctx: TargetCont
       return command ? describeCommand(command) : { kind: 'command', programs: [] }
     }
     case 'web': {
-      const host = webHost(value.url)
+      // WebFetch's `url`; the web research's first given page (its question is never read).
+      const host = webHost(value.url) ?? (Array.isArray(value.urls) ? webHost(value.urls[0]) : undefined)
       return host ? { kind: 'web', host } : { kind: 'web' }
     }
     case 'mcp-external':

@@ -1,6 +1,7 @@
 import type { ReferenceTools } from '../consultations/tools'
 import type { CompanyFileTools } from '../company-files/tools'
 import type { ReviewTools } from '../review/tools'
+import type { WebResearchTools } from '../web-research/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
 import type { WriteGuard } from '../write-guard'
@@ -44,6 +45,11 @@ export interface AgentConnection {
     companyFiles?: CompanyFileTools
     /** 「確認をお願いする」: ask the member to review and stop (review/tools.ts). */
     review?: ReviewTools
+    /**
+     * 「Web で調べる」 (web-research/tools.ts). Given → the agent offers it as
+     * `acb_web` / `web_research` and its own built-in web tools are off.
+     */
+    webResearch?: WebResearchTools
     resumeId?: string
     /** Refuse edits to read-only folders before they happen (write-guard.ts). */
     writeGuard?: WriteGuard

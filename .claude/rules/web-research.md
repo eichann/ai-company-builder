@@ -1,0 +1,101 @@
+---
+paths:
+  - "client/shared/web-research.ts"
+  - "client/electron/web-research/**"
+  - "client/electron/agents/web-reader.ts"
+  - "client/electron/agents/claude-web-reader.ts"
+  - "client/electron/agents/codex-web-reader.ts"
+  - "client/electron/agents/codex-text.ts"
+  - "client/tests/web-research.test.ts"
+---
+
+# 「Web で調べる」: a separate reader reads the web
+
+The chat AI works in the member's company folder with file and command tools. Text from a web
+page in its context is a prompt-injection path straight to those tools. So the working AI has no
+web tools of its own; it calls the app tool `web_research`, and a separate **reader** — the
+member's own agent on its light model, with only web tools, no settings and an empty folder —
+reads the web. The app cleans the reader's answer and hands the working AI plain-text key points
++ source URLs under a header that says they are data, not instructions. Owner decisions: the
+reader is the member's own agent on a light model (Claude: Haiku; Codex: `CODEX_LIGHT_MODEL`,
+else the catalog's default); a per-conversation call limit. Not now: admin settings for it,
+an M2 stop, logging the reader's own fetches separately, rewriting company skills.
+
+## Pieces
+
+- `client/shared/web-research.ts` (pure): ids (`acb_web` / `web_research`,
+  `WEB_RESEARCH_TOOL_ID`), limits, `validateWebResearchInput` (question 1–1000 chars; ≤ 5 URLs,
+  http/https, ≤ 2048 chars, no `user:pass@`; refused hosts: localhost / `*.localhost`, `.local`,
+  `.internal`, `.lan`, `.home.arpa`, `.intranet`, `.corp`, single-label names, private /
+  loopback / link-local / CGNAT / benchmark / multicast IPv4 (WHATWG URL normalizes `2130706433`,
+  `0x7f000001`, `127.1`), every IPv6 literal), `sanitizeWebText` (HTML comments, script/style/…
+  blocks, tags, common entities, zero-width / bidi / Unicode tag characters / other controls
+  except `\n` `\t`, NFC, blank-line runs, 6000 chars + 「（長いため省略しました）」),
+  `findInstructionLikeText` (conservative English + Japanese phrase list → flag labels; a flag,
+  never a filter), source extraction, `formatWebResearchResult` (fixed header, ⚠ line when
+  flagged, 【要点】, 【出典】, fence lines; a fake fence line inside the content is dropped),
+  the reader's system prompt and the working AI's instruction paragraph.
+- Registry: capability `webReader` (Claude Code, Codex; not the API key) and task model
+  `webReader`; factory `runWebReader` (`CAPABILITY_FACTORIES`), entry point
+  `runWebReader(id, request)` in `electron/agents/registry.ts`, which creates an empty
+  `mkdtemp` folder and removes it afterwards. Not an `AgentProfile` (profiles still throw).
+- `agents/web-reader.ts`: the contract (`WebReaderRequest` / `Result`, `WebReaderError` codes
+  `unavailable` / `timeout` / `cancelled` / `refused-address` / `too-long` / `failed`), 120 s.
+- Claude (`agents/claude-web-reader.ts`): `claude -p --model haiku --safe-mode --tools
+  WebFetch,WebSearch --allowedTools WebFetch,WebSearch --permission-mode dontAsk
+  --strict-mcp-config --setting-sources "" --disable-slash-commands --no-session-persistence
+  --max-turns 8 --output-format stream-json --verbose --system-prompt …`, input JSON on stdin,
+  env via `agentEnv` + `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, spawned like the one-shots
+  (`spawnVoiceProcess`, `inheritEnv: false`), stderr drained unread. The stream is read line by
+  line: an init message listing any other tool, any other tool call, or a WebFetch to a refused
+  host stops it (SIGKILL; best effort — the call may already run). Verified on CLI 2.1.304:
+  init lists exactly WebFetch + WebSearch and WebFetch works under `--safe-mode`.
+- Codex (`agents/codex-web-reader.ts`): `generateCodexText` with a `CodexTextJob` — the
+  one-shot overrides with `web_search="live"` instead of `"disabled"` (values: disabled / cached
+  / indexed / live, from `codex app-server generate-json-schema`), items allowed: userMessage,
+  agentMessage, reasoning, webSearch; any request from Codex stops it; configured MCP servers
+  disabled one by one; ephemeral, read-only, approvals `never`. `webSearch` items with
+  `action.url` are the pages it opened (a refused host stops it).
+- The tool (`electron/web-research/tools.ts`): schema + Japanese/English description;
+  `createWebResearchTools` (validate → per-conversation budget → reader → format; failures are
+  fixed Japanese sentences `WEB_RESEARCH_MESSAGES`, never a stack; logs carry durations and
+  counts only, never the question, answer or URLs); `createWebResearchBudget` (20 per
+  `appSessionId`, in memory, ≤ 5000 conversations); `startWebResearchMcp` for Codex (loopback,
+  `tool_timeout_sec` 180, annotations read-only + open-world — Codex calls it without asking,
+  verified with codex-cli 0.153.4).
+
+## Wiring
+
+- `chat-server.ts`: `config.createWebResearch?.({ agent, conversationId, signal })` for agents
+  that own the conversation and claim `webReader`; its `instructions` go into the system prompt
+  and `webResearch` into `createChatModel`. Built in `features/chat/server-config.ts` (one budget
+  per app run; the member's CLI path and environment read per call).
+- Claude chat (`agents/claude.ts`): with `webResearch`, an in-process SDK MCP server `acb_web`
+  (tool in `allowedTools`, auto-allowed in `canUseTool`) and `settings: { permissions: { deny:
+  ['WebFetch', 'WebSearch'] } }` (flag settings: the whole session incl. subagents, every
+  permission mode; WebFetch / WebSearch bypass the sandbox network allowlist, so this is the
+  only reliable off switch; not `disallowedTools`, which the provider ignores with
+  allowedTools). Verified: the session's init tools lose both and list
+  `mcp__acb_web__web_research`. Without `webResearch` nothing changes.
+- Codex chat (`agents/codex.ts`): with `webResearch`, the loopback server in `mcp_servers` and
+  `web_search: 'disabled'` in the thread config (verified: no `webSearch` item, the model says it
+  has no web tool). Its `mcpToolCall` rows show as `mcp__acb_web__web_research`.
+- Private-read guard: `acb_web` is an outbound tool (not in `APP_MCP_SERVERS`), so after a
+  private read the member is asked first (`webResearchMessage`); the approval shows the
+  question. The canUseTool auto-allow only applies when that guard did not ask.
+- AI action log: `mcp__acb_web__web_research` is category `web`, target = the first given URL's
+  host (`{ kind: 'web', host }`, else `{ kind: 'web' }`), never the question. The reader's own
+  fetches are not logged (owner decision: not now). Wire contract unchanged.
+
+## Limits
+
+- Bash (`curl`, scripts) can still reach the network; that is the sandbox's job, not this one.
+- DNS that resolves a public name to a private address is not checked (the CLI fetches).
+- The phrase flags are conservative and incomplete; the header and the reader's own rules are
+  the main defence, the flag is a hint for the AI and the member.
+- The limit lives in memory (an app restart resets it).
+
+Tests: `client/tests/web-research.test.ts` (validation, SSRF hosts, hidden text, HTML, phrases,
+caps, formatting, tool messages and budget, reader flags and stream checks, the Codex endpoint),
+`private-read-guard.test.ts` (outbound + Claude wiring), `codex-connection.test.ts` (thread
+config), `agent-events.test.ts`, `agent-registry*.test.ts`.

@@ -2,7 +2,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { AGENTS, AGENT_IDS } from '../shared/agents/registry'
 import {
-  AGENT_FACTORIES, CAPABILITY_FACTORIES, createAgentConnection, oneShotUnavailable, runOneShotText, writeAgentHandoff,
+  AGENT_FACTORIES, CAPABILITY_FACTORIES, createAgentConnection, oneShotUnavailable, runOneShotText, runWebReader, writeAgentHandoff,
   type AgentHost, type OneShotTextRequest,
 } from '../electron/agents/registry'
 
@@ -47,6 +47,8 @@ test('role profiles are refused until an agent implements them; an empty one is 
 test('capability-gated entry points refuse an agent without the capability', async () => {
   const request = { input: { messages: [] }, cwd: '/tmp', env: {}, signal: new AbortController().signal, save: () => {} }
   await assert.rejects(writeAgentHandoff('api-key', request, { getCli: () => '/x' }), /no hand-off memos/)
+  const reader = { input: { question: 'q', urls: [] }, signal: new AbortController().signal, host: { getCli: () => '/x', env: {} } }
+  await assert.rejects(runWebReader('api-key', reader), /no Web reader/)
 })
 
 test('one-shot readiness: the API key needs a key; Claude Code only when the caller asks; Codex is always tried', () => {
