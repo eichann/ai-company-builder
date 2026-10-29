@@ -148,3 +148,15 @@ test('cancelling a review deletes its file', async ({ page }) => {
   expect(Object.keys(await disk(page)).filter(p => p.includes('.review.'))).toEqual([`${DOC}.review.${SATO_REVIEW}.json`])
   expectNoPageErrors(state)
 })
+
+test('starting a review removes an existing review request', async ({ page }) => {
+  const state = await openPreview(page, 'doc-review', { request: '1' })
+  const hasRequest = async () => Object.keys(await disk(page)).includes(`${DOC}.review-request.json`)
+  // The history button appears once the first load (which also reads the request) is done.
+  await expect(page.getByRole('button', { name: 'レビュー履歴 (1)' })).toBeVisible()
+  expect(await hasRequest()).toBe(true)
+  await page.getByRole('button', { name: 'レビューする' }).click()
+  await expect(page.getByText('レビュー中 — テキストを選択してコメントを追加')).toBeVisible()
+  await expect.poll(hasRequest).toBe(false)
+  expectNoPageErrors(state)
+})

@@ -3,7 +3,7 @@
 // banner, side panel, comment popover, replies, resolve) on a Markdown file shown as a
 // preview, with the preload API mocked by an in-memory folder. 提案書.md
 // already has a completed review by 佐藤; the member is 山田 (demo@example.com).
-// Open /tests/doc-review-ui.html?theme=light|dark
+// Open /tests/doc-review-ui.html?theme=light|dark (&request=1: a review request exists)
 // window.__acbFiles is the "disk" (path → content), for the spec to read the
 // sidecar files the review writes.
 import { createRoot } from 'react-dom/client'
@@ -50,6 +50,9 @@ const files: Record<string, string> = {
     },
   }, null, 2),
 }
+
+// ?request=1: someone asked for a review of 提案書.md (the button is hidden; the file can still exist).
+if (params.get('request') === '1') files[`${DOC}.review-request.json`] = JSON.stringify({ requestedBy: '佐藤', requestedAt: '2026-10-21T00:00:00.000Z' }, null, 2)
 
 installElectronAPI({
   readFile: async p => (p in files ? files[p] : null),

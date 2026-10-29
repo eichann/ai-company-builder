@@ -456,7 +456,7 @@ export function TabbedEditorPanel({
 
   // Markdown review
   const authUser = useAuthStore(state => state.user)
-  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '')
+  const review = useMarkdownReview(activeFilePath, authUser?.name || 'Anonymous', authUser?.email || '', authUser?.id)
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
   const textSelection = useTextSelection(
     review.isReviewing,
