@@ -198,13 +198,13 @@ test('a reply that finishes while the member is elsewhere waits under 「結果�
   const results = sidebar.getByRole('region', { name: '結果が届いています' })
   await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toContainText('返事が届いています')
 
-  // Reading it keeps it there; moving on to another conversation finishes it.
+  // Reading it keeps it there; moving on to another conversation leaves it open to continue.
   await row.click()
   await expect(page.getByText('まとめました。').locator('visible=true')).toBeVisible()
   await expect(results.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
   await sidebar.getByRole('button', { name: /^新しい会話/ }).click()
   await expect(results).toHaveCount(0)
-  await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+  await expect(sidebar.getByRole('region', { name: '開いている相談' }).getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
 })
 
 test.describe('a long restored conversation', () => {
@@ -239,9 +239,9 @@ test.describe('a long restored conversation', () => {
   test('both restored tabs are listed; switching keeps each tab\'s draft, keeps the other tab mounted and reopens at the latest message', async ({ page }) => {
     await openPreview(page, 'chat-header', { history: 'long' })
     const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
-    // Both restored tabs are idle: 「終わったもの」, open ones first and marked.
-    await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByText('開いています')).toHaveCount(1)
-    await expect(sidebar.getByRole('region', { name: '終わったもの' }).getByText('表示中')).toHaveCount(1)
+    // Both restored tabs are idle: 「開いている相談」, marked.
+    await expect(sidebar.getByRole('region', { name: '開いている相談' }).getByText('開いています')).toHaveCount(1)
+    await expect(sidebar.getByRole('region', { name: '開いている相談' }).getByText('表示中')).toHaveCount(1)
     await expect(page.getByRole('button', { name: /^以前のメッセージを表示/ })).toBeVisible({ timeout: 15_000 })
     await list(page).evaluate(el => { el.scrollTop = 0 })
 

@@ -3,6 +3,16 @@ import { normalizeSearchText } from '../../shared/chat-history-summary'
 
 export interface ConversationTab { id: string; title: string; sessionId: string | null }
 
+/** Nothing sent yet: no stored conversation, or only the greeting (a draft may exist). */
+export function isUnsent(session: ChatSessionSummary | undefined): boolean {
+  return !session || session.messageCount <= 1
+}
+
+/** Unsent and without a draft: nothing worth keeping once its tab is closed. */
+export function isEmptyConversation(session: ChatSessionSummary | undefined): boolean {
+  return isUnsent(session) && !session?.draftInput?.trim()
+}
+
 /**
  * Rows of the conversation list. Sessions are summaries (no message bodies);
  * a search over message bodies runs in the main process
@@ -13,12 +23,13 @@ export function buildConversationRows(sessions: ChatSessionSummary[], tabs: Conv
     const byId = new Map(sessions.map(s => [s.id, s]))
     const openIds = new Set(tabs.map(t => t.sessionId))
     const open = tabs.map(tab => ({ key: tab.id, tab, session: byId.get(tab.sessionId ?? ''), title: byId.get(tab.sessionId ?? '')?.title ?? tab.title }))
-    const past = sessions.filter(s => !openIds.has(s.id)).map(session => ({ key: session.id, tab: undefined, session, title: session.title }))
+    const past = sessions.filter(s => !openIds.has(s.id) && !isEmptyConversation(s)).map(session => ({ key: session.id, tab: undefined, session, title: session.title }))
     const needle = normalizeSearchText(query.trim())
     return [...open, ...past].filter(row => !needle || (row.session && contentMatches?.has(row.session.id)) ||
       [row.title, row.session?.draftInput ?? ''].some(text => normalizeSearchText(text).includes(needle)))
       .sort((a, b) => Number(!!b.tab) - Number(!!a.tab) || Number(!!b.session?.pinned) - Number(!!a.session?.pinned) ||
-        (b.session?.updatedAt ?? '').localeCompare(a.session?.updatedAt ?? ''))
+        // A tab with nothing stored yet is the newest (a just-started conversation on top).
+        (b.session?.updatedAt ?? '\uffff').localeCompare(a.session?.updatedAt ?? '\uffff'))
 }
 
 // Search runs over all sessions before pagination. Open and pinned chats always

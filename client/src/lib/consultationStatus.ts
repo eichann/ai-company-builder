@@ -142,25 +142,30 @@ export function sameStatus(a: ConsultationStatus, b: ConsultationStatus) {
 
 // --- The list's groups ---------------------------------------------------------
 
-export type ConversationGroupKey = 'needs-you' | 'pinned' | 'unseen' | 'failed' | 'working' | 'done'
+export type ConversationGroupKey = 'needs-you' | 'pinned' | 'unseen' | 'failed' | 'working' | 'open' | 'done'
 export const CONVERSATION_GROUPS: ReadonlyArray<{ key: ConversationGroupKey; label: string }> = [
   { key: 'needs-you', label: 'あなたの番' },
   { key: 'pinned', label: 'ピン留め' },
   { key: 'unseen', label: '結果が届いています' },
   { key: 'failed', label: '止まっています' },
   { key: 'working', label: 'AIが作業中' },
+  { key: 'open', label: '開いている相談' },
   { key: 'done', label: '終わったもの' },
 ]
 
 type Row = ReturnType<typeof buildConversationRows>[number]
 
-/** 「あなたの番」 comes before pinned; a pinned conversation in another state stays under ピン留め. */
+/**
+ * 「あなたの番」 comes before pinned; a pinned conversation in another state stays under ピン留め.
+ * An open tab whose AI is idle (a new one, or one the member has read and may continue) is
+ * 開いている相談; only closed conversations are 終わったもの — closing is how a member ends one.
+ */
 export function conversationGroupOf(row: Row, status: ConsultationStatus | undefined): ConversationGroupKey {
   const state = row.tab ? status?.state ?? 'idle' : 'idle'
   if (state === 'needs-you') return 'needs-you'
   if (row.session?.pinned) return 'pinned'
   if (state === 'unseen' || state === 'failed' || state === 'working') return state
-  return 'done'
+  return row.tab ? 'open' : 'done'
 }
 
 /** Rows in group order (the rows' own order kept inside a group: open tabs first, then by date). */
