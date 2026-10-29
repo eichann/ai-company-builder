@@ -24,11 +24,13 @@ before(async () => {
 })
 after(() => h.shutdown())
 
+const FAKE_KEY = 'sk-ant-FAKE-test-key-WXYZ'
+
 test('settings: defaults, validation, persisted in userData/config.json', async () => {
   const configFile = path.join(h.userData, 'config.json')
   assert.equal(await h.invoke('config:getAuthMode'), 'claude-code')
   assert.equal(await h.invoke('config:getPermissionMode'), 'auto')
-  assert.equal(await h.invoke('config:getApiKey'), null)
+  assert.deepEqual(await h.invoke('config:getApiKeyStatus'), { set: false, encryptionAvailable: true })
   assert.equal(await h.invoke('config:hasApiKey'), false)
   assert.equal(await h.invoke('config:getServerUrl'), SERVER_URL)
 
@@ -36,16 +38,37 @@ test('settings: defaults, validation, persisted in userData/config.json', async 
   assert.equal(await h.invoke('config:setPermissionMode', 'yolo'), false)
   assert.equal(await h.invoke('config:setAuthMode', 'codex'), true)
   assert.equal(await h.invoke('config:setPermissionMode', 'bypassPermissions'), true)
-  assert.equal(await h.invoke('config:setApiKey', 'sk-test'), true)
+  assert.deepEqual(await h.invoke('config:setApiKey', FAKE_KEY), { success: true })
   assert.equal(await h.invoke('config:getAuthMode'), 'codex')
   assert.equal(await h.invoke('config:getPermissionMode'), 'bypassPermissions')
-  assert.equal(await h.invoke('config:getApiKey'), 'sk-test')
+  // The renderer gets the last four characters, never the key.
+  assert.deepEqual(await h.invoke('config:getApiKeyStatus'), { set: true, last4: 'WXYZ', encryptionAvailable: true })
   assert.equal(await h.invoke('config:hasApiKey'), true)
-  assert.deepEqual(JSON.parse(fs.readFileSync(configFile, 'utf-8')), {
-    serverUrl: SERVER_URL, authMode: 'codex', permissionMode: 'bypassPermissions', anthropicApiKey: 'sk-test',
-  })
+  const raw = fs.readFileSync(configFile, 'utf-8')
+  assert.ok(!raw.includes(FAKE_KEY), 'config.json holds no plain key')
+  const saved = JSON.parse(raw)
+  assert.equal(typeof saved.anthropicApiKeyEncrypted, 'string')
+  delete saved.anthropicApiKeyEncrypted
+  assert.deepEqual(saved, { serverUrl: SERVER_URL, authMode: 'codex', permissionMode: 'bypassPermissions' })
   await h.invoke('config:setAuthMode', 'claude-code')
   await h.invoke('config:setPermissionMode', 'auto')
+})
+
+test('settings: no OS encryption → a new API key is refused, never stored in plain text', async () => {
+  const configFile = path.join(h.userData, 'config.json')
+  h.fake.encryptionAvailable = false
+  try {
+    const result = await h.invoke('config:setApiKey', 'sk-ant-FAKE-other-key-0000')
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /安全に保存する仕組み/)
+    assert.ok(!fs.readFileSync(configFile, 'utf-8').includes('sk-ant-FAKE-other-key-0000'))
+    assert.deepEqual(await h.invoke('config:getApiKeyStatus'), { set: true, last4: 'WXYZ', encryptionAvailable: false })
+  } finally {
+    h.fake.encryptionAvailable = true
+  }
+  assert.deepEqual(await h.invoke('config:setApiKey', ''), { success: true })
+  assert.deepEqual(await h.invoke('config:getApiKeyStatus'), { set: false, encryptionAvailable: true })
+  assert.equal(JSON.parse(fs.readFileSync(configFile, 'utf-8')).anthropicApiKeyEncrypted, undefined)
 })
 
 test('settings: extra environment names for AI processes — empty by default, secrets and patterns refused', async () => {

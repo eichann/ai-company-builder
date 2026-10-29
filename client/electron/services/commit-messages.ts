@@ -14,6 +14,8 @@ import type { ShellEnvironment } from './shell-env'
 
 export interface CommitMessagesDeps {
   config: ConfigStore
+  /** The API key in clear text (services/api-key-store.ts), read per use. */
+  apiKey: () => string | undefined
   claudeCli: ClaudeCli
   shellEnv: ShellEnvironment
   /** A working directory for the one-shot CLI (<userData>/commit-message). */
@@ -26,7 +28,7 @@ export interface CommitMessagesDeps {
  */
 export type CommitMessagesFor = (gitFor: (repoPath: string) => SimpleGit) => CommitMessageGenerator
 
-export function createCommitMessages({ config, claudeCli, shellEnv, cwd }: CommitMessagesDeps): CommitMessagesFor {
+export function createCommitMessages({ config, apiKey, claudeCli, shellEnv, cwd }: CommitMessagesDeps): CommitMessagesFor {
   return (gitFor) => createCommitMessageGenerator({
     readStaged: async (repoPath) => {
       const git: SimpleGit = gitFor(repoPath)
@@ -35,7 +37,7 @@ export function createCommitMessages({ config, claudeCli, shellEnv, cwd }: Commi
       const nameStatus = await git.raw(['-c', 'core.quotePath=false', 'diff', '--cached', '--name-status'])
       return { nameStatus, stat }
     },
-    settings: () => ({ authMode: config.authMode(), apiKey: config.load().anthropicApiKey }),
+    settings: () => ({ authMode: config.authMode(), apiKey: apiKey() }),
     claudeReady: claudeCli.isAuthenticated,
     getCli: claudeCli.path,
     getEnv: shellEnv.env,

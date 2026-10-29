@@ -21,10 +21,11 @@ import { createPrivateFoldersApi } from './private-folders-api'
 import { AllowedRoots } from './allowed-roots'
 import { typedIpc } from './ipc/registrar'
 import { createConfigStore } from './services/config-store'
+import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createMessageBoxHost, createWindowPort, desktopShell, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createMessageBoxHost, createWindowPort, desktopShell, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
 import { registerChatHistoryIpc } from './features/chat-history/ipc'
@@ -75,6 +76,8 @@ app.on('second-instance', () => {
 // Settings (<userData>/config.json), the environment for spawned processes,
 // and the member's Claude Code CLI (electron/services/).
 const config = createConfigStore(() => path.join(app.getPath('userData'), 'config.json'))
+// The API key, encrypted by the OS keychain; decrypted only here in main where it is used.
+const apiKey = createApiKeyStore(config, secretBox, message => console.log(message))
 const shellEnv = createShellEnvironment()
 // Every AI process gets an allowlisted environment plus the member's own
 // pass-through names (agents/agent-env.ts).
@@ -163,7 +166,7 @@ app.on('before-quit', () => tools.stopAll())
 
 registerEnvIpc(ipc, { paths: allowedRoots })
 
-registerSettingsIpc(ipc, { config, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
+registerSettingsIpc(ipc, { config, apiKey, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
 
 const agentInteractions = new AgentInteractions((owner, event, request) => {
   const target = mainWindow?.webContents
@@ -241,6 +244,7 @@ const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.joi
 const createGit = appGit.create
 const commitMessageGenerator = createCommitMessages({
   config,
+  apiKey: apiKey.read,
   claudeCli,
   shellEnv,
   cwd: () => path.join(app.getPath('userData'), 'commit-message'),
@@ -301,12 +305,13 @@ registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
 // declaration makes no-use-before-define (TDZ) hold by construction.
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
-  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: config.load().anthropicApiKey }))
+  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }))
   serveLocalFiles(allowedRoots)
   // Start embedded Hono chat server
   try {
     const serverConfig = createChatServerConfig({
       config,
+      apiKey: apiKey.read,
       claudeCli,
       shellEnv,
       history: localHistoryStore,

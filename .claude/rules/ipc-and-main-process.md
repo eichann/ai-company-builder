@@ -38,13 +38,14 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`).
 - `electron/services/` — shared state as explicit objects instead of module variables:
-  `config-store.ts` (config.json, cached), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
+  `config-store.ts` (config.json, cached, written atomically), `api-key-store.ts` (the API key,
+  encrypted through the shell's `SecretBox`; main decrypts it only where it is used), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
   `claude-cli.ts` (the member's `claude`, status cached 30 s), `session.ts` (server session
   cookies, memory only; every server client and git's token read them here), `app-git.ts` (every
   git the app runs: bundled-or-system binary, `GIT_ASKPASS` token, the guarded
   `sync/git-factory.ts` configuration), `commit-messages.ts` (sync's AI commit message).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
-  `WindowPort`, sync's message boxes) and the `local-file://` protocol registration.
+  `WindowPort`, `SecretBox` (safeStorage), sync's message boxes) and the `local-file://` protocol registration.
 - `main.ts` (~330 lines) — the composition root: creates services and stores in dependency
   order, calls each `register…Ipc`, owns the window, the app lifecycle and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.

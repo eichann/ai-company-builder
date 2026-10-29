@@ -76,6 +76,8 @@ export const fake = {
   openedPaths: [] as string[],
   openedExternal: [] as string[],
   paths: {} as Record<string, string>,
+  /** safeStorage.isEncryptionAvailable(); tests switch it off to see the refusal. */
+  encryptionAvailable: true,
   /** Resolves app.whenReady(); see the harness's `startApp`. */
   ready: null as null | (() => void),
 }
@@ -144,6 +146,19 @@ export const net = {
 
 export const nativeImage = {
   createFromDataURL: (url: string) => ({ dataURL: url }),
+}
+
+/** A reversible stand-in for the OS keychain: never the plain text on disk. */
+const FAKE_SEALED = 'fake-sealed:'
+export const safeStorage = {
+  isEncryptionAvailable: () => fake.encryptionAvailable,
+  getSelectedStorageBackend: () => 'gnome_libsecret',
+  encryptString: (text: string) => Buffer.from(FAKE_SEALED + Buffer.from(text).reverse().toString('hex')),
+  decryptString: (data: Buffer) => {
+    const sealed = data.toString()
+    if (!sealed.startsWith(FAKE_SEALED)) throw new Error('fake safeStorage: cannot decrypt')
+    return Buffer.from(sealed.slice(FAKE_SEALED.length), 'hex').reverse().toString()
+  },
 }
 
 export const systemPreferences = {

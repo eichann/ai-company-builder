@@ -3,11 +3,12 @@
 // voice-input.ts, the only code that imports Electron.
 
 import { pathToFileURL } from 'url'
-import { dialog, nativeImage, net, protocol, shell, type BrowserWindow, type WebContents } from 'electron'
+import { dialog, nativeImage, net, protocol, safeStorage, shell, type BrowserWindow, type WebContents } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
 import type { DesktopShell, WindowPort } from './features/ports'
 import type { MessageBoxHost } from './sync/message-box-dialog'
+import type { SecretBox } from './services/api-key-store'
 
 export const desktopShell: DesktopShell = {
   openPath: (target) => shell.openPath(target),
@@ -27,6 +28,29 @@ export const desktopShell: DesktopShell = {
       ),
     })
   },
+}
+
+/**
+ * The OS keychain-backed encryption for secrets in config.json (the API key).
+ * On Linux, safeStorage's 'basic_text' backend (no keyring) only obfuscates
+ * with a fixed password, so it counts as unavailable. Before app ready it is
+ * unavailable too (the key store retries later).
+ */
+export const secretBox: SecretBox = {
+  available() {
+    try {
+      if (!safeStorage.isEncryptionAvailable()) return false
+      if (process.platform === 'linux') {
+        const backend = safeStorage.getSelectedStorageBackend()
+        if (backend === 'basic_text' || backend === 'unknown') return false
+      }
+      return true
+    } catch {
+      return false
+    }
+  },
+  encrypt: (text) => safeStorage.encryptString(text),
+  decrypt: (data) => safeStorage.decryptString(data),
 }
 
 /** Events to the app's window; dropped while it does not exist or is destroyed. */

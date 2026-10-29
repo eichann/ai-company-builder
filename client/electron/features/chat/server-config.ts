@@ -29,6 +29,8 @@ import { buildSystemPrompt } from './system-prompt'
 
 export interface ChatServerConfigDeps {
   config: ConfigStore
+  /** The API key in clear text (services/api-key-store.ts), read per use. */
+  apiKey: () => string | undefined
   claudeCli: ClaudeCli
   shellEnv: ShellEnvironment
   history: ChatHistoryStore
@@ -52,7 +54,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
   const webResearchBudget = createWebResearchBudget()
   return {
     getAuthMode: () => deps.config.authMode(),
-    getApiKey: () => deps.config.load().anthropicApiKey,
+    getApiKey: deps.apiKey,
     // Unset → 'auto'. A mode the user saved explicitly is kept as-is.
     getPermissionMode: () => normalizePermissionMode(deps.config.load().permissionMode),
     isClaudeCodeAuthenticated: deps.claudeCli.isAuthenticated,
