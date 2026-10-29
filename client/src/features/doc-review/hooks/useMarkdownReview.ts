@@ -2,7 +2,7 @@
 // comment, reply, resolve, complete, cancel); kept whole, ~310 lines.
 import { useState, useCallback, useEffect } from 'react'
 import {
-  emailToHash,
+  replyFileKey,
   mergeRepliesIntoReviews,
   type CommentReply,
   type CommentSeverity,
@@ -13,23 +13,23 @@ import {
 } from '../model'
 import {
   deleteReviewFile,
-  deleteReviewRequest,
+  deleteReviewRequestFile,
   readAllReplies,
   readAllReviews,
   readDocument,
   readMyReplies,
-  readReviewRequest,
+  readReviewRequestFile,
   writeMyReplies,
   writeReview,
-  writeReviewRequest,
+  writeReviewRequestFile,
 } from '../api'
 
-export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string) {
+export function useMarkdownReview(filePath: string | null, reviewerName: string, reviewerEmail: string, memberId?: string | null) {
   const [reviews, setReviews] = useState<Review[]>([])
   const [activeReview, setActiveReview] = useState<Review | null>(null)
   const [loading, setLoading] = useState(false)
   const [hasReviewRequest, setHasReviewRequest] = useState(false)
-  const myEmailHash = emailToHash(reviewerEmail)
+  const myReplyKey = replyFileKey(reviewerEmail, memberId)
 
   // Load all reviews from sidecar files
   const loadReviews = useCallback(async (docPath: string) => {
@@ -39,7 +39,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
         readAllReviews(docPath),
         readAllReplies(docPath),
         readDocument(docPath),
-        readReviewRequest(docPath),
+        readReviewRequestFile(docPath),
       ])
       setHasReviewRequest(reviewRequest !== null)
 
@@ -126,13 +126,13 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
 
   const requestReview = useCallback(async () => {
     if (!filePath) return
-    await writeReviewRequest(filePath, reviewerName)
+    await writeReviewRequestFile(filePath, reviewerName)
     setHasReviewRequest(true)
   }, [filePath, reviewerName])
 
   const cancelRequestReview = useCallback(async () => {
     if (!filePath) return
-    await deleteReviewRequest(filePath)
+    await deleteReviewRequestFile(filePath)
     setHasReviewRequest(false)
   }, [filePath])
 
@@ -141,7 +141,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
 
     // Auto-remove review request when someone starts reviewing
     if (hasReviewRequest) {
-      await deleteReviewRequest(filePath)
+      await deleteReviewRequestFile(filePath)
       setHasReviewRequest(false)
     }
 
@@ -157,7 +157,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     await writeReview(filePath, newReview)
     setReviews(prev => [...prev, newReview])
     setActiveReview(newReview)
-  }, [filePath, reviewerName, reviewerEmail])
+  }, [filePath, reviewerName, reviewerEmail, hasReviewRequest])
 
   const completeReview = useCallback(async () => {
     if (!activeReview || !filePath) return
@@ -218,7 +218,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     const newResolved = !comment.resolved
 
     // Write resolution to own reply file (conflict-free)
-    const existing = await readMyReplies(filePath, myEmailHash)
+    const existing = await readMyReplies(filePath, myReplyKey)
     const replyFileData: ReplyFileData = existing || {
       version: 1,
       authorName: reviewerName,
@@ -237,7 +237,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     } else {
       replyFileData.resolutions.push(entry)
     }
-    await writeMyReplies(filePath, myEmailHash, replyFileData)
+    await writeMyReplies(filePath, myReplyKey, replyFileData)
 
     // Update local state immediately
     const updatedReview = {
@@ -248,7 +248,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     }
     setReviews(prev => prev.map(r => r.id === updatedReview.id ? updatedReview : r))
     setActiveReview(updatedReview)
-  }, [activeReview, filePath, reviewerName, reviewerEmail, myEmailHash])
+  }, [activeReview, filePath, reviewerName, reviewerEmail, myReplyKey])
 
   const addReply = useCallback(async (commentId: string, body: string) => {
     if (!activeReview || !filePath) return
@@ -262,7 +262,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     }
 
     // Write to own reply file (conflict-free)
-    const existing = await readMyReplies(filePath, myEmailHash)
+    const existing = await readMyReplies(filePath, myReplyKey)
     const replyFileData: ReplyFileData = existing || {
       version: 1,
       authorName: reviewerName,
@@ -270,7 +270,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
       replies: [],
     }
     replyFileData.replies.push(reply)
-    await writeMyReplies(filePath, myEmailHash, replyFileData)
+    await writeMyReplies(filePath, myReplyKey, replyFileData)
 
     // Update local state immediately
     const updatedReview = {
@@ -281,7 +281,7 @@ export function useMarkdownReview(filePath: string | null, reviewerName: string,
     }
     setReviews(prev => prev.map(r => r.id === updatedReview.id ? updatedReview : r))
     setActiveReview(updatedReview)
-  }, [activeReview, filePath, reviewerName, reviewerEmail, myEmailHash])
+  }, [activeReview, filePath, reviewerName, reviewerEmail, myReplyKey])
 
   const completedReviews = reviews.filter(r => r.status === 'completed')
 

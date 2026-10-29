@@ -11,6 +11,7 @@ import {
   getReviewFilePath,
   getReviewRequestFilePath,
   hasUnseenReviews,
+  replyFileKey,
   isReviewSidecarFile,
   markReviewSeen,
   mergeRepliesIntoReviews,
@@ -36,6 +37,18 @@ test('the reply file hash of an email never changes (existing reply files are fo
   // A signed-out member (no email) shares one reply file with every other one.
   assert.equal(emailToHash(''), '0')
   assert.match(emailToHash('someone.with.a.long.address@example.com'), /^[0-9a-z]+$/)
+})
+
+test('replyFileKey: the email keeps its existing reply file; without one the member id keeps members apart', () => {
+  assert.equal(replyFileKey('demo@example.com', 'u1'), 'qtm6lc', 'same file name as before for members with an email')
+  assert.equal(replyFileKey('demo@example.com'), 'qtm6lc')
+  const a = replyFileKey('', 'member-a')
+  const b = replyFileKey('  ', 'member-b')
+  assert.notEqual(a, b)
+  assert.notEqual(a, '0')
+  assert.equal(replyFileKey('', 'member-a'), a, 'stable')
+  assert.match(a, /^[0-9a-z]+$/)
+  assert.equal(replyFileKey('', null), '0', 'nobody signed in: the old shared name')
 })
 
 test('isReviewSidecarFile: review, reply, request and the legacy .reviews.json; not the document', () => {
@@ -79,7 +92,8 @@ test('unseen reviews: new files are unseen until marked; marking stores the sort
     const files = ['提案書.md.review.b.json', '提案書.md.review.a.json']
     assert.equal(hasUnseenReviews(DOC, files), true)
     assert.equal(hasUnseenReviews(DOC, []), false)
-    markReviewSeen(DOC, [...files])
+    markReviewSeen(DOC, files)
+    assert.deepEqual(files, ['提案書.md.review.b.json', '提案書.md.review.a.json'], "the caller's array is not reordered")
     assert.equal(store.get(`review-seen:${DOC}`), JSON.stringify(['提案書.md.review.a.json', '提案書.md.review.b.json']))
     assert.equal(hasUnseenReviews(DOC, files), false)
     assert.equal(hasUnseenReviews(DOC, ['提案書.md.review.a.json']), false, 'a removed review is not "unseen"')
@@ -140,12 +154,13 @@ test('findTextInMarkdown: exact match gives the source offsets', () => {
   assert.deepEqual(findTextInMarkdown('同じ 同じ', '同じ'), { start: 0, end: 2 }, 'first occurrence')
 })
 
-test('findTextInMarkdown: a selection across a paragraph break (rendered as one space) is found at the right start', () => {
+test('findTextInMarkdown: a selection across collapsed whitespace maps both ends back to the source', () => {
   const md = '前文\n\n  本文の  一節です'
-  const found = findTextInMarkdown(md, '本文の 一節です')
-  assert.equal(found?.start, 6)
-  // Known gap: `end` is start + the selection's length, not mapped back through
-  // the collapsed whitespace, so it falls short here (it should be md.length).
-  // The offsets are stored in the sidecar but nothing reads them today.
-  assert.equal(found?.end, 14)
+  assert.deepEqual(findTextInMarkdown(md, '本文の 一節です'), { start: 6, end: md.length })
+  const two = 'a\n\nb c'
+  const found = findTextInMarkdown(two, 'a b')
+  assert.deepEqual(found, { start: 0, end: 4 })
+  assert.equal(two.slice(found!.start, found!.end), 'a\n\nb')
+  // Surrounding whitespace in the selection is not part of the match.
+  assert.deepEqual(findTextInMarkdown('x  y\tz', ' y z '), { start: 3, end: 6 })
 })

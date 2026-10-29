@@ -101,11 +101,14 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - `<doc>.review.<uuid>.json` — `{ version: 1, review: { id, reviewerName, reviewerEmail, status
   (in_progress | completed), createdAt, completedAt, comments[], snapshot? } }`, written only by
   the reviewer; `snapshot` (the document at completion) feeds 「変更を確認」.
-- `<doc>.reply.<emailToHash(email)>.json` — `{ version, authorName, authorEmail, replies[],
-  resolutions? }`: everyone else's replies and resolved marks (`{ reviewId, commentId,
-  resolved }`, last one wins over the review file). `emailToHash` must keep its output.
+- `<doc>.reply.<replyFileKey(email, memberId)>.json` — `{ version, authorName, authorEmail,
+  replies[], resolutions? }`: everyone else's replies and resolved marks (`{ reviewId, commentId,
+  resolved }`, last one wins over the review file). With an email the key is `emailToHash(email)`
+  (must keep its output: existing files are found by it); without one, the member id. Every
+  reply file in the folder is read, whoever wrote it.
 - `<doc>.review-request.json` — `{ requestedBy, requestedAt }` (button hidden, kept for a Slack
-  notification). Not the chat's 「確認をお願いする」 (`request_review`).
+  notification; `readReviewRequestFile` & co. in `api.ts`). Not the chat's 「確認をお願いする」
+  (`request_review`, `client/shared/review-request.ts`).
 - The file tree hides sidecars (`isReviewSidecarFile`) and badges documents with unseen reviews
   (`localStorage review-seen:<doc path>`).
 - Rules and shapes: `model.ts` (pure); every file read/write/delete: `api.ts` (the hook and

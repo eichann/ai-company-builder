@@ -65,6 +65,18 @@ export function getReviewFilePath(filePath: string, reviewId: string): string {
   return `${filePath}.review.${reviewId}.json`
 }
 
+/**
+ * The `<hash>` of the member's own reply file. A member with an email keeps
+ * `emailToHash(email)`, the name their existing reply file already has. Without
+ * one, the member id keeps members apart (all of them used to share `.reply.0.json`;
+ * every reply file is still read, so those entries keep showing).
+ */
+export function replyFileKey(email: string, memberId?: string | null): string {
+  if (email.trim()) return emailToHash(email)
+  if (memberId) return emailToHash(`member:${memberId}`)
+  return emailToHash('')
+}
+
 export function emailToHash(email: string): string {
   // Simple deterministic hash for file naming
   let hash = 0
@@ -173,7 +185,7 @@ export function detectReviewStatus(fileNames: string[]): Map<string, { hasReview
 /** Mark review files as seen for a given document path */
 export function markReviewSeen(filePath: string, reviewFileNames: string[]): void {
   const key = `review-seen:${filePath}`
-  localStorage.setItem(key, JSON.stringify(reviewFileNames.sort()))
+  localStorage.setItem(key, JSON.stringify([...reviewFileNames].sort()))
 }
 
 /** Check if there are unseen review files for a given document path */
@@ -216,7 +228,18 @@ export function findTextInMarkdown(markdown: string, selectedText: string): { st
         normalizedPos++
       }
     }
-    return { start: originalPos, end: originalPos + selectedText.length }
+    const start = originalPos
+    // Walk on through the source for the selection's (collapsed) length, so the
+    // end also lands where the source text ends, whitespace runs included.
+    while (normalizedPos < normalizedIndex + normalizedSelected.length && originalPos < markdown.length) {
+      if (/\s/.test(markdown[originalPos])) {
+        while (originalPos < markdown.length && /\s/.test(markdown[originalPos])) originalPos++
+      } else {
+        originalPos++
+      }
+      normalizedPos++
+    }
+    return { start, end: originalPos }
   }
 
   return null

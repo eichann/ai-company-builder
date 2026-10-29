@@ -181,7 +181,7 @@ export async function writeMyReplies(filePath: string, emailHash: string, data: 
 // SlackメンバーIDと紐づけてメンション送信する想定。
 // ============================================================================
 
-export async function readReviewRequest(filePath: string): Promise<{ requestedBy: string; requestedAt: string } | null> {
+export async function readReviewRequestFile(filePath: string): Promise<{ requestedBy: string; requestedAt: string } | null> {
   try {
     const content = await window.electronAPI.readFile(getReviewRequestFilePath(filePath))
     if (!content) return null
@@ -191,14 +191,14 @@ export async function readReviewRequest(filePath: string): Promise<{ requestedBy
   }
 }
 
-export async function writeReviewRequest(filePath: string, requestedBy: string): Promise<void> {
+export async function writeReviewRequestFile(filePath: string, requestedBy: string): Promise<void> {
   await window.electronAPI.writeFile(
     getReviewRequestFilePath(filePath),
     JSON.stringify({ requestedBy, requestedAt: new Date().toISOString() }, null, 2),
   )
 }
 
-export async function deleteReviewRequest(filePath: string): Promise<void> {
+export async function deleteReviewRequestFile(filePath: string): Promise<void> {
   try {
     await window.electronAPI.deleteItem(getReviewRequestFilePath(filePath))
   } catch {
