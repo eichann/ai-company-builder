@@ -8,14 +8,15 @@
  *
  *   DATA_DIR      default <cwd>/data
  *   REPOS_DIR     the bare repositories; default <DATA_DIR>/repos
- *   WORKDIR_DIR   the server's working clones (department and company-seed
- *                 mutations); <DATA_DIR>/workdirs
+ *
+ * <DATA_DIR>/workdirs held the server's working clones until department and
+ * seeding commits moved into the bare repositories (lib/bare-commit.ts).
+ * Nothing uses it any more; a leftover one can be deleted.
  */
 import { join } from 'path'
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
-export const WORKDIR_DIR = join(DATA_DIR, 'workdirs')
 
 /** The application database (better-sqlite3, src/db). */
 export const APP_DB_PATH = join(DATA_DIR, 'app.sqlite')

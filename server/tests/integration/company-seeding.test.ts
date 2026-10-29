@@ -79,7 +79,7 @@ import { execFileSync } from 'child_process'
 import { Hono } from 'hono'
 import { initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
-import { setSeedGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
+import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { departmentsRoute } from '../../src/routes/departments'
 
 vi.setConfig({ testTimeout: 300_000, hookTimeout: 300_000 })
@@ -137,7 +137,7 @@ beforeAll(() => {
   initDatabase()
   scratch = mkdtempSync(join(tmpdir(), 'acb-seed-'))
   // A developer's global init.templateDir (e.g. git-secrets) would install
-  // client-side hooks into the working clone and slow every commit down
+  // client-side hooks into new repositories and slow every git call down
   savedTemplateDir = process.env.GIT_TEMPLATE_DIR
   process.env.GIT_TEMPLATE_DIR = mkdtempSync(join(scratch, 'templates-'))
 })
@@ -204,7 +204,7 @@ describe('company creation seeds the department folders asynchronously', () => {
   it('kills a hung push at the timeout and still creates the company, as when seeding failed before', async () => {
     const pidFile = join(scratch, 'hook.pid')
     usePreReceiveHook(`echo $$ > '${pidFile}'\nsleep 600`)
-    const restore = setSeedGitTimeoutsForTests({ local: 60_000, push: 15_000 })
+    const restore = setRepoGitTimeoutsForTests({ local: 60_000, push: 15_000 })
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
     try {
       const started = Date.now()

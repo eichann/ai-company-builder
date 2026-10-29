@@ -41,8 +41,7 @@ Data:
   ./data/
   ├── app.sqlite       ← Application database (companies, members, departments)
   ├── auth.sqlite      ← Authentication database (users, sessions)
-  ├── repos/           ← Git bare repositories (one per company)
-  └── workdirs/        ← Git working directories
+  └── repos/           ← Git bare repositories (one per company)
 ```
 
 **How it works**: The Electron desktop app connects to your server entirely over **HTTPS**:
@@ -234,7 +233,7 @@ NODE_ENV=production
 #### 2.3 Create the Data Directory
 
 ```bash
-mkdir -p data/repos data/workdirs
+mkdir -p data/repos
 ```
 
 #### 2.4 Build and Start
@@ -423,7 +422,9 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 | Authentication database | `data/auth.sqlite` | **Critical** |
 | Git repositories | `data/repos/` | **Critical** |
 | Environment file | `.env` | **Critical** |
-| Working directories | `data/workdirs/` | Low — can be regenerated |
+
+Older versions also kept working copies in `data/workdirs/`. Current versions no longer use
+them; the directory needs no backup and can be deleted.
 
 ### Backup Script
 

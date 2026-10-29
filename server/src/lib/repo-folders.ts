@@ -1,6 +1,6 @@
 /**
  * Folders on the shared branch of a company's bare repository, read
- * straight from the bare repository (no working clone, no pull): the
+ * straight from the bare repository (no checkout, no pull): the
  * department list and stats (routes/departments.ts), and folder paths the
  * permission editor and private folders resolve (routes/permission-rules.ts,
  * routes/private-folders.ts).
@@ -16,8 +16,9 @@ import { gitAsync } from './git-exec'
 
 // The shared branch of the bare repo: main, or master for a repo created
 // before the branch name was pinned (the old working-clone pull fell back the
-// same way). null while the repo has no commits.
-async function resolveSharedBranch(bareRepo: string): Promise<string | null> {
+// same way). null while the repo has no commits. Also the branch the server's
+// own commits go to (lib/bare-commit.ts).
+export async function resolveSharedBranch(bareRepo: string): Promise<string | null> {
   for (const branch of ['main', 'master']) {
     try {
       await gitAsync(['-C', bareRepo, 'rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`])
@@ -61,7 +62,7 @@ export async function listFoldersFromRepo(companyId: string): Promise<string[]> 
 
 // Helper: Count files and folders in a department folder of the shared
 // branch, skipping hidden entries and everything below them — the count
-// countFilesInDir makes on a checkout. null when the folder does not exist
+// the old working-clone code made on a checkout. null when the folder does not exist
 // (or is not a directory).
 export async function countFilesInRepoFolder(companyId: string, folder: string): Promise<{ files: number; folders: number } | null> {
   const bareRepo = companyRepoPath(companyId)
@@ -75,9 +76,19 @@ export async function countFilesInRepoFolder(companyId: string, folder: string):
     return null
   }
 
+  return countFilesInTree(bareRepo, `${ref}:${folder}`)
+}
+
+/**
+ * Files and folders in a tree (a department folder), skipping hidden entries
+ * and everything below them: what the old working-clone code counted on disk
+ * (`countFilesInDir`, a gitlink checking out as an empty directory). Also the
+ * counts a department deletion reports.
+ */
+export async function countFilesInTree(bareRepo: string, treeish: string): Promise<{ files: number; folders: number }> {
   let files = 0
   let folders = 0
-  for (const entry of parseLsTree(await gitAsync(['-C', bareRepo, 'ls-tree', '-r', '-t', '-z', `${ref}:${folder}`]))) {
+  for (const entry of parseLsTree(await gitAsync(['-C', bareRepo, 'ls-tree', '-r', '-t', '-z', treeish]))) {
     if (entry.path.split('/').some(part => part.startsWith('.'))) continue
     if (entry.type === 'tree' || entry.type === 'commit') folders++
     else files++

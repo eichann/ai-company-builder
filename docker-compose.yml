@@ -31,7 +31,7 @@ services:
     # scratch clone can be large).
     read_only: true
     volumes:
-      # SQLite databases, company repositories, working clones, archives
+      # SQLite databases, company repositories, archives
       - ./data:/app/data
       - api-tmp:/tmp
     restart: unless-stopped

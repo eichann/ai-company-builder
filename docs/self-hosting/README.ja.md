@@ -41,8 +41,7 @@
   ./data/
   ├── app.sqlite       ← アプリDB（会社・メンバー・部署）
   ├── auth.sqlite      ← 認証DB（ユーザー・セッション）
-  ├── repos/           ← Git ベアリポジトリ（会社ごとに1つ）
-  └── workdirs/        ← Git 作業ディレクトリ
+  └── repos/           ← Git ベアリポジトリ（会社ごとに1つ）
 ```
 
 **仕組み**: Electronデスクトップアプリは、全て **HTTPS** 経由でサーバーに接続します：
@@ -224,7 +223,7 @@ NODE_ENV=production
 #### 2.3 データディレクトリの作成
 
 ```bash
-mkdir -p data/repos data/workdirs
+mkdir -p data/repos
 ```
 
 #### 2.4 ビルドと起動
@@ -402,7 +401,9 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 | 認証DB | `data/auth.sqlite` | **最重要** |
 | Git リポジトリ | `data/repos/` | **最重要** |
 | 環境変数ファイル | `.env` | **最重要** |
-| 作業ディレクトリ | `data/workdirs/` | 低（再生成可能） |
+
+以前のバージョンは `data/workdirs/` に作業用のコピーを置いていました。現在のバージョンは使わないため、
+バックアップは不要で、削除してかまいません。
 
 ### バックアップスクリプト
 
