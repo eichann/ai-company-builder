@@ -40,7 +40,7 @@ through `/bin/sh`, which on Ubuntu is dash and fails on multi-digit fds.
 
 The preview pages `client/tests/*-ui.html` (+ `.tsx`) render the real React components with the
 preload API faked (`tests/ui/fixtures/electron-api.ts`: `installElectronAPI`, typed against
-`Window['electronAPI']` from `electron/preload.ts`) and, for the chat, a faked chat server.
+`Window['electronAPI']` from `src/shared/ipc/electron-api.ts`) and, for the chat, a faked chat server.
 Playwright drives them in headless Chromium (`client/tests/ui/*.spec.ts`, CI "Renderer UI tests
 (macOS)").
 
