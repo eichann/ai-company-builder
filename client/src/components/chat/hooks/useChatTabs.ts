@@ -88,11 +88,11 @@ export function useChatTabs(companyId: string | undefined, newChatTitle: string)
 
   // Stable props for the memoised chats: a tab whose own props did not change
   // (another tab's title, the active tab switching elsewhere) does not re-render.
-  const tabCallbacksRef = useRef(new Map<string, { title: (title: string) => void; sessionId: (sessionId: string | null) => void }>())
+  const tabCallbacksRef = useRef(new Map<string, { title: (title: string) => void; sessionId: (sessionId: string | null) => void; close: () => void }>())
   const tabCallbacks = (tabId: string) => {
     let callbacks = tabCallbacksRef.current.get(tabId)
     if (!callbacks) {
-      callbacks = { title: title => updateTabTitle(tabId, title), sessionId: sessionId => updateTabSessionId(tabId, sessionId) }
+      callbacks = { title: title => updateTabTitle(tabId, title), sessionId: sessionId => updateTabSessionId(tabId, sessionId), close: () => closeTab(tabId) }
       tabCallbacksRef.current.set(tabId, callbacks)
     }
     return callbacks

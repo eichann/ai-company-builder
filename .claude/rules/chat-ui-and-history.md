@@ -65,6 +65,20 @@ one place an added agent brings its own controls; everything else asks the regis
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
   a pinned conversation leaves ピン留め only for あなたの番. Tests:
   `client/tests/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- Empty conversations are deleted in two cases, by one rule (`isEmptyConversation`: never sent,
+  no draft, not renamed, not pinned): closing one (`closeConversation` in `ChatSidebar.tsx`), and
+  leaving one for another conversation (owner, 2026-10-30: a blank new one left behind is in the
+  way). The second is `src/features/chat/hooks/useDiscardBlankOnLeave.ts`, called in
+  `ChatPanelChat` after `useChatHistory` (its synchronous save on leaving lands first): when a
+  mounted tab stops being the active one — which only a switch to another conversation does
+  (a row, 「AIに相談する」, opening a conversation); quitting, other panels and company switches
+  unmount it or keep it active — and the tab's live state is blank (`features/chat/model.ts`
+  `discardWhenLeft`: history restored, no message besides the greeting, no draft text, no
+  attached images or files, no running turn, waiting send, approval, question or hand-off
+  request) and its stored summary is empty, its tab closes and its stored copy is deleted. It
+  re-checks after reading the summaries (the member may have come back), never deletes the last
+  tab (`closeTab`), and fails silently like closing. Tests: `src/features/chat/model.test.ts`,
+  `tests/ui/chat-panel.spec.ts`.
 - Pure helpers with tests (`client/tests/chat-panel-helpers.test.ts`): `chatSessionMessages.ts`
   (UIMessage ↔ history, conversion cache, title transcript), `chatRequestBody.ts` (the
   `/api/chat` body: same fields and order, pending attachments consumed once),

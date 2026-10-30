@@ -34,6 +34,8 @@ interface ChatInputProps {
   suggestion?: string | null
   /** The input dropped the suggestion (typed past it, accepted, Esc). */
   onSuggestionCleared?: () => void
+  /** How many images and files are attached and not sent yet. */
+  onAttachmentsChange?: (count: number) => void
 }
 
 const chatInputCodeMirrorTheme = EditorView.theme({
@@ -667,6 +669,7 @@ export const ChatInput = memo(function ChatInput({
   apiRef,
   suggestion,
   onSuggestionCleared,
+  onAttachmentsChange,
 }: ChatInputProps) {
   const [voiceBusy, setVoiceBusy] = useState(false)
   const isLegacyTextareaMode = isPerfCutEnabled('chatInputBare')
@@ -675,6 +678,8 @@ export const ChatInput = memo(function ChatInput({
   const [isDragOver, setIsDragOver] = useState(false)
   const [imageWarning, setImageWarning] = useState('')
   const dragCounterRef = useRef(0)
+  const attachmentCount = attachedImages.length + attachedFilePaths.length
+  useEffect(() => { onAttachmentsChange?.(attachmentCount) }, [attachmentCount, onAttachmentsChange])
 
   const handleDragEnter = useCallback((e: React.DragEvent) => {
     e.preventDefault()

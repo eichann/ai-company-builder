@@ -141,6 +141,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 sidebarOpen={sidebarOpen}
                 initialSessionId={tab.sessionId}
                 onSessionIdChange={tabCallbacks(tab.id).sessionId}
+                onLeftBlank={tabCallbacks(tab.id).close}
               />
             </div>
           </div>
