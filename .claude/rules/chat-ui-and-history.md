@@ -15,6 +15,11 @@ paths:
   - "client/tests/chat-server-client.test.ts"
   - "client/tests/chat-panel-helpers.test.ts"
   - "client/tests/ui/chat-*.spec.ts"
+  - "client/src/app/ChatWindowApp.tsx"
+  - "client/shared/chat-windows.ts"
+  - "client/electron/features/chat-windows/**"
+  - "client/tests/chat-window*"
+  - "client/tests/ipc-chat-windows.test.ts"
 ---
 
 # Chat panel, chat history store and chat rendering
@@ -103,6 +108,46 @@ one place an added agent brings its own controls; everything else asks the regis
   `ChatConversation.tsx`): a synchronous save of the conversation cut before the edited message +
   the new one, then send. The edited message's file references are sent again; images are not
   (history keeps thumbnails only).
+
+## 「別ウィンドウで開く」: a consultation in a window of its own (owner, 2026-10-30)
+
+One consultation per window still holds: a member can show 2–3 consultations side by side (two
+monitors) by opening each in its own window. Pure parts: `client/shared/chat-windows.ts` (the
+request / status shapes and their checks, `closeStopsTheAI`), the window registry
+`electron/features/chat-windows/registry.ts`, renderer `src/features/chat/chatWindows.ts`.
+
+- Entry points: 「別ウィンドウで開く」 on each row of 「AIへの相談」 (next to pin / rename /
+  delete), the same button in the chat header, and the command `chat.openInWindow { sessionId }`
+  (`commands.md`). All run `useMoveToWindow` (`features/chat/hooks/`), handled in `ChatPanel.tsx`.
+- **Never in two places.** Main keeps which window shows which conversation
+  (`createChatWindowRegistry`: `claim` refuses a second window); opening one already shown
+  focuses that window. In the main window: a consultation shown here leaves first (`detachSession`
+  in `useChatTabs`, inside `flushSync`, so its unmount saves synchronously before the window reads
+  it; the next tab shows, or a new one when it was the last); its row stays listed as open with
+  「別ウィンドウで表示中」 (`windowTabs`: stand-in tabs `window:<id>`, never mounted), and clicking
+  it, opening it from history or a consultation reference focuses that window instead. Tests:
+  `client/tests/chat-windows.test.ts` (registry, mutation-checked), `tests/ui/chat-panel.spec.ts`
+  「a consultation in its own window」.
+- **Statuses cross windows.** The window publishes its tab's status as usual and reports it to
+  main (`chatWindow:reportStatus`, `useReportWindowStatus`); main broadcasts `chatWindow:changed`
+  to the main window, whose list groups the row by that status (あなたの番, AIが作業中, 新着 count as
+  for a tab; `statusOfTab`). Test: `src/features/chat/chatWindows.test.ts`.
+- **Moving needs a quiet consultation.** Turns are driven by the page (its `/api/chat` request;
+  history is saved by the page), so a consultation whose AI works or waits for an approval or an
+  answer cannot move (buttons disabled, `canMoveToWindow`), and **closing a window mid-turn asks**
+  「AIが作業中です。閉じると止まります」 (閉じる / キャンセル, `electron-adapter.ts`): closing stops
+  the AI there; what was said so far is saved on unload. A 「確認をお願いします」 wait does not ask.
+  Keeping the turn alive after its page goes would need main-side turns (not built).
+- A closed window's consultation returns to the main window as an open tab, not shown in front
+  (`onReturned` in `useChatWindows`). Company switch, sign-out (main's `onSignedOut` too) and the
+  main window closing close every window without asking; quitting closes all.
+- The window (`src/app/ChatWindowApp.tsx`, `?window=chat` in `src/main.tsx`) shows only that
+  consultation's chat (`ChatPanelChat` with `standalone`: no new-chat or list buttons): header,
+  messages, composer, voice input, cards, review requests (their file links hide: no `file.open`
+  handler there). Company, department and slash commands come from main (`chatWindow:getContext`,
+  what the main window had when it opened); the title follows the consultation; a deleted
+  conversation closes the window. Preview `client/tests/chat-window-ui.html`, spec
+  `tests/ui/chat-window.spec.ts`.
 
 ## Talking to the chat server
 

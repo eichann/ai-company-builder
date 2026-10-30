@@ -171,3 +171,42 @@ export function onChatServerInfo(callback: Args<'onChatServerInfo'>[0], reads: C
 export function openInBrowser(url: string, outbound: ChatOutbound = window.electronAPI) {
   return outbound.openExternal(url)
 }
+
+/**
+ * The main window's consultation windows (「別ウィンドウで開く」, this computer):
+ * open one or bring it to the front, list them with their status, close them
+ * all (company switch, sign-out). Nothing leaves the computer.
+ */
+export type ChatWindowViews = ElectronPort<'openChatWindow' | 'focusChatWindow' | 'listChatWindows' | 'closeChatWindows' | 'onChatWindowsChanged'>
+/** A consultation's own window: which consultation it shows, and its status for the main window's list. */
+export type ChatWindowSelf = ElectronPort<'getChatWindowContext' | 'reportChatWindowStatus'>
+
+export function openChatWindow(sessionId: string, request: Args<'openChatWindow'>[1], views: ChatWindowViews = window.electronAPI) {
+  return views.openChatWindow(sessionId, request)
+}
+
+export function focusChatWindow(sessionId: string, views: ChatWindowViews = window.electronAPI) {
+  return views.focusChatWindow(sessionId)
+}
+
+export function listChatWindows(views: ChatWindowViews = window.electronAPI) {
+  return views.listChatWindows()
+}
+
+export function closeChatWindows(views: ChatWindowViews = window.electronAPI) {
+  return views.closeChatWindows()
+}
+
+/** Another window's status changed, or a window closed; returns the unsubscribe. */
+export function onChatWindowsChanged(callback: Args<'onChatWindowsChanged'>[0], views: ChatWindowViews = window.electronAPI) {
+  return views.onChatWindowsChanged(callback)
+}
+
+/** In a consultation's own window: what it shows (null in any other window). */
+export function getChatWindowContext(self: ChatWindowSelf = window.electronAPI) {
+  return self.getChatWindowContext()
+}
+
+export function reportChatWindowStatus(status: Args<'reportChatWindowStatus'>[0], self: ChatWindowSelf = window.electronAPI) {
+  return self.reportChatWindowStatus(status)
+}

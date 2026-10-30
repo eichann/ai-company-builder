@@ -22,6 +22,7 @@
 
 import type { HandoffCompletion, HandoffView } from './handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from './agent-interaction'
+import type { ChatWindowContext, ChatWindowInfo, ChatWindowOpenRequest, ChatWindowOpenResult, ChatWindowStatus, ChatWindowsChange } from './chat-windows'
 import type { AuthMode, CodexStatus } from './agent'
 import type { VoiceCapabilities, VoiceDeviceList, VoiceEvent, VoiceInputAPI } from './voice-input'
 import type { VoicePromptSettings } from './voice-prompt'
@@ -492,6 +493,14 @@ export interface IpcInvokeChannels {
   'chatHistory:patchSession': { args: [companyId: string, sessionId: string, patch: ChatMetadataPatch]; result: ChatSession | null }
   'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
   'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
+  // 「別ウィンドウで開く」 (shared/chat-windows.ts): open / focus / list / closeAll from the main
+  // window only; getContext / reportStatus from a consultation's own window only.
+  'chatWindow:open': { args: [sessionId: string, request: ChatWindowOpenRequest]; result: ChatWindowOpenResult }
+  'chatWindow:focus': { args: [sessionId: string]; result: boolean }
+  'chatWindow:list': { args: []; result: ChatWindowInfo[] }
+  'chatWindow:closeAll': { args: []; result: void }
+  'chatWindow:getContext': { args: []; result: ChatWindowContext | null }
+  'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
 }
 
 /** renderer → main, fire and forget: ipcRenderer.send(channel, ...args). */
@@ -520,6 +529,7 @@ export interface IpcEventChannels {
   'handoff:changed': [scope: { companyId: string; sessionId: string }]
   'chatHistory:changed': [data: ChatHistoryChange]
   'chat-server:info': [info: ChatServerInfo]
+  'chatWindow:changed': [change: ChatWindowsChange]
 }
 
 export type InvokeChannel = keyof IpcInvokeChannels
@@ -695,4 +705,13 @@ export interface ElectronAPI {
   // Chat server (for useChat transport)
   getChatServerInfo: Invoke<'chat-server:getInfo'>
   onChatServerInfo: Subscribe<'chat-server:info'>
+
+  // Consultations in windows of their own
+  openChatWindow: Invoke<'chatWindow:open'>
+  focusChatWindow: Invoke<'chatWindow:focus'>
+  listChatWindows: Invoke<'chatWindow:list'>
+  closeChatWindows: Invoke<'chatWindow:closeAll'>
+  onChatWindowsChanged: Subscribe<'chatWindow:changed'>
+  getChatWindowContext: Invoke<'chatWindow:getContext'>
+  reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
 }

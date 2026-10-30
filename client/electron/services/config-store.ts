@@ -21,6 +21,8 @@ export interface AppConfig {
   docbaseCookie?: string
   /** Extra environment variable names passed to AI processes (agents/agent-env.ts). */
   agentEnvPassthrough?: string[]
+  /** Where the last consultation window (「別ウィンドウで開く」) was; the next one opens there. */
+  chatWindowBounds?: { x?: number; y?: number; width: number; height: number }
 }
 
 export interface ConfigStore {

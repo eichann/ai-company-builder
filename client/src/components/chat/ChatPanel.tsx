@@ -13,6 +13,9 @@ import { useChatServer } from './hooks/useChatServer'
 import { useChatTabs } from './hooks/useChatTabs'
 import { useAgentAuth } from './hooks/useAgentAuth'
 import { getChatSession } from '../../features/chat/api'
+import { useChatWindows } from '../../features/chat/hooks/useChatWindows'
+import { useMoveToWindow } from '../../features/chat/hooks/useMoveToWindow'
+import { consultationStatusOf } from './consultationStatusStore'
 import { commandArea, useCommandHandler } from '../../shared/commands/commands'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
@@ -54,7 +57,35 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     return () => observer.disconnect()
   }, [isChecking, isReady, chatServer])
 
-  const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id, t('chat.newChat'))
+  const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id, t('chat.newChat'))
+
+  // 「別ウィンドウで開く」: consultations other windows show, and moving one there.
+  // One that comes back (its window closed) is listed here again as an open tab.
+  const companyId = currentCompany?.id ?? ''
+  const returnFromWindow = useCallback((sessionId: string) => {
+    void getChatSession(companyId, sessionId).then(session => { if (session) openSession(sessionId, { activate: false }) }).catch(() => {})
+  }, [companyId, openSession])
+  const chatWindows = useChatWindows(companyId, returnFromWindow)
+  const tabsRef = useRef(tabs)
+  tabsRef.current = tabs
+  const moveToWindow = useMoveToWindow({
+    company: currentCompany ? { id: currentCompany.id, name: currentCompany.name, rootPath: currentCompany.rootPath } : null,
+    department: activeDepartment,
+    slashCommands,
+    windows: chatWindows,
+    tabOf: sessionId => {
+      const tab = tabsRef.current.find(candidate => candidate.sessionId === sessionId)
+      return tab && { id: tab.id, status: consultationStatusOf(tab.id) }
+    },
+    detach: detachSession,
+    reopen: sessionId => openSession(sessionId, { activate: false }),
+  })
+  useCommandHandler('chat.openInWindow', ({ sessionId }) => moveToWindow(sessionId), { target: paneId })
+  // A consultation another window shows is brought to the front there, never opened here too.
+  const openOrFocus = useCallback((sessionId: string) => {
+    if (chatWindows.has(sessionId)) void moveToWindow(sessionId)
+    else openSession(sessionId)
+  }, [chatWindows, moveToWindow, openSession])
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
@@ -63,6 +94,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
 
   const openSettings = useCallback(() => setShowSettings(true), [])
+  const openInWindow = useCallback((sessionId: string) => { void moveToWindow(sessionId) }, [moveToWindow])
   const toggleSidebar = useCallback(() => setSidebarOpen(open => !open), [])
   // The layout passes a new object on every render; only its value matters.
   const departmentName = activeDepartment?.name
@@ -104,7 +136,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
     <OpenConsultationContext.Provider value={id => {
       if (!currentCompany) return
       void getChatSession(currentCompany.id, id).then(session => {
-        if (session) openSession(id)
+        if (session) openOrFocus(id)
         else window.alert("この相談は削除されたか、参照できません。")
       }).catch(() => window.alert("相談を開けませんでした。"))
     }}>
@@ -113,8 +145,9 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
         {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
         <div className={compact ? 'absolute inset-y-0 left-0 z-30 shadow-xl' : 'shrink-0'}>
           <ChatSidebar companyId={currentCompany!.id} tabs={tabs} activeTabId={activeTabId}
+            windows={chatWindows} onOpenInWindow={id => void moveToWindow(id)}
             onSelectTab={id => { setActiveTabId(id); if (compact) setSidebarOpen(false) }}
-            onOpenSession={id => { openSession(id); if (compact) setSidebarOpen(false) }}
+            onOpenSession={id => { openOrFocus(id); if (compact) setSidebarOpen(false) }}
             onCloseTab={closeTab} onNew={() => { createNewTab(); if (compact) setSidebarOpen(false) }}
             onHide={() => setSidebarOpen(false)} />
         </div>
@@ -149,6 +182,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 onLeftBlank={tabCallbacks(tab.id).close}
                 inputRequest={tab.id === activeTabId ? inputRequest : null}
                 onInputRequestConsumed={consumeInputRequest}
+                onOpenInWindow={openInWindow}
               />
             </div>
           </div>

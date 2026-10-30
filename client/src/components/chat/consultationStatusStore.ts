@@ -32,6 +32,11 @@ export function clearConsultationStatus(tabId: string) {
   replace(next)
 }
 
+/** One tab's status now (outside React: an action that depends on it). */
+export function consultationStatusOf(tabId: string): ConsultationStatus | undefined {
+  return statuses.get(tabId)
+}
+
 export function useConsultationStatuses(): ReadonlyMap<string, ConsultationStatus> {
   return useSyncExternalStore(subscribe, () => statuses)
 }
