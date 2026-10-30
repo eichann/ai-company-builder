@@ -1,3 +1,4 @@
+// Over 300 lines on purpose: one model class and its registry share the cache and refresh rules.
 /**
  * The file tree's data, outside React: one model per folder the tree shows
  * (a department, or the whole company), kept in a module-level registry so

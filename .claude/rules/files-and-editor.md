@@ -63,7 +63,14 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   the watcher. First view reads two levels (`readDirectoryTree(…, 1)`); deeper folders load on
   expand. An event re-reads only the changed path's parent if it is on screen; a collapsed or
   off-screen folder is marked stale and re-read when shown; `change` re-reads nothing
-  (`planTreeRefresh`, unit-tested). Rows are memoised (`TreeRow`).
+  (`planTreeRefresh`, unit-tested). Rows are memoised (`components/TreeRow.tsx`; their handlers
+  sit behind one ref so a row never re-renders for new callbacks).
+- `components/FileTreePanel.tsx` only composes: `hooks/useFileTreeModel.ts` (the model, the
+  visible rows), `useNotDownloadedFolders.ts` (placeholders, one-click download, the refusal),
+  `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
+  `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
+  private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
+  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
