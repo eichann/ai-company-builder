@@ -125,7 +125,11 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   or replaces one name, `null` removes it; other lines and comments stay; bad names, line breaks
   and non-strings are refused). Same shape as `config:getApiKeyStatus`. The value-returning
   `env:read` / whole-file `env:write` were removed (renderer and main ship together). Test:
-  `ipc-fs.test.ts` ("env:status never hands a .env value to the renderer").
+  `ipc-fs.test.ts` ("env:status never hands a .env value to the renderer"). The server session
+  stays in main too: `auth:signIn` / `auth:signUp` answer only `{ success, error? }` (Better
+  Auth's response body carries the session token; who signed in comes from `auth:getSession`,
+  the `/api/me` user fields). Test: `ipc-app.test.ts` ("auth:signIn / auth:signUp never hand the
+  session token").
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start`;
   `skills:publish` / `makePrivate` refuse a multi-line entry; `skills:toggleNurturing` only a
