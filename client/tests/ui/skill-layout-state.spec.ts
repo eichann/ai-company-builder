@@ -1,6 +1,6 @@
 // What the main screen remembers and restores (tests/skill-layout-ui.tsx):
 // open file tabs and the left tab per company, the chosen department, and the
-// panel dividers (their widths saved per company). These pin the behaviour the SkillCentricLayout split
+// panel dividers (their widths saved per company). These pin the behaviour the AppShell (formerly SkillCentricLayout) split
 // (Phase 4) moves into hooks and the split-tree layout. `keep: '1'` reloads
 // the page without clearing storage — an app restart; `seed` writes what an
 // earlier version of the app saved, so old saved state keeps restoring.

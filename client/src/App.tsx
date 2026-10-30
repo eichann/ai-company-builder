@@ -1,7 +1,7 @@
 import { useRef, useState, useEffect } from 'react'
 import { useAppStore } from './stores/appStore'
 import { useAuthStore } from './stores/authStore'
-import { SkillCentricLayout } from './components/skill-ui'
+import { AppShell } from './app/AppShell'
 import { LoginScreen } from './components/auth/LoginScreen'
 import { CompanySelector } from './components/auth/CompanySelector'
 import { ServerSetupScreen } from './components/auth/ServerSetupScreen'
@@ -162,7 +162,7 @@ function App() {
     return <CompanySelector />
   }
 
-  return <SkillCentricLayout />
+  return <AppShell />
 }
 
 export default App

@@ -13,6 +13,7 @@ paths:
   - "client/src/lib/line-diff.ts"
   - "client/src/lib/editorTabs.ts"
   - "client/src/components/skill-ui/**"
+  - "client/src/app/AppShell.tsx"
   - "client/src/features/doc-review/**"
   - "client/src/features/skills/**"
   - "client/src/features/history/**"
@@ -44,7 +45,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 ## Watcher (`client/electron/company-watcher.ts`, opened via `features/fs/watchers.ts`)
 
 - One native `fs.watch(root, { recursive: true })` per company (FSEvents /
-  ReadDirectoryChangesW / inotify on Node ≥ 20), opened by `SkillCentricLayout` when the company
+  ReadDirectoryChangesW / inotify on Node ≥ 20), opened by `src/app/AppShell.tsx` when the company
   opens (`watchCompany`, port `CompanyWatchReads` in `src/shared/ipc/file-events.ts`) and closed when it closes or the app quits — never per department or
   tab. chokidar opened one handle per directory and file and took ~30 s to close on the main
   thread; it stays only as the fallback for `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.

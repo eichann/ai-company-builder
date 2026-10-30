@@ -123,11 +123,11 @@ editor, review, search, history, backups).
 
 ## Planned shape of the screen (build toward it, do not hard-code around it)
 
-These are the owner's decisions for the skeleton work (splitting `SkillCentricLayout.tsx`;
+These are the owner's decisions for the skeleton work (splitting `src/app/AppShell.tsx`, formerly `SkillCentricLayout.tsx`;
 D7–D9, confirmed 2026-10-30).
 
 - **Panel registry.** The left panel's tabs (today `type LeftPanelTab = 'skills' | 'files' |
-  'search' | 'history'` and `VALID_LEFT_TABS` in `SkillCentricLayout.tsx`) become a list of
+  'search' | 'history'` and `VALID_LEFT_TABS` in `src/app/AppShell.tsx`) become a list of
   registered panels, the four current ones included, so a later extension adds a tab without
   special cases. A remembered tab id that is not registered falls back to the default tab. Same
   idea as the agent registry (`client/shared/agents/registry.ts`).
