@@ -57,7 +57,7 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
 GET  /api/config                                  setup state (no auth)
 *    /api/auth/**                                 Better Auth; sign-up after the first user
                                                   needs X-Invitation-Token
-/api/me                       GET, PATCH          me.ts
+/api/me                       GET                 me.ts (no PATCH: it never saved)
 /api/companies                GET /, GET /:id, POST /, PATCH /:id,
                               GET /:id/members, POST /:id/members,
                               PUT /:id/members/:userId/role, DELETE /:id/members/:userId,
@@ -185,7 +185,8 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 ## Database and data
 
 - SQLite through better-sqlite3 (no ORM): `data/app.sqlite` (app) and `data/auth.sqlite`
-  (Better Auth). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
+  (Better Auth; one WAL connection for the process, `lib/auth.ts` `authDb`, also used by
+  `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), and the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,

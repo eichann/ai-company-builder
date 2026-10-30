@@ -499,3 +499,26 @@ test.describe('a consultation in its own window', () => {
     expect(await chat(page, c => c.windows.opened)).toEqual([])
   })
 })
+
+test('an attached image that cannot be read stops the send and gives the typed text back', async ({ page }) => {
+  // The image's FileReader never answered (no onerror): the composer was
+  // already cleared and the message never went out, so the typed text was lost.
+  await page.addInitScript(() => {
+    FileReader.prototype.readAsDataURL = function (this: FileReader) {
+      setTimeout(() => this.dispatchEvent(new ProgressEvent('error')), 0)
+    }
+  })
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  await input(page).click()
+  await page.keyboard.insertText('この画像の内容をまとめて')
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.items.add(new File([new Uint8Array([137, 80, 78, 71])], 'screen.png', { type: 'image/png' }))
+    return dt
+  })
+  await input(page).locator('xpath=ancestor::div[contains(@class, "rounded-xl")][1]').dispatchEvent('drop', { dataTransfer: data })
+  await page.keyboard.press('Meta+Enter')
+  await expect(page.getByText('添付した画像を読み込めなかったため、送信しませんでした。入力した文は残してあります。画像を添付し直してから、もう一度送信してください。')).toBeVisible()
+  await expect(input(page)).toHaveText('この画像の内容をまとめて')
+  expect(await paths(page)).not.toContain('/api/chat')
+})

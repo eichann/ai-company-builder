@@ -158,6 +158,22 @@ test('the preview keeps its scroll position when the member opens another file a
   await expect.poll(() => scroller.evaluate(el => el.scrollTop / (el.scrollHeight - el.clientHeight))).toBeGreaterThan(0.4)
 })
 
+test('each Markdown file keeps its own preview scroll position when the member switches between two previews', async ({ page }) => {
+  // Preview → preview kept one mounted preview: the second file opened at the
+  // first one's position, and coming back did not restore it.
+  await open(page)
+  await tab(page, LONG_DOC).click()
+  await page.getByRole('button', { name: 'プレビュー' }).click()
+  const scroller = page.locator('.markdown-body').locator('..')
+  await expect(page.getByRole('heading', { name: '第1回' })).toBeVisible()
+  await scroller.evaluate(el => { el.scrollTop = (el.scrollHeight - el.clientHeight) / 2 })
+  await tab(page, `${ROOT}/営業部/提案書.md`).click()
+  await expect(page.getByRole('heading', { name: '提案書' })).toBeVisible()
+  await tab(page, LONG_DOC).click()
+  await expect(page.getByRole('heading', { name: '第1回' })).toBeAttached()
+  await expect.poll(() => scroller.evaluate(el => el.scrollTop / (el.scrollHeight - el.clientHeight))).toBeGreaterThan(0.4)
+})
+
 test('an image and a PDF show as such, and say so when they cannot be read', async ({ page }) => {
   await open(page)
   await tab(page, `${ROOT}/営業部/ロゴ.png`).click()

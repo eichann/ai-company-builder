@@ -129,8 +129,7 @@ export function AppShell() {
   }, [markDownloaded, refreshSkills])
   const { isDownloading, downloadError, download: handleDownloadDepartment } = useDepartmentDownload({
     folder: selectedDept?.folder,
-    excludedPaths: sparseCheckout.excludedPaths,
-    apply: sparseCheckout.apply,
+    change: sparseCheckout.change,
     onDownloaded: handleDepartmentDownloaded,
   })
 

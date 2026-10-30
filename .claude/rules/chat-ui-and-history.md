@@ -205,7 +205,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail
-  (`components/chat/historyThumbnail.ts`). Old full-size data URLs still load.
+  (`components/chat/historyThumbnail.ts`). Old full-size data URLs still load. An image that
+  cannot be read stops the send: the typed text goes back into the composer with
+  「添付した画像を読み込めなかったため、送信しませんでした。…」 (`useMessageAttachments.ts`
+  rejects; `tests/ui/chat-panel.spec.ts` 「an attached image that cannot be read…」).
 - Tests: `client/tests/chat-history-store.test.ts`.
 
 ## Rendering (`client/src/components/chat/`)

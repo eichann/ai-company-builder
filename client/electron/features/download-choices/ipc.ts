@@ -30,7 +30,18 @@ export interface DownloadChoicesDeps {
 }
 
 export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, privateFolders, activity }: DownloadChoicesDeps): void {
-
+  // One change at a time per company folder: two overlapping `sparse-checkout
+  // set` runs (two quick downloads) collided on git's index and left the
+  // folder list half-applied. The renderer also builds each change from the
+  // latest list (src/shared/lib/exclusionChanges.ts).
+  const queues = new Map<string, Promise<unknown>>()
+  const inTurn = <T>(key: string, fn: () => Promise<T>): Promise<T> => {
+    const next = (queues.get(key) ?? Promise.resolve()).then(fn, fn)
+    const tail = next.catch(() => undefined)
+    queues.set(key, tail)
+    void tail.then(() => { if (queues.get(key) === tail) queues.delete(key) })
+    return next
+  }
 
   // Read the persisted exclusion list for a repo.
   ipc.handle('git:sparseGetExclusions', async (_, repoPath: string) => {
@@ -49,7 +60,7 @@ export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, s
   // While it runs, the bytes arriving in .git/objects/pack (a download in a
   // partial clone) are reported to the window as 'sparse:progress' events, so
   // the panel can show the download moving.
-  ipc.handle('git:sparseSetExclusions', (event, repoPath: string, excluded: string[]) => activity.during('download-choices', async () => {
+  ipc.handle('git:sparseSetExclusions', (event, repoPath: string, excluded: string[]) => inTurn(String(repoPath), () => activity.during('download-choices', async () => {
     let stopProgress: (() => void) | null = null
     try {
       const safe = paths.validate(repoPath)
@@ -76,7 +87,7 @@ export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, s
     } finally {
       stopProgress?.()
     }
-  }))
+  })))
 
   // Files inside these folders with changes not committed yet: the settings
   // panel asks before leaving such a folder out (the next sync would move them

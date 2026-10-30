@@ -23,26 +23,5 @@ meRoute.get('/', async (c) => {
   })
 })
 
-// Update current user info
-meRoute.patch('/', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-
-  if (!user) {
-    return c.json({ error: 'Unauthorized' }, 401)
-  }
-
-  const body = await c.req.json()
-  const { name, image } = body
-
-  // Update user via Better Auth API
-  // For now, just return the updated user concept
-  // TODO: Implement actual update when Better Auth supports it
-
-  return c.json({
-    id: user.id,
-    email: user.email,
-    name: name ?? user.name,
-    image: image ?? user.image,
-    emailVerified: user.emailVerified,
-  })
-})
+// No PATCH: changing one's name or image is not offered, and a route that
+// answers success must have saved something.

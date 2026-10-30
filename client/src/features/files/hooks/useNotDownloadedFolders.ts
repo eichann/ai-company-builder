@@ -71,7 +71,7 @@ export function useNotDownloadedFolders(
     if (!folder) return
     setDownloading(prev => new Set(prev).add(entry.path))
     try {
-      const result = await sparse.apply(sparse.excludedPaths.filter(e => pathKey(e) !== pathKey(folder)))
+      const result = await sparse.change(current => current.filter(e => pathKey(e) !== pathKey(folder)))
       if (!result.success) {
         warn(result.offline ? 'インターネットにつながっているときにダウンロードできます' : `ダウンロードできませんでした：${result.error ?? ''}`, 5000)
       } else {

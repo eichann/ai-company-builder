@@ -1,4 +1,4 @@
-import { ApiError } from './api'
+import { ApiError, ApiTimeoutError } from './api'
 
 // The API answers in English for developers; the people using this panel are
 // non-engineers, so each failure is restated in Japanese with what to do next.
@@ -80,6 +80,9 @@ export function describeError(err: unknown): string {
         }
         return `操作できませんでした（${err.message}）。`
     }
+  }
+  if (err instanceof ApiTimeoutError) {
+    return 'サーバーから応答がありません。少し待ってからもう一度お試しください。'
   }
   if (err instanceof TypeError) {
     // fetch() rejects with TypeError when the network or server is unreachable.

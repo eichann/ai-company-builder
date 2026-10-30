@@ -168,7 +168,8 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
 - `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
   (each tab's text, loading, the watcher: follow the disk / mark external / missing),
   `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, load the disk
-  version, the confirm), `useMarkdownView.ts` (preview / source mode, scroll positions),
+  version, the confirm), `useMarkdownView.ts` (preview / source mode, scroll positions; the
+  preview pane is keyed by file so each file restores its own),
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`

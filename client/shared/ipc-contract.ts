@@ -159,6 +159,17 @@ export interface EnvStatusResult {
   error?: string
 }
 
+/**
+ * Why a sync (or an automatic send) stopped. Read by released apps' notices
+ * (src/features/sync/model.ts) and the automatic-sync stop list. Every value
+ * sync produces is named here (editors complete them); a new one is added here.
+ */
+export type SyncErrorType =
+  | 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied'
+  | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'unknown'
+  // Older or newer apps may send others; readers treat an unknown one as a plain failure.
+  | (string & Record<never, never>)
+
 export interface GitResult {
   success: boolean
   error?: string
@@ -181,7 +192,7 @@ export interface GitResult {
   // computer's versions were copied to nestedRepoBackupPath before the pull
   nestedRepoBackupFiles?: string[]
   nestedRepoBackupPath?: string
-  errorType?: 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'unknown' | string
+  errorType?: SyncErrorType
   secretDetected?: boolean
   // Agent-execution config paths (.claude/settings.json, .mcp.json, ...) the
   // server refused because only an owner/admin may change them

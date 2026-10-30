@@ -4,7 +4,7 @@ import { Suspense, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { AuthLayout } from '@/components/app/brand'
-import { FullPageLoading } from '@/components/app/states'
+import { ErrorState, FullPageLoading } from '@/components/app/states'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -26,17 +26,21 @@ function LoginForm() {
   const [name, setName] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // Whether an account exists cannot be guessed: when /api/config fails, say so
+  // (with 再読み込み) instead of showing a login form on a server with no account.
+  const [configError, setConfigError] = useState<unknown>(null)
+  const [configAttempt, setConfigAttempt] = useState(0)
 
   useEffect(() => {
     let active = true
     configApi.get().then(
       (c) => active && setSetupComplete(c.setupComplete),
-      () => active && setSetupComplete(true)
+      (e: unknown) => active && setConfigError(e ?? new Error('config'))
     )
     return () => {
       active = false
     }
-  }, [])
+  }, [configAttempt])
 
   useEffect(() => {
     if (!authLoading && user) router.replace(redirectTo)
@@ -62,6 +66,13 @@ function LoginForm() {
     }
   }
 
+  if (configError && setupComplete === null) {
+    return (
+      <AuthLayout>
+        <ErrorState error={configError} title="サーバーの状態を確認できませんでした" onRetry={() => { setConfigError(null); setConfigAttempt((n) => n + 1) }} />
+      </AuthLayout>
+    )
+  }
   if (setupComplete === null || authLoading) return <FullPageLoading />
 
   return (

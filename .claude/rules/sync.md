@@ -158,7 +158,8 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   retry or a revert on top would fail forever. Push is attempted whenever commits are unpushed.
 - Result fields: `errorType` is one of `network`, `auth`, `conflict`, `locked`, `push_failed`,
   `protected_config`, `write_denied`, `personal_path`, `local_only_path`, `reserved_path`,
-  `unknown` (the IPC contract types it as these names or `string`). Private folders add
+  `needs_member` (automatic send), `unknown` (`SyncErrorType` in the IPC contract names them all
+  and still accepts another string from an older or newer app). Private folders add
   `privateFolders` (per folder), `newPrivateFolders`, `lostPrivateFolders`, `madePublicFolders`;
   a failed private folder makes the whole result `success: false` with
   「非公開フォルダ『…』を同期できませんでした。…その他のフォルダは同期しました」.

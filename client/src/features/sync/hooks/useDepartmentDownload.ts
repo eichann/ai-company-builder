@@ -6,13 +6,13 @@ export interface DownloadError { offline: boolean; message: string }
 interface Options {
   /** The selected department's folder (the one the prompt offers to download). */
   folder: string | undefined
-  excludedPaths: string[]
-  apply: (excluded: string[]) => Promise<ApplyResult>
+  /** Changes the list as it is when its turn comes (useSparseCheckout `change`). */
+  change: (update: (current: string[]) => string[]) => Promise<ApplyResult>
   onDownloaded: (folder: string) => void
 }
 
 /** 「ダウンロードして同期を開始」 for one department: downloads it and says why when it could not. */
-export function useDepartmentDownload({ folder, excludedPaths, apply, onDownloaded }: Options) {
+export function useDepartmentDownload({ folder, change, onDownloaded }: Options) {
   const [isDownloading, setIsDownloading] = useState(false)
   const [downloadError, setDownloadError] = useState<DownloadError | null>(null)
 
@@ -21,7 +21,7 @@ export function useDepartmentDownload({ folder, excludedPaths, apply, onDownload
     setIsDownloading(true)
     setDownloadError(null)
     try {
-      const result = await apply(excludedPaths.filter(p => p !== folder))
+      const result = await change(current => current.filter(p => p !== folder))
       if (result.success) {
         onDownloaded(folder)
       } else {
@@ -33,7 +33,7 @@ export function useDepartmentDownload({ folder, excludedPaths, apply, onDownload
     } finally {
       setIsDownloading(false)
     }
-  }, [folder, excludedPaths, apply, onDownloaded])
+  }, [folder, change, onDownloaded])
   // Another department's prompt starts without the previous error.
   useEffect(() => { setDownloadError(null) }, [folder])
 

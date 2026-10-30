@@ -4,9 +4,7 @@ import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
-import Database from 'better-sqlite3'
-import { auth } from './lib/auth'
-import { AUTH_DB_PATH } from './lib/config'
+import { auth, authDb } from './lib/auth'
 import { db, initDatabase } from './db'
 import { signUpWithInvitation } from './lib/invitation-signup'
 import { meRoute } from './routes/me'
@@ -46,8 +44,7 @@ initDatabase()
   console.log(broker.enabled ? `Key broker: on (key-encryption key ${broker.kekId})` : `Key broker: off — ${broker.detail}`)
 }
 
-// Clean up expired sessions on startup
-const authDb = new Database(AUTH_DB_PATH)
+// Clean up expired sessions on startup (lib/auth.ts's one connection, kept open)
 
 // Ensure Better Auth tables exist (created here so a fresh install boots without
 // a manual migration step — mirrors initDatabase() for app.sqlite).
@@ -100,7 +97,6 @@ const deleted = authDb.prepare('DELETE FROM session WHERE expiresAt < ?').run(ne
 if (deleted.changes > 0) {
   console.log(`Cleaned up ${deleted.changes} expired session(s)`)
 }
-authDb.close()
 
 const app = new Hono()
 
@@ -127,9 +123,7 @@ app.get('/', (c) => {
 
 // Public config endpoint (no auth required) - used by Electron client to validate server URL
 app.get('/api/config', (c) => {
-  const authDbConn = new Database(AUTH_DB_PATH)
-  const result = authDbConn.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
-  authDbConn.close()
+  const result = authDb.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
 
   return c.json({
     success: true,
@@ -145,9 +139,7 @@ app.get('/api/config', (c) => {
 app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
   // Block signup after initial setup (first user created)
   if (c.req.method === 'POST' && c.req.path === '/api/auth/sign-up/email') {
-    const authDbConn = new Database(AUTH_DB_PATH)
-    const result = authDbConn.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
-    authDbConn.close()
+    const result = authDb.prepare('SELECT COUNT(*) as count FROM user').get() as { count: number }
 
     if (result.count > 0) {
       // Allow signup only with valid invitation token

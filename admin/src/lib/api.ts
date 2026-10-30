@@ -41,35 +41,60 @@ type RequestOptions = {
   headers?: Record<string, string>
 }
 
+/** The server did not answer in time (a hung proxy or server): the request was abandoned. */
+export class ApiTimeoutError extends Error {
+  constructor() {
+    super('The server did not answer in time')
+    this.name = 'ApiTimeoutError'
+  }
+}
+
+/** How long a request may take before it is abandoned (a page would otherwise spin forever). */
+export const API_TIMEOUT_MS = 30_000
+
 export async function apiClient<T>(endpoint: string, options: RequestOptions = {}): Promise<T> {
   const { method = 'GET', body, headers = {} } = options
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), API_TIMEOUT_MS)
+  try {
+    const res = await fetch(`${API_BASE}${endpoint}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        ...headers,
+      },
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+      credentials: 'include',
+      signal: controller.signal,
+    })
+    // An empty body (204, or a proxy's empty error page) is not a parse error.
+    const text = await res.text()
+    let raw: unknown = null
+    if (text.trim() !== '') {
+      try { raw = JSON.parse(text) } catch { raw = undefined }
+    }
 
-  const res = await fetch(`${API_BASE}${endpoint}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      ...headers,
-    },
-    body: body !== undefined ? JSON.stringify(body) : undefined,
-    credentials: 'include',
-  })
-
-  if (!res.ok) {
-    const raw: unknown = await res.json().catch(() => null)
-    const error = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
-    const message = typeof error?.error === 'string' ? error.error : typeof error?.message === 'string' ? error.message : ''
-    throw new ApiError(res.status, message || `Request failed (${res.status})`, error)
+    if (!res.ok) {
+      const error = raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : null
+      const message = typeof error?.error === 'string' ? error.error : typeof error?.message === 'string' ? error.message : ''
+      throw new ApiError(res.status, message || `Request failed (${res.status})`, error)
+    }
+    if (raw === undefined) throw new ApiError(res.status, 'Invalid response from the server')
+    return raw as T
+  } catch (err) {
+    if (controller.signal.aborted) throw new ApiTimeoutError()
+    throw err
+  } finally {
+    clearTimeout(timer)
   }
-
-  return res.json() as Promise<T>
 }
 
 /** `{ success, data }` envelope used by every company-scoped endpoint. */
 type Envelope<T> = { success: boolean; data: T }
 
 async function getData<T>(endpoint: string, options?: RequestOptions): Promise<T> {
-  const res = await apiClient<Envelope<T>>(endpoint, options)
-  return res.data
+  const res = await apiClient<Envelope<T> | null>(endpoint, options)
+  return res?.data as T
 }
 
 const enc = encodeURIComponent
