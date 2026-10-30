@@ -19,12 +19,17 @@ import { sqliteClientActivityRepository } from './adapters/sqlite/client-activit
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
 import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
+import { sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
 import { processCompanyLock, randomIds, systemClock } from './adapters/system'
+import { loadKekFile } from './adapters/kek-file'
+import { localSecretCipher } from './adapters/local-secret-cipher'
+import { BROKER_KEK_FILE, DATA_DIR } from './lib/config'
+import type { BrokerCipherState } from './ports/key-broker'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
@@ -34,8 +39,21 @@ import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createBrokerVault } from './services/broker-vault'
 
-export function createServices(conn: Database.Database) {
+/**
+ * The key broker's cipher: envelope encryption under the KEK file named by
+ * BROKER_KEK_FILE, or "off" with the reason (the server runs without it).
+ */
+export function brokerCipherFromEnv(): BrokerCipherState {
+  const loaded = loadKekFile(BROKER_KEK_FILE, DATA_DIR)
+  if (!loaded.ok) return { enabled: false, reason: loaded.reason, detail: loaded.detail }
+  const cipher = localSecretCipher(loaded.kek)
+  loaded.kek.fill(0)
+  return { enabled: true, cipher }
+}
+
+export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv()) {
   const repos = {
     companies: sqliteCompanyRepository(conn),
     memberships: sqliteMembershipRepository(conn),
@@ -48,6 +66,7 @@ export function createServices(conn: Database.Database) {
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     agentSandbox: sqliteAgentSandboxRepository(conn),
+    brokerKeys: sqliteKeyBrokerRepository(conn),
     orphanedScopes: gitOrphanedScopeReader(),
   }
   const shared = {
@@ -75,6 +94,7 @@ export function createServices(conn: Database.Database) {
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
     agentEvents: createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) }),
     agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
+    brokerVault: createBrokerVault({ ...repos, brokerCipher }),
     companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,

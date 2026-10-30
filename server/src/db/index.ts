@@ -294,12 +294,77 @@ export function initDatabase(conn: Database.Database = sqlite) {
       change TEXT NOT NULL
     );
 
+    -- The API key broker (.claude/rules/key-broker.md). A key's value is only
+    -- ever stored sealed: AES-256-GCM under its own data key, the data key
+    -- wrapped by the key-encryption key named in kek_id (envelope encryption).
+    CREATE TABLE IF NOT EXISTS broker_keys (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      scope TEXT NOT NULL CHECK (scope IN ('company', 'user')),
+      owner_user_id TEXT,
+      service TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      last4 TEXT NOT NULL,
+      cipher_scheme TEXT NOT NULL,
+      ciphertext TEXT NOT NULL,
+      nonce TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      wrapped_key TEXT NOT NULL,
+      kek_id TEXT NOT NULL,
+      destinations TEXT NOT NULL,
+      audience TEXT NOT NULL,
+      caps TEXT NOT NULL,
+      allow_private_content INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK (status IN ('active', 'disabled')),
+      created_at TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      secret_updated_at TEXT NOT NULL,
+      CHECK ((scope = 'company') = (owner_user_id IS NULL))
+    );
+
+    -- Per service: which key a request uses and where members' own keys may go
+    -- (defaults apply while no row exists).
+    CREATE TABLE IF NOT EXISTS broker_services (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      service TEXT NOT NULL,
+      category TEXT NOT NULL CHECK (category IN ('person', 'tool', 'system')),
+      rule TEXT NOT NULL CHECK (rule IN ('company-only', 'user-only', 'company-first')),
+      own_key_hosts TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, service)
+    );
+
+    -- Whether members may register their own keys (default on while no row exists).
+    CREATE TABLE IF NOT EXISTS broker_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      member_keys_allowed INTEGER NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL
+    );
+
+    -- Every change of a key, a service rule or the setting: who, when, what
+    -- (JSON without any secret; a replaced key shows its last 4 characters).
+    CREATE TABLE IF NOT EXISTS broker_history (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      key_id TEXT,
+      action TEXT NOT NULL,
+      changed_at TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      change TEXT NOT NULL
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_event_settings_history_company ON agent_event_settings_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_agent_sandbox_history_company ON agent_sandbox_history(company_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_broker_keys_company ON broker_keys(company_id, service);
+    CREATE INDEX IF NOT EXISTS idx_broker_history_company ON broker_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);

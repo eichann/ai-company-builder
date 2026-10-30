@@ -10,6 +10,7 @@
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
  *   client-version.ts     desktop-app build identity: parsing and ordering
  *   agent-sandbox.ts      the company's AI sandbox setting (「AI の囲い」): shape, validation
+ *   key-broker.ts         the API key broker (「API キー」): services, rules, input validation
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -24,3 +25,4 @@ export * from './instruction-files'
 export * from './write-access'
 export * from './client-version'
 export * from './agent-sandbox'
+export * from './key-broker'

@@ -24,6 +24,8 @@ services:
       - SERVER_HOST=${SERVER_HOST}
       - SERVER_USER=${SERVER_USER}
       - HOST_REPOS_DIR=${HOST_REPOS_DIR}
+      # Optional key broker KEK (README "Key broker"); /dev/null = broker off.
+      - BROKER_KEK_FILE=/run/secrets/broker-kek
     # Runs the code baked into the image (no source mount, read-only root
     # filesystem): updates need `up -d --build`, as in the guide's Updating
     # section. The server writes only under /app/data and /tmp.
@@ -31,6 +33,7 @@ services:
     volumes:
       - ./data:/app/data
       - api-tmp:/tmp
+      - ${BROKER_KEK_HOST_FILE:-/dev/null}:/run/secrets/broker-kek:ro
     restart: unless-stopped
 
   admin:

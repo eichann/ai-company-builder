@@ -103,6 +103,26 @@ jobs:
           echo "api PID 1: $cmd"
           case "$cmd" in *watch*) echo "::error::api runs a file watcher"; exit 1;; esac
 
+      - name: Key broker is off without a KEK, and on with one mounted read-only
+        run: |
+          # No BROKER_KEK_HOST_FILE: /dev/null is mounted and the server runs with the broker off.
+          docker compose logs --no-color api | grep -F 'Key broker: off' \
+            || { echo "::error::api did not report the key broker as off"; exit 1; }
+          # The operator command writes a new 0600 KEK (a throwaway one, in the runner's temp dir).
+          kek_dir="$RUNNER_TEMP/acb-kek"
+          install -d -m 700 "$kek_dir"
+          docker compose run --rm --no-deps -v "$kek_dir:/kek" api \
+            node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
+          [ "$(sudo stat -c %a "$kek_dir/broker-kek")" = 600 ] || { echo "::error::KEK file is not 0600"; exit 1; }
+          BROKER_KEK_HOST_FILE="$kek_dir/broker-kek" docker compose up -d --no-build api
+          for i in $(seq 1 30); do
+            docker compose logs --no-color api | grep -qF 'Key broker: on' && break
+            sleep 2
+          done
+          docker compose logs --no-color api | grep -F 'Key broker: on' \
+            || { echo "::error::api did not load the mounted KEK"; exit 1; }
+          curl -fsS --retry 30 --retry-all-errors --retry-delay 2 -o /dev/null http://127.0.0.1:3001/api/config
+
       - name: Admin serves /login from the production server
         run: |
           code=$(curl -sS --retry 60 --retry-all-errors --retry-delay 2 --max-time 180 -o /dev/null \

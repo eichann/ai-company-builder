@@ -19,8 +19,9 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
     → ports/    interfaces (repositories, RepoStore, CompanyLock, Clock/IdGenerator,
                 AccountDirectory, SecretCipher, Transactions)
         ↑ adapters/   sqlite/* repositories, git-repo-store.ts, accounts.ts, system.ts,
-                      company-files.ts, local-secret-cipher.ts
+                      company-files.ts, local-secret-cipher.ts, kek-file.ts
 src/composition.ts — the only module that imports adapters; routes take `services` from it
+src/cli/           operator commands (generate-broker-kek.ts), each its own composition root
 ```
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
@@ -40,9 +41,10 @@ src/composition.ts — the only module that imports adapters; routes take `servi
   `initDatabase()` is safe.
 - `AccountDirectory.bySessionToken` (`adapters/accounts.ts`) is the one place that reads Better
   Auth's session table directly (git over HTTP sends the token as the Basic-auth password).
-- `SecretCipher` (`ports/secret-cipher.ts`): encrypt/decrypt bound to a context;
-  `adapters/local-secret-cipher.ts` is the local AES-256-GCM implementation (context as AAD,
-  `v1.` envelope), used by nothing yet — the key broker's KMS cipher plugs in here.
+- `SecretCipher` (`ports/secret-cipher.ts`): the key broker's envelope encryption (a data key
+  per secret, wrapped by the KEK; `KeyWrapper` is where a KMS plugs in), bound to a context;
+  `adapters/local-secret-cipher.ts` with the KEK file from `adapters/kek-file.ts`. Used only by
+  `services/broker-vault.ts` (`key-broker.md`).
 - Sign-in and role checks are tested by calling the routes: `tests/security/auth-guards.test.ts`
   finds every handler of every file in `src/routes` at run time and expects 401 without a
   session (public endpoints are listed there with their reason); the 403 checks live in
@@ -172,7 +174,8 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
   (Better Auth). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
-  (`<DATA_DIR>/repos`). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  (`<DATA_DIR>/repos`), and the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
+  `key-broker.md`). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
   leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.
