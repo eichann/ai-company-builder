@@ -37,6 +37,10 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
   `sparse.ts`, `first-setup.ts`, `outside-checkout.ts`, `not-downloaded.ts`, `remote.ts`,
   `push-landed.ts`, `preview.ts`, `../protected-config.ts` (rejection recovery); private folders:
   `private-folders.ts`, `private-sync.ts`, `path-check.ts`, `reserved-path.ts`.
+- Renderer: 「サーバーと同期」 / 「変更を確認」 in `src/features/sync/hooks/useSync.ts`; which notice the
+  member gets in `model.ts` (anything sync set aside is a warning with its backup that stays until
+  dismissed; only a clean sync hides itself — `model.test.ts`); the notice in
+  `components/SyncNotification.tsx`.
 
 ## One press, several repositories
 
