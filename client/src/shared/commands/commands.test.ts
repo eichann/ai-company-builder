@@ -20,8 +20,8 @@ const catalog = defineCommands([
   },
 ])
 
-const key = (spec: { key: string; mod?: boolean; shift?: boolean; alt?: boolean }) =>
-  ({ key: spec.key, metaKey: !!spec.mod, ctrlKey: false, shiftKey: !!spec.shift, altKey: !!spec.alt })
+const key = (spec: { key: string; mod?: boolean; ctrl?: boolean; shift?: boolean; alt?: boolean }) =>
+  ({ key: spec.key, metaKey: !!spec.mod, ctrlKey: !!spec.ctrl, shiftKey: !!spec.shift, altKey: !!spec.alt })
 
 async function rejection(promise: Promise<unknown>): Promise<CommandError> {
   try {
@@ -125,6 +125,17 @@ test('an app-wide shortcut works from inside an area; other keys and modifiers p
   assert.equal(registry.handleKey(key({ key: 'c', mod: true }), inPane('left')), false)
   assert.equal(registry.handleKey(key({ key: 'c', mod: true, shift: true, alt: true }), inPane('left')), false)
   assert.equal(registry.handleKey(key({ key: 'c', shift: true }), inPane('left')), false)
+  await Promise.resolve()
+  assert.equal(toggled, 1)
+})
+
+test('on Windows / Linux, Ctrl+Shift+letter (reported upper-case) runs the shortcut; with Alt it does not', async () => {
+  const registry = createCommandRegistry(catalog)
+  let toggled = 0
+  registry.register('layout.toggleChat', () => { toggled++ })
+  assert.equal(registry.handleKey(key({ key: 'C', ctrl: true, shift: true }), [{ area: 'app' }]), true)
+  assert.equal(registry.handleKey(key({ key: 'C', ctrl: true, shift: true, alt: true }), [{ area: 'app' }]), false)
+  assert.equal(registry.handleKey(key({ key: 'C', ctrl: true }), [{ area: 'app' }]), false)
   await Promise.resolve()
   assert.equal(toggled, 1)
 })

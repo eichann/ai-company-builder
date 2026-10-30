@@ -29,7 +29,10 @@ export type CommandArea = 'app' | 'chat'
 export const COMMAND_AREAS: readonly CommandArea[] = ['app', 'chat']
 
 export interface CommandKeybinding {
-  /** `mod+shift+c`: modifiers (mod = ⌘ or Ctrl, shift, alt) then one KeyboardEvent.key, compared exactly. */
+  /**
+   * `mod+shift+c`: modifiers (mod = ⌘ or Ctrl, shift, alt) then one KeyboardEvent.key.
+   * A letter A–Z matches in either case (Windows reports Ctrl+Shift+C as `C`); other keys exactly.
+   */
   readonly key: string
   /** Only a focus inside this area receives the key (the innermost area wins). */
   readonly area: CommandArea
@@ -130,7 +133,17 @@ export function parseKey(spec: string): ParsedKey | null {
   const parts = spec.split('+')
   const key = parts.pop()
   if (!key || parts.some(p => !MODIFIERS.has(p)) || new Set(parts).size !== parts.length) return null
-  return { mod: parts.includes('mod'), shift: parts.includes('shift'), alt: parts.includes('alt'), key }
+  return { mod: parts.includes('mod'), shift: parts.includes('shift'), alt: parts.includes('alt'), key: keyName(key) }
+}
+
+/**
+ * A letter A–Z in lower case, any other key as it is. Shift is a modifier of
+ * its own, so the case `event.key` reports for a letter carries nothing:
+ * macOS gives `c` for ⌘⇧C, Windows / Linux give `C` for Ctrl+Shift+C (and
+ * Caps Lock turns Ctrl+P into `P`).
+ */
+function keyName(key: string): string {
+  return /^[A-Za-z]$/.test(key) ? key.toLowerCase() : key
 }
 
 function normalizeKey(spec: string): string {
@@ -140,12 +153,12 @@ function normalizeKey(spec: string): string {
 
 /**
  * Whether a key press is this shortcut. `mod` is ⌘ or Ctrl (as the app's
- * shortcuts always were); `key` is compared exactly, like the listeners these
- * replace (with ⌘ held, macOS reports a lower-case letter even with Shift).
+ * shortcuts always were); shift and alt (⌥) must match exactly, so ⌥⌘P is
+ * not ⌘P; a letter matches in either case (keyName), any other key exactly.
  */
 export function matchesKey(spec: ParsedKey, input: KeyInput): boolean {
   return spec.mod === (input.metaKey || input.ctrlKey)
     && spec.shift === input.shiftKey
     && spec.alt === input.altKey
-    && spec.key === input.key
+    && spec.key === keyName(input.key)
 }

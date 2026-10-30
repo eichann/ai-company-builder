@@ -44,8 +44,11 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
   pane): the optional argument names the instance; without it, the instance the member focused
   last runs it (`setActiveTarget`, fed by focus), else the first registered. A named instance
   that is not there is refused, never redirected to another.
-- `keybinding: { key: 'mod+shift+c', area }`: `mod` = ⌘ or Ctrl; `key` is `KeyboardEvent.key`,
-  compared exactly as the listeners it replaced did. A shortcut runs the command with no
+- `keybinding: { key: 'mod+shift+c', area }`: `mod` = ⌘ or Ctrl (either one, on every
+  platform); `shift` and `alt` must match exactly (⌥⌘P is not ⌘P); `key` is `KeyboardEvent.key`,
+  a letter A–Z matched in either case (Windows / Linux report Ctrl+Shift+C as `C`, macOS ⌘⇧C as
+  `c`), any other key exactly. Test: `commands.test.ts` 「on Windows / Linux, Ctrl+Shift+letter」.
+  A shortcut runs the command with no
   arguments, so its args must allow `{}`; two commands cannot share a key in one area.
 - `defineCommands` refuses a bad catalog at start-up (duplicate id, missing class, bad id,
   unreadable key), and `register` refuses a second handler for the same command and target.
