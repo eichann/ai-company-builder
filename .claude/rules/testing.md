@@ -15,6 +15,27 @@ Run what you touched; CI runs the suites (macOS runners). Sync's harness: `sync-
 IPC harness: `ipc-and-main-process.md`. Parity tests: `shared-core.md`. Full text:
 `docs/architecture/testing.md` (internal).
 
+## What a test is for
+
+A test earns its place when it stops something that would hurt if it happened. Before adding
+one, check all four:
+
+1. **It guards something you can name in one phrase** — "sync never loses a member's work", "a
+   key value never reaches the renderer". "The function is called" or "it returns this shape"
+   describes the code; it guards nothing. The test name says what is protected.
+2. **Without it, something can really break.** Remove or invert the guarded code: the test must
+   fail. For a guard, say in the PR that you checked this.
+3. **It survives a refactor that keeps the behaviour** — no assertions on internal function
+   names, call counts or module layout. A test you must edit on every pure move is a cost.
+4. **Nothing else already guarantees it** — not the type checker, not another test.
+
+Do not write: tests of one-line pass-throughs that only check arguments are forwarded (e.g. a
+`features/<f>/api.ts` function that calls one IPC method); tests that make a fake return X and
+assert X comes back; "renders without error" alone; copies of another test. Data-layer ports
+are covered by `architecture-boundaries.test.ts` and `ipc-contract.test.ts`; test a port only
+when it holds a rule (path limits, filtering, a secret kept out). Every PR that adds tests
+names, in its body, what each new test protects.
+
 ## Node tests
 
 Node tests run with node:test via tsx. Two places:

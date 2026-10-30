@@ -117,6 +117,10 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
 - **Security guards are tested; keep them.** Each guard in the rule files names the test that
   fails without it. If a guard seems to be in the way, raise it with the owner rather than
   weakening it — each one exists because of an observed failure.
+- **A test must guard something** (all packages): it protects a behaviour you can name, fails
+  when that code is removed, survives a behaviour-preserving refactor, and is not already
+  guaranteed by types or another test. No tests of pass-throughs or of fakes returning what they
+  were given. → `testing.md` ("What a test is for")
 - **Server layers point one way**: routes (HTTP) → services (rules) → ports ← adapters; only
   `src/composition.ts` imports adapters (`tests/unit/layering.test.ts`). → `server.md`
 - **Server request handlers stay async.** No `execFileSync` / `spawnSync` in `server/src`
