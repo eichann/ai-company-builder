@@ -106,6 +106,13 @@ export function describeCaps(c: BrokerCaps): string {
   return parts.length ? parts.join('、') : '上限なし'
 }
 
+/** 「12 回・3,400 トークン（1日の回数の上限 100）」; 「上限に達しました」 when a total cap is reached. */
+export function describeUsage(u: { requests: number; tokens: number }, c: BrokerCaps): string {
+  const base = `${u.requests.toLocaleString('ja-JP')} 回・${u.tokens.toLocaleString('ja-JP')} トークン`
+  const reached = (c.requestsPerDay !== null && u.requests >= c.requestsPerDay) || (c.tokensPerDay !== null && u.tokens >= c.tokensPerDay)
+  return reached ? `${base}（今日の上限に達しました）` : base
+}
+
 const keyName = (k: { displayName: string; service: string }) => `「${k.displayName}」（${k.service}）`
 
 function fieldLines(name: string, before: Partial<BrokerKeySnapshot>, after: Partial<BrokerKeySnapshot>, names: Names): string[] {

@@ -70,6 +70,17 @@ export interface BrokerGrant {
 
 export type BrokerTokenRefusal =
   | 'broker-off' | 'malformed' | 'unknown' | 'expired' | 'revoked' | 'not-member' | 'service-not-granted' | 'no-key'
+  /** The key that would apply is stopped by an admin (no other key to fall back to). */
+  | 'key-stopped'
+
+/** Whose live token it was, when it was valid up to choosing a key (for the call's record). */
+export interface BrokerTokenHolder {
+  tokenId: string
+  companyId: string
+  userId: string
+  conversationId: string
+  department: string | null
+}
 
 function parseJson<T>(text: string, fallback: T): T {
   try { return JSON.parse(text) as T } catch { return fallback }
@@ -89,17 +100,26 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
    * consultation's department (both dials), or their own active key (when
    * members may have own keys and its hosts are still allowed).
    */
-  function resolveKey(companyId: string, userId: string, department: string | null, service: string, rows: BrokerKeyRow[] = brokerKeys.list(companyId)): BrokerKeyRow | null {
+  function resolveKey(
+    companyId: string, userId: string, department: string | null, service: string,
+    rows: BrokerKeyRow[] = brokerKeys.list(companyId), includeStopped = false,
+  ): BrokerKeyRow | null {
     const setting = keyBroker.serviceSetting(companyId, service)
     const departmentId = keyBroker.departmentIdOfFolder(companyId, department)
-    const company = rows.find(r => r.scope === 'company' && r.service === service && r.status === 'active'
+    const live = (r: BrokerKeyRow) => includeStopped || r.status === 'active'
+    const company = rows.find(r => r.scope === 'company' && r.service === service && live(r)
       && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId)) ?? null
     const own = keyBroker.memberKeysAllowed(companyId)
-      ? rows.find(r => r.scope === 'user' && r.ownerUserId === userId && r.service === service && r.status === 'active'
+      ? rows.find(r => r.scope === 'user' && r.ownerUserId === userId && r.service === service && live(r)
         && parseJson<BrokerDestinations>(r.destinations, { hosts: [], pathPrefixes: [], models: [] }).hosts.every(h => setting.ownKeyHosts.includes(h))) ?? null
       : null
     const source = chooseBrokerKeySource(setting.rule, { company: !!company, user: !!own })
     return source === 'company' ? company : source === 'user' ? own : null
+  }
+
+  /** No usable key: is it because an admin stopped the one that would apply (the emergency stop's 「鍵」)? */
+  function stoppedReason(companyId: string, userId: string, department: string | null, service: string, rows?: BrokerKeyRow[]): 'key-stopped' | 'no-key' {
+    return resolveKey(companyId, userId, department, service, rows, true) ? 'key-stopped' : 'no-key'
   }
 
   return {
@@ -135,7 +155,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
         if (!known.has(service) && !builtinBrokerService(service)) { unavailable.push({ service, reason: 'unknown-service' }); continue }
         const key = resolveKey(member.companyId, member.userId, folder, service, rows)
         if (key) granted.push({ service, source: key.scope as BrokerKeyScope })
-        else unavailable.push({ service, reason: 'no-key' })
+        else unavailable.push({ service, reason: stoppedReason(member.companyId, member.userId, folder, service, rows) === 'key-stopped' ? 'stopped' : 'no-key' })
       }
       if (granted.length === 0) return ok({ enabled: true, token: null, tokenId: null, expiresAt: null, services: [], unavailable })
 
@@ -183,7 +203,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
      * which key? Never logs or returns the token. The relay then reveals the
      * key with `vault.reveal(grant.companyId, grant.keyId)`.
      */
-    validate(token: unknown, service: string): { ok: true; grant: BrokerGrant } | { ok: false; reason: BrokerTokenRefusal } {
+    validate(token: unknown, service: string): { ok: true; grant: BrokerGrant } | { ok: false; reason: BrokerTokenRefusal; who?: BrokerTokenHolder } {
       if (!brokerVault.status().enabled) return { ok: false, reason: 'broker-off' }
       if (!looksLikeBrokerToken(token)) return { ok: false, reason: 'malformed' }
       const row = brokerTokens.findByHash(tokenDigest.digest(token))
@@ -194,7 +214,8 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       if (role === null) return { ok: false, reason: 'not-member' }
       if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted' }
       const key = resolveKey(row.companyId, row.userId, row.department, service)
-      if (!key) return { ok: false, reason: 'no-key' }
+      const who: BrokerTokenHolder = { tokenId: row.id, companyId: row.companyId, userId: row.userId, conversationId: row.conversationId, department: row.department }
+      if (!key) return { ok: false, reason: stoppedReason(row.companyId, row.userId, row.department, service), who }
       return {
         ok: true,
         grant: {

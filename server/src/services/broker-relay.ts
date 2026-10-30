@@ -27,8 +27,10 @@ import {
   normalizeBrokerModel,
   type BrokerServiceInfo,
 } from '../../shared/core/key-broker'
+import type { AgentToolEvent, GuardReason, ToolDecision } from '../../shared/types/agent-events'
+import type { BrokerKeyRepository } from '../ports/key-broker'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
-import type { BrokerGrant, BrokerTokenRefusal, BrokerTokenService } from './broker-tokens'
+import type { BrokerGrant, BrokerTokenHolder, BrokerTokenRefusal, BrokerTokenService } from './broker-tokens'
 import type { BrokerVault } from './broker-vault'
 import type { KeyBrokerService } from './key-broker'
 
@@ -37,6 +39,13 @@ export interface BrokerRelayDeps {
   brokerVault: BrokerVault
   keyBroker: KeyBrokerService
   upstream: UpstreamClient
+  /** Daily use per key and member (caps). */
+  brokerKeys: BrokerKeyRepository
+  /** One record per call in the AI action log (agent_events), as the server observed it. */
+  record: (companyId: string, userId: string, event: Omit<AgentToolEvent, 'version' | 'id' | 'callId' | 'at'>) => void
+  /** The caps' day of a moment: YYYY-MM-DD. */
+  dayOf: (ms: number) => string
+  nowMs: () => number
   maxRequestBytes: number
   headersTimeoutMs: number
   log?: Pick<Console, 'warn'>
@@ -61,13 +70,39 @@ export interface RelayAnswer {
   body: AsyncIterable<Uint8Array> | Uint8Array | null
   /** For the call's record (K5): who and what, never a key or a body. */
   grant: BrokerGrant | null
+  /** Set when the relay itself answered (a refusal or an upstream failure). */
+  code?: RelayErrorCode
+}
+
+/** What the call's record says besides the answer (filled in as the relay goes). */
+interface CallMeta {
+  who?: BrokerTokenHolder
+  grant?: BrokerGrant
+  host?: string
+  path?: string
+  model?: string
+  bytesIn: number
+  /** The request reached the provider (counted for the caps). */
+  forwarded: boolean
 }
 
 /** Error codes the relay answers itself (JSON readable by the Gemini, OpenAI and Anthropic SDKs). */
 export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
-  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED'
+  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP'
+
+/** How a refusal of the relay is filed in the AI action log. */
+const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
+  ACB_NO_KEY: { decision: 'guard-denied', guardReason: 'key-not-available' },
+  ACB_STOPPED: { decision: 'stopped' },
+  ACB_BAD_PATH: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_DESTINATION_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_REDIRECT_REFUSED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
+  ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
+  ACB_TOO_LARGE: { decision: 'guard-denied' },
+}
 
 const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key'] as const
 /** Never forwarded upstream (hop-by-hop, our own, the client's identity). */
@@ -84,7 +119,7 @@ const ERROR_BODY_LIMIT = 1024 * 1024
 
 function jsonError(status: number, code: RelayErrorCode, message: string, grant: BrokerGrant | null = null): RelayAnswer {
   const body = new TextEncoder().encode(JSON.stringify({ type: 'error', error: { type: code, code, status: code, message } }))
-  return { status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body, grant }
+  return { status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body, grant, code }
 }
 
 const NEEDS_KEY = (s: BrokerServiceInfo | undefined, service: string) =>
@@ -96,6 +131,7 @@ function tokenRefusal(reason: BrokerTokenRefusal, info: BrokerServiceInfo | unde
     case 'not-member': return jsonError(403, 'ACB_NOT_MEMBER', 'この会社のメンバーではないため、鍵を使えません。')
     case 'service-not-granted':
     case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(info, service))
+    case 'key-stopped': return jsonError(403, 'ACB_STOPPED', `管理者が ${info?.label ?? service} の鍵を止めています。再開されるまで使えません。`)
     default: return jsonError(401, 'ACB_TOKEN_INVALID', 'ACB の通行証の期限が切れたか、使えなくなりました。新しい相談でもう一度お試しください。')
   }
 }
@@ -174,7 +210,7 @@ const UPLOAD_SESSION_MS = 60 * 60_000
 const UPLOAD_SESSIONS_MAX = 10_000
 
 export function createBrokerRelay(deps: BrokerRelayDeps) {
-  const { brokerTokens, brokerVault, keyBroker, upstream } = deps
+  const { brokerTokens, brokerVault, keyBroker, upstream, brokerKeys } = deps
   const log = deps.log ?? console
   /**
    * Gemini's resumable upload answers an `x-goog-upload-url` with an
@@ -183,6 +219,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
    * an hour) and lets that upload's own URL continue under that token.
    */
   const uploads = new Map<string, { token: string; until: number }>()
+  let prunedFor = ''
   const rememberUpload = (url: string, token: string) => {
     const id = new URL(url).searchParams.get('upload_id')
     if (!id) return
@@ -198,7 +235,81 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
   }
 
   return {
+    /** One call: the answer, and one record in the AI action log once it has ended. */
     async relay(req: RelayRequest): Promise<RelayAnswer> {
+      const started = deps.nowMs()
+      const meta: CallMeta = { bytesIn: 0, forwarded: false }
+      const answer = await relayInner(req, meta)
+      const who = meta.grant ?? meta.who
+      if (!who) return answer
+      const finish = (bytesOut: number, usage: UsageScanner | null, outcome: 'ok' | 'error' | 'unfinished') => {
+        const tokensIn = usage?.tokensIn
+        const tokensOut = usage?.tokensOut
+        if (meta.grant && meta.forwarded && (tokensIn || tokensOut)) {
+          brokerKeys.addUsage(meta.grant.companyId, meta.grant.keyId, meta.grant.userId, deps.dayOf(started), 0, (tokensIn ?? 0) + (tokensOut ?? 0))
+        }
+        const filed = answer.code ? REFUSAL_RECORD[answer.code] : undefined
+        try {
+          deps.record(who.companyId, who.userId, {
+            durationMs: Math.max(0, deps.nowMs() - started),
+            conversationId: who.conversationId.slice(0, 100),
+            ...(who.department ? { department: who.department } : {}),
+            agent: 'script',
+            ...(meta.model ? { model: meta.model.slice(0, 100) } : {}),
+            tool: `broker:${req.service}`,
+            category: 'broker',
+            target: {
+              kind: 'broker', service: req.service,
+              ...(meta.host ? { host: meta.host } : {}),
+              ...(meta.path ? { path: meta.path.slice(0, 200) } : {}),
+              ...(meta.model ? { model: meta.model.slice(0, 100) } : {}),
+              status: answer.status, bytesIn: meta.bytesIn, bytesOut,
+              ...(tokensIn !== undefined ? { tokensIn } : {}),
+              ...(tokensOut !== undefined ? { tokensOut } : {}),
+              ...(meta.grant ? { source: meta.grant.source } : {}),
+            },
+            decision: filed?.decision ?? 'auto-allowed',
+            ...(filed?.guardReason ? { guardReason: filed.guardReason } : {}),
+            outcome,
+          })
+        } catch {
+          log.warn(`[broker] relay ${req.service}: the call could not be recorded`)
+        }
+      }
+      const failed = answer.status >= 400 ? 'error' : 'ok'
+      if (answer.body === null || answer.body instanceof Uint8Array) {
+        const usage = new UsageScanner()
+        if (answer.body) usage.feed(answer.body)
+        finish(answer.body?.byteLength ?? 0, usage, failed)
+        return answer
+      }
+      const source = answer.body
+      const usage = new UsageScanner()
+      return {
+        ...answer,
+        body: (async function* () {
+          let bytes = 0
+          let outcome: 'ok' | 'error' | 'unfinished' = 'unfinished'
+          try {
+            for await (const chunk of source) {
+              bytes += chunk.byteLength
+              usage.feed(chunk)
+              yield chunk
+            }
+            outcome = failed
+          } catch (error) {
+            outcome = 'error'
+            throw error
+          } finally {
+            finish(bytes, usage, outcome)
+          }
+        })(),
+      }
+    },
+  }
+
+  async function relayInner(req: RelayRequest, meta: CallMeta): Promise<RelayAnswer> {
+    {
       const q = req.pathAndQuery.indexOf('?')
       const rawPath = q < 0 ? req.pathAndQuery : req.pathAndQuery.slice(0, q)
       const query = new URLSearchParams(q < 0 ? '' : req.pathAndQuery.slice(q + 1))
@@ -217,8 +328,12 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const info = builtinBrokerService(req.service)
       if (!info) return jsonError(404, 'ACB_UNKNOWN_SERVICE', `「${req.service}」は ACB の中継先として登録されていません。`)
       const checked = brokerTokens.validate(credential.token, req.service)
-      if (!checked.ok) return tokenRefusal(checked.reason, info, req.service)
+      if (!checked.ok) {
+        meta.who = checked.who
+        return tokenRefusal(checked.reason, info, req.service)
+      }
       const grant = checked.grant
+      meta.grant = grant
 
       // 2. Where it may go: the key's destinations.
       const path = checkPath(rawPath)
@@ -226,6 +341,8 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const { hosts, pathPrefixes, models } = grant.destinations
       const host = hosts.includes(info.defaultHosts[0]) ? info.defaultHosts[0] : hosts[0]
       if (!host) return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵には送ってよい宛先がありません。', grant)
+      meta.host = host
+      meta.path = path.decoded
       if (pathPrefixes.length > 0 && !pathPrefixes.some(p => path.decoded.startsWith(p))) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵では、この宛先（パス）は使えません。', grant)
       }
@@ -246,11 +363,29 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         body = bounded(body, deps.maxRequestBytes, () => { tooLarge = true })
       }
       const model = modelOf(path.decoded, json)
+      if (model) meta.model = normalizeBrokerModel(model) ?? undefined
       if (models.length > 0 && model !== null && !models.includes(normalizeBrokerModel(model) ?? '')) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', `この鍵では、モデル「${normalizeBrokerModel(model) ?? '?'}」は使えません。`, grant)
       }
 
       // 4. The real key, in the service's one header; our token stays here.
+      // 4a. The daily caps (company key: in total and per member; an own key: its own caps, none by default).
+      const day = deps.dayOf(deps.nowMs())
+      if (day !== prunedFor) {
+        // Daily use is kept 40 days (the admin page shows today; the log keeps the calls).
+        prunedFor = day
+        brokerKeys.pruneUsage(deps.dayOf(deps.nowMs() - 40 * 86_400_000))
+      }
+      const used = brokerKeys.usage(grant.companyId, grant.keyId, grant.userId, day)
+      const caps = grant.caps
+      const over = (caps.requestsPerDay !== null && used.requests >= caps.requestsPerDay)
+        || (caps.tokensPerDay !== null && used.tokens >= caps.tokensPerDay)
+        || (caps.requestsPerMemberPerDay !== null && used.memberRequests >= caps.requestsPerMemberPerDay)
+        || (caps.tokensPerMemberPerDay !== null && used.memberTokens >= caps.tokensPerMemberPerDay)
+      if (over) {
+        return jsonError(429, 'ACB_OVER_CAP', `${info.label} の鍵の、今日の上限に達しました。明日になるのを待つか、管理者に上限を見直してもらってください。`, grant)
+      }
+
       const secret = await brokerVault.reveal(grant.companyId, grant.keyId)
       if (!secret) return tokenRefusal('no-key', info, req.service)
       const headers: Record<string, string> = {}
@@ -264,13 +399,16 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       query.delete('key')
       const search = query.toString()
 
+      brokerKeys.addUsage(grant.companyId, grant.keyId, grant.userId, day, 1, 0)
+      meta.forwarded = true
+      const counted = body ? countBytes(body, n => { meta.bytesIn += n }) : null
       const timeout = AbortSignal.timeout(deps.headersTimeoutMs + 30 * 60_000)
       const result = await upstream.send({
         host,
         method: req.method,
         path: `${path.path}${search ? `?${search}` : ''}`,
         headers,
-        body,
+        body: counted,
         allowPrivateHosts: keyBroker.internalHosts(grant.companyId),
         signal: AbortSignal.any([req.signal, timeout]),
         headersTimeoutMs: deps.headersTimeoutMs,
@@ -313,7 +451,50 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         return { status: res.status, headers: out.filter(([n]) => n !== 'content-length'), body: new TextEncoder().encode(text), grant }
       }
       return { status: res.status, headers: out, body: res.body, grant }
-    },
+    }
+  }
+}
+
+function countBytes(body: AsyncIterable<Uint8Array>, add: (n: number) => void): AsyncIterable<Uint8Array> {
+  return (async function* () {
+    for await (const chunk of body) { add(chunk.byteLength); yield chunk }
+  })()
+}
+
+/**
+ * Token counts in a provider's answer, read as it streams (no body is kept):
+ * Gemini `usageMetadata` (promptTokenCount, candidatesTokenCount,
+ * thoughtsTokenCount), OpenAI `usage` (prompt_tokens / completion_tokens or
+ * input_tokens / output_tokens), Anthropic `usage` (input_tokens,
+ * output_tokens — cumulative in streams). Streams repeat running totals, so
+ * the largest value of each field wins.
+ */
+export class UsageScanner {
+  private tail = ''
+  private max = new Map<string, number>()
+  private readonly decoder = new TextDecoder()
+  private static readonly FIELD = /"(promptTokenCount|candidatesTokenCount|thoughtsTokenCount|prompt_tokens|completion_tokens|input_tokens|output_tokens)"\s*:\s*(\d{1,12})/g
+
+  feed(chunk: Uint8Array): void {
+    const text = this.tail + this.decoder.decode(chunk, { stream: true })
+    for (const m of text.matchAll(UsageScanner.FIELD)) {
+      const n = Number(m[2])
+      if (n > (this.max.get(m[1]) ?? -1)) this.max.set(m[1], n)
+    }
+    this.tail = text.slice(-64)
+  }
+
+  private pick(...names: string[]): number | undefined {
+    const values = names.map(n => this.max.get(n)).filter((v): v is number => v !== undefined)
+    return values.length ? Math.max(...values) : undefined
+  }
+
+  get tokensIn(): number | undefined { return this.pick('promptTokenCount', 'prompt_tokens', 'input_tokens') }
+
+  get tokensOut(): number | undefined {
+    const out = this.pick('candidatesTokenCount', 'completion_tokens', 'output_tokens')
+    const thoughts = this.max.get('thoughtsTokenCount')
+    return out === undefined && thoughts === undefined ? undefined : (out ?? 0) + (thoughts ?? 0)
   }
 }
 

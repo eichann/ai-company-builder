@@ -37,6 +37,7 @@ import {
   describePeople,
   describeWork,
   describeCaps,
+  describeUsage,
   hostsOf,
   invalidHosts,
   type Names,
@@ -53,6 +54,7 @@ type Dialogs =
   | { kind: 'edit'; key: BrokerKeySummary }
   | { kind: 'replace'; key: BrokerKeySummary }
   | { kind: 'delete'; key: BrokerKeySummary }
+  | { kind: 'stop-all' }
   | null
 
 export default function ApiKeysPage() {
@@ -148,6 +150,17 @@ export default function ApiKeysPage() {
                   {BROKER_OFF_HELP}
                 </p>
               </div>
+            </div>
+          )}
+
+          {data.keys.some((k) => k.status === 'active') && (
+            <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 px-4 py-3 text-sm">
+              <span>
+                緊急のときは、すべての鍵（会社の鍵とメンバーの自分の鍵）を今すぐ止められます。AI からの呼び出しは、次の1回から止まります。
+              </span>
+              <Button variant="destructive" size="sm" disabled={busy} onClick={() => setDialog({ kind: 'stop-all' })}>
+                すべての鍵を止める
+              </Button>
             </div>
           )}
 
@@ -270,6 +283,25 @@ export default function ApiKeysPage() {
           )}
         </DialogContent>
       </Dialog>
+
+      <Dialog open={dialog?.kind === 'stop-all'} onOpenChange={(o) => !o && setDialog(null)}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>すべての鍵を今すぐ止めますか？</DialogTitle>
+            <DialogDescription>
+              会社の鍵とメンバーの自分の鍵をすべて「停止中」にします。AI 経由の API の呼び出しは、次の1回から止まります。再開は鍵ごとに「再開」を押します。
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDialog(null)} disabled={busy}>
+              キャンセル
+            </Button>
+            <Button variant="destructive" disabled={busy} onClick={() => run('すべての鍵を止めました', () => keyBrokerApi.stopAll(companyId))}>
+              すべて止める
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   )
 }
@@ -317,6 +349,8 @@ function KeyRow({
             <dd>{describePeople(k.audience, names)}</dd>
             <dt>上限</dt>
             <dd>{describeCaps(k.caps)}</dd>
+            <dt>今日の利用</dt>
+            <dd>{describeUsage(k.usageToday, k.caps)}</dd>
             <dt>非公開の内容</dt>
             <dd>{k.allowPrivateContent ? '送ってよい' : '送る前に確認する'}</dd>
           </>

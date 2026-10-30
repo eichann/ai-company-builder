@@ -9,7 +9,8 @@
  *   PATCH  /broker/keys/:keyId            destinations, who, caps, flag, status
  *   DELETE /broker/keys/:keyId
  *   PUT    /broker/services/:service      { category, rule, ownKeyHosts }
- *   PUT    /broker/settings               { memberKeysAllowed }
+ *   PUT    /broker/settings               { memberKeysAllowed?, internalHosts? }
+ *   POST   /broker/stop-all               stop every key and token now (emergency stop)
  *
  * Any member (the desktop app, K3):
  *   POST   /me/broker-tokens              { conversationId, services?, department?, ttlMinutes? }
@@ -94,6 +95,12 @@ keyBrokerRoute.put('/broker/settings', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, keyBroker.setSettings(member, await jsonBody(c)))
+})
+
+keyBrokerRoute.post('/broker/stop-all', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, keyBroker.stopAll(member))
 })
 
 keyBrokerRoute.post('/me/broker-tokens', async (c) => {

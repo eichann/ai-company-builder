@@ -41,6 +41,11 @@ export const BROKER_MAX_REQUEST_MB = Number(process.env.BROKER_MAX_REQUEST_MB) |
 /** How long the relay waits for an upstream's response headers, in seconds (default 600: long AI answers). */
 export const BROKER_UPSTREAM_TIMEOUT_SECONDS = Number(process.env.BROKER_UPSTREAM_TIMEOUT_SECONDS) || 600
 
+/** Where the relay's day (daily caps) begins, as minutes east of UTC (default 540 = Japan). */
+export const BROKER_DAY_UTC_OFFSET_MINUTES = Number.isFinite(Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)) && process.env.BROKER_DAY_UTC_OFFSET_MINUTES
+  ? Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)
+  : 540
+
 /** A company's bare repository; the id is reduced to [A-Za-z0-9_-]. */
 export function companyRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)

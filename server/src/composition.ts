@@ -29,7 +29,7 @@ import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from '.
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
-import { BROKER_KEK_FILE, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -57,6 +57,11 @@ export function brokerCipherFromEnv(): BrokerCipherState {
   const cipher = localSecretCipher(loaded.kek)
   loaded.kek.fill(0)
   return { enabled: true, cipher }
+}
+
+/** The relay's day for daily caps (YYYY-MM-DD at BROKER_DAY_UTC_OFFSET_MINUTES, default Japan). */
+export function brokerDayOf(ms: number): string {
+  return new Date(ms + BROKER_DAY_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10)
 }
 
 export interface ServiceOptions {
@@ -91,7 +96,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
-  const keyBroker = createKeyBrokerService({ ...repos, ...shared, brokerVault })
+  const keyBroker = createKeyBrokerService({ ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()) })
+  const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
   })
@@ -109,7 +115,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       managedFolders: permissionViews.managedFolders,
     }),
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
-    agentEvents: createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) }),
+    agentEvents,
     agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
     brokerVault,
     keyBroker,
@@ -119,6 +125,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       brokerVault,
       keyBroker,
       upstream: options.upstream ?? httpsUpstream(),
+      brokerKeys: repos.brokerKeys,
+      record: agentEvents.recordServerEvent,
+      dayOf: brokerDayOf,
+      nowMs: () => shared.clock.nowMs(),
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
     }),

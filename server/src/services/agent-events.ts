@@ -63,6 +63,7 @@ import {
   type AgentEventViewer,
   type AgentEventViewerMode,
   type AgentEventViewers,
+  type AgentToolEvent,
   type SandboxImpact,
   type SandboxImpactCounts,
   type SensitiveLocation,
@@ -120,6 +121,7 @@ function targetParts(t: AgentEventTarget): string[] {
     case 'web': return t.host ? [t.host] : []
     case 'mcp': return t.tool ? [t.server, t.tool] : [t.server]
     case 'subagent': return t.subagentType ? [t.subagentType] : []
+    case 'broker': return [t.service, ...(t.host ? [t.host] : []), ...(t.model ? [t.model] : [])]
     default: return []
   }
 }
@@ -376,6 +378,45 @@ export function createAgentEventService(deps: AgentEventDeps) {
       }
       const accepted = rows.length > 0 ? events.insertMany(member.companyId, rows) : 0
       return ok({ accepted, duplicates: rows.length - accepted, rejected })
+    },
+
+    /**
+     * An event the server itself observed (the key broker's relay, K5): stored
+     * like an app's (same table, same readers), not rate-limited, at the
+     * server's time. `id` is made here.
+     */
+    recordServerEvent(companyId: string, userId: string, e: Omit<AgentToolEvent, 'version' | 'id' | 'callId' | 'at'>): void {
+      const at = clock.now()
+      const id = ids.newId().replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64)
+      events.insertMany(companyId, [{
+        id,
+        callId: id,
+        userId,
+        receivedAt: at,
+        at,
+        clientAt: at,
+        atAdjusted: false,
+        durationMs: e.durationMs ?? null,
+        conversationId: e.conversationId ?? null,
+        turnId: e.turnId ?? null,
+        department: e.department ?? null,
+        departmentKey: e.department ? pathKey(e.department) : null,
+        agent: e.agent,
+        model: e.model ?? null,
+        subagentType: e.subagentType ?? null,
+        tool: e.tool,
+        category: e.category,
+        target: e.target,
+        targetKind: e.target.kind,
+        targetText: targetParts(e.target).join('\n'),
+        targetRoots: targetRoots(e.target),
+        decision: e.decision,
+        guardReason: e.guardReason ?? null,
+        outcome: e.outcome ?? null,
+        sandbox: e.sandbox ?? null,
+        skill: e.skill ?? null,
+        clientVersion: null,
+      }])
     },
 
     /** GET …/agent-events: a page, newest first. */

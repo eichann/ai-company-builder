@@ -816,6 +816,8 @@ export const keyBrokerApi = {
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, { method: 'PUT', body: setting }),
   setMemberKeysAllowed: (companyId: string, memberKeysAllowed: boolean) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { memberKeysAllowed } }),
+  /** Emergency stop: every key disabled and every live token revoked, now. */
+  stopAll: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/stop-all`, { method: 'POST' }),
   /** The relay's exception: hosts allowed to resolve to an internal address. */
   setInternalHosts: (companyId: string, internalHosts: string[]) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { internalHosts } }),

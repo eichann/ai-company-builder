@@ -364,6 +364,7 @@ When team members open the invitation link, they can register a new account and 
 | `BROKER_TOKEN_TTL_MINUTES` | No | `30` | Lifetime (15–60 minutes) of the key broker's short-lived tokens. |
 | `BROKER_MAX_REQUEST_MB` | No | `100` | Largest request body the key broker's relay (`/api/broker/…`) forwards. |
 | `BROKER_UPSTREAM_TIMEOUT_SECONDS` | No | `600` | How long the relay waits for the provider's answer. |
+| `BROKER_DAY_UTC_OFFSET_MINUTES` | No | `540` | Where the API keys' daily caps begin, in minutes east of UTC (540 = Japan). |
 
 ### Key broker (optional)
 

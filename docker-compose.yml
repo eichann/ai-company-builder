@@ -30,6 +30,8 @@ services:
       # The relay's largest request (MB) and wait for an answer (seconds).
       - BROKER_MAX_REQUEST_MB=${BROKER_MAX_REQUEST_MB:-100}
       - BROKER_UPSTREAM_TIMEOUT_SECONDS=${BROKER_UPSTREAM_TIMEOUT_SECONDS:-600}
+      # Where the daily caps' day begins, minutes east of UTC (540 = Japan).
+      - BROKER_DAY_UTC_OFFSET_MINUTES=${BROKER_DAY_UTC_OFFSET_MINUTES:-540}
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").

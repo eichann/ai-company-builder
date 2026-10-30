@@ -110,6 +110,14 @@ export interface BrokerKeyRepository {
   saveSettings(companyId: string, settings: StoredBrokerSettings, change: BrokerChangeRow): void
   /** Newest first. */
   history(companyId: string, limit: number): BrokerChangeRow[]
+
+  /** The relay's use of a key on a day: in total and by one member. */
+  usage(companyId: string, keyId: string, userId: string, day: string): { requests: number; tokens: number; memberRequests: number; memberTokens: number }
+  /** Every key's total use on a day (the admin page). */
+  usageByKey(companyId: string, day: string): Map<string, { requests: number; tokens: number }>
+  addUsage(companyId: string, keyId: string, userId: string, day: string, requests: number, tokens: number): void
+  /** Delete use older than `beforeDay`. */
+  pruneUsage(beforeDay: string): number
 }
 
 export interface BrokerTokenRow {

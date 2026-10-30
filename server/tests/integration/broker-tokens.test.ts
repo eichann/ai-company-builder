@@ -176,7 +176,7 @@ describe('broker tokens', () => {
     const token = (await issue('bt-sales', { services: ['gemini'] })).json.data.token
     const keyId = services.brokerTokens.validate(token, 'gemini').grant.keyId
     services.keyBroker.update(owner, keyId, { audience: { allDepartments: false, departmentIds: ['bt-d-dev'], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] } })
-    expect(services.brokerTokens.validate(token, 'gemini')).toEqual({ ok: false, reason: 'no-key' })
+    expect(services.brokerTokens.validate(token, 'gemini')).toMatchObject({ ok: false, reason: 'no-key' })
     services.keyBroker.update(owner, keyId, { audience: { allDepartments: true, departmentIds: [], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] } })
     expect(services.brokerTokens.validate(token, 'gemini').ok).toBe(true)
     expect((await issue('bt-sales', { services: ['gemini'], department: null })).json.data.token).toMatch(/^acb_tok_/)
@@ -194,10 +194,10 @@ describe('broker tokens', () => {
     expect(await services.brokerVault.reveal(CO, v.grant.keyId)).toBe(FAKE_OWN)
     // The own key's host no longer allowed → no key; members' own keys switched off → no key.
     await services.keyBroker.setService(owner, 'openai', { category: 'tool', rule: 'company-first', ownKeyHosts: [] })
-    expect(services.brokerTokens.validate(r.json.data.token, 'openai')).toEqual({ ok: false, reason: 'no-key' })
+    expect(services.brokerTokens.validate(r.json.data.token, 'openai')).toMatchObject({ ok: false, reason: 'no-key' })
     await services.keyBroker.setService(owner, 'openai', { category: 'tool', rule: 'company-first', ownKeyHosts: ['api.openai.com'] })
     await services.keyBroker.setSettings(owner, { memberKeysAllowed: false })
-    expect(services.brokerTokens.validate(r.json.data.token, 'openai')).toEqual({ ok: false, reason: 'no-key' })
+    expect(services.brokerTokens.validate(r.json.data.token, 'openai')).toMatchObject({ ok: false, reason: 'no-key' })
     await services.keyBroker.setSettings(owner, { memberKeysAllowed: true })
     expect(services.brokerTokens.validate(r.json.data.token, 'openai').ok).toBe(true)
   })
@@ -206,10 +206,10 @@ describe('broker tokens', () => {
     const token = (await issue('bt-sales', { services: ['gemini'] })).json.data
     expect(services.brokerTokens.validate(token.token, 'gemini').ok).toBe(true)
 
-    // Key disabled → no key; enabled again → valid.
+    // Key stopped by an admin → "stopped" (the emergency stop's 鍵 unit); resumed → valid.
     const keyId = services.brokerTokens.validate(token.token, 'gemini').grant.keyId
     services.keyBroker.update(owner, keyId, { status: 'disabled' })
-    expect(services.brokerTokens.validate(token.token, 'gemini')).toEqual({ ok: false, reason: 'no-key' })
+    expect(services.brokerTokens.validate(token.token, 'gemini')).toMatchObject({ ok: false, reason: 'key-stopped', who: { userId: 'bt-sales' } })
     services.keyBroker.update(owner, keyId, { status: 'active' })
 
     // Expired.

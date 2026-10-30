@@ -44,6 +44,7 @@ const stored: BrokerKeySummary = {
   allowPrivateContent: false, status: 'active', createdAt: '2026-10-30T00:00:00.000Z', createdBy: 'u_owner',
   updatedAt: '2026-10-30T00:00:00.000Z', updatedBy: 'u_owner', secretUpdatedAt: '2026-10-30T00:00:00.000Z',
   usableBy: [{ userId: 'u_owner', name: '佐藤 花子', email: 'sato@example.com', via: 'person' }],
+  usageToday: { requests: 3, tokens: 1200 },
 }
 
 type Reply = { status?: number; body: unknown }

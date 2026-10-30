@@ -28,6 +28,7 @@ paths:
   - "server/src/lib/net-ranges.ts"
   - "server/src/lib/log-redaction.ts"
   - "server/tests/integration/broker-relay*.test.ts"
+  - "server/tests/integration/broker-records.test.ts"
   - "server/tests/unit/net-ranges.test.ts"
   - "server/src/services/own-broker-keys.ts"
   - "server/tests/integration/own-broker-keys.test.ts"
@@ -198,6 +199,37 @@ openai, anthropic; a generic relay is K9). No ACB session: the token is the sign
    key are dropped; error bodies (≥ 400, ≤ 1 MB) have the key and the token replaced by
    `[hidden]`. `set-cookie`, `alt-svc` and hop-by-hop headers are dropped.
 - WebSocket (Gemini Live, OpenAI Realtime) is not relayed in stage 1.
+
+## Record, stop and caps (K5)
+
+- **One `agent_events` row per call** once its answer has ended (`relay()` wraps the stream;
+  `agentEvents.recordServerEvent`): category `broker`, agent `script`, tool `broker:<service>`,
+  the token's member, conversation and department, `model`, and target
+  `{ kind: 'broker', service, host, path (no query, ≤ 200), model, status, bytesIn, bytesOut,
+  tokensIn, tokensOut, source: company | user }`; outcome ok / error / unfinished (client gone).
+  Never a body, header, key or token. Calls refused before a token is known (no / bad token, real
+  key sent) have no company and are not recorded. Refusals after it: `ACB_NO_KEY` → guard-denied
+  `key-not-available`; path / model / redirect → `destination-not-allowed`; internal address →
+  `internal-address`; caps → `over-cap`; stopped key → decision `stopped`. **Apps cannot send
+  these**: `parseAgentToolEvent` rejects category `broker`, agent `script` and target `broker`
+  (`SERVER_ONLY_CATEGORIES`). Tokens come from the answer as it streams (`UsageScanner`: Gemini
+  `usageMetadata` incl. thoughts, OpenAI `usage`, Anthropic `usage`; running totals → largest
+  value; a field split across chunks is still read) — this is why the relay asks upstream for
+  `accept-encoding: identity`.
+- **Stop (M2's 「鍵」 unit, server-side, immediate)**: a stopped key (`status: disabled`) that would
+  have applied (no other key to fall back to) → `validate` reason `key-stopped` → 403
+  `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
+  reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
+  「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
+  the history; resuming is per key. Tokens are not revoked, so the AI gets the "stopped" answer
+  (revoking would answer "token expired").
+- **Daily caps** (the key's `caps`): `broker_usage` (company, key, member, day: requests,
+  tokens); the day is `BROKER_DAY_UTC_OFFSET_MINUTES` (default 540 = Japan, `brokerDayOf`). Before
+  forwarding: total or member requests / tokens at or over a cap → 429 `ACB_OVER_CAP`
+  「<サービス> の鍵の、今日の上限に達しました。…」, recorded `over-cap`; else one request is counted
+  and the answer's tokens are added when it ends (so a call already running may pass a token
+  cap once). Kept 40 days. The admin page shows 「今日の利用」 per key (`usageToday`, 「今日の上限
+  に達しました」 at a total cap). No money caps in stage 1 (owner): providers' budget alerts.
 - Logs: never a header, body, key or token; the request log hides `/api/broker/` queries
   (`lib/log-redaction.ts`).
 
@@ -245,7 +277,10 @@ rule / own key / switch, every validation refusal, TTL bounds, the per-member bo
 the service's header, a real-looking key refused unforwarded, destinations / models / bad paths,
 the Japanese no-key refusal, upload URL rewrite + continuation, redirects, a provider echoing the
 key, internal destination, size limit, revoked token, **no key in any answer, log line or table,
-no token in any log line**), `tests/integration/broker-relay-https.test.ts` (real HTTPS to a
+no token in any log line**), `tests/integration/broker-records.test.ts` (one record per call with who / department / host
+/ path / model / sizes / tokens and nothing secret, tokens split across chunks, refusals filed by
+who decided, stop-all → `stopped` on the next call and resume, member and token caps
+(mutation-checked), an app cannot forge a relay record), `tests/integration/broker-relay-https.test.ts` (real HTTPS to a
 local provider with its own certificate: internal address refused before connecting and allowed
 by the exception, one internal answer among several refuses, one DNS lookup, TLS checked against
 the name, the whole route end to end — SSRF guard mutation-checked), `tests/unit/net-ranges.test.ts`

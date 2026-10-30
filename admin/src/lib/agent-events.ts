@@ -43,6 +43,7 @@ export const CATEGORY_LABELS: Record<ToolCategory, string> = {
   subagent: 'サブエージェント',
   question: '質問',
   other: 'その他',
+  broker: 'API キー経由の呼び出し',
 }
 
 export type DecisionTone = 'neutral' | 'allowed' | 'denied'
@@ -82,6 +83,10 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'outside-folder': '会社フォルダの外',
   'denied-read': '読み取りを禁止している場所',
   sandbox: 'AI の囲い',
+  'key-not-available': '使える API キーがない',
+  'destination-not-allowed': 'API キーで許可していない宛先・モデル',
+  'internal-address': '社内のアドレスへの送信',
+  'over-cap': 'API キーの1日の上限',
 }
 
 /** The AI sandbox's mark on a call (「AI の囲い」). */
@@ -94,6 +99,7 @@ export const AGENT_LABELS: Record<AgentKind, string> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
   'api-key': 'API キー',
+  script: 'スクリプト・道具（API キー経由）',
 }
 
 export const OUTCOME_LABELS: Record<ToolOutcome, string> = {
@@ -178,6 +184,16 @@ export function describeTarget(target: AgentEventTarget): TargetView {
       return { ...none, items: [{ kind: 'code', text: target.tool ? `${target.server} / ${target.tool}` : target.server }] }
     case 'subagent':
       return { ...none, items: [{ kind: 'plain', text: target.subagentType ? `サブエージェント ${target.subagentType}` : 'サブエージェント' }] }
+    case 'broker': {
+      const where = [target.host, target.path].filter(Boolean).join('')
+      const facts = [
+        target.model ? `モデル ${target.model}` : '',
+        target.status !== undefined ? `応答 ${target.status}` : '',
+        target.tokensIn !== undefined || target.tokensOut !== undefined ? `トークン ${target.tokensIn ?? 0} → ${target.tokensOut ?? 0}` : '',
+        target.source === 'user' ? '自分の鍵' : target.source === 'company' ? '会社の鍵' : '',
+      ].filter(Boolean).join('・')
+      return { ...none, items: [{ kind: 'code', text: `${target.service}: ${where || '（宛先なし）'}` }, ...(facts ? [{ kind: 'plain' as const, text: facts }] : [])] }
+    }
     case 'none':
       return none
     default:
