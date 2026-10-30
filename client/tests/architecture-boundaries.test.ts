@@ -209,7 +209,7 @@ test('renderer src/shared never imports src/features or src/app', () => {
  * Renderer files that still call window.electronAPI directly (2026-10-29:
  * 44; 43 with doc-review's api.ts, 39 with skills' api.ts, 36 with
  * settings' api.ts, 32 with voice's api.ts, 25 with chat's api.ts for
- * history and hand-off). Never add one: new IPC calls go
+ * history and hand-off, 20 with the rest of chat's). Never add one: new IPC calls go
  * into the feature's api.ts or src/shared/ipc/. Remove a file here when it stops calling it; a move-only
  * PR renames its entry. The count may only go down.
  */
@@ -218,11 +218,6 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/components/auth/CompanySelector.tsx',
   'src/components/auth/LoginScreen.tsx',
   'src/components/auth/ServerSetupScreen.tsx',
-  'src/components/chat/ChatAuthSettings.tsx',
-  'src/components/chat/hooks/useAgentAuth.ts',
-  'src/components/chat/hooks/useAgentInteractions.ts',
-  'src/components/chat/hooks/useChatServer.ts',
-  'src/components/chat/remoteImage.ts',
   'src/components/common/DiffViewer.tsx',
   'src/components/skill-ui/BackupHistorySlideOver.tsx',
   'src/components/skill-ui/CommitHistoryPanel.tsx',
@@ -240,7 +235,7 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/stores/appStore.ts',
   'src/stores/authStore.ts',
 ]
-const DIRECT_IPC_CEILING = 25
+const DIRECT_IPC_CEILING = 20
 
 /** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
 const isDataLayer = (clientPath: string) =>

@@ -14,6 +14,25 @@ export type HandoffReads = ElectronPort<'getHandoff' | 'onHandoffChanged'>
  * conversation and summarises it, so the conversation leaves the computer.
  */
 export type HandoffOutbound = ElectronPort<'updateHandoff' | 'completeHandoffTurn'>
+/**
+ * Reading this computer's AI setup: the chosen AI, whether Claude Code is installed
+ * and signed in, the permission mode, the API key's status (never the key).
+ */
+export type AgentSetupReads = ElectronPort<'getAuthMode' | 'getClaudeCodeStatus' | 'hasApiKey' | 'getApiKeyStatus' | 'getPermissionMode'>
+/** Checking Codex: starts the member's Codex, which asks their ChatGPT account and model list. */
+export type CodexStatusOutbound = ElectronPort<'getCodexStatus'>
+/** Changing this computer's AI setup: which AI the chat uses, what it may do without asking. */
+export type AgentSetupWrites = ElectronPort<'setAuthMode' | 'setPermissionMode'>
+/** Storing the Anthropic API key (a secret, encrypted on this computer); no other port carries it. */
+export type ApiKeyWrites = ElectronPort<'setApiKey'>
+/** Questions and approval requests from the running AI. */
+export type AgentQuestionReads = ElectronPort<'onAgentInteraction' | 'onAgentInteractionClosed' | 'getAgentInteractions' | 'onToolApprovalRequest'>
+/** Answering the running AI: the answer lets it go on (an approval lets it run the command). */
+export type AgentAnswers = ElectronPort<'respondAgentInteraction' | 'respondToolApproval'>
+/** Where the embedded chat server listens on this computer, and its token. */
+export type ChatServerReads = ElectronPort<'getChatServerInfo' | 'onChatServerInfo'>
+/** Leaving the app: opening a URL in the member's browser. */
+export type ChatOutbound = ElectronPort<'openExternal'>
 
 type Args<K extends keyof ElectronAPI> = ElectronAPI[K] extends (...args: infer A) => unknown ? A : never
 
@@ -72,4 +91,83 @@ export function updateHandoff(companyId: string, sessionId: string, outbound: Ha
 /** A turn ended normally and is saved: the memo is brought up to date when it is due. */
 export function recordHandoffTurn(companyId: string, sessionId: string, receipt: Args<'completeHandoffTurn'>[2], outbound: HandoffOutbound = window.electronAPI) {
   return outbound.completeHandoffTurn(companyId, sessionId, receipt)
+}
+
+export function getAuthMode(reads: AgentSetupReads = window.electronAPI) {
+  return reads.getAuthMode()
+}
+
+export function getClaudeCodeStatus(reads: AgentSetupReads = window.electronAPI) {
+  return reads.getClaudeCodeStatus()
+}
+
+export function isApiKeySaved(reads: AgentSetupReads = window.electronAPI) {
+  return reads.hasApiKey()
+}
+
+/** Whether a key is saved and its last four characters; the key never comes back. */
+export function getApiKeyStatus(reads: AgentSetupReads = window.electronAPI) {
+  return reads.getApiKeyStatus()
+}
+
+export function getPermissionMode(reads: AgentSetupReads = window.electronAPI) {
+  return reads.getPermissionMode()
+}
+
+export function getCodexStatus(outbound: CodexStatusOutbound = window.electronAPI) {
+  return outbound.getCodexStatus()
+}
+
+export function saveAuthMode(mode: Args<'setAuthMode'>[0], writes: AgentSetupWrites = window.electronAPI) {
+  return writes.setAuthMode(mode)
+}
+
+export function savePermissionMode(mode: Args<'setPermissionMode'>[0], writes: AgentSetupWrites = window.electronAPI) {
+  return writes.setPermissionMode(mode)
+}
+
+export function saveApiKey(apiKey: string, writes: ApiKeyWrites = window.electronAPI) {
+  return writes.setApiKey(apiKey)
+}
+
+/** A question from the AI; returns the unsubscribe. */
+export function onAgentInteraction(callback: Args<'onAgentInteraction'>[0], reads: AgentQuestionReads = window.electronAPI) {
+  return reads.onAgentInteraction(callback)
+}
+
+/** A question answered or cancelled elsewhere; returns the unsubscribe. */
+export function onAgentInteractionClosed(callback: Args<'onAgentInteractionClosed'>[0], reads: AgentQuestionReads = window.electronAPI) {
+  return reads.onAgentInteractionClosed(callback)
+}
+
+/** The questions still open for this window. */
+export function getAgentInteractions(reads: AgentQuestionReads = window.electronAPI) {
+  return reads.getAgentInteractions()
+}
+
+/** A dangerous command or private content going public waits for the member; returns the unsubscribe. */
+export function onToolApprovalRequest(callback: Args<'onToolApprovalRequest'>[0], reads: AgentQuestionReads = window.electronAPI) {
+  return reads.onToolApprovalRequest(callback)
+}
+
+/** True when main accepted the answer. */
+export function respondAgentInteraction(id: string, response: Args<'respondAgentInteraction'>[1], answers: AgentAnswers = window.electronAPI) {
+  return answers.respondAgentInteraction(id, response)
+}
+
+export function respondToolApproval(toolUseId: string, approved: boolean, answers: AgentAnswers = window.electronAPI) {
+  return answers.respondToolApproval(toolUseId, approved)
+}
+
+export function getChatServerInfo(reads: ChatServerReads = window.electronAPI) {
+  return reads.getChatServerInfo()
+}
+
+/** The address again once the page has loaded; returns the unsubscribe. */
+export function onChatServerInfo(callback: Args<'onChatServerInfo'>[0], reads: ChatServerReads = window.electronAPI) {
+  return reads.onChatServerInfo(callback)
+}
+
+export function openInBrowser(url: string, outbound: ChatOutbound = window.electronAPI) {
+  return outbound.openExternal(url)
 }

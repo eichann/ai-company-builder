@@ -85,6 +85,12 @@ one place an added agent brings its own controls; everything else asks the regis
   `client/tests/chat-server-client.test.ts`. Each method keeps its caller's error behaviour
   (steer → `unavailable`, forget never throws, suggestion / title → `null` on an error status).
   `fetch` is looked up per call (preview pages swap `window.fetch`).
+- Everything else the chat asks the main process goes through `src/features/chat/api.ts` too:
+  `AgentSetupReads` / `AgentSetupWrites` (chosen AI, permission mode), `ApiKeyWrites` (the
+  API key, a secret, on a port of its own), `CodexStatusOutbound` (the check starts Codex,
+  which asks the ChatGPT account), `AgentQuestionReads` / `AgentAnswers` (choice prompts and
+  approvals; an answer lets the AI go on), `ChatServerReads` (address and token) and
+  `ChatOutbound` (opening a URL in the browser).
 
 ## History store (`client/electron/chat-history-store.ts`, main process)
 

@@ -9,6 +9,8 @@
 // Raw HTML (`<img src=...>`) is covered separately: the chat renderer passes `skipHtml`
 // and never uses rehype-raw, so HTML tags in the message are dropped, not rendered.
 
+import { openInBrowser } from '../../features/chat/api'
+
 /** Only plain web URLs may be handed to the external browser. */
 export function isOpenableImageUrl(src: string | undefined): src is string {
   if (!src) return false
@@ -31,7 +33,7 @@ export async function openRemoteImage(
     openExternal: (url: string) => Promise<unknown>
   } = {
     confirm: (message) => window.confirm(message),
-    openExternal: (target) => window.electronAPI.openExternal(target),
+    openExternal: (target) => openInBrowser(target),
   },
 ): Promise<boolean> {
   if (!isOpenableImageUrl(url)) return false

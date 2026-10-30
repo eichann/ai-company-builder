@@ -3,6 +3,7 @@ import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import type { ApiKeyStatus } from '../../../shared/ipc-contract'
 import { DEFAULT_PERMISSION_MODE, type PermissionMode } from '../../../shared/permission-mode'
 import { VoiceShortcutSettings } from '../settings/VoiceShortcutSettings'
+import { getApiKeyStatus, getCodexStatus, getPermissionMode, saveApiKey, saveAuthMode, savePermissionMode } from '../../features/chat/api'
 import { useState, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { GearSix, Check, Lightning, CaretDown } from '@phosphor-icons/react'
@@ -26,7 +27,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
   const [saveError, setSaveError] = useState('')
   const refreshCodex = async () => {
     setCheckingCodex(true)
-    try { setCodexStatus(await window.electronAPI.getCodexStatus()) }
+    try { setCodexStatus(await getCodexStatus()) }
     catch (e) { setCodexStatus({ available: false, authenticated: false, models: [], error: `${String(e)}\n${CODEX_LOGIN_HELP}` }) }
     finally { setCheckingCodex(false) }
   }
@@ -48,11 +49,11 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
   }
 
   async function loadCurrentKey() {
-    setApiKeyStatus(await window.electronAPI.getApiKeyStatus())
+    setApiKeyStatus(await getApiKeyStatus())
   }
 
   async function loadPermissionMode() {
-    const mode = await window.electronAPI.getPermissionMode()
+    const mode = await getPermissionMode()
     loadedPermissionModeRef.current = mode
     setPermissionMode(mode)
   }
@@ -61,14 +62,14 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
     setSaving(true)
     try {
       if (authMode === 'api-key' && apiKey.trim()) {
-        const saved = await window.electronAPI.setApiKey(apiKey)
+        const saved = await saveApiKey(apiKey)
         if (!saved.success) {
           setSaveError(saved.error ?? 'APIキーを保存できませんでした。')
           return
         }
       }
-      await window.electronAPI.setAuthMode(authMode)
-      if (permissionMode !== loadedPermissionModeRef.current) await window.electronAPI.setPermissionMode(permissionMode)
+      await saveAuthMode(authMode)
+      if (permissionMode !== loadedPermissionModeRef.current) await savePermissionMode(permissionMode)
       onClose()
     } catch (error) {
       setSaveError(error instanceof Error ? error.message : String(error))

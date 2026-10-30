@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../../shared/agent-interaction'
 import type { ToolApprovalRequest } from '../../../../shared/ipc-contract'
+import { getAgentInteractions, onAgentInteraction, onAgentInteractionClosed, onToolApprovalRequest, respondAgentInteraction, respondToolApproval } from '../../../features/chat/api'
 
 /**
  * Questions the agent asks the member (choice prompts, Codex approvals;
@@ -25,26 +26,26 @@ export function useAgentInteractions(appSessionIdRef: MutableRefObject<string | 
       if (!active || closed.has(request.id)) return
       setInteractions(queue => queue.some(item => item.id === request.id) ? queue : [...queue, request])
     }
-    const unsubscribe = window.electronAPI.onAgentInteraction(add)
-    const unsubscribeClosed = window.electronAPI.onAgentInteractionClosed(request => {
+    const unsubscribe = onAgentInteraction(add)
+    const unsubscribeClosed = onAgentInteractionClosed(request => {
       closed.add(request.id)
       setInteractions(queue => queue.filter(item => item.id !== request.id))
     })
-    void window.electronAPI.getAgentInteractions().then(requests => requests.forEach(add)).catch(() => {})
+    void getAgentInteractions().then(requests => requests.forEach(add)).catch(() => {})
     return () => {
       active = false; unsubscribe(); unsubscribeClosed()
       // The conversation shown when the tab closes (not the one at mount): read at clean-up on purpose.
       // eslint-disable-next-line react-hooks/exhaustive-deps
       const sessionId = appSessionIdRef.current
-      void window.electronAPI.getAgentInteractions().then(requests => Promise.all(requests
+      void getAgentInteractions().then(requests => Promise.all(requests
         .filter(item => item.appSessionId === sessionId)
-        .map(item => window.electronAPI.respondAgentInteraction(item.id, { cancelled: true })))).catch(() => {})
+        .map(item => respondAgentInteraction(item.id, { cancelled: true })))).catch(() => {})
     }
   }, [appSessionIdRef])
 
   /** Answer a question; it leaves the queue once main accepted the answer. */
   const respondToInteraction = useCallback(async (id: string, response: AgentInteractionResponse) => {
-    const accepted = await window.electronAPI.respondAgentInteraction(id, response)
+    const accepted = await respondAgentInteraction(id, response)
     if (accepted) setInteractions(queue => queue.filter(item => item.id !== id))
     return accepted
   }, [])
@@ -62,7 +63,7 @@ export function useToolApprovals(appSessionIdRef: MutableRefObject<string | null
   const pendingApproval = pendingApprovals[0]
 
   useEffect(() => {
-    const unsub = window.electronAPI.onToolApprovalRequest((data) => {
+    const unsub = onToolApprovalRequest((data) => {
       // Only accept approval requests for this tab's session
       if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) {
         return // Not for this tab
@@ -73,7 +74,7 @@ export function useToolApprovals(appSessionIdRef: MutableRefObject<string | null
   }, [appSessionIdRef])
 
   const respondToApproval = useCallback((toolUseId: string, approved: boolean) => {
-    window.electronAPI.respondToolApproval(toolUseId, approved)
+    respondToolApproval(toolUseId, approved)
     setPendingApprovals(queue => queue.filter(p => p.toolUseId !== toolUseId))
   }, [])
 
