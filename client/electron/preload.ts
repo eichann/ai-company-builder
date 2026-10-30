@@ -14,6 +14,7 @@ import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
+import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
@@ -100,6 +101,9 @@ const api: ElectronAPI = {
   // Git operations
   gitSync: (repoPath: string, companyId: string, commitMessage: string) =>
     invoke('git:sync', repoPath, companyId, commitMessage),
+  // 「自動で受け取る」 / 「自動で送る」 (the renderer's timer; main decides whether it may run now).
+  gitAutoSync: (repoPath: string, companyId: string, mode: AutoSyncMode, state: AutoSyncRendererState) =>
+    invoke('git:autoSync', repoPath, companyId, mode, state),
   // Per-folder write access (閲覧のみ badges); refreshed by sync and the chat.
   getWriteAccess: (companyId: string, refresh?: boolean) =>
     invoke('writeAccess:get', companyId, refresh),

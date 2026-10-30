@@ -8,6 +8,8 @@ interface Props {
   companyName: string | undefined
   isLoadingPreview: boolean
   isSyncing: boolean
+  /** The sync button's tooltip (with the last automatic sync). */
+  syncTitle?: string
   onPreview: () => void
   onSync: () => void
   onShowBackups: () => void
@@ -17,7 +19,7 @@ interface Props {
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, onPreview, onSync, onShowBackups, onShowSettings }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', onPreview, onSync, onShowBackups, onShowSettings }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const setCurrentCompany = useAppStore((s) => s.setCurrentCompany)
@@ -64,7 +66,8 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, onPreview, 
           onClick={onSync}
           disabled={isSyncing || !hasCompany}
           className={`${ICON_BUTTON} disabled:opacity-50`}
-          title="サーバーと同期"
+          title={syncTitle}
+          aria-label="サーバーと同期"
         >
           {isSyncing ? (
             <SpinnerGap size={18} className="animate-spin" />

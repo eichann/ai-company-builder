@@ -71,6 +71,19 @@ what git actually sees through the app's `createGit`.
   (`sync.md`). Scenarios: "binary conflict…", "a conflicted edit is backed up even when a later
   unpushed commit renamed the file", "an earlier conflicted version is backed up…".
 
+- Automatic sync never acts for the member (`sync.md` "Automatic sync"). 「受け取る」 is a
+  fast-forward only and is held back — nothing changed — when any path the server changed is
+  changed locally, a path the server adds exists on disk (git overwrites ignored files, e.g. a
+  private clone or a file the member keeps ignored, silently), there are unpushed commits or a
+  git operation is in progress. 「送る」 cancels every question (`askLaterDialog`, `canAsk` true so
+  deletions are never synced unasked) and stops with `needs_member`. Every automatic run waits
+  while the editor has unsaved edits, an AI turn runs, a sync / download-choice change /
+  private-folder creation runs, or the last sync needs the member. Scenarios in
+  `client/tests/sync/auto-sync.test.ts`: "…never overwrites a file the member keeps ignored…",
+  "a run that must wait changes nothing…", "自動で送る never answers a question…" (each fails
+  with its guard removed); "…holds back when the member edited a file…" and "…commits the server
+  does not have yet" are also covered by `merge --ff-only`'s own refusal (two lines on purpose).
+
 ## Shared files
 
 - Nested repositories: ask **before** any mutation; cancelling changes nothing (the

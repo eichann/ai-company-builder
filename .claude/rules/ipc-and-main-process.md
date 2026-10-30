@@ -32,7 +32,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `agent-interactions` (tool approvals), `fs` (fs:*, dialog:selectDirectory,
   editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
-  `sync` (git:sync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
+  `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded

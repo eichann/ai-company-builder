@@ -47,6 +47,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[] }> = {
   'env:update': { args: [IN, { A: '1' }], paths: [0] },
   'privateFolders:reservedPathRefusal': { args: [IN_FILE], paths: [0] },
   'git:sync': { args: [IN, 'co', 'msg'], paths: [0] },
+  'git:autoSync': { args: [IN, 'co', 'receive', { unsavedEdits: false, needsMember: false, offline: false }], paths: [0] },
   'git:preview': { args: [IN], paths: [0] },
   'git:generateSummary': { args: [IN], paths: [0] },
   'git:revertFile': { args: [IN, 'a.txt', 'modified'], paths: [0] },

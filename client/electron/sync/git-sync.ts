@@ -62,7 +62,7 @@ import {
   type ReservedHoldBack,
 } from './reserved-path'
 import { createPathChecker, pathPrefixes, type PathChecker } from './path-check'
-import { privateBackupsDir, readPrivateScopesCache, accessLostMessage, madePublicMessage, newPrivateFolderMessage, existingFolderMovedMessage, type MyPrivateScope } from './private-folders'
+import { cloneStateOf, safeScopeDir, privateBackupsDir, readPrivateScopesCache, accessLostMessage, madePublicMessage, newPrivateFolderMessage, existingFolderMovedMessage, type MyPrivateScope } from './private-folders'
 import {
   isUnderAny,
   placePrivateFolders,
@@ -71,9 +71,12 @@ import {
   removeExcludedClone,
   syncReadOnlyScope,
 } from './private-sync'
-import type { SyncDeps } from './types'
+import type { SyncDeps, SyncDialog } from './types'
 import { writeExcludeLines, type ExcludeBlock } from './local-excludes'
 import { isTempSaveFile, TEMP_SAVE_EXCLUDE_PATTERN } from '../../shared/temp-save-file'
+import { NEEDS_MEMBER_ERROR, type ReceiveResult } from '../../shared/auto-sync'
+import { receiveIntoRepo, type RepoReceiveOutcome } from './receive'
+import { stagedAutoCommitMessage } from './auto-message'
 
 /** This computer's ignore rule for the app's temporary save files (.git/info/exclude). */
 const TEMP_SAVE_EXCLUDES: ExcludeBlock = {
@@ -1606,8 +1609,42 @@ function isCancelled(result: GitSyncResult): boolean {
   return !result.success && /^同期を中止しました|^同期がキャンセルされました/.test(error)
 }
 
+/** How a sync was started: `auto` = 「自動で送る」 (template message, questions stop it). */
+export interface SyncRunOptions {
+  auto?: boolean
+}
+
+/** Shown when 「自動で送る」 stopped at a question (the member's next manual sync asks it). */
+export const AUTO_NEEDS_MEMBER_MESSAGE = '自動で送る途中で、確認が必要なことがありました。変更はこのPCに残っています。「サーバーと同期」ボタンを押して続けてください。'
+
+/**
+ * The dialog of an automatic send: nothing is decided for the member. Any
+ * question cancels (the same as the member pressing キャンセル: nothing
+ * changes) and is recorded, so the result can say a manual sync is needed.
+ * canAsk stays true: the no-window path would sync deletions unasked.
+ */
+function askLaterDialog(asked: { value: boolean }): SyncDialog {
+  const later = async () => { asked.value = true; return 'cancel' as const }
+  return {
+    canAsk: () => true,
+    confirmSharedNestedRepo: later,
+    confirmExternalNestedRepo: later,
+    confirmDeletedFiles: later,
+    confirmProtectedConfigRestore: later,
+    confirmWriteDeniedRestore: later,
+  }
+}
+
 export interface GitSync {
-  (repoPath: string, companyId: string, commitMessage: string): Promise<GitSyncResult>
+  (repoPath: string, companyId: string, commitMessage: string, options?: SyncRunOptions): Promise<GitSyncResult>
+  /**
+   * 「自動で受け取る」: fast-forward the company repository and each readable
+   * private folder's clone to the server, only where nothing of the
+   * member's is touched (./receive.ts). Never commits or pushes.
+   */
+  receive(repoPath: string, companyId: string): Promise<ReceiveResult>
+  /** A sync, receive or private-folder change holds a repository lock right now. */
+  isRunning(): boolean
   /**
    * Apply the member's download choices for private folders now (settings
    * panel): download a folder that is no longer excluded, and remove the
@@ -1660,9 +1697,9 @@ export function createGitSync(deps: SyncDeps): GitSync {
   }
 
   /** Sync one readable private folder's clone. */
-  const syncScope = (repoPath: string, companyId: string, commitMessage: string, scope: MyPrivateScope, dir: string): Promise<PrivateFolderSyncReport> =>
+  const syncScope = (d: SyncDeps, repoPath: string, companyId: string, commitMessage: string, scope: MyPrivateScope, dir: string): Promise<PrivateFolderSyncReport> =>
     locked(dir, async () => {
-      const scopeDeps = { ...deps, dialog: prefixedDialog(deps.dialog, scope.path) }
+      const scopeDeps = { ...d, dialog: prefixedDialog(d.dialog, scope.path) }
       const r = scope.canWrite
         ? await runOne(scopeDeps, dir, companyId, commitMessage, {
             kind: 'scope', backupsDir: privateBackupsDir(repoPath), backupPrefix: scope.path,
@@ -1676,10 +1713,10 @@ export function createGitSync(deps: SyncDeps): GitSync {
     })
 
   /** Place every readable private folder and sync (or retire) each clone. */
-  const syncPrivateFolders = async (repoPath: string, companyId: string, commitMessage: string, scopes: MyPrivateScope[], options: { syncEach: boolean }) => {
+  const syncPrivateFolders = async (d: SyncDeps, repoPath: string, companyId: string, commitMessage: string, scopes: MyPrivateScope[], options: { syncEach: boolean }) => {
     const reports: PrivateFolderSyncReport[] = []
     const movedAside: string[] = []
-    for (const placement of await placePrivateFolders(deps, repoPath, scopes)) {
+    for (const placement of await placePrivateFolders(d, repoPath, scopes)) {
       const { scope } = placement
       if (placement.kind === 'failed') {
         reports.push({ path: scope.path, success: false, errorType: 'network', error: `非公開フォルダをダウンロードできませんでした。\n${placement.error}` })
@@ -1689,25 +1726,25 @@ export function createGitSync(deps: SyncDeps): GitSync {
       if (placement.kind === 'excluded') {
         if (!placement.clone) continue
         // Left out in settings: push its edits first, then remove it.
-        const r = await syncScope(repoPath, companyId, commitMessage, scope, placement.dir)
-        const removed = r.success && await locked(placement.dir, () => removeExcludedClone(deps, repoPath, placement.dir)).catch(() => false)
+        const r = await syncScope(d, repoPath, companyId, commitMessage, scope, placement.dir)
+        const removed = r.success && await locked(placement.dir, () => removeExcludedClone(d, repoPath, placement.dir)).catch(() => false)
         reports.push({ ...r, removed })
         continue
       }
       if (!options.syncEach && !placement.cloned) continue
-      reports.push({ ...(await syncScope(repoPath, companyId, commitMessage, scope, placement.dir)), cloned: placement.cloned })
+      reports.push({ ...(await syncScope(d, repoPath, companyId, commitMessage, scope, placement.dir)), cloned: placement.cloned })
     }
     return { reports, movedAside }
   }
 
-  const sync = (async (repoPath: string, companyId: string, commitMessage: string): Promise<GitSyncResult> =>
+  const syncWith = (runDeps: SyncDeps, repoPath: string, companyId: string, commitMessage: string): Promise<GitSyncResult> =>
     locked(repoPath, async () => {
       // Before the company repository: what changed in the member's access,
       // and the local excludes that keep private content out of it.
-      const prep = await preparePrivateFolders(deps, repoPath, companyId, pathChecker)
+      const prep = await preparePrivateFolders(runDeps, repoPath, companyId, pathChecker)
       const cache = prep.cache
       const readable = cache ? [...cache.scopes, ...(cache.pendingPublic ?? [])] : []
-      const company = await runOne(deps, repoPath, companyId, commitMessage, {
+      const company = await runOne(runDeps, repoPath, companyId, commitMessage, {
         kind: 'company',
         privatePaths: readable.map(s => s.path),
         // Only for a server that knows private folders (it answered /me/scopes once).
@@ -1731,7 +1768,7 @@ export function createGitSync(deps: SyncDeps): GitSync {
 
       // Then each readable private folder, whatever the company sync did:
       // a failure in one repository must not hold the others back.
-      const { reports, movedAside } = await syncPrivateFolders(repoPath, companyId, commitMessage, cache.scopes, { syncEach: true })
+      const { reports, movedAside } = await syncPrivateFolders(runDeps, repoPath, companyId, commitMessage, cache.scopes, { syncEach: true })
       fields.privateFolders = reports
       const cloned = reports.filter(r => r.cloned && r.success).map(r => r.path)
       if (cloned.length > 0) {
@@ -1753,13 +1790,54 @@ export function createGitSync(deps: SyncDeps): GitSync {
         errorType: failed[0].errorType ?? 'unknown',
         error: `${failures.join('\n\n')}\n\nその他のフォルダは同期しました（${companyMessage}）`,
       } as GitSyncResult, notes, fields)
-    })) as GitSync
+    })
+
+  // 「自動で送る」: the same sync with a template message and no questions answered for the member.
+  const autoDeps = (asked: { value: boolean }): SyncDeps => ({
+    ...deps,
+    dialog: askLaterDialog(asked),
+    generateCommitMessage: async (repoPath: string) => stagedAutoCommitMessage(deps.createGit(repoPath)),
+  })
+
+  const sync = (async (repoPath: string, companyId: string, commitMessage: string, options: SyncRunOptions = {}): Promise<GitSyncResult> => {
+    if (!options.auto) return syncWith(deps, repoPath, companyId, commitMessage)
+    const asked = { value: false }
+    const result = await syncWith(autoDeps(asked), repoPath, companyId, 'Sync from AI Company Builder')
+    if (!asked.value || result.success) return result
+    const error = 'error' in result && typeof result.error === 'string' ? result.error : ''
+    return { ...result, errorType: NEEDS_MEMBER_ERROR, error: error ? `${AUTO_NEEDS_MEMBER_MESSAGE}\n\n${error}` : AUTO_NEEDS_MEMBER_MESSAGE } as GitSyncResult
+  }) as GitSync
 
   sync.applyPrivateFolderChoices = (repoPath, companyId) => locked(repoPath, async () => {
     const cache = readPrivateScopesCache(repoPath)
     if (!cache || cache.companyId !== companyId || cache.scopes.length === 0) return []
-    return (await syncPrivateFolders(repoPath, companyId, 'Sync from AI Company Builder', cache.scopes, { syncEach: false })).reports
+    return (await syncPrivateFolders(deps, repoPath, companyId, 'Sync from AI Company Builder', cache.scopes, { syncEach: false })).reports
   })
+
+  sync.receive = async (repoPath, companyId) => {
+    const outcomes: RepoReceiveOutcome[] = []
+    const company = await locked(repoPath, () => receiveIntoRepo(deps.createGit(repoPath), repoPath, deps.log))
+    if (company.kind === 'offline') return { success: false, received: 0, heldBack: 0, offline: true }
+    outcomes.push(company)
+    // Each readable private folder already on this computer (nothing is
+    // cloned or removed here: access changes are the next sync's job).
+    const cache = readPrivateScopesCache(repoPath)
+    if (cache && cache.companyId === companyId) {
+      const notDownloaded = readSparseConfig(repoPath).excluded
+      for (const scope of cache.scopes) {
+        if (isNotDownloaded(notDownloaded, scope.path)) continue
+        const dir = safeScopeDir(repoPath, scope.path)
+        if (!dir || await cloneStateOf(deps.createGit, dir, scope) !== 'clone') continue
+        outcomes.push(await locked(dir, () => receiveIntoRepo(deps.createGit(dir), dir, deps.log)))
+      }
+    }
+    const received = outcomes.reduce((n, o) => n + (o.kind === 'received' ? o.files : 0), 0)
+    const heldBack = outcomes.filter(o => o.kind === 'held-back').length
+    if (received > 0 || heldBack > 0) deps.log.log(`Auto receive: ${received} file(s) received, ${heldBack} repository(ies) held back`)
+    return { success: true, received, heldBack }
+  }
+
+  sync.isRunning = () => syncLocks.size > 0
 
   sync.pathChecker = pathChecker
 

@@ -97,7 +97,9 @@ the machine is shared — CI runs all of it.
 - `partial-clone.test.ts` (every guard for a partial member; it never downloads unpicked
   departments), `outside-checkout.test.ts`, `folder-exclusions.test.ts` (sub-folders, nested
   choices, cone-mode migration, stale and case-variant exclusions), `large-files.test.ts`,
-  `user-hooks.test.ts`, `write-denied.test.ts`, `private-folders.test.ts`.
+  `user-hooks.test.ts`, `write-denied.test.ts`, `private-folders.test.ts`, `auto-sync.test.ts`
+  (automatic receive / send through `member.autoSync(mode, conditions)`, the same decision as
+  `git:autoSync`).
 - `characterization.test.ts` holds sync to a transcript recorded from the pre-extraction handler
   (`characterization.golden.json`). Re-record with `UPDATE_SYNC_GOLDEN=1` only for an intended
   behaviour change, and review the JSON diff in the PR.
