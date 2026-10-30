@@ -30,11 +30,13 @@ type Row = {
   decision: string
   guard_reason: string | null
   outcome: string | null
+  sandbox: string | null
+  skill: string | null
   client_version: string | null
 }
 
 const COLUMNS = `seq, id, call_id, user_id, received_at, at, client_at, at_adjusted, duration_ms, conversation_id, turn_id,
-  department, agent, model, subagent_type, tool, category, target, decision, guard_reason, outcome, client_version`
+  department, agent, model, subagent_type, tool, category, target, decision, guard_reason, outcome, sandbox, skill, client_version`
 
 function toRow(r: Row): AgentEventRow {
   let target: unknown = { kind: 'none' }
@@ -61,6 +63,8 @@ function toRow(r: Row): AgentEventRow {
     decision: r.decision,
     guardReason: r.guard_reason,
     outcome: r.outcome,
+    sandbox: r.sandbox,
+    skill: r.skill,
     clientVersion: r.client_version,
   }
 }
@@ -97,8 +101,8 @@ export function sqliteAgentEventRepository(conn: Database.Database): AgentEventR
         INSERT OR IGNORE INTO agent_events (
           company_id, id, user_id, received_at, at, client_at, at_adjusted, version, call_id, duration_ms,
           conversation_id, turn_id, department, department_key, agent, model, subagent_type, tool, category,
-          target_kind, target, target_text, target_roots, decision, guard_reason, outcome, client_version
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          target_kind, target, target_text, target_roots, decision, guard_reason, outcome, sandbox, skill, client_version
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
       return conn.transaction(() => {
         let stored = 0
@@ -107,7 +111,7 @@ export function sqliteAgentEventRepository(conn: Database.Database): AgentEventR
             companyId, e.id, e.userId, e.receivedAt, e.at, e.clientAt, e.atAdjusted ? 1 : 0, e.callId, e.durationMs,
             e.conversationId, e.turnId, e.department, e.departmentKey, e.agent, e.model, e.subagentType, e.tool, e.category,
             e.targetKind, JSON.stringify(e.target), e.targetText, e.targetRoots.length ? `\n${e.targetRoots.join('\n')}\n` : '',
-            e.decision, e.guardReason, e.outcome, e.clientVersion,
+            e.decision, e.guardReason, e.outcome, e.sandbox, e.skill, e.clientVersion,
           ).changes
         }
         return stored
@@ -132,6 +136,14 @@ export function sqliteAgentEventRepository(conn: Database.Database): AgentEventR
         ORDER BY day ASC, user_id ASC, category ASC
       `).all(tzModifier, ...deniedDecisions, ...w.params) as Array<{ day: string; user_id: string; category: string; denied: number; n: number }>
       return rows.map(r => ({ day: r.day, userId: r.user_id, category: r.category, denied: r.denied === 1, count: r.n }))
+    },
+
+    sandboxEvents(companyId, from, to, limit) {
+      return (conn.prepare(`
+        SELECT ${COLUMNS} FROM agent_events
+        WHERE company_id = ? AND at >= ? AND at < ? AND (sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox'))
+        ORDER BY at DESC, seq DESC LIMIT ?
+      `).all(companyId, from, to, limit) as Row[]).map(toRow)
     },
 
     countBefore(companyId, cutoff) {

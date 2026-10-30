@@ -14,6 +14,9 @@ paths:
   - "admin/src/app/companies/*/agent-sandbox/**"
   - "admin/src/lib/agent-sandbox.ts"
   - "admin/tests/agent-sandbox.test.tsx"
+  - "admin/src/components/agent-sandbox/**"
+  - "client/electron/services/agent-policy-store.ts"
+  - "client/tests/sandbox-observe.test.ts"
 ---
 
 # AI sandbox (「AI の囲い」): the company's policy, handed to the agents' own sandboxes
@@ -84,7 +87,45 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   `admin/src/lib/agent-sandbox.ts`. Types: `shared/types/agent-sandbox.ts` re-exported from
   `admin/src/lib/api.ts`, pinned by `admin-contract.test.ts`.
 
-Tests: `server/tests/integration/agent-sandbox.test.ts` (who may read / change, refusals of `*`
+## Observe and the log (S2)
+
+- The app reads its policy per chat turn: `services/agent-policy-store.ts` (`GET
+  /me/agent-policy`, 3 s budget, ETag; memory only — a failed refresh keeps the last answer, a
+  policy never received (or one that does not validate) = off this turn, logged).
+  `features/chat/server-config.ts` `getAgentSandbox` adds this computer's facts (home, userData,
+  `PATH` folders, the server's host); `chat-server.ts` → `decideTurnSandbox(settings, host,
+  capabilities.sandbox)` → the request's `sandbox` (`TurnSandbox`, `agents/connection.ts`).
+  `enforce` with an agent that cannot take the sandbox (registry `capabilities.sandbox`) runs as
+  observe for that turn (logged).
+- `observe` marks events (`sandbox: 'would-block'`) the tracker's `concern` finds
+  (`sandboxConcern`): a command naming a URL host outside the list, a denied place spelled in a
+  command (absolute, `~/`, `$HOME/`) or a Read-tool path inside one. Best effort: a script can
+  reach anything; the marks are for tuning the list, enforcing is the CLI's job.
+- `enforce`: a failed command whose error carries Claude Code's `<sandbox_violations>` (`deny
+  network-outbound host:port`, verified on 2.1.314) or `Operation not permitted` on a place
+  `concern` names is logged `sandbox: 'blocked'`, `guardReason: 'sandbox'`, the refused hosts
+  added to the target (`parseSandboxViolation`, `recordToolEnd`).
+- Reads refused by Claude Code's permission rules (the company Macs' managed settings, the
+  sandbox's `Read(...)` denies) run **no hook** (verified: no PreToolUse / PostToolUse(Failure)
+  / PermissionDenied), so M1 missed them. `createDeniedCallWatcher` (`claude-tool-events.ts`)
+  reads the message stream: a `tool_use` whose `tool_result` is an error containing 「denied by
+  your permission settings」 → `policy-denied` / `guardReason: 'denied-read'`, in every mode.
+- Every command event now carries the hosts of URLs it names (`target.hosts`, ≤ 5, host only),
+  and every event the skill the turn is running (`skill`: Claude's `Skill` tool, or a path under
+  `.claude|.agents|.codex/skills/<name>/`).
+- Server: `agent_events.sandbox` / `.skill` (idempotent `ALTER TABLE`), hosts searchable with
+  `q`; `GET /agent-events/sandbox?from&to` (owner/admin; default 30 days, ≤ 20,000 newest
+  events) → `byHost` / `bySkill` / `byPlace` with would-block / blocked / denied-read counts,
+  members, last time. Admin: the 「囲うと止まる操作（直近30日）」 card on 「AI の囲い」
+  (`components/agent-sandbox/impact-card.tsx`); log rows show 「囲うと止まる」 / 「囲いで止まった」 +
+  the skill, and a command's 宛先.
+
+Tests: `client/tests/sandbox-observe.test.ts` (observe marks hosts and denied places but never
+keeps a URL path; nothing without a sandbox; enforce reads the violations, an unrelated
+`Operation not permitted` is not the sandbox; a permission-rule refusal with no hook is logged;
+the skill; enforce → observe without the capability; the policy store),
+`server/tests/integration/agent-events.test.ts` (sandbox / skill / hosts kept, the impact table,
+owner/admin only), `server/tests/integration/agent-sandbox.test.ts` (who may read / change, refusals of `*`
 / `~`, a save reaches every member's policy, an override changes only that member, ETag),
 `admin/tests/agent-sandbox.test.tsx` (menu and page for owner/admin only, an open-everything
 list cannot be saved, what a save sends, an override changes one member),

@@ -19,6 +19,7 @@ import type { HandoffStore } from '../../handoff/store'
 import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
+import type { AgentPolicyStore } from '../../services/agent-policy-store'
 import type { ShellEnvironment } from '../../services/shell-env'
 import { notDownloadedFolders } from '../../sync/not-downloaded'
 import type { WriteAccessStore } from '../../write-access-store'
@@ -47,6 +48,14 @@ export interface ChatServerConfigDeps {
   cancelChoicePrompts: (appSessionId: string) => void
   /** The AI action log (services/agent-events.ts). */
   agentEvents: AgentEventRecorder
+  /** The member's AI policy per company (services/agent-policy-store.ts). */
+  agentPolicy: AgentPolicyStore
+  /** The server's URL (its host is always reachable from the sandbox). */
+  serverUrl: () => string
+}
+
+function hostOf(url: string): string | undefined {
+  try { return new URL(url).hostname || undefined } catch { return undefined }
 }
 
 export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerConfig {
@@ -81,6 +90,23 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         getPrivateFolders: () => deps.privateFolders.readable(companyId),
         getInstructionAuthority: () => deps.privateFolders.authority(companyId),
         getPrivateFolderView: () => deps.privateFolders.guardView(root),
+      }
+    },
+    getAgentSandbox: async (companyId, root) => {
+      const policy = await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })
+      if (!policy) return undefined
+      const { home, appDataDirs } = deps.agentEvents.paths()
+      if (!home) return undefined
+      const pathVar = deps.shellEnv.env().PATH ?? ''
+      return {
+        settings: policy.sandbox,
+        host: {
+          home,
+          companyRoot: root,
+          appDataDirs,
+          toolDirs: pathVar.split(process.platform === 'win32' ? ';' : ':').filter(dir => dir.startsWith('/')),
+          serverHost: hostOf(deps.serverUrl()),
+        },
       }
     },
     createCompanyFiles: (companyId, root, signal) => {

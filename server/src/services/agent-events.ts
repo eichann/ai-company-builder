@@ -44,6 +44,8 @@ import {
   AGENT_KINDS,
   DENIED_DECISIONS,
   GUARD_REASONS,
+  SANDBOX_MARKS,
+  SENSITIVE_LOCATIONS,
   TOOL_CATEGORIES,
   TOOL_DECISIONS,
   TOOL_OUTCOMES,
@@ -61,6 +63,9 @@ import {
   type AgentEventViewer,
   type AgentEventViewerMode,
   type AgentEventViewers,
+  type SandboxImpact,
+  type SandboxImpactCounts,
+  type SensitiveLocation,
   type ShownFileTarget,
   type ToolCategory,
   type ToolTarget,
@@ -79,6 +84,8 @@ const MAX_SCAN = 2000
 const MAX_Q = 200
 const MAX_SUMMARY_DAYS = 400
 const DEFAULT_SUMMARY_DAYS = 30
+/** Sandbox events counted per request (newest first); `truncated` beyond. */
+const SANDBOX_IMPACT_CAP = 20_000
 const HISTORY_LIMIT = 20
 const PRUNE_CHUNK = 500
 const RATE_TABLE_LIMIT = 10_000
@@ -109,7 +116,7 @@ function targetParts(t: AgentEventTarget): string[] {
   switch (t.kind) {
     case 'file': return [t.path]
     case 'files': return t.files.flatMap(f => (f.kind === 'file' ? [f.path] : []))
-    case 'command': return t.programs
+    case 'command': return [...t.programs, ...(t.hosts ?? [])]
     case 'web': return t.host ? [t.host] : []
     case 'mcp': return t.tool ? [t.server, t.tool] : [t.server]
     case 'subagent': return t.subagentType ? [t.subagentType] : []
@@ -291,6 +298,8 @@ export function createAgentEventService(deps: AgentEventDeps) {
       decision: pick(TOOL_DECISIONS, row.decision, 'policy-default'),
       guardReason: pickOrNull(GUARD_REASONS, row.guardReason),
       outcome: pickOrNull(TOOL_OUTCOMES, row.outcome),
+      sandbox: pickOrNull(SANDBOX_MARKS, row.sandbox),
+      skill: row.skill,
       clientVersion: row.clientVersion,
     }
   }
@@ -360,6 +369,8 @@ export function createAgentEventService(deps: AgentEventDeps) {
           decision: e.decision,
           guardReason: e.guardReason ?? null,
           outcome: e.outcome ?? null,
+          sandbox: e.sandbox ?? null,
+          skill: e.skill ?? null,
           clientVersion: version,
         })
       }
@@ -409,6 +420,63 @@ export function createAgentEventService(deps: AgentEventDeps) {
     },
 
     /** GET …/agent-events/summary: counts per member and day (+ per category). */
+    /**
+     * GET …/agent-events/sandbox?from&to (owner/admin): what the AI sandbox
+     * blocks or would block, by host, by skill and by kind of secret place —
+     * the table the company tunes its host list with. Default: the last 30 days.
+     */
+    sandboxImpact(member: Member, raw: RawQuery): Outcome<SandboxImpact> {
+      const allowed = requireFullAccess(member, AGENT_EVENTS_SETTINGS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const toIso = parseIso(raw.to)
+      const fromIso = parseIso(raw.from)
+      if (toIso === null) return refuse('bad-request', 'Invalid to (ISO date expected)')
+      if (fromIso === null) return refuse('bad-request', 'Invalid from (ISO date expected)')
+      const to = toIso ?? new Date(clock.nowMs() + AGENT_EVENTS_MAX_FUTURE_SKEW_MS).toISOString()
+      const from = fromIso ?? new Date(Date.parse(to) - DEFAULT_SUMMARY_DAYS * DAY_MS).toISOString()
+      if (Date.parse(from) >= Date.parse(to)) return refuse('bad-request', 'from must be before to')
+      if (Date.parse(to) - Date.parse(from) > MAX_SUMMARY_DAYS * DAY_MS) return refuse('bad-request', `At most ${MAX_SUMMARY_DAYS} days`)
+      const rows = events.sandboxEvents(member.companyId, from, to, SANDBOX_IMPACT_CAP + 1)
+      const truncated = rows.length > SANDBOX_IMPACT_CAP
+      const counted = truncated ? rows.slice(0, SANDBOX_IMPACT_CAP) : rows
+      type Acc = Omit<SandboxImpactCounts, 'members'> & { users: Set<string> }
+      const add = <K>(map: Map<K, Acc>, key: K, row: AgentEventRow) => {
+        let acc = map.get(key)
+        if (!acc) { acc = { wouldBlock: 0, blocked: 0, deniedReads: 0, users: new Set(), lastAt: row.at }; map.set(key, acc) }
+        if (row.sandbox === 'would-block') acc.wouldBlock++
+        else if (row.sandbox === 'blocked' || row.guardReason === 'sandbox') acc.blocked++
+        if (row.guardReason === 'denied-read') acc.deniedReads++
+        acc.users.add(row.userId)
+        if (row.at > acc.lastAt) acc.lastAt = row.at
+      }
+      const hosts = new Map<string, Acc>()
+      const skills = new Map<string | null, Acc>()
+      const places = new Map<SensitiveLocation | null, Acc>()
+      for (const row of counted) {
+        const target = parseToolTarget(row.target)
+        add(skills, row.skill, row)
+        if (target?.kind === 'command') for (const host of target.hosts ?? []) add(hosts, host, row)
+        const files = target?.kind === 'file' || target?.kind === 'outside' ? [target] : target?.kind === 'files' ? target.files : []
+        const read = row.guardReason === 'denied-read' || (target?.kind !== 'command' && row.sandbox !== null)
+        if (read) {
+          const kinds = [...new Set(files.map(f => pickOrNull(SENSITIVE_LOCATIONS, f.sensitive ?? null)))]
+          for (const kind of kinds.length ? kinds : [null]) add(places, kind, row)
+        }
+      }
+      const total = (a: Acc) => a.wouldBlock + a.blocked + a.deniedReads
+      const list = <K, T>(map: Map<K, Acc>, wrap: (key: K) => T) => [...map.entries()]
+        .sort((a, b) => total(b[1]) - total(a[1]) || (b[1].lastAt > a[1].lastAt ? 1 : -1))
+        .map(([key, a]) => ({ ...wrap(key), wouldBlock: a.wouldBlock, blocked: a.blocked, deniedReads: a.deniedReads, members: a.users.size, lastAt: a.lastAt }))
+      return ok({
+        from, to,
+        byHost: list(hosts, host => ({ host })),
+        bySkill: list(skills, skill => ({ skill })),
+        byPlace: list(places, place => ({ place })),
+        total: counted.length,
+        truncated,
+      })
+    },
+
     summary(member: Member, raw: RawQuery): Outcome<AgentEventSummary> {
       const reader = readerOf(member)
       if (!reader.ok) return reader

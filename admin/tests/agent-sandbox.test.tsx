@@ -85,6 +85,23 @@ describe('AI の囲い', () => {
     })
   })
 
+  it('shows which hosts and skills the sandbox stops or would stop, from the log', async () => {
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/agent-events/sandbox`]: {
+        body: ok({
+          from: '', to: '', total: 3, truncated: false,
+          byHost: [{ host: 'upload.example.net', wouldBlock: 2, blocked: 1, deniedReads: 0, members: 2, lastAt: '2026-10-30T00:00:00.000Z' }],
+          bySkill: [{ skill: 'create-movie', wouldBlock: 2, blocked: 1, deniedReads: 0, members: 2, lastAt: '2026-10-30T00:00:00.000Z' }],
+          byPlace: [{ place: 'ssh', wouldBlock: 0, blocked: 0, deniedReads: 1, members: 1, lastAt: '2026-10-30T00:00:00.000Z' }],
+        }),
+      },
+    })
+    renderInCompany(<AgentSandboxPage />)
+    const hosts = await screen.findByRole('table', { name: '宛先ごと' })
+    expect(within(hosts).getByText('upload.example.net')).toBeInTheDocument()
+    expect(within(screen.getByRole('table', { name: 'スキルごと' })).getByText('create-movie')).toBeInTheDocument()
+  })
+
   it('choosing one member\'s mode changes only that member (staged rollout)', async () => {
     const calls = stubApi(ownerCapabilities, {
       [`PUT ${base}/agent-sandbox/overrides/u_owner`]: (call) => ({

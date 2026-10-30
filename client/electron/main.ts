@@ -47,6 +47,7 @@ import { createAppGit } from './services/app-git'
 import { createCommitMessages } from './services/commit-messages'
 import { createAgentEventRecorder } from './services/agent-events'
 import { createAgentEventSender } from './services/agent-event-sender'
+import { createAgentPolicyStore } from './services/agent-policy-store'
 import os from 'node:os'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -213,6 +214,8 @@ const writeAccessStore = createWriteAccessStore({
 })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
+// The member's AI policy per company (「AI の囲い」; M2's stop joins it), read at each chat turn.
+const agentPolicyStore = createAgentPolicyStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
 // The AI action log (monitoring M1): the recorder (memory + console) and its
@@ -232,6 +235,7 @@ registerAuthIpc(ipc, {
   serverUrl: getServerApiUrl,
   onSignedOut: () => {
     writeAccessStore.clear()
+    agentPolicyStore.clear()
     companyFilesApi.clear()
     agentEventSender.signedOut()
   },
@@ -324,6 +328,8 @@ app.whenReady().then(async () => {
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents,
+      agentPolicy: agentPolicyStore,
+      serverUrl: getServerApiUrl,
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })

@@ -63,7 +63,7 @@ function event(over: Partial<AgentEventRecord>): AgentEventRecord {
     at: new Date().toISOString(), atAdjusted: false, receivedAt: new Date().toISOString(), durationMs: 1200,
     conversationId: 'conv-a', turnId: 't1', department: '営業部', agent: 'claude-code', model: 'claude-opus-5-5',
     subagentType: null, tool: 'Read', category: 'read', target: { kind: 'file', path: '営業部/提案書.md' },
-    decision: 'auto-allowed', guardReason: null, outcome: 'ok', clientVersion: null, ...over,
+    decision: 'auto-allowed', guardReason: null, outcome: 'ok', sandbox: null, skill: null, clientVersion: null, ...over,
   }
 }
 

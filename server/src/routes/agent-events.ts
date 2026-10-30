@@ -10,6 +10,8 @@
  *                                                   their departments' part, masked)
  *   GET  /agent-events/summary?from&to&tzOffsetMinutes
  *                                                   counts per member and day
+ *   GET  /agent-events/sandbox?from&to              what the AI sandbox blocks / would block,
+ *                                                   by host, skill, secret place (owner/admin)
  *   GET  /agent-events/settings                     retention + viewers + history (owner/admin)
  *   PUT  /agent-events/settings                     { retentionDays?, viewers? } (owner/admin)
  *   GET  /agent-events/settings/retention-preview?days=N   what N days would delete
@@ -67,6 +69,14 @@ agentEventsRoute.get('/agent-events/summary', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   const result = agentEvents.summary(member, c.req.query())
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value })
+})
+
+agentEventsRoute.get('/agent-events/sandbox', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const result = agentEvents.sandboxImpact(member, c.req.query())
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })

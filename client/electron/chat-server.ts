@@ -19,7 +19,9 @@ import {
   type UIMessage,
 } from 'ai'
 import { createChunkInjector, limitedUIMessageStreamResponse, type ChunkInjector } from './ui-stream-limits'
-import type { AgentEvent, AgentHostConfig, AskUser } from './agents/connection'
+import type { AgentEvent, AgentHostConfig, AskUser, TurnSandbox } from './agents/connection'
+import { decideTurnSandbox, type SandboxHost } from '../shared/agents/sandbox-policy'
+import type { AgentSandboxSettings } from '../../shared/core/agent-sandbox'
 import { CHOICE_PART_TYPE, type ChoicePromptRecord, type ChoiceResult } from '../shared/choice-prompt'
 import { createAgentConnection, type AgentHost } from './agents/registry'
 import { AGENTS, isAgentId, type AgentId } from '../shared/agents/registry'
@@ -60,6 +62,11 @@ export interface ChatServerConfig extends AgentHost {
    * returns undefined when nothing is known — then nothing is blocked.
    */
   getWriteGuard?: (companyId: string, companyRoot: string) => Promise<WriteGuard | undefined>
+  /**
+   * The member's AI sandbox setting for this company and this computer's facts
+   * (「AI の囲い」, sandbox-policy.ts); undefined = unknown (off this turn).
+   */
+  getAgentSandbox?: (companyId: string, companyRoot: string) => Promise<{ settings: AgentSandboxSettings; host: SandboxHost } | undefined>
   /** Cancel a conversation's pending tool approvals and choice cards (a stopped turn). */
   cancelInteractions?: (appSessionId: string) => void
 }
@@ -288,7 +295,14 @@ export async function startChatServer(config: ChatServerConfig) {
       } : undefined
     // The AI action log: the agents report to config.onToolEvent; this is what only the server knows.
     const toolEventContext = { companyId, companyRoot: companyRootPath, turnId: crypto.randomUUID(), department: activeDepartment?.folder }
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext }
+    // 「AI の囲い」: the member's sandbox for this turn (agent-sandbox.md).
+    const sandboxInput = connection.ownsConversation && companyId && companyRootPath
+      ? await Promise.resolve(config.getAgentSandbox?.(companyId, companyRootPath)).catch(() => undefined) : undefined
+    const sandboxDecision = sandboxInput ? decideTurnSandbox(sandboxInput.settings, sandboxInput.host, can.sandbox) : undefined
+    if (sandboxDecision && sandboxDecision.mode !== 'off' && sandboxDecision.degraded) console.warn(`[agent-sandbox] ${authMode} cannot run the sandbox here; recording only this turn`)
+    const sandbox: TurnSandbox | undefined = sandboxInput && sandboxDecision && sandboxDecision.mode !== 'off'
+      ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable } : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

@@ -46,11 +46,25 @@ export const DENIED_DECISIONS: readonly ToolDecision[] = ['member-denied', 'guar
 export const GUARD_REASONS = [
   'read-only-folder', 'not-downloaded', 'reserved-path', 'instruction-file', 'git-clone', 'git-init',
   'private-read', 'dangerous-command', 'needs-approval', 'outside-folder',
+  // The agent refused a read its permission rules deny (the company Macs' managed settings, or the
+  // app's sandbox `Read(...)` rules); the CLI runs no hook for these, the app reads the tool result.
+  'denied-read',
+  // The agent's sandbox blocked a command (a host outside the company's list, a denied place).
+  'sandbox',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 
 export const TOOL_OUTCOMES = ['ok', 'error', 'unfinished'] as const
 export type ToolOutcome = typeof TOOL_OUTCOMES[number]
+
+/**
+ * The AI sandbox (「AI の囲い」, agent-sandbox.ts) and this call:
+ * - would-block: the member's mode is `observe` and `enforce` would have
+ *   blocked it (a command naming a host outside the list, a read of a denied place);
+ * - blocked: the sandbox blocked it (mode `enforce`).
+ */
+export const SANDBOX_MARKS = ['would-block', 'blocked'] as const
+export type SandboxMark = typeof SANDBOX_MARKS[number]
 
 /** Secret places outside (or inside) the company folder: the kind is kept, the path never. */
 export const SENSITIVE_LOCATIONS = ['ssh', 'env-file', 'keychain', 'credentials', 'app-data'] as const
@@ -63,8 +77,12 @@ export type FileTarget =
 export type ToolTarget =
   | FileTarget
   | { kind: 'files'; files: FileTarget[]; more?: number }
-  /** `programs`: program name, plus the subcommand for a few well-known tools (`git push`). */
-  | { kind: 'command'; programs: string[]; more?: number; redirect?: true }
+  /**
+   * `programs`: program name, plus the subcommand for a few well-known tools (`git push`).
+   * `hosts`: the hosts of URLs the command names (≤ 5; host only, never the URL), or that the
+   * sandbox refused.
+   */
+  | { kind: 'command'; programs: string[]; more?: number; redirect?: true; hosts?: string[] }
   | { kind: 'web'; host?: string }
   | { kind: 'mcp'; server: string; tool?: string }
   | { kind: 'subagent'; subagentType?: string }
@@ -97,6 +115,10 @@ export interface AgentToolEvent {
   decision: ToolDecision
   guardReason?: GuardReason
   outcome?: ToolOutcome
+  /** Set only when the member's sandbox mode is observe / enforce and it concerns this call. */
+  sandbox?: SandboxMark
+  /** The skill the conversation was running when the call was made (its folder name), when known. */
+  skill?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -136,6 +158,9 @@ const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,39}$/
 /** A program label (`git push`, `sudo rm`, `npx @scope/pkg`, `?` for a name the app would not keep). */
 const PROGRAM_RE = /^[A-Za-z0-9 ._+:@/~?-]{1,80}$/
 const HOST_RE = /^[a-z0-9.\-:[\]]{1,255}$/
+const MAX_HOSTS = 5
+/** A skill folder name (shared/core/names.ts rule, plus `plugin:skill`). */
+const SKILL_RE = /^[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,63})?$/
 const ISO_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$/
 
 const has = <T extends string>(list: readonly T[], value: unknown): value is T =>
@@ -196,7 +221,15 @@ export function parseToolTarget(raw: unknown): ToolTarget | null {
         programs.push(label)
       }
       const extra = (more ?? 0) + Math.max(0, v.programs.length - MAX_PROGRAMS)
-      return { kind: 'command', programs, ...(extra > 0 ? { more: Math.min(extra, MAX_MORE) } : {}), ...(v.redirect === true ? { redirect: true as const } : {}) }
+      const hosts = Array.isArray(v.hosts)
+        ? [...new Set(v.hosts.slice(0, MAX_HOSTS).map(h => typeof h === 'string' ? text(h.toLowerCase(), 255, HOST_RE) : undefined).filter((h): h is string => !!h))]
+        : []
+      return {
+        kind: 'command', programs,
+        ...(extra > 0 ? { more: Math.min(extra, MAX_MORE) } : {}),
+        ...(v.redirect === true ? { redirect: true as const } : {}),
+        ...(hosts.length > 0 ? { hosts } : {}),
+      }
     }
     case 'web': {
       const host = typeof v.host === 'string' ? text(v.host.toLowerCase(), 255, HOST_RE) : undefined
@@ -244,6 +277,7 @@ export function parseAgentToolEvent(raw: unknown): AgentToolEvent | null {
   const department = relPath(v.department)
   const model = text(v.model, 100)
   const subagentType = text(v.subagentType, 40, NAME_RE)
+  const skill = text(v.skill, 129, SKILL_RE)
   return {
     version: AGENT_EVENT_VERSION,
     id,
@@ -263,6 +297,8 @@ export function parseAgentToolEvent(raw: unknown): AgentToolEvent | null {
     decision: v.decision,
     ...(has(GUARD_REASONS, v.guardReason) ? { guardReason: v.guardReason } : {}),
     ...(has(TOOL_OUTCOMES, v.outcome) ? { outcome: v.outcome } : {}),
+    ...(has(SANDBOX_MARKS, v.sandbox) ? { sandbox: v.sandbox } : {}),
+    ...(skill ? { skill } : {}),
   }
 }
 
@@ -324,6 +360,8 @@ export interface AgentEventRecord {
   decision: ToolDecision
   guardReason: GuardReason | null
   outcome: ToolOutcome | null
+  sandbox: SandboxMark | null
+  skill: string | null
   /** The app build that sent it (X-ACB-Client-Version), when it said. */
   clientVersion: string | null
 }
@@ -427,4 +465,35 @@ export interface AgentEventViewer {
 export interface AgentEventViewers {
   mode: AgentEventViewerMode
   viewers: AgentEventViewer[]
+}
+
+// ---------------------------------------------------------------------------
+// GET …/agent-events/sandbox?from&to  (owner/admin): what the sandbox blocks
+// or would block — the table that tunes the company's host list (「AI の囲い」)
+// ---------------------------------------------------------------------------
+
+export interface SandboxImpactCounts {
+  /** `observe`: enforce would have blocked these. */
+  wouldBlock: number
+  /** `enforce`: the sandbox blocked these. */
+  blocked: number
+  /** Reads the agent's permission rules refused (managed settings / the sandbox's Read rules). */
+  deniedReads: number
+  /** Members involved. */
+  members: number
+  lastAt: string
+}
+
+export interface SandboxImpact {
+  from: string
+  to: string
+  /** Hosts outside the list that commands named (would-block) or reached for (blocked), most first. */
+  byHost: Array<SandboxImpactCounts & { host: string }>
+  /** Per skill (null = no skill known), most first. */
+  bySkill: Array<SandboxImpactCounts & { skill: string | null }>
+  /** Denied / would-be-denied reads by kind of secret place (null = a place the company added). */
+  byPlace: Array<SandboxImpactCounts & { place: SensitiveLocation | null }>
+  /** Events counted (≤ the server's cap; `truncated` when more existed). */
+  total: number
+  truncated: boolean
 }

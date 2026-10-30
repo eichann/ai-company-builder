@@ -261,3 +261,28 @@ describe('settings, preview, viewers, prune', () => {
     expect((await list('ae-owner')).json.data.events.length).toBe(5)
   })
 })
+
+describe('the AI sandbox in the log (「AI の囲い」)', () => {
+  it('keeps the sandbox mark, the hosts and the skill; tables them by host, skill and secret place for owners/admins', async () => {
+    const sb = [
+      event({ id: 'sb-1', tool: 'Bash', category: 'command', target: { kind: 'command', programs: ['curl'], hosts: ['upload.example.net'] }, decision: 'policy-default', outcome: 'ok', sandbox: 'would-block', skill: 'create-movie' }),
+      event({ id: 'sb-2', tool: 'Bash', category: 'command', target: { kind: 'command', programs: ['python3'], hosts: ['upload.example.net', 'cdn.example.net'] }, decision: 'policy-default', outcome: 'error', guardReason: 'sandbox', sandbox: 'blocked', skill: 'create-movie' }),
+      event({ id: 'sb-3', tool: 'Read', category: 'read', target: { kind: 'outside', sensitive: 'ssh' }, decision: 'policy-denied', guardReason: 'denied-read', outcome: undefined }),
+      event({ id: 'sb-4', tool: 'Read', category: 'read' }),
+    ]
+    expect((await send('ae-member', sb)).json.data).toEqual({ accepted: 4, duplicates: 0, rejected: 0 })
+    const listed = (await list('ae-owner', 'q=cdn.example.net')).json.data.events
+    expect(listed.map((e: Json) => [e.id, e.sandbox, e.skill])).toEqual([['sb-2', 'blocked', 'create-movie']])
+
+    const impact = await call('ae-owner', 'GET', `${BASE}/sandbox`)
+    expect(impact.status).toBe(200)
+    const d = impact.json.data
+    expect(d.byHost.map((h: Json) => [h.host, h.wouldBlock, h.blocked, h.members])).toEqual([['upload.example.net', 1, 1, 1], ['cdn.example.net', 0, 1, 1]])
+    expect(d.bySkill.map((s: Json) => [s.skill, s.wouldBlock, s.blocked, s.deniedReads])).toEqual([['create-movie', 1, 1, 0], [null, 0, 0, 1]])
+    expect(d.byPlace.map((p: Json) => [p.place, p.deniedReads])).toEqual([['ssh', 1]])
+    expect(d.total).toBe(3)
+    expect((await call('ae-manager', 'GET', `${BASE}/sandbox`)).status).toBe(403)
+    expect((await call('ae-member', 'GET', `${BASE}/sandbox`)).status).toBe(403)
+    expect((await call('ae-owner', 'GET', `${BASE}/sandbox?from=nope`)).status).toBe(400)
+  })
+})

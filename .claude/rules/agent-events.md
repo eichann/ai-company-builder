@@ -86,6 +86,10 @@ events through it), the read shapes and the limits. The admin re-exports the rea
   `agent_event_settings_history` (who, when, before → after), the GET carries the latest 20.
   `GET …/settings/retention-preview?days=N` → `{ days, olderThan, wouldDelete }`;
   `GET /agent-events/viewers?mode=` → who would see the log (`all`, or `departments` with names).
+- `GET /agent-events/sandbox?from&to` (owner/admin): the AI sandbox's part of the log by host,
+  skill and secret place (`agent-sandbox.md`). Events carry optional `sandbox` (would-block /
+  blocked) and `skill`; command targets optional `hosts`; guard reasons `denied-read` and
+  `sandbox`.
 
 ## Who reads what
 
