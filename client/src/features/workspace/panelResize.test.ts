@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { clampWidth, createResizeDrag, dragWidth, leftPanelDrag } from '../src/lib/panelResize'
+import { clampWidth, createResizeDrag, dragWidth, leftPanelDrag } from './panelResize'
 
 // A fake frame scheduler: callbacks run only when the test calls frame().
 function frames() {

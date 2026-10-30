@@ -9,7 +9,7 @@ import { CopySkillModal } from './CopySkillModal'
 import { FileTreePanel } from './FileTreePanel'
 import { TabbedEditorPanel } from './TabbedEditorPanel'
 import { ToolViewer } from './ToolViewer'
-import { ResizeHandle } from './ResizeHandle'
+import { ResizeHandle } from '../../features/workspace/components/ResizeHandle'
 import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
@@ -28,7 +28,7 @@ import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
 import { subscribeFileChanges } from '../../lib/fileEvents'
 import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../lib/folderExists'
-import { dragWidth, leftPanelDrag } from '../../lib/panelResize'
+import { dragWidth, leftPanelDrag } from '../../features/workspace/panelResize'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
 import { scanAffected, skillsScopesAffected } from '../../../shared/skills-refresh'
 import { unwatchCompany, watchCompany } from '../../shared/ipc/file-events'
@@ -607,7 +607,7 @@ ${promptContent}
   }, [refreshSkills])
 
   // Resizing: each drag snapshots the width at pointerdown and derives the
-  // width from the pointer's total offset (see lib/panelResize).
+  // width from the pointer's total offset (see features/workspace/panelResize.ts).
   const fileTreeDragStartRef = useRef(fileTreeWidth)
   const handleFileTreeResizeStart = useCallback(() => {
     fileTreeDragStartRef.current = fileTreeWidthRef.current
