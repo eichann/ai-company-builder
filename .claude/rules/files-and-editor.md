@@ -31,6 +31,7 @@ paths:
   - "client/tests/doc-review-ui.*"
   - "client/tests/file-tree-ui.*"
   - "client/tests/ui/file-tree.spec.ts"
+  - "client/tests/ui/editor-*.spec.ts"
   - "client/tests/ui/doc-review.spec.ts"
   - "client/tests/skills-refresh.test.ts"
 ---
@@ -122,7 +123,10 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
   Closing a tab whose save was cancelled asks before discarding.
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
   `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
-- Preview: `client/tests/editor-tabs-ui.html?view=external`.
+- Preview: `client/tests/editor-tabs-ui.html?view=external` (`editor-tabs.spec.ts`); `?view=tabs`
+  for the panel itself (`editor-panel.spec.ts`: autosave after 1 s, ⌘S, closing saves first,
+  preview tabs pinned on double-click / first edit, ⌘⇧M and its remembered mode, ⌘F in a
+  preview, the preview's scroll position, image / PDF views).
 - Open tabs, the active tab and the left panel tab are saved per company in localStorage
   `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render

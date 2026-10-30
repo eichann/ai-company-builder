@@ -3,7 +3,10 @@
 // preload API is mocked (no Electron, no file system).
 // Open /tests/editor-tabs-ui.html?theme=light|dark&dept=content|sales|company
 // (&view=external: buttons that change / delete the open file on "disk", for
-// the external-change banner — type in the editor first).
+// the external-change banner — type in the editor first;
+// &view=tabs: tabs close, the last one opened is a preview tab, a long
+// Markdown file, an image and a PDF; window.__acbWrites lists every save and
+// window.__acbPinned every pinned tab).
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -25,12 +28,21 @@ const files: Record<string, string> = {
   [`${ROOT}/営業部/顧客リスト.csv`]: '会社名,担当\nA社,山田',
   [`${ROOT}/README.md`]: '# 会社フォルダ',
 }
+const tabsView = params.get('view') === 'tabs'
+const LONG_DOC = `${ROOT}/営業部/議事録.md`
+if (tabsView) {
+  files[LONG_DOC] = ['# 議事録', ...Array.from({ length: 60 }, (_, i) => `## 第${i + 1}回\n\n担当は山田です。予算の確認をしました。`)].join('\n\n')
+  files[`${ROOT}/営業部/ロゴ.png`] = ''
+  files[`${ROOT}/営業部/契約書.pdf`] = ''
+}
+const writes: Array<[string, string]> = []
+const pinned: string[] = []
 let emitChanges: ((changes: { type: string; path: string }[]) => void) | null = null
 Object.assign(window, {
   electronAPI: {
     readFile: async (p: string) => (p in files ? files[p] : null),
     readFileBinary: async () => null,
-    writeFile: async (p: string, content: string) => { files[p] = content; return true },
+    writeFile: async (p: string, content: string) => { files[p] = content; writes.push([p, content]); return true },
     createDirectory: async () => true,
     backupBeforeOverwrite: async () => ({ success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }),
     readDirectory: async () => [],
@@ -52,12 +64,20 @@ function externalDelete(p: string) {
   delete files[p]
   emitChanges?.([{ type: 'unlink', path: p }])
 }
-Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files })
+Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned })
 
 export function Preview() {
   const [dept, setDept] = useState(params.get('dept') ?? 'sales')
-  const openFiles = Object.keys(files)
+  const [openFiles, setOpenFiles] = useState(() => Object.keys(files))
   const [active, setActive] = useState(`${ROOT}/コンテンツG/台本.md`)
+  const [previewTab, setPreviewTab] = useState<string | null>(tabsView ? `${ROOT}/README.md` : null)
+  const closeFile = (p: string) => {
+    if (!tabsView) return
+    const rest = openFiles.filter(f => f !== p)
+    setOpenFiles(rest)
+    if (active === p) setActive(rest[0] ?? '')
+  }
+  const pinFile = (p: string) => { pinned.push(p); setPreviewTab(null) }
   const labels = tabDepartmentLabels(openFiles, { rootPath: ROOT, departments, selectedDeptId: dept === 'company' ? null : dept })
   return (
     <main className="min-h-screen bg-white text-gray-900 dark:bg-zinc-950 dark:text-zinc-100">
@@ -73,8 +93,9 @@ export function Preview() {
           <button data-testid="external-delete" className="rounded border px-2 py-1" onClick={() => externalDelete(active)}>AIがこのファイルを削除する</button>
         </div>
       )}
-      <div className="h-[420px] w-[760px]">
-        <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} tabLabels={labels} onSelectFile={setActive} onCloseFile={() => {}} />
+      {/* Tailwind does not scan this page: the tabs view sets its height itself so the preview scrolls. */}
+      <div className="h-[420px] w-[760px]" style={tabsView ? { height: 420 } : undefined}>
+        <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
       </div>
     </main>
   )
