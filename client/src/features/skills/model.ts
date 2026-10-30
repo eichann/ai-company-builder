@@ -1,6 +1,7 @@
 // Pure parts of skills: the SKILL.md a new skill starts with, renaming a
 // copied one, and the slash commands the chat offers.
 import type { DepartmentConfig } from '../../types'
+import { setFrontmatterField, yamlQuoted } from '../../../shared/skill-frontmatter'
 
 /** A web app inside a skill's folder (`tools/<name>/`). */
 export interface SkillTool {
@@ -48,8 +49,8 @@ export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした�
 export function newSkillMarkdown(data: NewSkillInput): string {
   const promptContent = data.prompt || `このスキルを実行すると、AIアシスタントが「${data.name}」タスクを実行します。`
   return `---
-name: ${data.name}
-description: ${data.description}
+name: ${yamlQuoted(data.name)}
+description: ${yamlQuoted(data.description)}
 ---
 
 # ${data.name}
@@ -72,10 +73,7 @@ ${promptContent}
 
 /** A copied skill's SKILL.md with the new name in its frontmatter. */
 export function renameSkillMarkdown(content: string, name: string): string {
-  return content.replace(
-    /^(---\n[\s\S]*?name:\s*).+$/m,
-    `$1${name}`,
-  )
+  return setFrontmatterField(content, 'name', name)
 }
 
 export interface SkillCommand { command: string; name: string; description?: string; color?: string }

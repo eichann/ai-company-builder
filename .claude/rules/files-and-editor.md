@@ -14,6 +14,8 @@ paths:
   - "client/src/app/AppShell.tsx"
   - "client/src/features/doc-review/**"
   - "client/src/features/skills/**"
+  - "client/shared/skill-frontmatter.ts"
+  - "client/tests/skill-frontmatter.test.ts"
   - "client/src/features/history/**"
   - "client/src/features/search/**"
   - "client/src/shared/ipc/diffs.ts"
@@ -113,6 +115,12 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 `Cache-Control: no-store`. An open file that is deleted shows a notice; one replaced reloads.
 
 ## Skills list freshness (`client/shared/skills-refresh.ts`)
+
+A SKILL.md's frontmatter is YAML the AI reads: the app writes `name` / `description` as
+double-quoted scalars (`yamlQuoted`; a line break, `---`, `: `, `#` typed into the wizard once
+broke the block) and changes one entry in place (`setFrontmatterField`, the copy's new name);
+`skills:list` reads plain, quoted, block and continued values like YAML does
+(`client/shared/skill-frontmatter.ts`, test `tests/skill-frontmatter.test.ts` against `js-yaml`).
 
 `skills:list` caches one scan per root + department folder (`''` = company-wide) for 5 s, for
 plain tab switches only. A scan is stale after any event at/under a `.claude/skills/` it reads
