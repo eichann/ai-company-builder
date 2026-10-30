@@ -319,12 +319,21 @@ export function initDatabase(conn: Database.Database = sqlite) {
 
   // Single-use invitation links (lib/invitation-signup.ts).
   migrateInvitationClaims(conn)
+  migrateAgentEventSandbox(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
   seedPermissionScopes(conn)
 
   if (conn === sqlite) console.log('Application database initialized at:', dbPath)
+}
+
+/** The AI sandbox's marks on logged events (「AI の囲い」, added after the log shipped). */
+function migrateAgentEventSandbox(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(agent_events)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('sandbox')) conn.exec(`ALTER TABLE agent_events ADD COLUMN sandbox TEXT`)
+  if (!cols.has('skill')) conn.exec(`ALTER TABLE agent_events ADD COLUMN skill TEXT`)
+  conn.exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_company_sandbox ON agent_events(company_id, at) WHERE sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox')`)
 }
 
 // Helper functions for common operations

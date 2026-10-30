@@ -31,6 +31,7 @@ import {
   CATEGORY_LABELS,
   DECISION_LABELS,
   GUARD_REASON_LABELS,
+  SANDBOX_MARK_LABELS,
   OUTCOME_LABELS,
   PERIOD_LABELS,
   PERIODS,
@@ -487,7 +488,7 @@ export function EventRow({
             {e.tool}
           </span>
         </div>
-        <TargetLine items={target.items} more={target.more} redirect={target.redirect} />
+        <TargetLine items={target.items} more={target.more} redirect={target.redirect} hosts={target.hosts} />
         <p className="flex flex-wrap items-center gap-x-2 text-xs text-muted-foreground">
           <span>{agentLabel(e)}</span>
           {e.department && <span>・作業フォルダ {e.department}</span>}
@@ -517,6 +518,12 @@ export function EventRow({
             理由: {GUARD_REASON_LABELS[e.guardReason] ?? e.guardReason}
           </span>
         )}
+        {e.sandbox && (
+          <span className={cn('text-xs', e.sandbox === 'blocked' ? 'text-destructive' : 'text-amber-700 dark:text-amber-400')}>
+            {SANDBOX_MARK_LABELS[e.sandbox]}
+            {e.skill ? `（スキル: ${e.skill}）` : ''}
+          </span>
+        )}
         <span className="text-xs text-muted-foreground tabular-nums">
           {e.outcome ? (
             <span className={cn(e.outcome === 'error' && 'text-destructive')}>{OUTCOME_LABELS[e.outcome] ?? e.outcome}</span>
@@ -532,7 +539,7 @@ export function EventRow({
   )
 }
 
-function TargetLine({ items, more, redirect }: { items: TargetItem[]; more: number; redirect: boolean }) {
+function TargetLine({ items, more, redirect, hosts }: { items: TargetItem[]; more: number; redirect: boolean; hosts?: string[] }) {
   if (items.length === 0 && more === 0) return null
   return (
     <div className="flex flex-wrap items-center gap-x-2 gap-y-1 text-sm">
@@ -546,6 +553,7 @@ function TargetLine({ items, more, redirect }: { items: TargetItem[]; more: numb
           ファイルに出力
         </Badge>
       )}
+      {hosts && hosts.length > 0 && <span className="text-xs text-muted-foreground">宛先: {hosts.join('、')}</span>}
     </div>
   )
 }

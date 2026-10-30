@@ -303,6 +303,7 @@ the server: `agent-events.md` ("Sending from the app").
   keychain / credentials / app-data — never the path), program name + subcommand for a short
   allowlist (git, npm, pnpm, yarn, bun, pip, uv, brew, docker, gh, cargo, go; `python -m <module>`;
   `npx <package>`; `sh -c '…'` is read inside), `redirect: true` for `>` / `>>` / `&>` / `tee`,
+  the hosts of URLs a command names (`hosts`, never the path or query),
   ≤ 5 programs per compound command, the web host, the MCP server + tool, the subagent type.
   No prompt, content, argument, URL path/query or message — a test feeds secrets and checks the
   serialized events. Categories need no agent id (tool names do not collide); app MCP servers
@@ -314,8 +315,10 @@ the server: `agent-events.md` ("Sending from the app").
   emission is wrapped (a failing recorder never reaches the agent). Translation per agent:
   - Claude (`agents/claude-tool-events.ts`): the PreToolUse hook and canUseTool return a
     `ToolVerdict` (the unchanged CLI answer + its decision) and are recorded at one point each;
-    PostToolUse / PostToolUseFailure (outcome, the CLI's `duration_ms`) and PermissionDenied
-    (`policy-denied`) are installed when a recorder is set; the query's end closes the turn.
+    PostToolUse / PostToolUseFailure (outcome, the CLI's `duration_ms`, the sandbox's violations)
+    and PermissionDenied (`policy-denied`) are installed when a recorder is set; calls the CLI's
+    permission rules refuse run no hook and are read from the message stream
+    (`createDeniedCallWatcher` → `denied-read`, `agent-sandbox.md`); the query's end closes the turn.
   - Codex (`agents/codex-tool-events.ts`): command / file-change approvals (member's answer,
     paired by `itemId`), `item/started` / `item/completed` (Codex's own policy otherwise;
     `declined` = `policy-denied`; an MCP call's arguments reach only `describeTarget`);

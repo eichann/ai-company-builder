@@ -73,6 +73,7 @@ const TYPES: Record<string, string> = {
   AgentEventRetentionPreview: 'AgentEventRetentionPreview',
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
+  SandboxImpact: 'SandboxImpact',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -302,6 +303,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentEventSettings', USERS.owner, 'PUT', `${base}/agent-events/settings`, { retentionDays: 90, viewers: 'admins-and-managers' })
     await expectShape('AgentEventRetentionPreview', USERS.owner, 'GET', `${base}/agent-events/settings/retention-preview?days=30`)
     await expectShape('AgentEventViewers', USERS.owner, 'GET', `${base}/agent-events/viewers?mode=admins-and-managers`)
+    await expectShape('SandboxImpact', USERS.owner, 'GET', `${base}/agent-events/sandbox`)
   })
 
   it('AI sandbox (「AI の囲い」)', async () => {

@@ -22,9 +22,10 @@ import type { AuthMode } from './agent'
 import { CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL, CLAUDE_CHOICE_TOOL } from './choice-prompt'
 import { REVIEW_SERVER } from './review-request'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL } from './web-research'
+import { commandHosts, type SandboxConcern, type SandboxViolation } from './agents/sandbox-policy'
 import {
   AGENT_EVENT_VERSION,
-  type AgentToolEvent, type FileTarget, type GuardReason, type SensitiveLocation, type ToolCategory,
+  type AgentToolEvent, type FileTarget, type GuardReason, type SandboxMark, type SensitiveLocation, type ToolCategory,
   type ToolDecision, type ToolOutcome, type ToolTarget,
 } from '../../shared/types/agent-events'
 
@@ -34,7 +35,7 @@ import {
 // the tracker below assigns an AuthMode to it, so an agent id the server does
 // not know fails to compile here.
 export { AGENT_EVENT_VERSION }
-export type { AgentToolEvent, FileTarget, GuardReason, SensitiveLocation, ToolCategory, ToolDecision, ToolOutcome, ToolTarget }
+export type { AgentToolEvent, FileTarget, GuardReason, SandboxMark, SensitiveLocation, ToolCategory, ToolDecision, ToolOutcome, ToolTarget }
 
 /**
  * Transient data part the chat server sends when the main process stopped a
@@ -280,7 +281,11 @@ function describeSegment(words: string[], depth: number, out: { programs: string
   out.programs.push([...prefix, label].join(' '))
 }
 
-/** A shell command as an event may hold it: program names (+ subcommands), whether it writes a file; no arguments. */
+/**
+ * A shell command as an event may hold it: program names (+ subcommands),
+ * whether it writes a file, the hosts of URLs it names (what the AI sandbox's
+ * host list is about); no arguments, no URL path or query.
+ */
 export function describeCommand(command: string): Extract<ToolTarget, { kind: 'command' }> {
   const out = { programs: [] as string[], redirect: false }
   const lexed = lex(command)
@@ -288,7 +293,35 @@ export function describeCommand(command: string): Extract<ToolTarget, { kind: 'c
   for (const segment of lexed.segments) describeSegment(segment, 0, out)
   const programs = out.programs.slice(0, MAX_PROGRAMS)
   const more = out.programs.length - programs.length
-  return { kind: 'command', programs, ...(more > 0 ? { more } : {}), ...(out.redirect ? { redirect: true as const } : {}) }
+  const hosts = commandHosts(command)
+  return { kind: 'command', programs, ...(more > 0 ? { more } : {}), ...(out.redirect ? { redirect: true as const } : {}), ...(hosts.length ? { hosts } : {}) }
+}
+
+// ---------------------------------------------------------------------------
+// Skills (which skill a call belongs to, for the sandbox's per-skill table)
+// ---------------------------------------------------------------------------
+
+const SKILL_NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}(:[a-z0-9][a-z0-9_-]{0,63})?$/
+const SKILL_PATH_RE = /(?:^|[\s'"/\\])\.(?:claude|agents|codex)[/\\]skills[/\\]([a-z0-9][a-z0-9_-]{0,63})(?:[/\\]|$)/
+
+/**
+ * The skill a call starts or works inside: Claude's `Skill` tool, or a path
+ * (a file, a command's script) under `.claude/skills/<name>/` (also
+ * `.agents/` / `.codex/`). Only a skill folder name, never a path.
+ */
+export function skillOfCall(tool: string, input: unknown): string | undefined {
+  const value = record(input)
+  if (tool === 'Skill') {
+    const name = str(value.skill) ?? str(value.command) ?? str(value.name)
+    const clean = name?.replace(/^\//, '')
+    return clean && SKILL_NAME_RE.test(clean) ? clean : undefined
+  }
+  const texts = [value.file_path, value.path, value.notebook_path, value.command].map(v => Array.isArray(v) ? v.join(' ') : v).filter((v): v is string => typeof v === 'string')
+  for (const text of texts) {
+    const match = SKILL_PATH_RE.exec(text)
+    if (match) return match[1]
+  }
+  return undefined
 }
 
 // ---------------------------------------------------------------------------
@@ -371,14 +404,27 @@ export interface ToolEventTracker {
   decide(callId: string | undefined, call: ToolCall, decision: ToolDecision, guardReason?: GuardReason): string
   /** The call started without a decision of the app's (Codex item/started): the agent's own policy let it run. */
   start(callId: string, call: ToolCall): void
-  /** Its result arrived. A call the tracker never saw is reported as `policy-default`. */
-  finish(callId: string, outcome: 'ok' | 'error', call?: ToolCall, durationMs?: number): void
+  /**
+   * Its result arrived. A call the tracker never saw is reported as `policy-default`.
+   * `violation`: what the sandbox refused, read from the failed command's output.
+   */
+  finish(callId: string, outcome: 'ok' | 'error', call?: ToolCall, durationMs?: number, violation?: SandboxViolation): void
   /** The turn is over: calls still open are emitted as `unfinished`. Later reports still work. */
   close(): void
 }
 
+/**
+ * The member's AI sandbox for this turn (sandbox-policy.ts): `observe` marks
+ * calls `enforce` would refuse; `enforce` marks the ones the sandbox refused.
+ */
+export interface ToolEventSandbox {
+  mode: 'observe' | 'enforce'
+  concern: (call: ToolCall) => SandboxConcern | undefined
+}
+
 export interface ToolEventContext extends TargetContext {
   agent: AuthMode
+  sandbox?: ToolEventSandbox
   conversationId?: string
   turnId?: string
   companyId?: string
@@ -400,6 +446,9 @@ interface OpenCall {
   target: ToolTarget
   decision: ToolDecision
   guardReason?: GuardReason
+  concern?: SandboxConcern
+  skill?: string
+  sandbox?: SandboxMark
 }
 
 export function createToolEventTracker(
@@ -413,6 +462,8 @@ export function createToolEventTracker(
   const open = new Map<string, OpenCall>()
   const done = new Set<string>()
   let warned = false
+  // The skill this turn is running (the latest one a call started or worked inside).
+  let currentSkill: string | undefined
   // A department folder name as the event carries it (company-relative, NFC), or nothing.
   const departmentPath = context.department?.normalize('NFC').replace(/\\/g, '/').split('/').filter(s => s && s !== '.').join('/')
   const department = departmentPath && !departmentPath.split('/').includes('..') ? departmentPath : undefined
@@ -425,9 +476,28 @@ export function createToolEventTracker(
   }
   const targetOf = (call: ToolCall) => describeTarget(call.tool, call.input, { ...context, cwd: call.cwd || context.cwd })
   const subagent = (call: ToolCall) => call.subagentType && PROGRAM_RE.test(call.subagentType) ? call.subagentType : undefined
+  const concernOf = (call: ToolCall) => {
+    try { return context.sandbox?.concern(call) } catch { return undefined }
+  }
   const openCall = (callId: string, call: ToolCall, decision: ToolDecision, guardReason?: GuardReason): OpenCall => {
     const t = now()
-    return { callId, at: t, since: t, tool: call.tool.slice(0, MAX_TOOL_NAME), subagentType: subagent(call), target: targetOf(call), decision, guardReason }
+    currentSkill = skillOfCall(call.tool, call.input) ?? currentSkill
+    const concern = concernOf(call)
+    return {
+      callId, at: t, since: t, tool: call.tool.slice(0, MAX_TOOL_NAME), subagentType: subagent(call), target: targetOf(call), decision, guardReason,
+      ...(concern ? { concern } : {}), ...(currentSkill ? { skill: currentSkill } : {}),
+      ...(concern && context.sandbox?.mode === 'observe' ? { sandbox: 'would-block' as const } : {}),
+    }
+  }
+  /** Enforce: did the sandbox refuse this call? Hosts it refused join the target's. */
+  const blockedBy = (c: OpenCall, violation: SandboxViolation | undefined): OpenCall | undefined => {
+    if (context.sandbox?.mode !== 'enforce' || !violation) return undefined
+    const read = violation.read || (violation.notPermitted && c.concern === 'read')
+    if (violation.hosts.length === 0 && !read) return undefined
+    const target = c.target.kind === 'command' && violation.hosts.length
+      ? { ...c.target, hosts: [...new Set([...(c.target.hosts ?? []), ...violation.hosts])].slice(0, 5) }
+      : c.target
+    return { ...c, target, sandbox: 'blocked', guardReason: c.guardReason ?? 'sandbox' }
   }
   const send = (c: OpenCall, outcome?: ToolOutcome, durationMs?: number) => {
     open.delete(c.callId)
@@ -451,6 +521,8 @@ export function createToolEventTracker(
       decision: c.decision,
       ...(c.guardReason ? { guardReason: c.guardReason } : {}),
       ...(outcome ? { outcome } : {}),
+      ...(c.sandbox ? { sandbox: c.sandbox } : {}),
+      ...(c.skill ? { skill: c.skill } : {}),
     }
     emit(event)
   }
@@ -483,11 +555,12 @@ export function createToolEventTracker(
         }
       })
     },
-    finish(callId, outcome, call, durationMs) {
+    finish(callId, outcome, call, durationMs, violation) {
       safe(undefined, () => {
         if (done.has(callId)) return
-        const c = open.get(callId) ?? (call ? openCall(callId, call, 'policy-default') : undefined)
-        if (!c) return
+        const seen = open.get(callId) ?? (call ? openCall(callId, call, 'policy-default') : undefined)
+        if (!seen) return
+        const c = (outcome === 'error' ? blockedBy(seen, violation) : undefined) ?? seen
         send(c, outcome, durationMs ?? now() - c.since)
       })
     },

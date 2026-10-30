@@ -10,6 +10,22 @@ import type { ChoiceQuestion, ChoiceResult } from '../../shared/choice-prompt'
 import type { RateLimitSnapshot } from '../../shared/rate-limits'
 import type { AgentProgressEvent } from '../../shared/agent-progress'
 import type { AgentToolEvent } from '../../shared/agent-events'
+import type { ResolvedSandbox } from '../../shared/agents/sandbox-policy'
+import type { AgentSandboxUnavailable } from '../../../shared/core/agent-sandbox'
+
+/**
+ * The member's AI sandbox for one turn (「AI の囲い」, agent-sandbox.md): the
+ * company policy with their override, merged with this computer's facts.
+ * `observe` records what `enforce` would refuse; `enforce` asks the agent's
+ * own sandbox to refuse it.
+ */
+export interface TurnSandbox {
+  mode: 'observe' | 'enforce'
+  resolved: ResolvedSandbox
+  /** The member's home folder (for `~/` in commands). */
+  home: string
+  onUnavailable: AgentSandboxUnavailable
+}
 
 /**
  * Side information an agent reports while a turn runs (not part of the
@@ -71,6 +87,8 @@ export interface AgentConnection {
      * (shared/agent-events.ts). The events go to the host's `onToolEvent`.
      */
     toolEventContext?: ToolEventContextInput
+    /** The AI sandbox for this turn; absent = off. */
+    sandbox?: TurnSandbox
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

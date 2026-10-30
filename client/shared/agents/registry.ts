@@ -80,6 +80,12 @@ export interface AgentCapabilities {
    */
   readonly webReader: boolean
   /**
+   * The app can hand the company's AI sandbox (「AI の囲い」, sandbox-policy.ts)
+   * to this agent's own sandbox (mode `enforce`). Without it, `enforce` runs as
+   * the company's `onUnavailable` says (record only, or no AI).
+   */
+  readonly sandbox: boolean
+  /**
    * Used when the member's own agent cannot write the commit message (or is
    * not signed in). A CLI that may belong to another vendor is never picked
    * on the member's behalf.
@@ -186,6 +192,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     handoff: true,
     oneShotText: true,
     webReader: true,
+    sandbox: false,
     commitMessageFallback: true,
     privateFolderCommitMessages: false,
     liveModelCatalog: false,
@@ -252,6 +259,7 @@ const CODEX: AgentDescriptor = {
     handoff: true,
     oneShotText: true,
     webReader: true,
+    sandbox: false,
     commitMessageFallback: false,
     privateFolderCommitMessages: false,
     liveModelCatalog: true,
@@ -290,6 +298,7 @@ const API_KEY: AgentDescriptor = {
     oneShotText: true,
     // The app's own loop has no web tools to replace.
     webReader: false,
+    sandbox: false,
     commitMessageFallback: true,
     privateFolderCommitMessages: true,
     liveModelCatalog: false,

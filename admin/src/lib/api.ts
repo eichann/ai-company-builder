@@ -14,6 +14,7 @@ import type {
   AgentEventSummary,
   AgentEventViewerMode,
   AgentEventViewers,
+  SandboxImpact,
 } from '../../../shared/types/agent-events'
 
 const API_BASE = ''
@@ -565,6 +566,8 @@ export type {
   AgentEventViewers,
   AgentKind,
   GuardReason,
+  SandboxImpact,
+  SandboxMark,
   SensitiveLocation,
   ShownFileTarget,
   ToolCategory,
@@ -598,6 +601,14 @@ export const agentEventsApi = {
   /** How many events a retention of `days` would delete (confirm before shortening). */
   retentionPreview: (companyId: string, days: number) =>
     getData<AgentEventRetentionPreview>(`/api/companies/${enc(companyId)}/agent-events/settings/retention-preview?days=${days}`),
+  /** What the AI sandbox blocks / would block, by host, skill and secret place (「AI の囲い」). */
+  sandboxImpact: (companyId: string, q: { from?: string; to?: string } = {}) => {
+    const params = new URLSearchParams()
+    if (q.from) params.set('from', q.from)
+    if (q.to) params.set('to', q.to)
+    const qs = params.toString()
+    return getData<SandboxImpact>(`/api/companies/${enc(companyId)}/agent-events/sandbox${qs ? `?${qs}` : ''}`)
+  },
   /** Who would see the log under `mode`, with their scope (the settings card's live list). */
   viewers: (companyId: string, mode: AgentEventViewerMode) =>
     getData<AgentEventViewers>(`/api/companies/${enc(companyId)}/agent-events/viewers?mode=${enc(mode)}`),

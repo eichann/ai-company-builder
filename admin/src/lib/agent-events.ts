@@ -19,6 +19,7 @@ import type {
   AgentEventViewerMode,
   AgentKind,
   GuardReason,
+  SandboxMark,
   SensitiveLocation,
   ShownFileTarget,
   ToolCategory,
@@ -79,6 +80,14 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'dangerous-command': '危ないコマンド',
   'needs-approval': '本人の確認が必要な操作',
   'outside-folder': '会社フォルダの外',
+  'denied-read': '読み取りを禁止している場所',
+  sandbox: 'AI の囲い',
+}
+
+/** The AI sandbox's mark on a call (「AI の囲い」). */
+export const SANDBOX_MARK_LABELS: Record<SandboxMark, string> = {
+  'would-block': '囲うと止まる',
+  blocked: '囲いで止まった',
 }
 
 export const AGENT_LABELS: Record<AgentKind, string> = {
@@ -135,6 +144,8 @@ export interface TargetView {
   more: number
   /** The command wrote its output to a file (`>`). */
   redirect: boolean
+  /** Hosts of URLs the command named (the AI sandbox's host list is about these). */
+  hosts?: string[]
 }
 
 function fileItem(f: ShownFileTarget): TargetItem {
@@ -159,6 +170,7 @@ export function describeTarget(target: AgentEventTarget): TargetView {
         items: target.programs.map((p) => (p === '?' ? { kind: 'plain', text: '（名前を残さないプログラム）' } : { kind: 'code', text: p })),
         more: target.more ?? 0,
         redirect: target.redirect === true,
+        ...(target.hosts?.length ? { hosts: target.hosts } : {}),
       }
     case 'web':
       return { ...none, items: [target.host ? { kind: 'code', text: target.host } : { kind: 'plain', text: '（宛先なし）' }] }

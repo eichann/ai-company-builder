@@ -19,7 +19,7 @@
  * Findings and verification: `.claude/rules/agent-sandbox.md`.
  */
 
-import { normalizeSandboxDomain, type AgentSandboxSettings } from '../../../shared/core/agent-sandbox'
+import { normalizeSandboxDomain, sandboxAllowsHost, type AgentSandboxSettings } from '../../../shared/core/agent-sandbox'
 
 /**
  * Places no sandboxed AI command may read: SSH / cloud / package-registry
@@ -210,4 +210,120 @@ export function codexSandboxConfig(resolved: ResolvedSandbox): Record<string, un
       },
     },
   }
+}
+
+// ---------------------------------------------------------------------------
+// Recording (observe) and reading the sandbox's refusals (enforce)
+// ---------------------------------------------------------------------------
+
+const URL_RE = /\b(?:https?|wss?|ftp|git|ssh|sftp):\/\/[^\s'"`<>\\)]+/gi
+const MAX_HOSTS = 5
+
+/** The hosts of URLs a command names (lower case, ≤ 5; never the path, query or user). */
+export function commandHosts(command: string): string[] {
+  const hosts: string[] = []
+  for (const match of command.matchAll(URL_RE)) {
+    let host: string
+    try { host = new URL(match[0]).hostname.toLowerCase() } catch { continue }
+    if (!host || host.startsWith('[') || hosts.includes(host)) continue
+    hosts.push(host)
+    if (hosts.length >= MAX_HOSTS) break
+  }
+  return hosts
+}
+
+/** What enforce would refuse about a call: a host outside the list, or a read of a denied place. */
+export type SandboxConcern = 'host' | 'read'
+
+const READ_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead', 'View', 'ListDirectory', 'readFile', 'listDirectory'])
+const COMMAND_TOOLS = new Set(['Bash', 'executeCommand'])
+
+/**
+ * Would `enforce` refuse this call? Commands: a named host the list does not
+ * allow, or a denied place spelled in the command (absolute, `~/`, `$HOME/`).
+ * Read tools: a path inside a denied place. Best effort (a script can reach
+ * anything) — this marks the log in observe mode; enforcing is the CLI's job.
+ */
+export function sandboxConcern(resolved: ResolvedSandbox, tool: string, input: unknown, home: string): SandboxConcern | undefined {
+  const value = input && typeof input === 'object' ? input as Record<string, unknown> : {}
+  if (COMMAND_TOOLS.has(tool)) {
+    const command = Array.isArray(value.command) ? value.command.filter(w => typeof w === 'string').join(' ') : typeof value.command === 'string' ? value.command : ''
+    if (!command) return undefined
+    if (commandHosts(command).some(host => !sandboxAllowsHost(resolved.allowedDomains, host))) return 'host'
+    const homeBase = trimSlash(home)
+    const text = command.replace(/\$\{?HOME\}?(?=\/)/g, homeBase).replace(/(^|[\s'"=:])~(?=\/)/g, `$1${homeBase}`)
+    if (resolved.denyRead.some(place => containsPath(text, place))) return 'read'
+    return undefined
+  }
+  if (READ_TOOLS.has(tool)) {
+    const raw = [value.file_path, value.path, value.notebook_path].find((v): v is string => typeof v === 'string' && v.length > 0)
+    const path = raw ? expandHomePath(raw, home) : undefined
+    if (path && resolved.denyRead.some(place => isSameOrInside(path, place))) return 'read'
+  }
+  return undefined
+}
+
+/** `place` appears in `text` as a whole path (followed by `/`, a quote, a space, a separator or the end). */
+function containsPath(text: string, place: string): boolean {
+  for (let from = 0; ;) {
+    const at = text.indexOf(place, from)
+    if (at < 0) return false
+    const next = text[at + place.length]
+    if (next === undefined || /[\s/'"`;|&)]/.test(next)) return true
+    from = at + 1
+  }
+}
+
+/** What the sandbox refused, read from a failed command's output. */
+export interface SandboxViolation {
+  /** Hosts the network proxy refused (`deny network-outbound host:port`). */
+  hosts: string[]
+  /** A file access the sandbox reported (a `deny file-…` line). */
+  read: boolean
+  /** The command failed with `Operation not permitted` (a denied place, when the command names one). */
+  notPermitted: boolean
+}
+
+/**
+ * Claude Code appends `<sandbox_violations>` to a command's error output when
+ * the sandbox refused a connection (verified on CLI 2.1.314: `deny
+ * network-outbound example.org:443 (host is not on the allow list)`). A
+ * refused file read shows only as `Operation not permitted`.
+ */
+export function parseSandboxViolation(output: unknown): SandboxViolation | undefined {
+  if (typeof output !== 'string' || !output) return undefined
+  const block = /<sandbox_violations>([\s\S]*?)<\/sandbox_violations>/.exec(output)?.[1]
+  const notPermitted = /Operation not permitted/.test(output)
+  if (block === undefined && !notPermitted) return undefined
+  const hosts: string[] = []
+  let read = false
+  for (const line of (block ?? '').split('\n')) {
+    const network = /deny network-outbound\s+([A-Za-z0-9.-]+)(?::\d+)?/.exec(line)
+    if (network) {
+      const host = network[1].toLowerCase()
+      if (!hosts.includes(host) && hosts.length < MAX_HOSTS) hosts.push(host)
+    } else if (/deny file-/.test(line)) read = true
+  }
+  return { hosts, read, notPermitted }
+}
+
+// ---------------------------------------------------------------------------
+// One turn
+// ---------------------------------------------------------------------------
+
+/** What a turn does with the member's policy (`off` → no sandbox part at all). */
+export type TurnSandboxDecision =
+  | { mode: 'off' }
+  | { mode: 'observe' | 'enforce'; resolved: ResolvedSandbox; onUnavailable: AgentSandboxSettings['onUnavailable']; degraded: boolean }
+
+/**
+ * The member's mode for this turn. `enforce` with an agent that cannot take
+ * the sandbox (registry `capabilities.sandbox`) runs as `observe`
+ * (`degraded`: the caller applies the company's `onUnavailable`).
+ */
+export function decideTurnSandbox(settings: AgentSandboxSettings, host: SandboxHost, canEnforce: boolean): TurnSandboxDecision {
+  if (settings.mode === 'off') return { mode: 'off' }
+  const resolved = resolveSandbox(settings, host)
+  if (settings.mode === 'enforce' && !canEnforce) return { mode: 'observe', resolved, onUnavailable: settings.onUnavailable, degraded: true }
+  return { mode: settings.mode, resolved, onUnavailable: settings.onUnavailable, degraded: false }
 }

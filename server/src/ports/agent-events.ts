@@ -30,6 +30,10 @@ export interface AgentEventRow {
   decision: string
   guardReason: string | null
   outcome: string | null
+  /** The AI sandbox mark (would-block / blocked), or null. */
+  sandbox: string | null
+  /** The skill the conversation was running, or null. */
+  skill: string | null
   clientVersion: string | null
 }
 
@@ -82,6 +86,11 @@ export interface AgentEventRepository {
   dailyCounts(companyId: string, filter: AgentEventFilter, deniedDecisions: string[], tzModifier: string): AgentEventDailyRow[]
   /** Events with at < cutoff. */
   countBefore(companyId: string, cutoff: string): number
+  /**
+   * The AI sandbox's part of the log in [from, to): events with a sandbox mark or a
+   * `denied-read` / `sandbox` guard reason, newest first, at most `limit`.
+   */
+  sandboxEvents(companyId: string, from: string, to: string, limit: number): AgentEventRow[]
   /** Delete at most `max` events with at < cutoff. Returns how many went. */
   deleteBefore(companyId: string, cutoff: string, max: number): number
   /** Companies that have events. */

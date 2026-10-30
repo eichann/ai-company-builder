@@ -5,6 +5,7 @@
 // `tool_use_id`.
 
 import type { GuardReason, ToolCall, ToolDecision, ToolEventTracker } from '../../shared/agent-events'
+import { parseSandboxViolation } from '../../shared/agents/sandbox-policy'
 
 /** What the CLI gets back, and what the app decided (undefined: nothing to record). */
 export interface ToolVerdict<T> {
@@ -45,6 +46,48 @@ export function recordToolEnd(tracker: ToolEventTracker | undefined, input: Hook
   const call = claudeToolCall(input)
   const duration = typeof input.duration_ms === 'number' ? input.duration_ms : undefined
   if (input.hook_event_name === 'PostToolUse') tracker.finish(input.tool_use_id, 'ok', call, duration)
-  else if (input.hook_event_name === 'PostToolUseFailure') tracker.finish(input.tool_use_id, 'error', call, duration)
+  // A failed command's error carries the sandbox's `<sandbox_violations>` (enforce).
+  else if (input.hook_event_name === 'PostToolUseFailure') tracker.finish(input.tool_use_id, 'error', call, duration, parseSandboxViolation(input.error))
   else if (input.hook_event_name === 'PermissionDenied') tracker.decide(input.tool_use_id, call, 'policy-denied')
+}
+
+/**
+ * Claude Code's own text for a call its permission rules refused (verified on
+ * CLI 2.1.314: `<tool_use_error>File is in a directory that is denied by your
+ * permission settings.</tool_use_error>`). Managed settings (the company
+ * Macs' Jamf profile) and the sandbox's `Read(...)` denies refuse this way.
+ */
+const PERMISSION_DENIED_RE = /denied by your permission settings/i
+
+/**
+ * Reads the CLI's message stream for refusals no hook reports: a call its
+ * permission rules deny runs neither PreToolUse nor PostToolUse(Failure), so
+ * the log never saw it (found with the company Macs' managed settings). The
+ * `tool_use` block gives the call, its `tool_result` (is_error + the text
+ * above) the refusal → `policy-denied` / `denied-read`. A call a hook already
+ * reported is left alone (the tracker ignores a finished id).
+ */
+export function createDeniedCallWatcher(tracker: ToolEventTracker): (message: unknown) => void {
+  const calls = new Map<string, ToolCall>()
+  return message => {
+    const m = message as { type?: unknown; message?: { content?: unknown } } | null
+    const content = Array.isArray(m?.message?.content) ? m!.message!.content as Array<Record<string, unknown>> : []
+    if (m?.type === 'assistant') {
+      for (const block of content) {
+        if (block?.type === 'tool_use' && typeof block.id === 'string' && typeof block.name === 'string') {
+          if (calls.size >= 500) calls.delete(calls.keys().next().value as string)
+          calls.set(block.id, { tool: block.name, input: block.input })
+        }
+      }
+    } else if (m?.type === 'user') {
+      for (const block of content) {
+        if (block?.type !== 'tool_result' || block.is_error !== true || typeof block.tool_use_id !== 'string') continue
+        const call = calls.get(block.tool_use_id)
+        calls.delete(block.tool_use_id)
+        const text = typeof block.content === 'string' ? block.content
+          : Array.isArray(block.content) ? block.content.map(part => (part as { text?: unknown })?.text).filter(t => typeof t === 'string').join('\n') : ''
+        if (call && PERMISSION_DENIED_RE.test(text)) tracker.decide(block.tool_use_id, call, 'policy-denied', 'denied-read')
+      }
+    }
+  }
 }

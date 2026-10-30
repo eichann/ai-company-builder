@@ -4,6 +4,7 @@ import { useState } from 'react'
 import { toast } from 'sonner'
 import { ArrowCounterClockwise, Barricade, ClockCounterClockwise, Globe, FolderLock, LockSimple, UserSwitch } from '@phosphor-icons/react'
 
+import { ImpactCard } from '@/components/agent-sandbox/impact-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
@@ -73,6 +74,7 @@ export default function AgentSandboxPage() {
             onSaved={(next) => view.setData(() => next)}
           />
           <OverridesCard view={view.data} onSaved={(next) => view.setData(() => next)} />
+          <ImpactCard />
           <HistoryCard history={view.data.history} />
         </div>
       ) : null}

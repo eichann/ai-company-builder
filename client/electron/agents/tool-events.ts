@@ -5,22 +5,25 @@
 
 import { createToolEventTracker, type ToolEventTracker } from '../../shared/agent-events'
 import type { AuthMode } from '../../shared/agent'
-import type { AgentHostConfig, ToolEventContextInput } from './connection'
+import { sandboxConcern } from '../../shared/agents/sandbox-policy'
+import type { AgentHostConfig, ToolEventContextInput, TurnSandbox } from './connection'
 
 let warnedEmit = false
 
 export function turnToolEvents(
   host: Pick<AgentHostConfig, 'onToolEvent' | 'toolEventPaths'>,
   agent: AuthMode,
-  request: { appSessionId?: string; modelId?: string; workingDirectory?: string; toolEventContext?: ToolEventContextInput },
+  request: { appSessionId?: string; modelId?: string; workingDirectory?: string; toolEventContext?: ToolEventContextInput; sandbox?: TurnSandbox },
 ): ToolEventTracker | undefined {
   const sink = host.onToolEvent
   if (!sink) return undefined
   let paths: { home?: string; appDataDirs?: string[] } = {}
   try { paths = host.toolEventPaths?.() ?? {} } catch { /* no secret-place marks */ }
   const context = request.toolEventContext
+  const sandbox = request.sandbox
   return createToolEventTracker({
     agent,
+    ...(sandbox ? { sandbox: { mode: sandbox.mode, concern: call => sandboxConcern(sandbox.resolved, call.tool, call.input, sandbox.home) } } : {}),
     conversationId: request.appSessionId,
     turnId: context?.turnId,
     companyId: context?.companyId,

@@ -20,7 +20,7 @@ import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { createClaudeSteer, tapQuery } from './steering'
 import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../../shared/agents/registry'
 import { turnToolEvents } from './tool-events'
-import { recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
+import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -146,7 +146,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -155,7 +155,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       // The mode the CLI actually runs tools in (it reports it on every hook call).
       let observedMode: string | undefined
       // The AI action log for this turn (shared/agent-events.ts); undefined when nobody records.
-      const toolEvents = turnToolEvents(config, 'claude-code', { appSessionId, modelId, workingDirectory, toolEventContext })
+      const toolEvents = turnToolEvents(config, 'claude-code', { appSessionId, modelId, workingDirectory, toolEventContext, sandbox })
       // PreToolUse decision: request UI approval for dangerous patterns (works even in
       // bypassPermissions). Each answer carries the decision it stands for (the action log).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -415,7 +415,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
                 if (event) onEvent(event)
               })
               onQueryCreated?.(query as object)
-              if (toolEvents) tapQuery(query as object, () => {}, () => toolEvents.close())
+              // Refusals by permission rules run no hook: read them from the messages.
+              if (toolEvents) tapQuery(query as object, createDeniedCallWatcher(toolEvents), () => toolEvents.close())
             },
           } : {}),
           // Off unless the renderer can show it; the member's own
