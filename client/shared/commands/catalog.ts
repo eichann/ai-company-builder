@@ -32,6 +32,20 @@ export const COMMANDS = defineCommands([
     }),
     target: { arg: 'pane', area: 'chat' },
   },
+  {
+    id: 'layout.toggleChat', title: 'AIチャットの表示を切り替える', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
+  },
+  {
+    // The 「ファイルを探す」 dialog (search by file name).
+    id: 'file.search', title: 'ファイルを名前で探す', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+p', area: 'app' },
+  },
+  {
+    // The left panel's 検索 tab, with the cursor in its box.
+    id: 'search.show', title: '検索を開く', class: 'view',
+    args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },
+  },
 ])
 
 export type AppCommands = typeof COMMANDS

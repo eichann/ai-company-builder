@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
+import { useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, GitCommit, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
 import { ChatPanel } from '../components/chat/ChatPanel'
@@ -33,7 +33,7 @@ import { skillCommands } from '../features/skills/model'
 import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownload'
 import { useSync } from '../features/sync/hooks/useSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
-import { useCommandHandler } from '../shared/commands/commands'
+import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -140,27 +140,15 @@ export function AppShell() {
   const { handleSync } = sync
   const handlePrivateFolderCreated = useCallback(() => { void handleSync() }, [handleSync])
 
-  // Keyboard shortcuts: Cmd+Shift+F → search tab, Cmd+P → file search modal, Cmd+Shift+C → toggle chat
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
-        e.preventDefault()
-        setLeftTab('search')
-        requestAnimationFrame(() => searchInputRef.current?.focus())
-      }
-      if ((e.metaKey || e.ctrlKey) && !e.shiftKey && e.key === 'p') {
-        e.preventDefault()
-        setShowFileSearch(true)
-      }
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
-        if (isChatInputRecentlyActive()) return
-        e.preventDefault()
-        toggleChat()
-      }
-    }
-    document.addEventListener('keydown', handleKeyDown)
-    return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [setLeftTab, toggleChat])
+  // The app's shortcuts are commands (shared/commands/catalog.ts), delivered to the focused area only.
+  useKeybindings()
+  useCommandHandler('search.show', () => {
+    setLeftTab('search')
+    requestAnimationFrame(() => searchInputRef.current?.focus())
+  })
+  useCommandHandler('file.search', () => setShowFileSearch(true))
+  // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
+  useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
 
   const handleSelectDept = (id: string) => {
     selectDepartment(id)
