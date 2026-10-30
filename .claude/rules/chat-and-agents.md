@@ -230,7 +230,7 @@ tool), renderer `ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`.
   stored with the reply as `reviewRequests`, so the card and 「あなたの番」 survive a restart.
   The latest reply's request is pending until the member sends anything: 「この内容で進めて」
   sends `REVIEW_CONFIRM_MESSAGE`, 「直してほしい」 focuses the composer, a file opens in the
-  editor (`OpenFileContext`, the main screen's opener). Tests: `client/tests/review-request.test.ts`,
+  editor (the `file.open` command, registered by the main screen; `commands.md`). Tests: `client/tests/review-request.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
 
 ## Instructions while the AI works (steering)

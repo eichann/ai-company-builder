@@ -33,6 +33,7 @@ import { skillCommands } from '../features/skills/model'
 import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownload'
 import { useSync } from '../features/sync/hooks/useSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
+import { useCommandHandler } from '../shared/commands/commands'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -178,6 +179,7 @@ export function AppShell() {
     handleOpenFile(filePath)
     handlePinFile(filePath)
   }, [handleOpenFile, handlePinFile, setLeftTab])
+  useCommandHandler('file.open', ({ path }) => handleFileSearchSelect(path))
 
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
@@ -285,7 +287,6 @@ export function AppShell() {
             departmentPath={rootPath}
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
-            onOpenFile={handleFileSearchSelect}
           />
         ) : (
         <>

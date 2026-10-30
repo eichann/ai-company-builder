@@ -2,7 +2,8 @@ import { memo, useContext } from 'react'
 import { CheckCircle, Eye, FileText } from '@phosphor-icons/react'
 import type { ReviewRecord } from '../../../shared/review-request'
 import { useAppStore } from '../../stores/appStore'
-import { OpenFileContext, ReviewActionsContext } from './review-context'
+import { runCommand, useCommandAvailable } from '../../shared/commands/commands'
+import { ReviewActionsContext } from './review-context'
 
 /**
  * 「確認をお願いします」: the AI asked the member to look at its work and
@@ -11,7 +12,7 @@ import { OpenFileContext, ReviewActionsContext } from './review-context'
  */
 export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { record: ReviewRecord }) {
   const actions = useContext(ReviewActionsContext)
-  const openFile = useContext(OpenFileContext)
+  const canOpenFile = useCommandAvailable('file.open')
   const rootPath = useAppStore(state => state.currentCompany?.rootPath)
   const pending = actions.pendingId === record.id
   return (
@@ -25,8 +26,8 @@ export const ReviewRequestCard = memo(function ReviewRequestCard({ record }: { r
       {record.message && <p className="mt-1 whitespace-pre-wrap text-xs text-gray-600 dark:text-zinc-300">{record.message}</p>}
       {record.files.length > 0 && <ul aria-label="見てほしいファイル" className="mt-2 space-y-1">
         {record.files.map(file => <li key={file}>
-          {openFile && rootPath
-            ? <button type="button" onClick={() => openFile(`${rootPath}/${file}`)} title="エディタで開く"
+          {canOpenFile && rootPath
+            ? <button type="button" onClick={() => void runCommand('file.open', { path: `${rootPath}/${file}` })} title="エディタで開く"
                 className="flex max-w-full items-center gap-1.5 rounded px-1 py-0.5 text-left font-mono text-xs text-accent hover:bg-accent/10">
                 <FileText size={13} aria-hidden className="shrink-0" /><span className="truncate">{file}</span>
               </button>

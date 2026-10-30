@@ -13,6 +13,7 @@ import type { AgentInteractionRequest, AgentInteractionResponse } from '../share
 import type { CodexStatus } from '../shared/agent'
 import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
+import { commands } from '../src/shared/commands/commands'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -264,6 +265,9 @@ window.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
   return json({})
 }
 
+// The main screen's file opener, as AppShell registers it.
+commands.register('file.open', ({ path }) => { control.opened.push(path) })
+
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
@@ -271,7 +275,7 @@ const width = Number(params.get('width')) || 760
 createRoot(document.getElementById('root')!).render(
   <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
     <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-      <ChatPanel departmentPath="/tmp/acb-preview" onOpenFile={path => { control.opened.push(path) }} />
+      <ChatPanel departmentPath="/tmp/acb-preview" />
     </div>
   </div>,
 )
