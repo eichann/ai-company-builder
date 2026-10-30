@@ -123,6 +123,12 @@ export interface AgentDescriptor<ModelId extends string = string> {
   readonly defaultEffort?: AgentEffort
   readonly tasks: AgentTaskModels
   readonly capabilities: AgentCapabilities
+  /**
+   * The oldest CLI the app starts (`<cli> --version`, cli-version.ts): older
+   * ones lack what the app relies on (for Codex: permission profiles and the
+   * network proxy the sandbox uses). Undefined = no check.
+   */
+  readonly minCliVersion?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -216,6 +222,9 @@ const CODEX: AgentDescriptor = {
   id: 'codex',
   shortLabel: 'Codex',
   label: 'Codex',
+  // Verified with the app: app-server protocol, permission profiles +
+  // features.network_proxy (`codex sandbox`, findings §B.2).
+  minCliVersion: '0.153.4',
   // From `model/list` at run time; the model's own default effort applies.
   models: [],
   tasks: {

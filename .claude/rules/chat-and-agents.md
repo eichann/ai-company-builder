@@ -54,7 +54,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   job (`tasks`: chat / title / commitMessage / voice / handoff / webReader) and `capabilities`
   (ownsConversation, steering, promptSuggestions, choicePrompts, subagentProgress, rateLimits,
   imageInput, companyFilesMcp, references, writeGuard, privateReadGuard, handoff, oneShotText,
-  webReader, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog).
+  webReader, commitMessageFallback, privateFolderCommitMessages, liveModelCatalog), and
+  `minCliVersion` (Codex: the oldest CLI the app starts, checked with `--version` before a chat
+  turn and in the settings check — `agent-sandbox.md`).
 - **Every model id lives there.** `client/tests/agent-registry.test.ts` pins today's strings and
   fails on a model id literal anywhere under `client/electron`, `client/src`, `client/shared`.
   A model generation update is a registry-only change. (The API-key mode deliberately uses

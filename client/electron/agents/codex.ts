@@ -19,6 +19,7 @@ import { fromCodexRateLimits } from '../../shared/rate-limits'
 import type { SteerTarget } from './steering'
 import { turnToolEvents } from './tool-events'
 import { recordCodexApproval, recordCodexItem } from './codex-tool-events'
+import { checkInstalledCodex, type CodexVersionCheck } from './codex-version'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -28,6 +29,9 @@ type Request = Parameters<AgentConnection['createChatModel']>[0]
 export type CodexTransport = Pick<CodexRpc, 'initialize' | 'request' | 'send' | 'close' | 'onMessage' | 'onFailure'>
 type RpcFactory = (env: Record<string, string>) => CodexTransport
 const defaultRpc: RpcFactory = env => new CodexRpc(env)
+// The version floor applies to the member's CLI; an injected transport (tests) has none to check.
+const noVersionCheck: CodexVersionCheck = async () => ({ ok: true })
+const versionCheckFor = (createRpc: RpcFactory) => createRpc === defaultRpc ? checkInstalledCodex : noVersionCheck
 type Config = AgentHostConfig
 interface NativeModel { model: string; displayName: string; hidden?: boolean; isDefault: boolean; supportedReasoningEfforts: { reasoningEffort: string }[]; defaultReasoningEffort: string }
 interface NativeUsage { inputTokens: number; outputTokens: number; cachedInputTokens: number; reasoningOutputTokens: number }
@@ -48,11 +52,13 @@ export async function requireChatGPT(rpc: CodexTransport) {
   const result = await rpc.request<{ account: { type: string } | null }>('account/read', { refreshToken: false })
   if (result.account?.type !== 'chatgpt') throw new Error('CodexにChatGPTアカウントでログインしてください。ターミナルで codex login を実行後、再確認してください。')
 }
-export async function getCodexStatus(env: Record<string, string>, platform: NodeJS.Platform = process.platform): Promise<CodexStatus> {
+export async function getCodexStatus(env: Record<string, string>, platform: NodeJS.Platform = process.platform, checkVersion: CodexVersionCheck = checkInstalledCodex): Promise<CodexStatus> {
   if (platform === 'win32') return { unsupported: true, available: false, authenticated: false, models: [], error: CODEX_WINDOWS_UNSUPPORTED }
   let rpc: CodexRpc | undefined
   let authenticated = false
   try {
+    const version = await checkVersion(env)
+    if (!version.ok) return { available: false, authenticated: false, models: [], error: version.message }
     rpc = new CodexRpc(env)
     await rpc.initialize()
     await requireChatGPT(rpc)
@@ -63,7 +69,7 @@ export async function getCodexStatus(env: Record<string, string>, platform: Node
   } finally { rpc?.close() }
 }
 
-function createModel(config: Config, request: Request, title = false, createRpc: RpcFactory = defaultRpc): Model {
+function createModel(config: Config, request: Request, title = false, createRpc: RpcFactory = defaultRpc, checkVersion: CodexVersionCheck = versionCheckFor(createRpc)): Model {
   const model: Model = {
     specificationVersion: 'v3', provider: 'codex', modelId: request.modelId || 'default', supportedUrls: { 'image/*': [/^data:/] },
     async doGenerate(options) {
@@ -212,6 +218,10 @@ function createModel(config: Config, request: Request, title = false, createRpc:
           if (options.abortSignal?.aborted) { abort(); return }
           armTimeout()
           void (async () => {
+            // Too old a CLI: a plain notice instead of a protocol error later.
+            const version = await checkVersion(config.getShellEnv())
+            if (!version.ok) throw new Error(version.message)
+            if (ended) return
             rpc = createRpc(config.getShellEnv())
             rpc.onFailure = error => finish(error)
             rpc.onMessage = message => {
@@ -330,12 +340,12 @@ function createModel(config: Config, request: Request, title = false, createRpc:
   }
   return model
 }
-export function createCodexConnection(config: Config, createRpc: RpcFactory = defaultRpc): AgentConnection {
+export function createCodexConnection(config: Config, createRpc: RpcFactory = defaultRpc, checkVersion: CodexVersionCheck = versionCheckFor(createRpc)): AgentConnection {
   return {
     id: 'codex', ownsConversation: true, authenticationError: () => process.platform === 'win32' ? CODEX_WINDOWS_UNSUPPORTED : undefined,
     isMissingSession: (error, id) => error instanceof MissingAgentSession && error.sessionId === id,
-    createChatModel: request => createModel(config, request, false, createRpc),
-    createTitleModel: request => createModel(config, request || {}, true, createRpc),
+    createChatModel: request => createModel(config, request, false, createRpc, checkVersion),
+    createTitleModel: request => createModel(config, request || {}, true, createRpc, checkVersion),
     readMetadata(metadata) {
       const value = metadata?.codex as { sessionId?: string } | undefined
       return { sessionId: value?.sessionId }
