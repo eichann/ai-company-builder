@@ -74,6 +74,7 @@ const TYPES: Record<string, string> = {
   AgentEventRetentionPreview: 'AgentEventRetentionPreview',
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
+  AgentStops: 'AgentStopView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Invitations: 'Invitation[]',
@@ -201,6 +202,7 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   // The same mounts as src/index.ts.
   app = new Hono()
@@ -212,6 +214,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api', invitationsRoute)
 
@@ -318,6 +321,12 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
+  })
+
+  it('emergency stop (「AI の緊急停止」)', async () => {
+    await expectShape('AgentStops', USERS.owner, 'GET', `${base}/agent-stops`)
+    const made = await expectShape('AgentStops', USERS.owner, 'POST', `${base}/agent-stops`, { userId: USERS.member, tool: 'command', reason: '契約テスト' })
+    await expectShape('AgentStops', USERS.owner, 'DELETE', `${base}/agent-stops/${made.active[0].id}`)
   })
 
   it('API keys (「API キー」)', async () => {

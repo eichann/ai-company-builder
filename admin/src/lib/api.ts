@@ -638,6 +638,28 @@ export const agentSandboxApi = {
 }
 
 // ---------------------------------------------------------------------------
+// Emergency stop (「AI の緊急停止」, M2): shapes from shared/types/agent-stop.ts
+// ---------------------------------------------------------------------------
+
+export type {
+  AgentStopEntry,
+  AgentStopRequest,
+  AgentStopToolKind,
+  AgentStopUnsupportedMember,
+  AgentStopView,
+} from '../../../shared/types/agent-stop'
+
+import type { AgentStopRequest, AgentStopView } from '../../../shared/types/agent-stop'
+
+export const agentStopApi = {
+  get: (companyId: string) => getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops`),
+  stop: (companyId: string, request: AgentStopRequest) =>
+    getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops`, { method: 'POST', body: request }),
+  release: (companyId: string, stopId: string) =>
+    getData<AgentStopView>(`/api/companies/${enc(companyId)}/agent-stops/${enc(stopId)}`, { method: 'DELETE' }),
+}
+
+// ---------------------------------------------------------------------------
 // Invitations
 // ---------------------------------------------------------------------------
 

@@ -10,6 +10,7 @@ import {
   Check,
   Desktop,
   Gear,
+  HandPalm,
   Key,
   List,
   LockKey,
@@ -27,6 +28,8 @@ import {
 } from '@phosphor-icons/react'
 import type { Icon } from '@phosphor-icons/react'
 
+import { AgentStopProvider } from '@/components/agent-stop/agent-stop-context'
+import { StopBar } from '@/components/agent-stop/stop-bar'
 import { Avatar } from '@/components/ui/avatar'
 import { Button } from '@/components/ui/button'
 import {
@@ -72,6 +75,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'security', label: 'セキュリティ', icon: LockKey, visible: (c) => c.isAdmin },
   { segment: 'agent-events', label: 'AI の操作の記録', icon: Robot, visible: (c) => c.isAdmin || c.canViewAgentEvents },
   { segment: 'agent-sandbox', label: 'AI の囲い', icon: Barricade, visible: (c) => c.isAdmin },
+  { segment: 'agent-stop', label: 'AI の緊急停止', icon: HandPalm, visible: (c) => c.isAdmin },
   { segment: 'api-keys', label: 'API キー', icon: Key, visible: (c) => c.isAdmin },
   { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]
@@ -81,6 +85,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { company } = useCompany()
 
   return (
+    <AgentStopProvider>
     <div className="flex min-h-dvh">
       {/* Desktop sidebar */}
       <aside className="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-sidebar-border bg-sidebar text-sidebar-foreground lg:flex">
@@ -103,9 +108,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           </Button>
           <span className="truncate text-sm font-medium">{company.data?.name ?? ''}</span>
         </header>
-        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">{children}</main>
+        <main className="mx-auto w-full max-w-6xl flex-1 px-4 py-6 sm:px-6 lg:px-10 lg:py-10">
+          {/* 「AI を止める」 on every page (owner/admin; agent-stop.md). */}
+          <StopBar />
+          {children}
+        </main>
       </div>
     </div>
+    </AgentStopProvider>
   )
 }
 
