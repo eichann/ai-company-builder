@@ -40,6 +40,8 @@ if (params.get('storage') !== 'keep') { try { localStorage.clear() } catch { /* 
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('preview-user')
 const longHistory = params.get('history') === 'long'
 const editHistory = params.get('history') === 'edit'
+// Enough closed conversations that the 「AIへの相談」 list scrolls (sticky group headings).
+const manyHistory = params.get('history') === 'many'
 const signedOut = params.get('auth') === 'none'
 
 const CODE_SAMPLES: Array<[string, string]> = [
@@ -114,7 +116,8 @@ installElectronAPI({
   getAuthMode: async () => agent,
   hasApiKey: async () => false,
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
-  getChatSessionSummaries: async () => longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
+  getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
+    : longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
     : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession

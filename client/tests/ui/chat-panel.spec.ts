@@ -281,6 +281,22 @@ test('a group heading folds its rows, stays folded after a reload, and a search 
   await expect(row).toBeHidden()
 })
 
+test('a group heading stays at the top of the list while its rows scroll under it', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 600 })
+  await openPreview(page, 'chat-header', { turn: 'manual', history: 'many' })
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  const closed = sidebar.getByRole('button', { name: /^終わったもの/ })
+  await expect(sidebar.getByRole('button', { name: /^終わった相談 15/ })).toBeAttached()
+  const list = sidebar.locator('.overflow-y-auto')
+  const listTop = async () => (await list.boundingBox())!.y
+  await list.evaluate(el => { el.scrollTop = el.scrollHeight })
+  // Scrolled to the end: the closed group's heading is pinned at the top of the list, not scrolled away.
+  await expect.poll(async () => Math.abs(Math.round((await closed.boundingBox())!.y - await listTop()))).toBeLessThanOrEqual(2)
+  await expect(closed).toBeInViewport()
+  await closed.click()
+  await expect(closed).toHaveAttribute('aria-expanded', 'false')
+})
+
 test('「確認をお願いします」: the AI asks for a review and stops; 「あなたの番」 until the member answers, files open in the editor', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual' })
   await send(page, '企画書を書いて')

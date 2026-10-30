@@ -42,10 +42,13 @@ const LINE_TONE: Record<string, string> = {
   unseen: 'text-emerald-700 dark:text-emerald-400',
 }
 
-/** A group's heading: a fold toggle with its count (「あなたの番」 never folds); a folded group still shows 新着. */
+/** A group's heading: a fold toggle with its count (「あなたの番」 never folds); a folded group still shows 新着.
+ *  Sticky within its section, so the heading of the group being scrolled stays at the top until the next one takes over. */
 function GroupHeading({ group, first, count, folded, unread, onToggle }: { group: { key: ConversationGroupKey; label: string }; first: boolean; count: number; folded: boolean; unread: boolean; onToggle: (key: ConversationGroupKey) => void }) {
   const foldable = canCollapse(group.key)
-  const tone = `flex w-full items-center justify-between rounded-md border-l-2 px-2 py-1.5 ${first ? 'mt-1' : 'mt-3'} mb-1 text-[11px] font-semibold ${group.key === 'needs-you'
+  // The sticky wrapper is opaque (the sidebar's own background) so rows never show through the tinted heading.
+  const sticky = `sticky top-0 z-10 bg-gray-50 dark:bg-zinc-900 ${first ? 'mt-1' : 'mt-3'} mb-1`
+  const tone = `flex w-full items-center justify-between rounded-md border-l-2 px-2 py-1.5 text-[11px] font-semibold ${group.key === 'needs-you'
     ? 'border-amber-500/60 bg-amber-500/15 text-amber-800 dark:text-amber-300'
     : 'border-accent/40 bg-gray-200/70 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300'}`
   const content = <>
@@ -56,8 +59,8 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
     </span>
     <span className="font-normal tabular-nums text-gray-500 dark:text-zinc-400">{count}件</span>
   </>
-  if (!foldable) return <h3 className={tone}>{content}</h3>
-  return <h3>
+  if (!foldable) return <h3 className={sticky}><div className={tone}>{content}</div></h3>
+  return <h3 className={sticky}>
     <button type="button" onClick={() => onToggle(group.key)} aria-expanded={!folded} aria-controls={`conversation-group-${group.key}`}
       className={`${tone} text-left hover:brightness-95 focus-visible:outline-accent`}>{content}</button>
   </h3>
