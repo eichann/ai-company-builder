@@ -65,6 +65,15 @@ one place an added agent brings its own controls; everything else asks the regis
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
   a pinned conversation leaves ピン留め only for あなたの番. Tests:
   `client/tests/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
+- Each group heading except あなたの番 folds its rows (owner, 2026-10-30): a button with
+  `aria-expanded` and a chevron, the count still shown. あなたの番 never folds, so what the AI waits
+  for cannot be folded away; a folded group with an unread reply shows 新着 on its heading.
+  Folded groups are remembered per company in localStorage (`chatCollapsedGroups:<companyId>`,
+  `src/features/chat/hooks/useCollapsedGroups.ts`; unreadable → all open); while the search box
+  has text every group is open (`features/chat/conversationGroups.ts`), so a match is never
+  hidden. Folding only hides rows: pagination counts all rows, and 「続きを読み込む」 hides while
+  終わったもの is folded. Tests: `src/features/chat/conversationGroups.test.ts`,
+  `tests/ui/chat-panel.spec.ts`.
 - Empty conversations are deleted in two cases, by one rule (`isEmptyConversation`: never sent,
   no draft, not renamed, not pinned): closing one (`closeConversation` in `ChatSidebar.tsx`), and
   leaving one for another conversation (owner, 2026-10-30: a blank new one left behind is in the
