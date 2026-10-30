@@ -49,6 +49,9 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/only owners and admins can view the ai action log/i, 'AI の操作の記録を見られるのは、オーナーと管理者です（設定によっては部署の責任者も、自分の部署の分だけ見られます）。'],
   [/only owners and admins can manage the ai action log settings/i, 'AI の操作の記録の設定を変えられるのは、オーナーと管理者だけです。'],
   [/^at most \d+ days$/i, '一度に見られる期間は400日までです。期間を短くしてください。'],
+  [/host cannot change while keys exist|keys registered for this service go to other hosts/i, 'このサービスに鍵が登録されているため、送り先のホスト名は変えられません。先にそのサービスの鍵を削除してください。'],
+  [/delete the keys registered for this service first/i, 'このサービスに鍵が登録されているため、削除できません。先にそのサービスの鍵を削除してください。'],
+  [/this service's requests go to .* only/i, 'このサービスの送り先は、登録したときのホストだけです。ほかのホストは書けません。'],
   [/invitation.*(expired|used|invalid|not found)/i, 'この招待リンクは無効か、有効期限が切れています。管理者に新しいリンクを依頼してください。'],
 ]
 

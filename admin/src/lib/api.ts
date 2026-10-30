@@ -785,6 +785,7 @@ export type {
   BrokerKeySummary,
   BrokerKeyUpdate,
   BrokerKeyUser,
+  BrokerRelayServiceSave,
   BrokerServiceSetting,
   BrokerServiceView,
   BrokerSettings,
@@ -796,11 +797,12 @@ export type {
   BrokerDestinations,
   BrokerKeyRule,
   BrokerKeyStatus,
+  BrokerRelayDefinition,
   BrokerServiceCategory,
   BrokerStatusReason,
 } from '../../../shared/core/key-broker'
 
-import type { BrokerKeyCreate, BrokerKeyUpdate, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
+import type { BrokerKeyCreate, BrokerKeyUpdate, BrokerRelayServiceSave, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
 
 export const keyBrokerApi = {
   get: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker`),
@@ -814,6 +816,11 @@ export const keyBrokerApi = {
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, { method: 'DELETE' }),
   setService: (companyId: string, service: string, setting: BrokerServiceSetting) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, { method: 'PUT', body: setting }),
+  /** A generic service (K9): register or change its destination and how the key travels. */
+  saveRelayService: (companyId: string, service: string, definition: BrokerRelayServiceSave) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, { method: 'PUT', body: definition }),
+  removeRelayService: (companyId: string, service: string) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, { method: 'DELETE' }),
   setMemberKeysAllowed: (companyId: string, memberKeysAllowed: boolean) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { memberKeysAllowed } }),
   /** Emergency stop: every key disabled and every live token revoked, now. */

@@ -7,6 +7,7 @@ import { toast } from 'sonner'
 import { ClockCounterClockwise, Key, LockSimple, Plus, ShieldWarning, SlidersHorizontal, UserCircle, Warning } from '@phosphor-icons/react'
 
 import { KeyForm, createBody, type KeyFormValues } from '@/components/key-broker/key-form'
+import { RelayServicesCard } from '@/components/key-broker/relay-services'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -80,16 +81,18 @@ export default function ApiKeysPage() {
     department: (id) => data?.departments.find((d) => d.id === id)?.name ?? '（削除された部署）',
   }
 
-  /** Run a change; the answer is the whole new view. */
-  const run = async (label: string, fn: () => Promise<BrokerView>) => {
+  /** Run a change; the answer is the whole new view. Resolves whether it was saved. */
+  const run = async (label: string, fn: () => Promise<BrokerView>): Promise<boolean> => {
     setBusy(true)
     try {
       const next = await fn()
       view.setData(() => next)
       toast.success(label)
       setDialog(null)
+      return true
     } catch (err) {
       toast.error('保存できませんでした', { description: describeError(err) })
+      return false
     } finally {
       setBusy(false)
     }
@@ -223,6 +226,12 @@ export default function ApiKeysPage() {
             </div>
           </Card>
 
+          <RelayServicesCard
+            view={data}
+            busy={busy}
+            onSave={(s, definition) => run('サービスを保存しました', () => keyBrokerApi.saveRelayService(companyId, s, definition))}
+            onRemove={(s) => run('サービスを削除しました', () => keyBrokerApi.removeRelayService(companyId, s))}
+          />
           <ServicesCard view={data} busy={busy} onSave={(s, setting) => run('サービスの設定を保存しました', () => keyBrokerApi.setService(companyId, s, setting))} />
           <InternalHostsCard
             hosts={data.settings.internalHosts}
