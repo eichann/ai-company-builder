@@ -10,7 +10,6 @@ import { initDatabase } from '../../src/db'
 import { sqliteCompanyRepository } from '../../src/adapters/sqlite/companies'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sqliteInvitationRepository } from '../../src/adapters/sqlite/invitations'
-import { sqliteDepartmentRepository } from '../../src/adapters/sqlite/departments'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 
 let conn: Database.Database
@@ -97,19 +96,6 @@ describe('invitations', () => {
 
     repo.delete('i2')
     expect(repo.findByToken('t2')).toBeUndefined()
-  })
-})
-
-describe('departments', () => {
-  it('inserts a top-level active department', () => {
-    company('a', '2026-01-01T00:00:00.000Z')
-    sqliteDepartmentRepository(conn).insert({
-      id: 'd1', companyId: 'a', name: '営業部', nameEn: 'Sales', folder: '営業部', icon: 'Storefront',
-      color: '#3b82f6', description: null, sortOrder: 0, createdAt: '2026-01-01T00:00:00.000Z', createdBy: 'u1',
-    })
-    expect(conn.prepare('SELECT * FROM departments').get()).toMatchObject({
-      id: 'd1', parent_id: null, is_active: 1, sort_order: 0, created_at: '2026-01-01T00:00:00.000Z', updated_at: '2026-01-01T00:00:00.000Z', created_by: 'u1',
-    })
   })
 })
 

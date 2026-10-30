@@ -43,9 +43,11 @@ src/composition.ts — the only module that imports adapters; routes take `servi
 - `SecretCipher` (`ports/secret-cipher.ts`): encrypt/decrypt bound to a context;
   `adapters/local-secret-cipher.ts` is the local AES-256-GCM implementation (context as AAD,
   `v1.` envelope), used by nothing yet — the key broker's KMS cipher plugs in here.
-- Static security tests (`tests/security/authorization.test.ts`) accept the access-policy calls
-  (`access.memberOf(`, `requireFullAccess(`, `requireOwner(`) as the membership / 403 checks;
-  the behavioural checks live in `tests/integration/authorization.test.ts`.
+- Sign-in and role checks are tested by calling the routes: `tests/security/auth-guards.test.ts`
+  finds every handler of every file in `src/routes` at run time and expects 401 without a
+  session (public endpoints are listed there with their reason); the 403 checks live in
+  `tests/integration/authorization.test.ts`. Do not add tests that search route source for the
+  name of a check.
 
 ## Route map (mounted in `server/src/index.ts`)
 

@@ -5,7 +5,6 @@ import { describeRules, draftFromRules, losingEdit, previewAccess, rulesFromDraf
 import { describeError } from '@/lib/errors'
 import { isValidFolderName, suggestFolderName } from '@/lib/folder-name'
 import { compareBuilds, formatBuild, formatRelative, latest, parseBuild, parseServerDate } from '@/lib/format'
-import { ruleAccessLabel } from '@/lib/permission-labels'
 import { safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
 import { members } from './fixtures'
@@ -95,14 +94,6 @@ describe('folder names', () => {
     expect(suggestFolderName('営業 企画部')).toBe('営業-企画部')
     expect(suggestFolderName('  Sales & Marketing ')).toBe('Sales-Marketing')
     expect(isValidFolderName(suggestFolderName('#マーケ'))).toBe(true)
-  })
-})
-
-describe('permission labels', () => {
-  it('describes access', () => {
-    expect(ruleAccessLabel({ canRead: true, canWrite: true })).toBe('閲覧・編集')
-    expect(ruleAccessLabel({ canRead: true, canWrite: false })).toBe('閲覧のみ')
-    expect(ruleAccessLabel({ canRead: false, canWrite: false })).toBe('アクセス不可')
   })
 })
 

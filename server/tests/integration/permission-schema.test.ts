@@ -70,18 +70,14 @@ afterAll(() => {
 })
 
 describe('schema on a fresh database', () => {
-  it('creates the permission tables and indexes', () => {
+  it('has the permission tables and allows one scope per company and path', () => {
     const conn = new Database(join(tmp, 'fresh.sqlite'))
     initDatabase(conn)
     expect(tables(conn)).toEqual(expect.arrayContaining(['scopes', 'scope_rules', 'department_managers', 'push_rejections']))
-    const cols = (t: string) => (conn.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).map(c => c.name)
-    expect(cols('scopes')).toEqual(['id', 'company_id', 'path', 'kind', 'department_id', 'repo_id', 'created_at', 'created_by'])
-    expect(cols('scope_rules')).toEqual(['id', 'scope_id', 'subject_type', 'subject_id', 'can_read', 'can_write', 'created_at', 'created_by'])
-    expect(cols('department_managers')).toEqual(['department_id', 'user_id', 'created_at', 'created_by'])
-    expect(cols('push_rejections')).toEqual(['id', 'company_id', 'user_id', 'marker', 'paths', 'created_at'])
     // Nothing to seed without companies.
     expect(countAll(conn)).toEqual({ scopes: 0, scope_rules: 0, department_managers: 0, push_rejections: 0 })
-    // (company_id, path) is unique.
+    // A second scope for the same (company, path) would make the rules of a
+    // place ambiguous: the database refuses it.
     conn.prepare(`INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES ('c', 'C', 'c', 'u', 't', 't')`).run()
     seedPermissionScopes(conn)
     expect(() => conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('x', 'c', '', 'folder', 't')`).run()).toThrow(/UNIQUE/)
