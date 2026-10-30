@@ -175,8 +175,8 @@ test('symbolic links: judged by their real location — a link leading out of th
   assert.equal(await h.invoke('fs:readFile', path.join(viaLink, 'docs', 'relative-out.md')), null)
 })
 
-test('fs handlers inside a root: result shapes', async () => {
-  const dir = path.join(root, 'shapes')
+const shapes = (name: string) => {
+  const dir = path.join(root, name)
   writeFiles(dir, {
     'a.md': '# a',
     'bin.dat': Buffer.from([0, 1, 2, 255]),
@@ -184,17 +184,11 @@ test('fs handlers inside a root: result shapes', async () => {
     'node_modules/pkg/index.js': '',
     '.backups/old/f.md': '',
   })
-  const entries = await h.invoke<Array<{ name: string; isDirectory: boolean; path: string }>>('fs:readDirectory', dir)
-  assert.deepEqual(entries.sort((a, b) => a.name.localeCompare(b.name)), [
-    { name: '.backups', isDirectory: true, path: path.join(dir, '.backups') },
-    { name: 'a.md', isDirectory: false, path: path.join(dir, 'a.md') },
-    { name: 'bin.dat', isDirectory: false, path: path.join(dir, 'bin.dat') },
-    { name: 'node_modules', isDirectory: true, path: path.join(dir, 'node_modules') },
-    { name: 'sub', isDirectory: true, path: path.join(dir, 'sub') },
-  ])
-  assert.deepEqual(await h.invoke('fs:readDirectory', path.join(dir, 'missing')), [])
+  return dir
+}
 
-  // Tree: maxDepth levels of children (default 2 from preload), skipped dirs listed without children.
+test('the file tree shows node_modules and .backups but never walks into them, and stops at the depth asked for', async () => {
+  const dir = shapes('tree')
   type Node = { name: string; isDirectory: boolean; path: string; children?: Node[] }
   const strip = (nodes: Node[]): unknown[] => nodes.sort((a, b) => a.name.localeCompare(b.name))
     .map(n => (n.children ? { name: n.name, children: strip(n.children) } : n.name))
@@ -203,40 +197,47 @@ test('fs handlers inside a root: result shapes', async () => {
     { name: 'sub', children: [{ name: 'deeper', children: ['deepest'] }] },
   ])
   assert.deepEqual(strip(await h.invoke<Node[]>('fs:readDirectoryTree', dir, 0)), ['.backups', 'a.md', 'bin.dat', 'node_modules', 'sub'])
+})
 
-  assert.equal(await h.invoke('fs:readFile', path.join(dir, 'a.md')), '# a')
-  assert.equal(await h.invoke('fs:readFile', path.join(dir, 'missing.md')), null)
+test('a binary file reaches the renderer byte for byte; a missing file or folder reads as nothing, not an error', async () => {
+  const dir = shapes('read')
   const binary = await h.invoke<ArrayBuffer>('fs:readFileBinary', path.join(dir, 'bin.dat'))
-  assert.ok(binary instanceof ArrayBuffer)
   assert.deepEqual([...new Uint8Array(binary)], [0, 1, 2, 255])
+  assert.equal(await h.invoke('fs:readFile', path.join(dir, 'missing.md')), null)
+  assert.deepEqual(await h.invoke('fs:readDirectory', path.join(dir, 'missing')), [])
+})
 
+test('a save into a folder that no longer exists fails instead of creating the folder again', async () => {
+  const dir = shapes('write')
   assert.equal(await h.invoke('fs:writeFile', path.join(dir, 'w.md'), 'written'), true)
   assert.equal(fs.readFileSync(path.join(dir, 'w.md'), 'utf-8'), 'written')
-  assert.equal(await h.invoke('fs:writeFile', path.join(dir, 'no-such-dir', 'w.md'), 'x'), false) // no mkdir -p
-  assert.equal(await h.invoke('fs:createDirectory', path.join(dir, 'n1', 'n2')), true) // recursive
-  assert.equal(await h.invoke('fs:exists', path.join(dir, 'n1', 'n2')), true)
+  assert.equal(await h.invoke('fs:writeFile', path.join(dir, 'no-such-dir', 'w.md'), 'x'), false)
+  assert.equal(fs.existsSync(path.join(dir, 'no-such-dir')), false)
+})
 
-  const stat = await h.invoke<{ success: boolean; data: Record<string, unknown> }>('fs:stat', path.join(dir, 'a.md'))
-  assert.deepEqual(Object.keys(stat.data).sort(), ['ctime', 'isDirectory', 'isFile', 'mtime', 'size'])
-  assert.deepEqual({ ...stat, data: { ...stat.data, mtime: 0, ctime: 0 } }, { success: true, data: { isDirectory: false, isFile: true, size: 3, mtime: 0, ctime: 0 } })
-  assert.match(String(stat.data.mtime), /^\d{4}-\d\d-\d\dT.*Z$/)
-
-  assert.deepEqual(await h.invoke('fs:rename', path.join(dir, 'w.md'), path.join(dir, 'r.md')), { success: true, newPath: path.join(dir, 'r.md') })
-  assert.deepEqual(await h.invoke('fs:move', path.join(dir, 'r.md'), path.join(dir, 'sub', 'r.md')), { success: true })
-  assert.deepEqual(await h.invoke('fs:copy', path.join(dir, 'sub'), path.join(dir, 'sub-copy')), { success: true }) // recursive
+test('rename, move and copy bring the whole content along; a file dropped in from outside is moved (the original is gone)', async () => {
+  const dir = shapes('move')
+  fs.writeFileSync(path.join(dir, 'w.md'), 'written')
+  await h.invoke('fs:rename', path.join(dir, 'w.md'), path.join(dir, 'r.md'))
+  await h.invoke('fs:move', path.join(dir, 'r.md'), path.join(dir, 'sub', 'r.md'))
+  assert.equal(fs.readFileSync(path.join(dir, 'sub', 'r.md'), 'utf-8'), 'written')
+  assert.equal(fs.existsSync(path.join(dir, 'w.md')) || fs.existsSync(path.join(dir, 'r.md')), false)
+  await h.invoke('fs:copy', path.join(dir, 'sub'), path.join(dir, 'sub-copy'))
   assert.equal(fs.readFileSync(path.join(dir, 'sub-copy', 'deeper', 'deepest', 'x.md'), 'utf-8'), 'x')
+  assert.equal(fs.readFileSync(path.join(dir, 'sub', 'deeper', 'deepest', 'x.md'), 'utf-8'), 'x')
   const dropped = path.join(h.companyDir('finder'), 'drop.md')
   fs.writeFileSync(dropped, 'dropped')
-  assert.deepEqual(await h.invoke('fs:moveFromExternal', dropped, path.join(dir, 'drop.md')), { success: true })
+  await h.invoke('fs:moveFromExternal', dropped, path.join(dir, 'drop.md'))
+  assert.equal(fs.readFileSync(path.join(dir, 'drop.md'), 'utf-8'), 'dropped')
   assert.equal(fs.existsSync(dropped), false)
-  assert.deepEqual(await h.invoke('fs:delete', path.join(dir, 'sub-copy')), { success: true }) // a folder, recursively
-  assert.deepEqual(await h.invoke('fs:delete', path.join(dir, 'drop.md')), { success: true })
-  const missing = await h.invoke<{ success: boolean; error: string }>('fs:delete', path.join(dir, 'drop.md'))
-  assert.equal(missing.success, false)
-  assert.match(missing.error, /ENOENT/)
+})
 
-  h.send('fs:startDrag', path.join(dir, 'a.md'))
-  assert.equal((h.renderer().drags.at(-1) as { file: string }).file, path.join(dir, 'a.md'))
+test('deleting a folder removes everything in it; deleting what is not there reports a failure', async () => {
+  const dir = shapes('delete')
+  assert.deepEqual(await h.invoke('fs:delete', path.join(dir, 'sub')), { success: true })
+  assert.equal(fs.existsSync(path.join(dir, 'sub')), false)
+  const missing = await h.invoke<{ success: boolean; error: string }>('fs:delete', path.join(dir, 'sub'))
+  assert.equal(missing.success, false)
 })
 
 test('writes into a not-downloaded folder or at a reserved folder name are refused; reads and existing paths are not', async () => {

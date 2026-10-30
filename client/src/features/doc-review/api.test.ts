@@ -64,12 +64,15 @@ const review = (comments: ReviewComment[], extra: Partial<Review> = {}): Review 
 const fileOf = (r: Review) => JSON.stringify({ version: 1, review: r }, null, 2)
 const temps = () => [...disk.keys()].filter(p => p.includes('.acb-tmp-'))
 
-test('a save writes a temporary file next to the target and renames it over, leaving no temporary file', async () => {
+test('a save never writes the review file in place: a file in the same folder is renamed over it and nothing else is left', async () => {
   const saved = await saveReview(DOC, review([comment('c1')]), null, files)
   assert.equal(disk.get(REVIEW_PATH), fileOf(saved))
   assert.ok(!log.includes(`write ${REVIEW_PATH}`), 'the target itself is never written in place')
-  assert.match(log.find(l => l.startsWith('rename'))!, /^rename \/c\/営業部\/\.提案書\.md\.review\.r1\.json\.acb-tmp-[0-9a-z]+ -> \/c\/営業部\/提案書\.md\.review\.r1\.json$/)
-  assert.deepEqual(temps(), [])
+  const [from, to] = log.find(l => l.startsWith('rename '))!.slice('rename '.length).split(' -> ')
+  assert.equal(to, REVIEW_PATH)
+  const folder = (p: string) => p.slice(0, p.lastIndexOf('/'))
+  assert.equal(folder(from), folder(REVIEW_PATH), 'renamed from the same folder (one volume, so the rename is atomic)')
+  assert.deepEqual([...disk.keys()], [REVIEW_PATH], 'no temporary file is left behind')
 })
 
 test('a failed write or rename is retried; the temporary file is cleaned up each time', async () => {

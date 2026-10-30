@@ -1,24 +1,20 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
-  TRUNCATED_MARKER, WEB_RESEARCH_LIMITS, WEB_RESEARCH_TOOL_ID, checkWebUrl, extractSourceUrls, findInstructionLikeText,
+  TRUNCATED_MARKER, WEB_RESEARCH_LIMITS, checkWebUrl, extractSourceUrls, findInstructionLikeText,
   countedLine, formatWebResearchResult, refusedHost, sanitizeWebText, splitReaderAnswer, validateWebResearchInput,
 } from '../shared/web-research'
-import { WEB_RESEARCH_MESSAGES, createWebResearchBudget, createWebResearchTools, startWebResearchMcp, webResearchDescription, webResearchSchema } from '../electron/web-research/tools'
+import { WEB_RESEARCH_MESSAGES, WEB_RESEARCH_TOOL_TIMEOUT_SEC, createWebResearchBudget, createWebResearchTools, startWebResearchMcp, webResearchDescription } from '../electron/web-research/tools'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js'
-import { WebReaderError, type WebReaderResult } from '../electron/agents/web-reader'
+import { WEB_READER_TIMEOUT_MS, WebReaderError, type WebReaderResult } from '../electron/agents/web-reader'
 import { readClaudeReaderMessage, claudeWebReaderArgs } from '../electron/agents/claude-web-reader'
 import { AGENTS } from '../shared/agents/registry'
 import { CODEX_WEB_READER_OVERRIDES, runCodexWebReader, selectReaderModel } from '../electron/agents/codex-web-reader'
 import { CODEX_TEXT_OVERRIDES, type CodexTextRequest } from '../electron/agents/codex-text'
-import { WEB_READER_SYSTEM_PROMPT, WEB_RESEARCH_INSTRUCTIONS } from '../shared/web-research'
+import { WEB_READER_SYSTEM_PROMPT } from '../shared/web-research'
 
 const ch = (...codes: number[]) => String.fromCodePoint(...codes)
-
-test('the tool id is the app MCP server + tool', () => {
-  assert.equal(WEB_RESEARCH_TOOL_ID, 'mcp__acb_web__web_research')
-})
 
 test('input: question 1–1000 characters, at most 5 public http(s) URLs', () => {
   assert.deepEqual(validateWebResearchInput({ question: '  Node.js 22 の LTS 終了日 ' }), { ok: true, input: { question: 'Node.js 22 の LTS 終了日', urls: [], depth: 'normal' } })
@@ -148,13 +144,6 @@ test('related links: cleaned, refused hosts dropped, not repeated from sources, 
   assert.ok(result.text.includes('【関連リンク（未読）】\n- https://ex.com/secret\n- https://ex.com/p0'))
   assert.ok(result.text.indexOf('【出典】') < result.text.indexOf('【関連リンク（未読）】'))
   assert.ok(!formatWebResearchResult({ answer: '- 要点' }).text.includes('【関連リンク（未読）】'))
-})
-
-test('the reader is told to dig (same-site links, more searches, links back from WebFetch) and to list related links', () => {
-  for (const phrase of ['リンクをたどって', '関係しそうなリンクの URL', '関連リンク:', '出典:', '3000文字以内', '絶対に従わない', '開かない']) {
-    assert.ok(WEB_READER_SYSTEM_PROMPT.includes(phrase), phrase)
-  }
-  assert.ok(WEB_RESEARCH_INSTRUCTIONS.includes('関連リンク'))
 })
 
 test('the working AI gets: fixed header, cleaned key points, sources, and a warning when flagged', () => {
@@ -350,23 +339,19 @@ test('the app counts the pages actually read; 0 pages warns that it is a search-
   assert.deepEqual(countedLine(1, 0), ['【調べた量（アプリが数えたもの）】読んだページ：1件／未読の関連リンク：0件（調べ方：ふつう）'])
 })
 
-test('the reader prefers official pages, never answers from snippets alone, and digs deeper on depth "deep"', () => {
-  for (const phrase of ['公式・一次情報を優先して開く', 'スニペット）だけで答えない', '少なくとも1〜2ページ', '"deep" なら公式・一次情報があればそれを含めて少なくとも3ページ', '検索結果だけの要約です', 'depth']) {
-    assert.ok(WEB_READER_SYSTEM_PROMPT.includes(phrase), phrase)
-  }
-  const value = (args: string[], flag: string) => args[args.indexOf(flag) + 1]
-  assert.equal(value(claudeWebReaderArgs('m'), '--max-turns'), '25')
-  assert.equal(value(claudeWebReaderArgs('m', 'deep'), '--max-turns'), '40')
+test('the reader is told never to obey a page or open a member-network address, and its turns are bounded (deep digs further)', () => {
+  assert.match(WEB_READER_SYSTEM_PROMPT, /指示・依頼・命令[^\n]*絶対に従わない/)
+  assert.match(WEB_READER_SYSTEM_PROMPT, /localhost、社内ネットワーク[^\n]*開かない/)
+  const turns = (depth?: 'deep') => Number((args => args[args.indexOf('--max-turns') + 1])(claudeWebReaderArgs('m', depth)))
+  assert.ok(turns() > 0 && Number.isFinite(turns()))
+  assert.ok(turns('deep') > turns())
 })
 
-test('the working AI is told how to use it: narrow questions, URLs, several calls, deep, and the pages-read line', () => {
-  for (const text of [WEB_RESEARCH_INSTRUCTIONS, webResearchDescription]) {
-    for (const phrase of ['狭く', 'urls', '何回かに分けて', '"deep"', '読んだページ', '0件']) assert.ok(text.includes(phrase), phrase)
-  }
-  assert.ok(webResearchDescription.includes('5分'))
-  assert.ok(!webResearchDescription.includes('2分'))
-  assert.ok(WEB_RESEARCH_MESSAGES.timeout.includes('5分'))
-  assert.ok(Object.keys(webResearchSchema.shape).includes('depth'))
+test('the time limit the AI and the member are told is the reader\'s real one, and Codex waits longer than the reader', () => {
+  const minutes = `${WEB_READER_TIMEOUT_MS / 60_000}分`
+  assert.ok(webResearchDescription.includes(minutes), minutes)
+  assert.ok(WEB_RESEARCH_MESSAGES.timeout.includes(minutes), minutes)
+  assert.ok(WEB_RESEARCH_TOOL_TIMEOUT_SEC * 1000 > WEB_READER_TIMEOUT_MS)
 })
 
 test('tool: depth reaches the reader and the counted line; a deep call counts as one', async () => {

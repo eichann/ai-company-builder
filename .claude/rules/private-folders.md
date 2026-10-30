@@ -128,5 +128,6 @@ or who can see it. So:
 - Departments containing a private folder cannot be deleted or renamed (409
   `PRIVATE_FOLDERS_INSIDE`).
 - There is deliberately no MCP tool to create private folders: only people, through the admin
-  console or the app's dialog.
+  console or the app's dialog. In the app, nothing the chat or an agent imports may reach
+  `electron/private-folders-api.ts`, however indirectly (`client/tests/architecture-boundaries.test.ts`).
 - Tests: `server/tests/unit/private-folders.test.ts`, `server/tests/integration/private-folders.test.ts`.

@@ -59,10 +59,13 @@ test('all: true and no ruled scope', () => {
   assert.equal(evaluateWrite(BOB, '../x').write, false)
 })
 
-test('normalizeRepoPath and isWriteAccess', () => {
+test('a path that climbs with .. is never normalized into a folder it might name; spelling differences are', () => {
   assert.equal(normalizeRepoPath('a//b/'), 'a/b')
   assert.equal(normalizeRepoPath('a/../b'), null)
   assert.equal(normalizeRepoPath('ガ'.normalize('NFD')), 'ガ')
+})
+
+test('a malformed server answer about write access is never taken as permission', () => {
   assert.equal(isWriteAccess(BOB), true)
   assert.equal(isWriteAccess({ version: 'v', all: false, scopes: [] }), false)
   assert.equal(isWriteAccess({ version: 'v', role: 'm', all: false, scopes: [{ path: 1, write: true }] }), false)

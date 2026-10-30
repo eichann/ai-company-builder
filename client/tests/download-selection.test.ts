@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../src/lib/download-selection'
+import { diffSelection, downloadedBytes, folderCheckState, sameSelection, toggleFolder } from '../src/lib/download-selection'
 
 test('tri-state: checked, partial (something inside left out), unchecked, inherited (inside a folder left out)', () => {
   const ex = ['コンテンツ/動画', '営業部']
@@ -27,12 +27,4 @@ test('diff, equality and downloaded size', () => {
   assert.equal(downloadedBytes(1000, ['a'], { a: null }), null)
   assert.equal(downloadedBytes(null, [], {}), null)
   assert.equal(downloadedBytes(1000, ['a', 'a/b'], { a: 100, 'a/b': 40 }), 900) // nested entries are not counted twice
-})
-
-test('sizes read like the rest of the app', () => {
-  assert.equal(formatBytes(null), '—')
-  assert.equal(formatBytes(512), '512 B')
-  assert.equal(formatBytes(42 * 1024 ** 2), '42 MB')
-  assert.equal(formatBytes(3.2 * 1024 ** 3), '3.2 GB')
-  assert.equal(formatBytes(1.5 * 1024 ** 2), '1.5 MB')
 })

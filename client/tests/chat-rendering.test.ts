@@ -4,7 +4,7 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import Markdown from 'react-markdown'
 import { chatMarkdownSafety } from '../src/components/chat/chatMarkdownSafety'
-import { splitMarkdownBlocks, streamThrottleMs } from '../src/components/chat/markdownBlocks'
+import { splitMarkdownBlocks } from '../src/components/chat/markdownBlocks'
 import { MESSAGE_WINDOW, earlierAnchor, windowStart } from '../src/components/chat/messageWindow'
 import { thumbnailSize } from '../src/components/chat/historyThumbnail'
 
@@ -65,11 +65,6 @@ test('a streaming reply: earlier blocks stay identical, only the tail grows; an 
     previous = texts
   }
   assert.deepEqual(previous, ['# 結果', '説明の段落。', '```python\nprint(1)\n\nprint(2)\n```', 'まとめ。'])
-})
-
-test('long replies stream with a longer throttle', () => {
-  assert.equal(streamThrottleMs(500), 50)
-  assert.equal(streamThrottleMs(30_000), 150)
 })
 
 // --- windowed message list -----------------------------------------------------

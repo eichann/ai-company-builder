@@ -1,8 +1,9 @@
 // The document review's temporary save file name (src/features/doc-review/api.ts)
 // and the rule sync uses to never commit one (client/shared/temp-save-file.ts).
+// That the exclude pattern applies in every folder: tests/sync/temp-save-files.test.ts.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { isTempSaveFile, tempSaveFileName, TEMP_SAVE_EXCLUDE_PATTERN } from '../shared/temp-save-file'
+import { isTempSaveFile, tempSaveFileName } from '../shared/temp-save-file'
 
 test('the temporary file is a dotfile next to the target', () => {
   assert.equal(tempSaveFileName('提案書.md.review.r1.json', 'k3x9'), '.提案書.md.review.r1.json.acb-tmp-k3x9')
@@ -22,9 +23,4 @@ test('isTempSaveFile: only the app\'s temporary save files, at any depth', () =>
     '.gitignore',
     '.env',
   ]) assert.equal(isTempSaveFile(p), false, p)
-})
-
-test('the exclude pattern has no slash, so git applies it in every folder', () => {
-  assert.equal(TEMP_SAVE_EXCLUDE_PATTERN, '.*.acb-tmp-*')
-  assert.ok(!TEMP_SAVE_EXCLUDE_PATTERN.includes('/'))
 })
