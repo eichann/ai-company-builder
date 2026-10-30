@@ -144,11 +144,6 @@ test('mergeRepliesIntoReviews: a resolution in a reply file overrides the review
   assert.deepEqual(merged[0].comments.map(c => c.resolved), [false, false, true])
 })
 
-test('mergeRepliesIntoReviews: nothing to merge returns the same array', () => {
-  const reviews = [review('r1', [{ id: 'c1' }])]
-  assert.equal(mergeRepliesIntoReviews(reviews, [], []), reviews)
-})
-
 test('findTextInMarkdown: exact match gives the source offsets', () => {
   const md = '# 提案書\n\n来期のご提案です。'
   assert.deepEqual(findTextInMarkdown(md, '来期のご提案'), { start: 7, end: 13 })

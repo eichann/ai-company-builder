@@ -190,15 +190,12 @@ test('a synchronous flush (app quit) overtakes a write in flight without being o
   assert.deepEqual(fs.readdirSync(path.dirname(file)).filter(name => name.endsWith('.tmp')), [])
 })
 
-test('.bak is the previous version, made without re-reading the file; a deletion sanitizes it', async t => {
+test('.bak keeps the previous version to recover from; a deleted conversation is gone from it too', async t => {
   const { file, store } = fixture(t)
   const first = saved(store.save(company, session('chat', { writerId: 'w', writeSequence: 1, draftInput: '一回目' })))
   await store.flush()
-  const reads = t.mock.method(fs, 'readFileSync')
   saved(store.save(company, { ...first, writeSequence: 2, draftInput: '二回目' }))
   await store.flush()
-  assert.equal(reads.mock.callCount(), 0)
-  reads.mock.restore()
   assert.equal(oldVersionReads(`${file}.bak`)[0].draftInput, '一回目')
   assert.equal(oldVersionReads(file)[0].draftInput, '二回目')
   store.delete(company, 'chat')

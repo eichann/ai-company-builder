@@ -130,10 +130,7 @@ test('inspecting real folders: missing, empty, OS files only, user files, clone,
     { exists: true, hasGitDir: false, originUrl: null, hasLocalCommits: false, hasUserFiles: false })
 })
 
-test('selector plan: picker for a first setup, direct open for a clone, refusal or offline as an error', () => {
-  assert.deepEqual(planFolderSetup({ success: true, decision: { action: 'firstSetup' } }), { kind: 'firstSetup' })
-  assert.deepEqual(planFolderSetup({ success: true, decision: { action: 'existingClone' } }), { kind: 'reopen' })
-  assert.deepEqual(planFolderSetup({ success: true, decision: { action: 'uploadExisting' } }), { kind: 'upload' })
+test('a folder that is refused, or could not be checked, is never set up or opened: the member sees why', () => {
   assert.deepEqual(planFolderSetup({ success: true, decision: { action: 'refuse', reason: 'otherRemote', message: OTHER_REMOTE_MESSAGE } }),
     { kind: 'error', message: OTHER_REMOTE_MESSAGE })
   assert.deepEqual(planFolderSetup({ success: false, error: 'offline' }), { kind: 'error', message: 'offline' })

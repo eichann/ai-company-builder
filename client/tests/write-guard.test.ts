@@ -73,7 +73,7 @@ test('Bash: literal redirections and tee into a read-only folder are denied, the
   assert.equal(deny('echo hi > $OUT', CWD), false) // expansions: not judged
 })
 
-test('bashWriteTargets', () => {
+test('a Bash command\'s write targets are found (redirects, tee) but heredoc text, comparisons and /dev/null are never taken for one', () => {
   assert.deepEqual(bashWriteTargets('a > b; c >> "d e" 2> f'), ['b', 'd e', 'f'])
   assert.deepEqual(bashWriteTargets('x | tee -a one two'), ['one', 'two'])
   assert.deepEqual(bashWriteTargets("cat <<'EOF' > out.md\nline > not-a-target\nEOF"), ['out.md'])

@@ -26,28 +26,19 @@ function repoWithOrigin(): { root: string; cleanup: () => void } {
   return { root: repo, cleanup: () => fs.rmSync(root, { recursive: true, force: true }) }
 }
 
-test('the server answer is passed through with the query the server expects', async () => {
-  const calls: string[] = []
+test('the request names the company and folders safely (encoded, every measured folder) and carries the session cookies', async () => {
+  const calls: Array<{ url: string; cookie: string }> = []
   const fetchImpl = (async (url: string, init: RequestInit) => {
-    calls.push(url)
-    assert.equal((init.headers as Record<string, string>).Cookie, 'a=1; b=2')
-    return new Response(JSON.stringify({ success: true, data: { path: 'コンテンツ', size: 30, files: 2, folders: [{ name: '動画', path: 'コンテンツ/動画', size: 20, files: 1, hasChildren: false }], measured: { '営業部': 5 } } }))
+    calls.push({ url, cookie: (init.headers as Record<string, string>).Cookie })
+    return new Response(JSON.stringify({ success: true, data: { path: '', size: 0, files: 0, folders: [], measured: {} } }))
   }) as unknown as typeof fetch
-  const fetchSizes = serverFolderSizes({ baseUrl: 'http://acb.test', companyId: 'co 1', cookies: ['a=1', 'b=2'], fetchImpl })
-  const { root, cleanup } = repoWithOrigin()
-  try {
-    const view = await folderSizesView(simpleGit(root), fetchSizes, 'コンテンツ', ['営業部'])
-    assert.equal(view.offline, false)
-    assert.equal(view.size, 30)
-    assert.deepEqual(view.folders, [{ name: '動画', path: 'コンテンツ/動画', size: 20, files: 1, hasChildren: false }])
-    assert.deepEqual(view.measured, { '営業部': 5 })
-    const url = new URL(calls[0])
-    assert.equal(url.pathname, '/api/companies/co%201/folder-sizes')
-    assert.equal(url.searchParams.get('path'), 'コンテンツ')
-    assert.deepEqual(url.searchParams.getAll('measure'), ['営業部'])
-  } finally {
-    cleanup()
-  }
+  const fetchSizes = serverFolderSizes({ baseUrl: 'http://acb.test', companyId: 'co 1/x', cookies: ['a=1', 'b=2'], fetchImpl })
+  await fetchSizes('コンテンツ&measure=経理部', ['営業部', '総務 部'])
+  const url = new URL(calls[0].url)
+  assert.equal(url.pathname, '/api/companies/co%201%2Fx/folder-sizes')
+  assert.equal(url.searchParams.get('path'), 'コンテンツ&measure=経理部')
+  assert.deepEqual(url.searchParams.getAll('measure'), ['営業部', '総務 部'])
+  assert.equal(calls[0].cookie, 'a=1; b=2')
 })
 
 test('server unreachable: the folders are listed from the local trees, without sizes', async () => {

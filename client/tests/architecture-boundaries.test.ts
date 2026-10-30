@@ -161,6 +161,34 @@ test('the checks see real imports (self-test)', () => {
   assert.ok(importsOf(chatServer).some(s => target(chatServer, s) === 'electron/agents/registry'))
 })
 
+/** The client modules `start` reaches through imports, followed to the end (themselves included). */
+function reachableFrom(start: string[]): Set<string> {
+  const seen = new Set<string>()
+  const queue = [...start]
+  while (queue.length > 0) {
+    const file = queue.pop()!
+    if (seen.has(file)) continue
+    seen.add(file)
+    for (const spec of importsOf(join(CLIENT, file))) {
+      const t = target(join(CLIENT, file), spec)
+      if (t.startsWith('pkg:') || t.startsWith('../')) continue
+      const found = [`${t}.ts`, `${t}.tsx`, `${t}/index.ts`].find(c => existsSync(join(CLIENT, c)))
+      if (found) queue.push(found)
+    }
+  }
+  return seen
+}
+
+// Only a person, in the 「新しいフォルダ…」 dialog, creates a private folder
+// (private-folders.md): nothing the chat or an agent loads may import the API
+// that creates one, however many modules lie in between.
+test('the chat and the agents never reach the private-folder API, directly or through other modules', () => {
+  const start = ['electron/chat-server.ts', 'electron/chat-tools.ts', ...sourceFiles(join(CLIENT, 'electron', 'agents')).map(rel)]
+  const reached = reachableFrom(start)
+  assert.ok(reached.has('electron/agents/registry.ts'), 'the walk follows imports (self-test)')
+  assert.deepEqual([...reached].filter(f => /^electron\/private-folders-api\.ts$|^electron\/features\/private-folders\//.test(f)), [])
+})
+
 // ---- Renderer (client/src) — .claude/rules/renderer-structure.md ----
 
 /** 'editor' for anything under src/features/editor/, else null. */

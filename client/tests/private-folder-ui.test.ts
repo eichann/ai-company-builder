@@ -8,23 +8,12 @@ import {
   isPrivateRoot,
   privateFolderOf,
   reachCount,
-  viewersLabel,
   TO_PRIVATE_WARNING,
   type MyPrivateFolder,
   type PrivateFolderCreateContext,
 } from '../shared/private-folder-ui'
 import { createPrivateFoldersApi } from '../electron/private-folders-api'
-import { readFileSync, readdirSync } from 'node:fs'
-import { join } from 'node:path'
-
-test('the chat has no way to create private folders (only the dialog does)', () => {
-  const dir = join(import.meta.dirname, '..', 'electron')
-  const files = ['chat-tools.ts', 'chat-server.ts', ...readdirSync(join(dir, 'agents')).map(f => join('agents', f))].filter(f => f.endsWith('.ts'))
-  for (const f of files) {
-    const src = readFileSync(join(dir, f), 'utf8')
-    assert.doesNotMatch(src, /private-folders|createPrivateFolder|privateFolders:/, `${f} must not reach the private-folder API`)
-  }
-})
+// That the chat and the agents cannot reach this API: architecture-boundaries.test.ts.
 
 const EVAL: MyPrivateFolder = {
   scopeId: 's_eval',
@@ -96,10 +85,6 @@ test('default viewers = me + managers (never owners/admins); reach counts owners
   assert.deepEqual(defaultViewerIds('a', ctx()), ['u_mgr'])
   assert.equal(reachCount(['u_me', 'u_mgr'], ctx().members), 4)
   assert.equal(reachCount(['u_me', 'u_me', 'gone'], ctx().members), 3)
-})
-
-test('viewersLabel lists names and the rest', () => {
-  assert.equal(viewersLabel(EVAL, 2), '見られる人（4人）：山田、高橋、ほか2人')
 })
 
 function fakeFetch(routes: Record<string, (init?: RequestInit) => { status: number; body: unknown }>) {

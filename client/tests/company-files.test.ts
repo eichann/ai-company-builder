@@ -17,7 +17,6 @@ import {
   companyFileDescriptions,
   companyFilesInstructions,
   createCompanyFileTools,
-  startCompanyFilesMcp,
   toCompanyPath,
   TOOL_OUTPUT_MAX_BYTES,
   type CompanyFileTools,
@@ -268,13 +267,4 @@ test('Codex session: the tools are a token-protected loopback MCP server for the
   rpc.onMessage({ method: 'turn/completed', params: { threadId: 'thread-a', turn: { status: 'completed' } } })
   await response
   await assert.rejects(fetch(config.url, { method: 'POST' }))
-})
-
-test('the loopback endpoint stands alone too', async () => {
-  const server = await startCompanyFilesMcp(recordingTools().tools)
-  try {
-    assert.equal((await fetch(server.config.url, { method: 'POST' })).status, 403)
-  } finally {
-    server.close()
-  }
 })

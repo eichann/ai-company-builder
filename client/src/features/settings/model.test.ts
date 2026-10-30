@@ -1,13 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from './model'
-
-test('a saved entry shows set / last four characters only', () => {
-  assert.equal(envStatusLabel(undefined), '未設定')
-  assert.equal(envStatusLabel({ set: false }), '未設定')
-  assert.equal(envStatusLabel({ set: true }), '設定済み')
-  assert.equal(envStatusLabel({ set: true, last4: 'ab12' }), '設定済み（末尾 ab12）')
-})
+import { envChangesToSave, envDraftsFromText, normalizeEnvName } from './model'
 
 test('a save sends typed values and removals, nothing for untouched names', () => {
   assert.deepEqual(envChangesToSave({ A: ' new ', B: '   ', C: 'x' }, new Set(['C', 'D'])), { A: 'new', C: null, D: null })

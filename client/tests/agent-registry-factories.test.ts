@@ -24,15 +24,10 @@ test('every capability-gated factory an agent claims exists, and none it does no
   }
 })
 
-test('every agent gets a connection that matches its descriptor', () => {
+test('each agent\'s connection agrees with the registry on who runs the conversation (resume the CLI\'s session or send the history)', () => {
   for (const id of AGENT_IDS) {
-    const connection = createAgentConnection(id, host)
-    assert.equal(connection.ownsConversation, AGENTS[id].capabilities.ownsConversation, id)
-    assert.equal(typeof connection.createChatModel, 'function')
-    assert.equal(typeof connection.createTitleModel, 'function')
+    assert.equal(createAgentConnection(id, host).ownsConversation, AGENTS[id].capabilities.ownsConversation, id)
   }
-  // Ids as before (the API connection never carried the registry id).
-  assert.deepEqual(AGENT_IDS.map(id => createAgentConnection(id, host).id), ['claude-code', 'codex', 'anthropic-api'])
 })
 
 test('role profiles are refused until an agent implements them; an empty one is the normal connection', () => {

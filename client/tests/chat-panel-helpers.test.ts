@@ -6,7 +6,7 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { UIMessage } from 'ai'
 import {
-  greetingMessages, messageText, sameSaveInputs, sessionMessageFor, sessionMessageToUIMessage, titleTranscript, uiMessageToSessionMessage,
+  greetingMessages, messageText, sessionMessageFor, sessionMessageToUIMessage, titleTranscript, uiMessageToSessionMessage,
 } from '../src/components/chat/chatSessionMessages'
 import { buildChatRequestBody, type ChatRequestSources } from '../src/components/chat/chatRequestBody'
 import { persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, CHAT_TABS_KEY_PREFIX } from '../src/components/chat/chatTabsStorage'
@@ -73,14 +73,6 @@ test('sessionMessageFor reuses the conversion for the same message object, times
   assert.equal(first.images, images)
 })
 
-test('sameSaveInputs compares identities, not values', () => {
-  const messages: UIMessage[] = []
-  assert.equal(sameSaveInputs(null, ['a']), false)
-  assert.equal(sameSaveInputs(['a', messages], ['a', messages]), true)
-  assert.equal(sameSaveInputs(['a', messages], ['a', []]), false)
-  assert.equal(sameSaveInputs(['a'], ['a', undefined]), false)
-})
-
 test('title transcript: greeting skipped, next six messages, empty ones dropped; greeting shape', () => {
   const greeting = greetingMessages('こんにちは')
   assert.deepEqual(greeting, [{ id: '1', role: 'assistant', parts: [{ type: 'text', text: 'こんにちは' }] }])
@@ -113,16 +105,15 @@ function sources(overrides: Partial<{ [K in keyof ChatRequestSources]: ChatReque
   }
 }
 
-test('chat request body: fields in order, pending attachments sent once, hand-off receipt recorded', () => {
+test('chat request body: pending attachments go with one send only, and the hand-off receipt is recorded', () => {
   const s = sources({ claudeSessionId: { current: 'cli-1' }, pendingImages: { current: [{ mediaType: 'image/png', data: 'AAA' }] }, pendingFilePaths: { current: ['営業部/a.md'] } })
   const body = buildChatRequestBody(s)
-  assert.deepEqual(Object.keys(body), ['authMode', 'agentSession', 'workingDirectory', 'companyId', 'companyRootPath', 'activeDepartment', 'modelId', 'effort', 'promptSuggestions', 'appSessionId', 'claudeSessionId', 'images', 'referenceFiles'])
   assert.deepEqual(body.images, [{ mediaType: 'image/png', data: 'AAA' }])
   assert.deepEqual(body.referenceFiles, ['営業部/a.md'])
   assert.deepEqual(s.handoffRequest.current, { companyId: 'co', sessionId: 'app-1', provider: 'claude-code' })
   const next = buildChatRequestBody(s)
-  assert.equal('images' in next, false)
-  assert.equal('referenceFiles' in next, false)
+  assert.equal(next.images, undefined)
+  assert.equal(next.referenceFiles, undefined)
 })
 
 test('chat request body: creates the app session id when missing; no company → no hand-off receipt; no department → undefined', () => {

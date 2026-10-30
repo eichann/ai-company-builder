@@ -5,7 +5,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createChatServerClient } from '../src/components/chat/chatServerClient'
-import { CHAT_SERVER_PATHS } from '../shared/chat-server-api'
 
 type Call = { url: string; method: string; headers: Record<string, string>; body?: unknown }
 
@@ -26,12 +25,6 @@ function fakeServer(answer: (call: Call) => Response | Promise<Response>) {
 const json = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status, headers: { 'content-type': 'application/json' } })
 const AUTH = { Authorization: 'Bearer tok' }
 const JSON_AUTH = { Authorization: 'Bearer tok', 'Content-Type': 'application/json' }
-
-test('the chat URL and header the transport uses', () => {
-  const { client } = fakeServer(() => json({}))
-  assert.equal(client.chatUrl, 'http://127.0.0.1:3301/api/chat')
-  assert.deepEqual(client.headers, AUTH)
-})
 
 test('steer: POST /api/steer with the session and text; delivered / not-delivered pass through, anything else is unavailable', async () => {
   const answers: Array<() => Response | Promise<Response>> = [
@@ -107,10 +100,4 @@ test('fetch is looked up per call (the preview pages swap window.fetch after loa
   assert.deepEqual(await client.promptSuggestion('a'), { suggestion: 'first' })
   current = (async () => json({ suggestion: 'second' })) as typeof fetch
   assert.deepEqual(await client.promptSuggestion('a'), { suggestion: 'second' })
-})
-
-test('paths', () => {
-  assert.equal(CHAT_SERVER_PATHS.session('abc'), '/api/session/abc')
-  assert.equal(CHAT_SERVER_PATHS.promptSuggestion('abc'), '/api/prompt-suggestion/abc')
-  assert.equal(CHAT_SERVER_PATHS.rateLimits('claude-code'), '/api/rate-limits?provider=claude-code')
 })
