@@ -13,3 +13,29 @@ export function publishUnsavedEdits(paths: Iterable<string>): void {
 export function hasUnsavedEdits(): boolean {
   return dirty.size > 0
 }
+
+// Leaving (sign-out, closing the window): every editor saves its tabs first.
+// A saver writes what it can without asking and answers the paths it could
+// not save (changed on disk meanwhile, the write failed); the caller then
+// asks the member before anything is lost.
+type UnsavedEditsSaver = () => Promise<string[]>
+const savers = new Set<UnsavedEditsSaver>()
+
+/** Register an editor's saver while it is mounted; returns the unregister function. */
+export function registerUnsavedEditsSaver(saver: UnsavedEditsSaver): () => void {
+  savers.add(saver)
+  return () => { savers.delete(saver) }
+}
+
+/** Save every editor's unsaved tabs; resolves to the paths still unsaved (a saver that throws counts as every unsaved tab). */
+export async function saveUnsavedEdits(): Promise<string[]> {
+  const left: string[] = []
+  for (const saver of [...savers]) {
+    try {
+      left.push(...await saver())
+    } catch {
+      left.push(...dirty)
+    }
+  }
+  return [...new Set(left)]
+}

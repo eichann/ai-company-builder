@@ -17,6 +17,7 @@ paths:
   - "client/src/lib/company-folder-plan.ts"
   - "client/src/lib/restore-company.ts"
   - "client/src/shared/hooks/useSparseCheckout.ts"
+  - "client/src/shared/lib/exclusionChanges.ts"
   - "client/src/features/sync/hooks/useDepartmentDownload.ts"
   - "client/src/features/sync/components/DepartmentDownloadPrompt.tsx"
   - "client/src/features/workspace/hooks/useDepartmentAvailability.ts"
@@ -138,6 +139,11 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   「未ダウンロード」, 「ダウンロード」 on hover/focus and in its context menu) so nobody recreates
   it; it does not expand and is not a drop target. A failed download shows why (`role="alert"`
   under the button). `useSparseCheckout` instances refresh each other via `acb:sparse-changed`.
+  Changes run one at a time per company folder and each is built from the list as it is when its
+  turn comes (`change(current => …)`, `src/shared/lib/exclusionChanges.ts`); main also runs
+  `git:sparseSetExclusions` in turn per folder. Two quick 「ダウンロード」 clicks once put the first
+  folder back on the list. Tests: `exclusionChanges.test.ts`, `ipc-git.test.ts` 「download choices
+  applied at the same moment…」.
   It goes through `src/shared/ipc/download-choices.ts`: `ExcludedFolderReads` (the list) and
   `DownloadChoiceOutbound` (applying downloads from the server and syncs a left-out private
   folder one last time, so it is not a plain write).

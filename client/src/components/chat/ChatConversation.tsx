@@ -39,6 +39,8 @@ import { QueuedSendList } from './QueuedSendList'
 // (hooks/, one concern each, in the order useChat needs them) and
 // presentational parts (ChatHeader, MessageList, ChatInput, banners).
 
+const IMAGE_READ_FAILED = '添付した画像を読み込めなかったため、送信しませんでした。入力した文は残してあります。画像を添付し直してから、もう一度送信してください。'
+
 export interface ChatPanelChatProps {
   /** The tab this conversation is shown in (its status in the 「AIへの相談」 list). */
   tabId: string
@@ -225,7 +227,16 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
     lastTurnAbortedRef.current = false
 
     // Images (base64) and file paths for the request body and the bubble
-    if (files && files.length > 0) await stageImages(files)
+    if (files && files.length > 0) {
+      try {
+        await stageImages(files)
+      } catch {
+        // Nothing was sent: the typed text goes back into the composer.
+        if (!editing) chatInputApiRef.current?.setValue(text)
+        setHistoryError(IMAGE_READ_FAILED)
+        return
+      }
+    }
     if (filePaths && filePaths.length > 0) stageFilePaths(filePaths)
 
     const message: UIMessage = {

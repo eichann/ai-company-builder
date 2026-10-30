@@ -27,14 +27,18 @@ export function useMessageAttachments() {
   // Pending file paths for display (kept separately so transport body clearing doesn't lose them)
   const pendingDisplayFilePathsRef = useRef<string[]>([])
 
-  /** Convert images to base64 for the request; the bubble and the history keep a small copy. */
+  /** Convert images to base64 for the request; the bubble and the history keep a small copy. Rejects when one cannot be read. */
   const stageImages = useCallback(async (files: File[]) => {
     const imageParts: Array<{ mediaType: string; data: string }> = []
     const dataUrls: string[] = []
     for (const file of files) {
-      const dataUrl = await new Promise<string>((resolve) => {
+      // A file that cannot be read (moved, deleted, unreadable) rejects: the
+      // send stops and the composer gets the text back (ChatConversation).
+      const dataUrl = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader()
         reader.onload = () => resolve(reader.result as string)
+        reader.onerror = () => reject(reader.error ?? new Error('image read failed'))
+        reader.onabort = () => reject(new Error('image read aborted'))
         reader.readAsDataURL(file)
       })
       // The AI gets the full image; the bubble and the history keep a small copy.

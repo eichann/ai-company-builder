@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 
-import { ApiError, authApi, invitationsApi, overviewApi } from '@/lib/api'
+import { API_TIMEOUT_MS, ApiError, ApiTimeoutError, apiClient, authApi, invitationsApi, overviewApi } from '@/lib/api'
+import { describeError } from '@/lib/errors'
 import { COMPANY_ID, ok } from './fixtures'
 import { mockApi } from './mock-api'
 
@@ -28,6 +29,32 @@ describe('API client', () => {
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).status).toBe(403)
     expect((err as ApiError).message).toMatch(/owners and admins/)
+  })
+
+  it('an empty answer (204, a proxy\'s empty error) is not mistaken for a broken page', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 204 })))
+    await expect(apiClient('/api/x', { method: 'DELETE' })).resolves.toBeNull()
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('', { status: 502 })))
+    const err = await apiClient('/api/x').catch((e: unknown) => e)
+    expect(err).toBeInstanceOf(ApiError)
+    expect((err as ApiError).status).toBe(502)
+    expect(describeError(err)).toMatch(/サーバーでエラーが発生しました/)
+  })
+
+  it('a server that never answers is given up on with a plain message, not an endless spinner', async () => {
+    vi.useFakeTimers()
+    try {
+      vi.stubGlobal('fetch', vi.fn((_: RequestInfo | URL, init?: RequestInit) => new Promise<Response>((_, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')))
+      })))
+      const result = apiClient('/api/slow').catch((e: unknown) => e)
+      await vi.advanceTimersByTimeAsync(API_TIMEOUT_MS)
+      const err = await result
+      expect(err).toBeInstanceOf(ApiTimeoutError)
+      expect(describeError(err)).toBe('サーバーから応答がありません。少し待ってからもう一度お試しください。')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('path segments are URL-encoded', async () => {

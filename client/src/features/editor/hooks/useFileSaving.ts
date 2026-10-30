@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { backupBeforeOverwrite, createDirectory, readFile, writeFile } from '../api'
 import { canAutosave, decideSave, isDirty } from '../../../../shared/editor-disk-state'
+import { registerUnsavedEditsSaver } from '../../../shared/lib/unsavedEdits'
 import type { OpenFile } from './useOpenFiles'
 
 export interface ConfirmRequest {
@@ -169,6 +170,19 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     }
     return true
   }
+
+  // Leaving (sign-out, closing the window): write every tab with edits, not
+  // only the shown one, without asking; what cannot be saved that way (changed
+  // on disk meanwhile, the write failed) is answered so the caller can ask.
+  useEffect(() => registerUnsavedEditsSaver(async () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current)
+    const left: string[] = []
+    for (const [path, file] of fileContentsRef.current) {
+      if (file.isLoading || !isDirty(file)) continue
+      if (!await saveFile(path, file.content, { interactive: false })) left.push(path)
+    }
+    return left
+  }), [saveFile, fileContentsRef])
 
   const answerConfirm = (ok: boolean) => { confirmRequest?.resolve(ok); setConfirmRequest(null) }
 

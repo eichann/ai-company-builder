@@ -176,3 +176,14 @@ test('a file link clicked in a consultation\'s own window opens here, in the fil
   await expect(page.getByTitle(file, { exact: true })).toBeVisible()
   await expect(page.getByText('コピー用紙は総務へ。')).toBeVisible()
 })
+
+test('ログアウト is the one sign-out: the session ends and the company closes, so the login screen shows', async ({ page }) => {
+  // The title bar's button used to end the session but leave the account
+  // signed in on the company list.
+  await openPreview(page, 'skill-layout')
+  await deptTab(page, '営業部').click()
+  await page.getByTitle('ログアウト').click()
+  await expect.poll(() => page.evaluate(() => (window as unknown as { __acbLayout: { session(): unknown } }).__acbLayout.session()))
+    .toEqual({ user: null, company: null })
+  expect(await calls(page, 'signOut')).toEqual([[]])
+})

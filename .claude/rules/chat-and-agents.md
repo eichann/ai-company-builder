@@ -114,6 +114,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   Code (chat, titles, prompt suggestions, hand-off) and Codex (chat, one-shots, status) are covered.
   `runClaudeOneShot` (commit messages, voice) spawns with `inheritEnv: false` through the same
   function, and so do the API-key mode's commands (`chat-tools.ts`). Sync's git env is separate.
+- The API-key mode's `readFile` / `readSkillFile` read only the first 50 KB of a regular file
+  (`readFileHead`: stat first, never the whole file; a folder, pipe or device is refused). Test:
+  `client/tests/chat-tools-read.test.ts`.
 - Escape hatch: Settings → AIに渡す環境変数 (`config.json` `agentEnvPassthrough`, this computer
   only; `config:get/setAgentEnvPassthrough`): exact names, ≤ 50, deny still wins; empty by
   default; the page says these become visible to the AI.

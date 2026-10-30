@@ -22,6 +22,10 @@ paths:
   - "client/src/shared/ipc/file-events.ts"
   - "client/src/features/files/**"
   - "client/src/features/editor/**"
+  - "client/src/app/WindowCloseGuard.tsx"
+  - "client/electron/services/close-guard.ts"
+  - "client/tests/close-guard.test.ts"
+  - "client/src/shared/lib/unsavedEdits.ts"
   - "client/src/features/workspace/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
@@ -155,10 +159,25 @@ the result, disable their buttons meanwhile and show the reason (`role="alert"`)
   `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder;
   `features/backups/keep-current.ts`, shared with 復元 and 「元に戻す」, `sync.md` "Backups").
   Closing a tab whose save was cancelled asks before discarding.
+- **Leaving never drops edits** (stage-1 #1, 2026-10-31). Autosave writes only the shown tab, so
+  an edit in a tab left within the second, a tab paused by an external change and a failed save
+  were lost on sign-out or closing the window. Now every editor registers a saver
+  (`src/shared/lib/unsavedEdits.ts` `registerUnsavedEditsSaver`, in `useFileSaving.ts`) that writes
+  every tab with edits without asking; `features/editor/hooks/useSaveBeforeLeaving.ts` runs them and
+  names what could not be saved (「保存できていない編集があります」 … 「保存せずに進む」 / 「キャンセル」,
+  Enter does not confirm; `LeaveConfirmDialog`). Sign-out (`AppShell` → `authStore.signOut`, the
+  one sign-out: it also closes the company, so the login screen shows) and closing the main
+  window go through it. Closing / quitting: main holds the window's close and asks the renderer
+  (`app:closeRequested`; `electron/services/close-guard.ts`), `src/app/WindowCloseGuard.tsx`
+  (mounted next to `App` on every screen) answers `app:closeResponse` `ack` at once, then
+  `close` or `stay`; no `ack` within 3 s → it closes anyway. A quit held this way quits after
+  `close`. Tests: `tests/close-guard.test.ts`, `tests/ui/editor-panel.spec.ts` 「closing the window
+  saves every tab…」 / 「a tab that cannot be saved…」, `tests/ui/skill-layout.spec.ts` 「ログアウト…」.
 - `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
   (each tab's text, loading, the watcher: follow the disk / mark external / missing),
   `useFileSaving.ts` (autosave after 1 s, the explicit save, save before close, load the disk
-  version, the confirm), `useMarkdownView.ts` (preview / source mode, scroll positions),
+  version, the confirm), `useMarkdownView.ts` (preview / source mode, scroll positions; the
+  preview pane is keyed by file so each file restores its own),
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`

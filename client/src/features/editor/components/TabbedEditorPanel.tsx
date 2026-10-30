@@ -204,6 +204,8 @@ export function TabbedEditorPanel({
           <PdfPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
+            // One preview per file: it restores that file's scroll position when mounted.
+            key={activeFilePath}
             paneId={paneId}
             filePath={activeFilePath}
             content={activeFile.content}

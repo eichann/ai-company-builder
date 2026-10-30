@@ -68,6 +68,25 @@ function logCall(events: ToolEventTracker | undefined, tool: string, input: Reco
 // Output Truncation
 // ============================================================================
 
+/**
+ * The first `maxBytes` of a file as text, without reading the rest: a
+ * multi-GB file (a video, a dump) was read whole into memory before being cut.
+ * Only a regular file (a folder or device answers with an error).
+ */
+export async function readFileHead(absPath: string, maxBytes: number): Promise<string> {
+  const stat = await fs.stat(absPath)
+  if (!stat.isFile()) throw new Error(`Not a file: ${path.basename(absPath)}`)
+  const handle = await fs.open(absPath, 'r')
+  try {
+    const buf = Buffer.alloc(Math.min(stat.size, maxBytes + 1))
+    const { bytesRead } = await handle.read(buf, 0, buf.length, 0)
+    const text = buf.subarray(0, Math.min(bytesRead, maxBytes)).toString('utf-8')
+    return bytesRead > maxBytes || stat.size > maxBytes ? `${text}\n... (truncated)` : text
+  } finally {
+    await handle.close()
+  }
+}
+
 function truncate(text: string, maxBytes: number): string {
   if (Buffer.byteLength(text, 'utf-8') <= maxBytes) return text
   const buf = Buffer.from(text, 'utf-8')
@@ -121,8 +140,7 @@ export function createSkillTools(skillFolderPath: string, events?: ToolEventTrac
         log.refuseIfStopped()
         return log.run(async () => {
           const absPath = validatePath(filePath, skillFolderPath)
-          const content = await fs.readFile(absPath, 'utf-8')
-          return truncate(content, 50_000)
+          return readFileHead(absPath, 50_000)
         })
       },
     }),
@@ -140,8 +158,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         log.refuseIfStopped()
         return log.run(async () => {
           const absPath = validatePath(filePath, workingDirectory)
-          const content = await fs.readFile(absPath, 'utf-8')
-          return truncate(content, 50_000) // 50 KB limit
+          return readFileHead(absPath, 50_000) // 50 KB limit
         })
       },
     }),

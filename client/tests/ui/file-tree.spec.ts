@@ -170,8 +170,10 @@ test('a new file or a rename onto a name that is taken is refused in the dialog;
   await expect(page.getByRole('textbox')).toHaveValue('README.md')
   await page.getByRole('button', { name: 'キャンセル' }).click()
 
-  await row(page, 'ロゴ.png').focus()
-  await page.keyboard.press('F2')
+  // The menu names its row (F2 after a closed dialog could still reach the row focused before).
+  await row(page, 'ロゴ.png').click({ button: 'right' })
+  await page.getByRole('button', { name: /^名前を変更/ }).click()
+  await expect(page.getByRole('textbox')).toHaveValue('ロゴ.png')
   await nameDialog(page, '名前を変更', 'README.md')
   await expect(page.getByRole('alert')).toHaveText(taken)
   await page.getByRole('button', { name: 'キャンセル' }).click()

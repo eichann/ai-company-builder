@@ -1,6 +1,20 @@
 import { useState, useEffect, useCallback } from 'react'
-import { excludedFolderOf, normalizeExclusions } from '../../../shared/sparse-paths'
+import { excludedFolderOf, normalizeExclusions, pathKey } from '../../../shared/sparse-paths'
 import { applyExcludedFolders, getExcludedFolders } from '../ipc/download-choices'
+import { createExclusionQueue } from '../lib/exclusionChanges'
+
+// One queue for every instance (file tree, department prompt, settings): changes run in turn.
+const exclusionQueue = createExclusionQueue({
+  read: async rootPath => {
+    try {
+      const result = await getExcludedFolders(rootPath)
+      return result.success ? result.excluded : null
+    } catch {
+      return null
+    }
+  },
+  apply: (rootPath, excluded) => applyExcludedFolders(rootPath, excluded),
+})
 
 interface UseSparseCheckoutOptions {
   rootPath: string
@@ -28,6 +42,11 @@ interface UseSparseCheckoutResult {
   error: string | null
   /** Replace the whole exclusion list (settings panel → 適用). */
   apply: (next: string[]) => Promise<ApplyResult>
+  /**
+   * Change the list from what it is when this change's turn comes (one
+   * folder's 「ダウンロード」): never from the list this view last saw.
+   */
+  change: (update: (current: string[]) => string[]) => Promise<ApplyResult>
   /** Stop syncing a folder locally (add to exclusion list) */
   removePath: (folderPath: string) => Promise<boolean>
   /** Resume syncing a folder locally (remove from exclusion list); downloads it if needed */
@@ -84,13 +103,15 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     return () => window.removeEventListener(SPARSE_CHANGED_EVENT, onChanged)
   }, [rootPath, loadState])
 
-  // Apply a new exclusion list. On failure the main process has left the
-  // repository as it was; reload so the panel shows what is really on disk.
-  const apply = useCallback(async (next: string[]): Promise<ApplyResult> => {
+  // Apply a change, in turn with every other one for this folder. On failure
+  // the main process has left the repository as it was; reload so the panel
+  // shows what is really on disk.
+  const change = useCallback(async (update: (current: string[]) => string[]): Promise<ApplyResult> => {
     if (!rootPath) return { success: false, error: '会社フォルダが開かれていません' }
     setError(null)
+    let next: string[] = []
     try {
-      const result = await applyExcludedFolders(rootPath, next)
+      const result = await exclusionQueue.change(rootPath, current => { next = update(current); return next })
       if (!result.success) {
         setError(result.error || '変更できませんでした')
         await loadState()
@@ -107,14 +128,16 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     }
   }, [rootPath, loadState])
 
+  const apply = useCallback((next: string[]) => change(() => next), [change])
+
   const removePath = useCallback(
-    async (folderPath: string) => (await apply([...excludedPaths, folderPath])).success,
-    [apply, excludedPaths],
+    async (folderPath: string) => (await change(current => [...current, folderPath])).success,
+    [change],
   )
 
   const addPath = useCallback(
-    async (folderPath: string) => (await apply(excludedPaths.filter(p => p !== folderPath))).success,
-    [apply, excludedPaths],
+    async (folderPath: string) => (await change(current => current.filter(p => pathKey(p) !== pathKey(folderPath)))).success,
+    [change],
   )
 
   const disable = useCallback(async () => (await apply([])).success, [apply])
@@ -135,6 +158,7 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     isLoading,
     error,
     apply,
+    change,
     removePath,
     addPath,
     disable,

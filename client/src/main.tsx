@@ -1,6 +1,7 @@
 import ReactDOM from 'react-dom/client'
 import App from './App'
 import { ChatWindowApp } from './app/ChatWindowApp'
+import { WindowCloseGuard } from './app/WindowCloseGuard'
 import './index.css'
 import './i18n' // Initialize i18n
 import { startPerfDiagnostics } from './lib/perfDiagnostics'
@@ -13,5 +14,5 @@ const isChatWindow = new URLSearchParams(window.location.search).get('window') =
 ReactDOM.createRoot(document.getElementById('root')!).render(
   // StrictMode disabled: double-rendering in dev mode causes input lag in ChatPanel
   // Re-enable periodically to check for bugs: <React.StrictMode><App /></React.StrictMode>
-  isChatWindow ? <ChatWindowApp /> : <App />,
+  isChatWindow ? <ChatWindowApp /> : <><App /><WindowCloseGuard /></>,
 )

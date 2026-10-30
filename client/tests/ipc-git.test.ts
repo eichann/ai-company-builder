@@ -183,6 +183,21 @@ test('sparse handlers: exclusions round-trip through the worktree; uncommitted c
   assert.equal(fs.readFileSync(path.join(repo, '営業', 'a.md'), 'utf-8'), 'a')
 })
 
+test('download choices applied at the same moment run one after the other and each succeeds', async () => {
+  // Two overlapping `sparse-checkout set` runs collided on git's index; the
+  // later one failed and its folder stayed as it was.
+  const repo = path.join(root, 'sparse-together')
+  commitRepo(h.base, repo, { '営業/a.md': 'a', '開発/b.md': 'b', '総務/c.md': 'c', 'top.md': 't' })
+  type Result = { success: boolean; excluded: string[] }
+  const results = await Promise.all([
+    h.invoke<Result>('git:sparseSetExclusions', repo, ['営業', '開発']),
+    h.invoke<Result>('git:sparseSetExclusions', repo, ['営業']),
+    h.invoke<Result>('git:sparseSetExclusions', repo, []),
+  ])
+  assert.deepEqual(results.map(r => [r.success, r.excluded]), [[true, ['営業', '開発']], [true, ['営業']], [true, []]])
+  for (const f of ['営業/a.md', '開発/b.md', '総務/c.md']) assert.ok(fs.existsSync(path.join(repo, f)), f)
+})
+
 test('git:folderSizes: the server view (or local trees offline) plus readable private folders without sizes', async () => {
   const repo = path.join(root, 'sizes')
   commitRepo(h.base, repo, { '人事/x.md': 'x', '営業/y.md': 'y' })

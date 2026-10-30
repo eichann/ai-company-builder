@@ -8,10 +8,15 @@ if (!fs.existsSync(DATA_DIR)) {
   fs.mkdirSync(DATA_DIR, { recursive: true })
 }
 
-const dbPath = AUTH_DB_PATH
+// One connection to auth.sqlite for the whole process (Better Auth, user
+// lookups, /api/config, the sign-up check), in WAL mode so the many readers
+// (every request's session lookup) never wait behind a sign-in's write.
+export const authDb = new Database(AUTH_DB_PATH)
+authDb.pragma('journal_mode = WAL')
+authDb.pragma('busy_timeout = 5000')
 
 export const auth = betterAuth({
-  database: new Database(dbPath),
+  database: authDb,
   emailAndPassword: {
     enabled: true,
     minPasswordLength: 8,
@@ -54,9 +59,6 @@ export interface AuthUser {
   image: string | null
   emailVerified: boolean
 }
-
-// Direct access to auth database for user lookups
-const authDb = new Database(dbPath)
 
 /** Look up users by IDs from auth.sqlite. Returns a map of userId -> { email, name } */
 export function getUsersByIds(userIds: string[]): Map<string, { email: string; name: string | null }> {

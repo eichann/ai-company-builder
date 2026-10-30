@@ -49,9 +49,9 @@ describe('Auth rejection (401) — unauthenticated requests', () => {
       expect(res.status).toBe(401)
     })
 
-    it('PATCH /api/me', async () => {
+    it('PATCH /api/me is not offered (it answered success without saving)', async () => {
       const res = await jsonReq('PATCH', '/api/me', { name: 'Hacker' })
-      expect(res.status).toBe(401)
+      expect(res.status).toBe(404)
     })
   })
 

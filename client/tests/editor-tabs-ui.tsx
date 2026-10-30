@@ -16,6 +16,7 @@ import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
 import { useKeybindings } from '../src/shared/commands/commands'
 import { hasUnsavedEdits } from '../src/shared/lib/unsavedEdits'
+import { WindowCloseGuard } from '../src/app/WindowCloseGuard'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -38,13 +39,24 @@ if (tabsView) {
   files[`${ROOT}/営業部/契約書.pdf`] = ''
 }
 const writes: Array<[string, string]> = []
+// Saves of these paths fail (a spec adds them); closing the window as main asks it (close-guard.ts).
+const failWrites = new Set<string>()
+const closeAnswers: string[] = []
+let requestClose: (() => void) | null = null
 const pinned: string[] = []
 let emitChanges: ((changes: { type: string; path: string }[]) => void) | null = null
 Object.assign(window, {
   electronAPI: {
     readFile: async (p: string) => (p in files ? files[p] : null),
     readFileBinary: async () => null,
-    writeFile: async (p: string, content: string) => { files[p] = content; writes.push([p, content]); return true },
+    writeFile: async (p: string, content: string) => {
+      if (failWrites.has(p)) return false
+      files[p] = content
+      writes.push([p, content])
+      return true
+    },
+    onCloseRequested: (cb: () => void) => { requestClose = cb; return () => { requestClose = null } },
+    answerCloseRequest: async (answer: string) => { closeAnswers.push(answer) },
     createDirectory: async () => true,
     backupBeforeOverwrite: async () => ({ success: true, backupPath: `${ROOT}/.backups/2026-10-23T01-02-03-456_editor_overwrite` }),
     readDirectory: async () => [],
@@ -66,7 +78,8 @@ function externalDelete(p: string) {
   delete files[p]
   emitChanges?.([{ type: 'unlink', path: p }])
 }
-Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits })
+Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits,
+  __acbFailWrites: failWrites, __acbCloseAnswers: closeAnswers, __acbRequestClose: () => requestClose?.() })
 
 export function Preview() {
   // As AppShell does: shortcuts reach the focused area only.
@@ -101,6 +114,7 @@ export function Preview() {
       <div className="h-[420px] w-[760px]" style={tabsView ? { height: 420 } : undefined}>
         <TabbedEditorPanel openFiles={openFiles} activeFilePath={active} previewFilePath={previewTab} tabLabels={labels} onSelectFile={setActive} onCloseFile={closeFile} onPinFile={pinFile} />
       </div>
+      <WindowCloseGuard />
     </main>
   )
 }
