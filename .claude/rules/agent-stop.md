@@ -1,0 +1,67 @@
+---
+paths:
+  - "shared/types/agent-stop.ts"
+  - "server/src/routes/agent-stops.ts"
+  - "server/src/services/agent-stops.ts"
+  - "server/src/services/agent-policy.ts"
+  - "server/src/services/push-channel.ts"
+  - "server/src/ports/agent-stops.ts"
+  - "server/src/adapters/sqlite/agent-stops.ts"
+  - "server/tests/integration/agent-stops.test.ts"
+---
+
+# Emergency stop (monitoring M2, 「AI の緊急停止」) and the server → app push channel
+
+An owner/admin stops the members' AI in one click: the whole company, one member, or one kind
+of tool (command / write / web / external MCP) for everyone or one member. Running conversations
+stop at once; new ones are refused. Owner decisions (2026-10-25 / 10-31): only owner/admin stop;
+an app that has never received a policy does not stop (it records only), one that has keeps the
+last state it received; the push channel follows 「かもしれない運転」 — the most defensive design,
+each rule below with its test. The key broker's 「鍵」 unit stays in 「API キー」
+(`POST /broker/stop-all`, `key-broker.md` K5); the stop view shows the keys' state next to it.
+
+## Server
+
+- Tables (`db/index.ts`, additive): `agent_stops` (id, company, `user_id` NULL = everyone,
+  `tool` NULL = the whole AI, reason ≤ 500, stopped at/by, released at/by; never deleted — the
+  released rows are the history) and `agent_stop_clients` (company, member → the build of the
+  app that last said it follows the stop, when).
+- `routes/agent-stops.ts` → `services/agent-stops.ts` → `AgentStopRepository`:
+  `GET /agent-stops` (owner/admin) → `{ active, history (≤ 50), unsupported, keys }`;
+  `POST /agent-stops { userId?, tool?, reason? }` (owner/admin; the user must be a member; the
+  same scope already in force adds nothing); `DELETE /agent-stops/:stopId` (owner/admin;
+  releasing a released stop changes nothing). Every stop / release announces on the push channel.
+- `GET /me/agent-policy` (`routes/agent-sandbox.ts`, `services/agent-policy.ts`) now carries
+  `stop: { all, tools }`, merged for the caller (everyone's stops and their own); the version
+  (ETag) hashes sandbox + stop, so a stop changes it. Sandbox changes announce too.
+- **Apps that do not follow the stop** (「停止に対応していないアプリ」): an app that follows it
+  sends `X-ACB-Agent-Stop: 1` on `/me/agent-policy` and `/me/events`, recorded with its
+  `X-ACB-Client-Version`. A member is counted when `client_activity` has a build for them and it
+  is not the build recorded as following (never used the desktop app → not counted; back on an
+  old build → counted again). A member with two PCs on different builds may flip; the count is a
+  prompt to update, not a guarantee.
+
+## The push channel (`GET /me/events`, text/event-stream)
+
+- Frames: `event: policy` + `data: {"kind":"policy","version":"<32 hex>"}`, sent once at
+  connect (the current version, so an app that missed one while disconnected learns it) and on
+  every change; `:` heartbeat comments every 25 s (`PUSH_HEARTBEAT_MS`). Nothing else.
+- **No content in an event**: kind + version only — never a reason, name or folder
+  (`parsePushEvent` in `shared/types/agent-stop.ts` is the one shape; test "sends only kind +
+  version, never the reason or a name").
+- **Addressed by company × member**: `services/push-channel.ts` files subscribers by company,
+  then member; `announce(companyId, versionFor)` reaches only that company, each member with
+  their own version (test "an announcement for one company never reaches another company's
+  member").
+- **Caps**: `PUSH_MAX_PER_MEMBER` (3) open connections per member and company → 429
+  `TOO_MANY_CONNECTIONS`; `PUSH_MAX_TOTAL` (5000). A connection ends after `PUSH_LIFETIME_MS`
+  (10 min) and the app reconnects with its session (re-authenticated); a member removed from
+  the company hears nothing more (checked at each heartbeat). Tests: the cap, heartbeat,
+  removed member, lifetime.
+- Session in the Cookie header (never the URL); nothing about it is logged (test "never writes
+  the session to the log"); the route stays async (`no-exec-sync.test.ts`), no SQL in the route.
+- Proxies: `Content-Type: text/event-stream`, `Cache-Control: no-cache, no-store, no-transform`,
+  `X-Accel-Buffering: no`. Caddy's `reverse_proxy` flushes event streams immediately by itself;
+  no `encode` in front of `/api/*`; a load balancer in front needs an idle timeout > 60 s
+  (`docs/self-hosting/README*.md`). The admin's Next proxy (`admin/src/proxy.ts`) is only for
+  setups without Caddy; the app talks to the server URL directly.

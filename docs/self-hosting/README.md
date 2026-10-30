@@ -294,6 +294,13 @@ EOF
 
 Replace `your-domain.com` with your actual domain.
 
+> **Live notices to the desktop app**: the app keeps one long-lived connection to
+> `/api/companies/<id>/me/events` (Server-Sent Events, a heartbeat every 25 s) so an
+> administrator's emergency stop reaches it at once. Caddy's `reverse_proxy` passes event
+> streams through unbuffered by itself. Do not put `encode` (compression) in front of `/api/*`,
+> and keep any proxy or load balancer in front of Caddy at an idle timeout above 60 s. If the
+> stream is cut anyway, the app still checks every 60 s.
+
 #### 3.3 Point Your Domain to the Server
 
 Before reloading Caddy, make sure your domain's DNS A record points to your server's IP:

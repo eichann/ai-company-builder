@@ -6,23 +6,24 @@
  *   GET  /agent-sandbox                       setting + overrides + history (owner/admin)
  *   PUT  /agent-sandbox                       the whole setting (owner/admin)
  *   PUT  /agent-sandbox/overrides/:userId     { mode: off|observe|enforce|null } (owner/admin)
- *   GET  /me/agent-policy                     any member: the policy their app's AI follows
- *                                             (ETag = version, If-None-Match → 304). The
- *                                             emergency stop (M2) adds its part here.
+ *   GET  /me/agent-policy                     any member: the policy their app's AI follows —
+ *                                             the sandbox and the emergency stop (M2,
+ *                                             routes/agent-stops.ts) — (ETag = version,
+ *                                             If-None-Match → 304). A change is announced
+ *                                             on the push channel (/me/events).
  *
  * Non-members get 404 like every company route.
  */
-import { createHash } from 'crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import type { Member } from '../services/access'
-import type { AgentPolicy } from '../../shared/types/agent-sandbox'
 import { refusal } from './respond'
+import { noteStopSupport } from './agent-stops'
 
 export const agentSandboxRoute = new Hono()
-const { access, agentSandbox } = services
+const { access, agentSandbox, agentPolicy } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -51,6 +52,7 @@ agentSandboxRoute.put('/agent-sandbox', async (c) => {
   if (member instanceof Response) return member
   const result = agentSandbox.update(member, await jsonBody(c))
   if (!result.ok) return refusal(c, result)
+  agentPolicy.announce(member.companyId)
   return c.json({ success: true, data: result.value })
 })
 
@@ -59,19 +61,19 @@ agentSandboxRoute.put('/agent-sandbox/overrides/:userId', async (c) => {
   if (member instanceof Response) return member
   const result = agentSandbox.setOverride(member, c.req.param('userId'), await jsonBody(c))
   if (!result.ok) return refusal(c, result)
+  agentPolicy.announce(member.companyId)
   return c.json({ success: true, data: result.value })
 })
 
 agentSandboxRoute.get('/me/agent-policy', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  const sandbox = agentSandbox.policyFor(member)
-  const version = createHash('sha256').update(JSON.stringify({ sandbox })).digest('hex').slice(0, 32)
-  const etag = `"${version}"`
+  noteStopSupport(c, member)
+  const data = agentPolicy.policyFor(member)
+  const etag = `"${data.version}"`
   c.header('ETag', etag)
   c.header('Cache-Control', 'private, no-cache')
   const inm = c.req.header('If-None-Match')
   if (inm && inm.split(',').some(t => t.trim() === etag)) return c.body(null, 304)
-  const data: AgentPolicy = { version, sandbox }
   return c.json({ success: true, data })
 })

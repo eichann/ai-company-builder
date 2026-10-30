@@ -294,6 +294,33 @@ export function initDatabase(conn: Database.Database = sqlite) {
       change TEXT NOT NULL
     );
 
+    -- The emergency stop (monitoring M2, .claude/rules/agent-stop.md): one row per
+    -- stop an owner/admin made. user_id NULL = everyone; tool NULL = the whole AI
+    -- (else command / write / web / mcp-external). released_at NULL = in force.
+    -- Rows are never deleted: released ones are the history.
+    CREATE TABLE IF NOT EXISTS agent_stops (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT,
+      tool TEXT CHECK (tool IS NULL OR tool IN ('command', 'write', 'web', 'mcp-external')),
+      reason TEXT NOT NULL DEFAULT '',
+      stopped_at TEXT NOT NULL,
+      stopped_by TEXT NOT NULL,
+      released_at TEXT,
+      released_by TEXT
+    );
+
+    -- The last time a member's app said it follows the stop (X-ACB-Agent-Stop on
+    -- GET /me/agent-policy or /me/events), with its build: older apps never do,
+    -- which the admin's 「停止に対応していないアプリ」 count is built from.
+    CREATE TABLE IF NOT EXISTS agent_stop_clients (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      client_version TEXT,
+      last_seen_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id)
+    );
+
     -- The API key broker (.claude/rules/key-broker.md). A key's value is only
     -- ever stored sealed: AES-256-GCM under its own data key, the data key
     -- wrapped by the key-encryption key named in kek_id (envelope encryption).
@@ -394,6 +421,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_event_settings_history_company ON agent_event_settings_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_agent_sandbox_history_company ON agent_sandbox_history(company_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_stops_company ON agent_stops(company_id, released_at, stopped_at);
     CREATE INDEX IF NOT EXISTS idx_broker_keys_company ON broker_keys(company_id, service);
     CREATE INDEX IF NOT EXISTS idx_broker_history_company ON broker_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_broker_tokens_member ON broker_tokens(company_id, user_id, expires_at);

@@ -84,6 +84,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET|POST /agent-stops, DELETE /agent-stops/:stopId,
+                              GET /me/events (SSE push channel)               agent-stops.ts
+                                                                (緊急停止: agent-stop.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
                               PUT /broker/services/:service, PUT|DELETE /broker/relay-services/:service,
