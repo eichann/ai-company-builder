@@ -21,6 +21,7 @@ import { createClaudeSteer, tapQuery } from './steering'
 import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../../shared/agents/registry'
 import { turnToolEvents } from './tool-events'
 import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
+import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
 
@@ -156,6 +157,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       let observedMode: string | undefined
       // The AI action log for this turn (shared/agent-events.ts); undefined when nobody records.
       const toolEvents = turnToolEvents(config, 'claude-code', { appSessionId, modelId, workingDirectory, toolEventContext, sandbox })
+      // 「AI の囲い」 enforce: Claude Code's own sandbox, from the company policy (sandbox-policy.ts).
+      const enforced = sandbox?.mode === 'enforce' ? claudeSandboxOptions(sandbox.resolved) : undefined
       // PreToolUse decision: request UI approval for dangerous patterns (works even in
       // bypassPermissions). Each answer carries the decision it stands for (the action log).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -288,6 +291,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           noteToolResult(privateReads.context, privateReads.state, String(input.tool_name), input.tool_response)
         }
         recordToolEnd(toolEvents, input)
+        // A command the sandbox refused: the AI relays the company's sentence instead of retrying.
+        if (enforced && sandbox && input.hook_event_name === 'PostToolUseFailure') {
+          const read = sandboxConcern(sandbox.resolved, String(input.tool_name), input.tool_input, sandbox.home) === 'read'
+          const context = sandboxRefusalContext(parseSandboxViolation(input.error), read)
+          if (context) return { continue: true, hookSpecificOutput: { hookEventName: 'PostToolUseFailure', additionalContext: context } }
+        }
         return { continue: true }
       }
 
@@ -347,7 +356,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const resolvedModel = claudeCliModel(modelId)
       const resolvedEffort = claudeCliEffort(resolvedModel, effort as AgentEffort | undefined)
 
-      const createNative = (mode: PermissionMode) => {
+      const createNative = (mode: PermissionMode, sandboxed = !!enforced) => {
         // One MCP server instance per query: a fallback re-run must not reuse the first one.
         const referenceServer = references ? createSdkMcpServer({ name: 'acb_consultations', tools: (Object.keys(referenceSchemas) as ReferenceToolName[]).map(name => tool(name, referenceDescriptions[name], referenceSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await references.execute(name, args) }] }))) }) : undefined
         // App-provided (not the company repository's .mcp.json, which is protected config).
@@ -367,7 +376,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           ...(reviewServer ? [REVIEW_TOOL_ID] : []),
           ...(webResearchServer ? [WEB_RESEARCH_TOOL_ID] : []),
         ]
-        const state = { missingSession: false, autoRejected: false }
+        const state = { missingSession: false, autoRejected: false, sandboxUnavailable: false }
         // Steering + prompt suggestions (steering.ts): watch the query the
         // provider runs. A suggestion arrives after the turn's result, once
         // the UI stream has already closed, so it goes out through
@@ -400,7 +409,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // permission mode; WebFetch / WebSearch also bypass the sandbox's
           // network allowlist, so this is the only reliable switch). Not
           // `disallowedTools`: the provider ignores it whenever allowedTools is set.
-          ...(webResearch ? { settings: { permissions: { deny: [...CLAUDE_BUILTIN_WEB_TOOLS] } } } : {}),
+          // Under the company sandbox the same flag settings also deny reading its secret places
+          // (the sandbox covers only Bash; the Read tool needs these rules).
+          ...(webResearch || sandboxed ? { settings: { permissions: { deny: [...new Set([...(webResearch ? CLAUDE_BUILTIN_WEB_TOOLS : []), ...(sandboxed && enforced ? enforced.permissionsDeny : [])])] } } } : {}),
+          // The company sandbox (agent-sandbox.md): --settings layer, so the company
+          // repository's .claude/settings.json cannot loosen it (strictAllowlist,
+          // allowUnsandboxedCommands: false). failIfUnavailable: a CLI that cannot
+          // start it stops, and the app follows the company's onUnavailable.
+          ...(sandboxed && enforced ? { sandbox: enforced.sandbox } : {}),
           streamingInput: 'always',
           // One-line progress for running subagents (task_progress.summary),
           // shown in the subagent row; see shared/agent-progress.ts.
@@ -443,18 +459,20 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             const child = spawnClaudeCodeProcess(opts)
             // The SDK can discard stderr on result errors; inspect only these exact startup failures.
             let pending = ''
-            if (existingCliSessionId || mode === 'auto') child.stderr?.on('data', (chunk: Buffer) => {
+            if (existingCliSessionId || mode === 'auto' || sandboxed) child.stderr?.on('data', (chunk: Buffer) => {
               pending += chunk.toString()
               const lines = pending.split('\n'); pending = lines.pop()!.slice(-512)
               if (existingCliSessionId && lines.some(line => line.trim() === `No conversation found with session ID: ${existingCliSessionId}`)) state.missingSession = true
               if (mode === 'auto' && lines.some(line => AUTO_REJECTED.test(line))) state.autoRejected = true
+              if (sandboxed && lines.some(line => CLAUDE_SANDBOX_UNAVAILABLE_RE.test(line))) state.sandboxUnavailable = true
             })
             return child
           },
           hooks: {
             PreToolUse: [{ hooks: [preToolUseHook] }],
             ...(privateReads || toolEvents ? { PostToolUse: [{ hooks: [postToolUseHook] }] } : {}),
-            ...(toolEvents ? { PostToolUseFailure: [{ hooks: [postToolUseHook] }], PermissionDenied: [{ hooks: [postToolUseHook] }] } : {}),
+            ...(toolEvents || sandboxed ? { PostToolUseFailure: [{ hooks: [postToolUseHook] }] } : {}),
+            ...(toolEvents ? { PermissionDenied: [{ hooks: [postToolUseHook] }] } : {}),
           },
           ...(canUseToolFn ? { canUseTool: canUseToolFn } : {}),
         })
@@ -462,7 +480,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       }
 
       const primary = createNative(permissionMode)
-      if (!existingCliSessionId && requestedMode !== 'auto') return primary.model
+      if (!existingCliSessionId && requestedMode !== 'auto' && !enforced) return primary.model
       // The fallback notice is shown once per conversation, as soon as it applies,
       // outside any open text block.
       const takeNotice = (text: string | undefined) => {
@@ -470,7 +488,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (appSessionId) notifiedConversations.add(appSessionId)
         return text
       }
-      const relay = (stream: ReadableStream<StreamPart>, state: typeof primary.state, pendingNotice: () => string | undefined) => {
+      const relay = (stream: ReadableStream<StreamPart>, state: typeof primary.state, pendingNotice: () => string | undefined, oncePerConversation = true) => {
         let shown = false
         const openText = new Set<string>()
         return stream.pipeThrough(new TransformStream<StreamPart, StreamPart>({
@@ -479,7 +497,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
               const pending = pendingNotice()
               if (pending) {
                 shown = true
-                const text = takeNotice(pending)
+                const text = oncePerConversation ? takeNotice(pending) : pending
                 if (text) for (const extra of noticeParts(text)) controller.enqueue(extra)
               }
             }
@@ -491,13 +509,26 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       }
       const cliNotice = () => PERMISSION_FALLBACK_NOTICE.cli
       const accountNotice = () => (observedMode === 'default' ? PERMISSION_FALLBACK_NOTICE.account : undefined)
+      // The company sandbox did not start (failIfUnavailable): the company's
+      // onUnavailable decides — stop with a plain sentence, or run this turn without it.
+      const sandboxStartFailed = (error: unknown) => primary.state.sandboxUnavailable || CLAUDE_SANDBOX_UNAVAILABLE_RE.test(error instanceof Error ? error.message : String(error ?? ''))
+      const sandboxFallback = async (params: Parameters<ReturnType<typeof claudeCode>['doStream']>[0]) => {
+        console.warn('[agent-sandbox] Claude Code could not start the sandbox; following the company setting:', sandbox?.onUnavailable)
+        if (sandbox?.onUnavailable !== 'record-only') {
+          return { stream: new ReadableStream<StreamPart>({ start(c) { c.enqueue({ type: 'stream-start', warnings: [] }); c.enqueue({ type: 'error', error: new Error(SANDBOX_MESSAGES.startFailedStop) }); c.close() } }) }
+        }
+        const retry = createNative(cliLacksAuto ? 'default' : permissionMode, false)
+        const result = await retry.model.doStream(params)
+        return { ...result, stream: relay(result.stream, retry.state, () => SANDBOX_MESSAGES.startFailedRecordOnly, false) }
+      }
       return wrapLanguageModel({ model: primary.model, middleware: {
         specificationVersion: 'v3',
         wrapStream: async ({ doStream, params }) => {
-          if (requestedMode !== 'auto' || cliLacksAuto) {
+          if ((requestedMode !== 'auto' || cliLacksAuto) && !enforced) {
             const result = await doStream()
             return { ...result, stream: relay(result.stream, primary.state, cliLacksAuto ? cliNotice : () => undefined) }
           }
+          const peeksAuto = requestedMode === 'auto' && !cliLacksAuto
           // A CLI without `auto` rejects the flag before producing anything:
           // peek at the first real part and, on that exact failure, re-run the
           // turn in 'default' (nothing has reached the user yet).
@@ -510,7 +541,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           }
           let result
           try { result = await doStream() } catch (error) {
-            if (primary.state.autoRejected) return fallback()
+            if (peeksAuto && primary.state.autoRejected) return fallback()
+            if (enforced && sandboxStartFailed(error)) return sandboxFallback(params)
             throw error
           }
           const reader = result.stream.getReader()
@@ -521,9 +553,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             head.push(next.value)
             if (next.value.type !== 'stream-start') break
           }
-          if (head.at(-1)?.type === 'error' && primary.state.autoRejected) {
+          const last = head.at(-1)
+          if (last?.type === 'error' && peeksAuto && primary.state.autoRejected) {
             await reader.cancel().catch(() => {})
             return fallback()
+          }
+          if (last?.type === 'error' && enforced && sandboxStartFailed(last.error)) {
+            await reader.cancel().catch(() => {})
+            return sandboxFallback(params)
           }
           const replay = new ReadableStream<StreamPart>({
             start(controller) { for (const part of head) controller.enqueue(part) },
@@ -533,7 +570,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
             },
             cancel(reason) { return reader.cancel(reason) },
           })
-          return { ...result, stream: relay(replay, primary.state, accountNotice) }
+          return { ...result, stream: relay(replay, primary.state, peeksAuto ? accountNotice : cliLacksAuto ? cliNotice : () => undefined) }
         },
       } })
     },

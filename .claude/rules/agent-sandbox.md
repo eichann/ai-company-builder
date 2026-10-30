@@ -17,6 +17,7 @@ paths:
   - "admin/src/components/agent-sandbox/**"
   - "client/electron/services/agent-policy-store.ts"
   - "client/tests/sandbox-observe.test.ts"
+  - "client/tests/sandbox-claude.test.ts"
 ---
 
 # AI sandbox (「AI の囲い」): the company's policy, handed to the agents' own sandboxes
@@ -120,7 +121,45 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   (`components/agent-sandbox/impact-card.tsx`); log rows show 「囲うと止まる」 / 「囲いで止まった」 +
   the skill, and a command's 宛先.
 
-Tests: `client/tests/sandbox-observe.test.ts` (observe marks hosts and denied places but never
+## Enforce with Claude Code (S3, macOS / Linux)
+
+- Registry `capabilities.sandbox` (Claude Code: true; Codex, API key: false until S4) and
+  `sandboxPlatform` (darwin, linux — Windows is record only, owner decision). `chat-server.ts`:
+  enforce that cannot run here → `onUnavailable: 'stop'` answers 403
+  `SANDBOX_MESSAGES.unavailableStop`, `record-only` runs the turn as observe (logged). Under
+  enforce the system prompt gets `SANDBOX_INSTRUCTIONS` (relay the company's sentence, never
+  work around the sandbox).
+- `agents/claude.ts` with `sandbox.mode === 'enforce'`: provider `sandbox` =
+  `claudeSandboxOptions(resolved).sandbox` (the SDK merges it into the CLI's `--settings`
+  layer) and flag `settings.permissions.deny` = WebFetch / WebSearch + `Read(//p)` /
+  `Read(//p/**)` for every denied place. Observe / off pass neither (unchanged CLI).
+- The sandbox cannot start (`failIfUnavailable`; stderr or the stream error matches
+  `CLAUDE_SANDBOX_UNAVAILABLE_RE`, from the CLI's strings — not reproducible on a Mac):
+  `stop` → the turn ends with 「サンドボックスを開始できませんでした。会社の設定により、この PC では AI
+  を使えません。管理者に相談してください。」; `record-only` → the turn re-runs without the sandbox
+  and the reply starts with 「※ サンドボックスを開始できませんでした。会社の設定により、今回は記録だけで続けます。」.
+  Any other failure surfaces unchanged (never a silent unsandboxed re-run).
+- A refused host / read: the PostToolUseFailure hook returns `additionalContext` with
+  `blockedHostMessage(host)` = 「会社の設定で、この宛先（host）には接続できません。必要なら管理者に許可を依頼してください。」
+  (or the read sentence) for the AI to relay; the event is `blocked` (S2).
+- Verified on this Mac (CLI 2.1.314, Haiku, Jamf developer managed settings present, the
+  scratch company's `.claude/settings.json` trying to disable the sandbox, allow example.org /
+  example.com and re-open `~/.ssh`): api.github.com 200; example.org refused (curl 56, logged
+  `blocked` + host); generativelanguage.googleapis.com reached (403 from Google = no key);
+  `python3 -c "open('~/.ssh/config')"` → `PermissionError` (logged `blocked`); the Read tool on
+  `~/.ssh/config` refused (logged `denied-read`); `~/.aws/config` unreadable; company folder read
+  / append / mkdir OK; writing `~/Desktop` refused; observe mode lets example.org through and
+  logs `would-block`; the Web reader (its own process, no sandbox) still reads example.com.
+- Not covered by Claude's sandbox: the Read tool beyond the `Read(...)` denies, MCP servers and
+  hooks (outside the sandbox; `.mcp.json` / hooks are PROTECTED_CONFIG), WebFetch / WebSearch
+  (denied; the Web reader is the way to the web). DNS and allowed hosts themselves remain
+  possible exfiltration paths. A managed `enabledPlatforms` that leaves macOS out turns the
+  sandbox off without an error (seen with a flag setting) — keep it out of the Jamf profile.
+
+Tests: `client/tests/sandbox-claude.test.ts` (the CLI gets the sandbox and the Read denies
+under enforce and nothing under observe / off; start failure → stop sentence or re-run with
+the notice; other failures never re-run; the refused host's sentence reaches the AI; Windows
+never enforces), `client/tests/sandbox-observe.test.ts` (observe marks hosts and denied places but never
 keeps a URL path; nothing without a sandbox; enforce reads the violations, an unrelated
 `Operation not permitted` is not the sandbox; a permission-rule refusal with no hook is logged;
 the skill; enforce → observe without the capability; the policy store),

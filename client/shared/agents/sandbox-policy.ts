@@ -146,7 +146,7 @@ export function resolveSandbox(settings: Pick<AgentSandboxSettings, 'allowedDoma
 }
 
 /** Claude Code's sandbox settings (the SDK's `SandboxSettings` subset the app sets). */
-export interface ClaudeSandboxSettings {
+export type ClaudeSandboxSettings = {
   enabled: true
   failIfUnavailable: true
   autoAllowBashIfSandboxed: true
@@ -326,4 +326,49 @@ export function decideTurnSandbox(settings: AgentSandboxSettings, host: SandboxH
   const resolved = resolveSandbox(settings, host)
   if (settings.mode === 'enforce' && !canEnforce) return { mode: 'observe', resolved, onUnavailable: settings.onUnavailable, degraded: true }
   return { mode: settings.mode, resolved, onUnavailable: settings.onUnavailable, degraded: false }
+}
+
+/** Platforms where the app hands the sandbox to an agent (owner decision: Windows is record only). */
+export function sandboxPlatform(platform: string): boolean {
+  return platform === 'darwin' || platform === 'linux'
+}
+
+// ---------------------------------------------------------------------------
+// What the member and the AI are told (plain Japanese for the member)
+// ---------------------------------------------------------------------------
+
+export const SANDBOX_MESSAGES = {
+  /** enforce + `stop`, and this computer / agent cannot run the sandbox at all (Windows, …). */
+  unavailableStop: 'この PC では AI の囲い（サンドボックス）を使えないため、会社の設定により AI を使えません。管理者に相談してください。',
+  /** enforce + `stop`, and the agent's sandbox failed to start. */
+  startFailedStop: 'サンドボックスを開始できませんでした。会社の設定により、この PC では AI を使えません。管理者に相談してください。',
+  /** enforce + `record-only`, and the agent's sandbox failed to start (shown once in the reply). */
+  startFailedRecordOnly: 'サンドボックスを開始できませんでした。会社の設定により、今回は記録だけで続けます。',
+} as const
+
+/** The sentence the member sees when a command reached for a host outside the list. */
+export function blockedHostMessage(host: string): string {
+  return `会社の設定で、この宛先（${host}）には接続できません。必要なら管理者に許可を依頼してください。`
+}
+
+export const BLOCKED_READ_MESSAGE = '会社の設定で、この場所は AI が読めないようになっています。'
+
+/**
+ * For the AI (system prompt, every agent under enforce): relay the refusal in
+ * the member's words and never work around it.
+ */
+export const SANDBOX_INSTRUCTIONS = `
+
+## Company sandbox (「AI の囲い」)
+Commands you run are sandboxed by the company: they can reach only the hosts the company allows, and cannot read some places (credentials, keychains, browser data). When a command fails because the sandbox refused a host (for example "<sandbox_violations> deny network-outbound HOST"), tell the user exactly: 「会社の設定で、この宛先（HOST）には接続できません。必要なら管理者に許可を依頼してください。」 with HOST replaced. When a read is refused, tell the user: 「${BLOCKED_READ_MESSAGE}」 Never try to get around the sandbox (another tool, another host, a proxy, copying the file elsewhere, dangerouslyDisableSandbox).`
+
+/** Claude Code's text when `failIfUnavailable` stopped it (strings of CLI 2.1.314). */
+export const CLAUDE_SANDBOX_UNAVAILABLE_RE = /failIfUnavailable|sandbox_required_unavailable|sandbox unavailable/i
+
+/** For the AI after a refused command (Claude's PostToolUseFailure `additionalContext`). */
+export function sandboxRefusalContext(violation: SandboxViolation | undefined, concernRead: boolean): string | undefined {
+  if (!violation) return undefined
+  if (violation.hosts.length) return `The company sandbox refused this connection. Tell the user exactly: ${violation.hosts.map(blockedHostMessage).join(' ')} Do not try another way.`
+  if (violation.read || (violation.notPermitted && concernRead)) return `The company sandbox refused this read. Tell the user exactly: ${BLOCKED_READ_MESSAGE} Do not try another way.`
+  return undefined
 }
