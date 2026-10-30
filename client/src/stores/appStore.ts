@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import i18n from '../i18n'
 import type { Company } from '../types'
+import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
 import { resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../lib/aiModels'
 
 // Theme type
@@ -135,15 +136,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setCurrentCompany: (company) => {
-    if (company?.rootPath && window.electronAPI?.registerAllowedRoot) {
-      window.electronAPI.registerAllowedRoot(company.rootPath)
+    if (company?.rootPath && canRegisterCompanyFolder()) {
+      registerCompanyFolder(company.rootPath)
     }
     set({ currentCompany: company })
   },
 
   addCompany: (company) => {
-    if (company.rootPath && window.electronAPI?.registerAllowedRoot) {
-      window.electronAPI.registerAllowedRoot(company.rootPath)
+    if (company.rootPath && canRegisterCompanyFolder()) {
+      registerCompanyFolder(company.rootPath)
     }
     set({ currentCompany: company })
   },

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useAuthStore } from '../../stores/authStore'
+import { getServerUrl } from '../../features/auth/api'
 import {
   Key,
   EnvelopeSimple,
@@ -18,7 +19,7 @@ export function LoginScreen() {
   const [signupUrl, setSignupUrl] = useState('')
 
   useEffect(() => {
-    window.electronAPI.getServerUrl().then((url) => {
+    getServerUrl().then((url) => {
       if (url) setSignupUrl(url)
     })
   }, [])

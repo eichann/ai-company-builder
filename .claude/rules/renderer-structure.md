@@ -33,7 +33,8 @@ client/src/
 
 Planned features: `workspace` (department tabs, left panel tabs, panel layout, department
 choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a document),
-`chat`, `sync`, `history`, `search`, `settings`, `auth`. Only create what you need; add a feature
+`chat`, `sync`, `history`, `search`, `settings`, `auth` (server address, sign-in, session),
+`company` (choosing a company and setting its folder up: the company selector). Only create what you need; add a feature
 folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do
@@ -64,9 +65,13 @@ editor, review, search, history, backups).
    `stores/`, `i18n/` and `types/` may be imported from anywhere.
 3. **No barrel files.** No `index.ts` that re-exports a folder: import the file you need. The
    boundary test, not a public index, guards a feature's edges (barrels also defeat tree shaking).
-4. **IPC goes through a data layer.** Components and hooks do not call `window.electronAPI`
-   directly; a feature's `api.ts` (or `shared/ipc/`) does. Existing direct calls are an explicit
-   list in the boundary test that may only shrink. The IPC contract itself (channels, arguments,
+4. **IPC goes through a data layer.** Components, hooks, stores and `App.tsx` do not call
+   `window.electronAPI` directly; a feature's `api.ts` (or `shared/ipc/`) does. The boundary
+   test fails on any other use, with no list of exceptions (the last older callers moved
+   2026-10-30). A store imports the port functions it needs (`authStore` →
+   `features/auth/api.ts`, `appStore` → `shared/ipc/allowed-folders.ts`); calls that reach the
+   company server are ports like any other, one small port per role, never a server client
+   object. The IPC contract itself (channels, arguments,
    `client/shared/ipc-contract.ts`) does not change for this: `ipc-and-main-process.md`.
    **Small ports, never one client object** (owner, 2026-10-29): an `api.ts` names only the
    methods it uses (`ElectronPort<'readFile' | …>`, for `voiceInput` `VoiceInputPort<…>`, both in

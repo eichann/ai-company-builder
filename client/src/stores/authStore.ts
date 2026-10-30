@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import * as authApi from '../features/auth/api'
 
 export interface AuthUser {
   id: string
@@ -37,10 +38,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   signIn: async (email, password) => {
     set({ isLoading: true })
     try {
-      const result = await window.electronAPI.signIn(email, password)
+      const result = await authApi.signIn(email, password)
       if (result.success) {
         // Fetch user info after sign in
-        const session = await window.electronAPI.getSession()
+        const session = await authApi.getSession()
         if (session.success && session.user) {
           set({ user: session.user })
         }
@@ -57,10 +58,10 @@ export const useAuthStore = create<AuthState>((set) => ({
   signUp: async (email, password, name) => {
     set({ isLoading: true })
     try {
-      const result = await window.electronAPI.signUp(email, password, name)
+      const result = await authApi.signUp(email, password, name)
       if (result.success) {
         // Fetch user info after sign up
-        const session = await window.electronAPI.getSession()
+        const session = await authApi.getSession()
         if (session.success && session.user) {
           set({ user: session.user })
         }
@@ -77,7 +78,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   signOut: async () => {
     set({ isLoading: true })
     try {
-      await window.electronAPI.signOut()
+      await authApi.signOut()
       set({ user: null })
     } finally {
       set({ isLoading: false })
@@ -87,7 +88,7 @@ export const useAuthStore = create<AuthState>((set) => ({
   checkSession: async () => {
     set({ isLoading: true })
     try {
-      const session = await window.electronAPI.getSession()
+      const session = await authApi.getSession()
       if (session.success && session.user) {
         set({ user: session.user })
       } else {

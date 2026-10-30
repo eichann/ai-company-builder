@@ -233,45 +233,25 @@ test('renderer src/shared never imports src/features or src/app', () => {
   assert.deepEqual(violations(files, sharedMayImport), [])
 })
 
-/**
- * Renderer files that still call window.electronAPI directly (2026-10-29:
- * 44; 43 with doc-review's api.ts, 39 with skills' api.ts, 36 with
- * settings' api.ts, 32 with voice's api.ts, 25 with chat's api.ts for
- * history and hand-off, 20 with the rest of chat's, 15 with history's,
- * search's and sync's api.ts and shared/ipc/diffs.ts, 10 with files' api.ts
- * and the shared ports for write access, departments and download choices,
- * 7 with the file tree's and the editor's api.ts and shared/ipc/file-events.ts,
- * 6 with the skeleton's calls in skills', sync's, editor's, workspace's and
- * auth's api.ts). Never add one: new IPC calls go
- * into the feature's api.ts or src/shared/ipc/. Remove a file here when it stops calling it; a move-only
- * PR renames its entry. The count may only go down.
- */
-const DIRECT_IPC_FILES: readonly string[] = [
-  'src/App.tsx',
-  'src/components/auth/CompanySelector.tsx',
-  'src/components/auth/LoginScreen.tsx',
-  'src/components/auth/ServerSetupScreen.tsx',
-  'src/stores/appStore.ts',
-  'src/stores/authStore.ts',
-]
-const DIRECT_IPC_CEILING = 6
-
-/** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
+/** The renderer's data layer: the only places allowed to reach window.electronAPI. */
 const isDataLayer = (clientPath: string) =>
   /^src\/features\/[^/]+\/api(\.tsx?$|\/)/.test(clientPath) || /^src\/shared\/ipc\//.test(clientPath)
 
 /** window.electronAPI, window['electronAPI'], or `const { electronAPI } = window`. */
 const ELECTRON_API_USE = /\bwindow\s*(?:\?\.|\.)\s*electronAPI\b|\bwindow\s*\[\s*['"]electronAPI['"]\s*\]|\{[^}]*\belectronAPI\b[^}]*\}\s*=\s*window\b/
 
-test('window.electronAPI only in the data layer and the shrinking list of older files', () => {
-  assert.ok(DIRECT_IPC_FILES.length <= DIRECT_IPC_CEILING, 'the list of direct window.electronAPI callers may only shrink')
+/**
+ * No exceptions: the older direct callers (44 files on 2026-10-29) all moved
+ * behind ports by 2026-10-30. A screen, hook or store reaches IPC only
+ * through a feature's api.ts or src/shared/ipc/ (renderer-structure.md).
+ */
+test('window.electronAPI only in the data layer', () => {
   const files = sourceFiles(join(CLIENT, 'src'))
   assert.ok(files.length > 0)
   const using = files.map(rel).filter(f => ELECTRON_API_USE.test(stripComments(readFileSync(join(CLIENT, f), 'utf8'))))
-  const unexpected = using.filter(f => !isDataLayer(f) && !DIRECT_IPC_FILES.includes(f))
+  assert.ok(using.some(isDataLayer), 'the check must see the data layer\'s own calls')
+  const unexpected = using.filter(f => !isDataLayer(f))
   assert.deepEqual(unexpected, [], 'call IPC from the feature\'s api.ts (or src/shared/ipc/) instead (renderer-structure.md)')
-  const stale = DIRECT_IPC_FILES.filter(f => !using.includes(f))
-  assert.deepEqual(stale, [], 'remove files that no longer call window.electronAPI (and lower DIRECT_IPC_CEILING)')
 })
 
 test('the renderer checks catch violations (self-test)', () => {

@@ -8,6 +8,9 @@ import { ServerSetupScreen } from './components/auth/ServerSetupScreen'
 import { SpinnerGap } from '@phosphor-icons/react'
 import type { Company } from './types'
 import { checkRememberedCompany } from './lib/restore-company'
+import { getServerUrl } from './features/auth/api'
+import { companyPathExists, getCompanies } from './features/company/api'
+import { registerCompanyFolder } from './shared/ipc/allowed-folders'
 
 const LAST_COMPANY_KEY_PREFIX = 'lastCompany:'
 
@@ -45,7 +48,7 @@ function App() {
 
   // Check server URL on mount
   useEffect(() => {
-    window.electronAPI.getServerUrl().then((url) => {
+    getServerUrl().then((url) => {
       setServerUrl(url)
     })
   }, [])
@@ -104,12 +107,12 @@ function App() {
       // exists (main answers only for registered folders).
       const outcome = await checkRememberedCompany(last, {
         accessibleCompanyIds: async () => {
-          const result = await window.electronAPI.getCompanies()
+          const result = await getCompanies()
           if (!result?.success || !Array.isArray(result.data)) return null
           return (result.data as Array<{ id: string }>).map((c) => c.id)
         },
-        registerAllowedRoot: (folder) => window.electronAPI.registerAllowedRoot(folder),
-        exists: (target) => window.electronAPI.exists(target),
+        registerAllowedRoot: (folder) => registerCompanyFolder(folder),
+        exists: (target) => companyPathExists(target),
       })
       // Not cancelled by this effect re-running (restore is attempted once per
       // session, so a cancelled attempt would never be retried): only a
@@ -134,7 +137,7 @@ function App() {
     return (
       <ServerSetupScreen
         onComplete={() => {
-          window.electronAPI.getServerUrl().then(setServerUrl)
+          getServerUrl().then(setServerUrl)
         }}
       />
     )
