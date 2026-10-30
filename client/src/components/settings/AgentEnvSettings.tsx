@@ -1,5 +1,6 @@
 import { useEffect, useId, useState } from 'react'
 import { Button, Callout, SubHeading } from './ui'
+import { getAgentEnvPassthrough, setAgentEnvPassthrough } from '../../features/settings/api'
 
 // Settings → AIに渡す環境変数: extra environment variable names the AI (and
 // the commands it runs) may see on this computer. By default the AI gets only
@@ -22,7 +23,7 @@ export function AgentEnvSettings() {
 
   useEffect(() => {
     let alive = true
-    window.electronAPI.getAgentEnvPassthrough()
+    getAgentEnvPassthrough()
       .then(names => { if (alive) { setSaved(names); setText(names.join('\n')) } })
       .catch(() => { if (alive) { setSaved([]); setStatus('error') } })
     return () => { alive = false }
@@ -31,7 +32,7 @@ export function AgentEnvSettings() {
   const save = async () => {
     setStatus('saving')
     try {
-      const result = await window.electronAPI.setAgentEnvPassthrough(parse(text))
+      const result = await setAgentEnvPassthrough(parse(text))
       setSaved(result.names)
       setText(result.names.join('\n'))
       setRefused({ invalid: result.invalid, denied: result.denied })
