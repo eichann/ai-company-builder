@@ -77,8 +77,10 @@ npx vite -c tests/ui/vite.config.ts    # look at a page: http://localhost:5174/t
   stays mounted. Assert through roles and text, not pixels (no snapshots); pure logic stays in
   node tests.
 - The chat specs drive replies through `window.__acbChat` (`chat-header-ui.html?turn=manual`),
-  the main screen through `window.__acbLayout` (`skill-layout-ui.html`). A new preview page gets
-  a spec; `smoke.spec.ts` picks it up automatically.
+  the main screen through `window.__acbLayout` (`skill-layout-ui.html`; `?keep=1` reloads without
+  clearing storage = an app restart, `?seed=<json>` writes what an earlier app version saved, so
+  `skill-layout-state.spec.ts` can check that old saved state still restores). A new preview page
+  gets a spec; `smoke.spec.ts` picks it up automatically.
 - `playwright test` starts and stops `vite preview` itself (port 4179). `UI_TEST_REUSE=1` reuses
   one you started (rebuild after changes); stop it, and any `vite -c tests/ui/vite.config.ts`,
   when done.
