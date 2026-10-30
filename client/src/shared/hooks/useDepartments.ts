@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import type { DepartmentConfig } from '../types'
-import { getDepartments } from '../shared/ipc/departments'
+import type { DepartmentConfig } from '../../types'
+import { getDepartments } from '../ipc/departments'
 
 interface DepartmentFromAPI {
   id: string

@@ -16,7 +16,7 @@ paths:
   - "client/src/lib/download-selection.ts"
   - "client/src/lib/company-folder-plan.ts"
   - "client/src/lib/restore-company.ts"
-  - "client/src/hooks/useSparseCheckout.ts"
+  - "client/src/shared/hooks/useSparseCheckout.ts"
   - "client/src/features/sync/hooks/useDepartmentDownload.ts"
   - "client/src/features/sync/components/DepartmentDownloadPrompt.tsx"
   - "client/src/features/workspace/hooks/useDepartmentAvailability.ts"

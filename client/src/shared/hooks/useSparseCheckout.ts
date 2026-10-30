@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { excludedFolderOf, normalizeExclusions } from '../../shared/sparse-paths'
-import { applyExcludedFolders, getExcludedFolders } from '../shared/ipc/download-choices'
+import { excludedFolderOf, normalizeExclusions } from '../../../shared/sparse-paths'
+import { applyExcludedFolders, getExcludedFolders } from '../ipc/download-choices'
 
 interface UseSparseCheckoutOptions {
   rootPath: string

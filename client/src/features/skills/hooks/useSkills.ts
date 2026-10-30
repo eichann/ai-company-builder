@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { Skill } from '../types'
-import { listSkills } from '../features/skills/api'
+import type { Skill } from '../../../types'
+import { listSkills } from '../api'
 
 interface UseSkillsOptions {
   rootPath: string

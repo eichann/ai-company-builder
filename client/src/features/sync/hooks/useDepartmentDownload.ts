@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import type { ApplyResult } from '../../../hooks/useSparseCheckout'
+import type { ApplyResult } from '../../../shared/hooks/useSparseCheckout'
 
 export interface DownloadError { offline: boolean; message: string }
 
