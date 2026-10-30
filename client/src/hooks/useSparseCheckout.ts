@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { excludedFolderOf, normalizeExclusions } from '../../shared/sparse-paths'
+import { applyExcludedFolders, getExcludedFolders } from '../shared/ipc/download-choices'
 
 interface UseSparseCheckoutOptions {
   rootPath: string
@@ -60,7 +61,7 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
       return
     }
     try {
-      const result = await window.electronAPI.sparseGetExclusions(rootPath)
+      const result = await getExcludedFolders(rootPath)
       setExcludedPaths(result.success ? normalizeExclusions(result.excluded) : [])
     } catch (err) {
       console.error('Failed to load sparse checkout state:', err)
@@ -89,7 +90,7 @@ export function useSparseCheckout({ rootPath }: UseSparseCheckoutOptions): UseSp
     if (!rootPath) return { success: false, error: '会社フォルダが開かれていません' }
     setError(null)
     try {
-      const result = await window.electronAPI.sparseSetExclusions(rootPath, next)
+      const result = await applyExcludedFolders(rootPath, next)
       if (!result.success) {
         setError(result.error || '変更できませんでした')
         await loadState()

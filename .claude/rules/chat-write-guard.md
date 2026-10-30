@@ -8,6 +8,7 @@ paths:
   - "client/shared/write-access.ts"
   - "shared/core/write-access.ts"
   - "client/src/hooks/useWriteAccess.ts"
+  - "client/src/shared/ipc/write-access.ts"
   - "client/src/components/skill-ui/ReadOnlyBadge.tsx"
   - "server/src/routes/permissions.ts"
   - "client/tests/write-guard.test.ts"
@@ -84,4 +85,6 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
   Unknown access (offline, server error) blocks nothing and is logged. Paths are judged
   lexically (no symlink resolution).
 - Renderer: `useWriteAccess` + `ReadOnlyBadge` (Phosphor `Lock`, 閲覧のみ) in the file tree
-  (where read-only starts) and above the open file.
+  (where read-only starts) and above the open file. It reads the access through
+  `src/shared/ipc/write-access.ts` (`WriteAccessReads`); a window without that API (preview
+  pages) shows nothing read-only.

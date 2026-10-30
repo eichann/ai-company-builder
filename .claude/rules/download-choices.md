@@ -17,6 +17,7 @@ paths:
   - "client/src/lib/company-folder-plan.ts"
   - "client/src/lib/restore-company.ts"
   - "client/src/hooks/useSparseCheckout.ts"
+  - "client/src/shared/ipc/download-choices.ts"
   - "client/tests/download-folders-ui.*"
   - "client/tests/sync/partial-clone.test.ts"
   - "client/tests/sync/folder-exclusions.test.ts"
@@ -132,5 +133,8 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   「未ダウンロード」, 「ダウンロード」 on hover/focus and in its context menu) so nobody recreates
   it; it does not expand and is not a drop target. A failed download shows why (`role="alert"`
   under the button). `useSparseCheckout` instances refresh each other via `acb:sparse-changed`.
+  It goes through `src/shared/ipc/download-choices.ts`: `ExcludedFolderReads` (the list) and
+  `DownloadChoiceOutbound` (applying downloads from the server and syncs a left-out private
+  folder one last time, so it is not a plain write).
 - Preview: `client/tests/download-folders-ui.html?view=settings|filetree&theme=light|dark&state=normal|offline|slow|confirm|applyOffline`
   (serve with `npx vite -c tests/ui/vite.config.ts`; see `testing.md`).

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import type { DepartmentConfig } from '../types'
+import { getDepartments } from '../shared/ipc/departments'
 
 interface DepartmentFromAPI {
   id: string
@@ -40,7 +41,7 @@ export function useDepartments(companyId: string | undefined): UseDepartmentsRes
     setError(null)
 
     try {
-      const result = await window.electronAPI.getDepartments(companyId)
+      const result = await getDepartments(companyId)
 
       if (result.success && result.data) {
         // Convert API response to DepartmentConfig format
