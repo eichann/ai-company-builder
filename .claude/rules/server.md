@@ -177,5 +177,11 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 ## Tests
 
 `cd server && npx vitest run tests/<path>` for what you touched; `tests/unit`, `tests/integration`
-(real git-http and hooks), `tests/security` (auth guards, authorization, input validation, path
-traversal, no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
+(real git-http and hooks), `tests/security` (auth guards, path traversal,
+no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
+
+- Who reaches a company repository over git HTTP (members with a live session; others 401 /
+  403 / 404 on info/refs, upload-pack and receive-pack, repository unchanged; only the two smart
+  services): `tests/integration/git-http-access.test.ts`. `..%2F` company ids and repository
+  names sent to every route that builds a repository path, against a sentinel repository next to
+  `REPOS_DIR`: `tests/security/path-traversal.test.ts`.
