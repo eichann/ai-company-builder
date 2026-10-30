@@ -357,6 +357,21 @@ export function initDatabase(conn: Database.Database = sqlite) {
       change TEXT NOT NULL
     );
 
+    -- Short-lived tokens the app hands the chat's child processes: only the
+    -- sha256 of the value is stored.
+    CREATE TABLE IF NOT EXISTS broker_tokens (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      services TEXT NOT NULL,
+      department TEXT,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
@@ -365,6 +380,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_agent_sandbox_history_company ON agent_sandbox_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_broker_keys_company ON broker_keys(company_id, service);
     CREATE INDEX IF NOT EXISTS idx_broker_history_company ON broker_history(company_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_broker_tokens_member ON broker_tokens(company_id, user_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_broker_tokens_expires ON broker_tokens(expires_at);
     CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);

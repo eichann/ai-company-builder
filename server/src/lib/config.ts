@@ -32,6 +32,9 @@ export const AUTH_DB_PATH = join(DATA_DIR, 'auth.sqlite')
  */
 export const BROKER_KEK_FILE = process.env.BROKER_KEK_FILE?.trim() || null
 
+/** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
+export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
+
 /** A company's bare repository; the id is reduced to [A-Za-z0-9_-]. */
 export function companyRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)

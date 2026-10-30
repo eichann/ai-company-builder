@@ -1,6 +1,6 @@
 /** SQLite storage of the key broker's vault, service rules, setting and history (ports/key-broker.ts). */
 import type Database from 'better-sqlite3'
-import type { BrokerChangeRow, BrokerKeyRepository, BrokerKeyRow, StoredBrokerService } from '../../ports/key-broker'
+import type { BrokerChangeRow, BrokerKeyRepository, BrokerKeyRow, BrokerTokenRepository, StoredBrokerService } from '../../ports/key-broker'
 import type { SealedSecret } from '../../ports/secret-cipher'
 
 const KEY_COLUMNS = `id, company_id, scope, owner_user_id, service, display_name, last4, kek_id, destinations, audience, caps,
@@ -155,6 +155,46 @@ export function sqliteKeyBrokerRepository(conn: Database.Database): BrokerKeyRep
         WHERE company_id = ? ORDER BY changed_at DESC, rowid DESC LIMIT ?
       `).all(companyId, limit) as Array<{ id: string; key_id: string | null; action: string; changed_at: string; changed_by: string; change: string }>)
         .map(r => ({ id: r.id, keyId: r.key_id, action: r.action, changedAt: r.changed_at, changedBy: r.changed_by, change: r.change }))
+    },
+  }
+}
+
+type TokenRow = {
+  id: string; company_id: string; user_id: string; token_hash: string; services: string; department: string | null
+  conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null
+}
+
+/** SQLite storage of the broker's short-lived tokens (only their sha256 is stored). */
+export function sqliteBrokerTokenRepository(conn: Database.Database): BrokerTokenRepository {
+  return {
+    insert(row) {
+      conn.prepare(`
+        INSERT INTO broker_tokens (id, company_id, user_id, token_hash, services, department, conversation_id, created_at, expires_at, revoked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(row.id, row.companyId, row.userId, row.tokenHash, row.services, row.department, row.conversationId, row.createdAt, row.expiresAt, row.revokedAt)
+    },
+    findByHash(tokenHash) {
+      const r = conn.prepare('SELECT * FROM broker_tokens WHERE token_hash = ?').get(tokenHash) as TokenRow | undefined
+      return r ? {
+        id: r.id, companyId: r.company_id, userId: r.user_id, tokenHash: r.token_hash, services: r.services, department: r.department,
+        conversationId: r.conversation_id, createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at,
+      } : null
+    },
+    revoke(companyId, userId, tokenId, at) {
+      return conn.prepare('UPDATE broker_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND id = ? AND revoked_at IS NULL')
+        .run(at, companyId, userId, tokenId).changes > 0
+    },
+    revokeAll(companyId, userId, at) {
+      return userId === null
+        ? conn.prepare('UPDATE broker_tokens SET revoked_at = ? WHERE company_id = ? AND revoked_at IS NULL AND expires_at > ?').run(at, companyId, at).changes
+        : conn.prepare('UPDATE broker_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?').run(at, companyId, userId, at).changes
+    },
+    countLive(companyId, userId, now) {
+      return (conn.prepare('SELECT COUNT(*) AS n FROM broker_tokens WHERE company_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?')
+        .get(companyId, userId, now) as { n: number }).n
+    },
+    pruneExpired(before) {
+      return conn.prepare('DELETE FROM broker_tokens WHERE expires_at < ?').run(before).changes
     },
   }
 }

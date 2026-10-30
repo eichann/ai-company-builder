@@ -441,6 +441,11 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       return brokerKeys.settings(companyId)?.memberKeysAllowed ?? true
     },
 
+    /** Services the company configured (a row in broker_services). */
+    knownServices(companyId: string): string[] {
+      return brokerKeys.services(companyId).map(s => s.service)
+    },
+
     /** Department membership as `usableBy` decides it, for tokens. */
     departmentMembership,
   }

@@ -19,6 +19,8 @@ paths:
   - "admin/src/components/key-broker/**"
   - "admin/src/lib/key-broker.ts"
   - "admin/tests/key-broker.test.tsx"
+  - "server/src/services/broker-tokens.ts"
+  - "server/tests/integration/broker-tokens.test.ts"
 ---
 
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
@@ -104,6 +106,31 @@ disable and delete still work). Audience departments must be the company's, peop
   never sends it. Without a KEK the page explains why and offers no registration
   (`BROKER_OFF_TEXT`). Words and draft parsing: `admin/src/lib/key-broker.ts`.
 
+## Short-lived tokens (K3)
+
+`services/broker-tokens.ts`, routes in `routes/key-broker.ts` (any member, the desktop app):
+
+- `POST /me/broker-tokens` `{ conversationId (1–200), services? (≤ 20 names; omitted = every
+  service with a key), department? (the chat's active department folder), ttlMinutes? }` →
+  `BrokerTokenIssued` `{ enabled, token, tokenId, expiresAt, services: [{ service, source }],
+  unavailable: [{ service, reason: no-key | unknown-service }] }`. The token is
+  `acb_tok_` + 64 hex (256 random bits, `IdGenerator.newToken`); **only its sha256 is stored**
+  (`broker_tokens.token_hash`, `TokenDigest` port, `adapters/system.ts`); the value is answered
+  once (`Cache-Control: no-store`) and never logged. No usable service → `token: null`; no KEK →
+  `{ enabled: false, token: null }` (200, not an error). Lifetime `BROKER_TOKEN_TTL_MINUTES`
+  (`lib/config.ts`, compose, default 30, clamped 15–60); the app may ask for less, never under 15.
+  At most `BROKER_TOKENS_PER_MEMBER` (50) live tokens per member and company → 429
+  `TOO_MANY_TOKENS`. Expired tokens are deleted a day after expiry (on issue).
+- `DELETE /me/broker-tokens/:tokenId`: the member's own token only (another's → 404).
+- `revokeAll(companyId, userId | null)`: the emergency stop (M2) will call it.
+- **`validate(token, service)` (for K4)** → `{ ok, grant }` or a reason (`broker-off`,
+  `malformed`, `unknown`, `revoked`, `expired`, `not-member`, `service-not-granted`, `no-key`).
+  It **re-decides the key on every call** (`resolveKey`: the service's rule, an active company
+  key the member may use now, or their own active key while own keys are allowed and its hosts
+  are still in the service's `ownKeyHosts`), so disabling a key, changing who may use it, the
+  rule, or removing the member stops the token at once. The grant names the key, its
+  destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
+
 ## Tests
 
 `tests/unit/local-secret-cipher.test.ts` (envelope, context, tampering, re-wrap keeps the
@@ -112,7 +139,9 @@ overwrites or prints a KEK), `tests/unit/broker-vault.test.ts` (no table holds a
 listing carries no secret, a copied row does not open, rewrap, off without a KEK),
 `tests/integration/key-broker.test.ts` (**no plaintext key in any answer, error, log line or
 table** across every admin call, success and error; who may manage; audience rules; history;
-503 without a KEK), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
+503 without a KEK), `tests/integration/broker-tokens.test.ts` (tokens only for usable
+services, rule / own key / switch, every validation refusal, TTL bounds, the per-member bound,
+**no token or key value in any log line or table**), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
 sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
 off message). Tests use
 obviously fake values (`fake-test-key-NOT-REAL…`) and KEKs made in temp dirs.
