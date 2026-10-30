@@ -517,6 +517,8 @@ export interface IpcInvokeChannels {
   'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
   // A file link in a consultation's window: opened in the main window's editor (a file in its company folder only).
   'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
+  /** The main window's answer to app:closeRequested: `ack` at once, then `close` or `stay`. */
+  'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
 }
 
 /** renderer → main, fire and forget: ipcRenderer.send(channel, ...args). */
@@ -548,6 +550,8 @@ export interface IpcEventChannels {
   'chatWindow:changed': [change: ChatWindowsChange]
   // To the main window only: a consultation's window asked to open this file (checked by main).
   'chatWindow:fileRequested': [request: ChatWindowFileRequest]
+  /** The member closes the main window or quits: save the open tabs first, then answer app:closeResponse. */
+  'app:closeRequested': []
 }
 
 export type InvokeChannel = keyof IpcInvokeChannels
@@ -737,4 +741,6 @@ export interface ElectronAPI {
   reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
   openFileInMainWindow: Invoke<'chatWindow:openFile'>
   onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
+  onCloseRequested: Subscribe<'app:closeRequested'>
+  answerCloseRequest: Invoke<'app:closeResponse'>
 }

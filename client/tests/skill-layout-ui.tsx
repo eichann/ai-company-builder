@@ -175,6 +175,7 @@ const api: Partial<ElectronAPI> = {
   getAuthMode: async () => 'claude-code',
   getChatSessionSummaries: async () => [],
   getAgentInteractions: async () => [],
+  signOut: async () => { record('signOut', []); return { success: true } },
 }
 installElectronAPI(api)
 
@@ -207,6 +208,8 @@ new MutationObserver(records => {
 
 Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
   editorWasEmpty: () => editorWasEmpty,
+  /** After ログアウト: is anyone signed in, is a company open? */
+  session: () => ({ user: useAuthStore.getState().user?.id ?? null, company: useAppStore.getState().currentCompany?.id ?? null }),
   /** Like the app: back to the company list (the screen unmounts), then open another company. */
   async switchCompany(id: string) {
     useAppStore.setState({ currentCompany: null })

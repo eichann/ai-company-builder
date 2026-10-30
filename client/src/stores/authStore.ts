@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import * as authApi from '../features/auth/api'
+import { useAppStore } from './appStore'
 import type { AuthUser } from '../../shared/ipc-contract'
 
 interface AuthState {
@@ -15,6 +16,7 @@ interface AuthState {
   // Auth methods
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>
   signUp: (email: string, password: string, name?: string) => Promise<{ success: boolean; error?: string }>
+  /** The one sign-out: the company screen closes and the login screen shows (unsaved tabs are the caller's: useSaveBeforeLeaving). */
   signOut: () => Promise<void>
   checkSession: () => Promise<void>
 }
@@ -72,6 +74,8 @@ export const useAuthStore = create<AuthState>((set) => ({
     set({ isLoading: true })
     try {
       await authApi.signOut()
+      // Close the company first: the next sign-in (maybe another account) starts from its own remembered company.
+      useAppStore.getState().setCurrentCompany(null)
       set({ user: null })
     } finally {
       set({ isLoading: false })

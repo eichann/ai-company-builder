@@ -52,6 +52,7 @@ import { createAppGit } from './services/app-git'
 import { createCommitMessages } from './services/commit-messages'
 import { createAgentEventRecorder } from './services/agent-events'
 import { createAgentEventSender } from './services/agent-event-sender'
+import { createCloseGuard, type CloseGuard } from './services/close-guard'
 import { createAgentPolicyStore } from './services/agent-policy-store'
 import { createAgentPushChannel } from './services/agent-push-channel'
 import { createAgentStop, type StoppableTurns } from './services/agent-stop'
@@ -130,6 +131,9 @@ function loadAppPage(win: BrowserWindow, query?: Record<string, string>) {
 
 // Set once the consultation windows exist (below): they go with the main window.
 let closeChatWindowsWithMain = () => {}
+// Closing the main window first lets the renderer save every open tab (services/close-guard.ts).
+let mainCloseGuard: CloseGuard | null = null
+let quitRequested = false
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -141,6 +145,17 @@ function createWindow() {
     webPreferences: appWebPreferences(),
   })
   mainWindow.on('closed', () => closeChatWindowsWithMain())
+  const win = mainWindow
+  const guard = createCloseGuard({
+    ask: () => appWindow.send('app:closeRequested'),
+    close: () => { if (!win.isDestroyed()) win.close() },
+    quit: () => app.quit(),
+    setTimer: (fn, ms) => setTimeout(fn, ms),
+    clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+  })
+  if (quitRequested) guard.onQuitRequested()
+  mainCloseGuard = guard
+  win.on('close', event => { if (!guard.onClose()) event.preventDefault() })
   // Fully disable spell checker to prevent dictionary loading overhead (especially for Japanese IME)
   mainWindow.webContents.session.setSpellCheckerLanguages([])
 
@@ -169,6 +184,14 @@ let chatTurns: ({ runningCount(): number } & StoppableTurns) | null = null
 // local-file:// (images etc. from the company folder); the scheme must be
 // registered before app.whenReady().
 registerLocalFileScheme()
+
+app.on('before-quit', () => { quitRequested = true; mainCloseGuard?.onQuitRequested() })
+// The main window's answer to app:closeRequested (only that window may answer).
+ipc.handle('app:closeResponse', (event, answer: 'ack' | 'close' | 'stay') => {
+  if (!mainWindow || mainWindow.isDestroyed() || event.sender.id !== mainWindow.webContents.id) return
+  if (answer === 'ack' || answer === 'close' || answer === 'stay') mainCloseGuard?.answer(answer)
+  if (answer === 'stay') quitRequested = false
+})
 
 // IPC handler for renderer to request chat server info on demand
 ipc.handle('chat-server:getInfo', () => {

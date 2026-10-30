@@ -262,6 +262,8 @@ const api: ElectronAPI = {
   reportChatWindowStatus: (status: ChatWindowStatus) => invoke('chatWindow:reportStatus', status),
   openFileInMainWindow: (filePath: string) => invoke('chatWindow:openFile', filePath),
   onFileRequestedFromChatWindow: callback => subscribe('chatWindow:fileRequested', callback),
+  onCloseRequested: callback => subscribe('app:closeRequested', callback),
+  answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
 }
 
 // The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).

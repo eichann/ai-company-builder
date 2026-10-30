@@ -166,3 +166,39 @@ test('an image and a PDF show as such, and say so when they cannot be read', asy
   await tab(page, `${ROOT}/営業部/契約書.pdf`).click()
   await expect(page.getByText('PDFを表示できません（削除されたか、読み込めません）')).toBeVisible()
 })
+
+const closeAnswers = (page: Page) => page.evaluate(() => (window as unknown as { __acbCloseAnswers: string[] }).__acbCloseAnswers)
+const requestClose = (page: Page) => page.evaluate(() => (window as unknown as { __acbRequestClose: () => void }).__acbRequestClose())
+
+test('closing the window saves every tab with edits — also one not shown — before main may close it', async ({ page }) => {
+  // Autosave runs for the shown tab only: an edit in a tab the member left
+  // within the second was never written, and closing the window lost it.
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  await pauseClock(page)
+  await typeAtEnd(page, '\n追記')
+  await tab(page, `${ROOT}/営業部/提案書.md`).click()
+  await requestClose(page)
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'close'])
+  expect(await writes(page)).toEqual([[SCRIPT, '# 台本\n\n第12回の構成案です。\n追記']])
+})
+
+test('a tab that cannot be saved is named before the window closes; キャンセル keeps it open', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  await pauseClock(page)
+  await page.evaluate(p => (window as unknown as { __acbFailWrites: Set<string> }).__acbFailWrites.add(p), SCRIPT)
+  await typeAtEnd(page, '\n追記')
+  await requestClose(page)
+  await expect(page.getByRole('heading', { name: '保存できていない編集があります' })).toBeVisible()
+  await expect(page.getByText('・台本.md')).toBeVisible()
+  await page.keyboard.press('Enter') // Enter does not discard
+  await expect(page.getByRole('heading', { name: '保存できていない編集があります' })).toBeVisible()
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay'])
+  await expect(editor(page)).toContainText('追記')
+
+  await requestClose(page)
+  await page.getByRole('button', { name: '保存せずに進む' }).click()
+  await expect.poll(() => closeAnswers(page)).toEqual(['ack', 'stay', 'ack', 'close'])
+})

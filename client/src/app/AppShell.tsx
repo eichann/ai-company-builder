@@ -36,6 +36,9 @@ import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
 import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
+import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
+import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
+import { useAuthStore } from '../stores/authStore'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -140,6 +143,18 @@ export function AppShell() {
     invalidateCommitCache()
   }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
   const sync = useSync({ rootPath, companyId: currentCompany?.id, onSynced: handleSynced })
+
+  // Signing out closes this screen: every open tab is saved first (useSaveBeforeLeaving).
+  const leaving = useSaveBeforeLeaving()
+  const signOut = useAuthStore(s => s.signOut)
+  const handleLogout = useCallback(async () => {
+    if (!await leaving.confirmLeave()) return
+    try {
+      await signOut()
+    } catch (error) {
+      console.error('Logout failed:', error)
+    }
+  }, [leaving, signOut])
   const { handleSync } = sync
   // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
   const autoSync = useAutoSync({
@@ -257,7 +272,9 @@ export function AppShell() {
         onSync={() => handleSync()}
         onShowBackups={() => setShowBackupHistory(true)}
         onShowSettings={() => setShowSettings(true)}
+        onLogout={() => { void handleLogout() }}
       />
+      <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       <DepartmentBar
         departments={departments}
         isLoading={isLoadingDepartments}
