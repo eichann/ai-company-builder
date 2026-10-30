@@ -13,6 +13,11 @@ paths:
   - "client/tests/commit-message.test.ts"
   - "client/src/components/common/SyncPreviewDialog.tsx"
   - "client/src/features/sync/**"
+  - "client/shared/auto-sync.ts"
+  - "client/electron/services/sync-activity.ts"
+  - "client/src/shared/lib/autoSyncSettings.ts"
+  - "client/src/shared/lib/unsavedEdits.ts"
+  - "client/src/features/settings/components/AutoSyncSettings.tsx"
 ---
 
 # Client sync (`git:sync`)
@@ -41,6 +46,8 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
   member gets in `model.ts` (anything sync set aside is a warning with its backup that stays until
   dismissed; only a clean sync hides itself — `model.test.ts`); the notice in
   `components/SyncNotification.tsx`.
+- Automatic sync: see "Automatic sync" below (`sync/receive.ts`, `sync/auto-sync.ts`,
+  `sync/auto-message.ts`; renderer `hooks/useAutoSync.ts`, `autoSyncSchedule.ts`).
 
 ## One press, several repositories
 
@@ -172,6 +179,56 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   main hands it to another app, so it is a port of its own). The sync button uses
   `SyncPreviewReads` (preview, never stages), `SyncRevertWrites` (「元に戻す」 one change),
   `SyncSummaryOutbound` (the member's AI reads the diff) and `SyncOutbound` (`git:sync`).
+
+## Automatic sync (owner decision 2026-10-30)
+
+Two per-member settings (Settings → 同期 → 自動同期, `src/features/settings/components/AutoSyncSettings.tsx`,
+stored on this PC in localStorage `acb.autoSync.settings`, `src/shared/lib/autoSyncSettings.ts`),
+both only while the app is open:
+
+- **自動で受け取る** — default on, every 15 min (5 / 10 / 15 / 30 / 60). `gitSync.receive`
+  (`sync/receive.ts`): fetch, then only `merge --ff-only origin/main`, for the company repository
+  and each readable private folder's existing clone (never clones, removes or hands over one).
+  It never commits, pushes, stashes, moves or backs up anything. The member's uncommitted work
+  stays as it is; the repository is **held back** (unchanged, the next manual sync handles it)
+  when a rebase / merge / `index.lock` is present, there are unpushed commits, any path the
+  server changed is also changed locally (edited, staged, deleted, new), a path the server adds
+  already exists on disk (an ignored file, a private clone, an excluded nested repository — git
+  overwrites ignored files silently) or a folder on its way is a file / link, or a changed path in
+  a not-downloaded folder exists on disk. Changes that touch none of the member's paths arrive
+  even while the member has other local edits. `merge --ff-only` refusing is a second line.
+- **自動で送る** — default off; at set times (default 12:00 and 18:00, editable) or every
+  30 / 60 / 120 min. The normal sync (`gitSync(…, { auto: true })`, every step above, conflicts
+  to `.backups/`) with two differences: the commit message is the template
+  「自動同期：N件の変更」 + up to 10 「追加/変更/削除: path」 lines + 「ほか N 件」
+  (`sync/auto-message.ts`, never the AI: one model call per scheduled run), and no question is
+  answered for the member — the dialog (`askLaterDialog`) cancels every question (deleted files,
+  nested repositories, protected config, write denied), keeps `canAsk` true (the no-window path
+  would sync deletions unasked), and the result becomes `errorType: 'needs_member'` with
+  「自動で送る途中で、確認が必要なことがありました。…「サーバーと同期」ボタンを押して続けてください。」.
+- `git:autoSync` (`features/sync/ipc.ts` → `sync/auto-sync.ts` `runAutoSync`) has the last word;
+  `autoSyncSkipReason` (`client/shared/auto-sync.ts`) skips silently when the last sync needs the
+  member, offline, a sync / receive / private-folder sync holds a lock (`gitSync.isRunning`), a
+  download-choice change or private-folder creation runs (`services/sync-activity.ts`), the
+  editor has unsaved edits (`src/shared/lib/unsavedEdits.ts`, published by the editor's `features/editor/hooks/useOpenFiles.ts`), or a chat
+  turn is running (`chat-turns.ts` `runningCount`). Malformed renderer state counts as "wait".
+- Timer: renderer `src/features/sync/hooks/useAutoSync.ts` (first look 60 s after the company
+  opens, then every 30 s); when a run is due is pure `autoSyncSchedule.ts`: measured from the
+  mode's last run, so runs missed while the app was closed come due **once** (no burst); 「送る」
+  never catches up on slots before it was turned on (`enabledAt`); a skipped run retries after
+  2 min; a send (and a manual sync) also counts as a receive / restarts 「送る」's clock.
+- Per company on this PC (`acb.autoSync.state:<companyId>`, `autoSyncState.ts`): last runs,
+  `needsMember` (set by any sync — manual or automatic — that stopped at a question an automatic
+  send will not answer, a rejected file, a secret or a conflict stop; cleared by the next
+  successful sync; automatic runs wait meanwhile). The member's own キャンセル in a manual sync
+  is "not now" (owner, 2026-10-30): it sets no stop and lifts one, so automatic sync resumes at
+  its next scheduled run (a send still facing the question stops there again, its notice not
+  repeated) and the failure kinds already shown. A failed automatic send shows the
+  manual sync's notice once per kind until a sync succeeds; a successful one is silent unless sync
+  set something aside (the same warning a manual sync shows). The sync button's tooltip shows
+  「最後の自動同期: M/D HH:MM」 or that automatic sync waits for the button.
+- Scenarios: `client/tests/sync/auto-sync.test.ts`; schedule: `src/features/sync/autoSyncSchedule.test.ts`;
+  settings page: `tests/ui/download-folders.spec.ts` 「自動同期」.
 
 ## Commit message (step 9)
 

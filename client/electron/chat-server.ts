@@ -564,7 +564,8 @@ ${transcript}
 
   console.log(`[chat-server] Started on http://127.0.0.1:${port}`)
 
-  // `turns.abort` / `abortAll` stop running turns from the main process (monitoring M2).
-  return { port, authToken, server, turns: { abort: chatTurns.abort, abortAll: chatTurns.abortAll } }
+  // `turns.abort` / `abortAll` stop running turns from the main process (monitoring M2);
+  // `runningCount` lets automatic sync wait while the AI works.
+  return { port, authToken, server, turns: { abort: chatTurns.abort, abortAll: chatTurns.abortAll, runningCount: chatTurns.runningCount } }
 }
 

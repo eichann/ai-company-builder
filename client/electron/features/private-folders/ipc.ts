@@ -8,14 +8,17 @@ import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PrivateFoldersApi } from '../../private-folders-api'
 import type { PathGuard } from '../ports'
 import type { PrivateFolderGuards } from './guards'
+import type { SyncActivity } from '../../services/sync-activity'
 
 export interface PrivateFoldersDeps {
   paths: PathGuard
   api: PrivateFoldersApi
   guards: Pick<PrivateFolderGuards, 'reservedRefusal'>
+  /** Automatic sync waits while a folder is being created. */
+  activity: Pick<SyncActivity, 'during'>
 }
 
-export function registerPrivateFoldersIpc(ipc: IpcRegistrar, { paths, api, guards }: PrivateFoldersDeps): void {
+export function registerPrivateFoldersIpc(ipc: IpcRegistrar, { paths, api, guards, activity }: PrivateFoldersDeps): void {
   // The file tree asks before creating / renaming / moving to a path: a
   // folder named like a private folder the member cannot read is refused with
   // the server's [RESERVED_PATH] sentence (only the name the member typed).
@@ -40,12 +43,12 @@ export function registerPrivateFoldersIpc(ipc: IpcRegistrar, { paths, api, guard
     if (typeof companyId !== 'string' || !companyId || !input || typeof input.name !== 'string' || typeof input.parentPath !== 'string') {
       return { success: false, offline: false, error: 'Invalid arguments' }
     }
-    return api.create(companyId, {
+    return activity.during('private-folder-setup', () => api.create(companyId, {
       parentPath: input.parentPath,
       name: input.name,
       ...(Array.isArray(input.viewers) ? { viewers: input.viewers.filter(v => typeof v === 'string') } : {}),
       ...(Array.isArray(input.editors) ? { editors: input.editors.filter(v => typeof v === 'string') } : {}),
       ...(input.force === true ? { force: true } : {}),
-    })
+    }))
   })
 }

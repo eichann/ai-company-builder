@@ -131,7 +131,9 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   one indigo accent, light and dark). The panel reaches the main process only through
   `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
   (uncommitted changes, progress), and separate ports for the company `.env` (status only),
-  `.gitignore`, the AI's environment-variable list and the git binary status.
+  `.gitignore`, the AI's environment-variable list and the git binary status. The 同期 group
+  also holds 「自動同期」 (`src/features/settings/components/AutoSyncSettings.tsx`; behaviour in
+  `sync.md` "Automatic sync").
 - File tree: a not-downloaded folder stays visible as a muted placeholder (dashed icon,
   「未ダウンロード」, 「ダウンロード」 on hover/focus and in its context menu) so nobody recreates
   it; it does not expand and is not a drop target. A failed download shows why (`role="alert"`

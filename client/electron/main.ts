@@ -48,6 +48,7 @@ import { createCommitMessages } from './services/commit-messages'
 import { createAgentEventRecorder } from './services/agent-events'
 import { createAgentEventSender } from './services/agent-event-sender'
 import { createAgentPolicyStore } from './services/agent-policy-store'
+import { createSyncActivity } from './services/sync-activity'
 import os from 'node:os'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -140,6 +141,8 @@ function createWindow() {
 
 // Chat server info (shared between app.whenReady and IPC handler)
 let chatServerInfo: { port: number; authToken: string } | null = null
+// Running chat turns (automatic sync waits while the AI works); set once the server started.
+let chatTurns: { runningCount(): number } | null = null
 
 // local-file:// (images etc. from the company folder); the scheme must be
 // registered before app.whenReady().
@@ -271,13 +274,21 @@ const gitSync = createGitSync({
   log: console,
 })
 
-registerSyncIpc(ipc, { paths: allowedRoots, gitSync, writeAccess: writeAccessStore })
+// Download-choice changes and private-folder creation, which automatic sync waits for.
+const syncActivity = createSyncActivity()
+registerSyncIpc(ipc, {
+  paths: allowedRoots,
+  gitSync,
+  writeAccess: writeAccessStore,
+  activity: syncActivity,
+  aiRunning: () => (chatTurns?.runningCount() ?? 0) > 0,
+})
 
 // Private folders (stage 3c): the 「新しいフォルダ…」 dialog and the lock
 // icons; the guards the chat and the file operations ask (features/private-folders).
 const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: session.cookies })
 const privateFolderGuards = createPrivateFolderGuards({ api: privateFoldersApi, pathChecker: gitSync.pathChecker })
-registerPrivateFoldersIpc(ipc, { paths: allowedRoots, api: privateFoldersApi, guards: privateFolderGuards })
+registerPrivateFoldersIpc(ipc, { paths: allowedRoots, api: privateFoldersApi, guards: privateFolderGuards, activity: syncActivity })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {
@@ -300,7 +311,7 @@ registerCompanySetupIpc(ipc, {
   serverUrl: getServerApiUrl,
   userDataDir: () => app.getPath('userData'),
 })
-registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync })
+registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
 registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
 
@@ -345,6 +356,7 @@ app.whenReady().then(async () => {
     })
     const result = await startChatServer(serverConfig)
     chatServerInfo = { port: result.port, authToken: result.authToken }
+    chatTurns = result.turns
   } catch (err) {
     console.error('[chat-server] Failed to start:', err)
   }

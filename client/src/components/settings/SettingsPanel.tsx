@@ -3,9 +3,10 @@ import { VoicePromptSettings } from './VoicePromptSettings'
 import { PromptSuggestionSettings } from './PromptSuggestionSettings'
 import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
+import { AutoSyncSettings } from '../../features/settings/components/AutoSyncSettings'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../lib/agentLogNotice'
@@ -28,13 +29,14 @@ interface SettingsPanelProps {
   initialTab?: TabType
 }
 
-export type TabType = 'sync' | 'gitignore' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
+export type TabType = 'sync' | 'autosync' | 'gitignore' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
     group: '同期',
     items: [
       { id: 'sync', label: 'ダウンロードするフォルダ', icon: <CloudArrowDown size={16} /> },
+      { id: 'autosync', label: '自動同期', icon: <ArrowsClockwise size={16} /> },
       { id: 'gitignore', label: '同期しないファイル', icon: <FileX size={16} /> },
     ],
   },
@@ -328,6 +330,11 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
                 <Card className="p-5"><AgentEnvSettings /></Card>
+              </div>
+            ) : activeTab === 'autosync' ? (
+              <div className="space-y-5 px-8 pb-8 pt-7">
+                <SectionHeader title="自動同期" description="アプリを開いている間、決まったタイミングでサーバーと同期します。" />
+                <AutoSyncSettings />
               </div>
             ) : activeTab === 'suggestions' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">

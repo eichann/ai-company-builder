@@ -84,6 +84,34 @@ test.describe('settings', () => {
     const updates = await page.evaluate(() => (window as unknown as { __acbEnvUpdates: unknown[] }).__acbEnvUpdates)
     expect(updates).toEqual([{ OPENAI_API_KEY: 'sk-FAKE-typed', ANTHROPIC_API_KEY: null }])
   })
+
+  // The owner-approved defaults and that a choice survives a restart (stored on this PC).
+  test('自動同期: receive on every 15 minutes and send off by default; turning send on keeps its times after a restart', async ({ page }) => {
+    await openPreview(page, 'download-folders')
+    await page.evaluate(() => localStorage.removeItem('acb.autoSync.settings'))
+    await page.reload()
+    await page.getByRole('button', { name: '自動同期' }).click()
+    const receive = page.getByRole('switch', { name: '自動で受け取る' })
+    const send = page.getByRole('switch', { name: '自動で送る' })
+    await expect(receive).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('combobox', { name: '間隔' })).toHaveValue('15')
+    await expect(send).toHaveAttribute('aria-checked', 'false')
+    await expect(page.getByRole('radio', { name: '決まった時刻に送る' })).toBeDisabled()
+
+    await send.click()
+    await expect(send).toHaveAttribute('aria-checked', 'true')
+    const times = page.getByRole('group', { name: '送る時刻' })
+    await expect(times).toContainText('12:00')
+    await expect(times).toContainText('18:00')
+    await page.getByRole('textbox', { name: '追加する時刻' }).fill('09:30')
+    await page.getByRole('button', { name: '時刻を追加' }).click()
+    await expect(times).toContainText('09:30')
+
+    await page.reload()
+    await page.getByRole('button', { name: '自動同期' }).click()
+    await expect(page.getByRole('switch', { name: '自動で送る' })).toHaveAttribute('aria-checked', 'true')
+    await expect(page.getByRole('group', { name: '送る時刻' })).toContainText('09:30')
+  })
 })
 
 test.describe('file tree', () => {

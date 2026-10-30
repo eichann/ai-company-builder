@@ -32,7 +32,9 @@ import crypto from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import type { SimpleGit } from 'simple-git'
-import { createGitSync, type GitSyncResult, type PrivateFolderSyncReport } from '../../electron/sync/git-sync'
+import { createGitSync, type GitSync, type GitSyncResult, type PrivateFolderSyncReport, type SyncRunOptions } from '../../electron/sync/git-sync'
+import { runAutoSync } from '../../electron/sync/auto-sync'
+import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from '../../shared/auto-sync'
 import type { PathChecker } from '../../electron/sync/path-check'
 import type { SyncDeps } from '../../electron/sync/types'
 import { createConfiguredGit } from '../../electron/sync/git-factory'
@@ -182,9 +184,17 @@ export interface HarnessHost {
 }
 
 /** What a member presses: the sync function (createGitSync's, or a test double). */
-export type SyncFn = ((repoPath: string, companyId: string, commitMessage: string) => Promise<GitSyncResult>) & {
+export type SyncFn = ((repoPath: string, companyId: string, commitMessage: string, options?: SyncRunOptions) => Promise<GitSyncResult>) & {
   applyPrivateFolderChoices?: (repoPath: string, companyId: string) => Promise<PrivateFolderSyncReport[]>
   pathChecker?: PathChecker
+  receive?: GitSync['receive']
+  isRunning?: GitSync['isRunning']
+}
+
+/** What the app knows when its timer fires (renderer and main), for Member.autoSync. */
+export interface AutoSyncConditions extends Partial<AutoSyncRendererState> {
+  aiRunning?: boolean
+  activity?: 'download-choices' | 'private-folder-setup' | null
 }
 
 export type SyncImplFactory = (deps: SyncDeps, host: HarnessHost) => SyncFn
@@ -1162,6 +1172,40 @@ export class Member {
     if (this.inFlight === 0) this.assertNoOperationInProgress()
     this.recordCommitted(before)
     return { result, dialogs, logs, durationMs }
+  }
+
+  /**
+   * One automatic run (git:autoSync) under `conditions` (default: nothing in
+   * the way). A send is recorded like a sync press ("no lost work").
+   */
+  async autoSync(mode: AutoSyncMode, conditions: AutoSyncConditions = {}): Promise<AutoSyncResult<SyncResultView>> {
+    const impl = this.sync_
+    if (!impl.receive || !impl.isRunning) throw new Error('this sync implementation has no automatic sync')
+    const before = this.snapshotPending()
+    const host = {
+      gitSync: Object.assign((...args: Parameters<GitSync>) => impl(...args), { receive: impl.receive, isRunning: impl.isRunning }),
+      aiRunning: () => conditions.aiRunning ?? false,
+      activity: () => conditions.activity ?? null,
+    }
+    const state: AutoSyncRendererState = {
+      unsavedEdits: conditions.unsavedEdits ?? false,
+      needsMember: conditions.needsMember ?? false,
+      offline: conditions.offline ?? false,
+    }
+    this.currentDialogs = []
+    this.currentLogs = []
+    const answer = await withTimeout(runAutoSync(host, this.dir, 'company', mode, state), this.world.syncTimeoutMs, `${this.name}'s automatic ${mode}`)
+    this.assertNoOperationInProgress()
+    if (answer.status === 'sent') {
+      this.results.push(answer.result)
+      this.recordCommitted(before)
+    }
+    return answer
+  }
+
+  /** Dialogs shown during the last sync or automatic run. */
+  lastDialogs(): DialogRecord[] {
+    return this.currentDialogs
   }
 
   assertNoOperationInProgress(): void {

@@ -32,6 +32,7 @@ import { useSkillsAutoRefresh } from '../features/skills/hooks/useSkillsAutoRefr
 import { skillCommands } from '../features/skills/model'
 import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownload'
 import { useSync } from '../features/sync/hooks/useSync'
+import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
 import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
 
@@ -137,6 +138,15 @@ export function AppShell() {
   }, [currentCompany?.id, refreshDepartments, refreshSkills, refreshCompanySkills, isCompanyWide])
   const sync = useSync({ rootPath, companyId: currentCompany?.id, onSynced: handleSynced })
   const { handleSync } = sync
+  // 「自動で受け取る」 / 「自動で送る」 while the app is open (Settings → 自動同期).
+  const autoSync = useAutoSync({
+    rootPath,
+    companyId: currentCompany?.id,
+    isSyncing: sync.isSyncing,
+    setIsSyncing: sync.setIsSyncing,
+    showNotice: sync.setSyncNotification,
+    onSynced: handleSynced,
+  })
   const handlePrivateFolderCreated = useCallback(() => { void handleSync() }, [handleSync])
 
   // The app's shortcuts are commands (shared/commands/catalog.ts), delivered to the focused area only.
@@ -233,6 +243,7 @@ export function AppShell() {
         companyName={currentCompany?.name}
         isLoadingPreview={sync.isLoadingPreview}
         isSyncing={sync.isSyncing}
+        syncTitle={autoSync.syncButtonTitle}
         onPreview={sync.handlePreview}
         onSync={() => handleSync()}
         onShowBackups={() => setShowBackupHistory(true)}

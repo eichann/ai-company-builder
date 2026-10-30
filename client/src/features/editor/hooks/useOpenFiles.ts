@@ -3,7 +3,8 @@ import { readFile } from '../api'
 import { isBinaryFile } from '../fileKinds'
 import { subscribeFileChanges } from '../../../lib/fileEvents'
 import { normalizePathSeparators } from '../../../shared/lib/path'
-import { applyDiskDecision, decideOnDiskEvent, type EditorFileState } from '../../../../shared/editor-disk-state'
+import { publishUnsavedEdits } from '../../../shared/lib/unsavedEdits'
+import { applyDiskDecision, decideOnDiskEvent, isDirty, type EditorFileState } from '../../../../shared/editor-disk-state'
 
 /**
  * An open tab. `originalContent` is the disk version the tab last loaded or
@@ -30,6 +31,12 @@ export function useOpenFiles(
 ) {
   const [fileContents, setFileContents] = useState<Map<string, OpenFile>>(new Map())
   const loadingRef = useRef<Set<string>>(new Set())
+
+  // Automatic sync waits while a tab holds edits not yet on disk.
+  useEffect(() => {
+    publishUnsavedEdits([...fileContents].filter(([, f]) => !f.isLoading && isDirty(f)).map(([p]) => p))
+  }, [fileContents])
+  useEffect(() => () => publishUnsavedEdits([]), [])
 
   // Ref to access latest fileContents inside onFileChange callback
   const fileContentsRef = useRef<Map<string, OpenFile>>(fileContents)

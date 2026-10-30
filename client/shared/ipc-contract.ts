@@ -29,6 +29,7 @@ import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession
 import type { PermissionMode } from './permission-mode'
 import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
+import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
 
 // ---------------------------------------------------------------------------
@@ -410,6 +411,7 @@ export interface IpcInvokeChannels {
 
   // Git
   'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
+  'git:autoSync': { args: [repoPath: string, companyId: string, mode: AutoSyncMode, state: AutoSyncRendererState]; result: AutoSyncResult<GitResult> }
   'writeAccess:get': { args: [companyId: string, refresh?: boolean]; result: WriteAccess | null }
   'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
   'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
@@ -646,6 +648,7 @@ export interface ElectronAPI {
 
   // Git
   gitSync: Invoke<'git:sync'>
+  gitAutoSync: Invoke<'git:autoSync'>
   /** Per-folder write access (閲覧のみ badges); refreshed by sync and the chat. */
   getWriteAccess: Invoke<'writeAccess:get'>
   onWriteAccessChanged: Subscribe<'writeAccess:changed'>

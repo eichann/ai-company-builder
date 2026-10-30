@@ -17,6 +17,8 @@ export type SyncRevertWrites = ElectronPort<'gitRevertFile'>
 export type SyncSummaryOutbound = ElectronPort<'gitGenerateSummary'>
 /** Syncing: commits, takes the server's changes and sends the member's work to the server. */
 export type SyncOutbound = ElectronPort<'gitSync'>
+/** Automatic sync (receive: takes teammates' changes; send: the normal sync). Main decides whether it may run now. */
+export type AutoSyncOutbound = ElectronPort<'gitAutoSync'>
 
 export function listBackups(rootPath: string, reads: BackupReads = window.electronAPI) {
   return reads.backupList(rootPath)
@@ -41,6 +43,10 @@ export function revertChange(rootPath: string, filePath: string, fileStatus: Par
 
 export function summarizeChanges(rootPath: string, outbound: SyncSummaryOutbound = window.electronAPI) {
   return outbound.gitGenerateSummary(rootPath)
+}
+
+export function autoSync(rootPath: string, companyId: string, mode: Parameters<AutoSyncOutbound['gitAutoSync']>[2], state: Parameters<AutoSyncOutbound['gitAutoSync']>[3], outbound: AutoSyncOutbound = window.electronAPI) {
+  return outbound.gitAutoSync(rootPath, companyId, mode, state)
 }
 
 export function syncCompany(rootPath: string, companyId: string, commitMessage: string, outbound: SyncOutbound = window.electronAPI) {

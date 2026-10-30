@@ -1,6 +1,8 @@
 import { useCallback, useState } from 'react'
 import { previewSync, revertChange, summarizeChanges, syncCompany } from '../api'
 import { syncNoticeFor, syncNoticeHidesItself, type SyncNotice } from '../model'
+import { afterSync, recordRun } from '../autoSyncSchedule'
+import { updateAutoSyncState } from '../autoSyncState'
 
 export interface SyncPreview {
   changes: { added: string[]; modified: string[]; deleted: string[] }
@@ -77,6 +79,11 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
         customCommitMessage || 'Sync from AI Company Builder'
       )
       if (result.success) await onSynced()
+      // A manual sync also restarts 「自動で送る」's clock and lifts an automatic stop it resolved.
+      updateAutoSyncState(companyId, s => {
+        const next = afterSync(s, result, { manual: true }).state
+        return result.success ? recordRun(next, 'send', 'ran', Date.now()) : next
+      })
       setSyncNotification(syncNoticeFor(result))
       if (syncNoticeHidesItself(result)) {
         setTimeout(() => setSyncNotification(null), 3000)
@@ -108,7 +115,7 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
   }, [rootPath])
 
   return {
-    isSyncing, syncNotification, setSyncNotification, handleSync,
+    isSyncing, setIsSyncing, syncNotification, setSyncNotification, handleSync,
     showPreview, setShowPreview, isLoadingPreview, isLoadingSummary, previewData,
     handlePreview, handleRequestSummary, handleRevertFile,
   }

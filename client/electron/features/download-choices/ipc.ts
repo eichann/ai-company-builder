@@ -16,6 +16,7 @@ import type { GitSync } from '../../sync/git-sync'
 import { readPrivateScopesCache } from '../../sync/private-folders'
 import { readSparseConfig, setSparseExclusions, uncommittedChangesIn } from '../../sync/sparse'
 import type { PathGuard } from '../ports'
+import type { SyncActivity } from '../../services/sync-activity'
 
 export interface DownloadChoicesDeps {
   paths: PathGuard
@@ -24,9 +25,11 @@ export interface DownloadChoicesDeps {
   serverUrl: () => string
   /** Download / retire private-folder clones after a change (runs under the sync lock). */
   privateFolders: Pick<GitSync, 'applyPrivateFolderChoices'>
+  /** Automatic sync waits while a change is applied. */
+  activity: Pick<SyncActivity, 'during'>
 }
 
-export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, privateFolders }: DownloadChoicesDeps): void {
+export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, session, serverUrl, privateFolders, activity }: DownloadChoicesDeps): void {
 
 
   // Read the persisted exclusion list for a repo.
@@ -46,7 +49,7 @@ export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, s
   // While it runs, the bytes arriving in .git/objects/pack (a download in a
   // partial clone) are reported to the window as 'sparse:progress' events, so
   // the panel can show the download moving.
-  ipc.handle('git:sparseSetExclusions', async (event, repoPath: string, excluded: string[]) => {
+  ipc.handle('git:sparseSetExclusions', (event, repoPath: string, excluded: string[]) => activity.during('download-choices', async () => {
     let stopProgress: (() => void) | null = null
     try {
       const safe = paths.validate(repoPath)
@@ -73,7 +76,7 @@ export function registerDownloadChoicesIpc(ipc: IpcRegistrar, { paths, appGit, s
     } finally {
       stopProgress?.()
     }
-  })
+  }))
 
   // Files inside these folders with changes not committed yet: the settings
   // panel asks before leaving such a folder out (the next sync would move them
