@@ -24,11 +24,14 @@ in `push-check.md`, private-folder guards in `private-folders-client.md`, render
 ## Git configuration (`sync/git-factory.ts`, used by every app git via `services/app-git.ts`)
 
 Test for the first group: `client/tests/client-identity.test.ts` ("createGit passes …") checks
-what git actually sees through the factory.
+what git actually sees through the app's `createGit`.
 
 - `GIT_EDITOR=true`, `GIT_SEQUENCE_EDITOR=true` on every invocation — `rebase --continue`
   otherwise opens `vi` with no TTY in a GUI app and blocks forever (one member's sync froze for
-  ~2 months). Git runs editors through its own `sh`, so `true` also works on Windows.
+  ~2 months). Git runs editors through its own `sh`, so `true` also works on Windows. Test:
+  "sync never opens an editor when continuing a rebase…" in `client-identity.test.ts` (every
+  editor variable and `core.editor` point at an editor that records itself and fails, so the
+  test does not depend on the environment it runs in).
 - Watchdog `timeout: { block: 5 * 60 * 1000 }` — kills a git process that prints nothing for
   5 minutes. Long transfers survive because fetch / pull / push all pass `--progress`; keep that
   flag on any new network command.

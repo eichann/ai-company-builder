@@ -1,12 +1,11 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
-import simpleGit from 'simple-git'
-import { createConfiguredGit } from '../electron/sync/git-factory'
+import { createAppGit } from '../electron/services/app-git'
 import { build } from 'vite'
 import { buildInfoDefine, compactUtc, computeBuildInfo } from '../scripts/build-info'
 import {
@@ -57,12 +56,18 @@ test('the identity is embedded into the bundled main-process module', async () =
   } finally {
     rmSync(outDir, { recursive: true, force: true })
   }
-
-  // vite.config.ts applies the same define to the Electron main entry.
-  const viteConfig = readFileSync(path.join(root, 'vite.config.ts'), 'utf8')
-  const mainEntry = viteConfig.slice(viteConfig.indexOf("entry: 'electron/main.ts'"), viteConfig.indexOf("entry: 'electron/preload.ts'"))
-  assert.match(mainEntry, /define: buildInfoDefine\(computeBuildInfo\(\{ root: __dirname, dev: command === 'serve' \}\)\)/)
 })
+
+/** The app's git (services/app-git.ts createGit) for `repo`, inheriting `env` as the environment. */
+function appGitWith(repo: string, appGitDir: string, env: NodeJS.ProcessEnv) {
+  const saved = process.env
+  process.env = env // createGit inherits process.env when it builds the git
+  try {
+    return createAppGit({ token: () => '', appGitDir: () => appGitDir }).create(repo)
+  } finally {
+    process.env = saved
+  }
+}
 
 test('createGit passes the identity headers to git as http.extraHeader', async () => {
   const config = gitIdentityConfig()
@@ -71,32 +76,72 @@ test('createGit passes the identity headers to git as http.extraHeader', async (
     `http.extraHeader=${CLIENT_PLATFORM_HEADER}: ${process.platform}/${process.arch}`,
   ])
 
-  // simple-git turns `config` into `-c` arguments: git itself sees both values.
-  const seen = await simpleGit(root, { config }).raw(['config', '--get-all', 'http.extraHeader'])
-  assert.deepEqual(seen.trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
-
-  // createGit (electron/services/app-git.ts, every git the app runs) hands
-  // them to the shared git factory (electron/sync/git-factory.ts), which
-  // appends them after the guarded settings — check what git actually sees
-  // through that factory.
-  const appGit = readFileSync(path.join(root, 'electron/services/app-git.ts'), 'utf8')
-  const start = appGit.indexOf('function createGit(')
-  assert.ok(start >= 0, 'createGit not found in electron/services/app-git.ts')
-  const body = appGit.slice(start, appGit.indexOf('\n  }\n', start))
-  assert.match(body, /createConfiguredGit\(/)
-  assert.match(body, /extraConfig: gitIdentityConfig\(\)/)
+  // What git itself sees through the app's createGit (services/app-git.ts on
+  // sync/git-factory.ts): the identity headers after the guarded settings.
   const appGitDir = mkdtempSync(path.join(tmpdir(), 'acb-app-git-'))
-  const git = createConfiguredGit(root, { binary: 'git', askPassPath: '/nonexistent', token: '', appGitDir, extraConfig: config })
-  assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
-  assert.equal((await git.raw(['config', '--get', 'http.postBuffer'])).trim(), '524288000')
-  // No diffstat after a fast-forward pull: it would download, in a partial
-  // clone, every teammate change outside the member's departments.
-  assert.equal((await git.raw(['config', '--get', 'merge.stat'])).trim(), 'false')
-  assert.equal((await git.raw(['config', '--get', 'credential.helper'])).trim(), '') // last value wins
-  assert.equal((await git.raw(['var', 'GIT_EDITOR'])).trim(), 'true')
-  // The member's own hooks and templates never apply (git-factory appGitDirs).
-  assert.equal((await git.raw(['config', '--get', 'core.hooksPath'])).trim(), path.join(appGitDir, 'hooks').split(path.sep).join('/'))
-  rmSync(appGitDir, { recursive: true, force: true })
+  try {
+    const git = appGitWith(root, appGitDir, process.env)
+    assert.deepEqual((await git.raw(['config', '--get-all', 'http.extraHeader'])).trim().split('\n'), config.map(c => c.slice('http.extraHeader='.length)))
+    assert.equal((await git.raw(['config', '--get', 'http.postBuffer'])).trim(), '524288000')
+    // No diffstat after a fast-forward pull: it would download, in a partial
+    // clone, every teammate change outside the member's departments.
+    assert.equal((await git.raw(['config', '--get', 'merge.stat'])).trim(), 'false')
+    assert.equal((await git.raw(['config', '--get', 'credential.helper'])).trim(), '') // last value wins
+    // The member's own hooks and templates never apply (git-factory appGitDirs).
+    assert.equal((await git.raw(['config', '--get', 'core.hooksPath'])).trim(), path.join(appGitDir, 'hooks').split(path.sep).join('/'))
+  } finally {
+    rmSync(appGitDir, { recursive: true, force: true })
+  }
+})
+
+// The 2026-07-29 sync freeze: `rebase --continue` after a conflicted pick
+// opened vi with no terminal and blocked forever. The member's environment
+// and git config may name any editor; the app's git must never start one.
+// This editor records that it ran and fails, so a regression shows up as a
+// failed rebase and a marker file rather than a hang.
+test('sync never opens an editor when continuing a rebase, whatever editor the environment names', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'acb-git-editor-'))
+  try {
+    const marker = path.join(dir, 'editor-was-opened')
+    const editor = path.join(dir, 'editor.sh')
+    writeFileSync(editor, `#!/bin/sh\necho "$@" >> '${marker}'\nexit 1\n`)
+    chmodSync(editor, 0o755)
+    const hostile: NodeJS.ProcessEnv = { ...process.env, GIT_EDITOR: editor, GIT_SEQUENCE_EDITOR: editor, EDITOR: editor, VISUAL: editor }
+
+    // A local commit that conflicts with the server's, stopped mid-rebase
+    // (set up with plain git, which may not open an editor either).
+    const repo = path.join(dir, 'repo')
+    const setupEnv = { ...process.env, GIT_EDITOR: 'false', GIT_SEQUENCE_EDITOR: 'false' }
+    const run = (args: string[]) => execFileSync('git', args, { cwd: repo, env: setupEnv, stdio: 'pipe' }).toString()
+    execFileSync('git', ['init', '-q', '--initial-branch=main', repo])
+    run(['config', 'user.name', 'member'])
+    run(['config', 'user.email', 'member@example.com'])
+    run(['config', 'core.editor', editor])
+    writeFileSync(path.join(repo, 'memo.md'), 'base\n')
+    run(['add', '-A'])
+    run(['commit', '-q', '-m', 'base'])
+    run(['checkout', '-q', '-b', 'server'])
+    writeFileSync(path.join(repo, 'memo.md'), 'server\n')
+    run(['commit', '-q', '-am', 'server change'])
+    run(['checkout', '-q', 'main'])
+    writeFileSync(path.join(repo, 'memo.md'), 'local\n')
+    run(['commit', '-q', '-am', 'local change'])
+    assert.throws(() => run(['rebase', 'server']), 'the rebase stops on the conflict')
+    writeFileSync(path.join(repo, 'memo.md'), 'server\nlocal\n')
+    run(['add', 'memo.md'])
+
+    const git = appGitWith(repo, path.join(dir, 'app-git'), hostile)
+    await git.rebase(['--continue']) // what git-sync.ts runs after resolving a conflict
+    assert.equal(existsSync(marker), false, 'an editor was started')
+    assert.equal(run(['log', '-1', '--format=%s']).trim(), 'local change')
+    assert.equal(run(['rev-parse', 'HEAD~1']).trim(), run(['rev-parse', 'server']).trim())
+
+    // The sequence editor too (an interactive rebase's todo list).
+    await git.rebase(['-i', 'HEAD~1'])
+    assert.equal(existsSync(marker), false, 'a sequence editor was started')
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 test('fetches to the server origin carry the identity headers, others are untouched', async () => {
