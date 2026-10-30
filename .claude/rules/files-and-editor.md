@@ -21,6 +21,7 @@ paths:
   - "client/src/shared/ipc/file-events.ts"
   - "client/src/features/files/**"
   - "client/src/features/editor/**"
+  - "client/src/features/workspace/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
@@ -44,7 +45,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 
 - One native `fs.watch(root, { recursive: true })` per company (FSEvents /
   ReadDirectoryChangesW / inotify on Node ≥ 20), opened by `SkillCentricLayout` when the company
-  opens (`watchCompany`) and closed when it closes or the app quits — never per department or
+  opens (`watchCompany`, port `CompanyWatchReads` in `src/shared/ipc/file-events.ts`) and closed when it closes or the app quits — never per department or
   tab. chokidar opened one handle per directory and file and took ~30 s to close on the main
   thread; it stays only as the fallback for `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
 - Raw events are collected per path for 100 ms, then classified by `lstat` into `add` / `addDir`
@@ -90,8 +91,9 @@ company-wide skills behind slash commands with `{ force: true }` (coalesced 120 
 ≤ 1 s while typing in chat) and after every successful sync, keeping the list on screen.
 `.claude/commands` / `.claude/agents` are not listed.
 The renderer reaches skills only through `src/features/skills/api.ts`: ports `SkillReads` (list,
-read a file), `SkillToolRuns` (start / stop a skill's tool) and `SkillOutbound` (open the tool's
-page in the browser).
+read a file), `SkillToolRuns` (start / stop a skill's tool), `SkillOutbound` (open the tool's
+page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillSharingWrites` (private /
+publish: the `.gitignore` line that decides whether the next sync shares the skill).
 
 ## External changes to open files (`client/shared/editor-disk-state.ts`, `TabbedEditorPanel`)
 

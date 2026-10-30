@@ -9,6 +9,13 @@ export type SkillReads = ElectronPort<'listSkills' | 'readFile'>
 export type SkillToolRuns = ElectronPort<'startTool' | 'stopTool'>
 /** Leaving the app: opening a URL in the member's browser. */
 export type SkillOutbound = ElectronPort<'openExternal'>
+/** Making or changing a skill's files on this computer: new skill, copy, 育成中 mark. */
+export type SkillWrites = ElectronPort<'createDirectory' | 'writeFile' | 'copyItem' | 'toggleSkillNurturing'>
+/**
+ * Marking a skill private or shared (the company .gitignore): written on this
+ * computer, but it decides whether the next sync sends the skill to everyone.
+ */
+export type SkillSharingWrites = ElectronPort<'makeSkillPrivate' | 'publishSkill'>
 
 type ListSkillsArgs = Parameters<ElectronAPI['listSkills']>
 
@@ -39,4 +46,31 @@ export function stopSkillTool(toolPath: string, runs: SkillToolRuns = window.ele
 /** Opens the tool's local page in the member's browser. */
 export function openInBrowser(url: string, outbound: SkillOutbound = window.electronAPI) {
   return outbound.openExternal(url)
+}
+
+export function createSkillDirectory(dirPath: string, writes: SkillWrites = window.electronAPI) {
+  return writes.createDirectory(dirPath)
+}
+
+export function writeSkillFile(filePath: string, content: string, writes: SkillWrites = window.electronAPI) {
+  return writes.writeFile(filePath, content)
+}
+
+/** Copies a whole skill folder. */
+export function copySkill(sourcePath: string, destPath: string, writes: SkillWrites = window.electronAPI) {
+  return writes.copyItem(sourcePath, destPath)
+}
+
+export function setSkillNurturing(skillMdPath: string, makeNurturing: boolean, writes: SkillWrites = window.electronAPI) {
+  return writes.toggleSkillNurturing(skillMdPath, makeNurturing)
+}
+
+/** Keeps the skill out of the next sync (`.gitignore`). */
+export function makeSkillPrivate(rootPath: string, skillRelativePath: string, sharing: SkillSharingWrites = window.electronAPI) {
+  return sharing.makeSkillPrivate(rootPath, skillRelativePath)
+}
+
+/** One way: the next sync shares the skill with everyone. */
+export function publishSkill(rootPath: string, skillRelativePath: string, sharing: SkillSharingWrites = window.electronAPI) {
+  return sharing.publishSkill(rootPath, skillRelativePath)
 }
