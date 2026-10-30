@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { ChatServerInfo } from '../../../../shared/ipc-contract'
 import { createChatServerClient, type ChatServerClient } from '../chatServerClient'
+import { getChatServerInfo, onChatServerInfo } from '../../../features/chat/api'
 
 /**
  * The chat server's client, once main has told the renderer where it listens
@@ -14,10 +15,10 @@ export function useChatServer(): ChatServerClient | null {
   const [info, setInfo] = useState<ChatServerInfo | null>(null)
 
   useEffect(() => {
-    window.electronAPI.getChatServerInfo().then(result => {
+    getChatServerInfo().then(result => {
       if (result) setInfo(result)
     })
-    return window.electronAPI.onChatServerInfo(serverInfo => {
+    return onChatServerInfo(serverInfo => {
       setInfo(serverInfo)
     })
   }, [])

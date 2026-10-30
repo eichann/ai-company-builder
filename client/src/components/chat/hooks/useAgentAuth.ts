@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
+import { getAuthMode, getClaudeCodeStatus, getCodexStatus, isApiKeySaved } from '../../../features/chat/api'
 
 /**
  * Which agent the member chose and whether the chat can start with it
@@ -20,9 +21,9 @@ export function useAgentAuth() {
     if (!background) setIsChecking(true)
     try {
       const [ccStatus, savedAuthMode, hasApiKey] = await Promise.all([
-        window.electronAPI.getClaudeCodeStatus(),
-        window.electronAPI.getAuthMode(),
-        window.electronAPI.hasApiKey(),
+        getClaudeCodeStatus(),
+        getAuthMode(),
+        isApiKeySaved(),
       ])
 
       const ccAvailable = ccStatus.available && ccStatus.authenticated
@@ -31,7 +32,7 @@ export function useAgentAuth() {
       setAuthMode(savedAuthMode)
 
       if (savedAuthMode === 'codex') {
-        const status = await window.electronAPI.getCodexStatus()
+        const status = await getCodexStatus()
         setCodexStatus(status)
         // Keep the chat mounted, including drafts; show actionable auth errors in settings.
         setIsReady(true)
