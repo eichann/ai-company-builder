@@ -28,7 +28,8 @@ paths:
 The server holds the company's API keys; the AI only ever gets a short-lived token, and the
 relay (K4, planned) swaps it for the real key on the way upstream. Owner decisions
 (2026-10-22 … 10-30): keys are never returned in plain text; a **company key** (owner/admin
-registers it; departments or everyone + per-person exceptions) and a member's **own key**
+registers it; two dials: which departments' work × which people, + per-person exceptions) and a
+member's **own key**
 (that member only); skills ask for a **service**, and per service the company picks
 「会社の鍵だけ／自分の鍵だけ／会社優先」 (defaults: a service that acts as a person → own key
 only; a tool or company system → company key only); members may register own keys (default
@@ -62,7 +63,7 @@ app). Order: K1 vault → K2 admin page → K3 tokens → K4 relay (Gemini → O
 - **Tables** (`db/index.ts`): `broker_keys` (scope `company`|`user` + `owner_user_id`,
   `service`, `display_name`, `last4`, the sealed value `cipher_scheme`/`ciphertext`/`nonce`/
   `tag`/`wrapped_key`/`kek_id`, JSON `destinations` {hosts, pathPrefixes, models}, JSON
-  `audience` {everyone, departmentIds, addUserIds, removeUserIds}, JSON `caps`
+  `audience` {allDepartments, departmentIds, everyone, addUserIds, removeUserIds}, JSON `caps`
   {requestsPerDay, tokensPerDay, requestsPerMemberPerDay, tokensPerMemberPerDay},
   `allow_private_content`, `status` active|disabled, created/updated/by, `secret_updated_at`),
   `broker_services` (per company and service: `category` person|tool|system, `rule`,
@@ -76,7 +77,9 @@ app). Order: K1 vault → K2 admin page → K3 tokens → K4 relay (Gemini → O
   built-in services (gemini, openai, anthropic with their hosts), destination hosts are exact
   (no wildcard, IP, `localhost`, `.local`, `.internal`), path prefixes, model ids,
   `checkBrokerSecret` (printable ASCII, 8–4096, never an `acb_tok_` token; its errors never
-  quote the value), `companyKeyEligibility`, `chooseBrokerKeySource`.
+  quote the value), the audience (`parseBrokerAudience`, `upgradeBrokerAudience`,
+  `companyKeyEligibility`, `companyKeyCoversDepartment`, `companyKeyUsable`),
+  `chooseBrokerKeySource`.
 
 ## Admin API and page (K2, owner/admin)
 
@@ -92,14 +95,21 @@ delete / service / settings; the GET carries the latest 50). Check order who →
 registering or replacing without a KEK → 503 `{ code: 'BROKER_OFF' }` (metadata edits,
 disable and delete still work). Audience departments must be the company's, people its members.
 
-- **Who may use a company key** (`usableBy`, and what tokens will use): removed by name →
-  never; added by name; everyone; or a member of one of its departments. **A member belongs to a
-  department when the permission rules let them read its folder** (`resolveAccess`; owners and
-  admins read everything) — ACB has no other department membership. With the default seed
-  (everyone reads everything) a department key is usable by everyone; the page's 「今使える人」
-  shows the effect.
+- **Who may use a company key: two dials** (owner decision 2026-10-30). ① **Which departments'
+  work** (`allDepartments` = 全社, or `departmentIds`): matched against the department the
+  consultation is in — the folder the app sends with the token (`department`), mapped to a
+  department by `pathKey` (NFC, A–Z folded; `departmentIdOfFolder`); a consultation outside any
+  department, or in an unknown folder, can use only 全社 keys. ② **Which people** (`everyone`
+  = 全員, else only `addUserIds`), with per-person exceptions: `removeUserIds` never (even under
+  全員), `addUserIds` always. Not 全社 needs at least one department (400). Reading a
+  department's folder no longer decides anything — it replaced the K2 rule "members who can read
+  the folder", which with everyone reading everything meant everyone. An audience without
+  `allDepartments` (K2 rows, an older admin page) is converted by `upgradeBrokerAudience`:
+  departments listed → work in them by everyone (± people); none → 全社, by everyone or the added
+  people. `usableBy` (「今使える人」) lists dial ②; dial ① is decided per consultation.
 - Admin page 「API キー」 (`admin/src/app/companies/[id]/api-keys/page.tsx`, menu `api-keys`,
-  owners/admins): company keys and members' own keys (last 4, destinations, who, caps,
+  owners/admins): company keys and members' own keys (last 4, destinations, 使える仕事 (dial ①)
+  and 使える人 (dial ②), caps,
   「非公開の内容を送ってよい」, status, 「今使える人」), register / edit settings / replace /
   stop・resume / delete, the members' own-key switch, per-service 種類・決め方・自分の鍵の送り先,
   the history. The value is a password field sent once in the POST (or the replace PUT); editing
@@ -126,7 +136,7 @@ disable and delete still work). Audience departments must be the company's, peop
 - **`validate(token, service)` (for K4)** → `{ ok, grant }` or a reason (`broker-off`,
   `malformed`, `unknown`, `revoked`, `expired`, `not-member`, `service-not-granted`, `no-key`).
   It **re-decides the key on every call** (`resolveKey`: the service's rule, an active company
-  key the member may use now, or their own active key while own keys are allowed and its hosts
+  key the member may use now for the token's department (both dials), or their own active key while own keys are allowed and its hosts
   are still in the service's `ownKeyHosts`), so disabling a key, changing who may use it, the
   rule, or removing the member stops the token at once. The grant names the key, its
   destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
@@ -138,9 +148,11 @@ ciphertext), `tests/unit/broker-kek.test.ts` (which KEK files are refused; the g
 overwrites or prints a KEK), `tests/unit/broker-vault.test.ts` (no table holds a value, the
 listing carries no secret, a copied row does not open, rewrap, off without a KEK),
 `tests/integration/key-broker.test.ts` (**no plaintext key in any answer, error, log line or
-table** across every admin call, success and error; who may manage; audience rules; history;
+table** across every admin call, success and error; who may manage; the two dials and the K2
+form's conversion; history;
 503 without a KEK), `tests/integration/broker-tokens.test.ts` (tokens only for usable
-services, rule / own key / switch, every validation refusal, TTL bounds, the per-member bound,
+services, both dials (another department or none → no key; a dial change stops a live token),
+rule / own key / switch, every validation refusal, TTL bounds, the per-member bound,
 **no token or key value in any log line or table**), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
 sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
 off message). Tests use

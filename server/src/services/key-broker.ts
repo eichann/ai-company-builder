@@ -8,10 +8,11 @@
  * four characters. Values go straight from the request into
  * `vault.seal` (services/broker-vault.ts); validation errors never quote them.
  *
- * Who may use a company key (`usableBy`): everyone, or the members of its
- * departments, plus people added by name, minus people removed by name. A
- * member belongs to a department when the permission rules let them read
- * its folder (ACB has no other department membership). Own keys: the owner.
+ * Who may use a company key: two dials (shared/core `BrokerAudience`) —
+ * ① for which work (全社, or consultations in these departments: matched by
+ * the token against the chat's department) and ② by whom (全員 or listed
+ * people, ± per-person exceptions). `usableBy` lists dial ②; dial ① is
+ * decided per consultation. Own keys: the owner.
  */
 import {
   BROKER_KEY_RULES,
@@ -19,7 +20,6 @@ import {
   BROKER_SERVICE_CATEGORIES,
   BUILTIN_BROKER_SERVICES,
   NO_BROKER_CAPS,
-  NOBODY,
   brokerSecretLast4,
   builtinBrokerService,
   checkBrokerSecret,
@@ -27,6 +27,7 @@ import {
   defaultBrokerRule,
   isValidBrokerServiceName,
   parseBrokerAudience,
+  upgradeBrokerAudience,
   parseBrokerCaps,
   parseBrokerDestinations,
   parseBrokerDisplayName,
@@ -39,7 +40,7 @@ import {
   type BrokerKeyStatus,
   type BrokerServiceCategory,
 } from '../../shared/core/key-broker'
-import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
+import { pathKey } from '../../shared/core/paths'
 import type {
   BrokerChange,
   BrokerChangeDetail,
@@ -55,8 +56,7 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { DepartmentRepository } from '../ports/departments'
 import type { BrokerKeyChanges, BrokerKeyRepository, BrokerKeyRow, StoredBrokerService } from '../ports/key-broker'
 import type { MembershipRepository } from '../ports/memberships'
-import type { ScopeRepository } from '../ports/scopes'
-import { hasFullAccess, requireFullAccess, type Member } from './access'
+import { requireFullAccess, type Member } from './access'
 import type { BrokerVault } from './broker-vault'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -69,7 +69,6 @@ export interface KeyBrokerDeps {
   brokerVault: BrokerVault
   memberships: MembershipRepository
   departments: DepartmentRepository
-  scopes: ScopeRepository
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
@@ -85,7 +84,7 @@ function parseJson<T>(text: string, fallback: T): T {
 /** A stored key's parsed fields (rows written by this service; a damaged field falls back to "nothing allowed"). */
 function decoded(row: BrokerKeyRow) {
   const destinations = parseJson<BrokerDestinations>(row.destinations, { hosts: [], pathPrefixes: [], models: [] })
-  const audience = row.scope === 'company' ? parseJson<BrokerAudience>(row.audience, NOBODY) : NOBODY
+  const audience = row.scope === 'company' ? upgradeBrokerAudience(parseJson<unknown>(row.audience, null)) : upgradeBrokerAudience(null)
   const caps = { ...NO_BROKER_CAPS, ...parseJson<Partial<BrokerCaps>>(row.caps, {}) }
   return { destinations, audience, caps }
 }
@@ -109,25 +108,16 @@ function snapshot(row: BrokerKeyRow): BrokerKeySnapshot {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
 export function createKeyBrokerService(deps: KeyBrokerDeps) {
-  const { brokerKeys, brokerVault, memberships, departments, scopes, accounts, clock, ids } = deps
+  const { brokerKeys, brokerVault, memberships, departments, accounts, clock, ids } = deps
 
-  /** Does the member belong to the department (can read its folder)? Cached per call. */
-  function departmentMembership(companyId: string) {
-    const list = scopes.listWithRules(companyId)
-    const folders = new Map(departments.listByCompany(companyId).map(d => [d.id, d.folder]))
-    const cache = new Map<string, boolean>()
-    return (userId: string, role: string) => (departmentId: string): boolean => {
-      const folder = folders.get(departmentId)
-      if (folder === undefined) return false
-      const key = `${userId}\0${departmentId}`
-      let v = cache.get(key)
-      if (v === undefined) {
-        const repo: PermissionRepository = { getMemberRole: () => role, listScopes: () => list }
-        v = hasFullAccess(role) || resolveAccess(companyId, userId, folder, repo).read
-        cache.set(key, v)
-      }
-      return v
-    }
+  /**
+   * The department a consultation is in, from the folder the app sent
+   * (compared as NFC with A–Z folded); null when none or not a department.
+   */
+  function departmentIdOfFolder(companyId: string, folder: string | null): string | null {
+    if (!folder) return null
+    const key = pathKey(folder)
+    return departments.listByCompany(companyId).find(d => pathKey(d.folder) === key)?.id ?? null
   }
 
   function serviceSettings(companyId: string): Map<string, StoredBrokerService> {
@@ -146,7 +136,6 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   function view(companyId: string): BrokerView {
     const rows = brokerKeys.list(companyId)
     const members = memberships.listByCompany(companyId)
-    const inDepartment = departmentMembership(companyId)
     const history = brokerKeys.history(companyId, HISTORY_LIMIT)
     const people = accounts.byIds([...new Set([
       ...members.map(m => m.user_id),
@@ -162,7 +151,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         usableBy = members.some(m => m.user_id === row.ownerUserId) ? [{ userId: row.ownerUserId!, ...person(row.ownerUserId!), via: 'owner' }] : []
       } else {
         usableBy = members.flatMap(m => {
-          const via = companyKeyEligibility(s.audience, m.user_id, inDepartment(m.user_id, m.role))
+          const via = companyKeyEligibility(s.audience, m.user_id)
           return via ? [{ userId: m.user_id, ...person(m.user_id), via }] : []
         })
       }
@@ -446,8 +435,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       return brokerKeys.services(companyId).map(s => s.service)
     },
 
-    /** Department membership as `usableBy` decides it, for tokens. */
-    departmentMembership,
+    /** The consultation's department (dial ①), for tokens. */
+    departmentIdOfFolder,
   }
 }
 

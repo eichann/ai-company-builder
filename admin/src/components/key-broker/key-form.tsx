@@ -26,6 +26,7 @@ import {
 } from '@/lib/key-broker'
 
 const OTHER = '__other__'
+/** Per person: as dial ② says, always allowed (added), or never (removed). */
 type PersonChoice = 'follow' | 'add' | 'remove'
 
 export interface KeyFormValues {
@@ -65,8 +66,9 @@ export function KeyForm({
   const [hosts, setHosts] = useState((editing?.destinations.hosts ?? builtin?.defaultHosts ?? []).join('\n'))
   const [paths, setPaths] = useState((editing?.destinations.pathPrefixes ?? []).join('\n'))
   const [models, setModels] = useState((editing?.destinations.models ?? []).join('\n'))
-  const [everyone, setEveryone] = useState(editing?.audience.everyone ?? false)
+  const [allDepartments, setAllDepartments] = useState(editing?.audience.allDepartments ?? true)
   const [departmentIds, setDepartmentIds] = useState<string[]>(editing?.audience.departmentIds ?? [])
+  const [everyone, setEveryone] = useState(editing?.audience.everyone ?? true)
   const [people, setPeople] = useState<Record<string, PersonChoice>>(() => {
     const out: Record<string, PersonChoice> = {}
     for (const u of editing?.audience.addUserIds ?? []) out[u] = 'add'
@@ -92,6 +94,7 @@ export function KeyForm({
   const badHosts = invalidHosts(hosts)
   if (badHosts.length) errors.push(`送り先に使えない書き方があります: ${badHosts.join('、')}（「*」・IP アドレス・localhost・https:// やパスは書けません）`)
   const missing = !service || !displayName.trim() || (!editing && !secret.trim()) || hostsOf(hosts).length === 0
+    || (!allDepartments && departmentIds.length === 0)
   const badPaths = invalidPathPrefixes(paths)
   if (badPaths.length) errors.push(`パスに使えない書き方があります: ${badPaths.join('、')}`)
   const badModels = invalidModels(models)
@@ -108,10 +111,12 @@ export function KeyForm({
       secret: secret.trim(),
       destinations: { hosts: hostsOf(hosts), pathPrefixes: pathPrefixesOf(paths), models: modelsOf(models) },
       audience: {
+        allDepartments,
+        departmentIds: allDepartments ? [] : departmentIds,
         everyone,
-        departmentIds: everyone ? [] : departmentIds,
-        addUserIds: Object.entries(people).filter(([, v]) => v === 'add').map(([u]) => u),
-        removeUserIds: Object.entries(people).filter(([, v]) => v === 'remove').map(([u]) => u),
+        // Under 全員 only removals mean anything; under 指定した人 only additions.
+        addUserIds: everyone ? [] : Object.entries(people).filter(([, v]) => v === 'add').map(([u]) => u),
+        removeUserIds: everyone ? Object.entries(people).filter(([, v]) => v === 'remove').map(([u]) => u) : [],
       },
       caps: capValues as BrokerCaps,
       allowPrivateContent: allowPrivate,
@@ -180,12 +185,18 @@ export function KeyForm({
       </fieldset>
 
       <fieldset className="grid gap-2">
-        <legend className="mb-1 text-sm font-medium">使える人</legend>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={everyone} onChange={(e) => setEveryone(e.target.checked)} />
-          全員
-        </label>
-        {!everyone && (
+        <legend className="mb-1 text-sm font-medium">どの部署の仕事で使えるか</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`${id}-work`} checked={allDepartments} onChange={() => setAllDepartments(true)} />
+            全社
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`${id}-work`} checked={!allDepartments} onChange={() => setAllDepartments(false)} />
+            選んだ部署だけ
+          </label>
+        </div>
+        {!allDepartments && (
           <div className="flex flex-wrap gap-x-4 gap-y-1" role="group" aria-label="使える部署">
             {view.departments.map((d) => (
               <label key={d.id} className="flex items-center gap-2 text-sm">
@@ -199,22 +210,51 @@ export function KeyForm({
             ))}
           </div>
         )}
-        <p className="text-xs text-muted-foreground">部署の人 = その部署のフォルダを読める人（権限の設定どおり）。個人ごとに足す・外すこともできます。</p>
+        <p className="text-xs text-muted-foreground">
+          AI への相談がどの部署のフォルダで行われているかで決まります。部署を選ぶと、それ以外の部署や部署の外での相談では使えません。
+        </p>
+      </fieldset>
+
+      <fieldset className="grid gap-2">
+        <legend className="mb-1 text-sm font-medium">使える人</legend>
+        <div className="flex flex-wrap gap-x-4 gap-y-1">
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`${id}-who`} checked={everyone} onChange={() => setEveryone(true)} />
+            全員
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <input type="radio" name={`${id}-who`} checked={!everyone} onChange={() => setEveryone(false)} />
+            指定した人だけ
+          </label>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {everyone ? '使わせたくない人だけ「使えない」にします。' : '使ってよい人を「使える」にします。'}
+        </p>
         <ul className="divide-y rounded-md border">
           {members.map((m) => {
             const name = m.name || m.email || '名前未設定'
+            const choice = people[m.userId] ?? 'follow'
+            const value = everyone ? (choice === 'remove' ? 'remove' : 'follow') : choice === 'add' ? 'add' : 'follow'
             return (
               <li key={m.userId} className="flex items-center gap-3 px-3 py-1.5 text-sm">
                 <span className="min-w-0 flex-1 truncate">{name}</span>
                 <select
                   aria-label={`${name}の扱い`}
                   className="h-8 rounded-md border bg-transparent px-2 text-sm"
-                  value={people[m.userId] ?? 'follow'}
+                  value={value}
                   onChange={(e) => setPeople((p) => ({ ...p, [m.userId]: e.target.value as PersonChoice }))}
                 >
-                  <option value="follow">部署どおり</option>
-                  <option value="add">追加（使える）</option>
-                  <option value="remove">除外（使えない）</option>
+                  {everyone ? (
+                    <>
+                      <option value="follow">使える</option>
+                      <option value="remove">使えない（除外）</option>
+                    </>
+                  ) : (
+                    <>
+                      <option value="follow">使えない</option>
+                      <option value="add">使える</option>
+                    </>
+                  )}
                 </select>
               </li>
             )

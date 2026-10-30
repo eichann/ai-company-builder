@@ -3,7 +3,8 @@
  * routes, database and vault with a temporary KEK.
  *
  * - A member gets a token only for the services they can use now (the
- *   service's rule, who may use the company key, their own key); the token is
+ *   service's rule, both dials of the company key — the consultation's
+ *   department and the person — or their own key); the token is
  *   unguessable and only its hash is stored — the value is in no table and
  *   no log line.
  * - The relay's validation (`brokerTokens.validate`) re-decides on every call:
@@ -105,10 +106,11 @@ beforeAll(async () => {
   app = new Hono()
   app.route('/api/companies/:companyId', keyBrokerRoute)
 
-  // A company Gemini key for 営業部 …
+  db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('bt-d-dev', CO, '開発', 'Dev', ts(), ts())
+  // A company Gemini key for work in 営業部, by bt-sales and bt-leaver …
   const created = await services.keyBroker.create(owner, {
     service: 'gemini', displayName: '営業 Gemini', secret: FAKE_COMPANY,
-    audience: { everyone: false, departmentIds: ['bt-d-sales'], addUserIds: [], removeUserIds: [] },
+    audience: { allDepartments: false, departmentIds: ['bt-d-sales'], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] },
   })
   expect(created.ok).toBe(true)
   // … and bt-dev's own OpenAI key (members register own keys in K8; stored the same way here).
@@ -156,9 +158,29 @@ describe('broker tokens', () => {
     expect(services.brokerTokens.validate(d.token, 'openai')).toEqual({ ok: false, reason: 'service-not-granted' })
   })
 
-  it('who may use the company key decides: a member outside 営業部 gets no Gemini token', async () => {
+  it('dial ②: a person the key is not for gets no Gemini token, even in 営業部', async () => {
     const r = await issue('bt-dev', { services: ['gemini'] })
     expect(r.json.data).toMatchObject({ enabled: true, token: null, services: [], unavailable: [{ service: 'gemini', reason: 'no-key' }] })
+  })
+
+  it('dial ①: the key is for work in 営業部 only — another department or none gets no token', async () => {
+    for (const department of ['Dev', null, 'どこでもない']) {
+      const r = await issue('bt-sales', { services: ['gemini'], department })
+      expect(r.json.data, String(department)).toMatchObject({ token: null, unavailable: [{ service: 'gemini', reason: 'no-key' }] })
+    }
+    // The folder is compared as NFC (a Mac sends NFD) with A–Z folded.
+    expect((await issue('bt-sales', { services: ['gemini'], department: '営業部'.normalize('NFD') })).json.data.token).toMatch(/^acb_tok_/)
+    expect((await issue('bt-sales', { services: ['gemini'], department: 'dev' })).json.data.token).toBeNull()
+
+    // Changing the dial stops a live token at once; 全社 lets it work anywhere.
+    const token = (await issue('bt-sales', { services: ['gemini'] })).json.data.token
+    const keyId = services.brokerTokens.validate(token, 'gemini').grant.keyId
+    services.keyBroker.update(owner, keyId, { audience: { allDepartments: false, departmentIds: ['bt-d-dev'], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] } })
+    expect(services.brokerTokens.validate(token, 'gemini')).toEqual({ ok: false, reason: 'no-key' })
+    services.keyBroker.update(owner, keyId, { audience: { allDepartments: true, departmentIds: [], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] } })
+    expect(services.brokerTokens.validate(token, 'gemini').ok).toBe(true)
+    expect((await issue('bt-sales', { services: ['gemini'], department: null })).json.data.token).toMatch(/^acb_tok_/)
+    services.keyBroker.update(owner, keyId, { audience: { allDepartments: false, departmentIds: ['bt-d-sales'], everyone: false, addUserIds: ['bt-sales', 'bt-leaver'], removeUserIds: [] } })
   })
 
   it('the service rule decides between the company key and the member\'s own key', async () => {

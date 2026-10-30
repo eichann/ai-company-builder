@@ -324,7 +324,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'GET', `${base}/broker`)
     const created = await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/keys`, {
       service: 'gemini', displayName: '契約テスト', secret: 'fake-test-key-NOT-REAL-contract-0000',
-      audience: { everyone: true, departmentIds: [], addUserIds: [], removeUserIds: [USERS.member] }, caps: { requestsPerDay: 10 },
+      audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [USERS.member] }, caps: { requestsPerDay: 10 },
     })
     const id = created.keys[0].id
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/keys/${id}/secret`, { secret: 'fake-test-key-NOT-REAL-contract-1111' })
@@ -452,14 +452,14 @@ describe('the admin console\'s requests do what the admin means on the server', 
     const created = await A.keyBrokerApi.create(CO, {
       service: 'openai', displayName: '翻訳用', secret: 'fake-test-key-NOT-REAL-builder-2222',
       destinations: { hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/'], models: ['gpt-5-mini'] },
-      audience: { everyone: false, departmentIds: [], addUserIds: [USERS.member], removeUserIds: [] },
+      audience: { allDepartments: false, departmentIds: [row('SELECT id FROM departments WHERE company_id = ? ORDER BY rowid LIMIT 1', CO).id], everyone: false, addUserIds: [USERS.member], removeUserIds: [] },
       caps: { requestsPerMemberPerDay: 50 }, allowPrivateContent: false,
     })
     const id = created.keys.find(k => k.displayName === '翻訳用')!.id
     const stored = row('SELECT service, last4, destinations, audience, caps FROM broker_keys WHERE id = ?', id)
     expect(stored.last4).toBe('2222')
     expect(JSON.parse(stored.destinations)).toEqual({ hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/'], models: ['gpt-5-mini'] })
-    expect(JSON.parse(stored.audience).addUserIds).toEqual([USERS.member])
+    expect(JSON.parse(stored.audience)).toMatchObject({ allDepartments: false, everyone: false, addUserIds: [USERS.member] })
     expect(JSON.parse(stored.caps).requestsPerMemberPerDay).toBe(50)
     await A.keyBrokerApi.update(CO, id, { status: 'disabled' })
     expect(row('SELECT status FROM broker_keys WHERE id = ?', id).status).toBe('disabled')
