@@ -366,3 +366,150 @@ export const BROKER_NO_KEY_PLACEHOLDER = 'acb_tok_none'
 export function looksLikeBrokerToken(value: unknown): value is string {
   return typeof value === 'string' && /^acb_tok_[0-9a-f]{64}$/.test(value)
 }
+
+// ---------------------------------------------------------------------------
+// Generic relay services (K9): an owner/admin names a destination and how the
+// key travels (one header, one value format) — any header-type API passes the
+// relay without code. The host is fixed here, at registration; nothing the
+// client sends chooses it.
+// ---------------------------------------------------------------------------
+
+/** Where the key goes in a header value: exactly once, e.g. `Bearer {key}`. */
+export const BROKER_KEY_SLOT = '{key}'
+
+export const BROKER_RELAY_LIMITS = {
+  /** Generic service ids: shorter than names so `ACB_<ID>_BASE_URL` stays readable. */
+  serviceId: 32,
+  basePath: 200,
+  headerName: 64,
+  format: 200,
+} as const
+
+/**
+ * A generic service's id, or false: lower-case ASCII letters and digits in
+ * words joined by single hyphens, starting with a letter (`hubspot`,
+ * `case-master`), 2–32 characters, never a built-in name. No `_`, so the
+ * app's variable names (`ACB_CASE_MASTER_BASE_URL`, `-` → `_`) are one per
+ * service.
+ */
+export function isValidRelayServiceId(value: unknown): value is string {
+  return typeof value === 'string'
+    && value.length >= 2 && value.length <= BROKER_RELAY_LIMITS.serviceId
+    && /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(value)
+    && !builtinBrokerService(value)
+}
+
+/**
+ * Header names the key may never be put in: hop-by-hop, framing, the client's
+ * identity, cookies, our own, and the ones the relay sets itself.
+ */
+const FORBIDDEN_RELAY_HEADERS = new Set([
+  'host', 'connection', 'keep-alive', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'expect',
+  'cookie', 'set-cookie', 'forwarded', 'via', 'x-real-ip', 'origin', 'referer',
+  'accept', 'accept-encoding', 'user-agent', 'range', 'location', 'date',
+])
+const FORBIDDEN_RELAY_HEADER_PREFIXES = ['proxy-', 'content-', 'x-forwarded-', 'x-acb-', 'sec-', 'access-control-']
+
+/** The header a generic service's key goes in (lower case), or undefined. */
+export function normalizeRelayHeaderName(input: unknown): string | undefined {
+  if (typeof input !== 'string') return undefined
+  const value = input.trim().toLowerCase()
+  if (!value || value.length > BROKER_RELAY_LIMITS.headerName) return undefined
+  // RFC 9110 token characters only.
+  if (!/^[a-z0-9!#$%&'*+.^_`|~-]+$/.test(value)) return undefined
+  if (FORBIDDEN_RELAY_HEADERS.has(value) || FORBIDDEN_RELAY_HEADER_PREFIXES.some(p => value.startsWith(p))) return undefined
+  return value
+}
+
+/**
+ * The header value's shape, or undefined: printable ASCII (spaces allowed
+ * inside), `{key}` exactly once, at most 200 characters (`Bearer {key}`,
+ * `{key}`, `Token token={key}`).
+ */
+export function normalizeRelayFormat(input: unknown): string | undefined {
+  if (typeof input !== 'string') return undefined
+  const value = input.trim()
+  if (!value || value.length > BROKER_RELAY_LIMITS.format || !/^[\x20-\x7e]+$/.test(value)) return undefined
+  if (value.split(BROKER_KEY_SLOT).length !== 2) return undefined
+  return value
+}
+
+/**
+ * `https://host[/base/path]` → the exact host and the base path (no trailing
+ * `/`; '' for none), or an error. https only, no port other than 443, no user
+ * name / password, query or fragment; the host follows the destination rules
+ * (exact name: no IP, `localhost`, `.local`, `.internal`).
+ */
+export function parseRelayBaseUrl(input: unknown): Parsed<{ host: string; basePath: string }> {
+  if (typeof input !== 'string' || !input.trim()) return { error: 'baseUrl must be an https:// address' }
+  const text = input.trim()
+  // eslint-disable-next-line no-control-regex
+  if (/[\u0000- \u007f\\]/.test(text)) return { error: 'baseUrl must not contain spaces, backslashes or control characters' }
+  const m = /^https:\/\/([^/?#@]+)(\/[^?#]*)?$/i.exec(text)
+  if (!m) return { error: 'baseUrl must be https://<host>[/<path>] without a user, query or fragment' }
+  let authority = m[1].toLowerCase()
+  if (authority.endsWith(':443')) authority = authority.slice(0, -4)
+  if (authority.includes(':')) return { error: 'baseUrl: only the standard https port (443) is allowed' }
+  const host = normalizeBrokerHost(authority)
+  if (!host) return { error: 'baseUrl: the host must be an exact public name (no IP address, localhost, .local or .internal)' }
+  let basePath = m[2] ?? ''
+  while (basePath.endsWith('/')) basePath = basePath.slice(0, -1)
+  if (basePath && (basePath.length > BROKER_RELAY_LIMITS.basePath || !normalizeBrokerPathPrefix(basePath))) {
+    return { error: 'baseUrl: the path must be plain (no %, .., // or spaces)' }
+  }
+  return { value: { host, basePath } }
+}
+
+/** A generic service as the company registered it. */
+export interface BrokerRelayDefinition {
+  /** What people see (「顧客管理」, `HubSpot`). */
+  label: string
+  /** The one host its requests go to. */
+  host: string
+  /** Put before every path (`/v2`), '' for none. */
+  basePath: string
+  /** The header the key goes in (lower case). */
+  header: string
+  /** The header's value, with `{key}` where the key goes. */
+  format: string
+}
+
+/** `https://host/base` of a definition (what the admin typed, normalised). */
+export function relayBaseUrl(def: Pick<BrokerRelayDefinition, 'host' | 'basePath'>): string {
+  return `https://${def.host}${def.basePath}`
+}
+
+/** PUT …/broker/relay-services/:service { label, baseUrl, header, format? } */
+export function parseBrokerRelayDefinition(input: unknown): Parsed<BrokerRelayDefinition> {
+  if (!isObject(input)) return { error: 'Body must be a JSON object' }
+  const label = parseBrokerDisplayName(input.label)
+  if ('error' in label) return { error: label.error.replace('displayName', 'label') }
+  const base = parseRelayBaseUrl(input.baseUrl)
+  if ('error' in base) return base
+  const header = normalizeRelayHeaderName(input.header)
+  if (!header) return { error: 'header must be a plain header name (not Host, Cookie, Content-*, X-Forwarded-*, …)' }
+  const format = normalizeRelayFormat(input.format ?? BROKER_KEY_SLOT)
+  if (!format) return { error: `format must contain ${BROKER_KEY_SLOT} exactly once (printable ASCII, at most ${BROKER_RELAY_LIMITS.format} characters)` }
+  return { value: { label: label.value, host: base.value.host, basePath: base.value.basePath, header, format } }
+}
+
+/** A stored definition (JSON the server wrote), or null when it is not one. */
+export function readBrokerRelayDefinition(input: unknown): BrokerRelayDefinition | null {
+  if (!isObject(input) || typeof input.host !== 'string' || typeof input.basePath !== 'string') return null
+  const parsed = parseBrokerRelayDefinition({ ...input, baseUrl: relayBaseUrl({ host: input.host, basePath: input.basePath }) })
+  return 'error' in parsed ? null : parsed.value
+}
+
+/** The header value sent upstream: the format with the key in its slot. */
+export function relayCredentialValue(format: string, secret: string): string {
+  const [before, after] = format.split(BROKER_KEY_SLOT)
+  return `${before}${secret}${after}`
+}
+
+/** What the client put in the slot of `format` (the whole value when it does not have the format's shape). */
+export function relayCredentialOf(format: string, value: string): string {
+  const [before, after] = format.split(BROKER_KEY_SLOT)
+  const v = value.trim()
+  if (v.length >= before.length + after.length && v.startsWith(before) && v.endsWith(after)) return v.slice(before.length, v.length - after.length).trim()
+  return v
+}

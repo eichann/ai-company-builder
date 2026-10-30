@@ -96,7 +96,7 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
       const own = ownRow(member, service, rows)
       return {
         service,
-        label: builtinBrokerService(service)?.label ?? service,
+        label: keyBroker.serviceLabel(member.companyId, service),
         category: setting.category,
         rule: setting.rule,
         ownKey: ownKeyAllowance(member.companyId, service),
@@ -188,7 +188,7 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
         scope: 'user',
         ownerUserId: member.userId,
         service,
-        displayName: displayName ?? `${builtinBrokerService(service)?.label ?? service}（自分の鍵）`,
+        displayName: displayName ?? `${keyBroker.serviceLabel(member.companyId, service)}（自分の鍵）`,
         last4,
         destinations,
         audience: JSON.stringify(upgradeBrokerAudience(null)),
