@@ -9,7 +9,8 @@ import {
   Check,
 } from '@phosphor-icons/react'
 import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
-import type { DepartmentConfig, Skill } from '../../types'
+import type { DepartmentConfig } from '../../types'
+import type { Skill } from '../../features/skills/model'
 import { COMPANY_TAB_ID } from '../../shared/lib/departments'
 import { listSkills, readSkillFile } from '../../features/skills/api'
 

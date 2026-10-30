@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
-import type { Company, Department } from '../../types'
-import { DEPARTMENT_TEMPLATES } from '../../types'
+import type { CompanyView, DepartmentFolder } from '../../types'
 import { planFolderSetup, type FolderSetupPlan } from '../../lib/company-folder-plan'
 import { formatBytes } from '../../lib/download-selection'
 import { getDepartments } from '../../shared/ipc/departments'
@@ -49,6 +48,12 @@ interface PickableDepartment {
   folder: string
 }
 type SetupStep = 'folder' | 'git' | 'done'
+
+// The ids the retired department templates gave their folders; any other folder's id is its name in lower case.
+const TEMPLATE_DEPARTMENT_IDS = new Map([
+  ['shared', 'common'], ['hr', 'hr'], ['sales', 'sales'],
+  ['development', 'dev'], ['accounting', 'finance'], ['general', 'general'],
+])
 
 export function CompanySelector() {
   const { addCompany } = useAppStore()
@@ -238,15 +243,14 @@ export function CompanySelector() {
       // Read departments from folder (may be cloned from server or empty)
       setSetupStep('folder')
       const entries = await readCompanyFolder(companyPath)
-      const departments: Department[] = []
+      const departments: DepartmentFolder[] = []
 
       for (const entry of entries) {
         if (entry.isDirectory && !entry.name.startsWith('_') && !entry.name.startsWith('.')) {
           const hasAgentMd = await companyPathExists(`${entry.path}/AGENT.md`)
-          const template = DEPARTMENT_TEMPLATES.find((t) => t.name === entry.name)
 
           departments.push({
-            id: template?.id || entry.name.toLowerCase(),
+            id: TEMPLATE_DEPARTMENT_IDS.get(entry.name) || entry.name.toLowerCase(),
             name: entry.name,
             path: entry.path,
             hasAgent: hasAgentMd,
@@ -264,7 +268,7 @@ export function CompanySelector() {
       await new Promise(resolve => setTimeout(resolve, 500))
 
       // Create company object
-      const company: Company = {
+      const company: CompanyView = {
         id: selectedCompany.id,
         name: selectedCompany.name,
         rootPath: companyPath,

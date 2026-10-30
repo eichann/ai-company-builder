@@ -4,7 +4,7 @@ import {
   ArrowSquareOut,
   Wrench,
 } from '@phosphor-icons/react'
-import type { SkillTool } from '../../types'
+import type { SkillTool } from '../../features/skills/model'
 import { openInBrowser } from '../../features/skills/api'
 
 interface ToolViewerProps {

@@ -1,6 +1,6 @@
 import { SkillGrid } from '../../../components/skill-ui/SkillGrid'
 import { SkillDetailPanel } from '../../../components/skill-ui/SkillDetailPanel'
-import type { Skill, SkillTool } from '../../../types'
+import type { Skill, SkillTool } from '../model'
 
 interface Props {
   skills: Skill[]

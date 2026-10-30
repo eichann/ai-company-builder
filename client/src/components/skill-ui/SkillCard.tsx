@@ -1,6 +1,6 @@
 import { memo } from 'react'
 import { Lightning, FileText, Gear } from '@phosphor-icons/react'
-import type { Skill } from '../../types'
+import type { Skill } from '../../features/skills/model'
 
 interface SkillCardProps {
   skill: Skill
