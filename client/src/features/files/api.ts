@@ -36,3 +36,66 @@ export function createPrivateFolder(
 ) {
   return outbound.createPrivateFolder(companyId, input)
 }
+
+/** Reading the company folder on this computer: folder listings, whether a name is taken. */
+export type FileTreeReads = ElectronPort<'readDirectory' | 'readDirectoryTree' | 'getStats'>
+/** Changing the company folder on this computer: new file or folder, rename, move inside it, delete. */
+export type FileTreeWrites = ElectronPort<'writeFile' | 'createDirectory' | 'renameItem' | 'moveItem' | 'deleteItem'>
+/**
+ * Moving a file dropped from Finder into the company folder: it takes a file
+ * from anywhere on this computer (the original is gone), so it has its own port.
+ */
+export type FileImportWrites = ElectronPort<'moveFromExternal'>
+/**
+ * Checking a name the member typed against private folders they cannot read:
+ * main asks the company server (paths/check), so the name leaves the computer.
+ */
+export type ReservedNameOutbound = ElectronPort<'reservedPathRefusal'>
+/** Alt-dragging a file out of the tree: hands it to another app (browser, Slack, Finder). */
+export type FileDragOutbound = ElectronPort<'startDrag'>
+
+export function readDirectory(dirPath: string, reads: FileTreeReads = window.electronAPI) {
+  return reads.readDirectory(dirPath)
+}
+
+export function readDirectoryTree(dirPath: string, maxDepth?: number, reads: FileTreeReads = window.electronAPI) {
+  return reads.readDirectoryTree(dirPath, maxDepth)
+}
+
+/** Rejects when nothing is at `path`. */
+export function getStats(path: string, reads: FileTreeReads = window.electronAPI) {
+  return reads.getStats(path)
+}
+
+export function createEmptyFile(filePath: string, writes: FileTreeWrites = window.electronAPI) {
+  return writes.writeFile(filePath, '')
+}
+
+export function createDirectory(dirPath: string, writes: FileTreeWrites = window.electronAPI) {
+  return writes.createDirectory(dirPath)
+}
+
+export function renameItem(oldPath: string, newPath: string, writes: FileTreeWrites = window.electronAPI) {
+  return writes.renameItem(oldPath, newPath)
+}
+
+export function moveItem(sourcePath: string, destPath: string, writes: FileTreeWrites = window.electronAPI) {
+  return writes.moveItem(sourcePath, destPath)
+}
+
+export function deleteItem(path: string, writes: FileTreeWrites = window.electronAPI) {
+  return writes.deleteItem(path)
+}
+
+export function moveFromExternal(sourcePath: string, destPath: string, writes: FileImportWrites = window.electronAPI) {
+  return writes.moveFromExternal(sourcePath, destPath)
+}
+
+/** The sentence refusing the name, or null when it may be used (or nobody knows: offline). */
+export function reservedPathRefusal(targetPath: string, outbound: ReservedNameOutbound = window.electronAPI) {
+  return outbound.reservedPathRefusal(targetPath)
+}
+
+export function startDrag(filePath: string, outbound: FileDragOutbound = window.electronAPI) {
+  outbound.startDrag(filePath)
+}
