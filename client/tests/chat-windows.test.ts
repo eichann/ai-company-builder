@@ -11,6 +11,8 @@ import type { IpcRegistrar } from '../electron/ipc/registrar'
 
 const MAIN = 1
 const ROOT = '/companies/acme'
+const OTHER_ROOT = '/companies/other'
+const FILES = new Set([`${ROOT}/営業部/企画/骨子.md`, `${ROOT}/未取得/a.md`, '/companies/other/a.md'])
 
 function context(sessionId: string): ChatWindowContext {
   return { sessionId, companyId: 'acme', companyName: 'Acme', rootPath: ROOT }
@@ -29,14 +31,28 @@ function world() {
     close: id => { closed.push(id); const options = open.get(id); open.delete(id); options?.onClosed() },
   }
   const changes: ChatWindowsChange[] = []
+  const fileRequests: string[] = []
+  let mainFocused = 0
+  const mainOpen = { value: true }
   const windows = registerChatWindowsIpc(ipc, {
     host,
     paths: {
-      validate: p => { if (!p.startsWith(ROOT)) throw new Error('outside'); return p },
-      rootOf: p => p.startsWith(ROOT) ? ROOT : null,
+      // Two registered companies: a window may still open files of its own only.
+      validate: p => { if (!p.startsWith(ROOT) && !p.startsWith(OTHER_ROOT)) throw new Error('outside'); return p },
+      rootOf: p => p.startsWith(ROOT) ? ROOT : p.startsWith(OTHER_ROOT) ? OTHER_ROOT : null,
     },
     isMainWindow: id => id === MAIN,
-    mainWindow: { send: (_channel, ...payload) => { changes.push(payload[0] as ChatWindowsChange) } },
+    mainWindow: {
+      send: (channel, ...payload) => {
+        if (channel === 'chatWindow:changed') changes.push(payload[0] as ChatWindowsChange)
+        else if (channel === 'chatWindow:fileRequested') fileRequests.push((payload[0] as { path: string }).path)
+      },
+    },
+    focusMainWindow: () => { mainFocused++; return mainOpen.value },
+    files: {
+      notDownloadedFolder: p => p.startsWith(`${ROOT}/未取得/`) ? '未取得' : null,
+      isFile: p => FILES.has(p),
+    },
     log: { warn: () => {} },
   })
   const call = (sender: number, channel: string, ...args: unknown[]) => handlers.get(channel)!({ sender: { id: sender } }, ...args)
@@ -49,7 +65,7 @@ function world() {
     options.onClosed()
     return null
   }
-  return { windows, call, open, focused, closed, changes, memberCloses }
+  return { windows, call, open, focused, closed, changes, memberCloses, fileRequests, mainOpen, mainFocused: () => mainFocused }
 }
 
 test('one consultation is never shown in two windows: opening it again focuses the window that has it', async () => {
@@ -145,4 +161,44 @@ test('what a page hands over is checked field by field', () => {
   assert.equal(parseWindowStatus({ state: 'working', line: 'x'.repeat(500) })?.line.length, 200)
   assert.equal(closeStopsTheAI({ state: 'needs-you', kind: 'approve', line: '' }), true)
   assert.equal(closeStopsTheAI({ state: 'idle', line: '' }), false)
+})
+
+test('a file link in a consultation\'s window opens in the main window\'s editor: main checks the path, then brings the main window up', async () => {
+  const w = world()
+  await w.call(MAIN, 'chatWindow:open', 's-1', context('s-1'))
+  const file = `${ROOT}/営業部/企画/骨子.md`
+  assert.deepEqual(await w.call(100, 'chatWindow:openFile', file), { ok: true })
+  assert.deepEqual(w.fileRequests, [file])
+  assert.equal(w.mainFocused(), 1)
+  // The main window comes up only when there is one to open it in.
+  w.mainOpen.value = false
+  assert.equal((await w.call(100, 'chatWindow:openFile', file) as { ok: boolean }).ok, false)
+  assert.deepEqual(w.fileRequests, [file])
+})
+
+test('only a consultation window asks, and only for a present file of its own company folder that is downloaded here', async () => {
+  const w = world()
+  await w.call(MAIN, 'chatWindow:open', 's-1', context('s-1'))
+  const refused = async (sender: number, filePath: unknown) => {
+    const answer = await w.call(sender, 'chatWindow:openFile', filePath) as { ok: boolean; error?: string }
+    assert.equal(answer.ok, false, String(filePath))
+    return answer.error ?? ''
+  }
+  const file = `${ROOT}/営業部/企画/骨子.md`
+  // The main window and unknown senders do not use this channel.
+  await refused(MAIN, file)
+  await refused(55, file)
+  // Outside every root, another company's folder (another registered root), '..' and junk.
+  await refused(100, '/etc/passwd')
+  await refused(100, '/companies/other/a.md')
+  await refused(100, `${ROOT}/営業部/../../other/a.md`)
+  await refused(100, ROOT)
+  await refused(100, 42)
+  await refused(100, `${ROOT}/${'a'.repeat(5000)}`)
+  // A folder not downloaded on this computer says so; a missing file (an unreadable private folder too) names nothing.
+  assert.match(await refused(100, `${ROOT}/未取得/a.md`), /ダウンロードしていない/)
+  const missing = await refused(100, `${ROOT}/秘密の企画/a.md`)
+  assert.doesNotMatch(missing, /秘密の企画/)
+  assert.deepEqual(w.fileRequests, [])
+  assert.equal(w.mainFocused(), 0)
 })

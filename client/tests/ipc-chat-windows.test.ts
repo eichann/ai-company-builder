@@ -5,7 +5,9 @@
 // closes them. The window registry's rules: chat-windows.test.ts.
 import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
-import { loadMain, type MainHarness } from './ipc-harness/main-harness.ts'
+import fs from 'node:fs'
+import path from 'node:path'
+import { loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { BrowserWindow, type FakeWebContents } from './ipc-harness/fake-electron.ts'
 import type { ChatSession } from '../shared/chat-history'
 
@@ -101,4 +103,32 @@ test('signing out closes every consultation window without asking', async () => 
   assert.equal(win.isDestroyed(), true)
   assert.equal(h.fake.messageBoxes.length, boxes)
   assert.deepEqual(await h.invoke('chatWindow:list'), [])
+})
+
+test('a file link in a consultation window opens in the main window: checked by main (own company folder, real location, on disk), then the main window comes up', async () => {
+  const win = await openWindow('session-file')
+  const page: FakeWebContents = win.webContents
+  const other = h.companyDir('other-company')
+  await h.invoke('fs:registerAllowedRoot', other)
+  writeFiles(root, { '営業部/企画/骨子.md': '# 骨子' })
+  writeFiles(other, { 'a.md': 'x' })
+  fs.symlinkSync(path.join(other, 'a.md'), path.join(root, 'link.md'))
+  const file = `${root}/営業部/企画/骨子.md`
+  const main = BrowserWindow.all[0]
+  const focusedBefore = main.focused
+  const requested = () => h.renderer().sentOn('chatWindow:fileRequested').map(([request]) => (request as { path: string }).path)
+
+  assert.deepEqual(await h.invokeAs(page, 'chatWindow:openFile', file), { ok: true })
+  assert.deepEqual(requested(), [file])
+  assert.equal(main.focused, focusedBefore + 1)
+  // The consultation windows never hear it: only the main window has the editor.
+  assert.equal(page.sentOn('chatWindow:fileRequested').length, 0)
+
+  for (const refused of [`${other}/a.md`, `${root}/link.md`, `${root}/ない.md`, `${root}/営業部`, '/etc/hosts']) {
+    assert.equal((await h.invokeAs<{ ok: boolean }>(page, 'chatWindow:openFile', refused)).ok, false, refused)
+  }
+  // Only a consultation window uses this channel.
+  assert.equal((await h.invoke<{ ok: boolean }>('chatWindow:openFile', file)).ok, false)
+  assert.deepEqual(requested(), [file])
+  win.close()
 })

@@ -112,3 +112,23 @@ export function closeStopsTheAI(status: ChatWindowStatus | undefined): boolean {
 
 export const CLOSE_WHILE_WORKING_MESSAGE = 'AIが作業中です。閉じると止まります'
 export const CLOSE_WHILE_WORKING_DETAIL = 'このウィンドウを閉じると、AIの作業はそこで止まります。ここまでのやり取りは保存され、相談はメインの画面の一覧に戻ります。'
+
+/**
+ * A file link in a consultation's window (a 「確認をお願いします」 file): the
+ * editor is in the main window, so the window's `file.open` handler asks main
+ * (`chatWindow:openFile`), which checks the path and hands it to the main
+ * window (`chatWindow:fileRequested`), where it runs as `file.open`.
+ */
+export type ChatWindowOpenFileResult = { ok: true } | { ok: false; error: string }
+
+/** `chatWindow:fileRequested`: the main window opens this file (main checked it). */
+export interface ChatWindowFileRequest { path: string }
+
+/** The refusals never name the path (a private folder's name stays out of the window's text). */
+export const OPEN_FILE_NOT_FOUND = 'このファイルが見つからないため、開けませんでした。'
+export const OPEN_FILE_OUTSIDE = 'この相談の会社フォルダの外にあるため、開けませんでした。'
+export const OPEN_FILE_NO_MAIN = 'メインの画面が開いていないため、開けませんでした。'
+/** A folder left out on this computer (a department folder of the company repository, never a private folder's). */
+export function openFileNotDownloaded(folder: string): string {
+  return `このフォルダ（${folder}）はダウンロードしていないため、開けません。設定の「ダウンロードするフォルダ」でダウンロードしてから開いてください。`
+}

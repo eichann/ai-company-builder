@@ -64,8 +64,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `tests/ipc-chat-windows.test.ts`.
 - **Sender checks.** Handlers that look at who sent them accept exactly the windows they are for,
   never "any window": `chatWindow:open` / `focus` / `list` / `closeAll` only the main window;
-  `chatWindow:getContext` / `reportStatus` only a registered consultation window, and only about
-  itself. Choice prompts and tool approvals go to the window that shows their conversation
+  `chatWindow:getContext` / `reportStatus` / `openFile` only a registered consultation window, and
+  only about itself (`openFile`: a file of its own company folder, then `chatWindow:fileRequested`
+  to the main window only). Choice prompts and tool approvals go to the window that shows their conversation
   (`webContentsForSession` in `main.ts`; the owner is that window's webContents, so only it may
   answer, as before). Conversation events (`chatHistory:changed`, `handoff:changed`) go to every
   window (`createBroadcastPort`). Tests: `tests/chat-windows.test.ts`,

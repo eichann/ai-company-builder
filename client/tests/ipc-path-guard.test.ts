@@ -19,13 +19,17 @@ import path from 'node:path'
 import { loadMain, writeFiles, type MainHarness } from './ipc-harness/main-harness.ts'
 import { staticMainChannels } from './ipc-harness/inventory.ts'
 import { AllowedRoots } from '../electron/allowed-roots.ts'
+import { BrowserWindow } from './ipc-harness/fake-electron.ts'
 
 /** A valid path inside the registered root (replaced per call). */
 const IN = Symbol('inside')
 const IN_FILE = Symbol('inside file')
 
-/** channel → its arguments (IN = a folder inside the root) and the indexes that are checked local paths. */
-const GUARDED: Record<string, { args: unknown[]; paths: number[] }> = {
+/**
+ * channel → its arguments (IN = a folder inside the root) and the indexes that are checked local paths.
+ * `fromChatWindow`: only a consultation's own window may call it (it is called from one opened in IN).
+ */
+const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow?: true }> = {
   'fs:readDirectory': { args: [IN], paths: [0] },
   'fs:readDirectoryTree': { args: [IN, 2], paths: [0] },
   'fs:readFile': { args: [IN_FILE], paths: [0] },
@@ -71,6 +75,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[] }> = {
   'skills:makePrivate': { args: [IN, 'x/.claude/skills/s/'], paths: [0] },
   'skills:toggleNurturing': { args: [IN_FILE, true], paths: [0] },
   'tools:start': { args: [IN, 'dev'], paths: [0] },
+  'chatWindow:openFile': { args: [IN_FILE], paths: [0], fromChatWindow: true },
 }
 
 /** Parameters named like a path that are not a local path to check (channel → parameter → why). */
@@ -151,22 +156,32 @@ test('each guarded parameter reaches AllowedRoots.validate, and an outside path 
   }
   try {
     const outside = path.join(h.base, 'outside-guard')
-    for (const [channel, { args, paths }] of Object.entries(GUARDED)) {
-      for (const index of paths) {
-        const probe = path.join(outside, channel.replace(/[^a-zA-Z]/g, '_'), String(index))
-        const callArgs = args.map((a, i) => i === index ? probe : a === IN ? root : a === IN_FILE ? path.join(root, 'a.txt') : a)
-        seen.length = 0
-        let result: unknown
-        try {
-          result = h.fake.handlers.has(channel) ? await h.invoke(channel, ...callArgs) : h.send(channel, ...callArgs)
-        } catch (error) {
-          result = error
+    const probeAll = async (fromChatWindow: boolean, call: (channel: string, args: unknown[]) => Promise<unknown>) => {
+      for (const [channel, { args, paths, ...options }] of Object.entries(GUARDED)) {
+        if (!!options.fromChatWindow !== fromChatWindow) continue
+        for (const index of paths) {
+          const probe = path.join(outside, channel.replace(/[^a-zA-Z]/g, '_'), String(index))
+          const callArgs = args.map((a, i) => i === index ? probe : a === IN ? root : a === IN_FILE ? path.join(root, 'a.txt') : a)
+          seen.length = 0
+          let result: unknown
+          try {
+            result = await call(channel, callArgs)
+          } catch (error) {
+            result = error
+          }
+          assert.ok(seen.includes(probe), `${channel}: argument ${index} never reached AllowedRoots.validate`)
+          const answer = (typeof result === 'object' && result !== null ? result : {}) as { success?: unknown; ok?: unknown }
+          const succeeded = result === true || answer.success === true || answer.ok === true
+          assert.ok(!succeeded, `${channel}: an outside path in argument ${index} succeeded: ${JSON.stringify(result)}`)
         }
-        assert.ok(seen.includes(probe), `${channel}: argument ${index} never reached AllowedRoots.validate`)
-        const succeeded = result === true || (typeof result === 'object' && result !== null && (result as { success?: unknown }).success === true)
-        assert.ok(!succeeded, `${channel}: an outside path in argument ${index} succeeded: ${JSON.stringify(result)}`)
       }
     }
+    await probeAll(false, async (channel, args) => h.fake.handlers.has(channel) ? await h.invoke(channel, ...args) : h.send(channel, ...args))
+    // Last: the main window opens a consultation window in the root, which then calls.
+    await h.startApp()
+    assert.deepEqual(await h.invoke('chatWindow:open', 'guard-session', { companyId: 'guard', companyName: 'Guard', rootPath: root }), { ok: true, focused: false })
+    const chatWindow = BrowserWindow.all.at(-1)!.webContents
+    await probeAll(true, (channel, args) => h.invokeAs(chatWindow, channel, ...args))
   } finally {
     AllowedRoots.prototype.validate = original
   }

@@ -60,7 +60,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 
 | Id | Class | Handler | Callers |
 |---|---|---|---|
-| `file.open` `{ path }` | view | `src/app/AppShell.tsx`: files tab, opens and keeps the tab (as Cmd+P's choice) | a review request's files (`ReviewRequestCard.tsx`; shown as links only while a handler exists, `useCommandAvailable`) |
+| `file.open` `{ path }` | view | `src/app/AppShell.tsx`: files tab, opens and keeps the tab (as Cmd+P's choice); in a consultation's own window, `useOpenFileInMainWindow` hands it to main, which runs it in the main window (`chat-ui-and-history.md`) | a review request's files (`ReviewRequestCard.tsx`; shown as links only while a handler exists, `useCommandAvailable`); a file link from a consultation's own window (`useFilesFromChatWindows`) |
 | `chat.newConsultation` `{ message?, pane? }` | outbound (the message starts the AI) | each chat pane (`ChatPanel.tsx`, target = its layout leaf id, today `chat`) | a skill's 実行 (`features/skills/hooks/useSkillsTab.ts`, message `/<skill folder> `) |
 | `chat.insertText` `{ text, pane? }` | local (replaces the composer's text, sends nothing) | each chat pane | none yet |
 | `chat.openInWindow` `{ sessionId, pane? }` | view (shows it in a window of its own; one shown elsewhere is focused) | each chat pane (`ChatPanel.tsx`, `useMoveToWindow`) | none yet; the row and header buttons call the same function directly (`chat-ui-and-history.md`) |

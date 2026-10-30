@@ -10,7 +10,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
 type Call = { name: string; args: unknown[] }
-type Layout = { calls: Call[]; addSkill(folder: string, name: string): void; emit(changes: Array<{ type: string; path: string }>): void }
+type Layout = { calls: Call[]; addSkill(folder: string, name: string): void; emit(changes: Array<{ type: string; path: string }>): void; fileFromChatWindow(path: string): void }
 declare global { interface Window { __acbLayout: Layout } }
 
 const ROOT = '/Users/demo/会社'
@@ -166,4 +166,13 @@ test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 検索 tab with th
   await expect(nameSearch).toHaveCount(0)
   await press({ key: 'f', metaKey: true, shiftKey: true })
   await expect(page.getByPlaceholder('文言を検索... (Enter)')).toBeFocused()
+})
+
+test('a file link clicked in a consultation\'s own window opens here, in the files tab, as a kept tab (file.open)', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  await leftTab(page, 'スキル').click()
+  const file = `${ROOT}/総務/備品.md`
+  await page.evaluate(path => window.__acbLayout.fileFromChatWindow(path), file)
+  await expect(page.getByTitle(file, { exact: true })).toBeVisible()
+  await expect(page.getByText('コピー用紙は総務へ。')).toBeVisible()
 })

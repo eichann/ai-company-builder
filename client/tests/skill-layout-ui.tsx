@@ -105,6 +105,8 @@ const COMMITS = [
 ]
 
 const fileChanges = emitter<Array<{ type: string; path: string }>>()
+// A file link clicked in a consultation's own window, after main checked it.
+const fileRequests = emitter<{ path: string }>()
 const calls: Array<{ name: string; args: unknown[] }> = []
 const record = (name: string, args: unknown[]) => { calls.push({ name, args }) }
 
@@ -134,6 +136,7 @@ const api: Partial<ElectronAPI> = {
   watchCompany: async () => ({ success: true }),
   unwatchCompany: async () => ({ success: true }),
   onFileChanges: fileChanges.subscribe,
+  onFileRequestedFromChatWindow: fileRequests.subscribe,
   onFileChange: () => () => {},
   listSkills: async (_root: string, folder: string, _id: string, _name?: string, options?: { force?: boolean }) => {
     record('listSkills', [folder, !!options?.force])
@@ -184,6 +187,8 @@ Object.assign(window, {
       fileChanges.emit([{ type: 'add', path: `${ROOT}/${folder ? `${folder}/` : ''}.claude/skills/${name}/SKILL.md` }])
     },
     emit(changes: Array<{ type: string; path: string }>) { fileChanges.emit(changes) },
+    /** A consultation's own window asked main to open this file here. */
+    fileFromChatWindow(path: string) { fileRequests.emit({ path }) },
   },
 })
 
