@@ -130,10 +130,21 @@ export interface BrokerDestinations {
   models: string[]
 }
 
-/** Who may use a company key: everyone, or departments, plus people added / removed by name. */
+/**
+ * Who may use a company key — two dials (owner decision 2026-10-30):
+ * ① **for which work**: `allDepartments` (全社), or only consultations whose
+ *    department is one of `departmentIds` — the department the chat is in,
+ *    which the token records;
+ * ② **by whom**: `everyone` (全員), or only the people in `addUserIds`; with
+ *    per-person exceptions: `addUserIds` may always use it, `removeUserIds`
+ *    never may (even under 全員).
+ * Reading a department's folder no longer decides anything (where everyone
+ * reads everything, that rule meant "everyone").
+ */
 export interface BrokerAudience {
-  everyone: boolean
+  allDepartments: boolean
   departmentIds: string[]
+  everyone: boolean
   addUserIds: string[]
   removeUserIds: string[]
 }
@@ -147,7 +158,7 @@ export interface BrokerCaps {
 }
 
 export const NO_BROKER_CAPS: BrokerCaps = { requestsPerDay: null, tokensPerDay: null, requestsPerMemberPerDay: null, tokensPerMemberPerDay: null }
-export const NOBODY: BrokerAudience = { everyone: false, departmentIds: [], addUserIds: [], removeUserIds: [] }
+export const NOBODY: BrokerAudience = { allDepartments: false, departmentIds: [], everyone: false, addUserIds: [], removeUserIds: [] }
 
 type Parsed<T> = { value: T } | { error: string }
 
@@ -186,9 +197,15 @@ export function parseOwnKeyHosts(input: unknown): Parsed<string[]> {
   return uniqueList(input, normalizeBrokerHost, BROKER_LIMITS.hosts, 'ownKeyHosts')
 }
 
+/**
+ * The audience an admin sent. Without `allDepartments` it is read in the K2
+ * form and converted by `upgradeBrokerAudience`. Not 全社 needs at least one
+ * department.
+ */
 export function parseBrokerAudience(input: unknown): Parsed<BrokerAudience> {
   if (!isObject(input)) return { error: 'audience must be an object' }
   if (typeof input.everyone !== 'boolean') return { error: 'audience.everyone must be true or false' }
+  if (input.allDepartments !== undefined && typeof input.allDepartments !== 'boolean') return { error: 'audience.allDepartments must be true or false' }
   const lists: Partial<Record<'departmentIds' | 'addUserIds' | 'removeUserIds', string[]>> = {}
   for (const key of ['departmentIds', 'addUserIds', 'removeUserIds'] as const) {
     const list = uniqueList(input[key], idEntry, BROKER_LIMITS.audienceEntries, `audience.${key}`)
@@ -198,7 +215,31 @@ export function parseBrokerAudience(input: unknown): Parsed<BrokerAudience> {
   const add = lists.addUserIds!
   const remove = lists.removeUserIds!
   if (add.some(id => remove.includes(id))) return { error: 'audience: a person cannot be both added and removed' }
-  return { value: { everyone: input.everyone, departmentIds: lists.departmentIds!, addUserIds: add, removeUserIds: remove } }
+  const audience = upgradeBrokerAudience({ ...input, departmentIds: lists.departmentIds, addUserIds: add, removeUserIds: remove })
+  if (!audience.allDepartments && audience.departmentIds.length === 0) return { error: 'audience: choose allDepartments or at least one department' }
+  return { value: audience }
+}
+
+/**
+ * A stored or sent audience in the two-dial form. A K2-era audience (no
+ * `allDepartments`) meant "everyone, or the members of these departments,
+ * ± people", and a department's members were those who could read its folder
+ * (everyone, by default). It becomes: departments listed → work in those
+ * departments, by everyone (± people); none → 全社, by everyone or by the
+ * added people. Anything unreadable is nobody.
+ */
+export function upgradeBrokerAudience(input: unknown): BrokerAudience {
+  if (!isObject(input)) return { ...NOBODY }
+  const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const departmentIds = ids(input.departmentIds)
+  const addUserIds = ids(input.addUserIds)
+  const removeUserIds = ids(input.removeUserIds)
+  const everyone = input.everyone === true
+  if (typeof input.allDepartments === 'boolean') {
+    return { allDepartments: input.allDepartments, departmentIds: input.allDepartments ? [] : departmentIds, everyone, addUserIds, removeUserIds }
+  }
+  if (!everyone && departmentIds.length > 0) return { allDepartments: false, departmentIds, everyone: true, addUserIds, removeUserIds }
+  return { allDepartments: true, departmentIds: [], everyone, addUserIds, removeUserIds }
 }
 
 export function parseBrokerCaps(input: unknown): Parsed<BrokerCaps> {
@@ -246,22 +287,30 @@ export function parseBrokerDisplayName(input: unknown): Parsed<string> {
 }
 
 /**
- * Why a member may use a company key, or null: removed by name → never;
- * added by name; everyone; a department they belong to. `inDepartment`
- * answers whether the member belongs to a department (the server decides
- * with the permission rules).
+ * Dial ② — why a member may use a company key, or null: removed by name →
+ * never; added by name; everyone.
  */
-export type BrokerEligibility = 'person' | 'everyone' | 'department'
-export function companyKeyEligibility(
-  audience: BrokerAudience,
-  userId: string,
-  inDepartment: (departmentId: string) => boolean,
-): BrokerEligibility | null {
+export type BrokerEligibility = 'person' | 'everyone'
+export function companyKeyEligibility(audience: BrokerAudience, userId: string): BrokerEligibility | null {
   if (audience.removeUserIds.includes(userId)) return null
   if (audience.addUserIds.includes(userId)) return 'person'
   if (audience.everyone) return 'everyone'
-  if (audience.departmentIds.some(inDepartment)) return 'department'
   return null
+}
+
+/**
+ * Dial ① — may the key be used for work in this department? `departmentId`
+ * is the consultation's department (null: none, or a folder the company
+ * does not know as a department) — then only a 全社 key applies.
+ */
+export function companyKeyCoversDepartment(audience: BrokerAudience, departmentId: string | null): boolean {
+  if (audience.allDepartments) return true
+  return departmentId !== null && audience.departmentIds.includes(departmentId)
+}
+
+/** Both dials: may `userId` use the key for a consultation in `departmentId`? */
+export function companyKeyUsable(audience: BrokerAudience, userId: string, departmentId: string | null): boolean {
+  return companyKeyEligibility(audience, userId) !== null && companyKeyCoversDepartment(audience, departmentId)
 }
 
 /** Which kind of key a request uses under `rule`, given what exists for the member; null = none. */

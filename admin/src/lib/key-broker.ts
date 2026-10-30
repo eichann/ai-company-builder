@@ -6,6 +6,7 @@ import {
   normalizeBrokerHost,
   normalizeBrokerModel,
   normalizeBrokerPathPrefix,
+  upgradeBrokerAudience,
   type BrokerAudience,
   type BrokerCaps,
   type BrokerKeyRule,
@@ -84,12 +85,20 @@ export interface Names {
   department: (departmentId: string) => string
 }
 
-/** 「営業部・開発部 ＋ 田中 − 鈴木」, or 「全員」. */
+/** Dial ①: 「全社」 or 「営業部・開発部」. */
+export function describeWork(a: BrokerAudience, names: Names): string {
+  return a.allDepartments ? '全社' : a.departmentIds.map(names.department).join('・') || '（部署の指定なし）'
+}
+
+/** Dial ②: 「全員 − 鈴木」, 「田中、佐藤」. */
+export function describePeople(a: BrokerAudience, names: Names): string {
+  if (a.everyone) return a.removeUserIds.length ? `全員 − ${a.removeUserIds.map(names.member).join('、')}` : '全員'
+  return a.addUserIds.map(names.member).join('、') || 'だれもいない'
+}
+
+/** Both dials in one line (the history; entries from before the dials are converted by the caller). */
 export function describeAudience(a: BrokerAudience, names: Names): string {
-  const base = a.everyone ? '全員' : a.departmentIds.length ? a.departmentIds.map(names.department).join('・') : '部署の指定なし'
-  const add = a.addUserIds.length ? ` ＋ ${a.addUserIds.map(names.member).join('、')}` : ''
-  const remove = a.removeUserIds.length ? ` − ${a.removeUserIds.map(names.member).join('、')}` : ''
-  return `${base}${add}${remove}`
+  return `${describeWork(a, names)}の仕事で、${describePeople(a, names)}`
 }
 
 export function describeCaps(c: BrokerCaps): string {
@@ -104,7 +113,7 @@ function fieldLines(name: string, before: Partial<BrokerKeySnapshot>, after: Par
   if ('displayName' in after) lines.push(`${name}: 名前 ${before.displayName} → ${after.displayName}`)
   if ('status' in after && after.status && before.status) lines.push(`${name}: ${STATUS_LABELS[before.status]} → ${STATUS_LABELS[after.status]}`)
   if ('destinations' in after && after.destinations) lines.push(`${name}: 送り先 → ${after.destinations.hosts.join('、')}`)
-  if ('audience' in after && after.audience) lines.push(`${name}: 使える人 → ${describeAudience(after.audience, names)}`)
+  if ('audience' in after && after.audience) lines.push(`${name}: 使える人 → ${describeAudience(upgradeBrokerAudience(after.audience), names)}`)
   if ('caps' in after && after.caps) lines.push(`${name}: 上限 → ${describeCaps(after.caps)}`)
   if ('allowPrivateContent' in after) lines.push(`${name}: 非公開の内容を送ってよい ${before.allowPrivateContent ? 'はい' : 'いいえ'} → ${after.allowPrivateContent ? 'はい' : 'いいえ'}`)
   return lines

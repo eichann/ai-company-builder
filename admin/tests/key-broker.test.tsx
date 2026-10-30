@@ -1,7 +1,8 @@
 // 「API キー」 (the key broker's admin page): who sees it, that a key's value is
 // sent once and never shown, that editing never sends a value, that a
-// destination which is not an exact host cannot be saved, and what the page
-// says when the server has no key-encryption key.
+// destination which is not an exact host cannot be saved, that the two dials
+// (which departments' work, which people) reach the request as chosen, and
+// what the page says when the server has no key-encryption key.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -38,11 +39,11 @@ const view: BrokerView = {
 const stored: BrokerKeySummary = {
   id: 'k1', scope: 'company', ownerUserId: null, ownerName: null, service: 'gemini', displayName: '営業用 Gemini', last4: FAKE.slice(-4),
   destinations: { hosts: ['generativelanguage.googleapis.com'], pathPrefixes: [], models: [] },
-  audience: { everyone: false, departmentIds: ['d_sales'], addUserIds: [], removeUserIds: [] },
+  audience: { allDepartments: false, departmentIds: ['d_sales'], everyone: false, addUserIds: ['u_owner'], removeUserIds: [] },
   caps: { requestsPerDay: null, tokensPerDay: null, requestsPerMemberPerDay: null, tokensPerMemberPerDay: null },
   allowPrivateContent: false, status: 'active', createdAt: '2026-10-30T00:00:00.000Z', createdBy: 'u_owner',
   updatedAt: '2026-10-30T00:00:00.000Z', updatedBy: 'u_owner', secretUpdatedAt: '2026-10-30T00:00:00.000Z',
-  usableBy: [{ userId: 'u_owner', name: '佐藤 花子', email: 'sato@example.com', via: 'department' }],
+  usableBy: [{ userId: 'u_owner', name: '佐藤 花子', email: 'sato@example.com', via: 'person' }],
 }
 
 type Reply = { status?: number; body: unknown }
@@ -84,7 +85,11 @@ describe('API キー', () => {
     const secret = within(dialog).getByLabelText('キー')
     expect(secret).toHaveAttribute('type', 'password')
     await userEvent.type(secret, FAKE)
+    await userEvent.click(within(dialog).getByRole('radio', { name: '選んだ部署だけ' }))
+    // No department chosen yet: nothing to save.
+    expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
     await userEvent.click(within(dialog).getByRole('checkbox', { name: '営業部' }))
+    await userEvent.click(within(dialog).getByRole('radio', { name: '指定した人だけ' }))
     await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '田中 太郎の扱い' }), 'add')
     await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
@@ -93,7 +98,7 @@ describe('API キー', () => {
       displayName: '営業用 Gemini',
       secret: FAKE,
       destinations: { hosts: ['generativelanguage.googleapis.com'], pathPrefixes: [], models: [] },
-      audience: { everyone: false, departmentIds: ['d_sales'], addUserIds: ['u_member'], removeUserIds: [] },
+      audience: { allDepartments: false, departmentIds: ['d_sales'], everyone: false, addUserIds: ['u_member'], removeUserIds: [] },
     })
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
     expect(await screen.findByText(`…${FAKE.slice(-4)}`)).toBeInTheDocument()
@@ -110,12 +115,15 @@ describe('API キー', () => {
     await userEvent.click(await screen.findByRole('button', { name: '設定を変更' }))
     const dialog = await screen.findByRole('dialog')
     expect(within(dialog).queryByLabelText('キー')).not.toBeInTheDocument()
-    await userEvent.click(within(dialog).getByRole('checkbox', { name: '全員' }))
+    await userEvent.click(within(dialog).getByRole('radio', { name: '全員' }))
+    await userEvent.selectOptions(within(dialog).getByRole('combobox', { name: '田中 太郎の扱い' }), 'remove')
+    await userEvent.click(within(dialog).getByRole('radio', { name: '全社' }))
     await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
     const body = calls.find((c) => c.method === 'PATCH')!.body as Record<string, unknown>
     expect(body).not.toHaveProperty('secret')
-    expect(body.audience).toMatchObject({ everyone: true })
+    // 全員 keeps only removals; 全社 drops the departments.
+    expect(body.audience).toEqual({ allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: ['u_member'] })
   })
 
   it('a destination that is not one exact host cannot be saved', async () => {

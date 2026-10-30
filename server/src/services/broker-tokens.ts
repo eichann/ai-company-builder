@@ -15,14 +15,13 @@ import {
   BROKER_TOKEN_PREFIX,
   BROKER_TOKEN_TTL_MINUTES,
   NO_BROKER_CAPS,
-  NOBODY,
   builtinBrokerService,
   chooseBrokerKeySource,
   clampBrokerTokenTtl,
-  companyKeyEligibility,
+  companyKeyUsable,
   isValidBrokerServiceName,
   looksLikeBrokerToken,
-  type BrokerAudience,
+  upgradeBrokerAudience,
   type BrokerCaps,
   type BrokerDestinations,
   type BrokerKeyScope,
@@ -86,14 +85,15 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
 
   /**
    * The key a request for `service` uses for this member now, under the
-   * service's rule: an active company key they may use, or their own active
-   * key (when members may have own keys and its hosts are still allowed).
+   * service's rule: an active company key they may use for work in the
+   * consultation's department (both dials), or their own active key (when
+   * members may have own keys and its hosts are still allowed).
    */
-  function resolveKey(companyId: string, userId: string, role: string, service: string, rows: BrokerKeyRow[] = brokerKeys.list(companyId)): BrokerKeyRow | null {
+  function resolveKey(companyId: string, userId: string, department: string | null, service: string, rows: BrokerKeyRow[] = brokerKeys.list(companyId)): BrokerKeyRow | null {
     const setting = keyBroker.serviceSetting(companyId, service)
-    const inDepartment = keyBroker.departmentMembership(companyId)(userId, role)
+    const departmentId = keyBroker.departmentIdOfFolder(companyId, department)
     const company = rows.find(r => r.scope === 'company' && r.service === service && r.status === 'active'
-      && companyKeyEligibility(parseJson<BrokerAudience>(r.audience, NOBODY), userId, inDepartment) !== null) ?? null
+      && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId)) ?? null
     const own = keyBroker.memberKeysAllowed(companyId)
       ? rows.find(r => r.scope === 'user' && r.ownerUserId === userId && r.service === service && r.status === 'active'
         && parseJson<BrokerDestinations>(r.destinations, { hosts: [], pathPrefixes: [], models: [] }).hosts.every(h => setting.ownKeyHosts.includes(h))) ?? null
@@ -123,6 +123,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
         return ok({ enabled: false, token: null, tokenId: null, expiresAt: null, services: [], unavailable: [] })
       }
 
+      const folder = typeof department === 'string' ? department.normalize('NFC') : null
       const rows = brokerKeys.list(member.companyId)
       const known = new Set([...rows.map(r => r.service), ...keyBroker.knownServices(member.companyId)])
       const requested = body.services !== undefined
@@ -132,7 +133,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       const unavailable: Array<{ service: string; reason: BrokerUnavailableReason }> = []
       for (const service of requested) {
         if (!known.has(service) && !builtinBrokerService(service)) { unavailable.push({ service, reason: 'unknown-service' }); continue }
-        const key = resolveKey(member.companyId, member.userId, member.role, service, rows)
+        const key = resolveKey(member.companyId, member.userId, folder, service, rows)
         if (key) granted.push({ service, source: key.scope as BrokerKeyScope })
         else unavailable.push({ service, reason: 'no-key' })
       }
@@ -156,7 +157,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
         userId: member.userId,
         tokenHash: tokenDigest.digest(token),
         services: JSON.stringify(granted.map(g => g.service)),
-        department: typeof department === 'string' ? department.normalize('NFC') : null,
+        department: folder,
         conversationId,
         createdAt: now,
         expiresAt,
@@ -192,7 +193,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       const role = memberships.roleOf(row.companyId, row.userId)
       if (role === null) return { ok: false, reason: 'not-member' }
       if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted' }
-      const key = resolveKey(row.companyId, row.userId, role, service)
+      const key = resolveKey(row.companyId, row.userId, row.department, service)
       if (!key) return { ok: false, reason: 'no-key' }
       return {
         ok: true,

@@ -33,7 +33,8 @@ import {
   STATUS_LABELS,
   brokerChangeLines,
   checkBrokerSecret,
-  describeAudience,
+  describePeople,
+  describeWork,
   describeCaps,
   hostsOf,
   invalidHosts,
@@ -304,8 +305,10 @@ function KeyRow({
         )}
         {k.scope === 'company' && (
           <>
+            <dt>使える仕事</dt>
+            <dd>{describeWork(k.audience, names)}</dd>
             <dt>使える人</dt>
-            <dd>{describeAudience(k.audience, names)}</dd>
+            <dd>{describePeople(k.audience, names)}</dd>
             <dt>上限</dt>
             <dd>{describeCaps(k.caps)}</dd>
             <dt>非公開の内容</dt>

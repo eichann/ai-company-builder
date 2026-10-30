@@ -5,8 +5,10 @@
  * - No plaintext key ever leaves the vault: not in any answer (success or
  *   error), not in any log line, not in any table — only its last 4.
  * - Only owners/admins manage keys; strangers learn nothing.
- * - Who can use a company key: everyone / departments (members who can read
- *   its folder) + people added, − people removed.
+ * - Who can use a company key: two dials — ① for which work (全社 / these
+ *   departments) and ② by whom (全員 / listed people) ± per-person
+ *   exceptions. Reading a department's folder decides nothing; an audience
+ *   in the K2 form is converted.
  * - Every change is recorded; replacing a key changes the value the relay
  *   gets; a disabled or deleted key is marked so.
  * - Without a KEK nothing can be registered (503 BROKER_OFF), the rest works.
@@ -73,7 +75,7 @@ const gemini = (over: Record<string, unknown> = {}) => ({
   service: 'gemini',
   displayName: '営業用 Gemini',
   secret: FAKE,
-  audience: { everyone: false, departmentIds: ['kb-d-sales'], addUserIds: [], removeUserIds: [] },
+  audience: { allDepartments: false, departmentIds: ['kb-d-sales'], everyone: true, addUserIds: [], removeUserIds: [] },
   caps: { requestsPerDay: 1000 },
   ...over,
 })
@@ -149,22 +151,41 @@ describe('API keys (key broker admin)', () => {
       caps: { requestsPerDay: 1000, tokensPerDay: null, requestsPerMemberPerDay: null, tokensPerMemberPerDay: null },
       allowPrivateContent: false,
     })
-    // 営業部 = whoever can read its folder: kb-sales, the owner and the admin — not kb-dev.
-    expect(key.usableBy.map((u: Json) => u.userId).sort()).toEqual(['kb-admin', 'kb-owner', 'kb-sales'])
+    // Dial ② 全員: every member — reading 営業部's folder (only kb-sales may) no longer decides who.
+    expect(key.usableBy.map((u: Json) => u.userId).sort()).toEqual(['kb-admin', 'kb-dev', 'kb-owner', 'kb-sales'])
+    expect(key.audience).toEqual({ allDepartments: false, departmentIds: ['kb-d-sales'], everyone: true, addUserIds: [], removeUserIds: [] })
     expect(r.json.data.history[0]).toMatchObject({ changedBy: 'kb-owner', keyId: key.id, change: { action: 'create', key: { last4: FAKE.slice(-4) } } })
     expect(await services.brokerVault.reveal(CO, key.id)).toBe(FAKE)
   })
 
-  it('people added and removed by name override the departments', async () => {
+  it('dial ②: listed people only, or 全員 minus the people removed by name', async () => {
     const id = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys[0].id
-    const r = await call('kb-admin', 'PATCH', `${BASE}/broker/keys/${id}`, {
-      audience: { everyone: false, departmentIds: ['kb-d-sales'], addUserIds: ['kb-dev'], removeUserIds: ['kb-sales'] },
+    let r = await call('kb-admin', 'PATCH', `${BASE}/broker/keys/${id}`, {
+      audience: { allDepartments: false, departmentIds: ['kb-d-sales'], everyone: false, addUserIds: ['kb-dev'], removeUserIds: [] },
     })
     expect(r.status).toBe(200)
-    const users = r.json.data.keys[0].usableBy.map((u: Json) => [u.userId, u.via])
-    expect(users).toContainEqual(['kb-dev', 'person'])
-    expect(users.map((u: string[]) => u[0])).not.toContain('kb-sales')
+    expect(r.json.data.keys[0].usableBy.map((u: Json) => [u.userId, u.via])).toEqual([['kb-dev', 'person']])
+    r = await call('kb-admin', 'PATCH', `${BASE}/broker/keys/${id}`, {
+      audience: { allDepartments: false, departmentIds: ['kb-d-sales'], everyone: true, addUserIds: [], removeUserIds: ['kb-sales'] },
+    })
+    const users = r.json.data.keys[0].usableBy.map((u: Json) => u.userId)
+    expect(users).toContain('kb-dev')
+    expect(users).not.toContain('kb-sales')
     expect(r.json.data.history[0].change).toMatchObject({ action: 'update', before: { audience: { removeUserIds: [] } }, after: { audience: { removeUserIds: ['kb-sales'] } } })
+  })
+
+  it('an audience in the K2 form (no allDepartments) is read as work in its departments, by everyone', async () => {
+    const id = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys[0].id
+    const r = await call('kb-admin', 'PATCH', `${BASE}/broker/keys/${id}`, {
+      audience: { everyone: false, departmentIds: ['kb-d-sales'], addUserIds: [], removeUserIds: ['kb-sales'] },
+    })
+    expect(r.status).toBe(200)
+    expect(r.json.data.keys[0].audience).toEqual({ allDepartments: false, departmentIds: ['kb-d-sales'], everyone: true, addUserIds: [], removeUserIds: ['kb-sales'] })
+    // A row stored in the K2 form reads the same way.
+    db.prepare('UPDATE broker_keys SET audience = ? WHERE id = ?').run(JSON.stringify({ everyone: false, departmentIds: [], addUserIds: ['kb-dev'], removeUserIds: [] }), id)
+    const view = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data
+    expect(view.keys[0].audience).toEqual({ allDepartments: true, departmentIds: [], everyone: false, addUserIds: ['kb-dev'], removeUserIds: [] })
+    expect(view.keys[0].usableBy.map((u: Json) => u.userId)).toEqual(['kb-dev'])
   })
 
   it('refuses destinations that are not exact hosts, strangers in the audience, bad values', async () => {
@@ -174,9 +195,11 @@ describe('API keys (key broker admin)', () => {
       gemini({ destinations: { hosts: ['localhost'] } }),
       gemini({ service: 'custom-crm' }), // no built-in hosts: destinations required
       gemini({ destinations: { hosts: ['api.example.com'], pathPrefixes: ['/../x'] } }),
-      gemini({ audience: { everyone: false, departmentIds: ['nope'], addUserIds: [], removeUserIds: [] } }),
-      gemini({ audience: { everyone: false, departmentIds: [], addUserIds: ['kb-stranger'], removeUserIds: [] } }),
-      gemini({ audience: { everyone: true, departmentIds: [], addUserIds: ['kb-dev'], removeUserIds: ['kb-dev'] } }),
+      gemini({ audience: { allDepartments: false, departmentIds: ['nope'], everyone: true, addUserIds: [], removeUserIds: [] } }),
+      gemini({ audience: { allDepartments: false, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] } }), // no work at all
+      gemini({ audience: { allDepartments: 'yes', departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] } }),
+      gemini({ audience: { allDepartments: true, departmentIds: [], everyone: false, addUserIds: ['kb-stranger'], removeUserIds: [] } }),
+      gemini({ audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: ['kb-dev'], removeUserIds: ['kb-dev'] } }),
       gemini({ caps: { requestsPerDay: 0 } }),
       gemini({ service: 'Gemini' }),
       gemini({ secret: 'short' }),
