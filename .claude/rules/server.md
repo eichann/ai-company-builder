@@ -44,7 +44,7 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
 - `SecretCipher` (`ports/secret-cipher.ts`): the key broker's envelope encryption (a data key
   per secret, wrapped by the KEK; `KeyWrapper` is where a KMS plugs in), bound to a context;
   `adapters/local-secret-cipher.ts` with the KEK file from `adapters/kek-file.ts`. Used only by
-  `services/broker-vault.ts` (`key-broker.md`).
+  `services/broker-vault.ts` (`key-broker.md`); no route reaches its `reveal`.
 - Sign-in and role checks are tested by calling the routes: `tests/security/auth-guards.test.ts`
   finds every handler of every file in `src/routes` at run time and expects 401 without a
   session (public endpoints are listed there with their reason); the 403 checks live in
@@ -84,6 +84,10 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
                               GET /me/agent-policy                            agent-sandbox.ts
                                                                 (「AI の囲い」: agent-sandbox.md)
+                              GET /broker, POST /broker/keys,
+                              PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
+                              PUT /broker/services/:service, PUT /broker/settings  key-broker.ts
+                                                                (「API キー」: key-broker.md)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts
