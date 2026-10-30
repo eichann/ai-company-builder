@@ -1,6 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
 import type { DepartmentConfig, Skill, SkillTool } from '../../../types'
-import { useAppStore } from '../../../stores/appStore'
+import { runCommand } from '../../../shared/commands/commands'
 import type { NewSkillInput } from '../model'
 import { useSkillActions } from './useSkillActions'
 
@@ -16,11 +16,10 @@ interface Options {
 
 /**
  * The スキル tab's state: the chosen skill, the new-skill and copy dialogs, a
- * skill's tool shown full screen, and running a skill (its slash command goes
- * into the chat input).
+ * skill's tool shown full screen, and running a skill (a new consultation
+ * that sends its slash command).
  */
 export function useSkillsTab({ rootPath, departments, departmentFolder, departmentId, skills, refreshSkills }: Options) {
-  const setPendingChatInput = useAppStore((s) => s.setPendingChatInput)
   const [selectedSkillId, setSelectedSkillId] = useState<string | null>(null)
   const [wizardOpen, setWizardOpen] = useState(false)
   const [copyOpen, setCopyOpen] = useState(false)
@@ -35,8 +34,8 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
     const skill = skills.find((s) => s.id === id)
     // The skill's folder name is its slash command.
     const folderName = skill?.skillPath?.split('/').pop()
-    if (folderName) setPendingChatInput(`/${folderName} `, true)
-  }, [skills, setPendingChatInput])
+    if (folderName) void runCommand('chat.newConsultation', { message: `/${folderName} ` })
+  }, [skills])
 
   const create = useCallback(async (data: NewSkillInput) => {
     const id = await createSkill(data)

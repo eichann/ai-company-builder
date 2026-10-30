@@ -145,7 +145,8 @@ D7–D9, confirmed 2026-10-30).
   differs from "drag 60 px past the max hides the chat", it stores percentages, and it released
   weekly with API breaks across majors). Today the tree has the screen's look only; multiple chat
   panes come later and need the chat's "one panel on screen" assumptions (`isActive`,
-  `pendingChatInput`, window-wide shortcuts) removed first. Changing the saved shape means a new
+  window-wide shortcuts) removed first (chat input from other features already names its pane:
+  the `chat.*` commands, `commands.md`). Changing the saved shape means a new
   `version` and reading the old one (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`).
 - **Extension UI stays isolated.** Extension screens will run in an isolated frame and get only
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into

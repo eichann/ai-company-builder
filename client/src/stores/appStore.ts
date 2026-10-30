@@ -75,11 +75,6 @@ interface AppState {
   aiModel: AIModel
   aiEffort: AIEffort
 
-  // Pending text to insert into chat input
-  pendingChatInput: string | null
-  // When true, start a new chat session before inserting pendingChatInput
-  pendingChatNewSession: boolean
-
   // Chat: render assistant messages as decorated markdown (vs raw text)
   chatMarkdownRender: boolean
 
@@ -91,9 +86,6 @@ interface AppState {
   setCurrentCompany: (company: Company | null) => void
   addCompany: (company: Company) => void
 
-  // Chat input actions
-  setPendingChatInput: (text: string | null, newSession?: boolean) => void
-
   // Chat markdown rendering toggle
   setChatMarkdownRender: (enabled: boolean) => void
 }
@@ -104,8 +96,6 @@ export const useAppStore = create<AppState>((set, get) => ({
   aiModel: getInitialModel(),
   aiEffort: getInitialEffort(),
   currentCompany: null,
-  pendingChatInput: null,
-  pendingChatNewSession: false,
   chatMarkdownRender: getInitialChatMarkdownRender(),
 
   toggleTheme: () => {
@@ -148,8 +138,6 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
     set({ currentCompany: company })
   },
-
-  setPendingChatInput: (text, newSession = false) => set({ pendingChatInput: text, pendingChatNewSession: newSession }),
 
   setChatMarkdownRender: (enabled) => {
     localStorage.setItem('chatMarkdownRender', String(enabled))

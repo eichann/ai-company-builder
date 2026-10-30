@@ -5,7 +5,7 @@ import { useAuthStore } from '../../stores/authStore'
 import { OpenConsultationContext } from './consultation-context'
 import { type SlashCommandItem } from './SlashCommandDropdown'
 import { ChatSidebar } from './ChatSidebar'
-import { ChatPanelChat } from './ChatConversation'
+import { ChatPanelChat, type ChatInputRequest } from './ChatConversation'
 import { AuthSettings } from './ChatAuthSettings'
 import { ChatAuthChecking, ChatSetupNeeded } from './ChatAuthGate'
 import { AgentLogNotice } from './AgentLogNotice'
@@ -13,6 +13,7 @@ import { useChatServer } from './hooks/useChatServer'
 import { useChatTabs } from './hooks/useChatTabs'
 import { useAgentAuth } from './hooks/useAgentAuth'
 import { getChatSession } from '../../features/chat/api'
+import { commandArea, useCommandHandler } from '../../shared/commands/commands'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
 // active one visible), the conversation list, and the agent settings overlay.
@@ -22,6 +23,8 @@ interface ChatPanelProps {
   departmentPath?: string  // Working directory for AI (company root path)
   activeDepartment?: { name: string; folder: string }  // Currently selected department (undefined = company-wide)
   slashCommands?: SlashCommandItem[]
+  /** This pane's id (the layout tree's leaf): what chat commands name in `pane`. */
+  paneId?: string
 }
 
 export function ChatPanel(props: ChatPanelProps) {
@@ -31,7 +34,7 @@ export function ChatPanel(props: ChatPanelProps) {
   return <CompanyChatPanel key={`${userId}:${companyId}`} userId={userId} {...props} />
 }
 
-function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands }: ChatPanelProps & { userId: string }) {
+function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashCommands, paneId = 'chat' }: ChatPanelProps & { userId: string }) {
   const { t } = useTranslation()
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
@@ -52,6 +55,12 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   }, [isChecking, isReady, chatServer])
 
   const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id, t('chat.newChat'))
+
+  // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
+  const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
+  useCommandHandler('chat.newConsultation', ({ message }) => setInputRequest({ kind: 'newConsultation', message }), { target: paneId })
+  useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
+  const consumeInputRequest = useCallback(() => setInputRequest(null), [])
 
   const openSettings = useCallback(() => setShowSettings(true), [])
   const toggleSidebar = useCallback(() => setSidebarOpen(open => !open), [])
@@ -99,7 +108,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
         else window.alert("この相談は削除されたか、参照できません。")
       }).catch(() => window.alert("相談を開けませんでした。"))
     }}>
-    <div ref={panelRef} className="h-full relative flex min-w-0">
+    <div ref={panelRef} className="h-full relative flex min-w-0" {...commandArea('chat', paneId)}>
       {sidebarOpen && <>
         {compact && <button aria-label="AIへの相談の一覧を閉じる" className="absolute inset-0 bg-black/20 z-20" onClick={() => setSidebarOpen(false)} />}
         <div className={compact ? 'absolute inset-y-0 left-0 z-30 shadow-xl' : 'shrink-0'}>
@@ -138,6 +147,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
                 initialSessionId={tab.sessionId}
                 onSessionIdChange={tabCallbacks(tab.id).sessionId}
                 onLeftBlank={tabCallbacks(tab.id).close}
+                inputRequest={tab.id === activeTabId ? inputRequest : null}
+                onInputRequestConsumed={consumeInputRequest}
               />
             </div>
           </div>

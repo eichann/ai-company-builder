@@ -58,21 +58,22 @@ export interface ChatPanelChatProps {
   onSessionIdChange?: (sessionId: string | null) => void
   /** Closes this tab: the member left it for another conversation with nothing typed (useDiscardBlankOnLeave). */
   onLeftBlank?: () => void
+  /** A chat command waiting for this tab (only the active tab gets one); consumed once acted on. */
+  inputRequest?: ChatInputRequest | null
+  onInputRequestConsumed?: () => void
 }
+
+/** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
+export type ChatInputRequest =
+  | { kind: 'newConsultation'; message?: string }
+  | { kind: 'insertText'; text: string }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
-  const pendingChatInput = useAppStore((state) => state.pendingChatInput)
-  const pendingChatNewSession = useAppStore((state) => state.pendingChatNewSession)
-  const setPendingChatInput = useAppStore((state) => state.setPendingChatInput)
   const models = useAgentModelSelection(authMode, codexStatus)
-
-  const handlePendingTextConsumed = useCallback(() => {
-    setPendingChatInput(null, false)
-  }, [setPendingChatInput])
 
   // Which conversation this tab shows (refs read by the transport, onFinish
   // and the interaction lookup below — so this comes first).
@@ -271,17 +272,15 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
     requestChanges: () => chatInputApiRef.current?.focus(),
   }), [pendingReviewId, handleSend, chatInputApiRef])
 
-  // Start new chat and auto-send when skill execution is triggered (only active tab)
+  // chat.newConsultation (e.g. a skill's 実行): a new conversation, then its message is sent. Waits for the history.
   useEffect(() => {
-    if (!isActive || !historyReadyRef.current) return
-    if (pendingChatNewSession && pendingChatInput) {
-      const text = pendingChatInput
-      setPendingChatInput(null, false)
-      startNewChat().then(started => {
-        if (started) void handleSend(text)
-      })
-    }
-  }, [pendingChatNewSession, pendingChatInput, isRestoringSession])
+    if (!isActive || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
+    const message = inputRequest.message
+    onInputRequestConsumed?.()
+    startNewChat().then(started => {
+      if (started && message) void handleSend(message)
+    })
+  }, [inputRequest, isRestoringSession])
 
   // Edit message handler: resend from the edited message onward (sendTurn),
   // keeping the edited message's file references.
@@ -382,8 +381,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
             hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
-            pendingText={pendingChatNewSession ? null : (isActive ? pendingChatInput : null)}
-            onPendingTextConsumed={handlePendingTextConsumed}
+            pendingText={isActive && inputRequest?.kind === 'insertText' ? inputRequest.text : null}
+            onPendingTextConsumed={onInputRequestConsumed}
             slashCommands={slashCommands}
             apiRef={chatInputApiRef}
             suggestion={offeredSuggestion}

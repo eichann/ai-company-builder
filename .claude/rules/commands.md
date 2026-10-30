@@ -58,6 +58,13 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | Id | Class | Handler | Callers |
 |---|---|---|---|
 | `file.open` `{ path }` | view | `src/app/AppShell.tsx`: files tab, opens and keeps the tab (as Cmd+P's choice) | a review request's files (`ReviewRequestCard.tsx`; shown as links only while a handler exists, `useCommandAvailable`) |
+| `chat.newConsultation` `{ message?, pane? }` | outbound (the message starts the AI) | each chat pane (`ChatPanel.tsx`, target = its layout leaf id, today `chat`) | a skill's 実行 (`features/skills/hooks/useSkillsTab.ts`, message `/<skill folder> `) |
+| `chat.insertText` `{ text, pane? }` | local (replaces the composer's text, sends nothing) | each chat pane | none yet |
+
+A chat pane keeps the request until its active tab can act (history read): the tab then starts a
+new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`
+`inputRequest`). Only the active tab of the named pane receives it; the panel root is the `chat`
+focus area (`commandArea('chat', paneId)`). UI test: `tests/ui/chat-panel.spec.ts` 「chat commands」.
 
 ## Handlers and shortcuts
 
