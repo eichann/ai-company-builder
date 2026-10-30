@@ -41,6 +41,7 @@ import { registerToolsIpc } from './features/tools/ipc'
 import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { registerPrivateFoldersIpc } from './features/private-folders/ipc'
+import { registerBrokerIpc } from './features/broker/ipc'
 import { createPrivateFolderGuards } from './features/private-folders/guards'
 import { registerGitHistoryIpc } from './features/git-history/ipc'
 import { createAppGit } from './services/app-git'
@@ -289,6 +290,9 @@ registerSyncIpc(ipc, {
 const privateFoldersApi = createPrivateFoldersApi({ baseUrl: getServerApiUrl, cookies: session.cookies })
 const privateFolderGuards = createPrivateFolderGuards({ api: privateFoldersApi, pathChecker: gitSync.pathChecker })
 registerPrivateFoldersIpc(ipc, { paths: allowedRoots, api: privateFoldersApi, guards: privateFolderGuards, activity: syncActivity })
+
+// The member's own API keys (「自分の鍵」, features/broker; key-broker.md).
+registerBrokerIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {

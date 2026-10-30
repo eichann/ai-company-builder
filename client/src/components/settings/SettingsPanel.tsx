@@ -4,9 +4,10 @@ import { PromptSuggestionSettings } from './PromptSuggestionSettings'
 import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { AutoSyncSettings } from '../../features/settings/components/AutoSyncSettings'
+import { OwnKeysSection } from '../../features/settings/components/OwnKeysSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../lib/agentLogNotice'
@@ -29,7 +30,7 @@ interface SettingsPanelProps {
   initialTab?: TabType
 }
 
-export type TabType = 'sync' | 'autosync' | 'gitignore' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
+export type TabType = 'sync' | 'autosync' | 'gitignore' | 'ownkeys' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -43,7 +44,8 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
   {
     group: 'AI と連携',
     items: [
-      { id: 'apikeys', label: 'APIキー', icon: <Key size={16} /> },
+      { id: 'ownkeys', label: '自分の鍵', icon: <LockKey size={16} /> },
+      { id: 'apikeys', label: 'APIキー（このPC）', icon: <Key size={16} /> },
       { id: 'advanced', label: '環境変数（.env）', icon: <Code size={16} /> },
       { id: 'aienv', label: 'AIに渡す環境変数', icon: <ShieldCheck size={16} /> },
     ],
@@ -326,6 +328,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                 <Card className="p-5"><VoiceShortcutSettings /></Card>
                 <Card className="p-5"><VoicePromptSettings /></Card>
               </div>
+            ) : activeTab === 'ownkeys' ? (
+              <OwnKeysSection companyId={currentCompany.id} />
             ) : activeTab === 'aienv' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />

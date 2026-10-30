@@ -31,6 +31,7 @@ import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
+import type { OwnKeysResult } from './broker-keys'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -416,6 +417,10 @@ export interface IpcInvokeChannels {
   'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
   'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
   'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
+  // The member's own API keys (「自分の鍵」): the value goes in once, never comes back.
+  'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
+  'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
+  'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -656,6 +661,10 @@ export interface ElectronAPI {
   getMyPrivateFolders: Invoke<'privateFolders:mine'>
   getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
   createPrivateFolder: Invoke<'privateFolders:create'>
+  // The member's own API keys (「自分の鍵」): last 4 only ever comes back.
+  listOwnBrokerKeys: Invoke<'brokerKeys:list'>
+  saveOwnBrokerKey: Invoke<'brokerKeys:save'>
+  deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

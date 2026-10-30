@@ -21,6 +21,13 @@ paths:
   - "admin/tests/key-broker.test.tsx"
   - "server/src/services/broker-tokens.ts"
   - "server/tests/integration/broker-tokens.test.ts"
+  - "server/src/services/own-broker-keys.ts"
+  - "server/tests/integration/own-broker-keys.test.ts"
+  - "client/shared/broker-keys.ts"
+  - "client/electron/features/broker/**"
+  - "client/src/features/settings/own-keys*"
+  - "client/src/features/settings/hooks/useOwnKeys.ts"
+  - "client/src/features/settings/components/OwnKeysSection.tsx"
 ---
 
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
@@ -36,7 +43,8 @@ only; a tool or company system → company key only); members may register own k
 on) for destinations the admin allowed. Stage 1 has **no KMS** and **no issuer-side IP
 restriction**; it covers every API call the app makes (chat skills, tools started from the
 app). Order: K1 vault → K2 admin page → K3 tokens → K4 relay (Gemini → OpenAI → Anthropic)
-→ K5 log and stop → K6 app → K9 generic relay → K7 migration → K8 own keys.
+→ K5 log and stop → K6 app → K9 generic relay → K7 migration → K8 own keys (K8 was moved
+up by the owner, 2026-10-30: right after the two dials).
 
 ## Vault (K1)
 
@@ -141,6 +149,34 @@ disable and delete still work). Audience departments must be the company's, peop
   rule, or removing the member stops the token at once. The grant names the key, its
   destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
 
+## A member's own keys (K8, 「自分の鍵」)
+
+`services/own-broker-keys.ts`, routes in `routes/key-broker.ts` (any member, the desktop app):
+`GET /me/broker-keys` → `MyBrokerKeys` (`shared/types/key-broker.ts`): `enabled`,
+`memberKeysAllowed`, per service (built-in, configured, or with a key) its category and rule,
+`ownKey` (`{ allowed, hosts }` or why not: `member-keys-off` / `company-only` / `no-destinations`),
+the active company keys the member may use (dial ②) with their work (dial ①, department names),
+and the member's own key (last 4, hosts, status — never the value).
+`PUT /me/broker-keys/:service { secret, displayName? }` registers or replaces (one own key per
+member and service; `secret` through `checkBrokerSecret` and `vault.seal` like an admin's);
+check order: service name → body → service known (404) → own keys allowed (403
+`{ code: 'OWN_KEY_NOT_ALLOWED', reason }`) → KEK (503 `BROKER_OFF`). Allowed = the members'
+switch on, a rule other than 「会社の鍵だけ」, and at least one `ownKeyHosts`; the key's
+destinations are those hosts (refreshed on replace). An admin's stop survives a replace (only an
+admin resumes it). `DELETE /me/broker-keys/:service` always works (also with the switch off).
+Every change writes `broker_history` with the member as `changedBy`; the admin page lists the
+keys and the history. Tokens use the key through `resolveKey` (above).
+
+App: Settings → 「自分の鍵」 (`client/src/features/settings/components/OwnKeysSection.tsx`,
+`hooks/useOwnKeys.ts`, `own-keys.ts` = which key the AI will use, following
+`chooseBrokerKeySource`; ports `OwnKeyReads` / `OwnKeyOutbound` in `features/settings/api.ts`).
+Main: `electron/features/broker/ipc.ts` (`brokerKeys:list|save|delete`; the session cookie stays
+in main). The pasted value crosses renderer → main → server once (PUT body), in a password field;
+**main's answers are the server's view or a sentence built from status codes only**
+(`client/shared/broker-keys.ts` `ownKeysErrorText`), so no server text that might quote the
+request reaches the renderer, and nothing is logged but the method and status. The page that
+used to be 「APIキー」 (the company folder's `.env` on this computer) is now 「APIキー（このPC）」.
+
 ## Tests
 
 `tests/unit/local-secret-cipher.test.ts` (envelope, context, tampering, re-wrap keeps the
@@ -153,7 +189,13 @@ form's conversion; history;
 503 without a KEK), `tests/integration/broker-tokens.test.ts` (tokens only for usable
 services, both dials (another department or none → no key; a dial change stops a live token),
 rule / own key / switch, every validation refusal, TTL bounds, the per-member bound,
-**no token or key value in any log line or table**), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
+**no token or key value in any log line or table**), `tests/integration/own-broker-keys.test.ts`
+(own keys only where allowed (switch, rule, destinations), one per service, an admin's stop
+survives a replace, deleting only one's own, a token then uses it, 503 without a KEK, **no key
+value in any answer, error, log line or table**), `client/tests/ipc-app.test.ts`
+(「brokerKeys:save … never hands it back to the renderer」: refusals and offline answers carry
+no part of the key even when the server quotes it; nothing logged), `client/src/features/settings/own-keys.test.ts`
+(the page never promises a key the server would not use), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
 sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
 off message). Tests use
 obviously fake values (`fake-test-key-NOT-REAL…`) and KEKs made in temp dirs.

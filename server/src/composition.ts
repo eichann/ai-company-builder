@@ -42,6 +42,7 @@ import { createAgentSandboxService } from './services/agent-sandbox'
 import { createBrokerVault } from './services/broker-vault'
 import { createKeyBrokerService } from './services/key-broker'
 import { createBrokerTokenService } from './services/broker-tokens'
+import { createOwnBrokerKeyService } from './services/own-broker-keys'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -104,6 +105,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     brokerTokens: createBrokerTokenService({
       ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
     }),
+    ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,

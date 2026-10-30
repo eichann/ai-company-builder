@@ -15,6 +15,9 @@
  *   POST   /me/broker-tokens              { conversationId, services?, department?, ttlMinutes? }
  *                                         → a short-lived token for the chat's child processes
  *   DELETE /me/broker-tokens/:tokenId     revoke one's own token
+ *   GET    /me/broker-keys                 「自分の鍵」: services, company keys one may use, one's own keys (last 4)
+ *   PUT    /me/broker-keys/:service        { secret, displayName? } register / replace one's own key (K8)
+ *   DELETE /me/broker-keys/:service        delete one's own key
  *
  * No answer ever carries a key's value. Non-members get 404 like every
  * company route. Registering / replacing answers 503 BROKER_OFF without a
@@ -29,7 +32,7 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 
 export const keyBrokerRoute = new Hono()
-const { access, keyBroker, brokerTokens } = services
+const { access, keyBroker, brokerTokens, ownBrokerKeys } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -103,4 +106,22 @@ keyBrokerRoute.delete('/me/broker-tokens/:tokenId', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, brokerTokens.revoke(member, c.req.param('tokenId')))
+})
+
+keyBrokerRoute.get('/me/broker-keys', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, ownBrokerKeys.list(member))
+})
+
+keyBrokerRoute.put('/me/broker-keys/:service', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await ownBrokerKeys.save(member, c.req.param('service'), await jsonBody(c)))
+})
+
+keyBrokerRoute.delete('/me/broker-keys/:service', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, ownBrokerKeys.remove(member, c.req.param('service')))
 })

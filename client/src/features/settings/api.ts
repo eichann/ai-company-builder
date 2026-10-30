@@ -23,6 +23,10 @@ export type AgentEnvWrites = ElectronPort<'setAgentEnvPassthrough'>
 export type FolderSizeReads = ElectronPort<'folderSizes'>
 /** Reading on this computer for the download choice: unsaved work in folders, download progress. */
 export type DownloadChoiceReads = ElectronPort<'sparseUncommittedChanges' | 'onSparseProgress'>
+/** Asking the company server which services the member may use and their own keys (last 4 only). */
+export type OwnKeyReads = ElectronPort<'listOwnBrokerKeys'>
+/** Sending one's own API key to the company server (once; it never comes back), or deleting it there. */
+export type OwnKeyOutbound = ElectronPort<'saveOwnBrokerKey' | 'deleteOwnBrokerKey'>
 
 export function getGitBinaryStatus(reads: GitBinaryReads = window.electronAPI) {
   return reads.gitBinaryStatus()
@@ -71,4 +75,17 @@ export function onDownloadProgress(
   reads: DownloadChoiceReads = window.electronAPI,
 ) {
   return reads.onSparseProgress(callback)
+}
+
+export function listOwnKeys(companyId: string, reads: OwnKeyReads = window.electronAPI) {
+  return reads.listOwnBrokerKeys(companyId)
+}
+
+/** Registers or replaces the member's own key for `service`; the value is not kept here. */
+export function saveOwnKey(companyId: string, service: string, secret: string, displayName: string | undefined, outbound: OwnKeyOutbound = window.electronAPI) {
+  return outbound.saveOwnBrokerKey(companyId, service, secret, displayName)
+}
+
+export function deleteOwnKey(companyId: string, service: string, outbound: OwnKeyOutbound = window.electronAPI) {
+  return outbound.deleteOwnBrokerKey(companyId, service)
 }
