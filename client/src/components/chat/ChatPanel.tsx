@@ -13,6 +13,7 @@ import { AgentLogNotice } from './AgentLogNotice'
 import { useChatServer } from './hooks/useChatServer'
 import { useChatTabs } from './hooks/useChatTabs'
 import { useAgentAuth } from './hooks/useAgentAuth'
+import { getChatSession } from '../../features/chat/api'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
 // active one visible), the conversation list, and the agent settings overlay.
@@ -96,7 +97,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   return (
     <OpenConsultationContext.Provider value={id => {
       if (!currentCompany) return
-      void window.electronAPI.getChatSession(currentCompany.id, id).then(session => {
+      void getChatSession(currentCompany.id, id).then(session => {
         if (session) openSession(id)
         else window.alert("この相談は削除されたか、参照できません。")
       }).catch(() => window.alert("相談を開けませんでした。"))

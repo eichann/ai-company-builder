@@ -1,6 +1,7 @@
 ---
 paths:
   - "client/src/components/chat/**"
+  - "client/src/features/chat/**"
   - "client/electron/chat-history-store.ts"
   - "client/electron/features/chat-history/**"
   - "client/electron/ui-stream-limits.ts"
@@ -103,6 +104,10 @@ one place an added agent brings its own controls; everything else asks the regis
   (body search in main, NFKC), `getSession`; save/flush return a `ChatSaveReceipt` (status +
   revision), not the conversation. `chatHistory:changed` carries `{ sessionId, kind: save |
   patch | delete }`; a tab re-reads only a `patch` of its own conversation.
+- The renderer reaches the history and the hand-off memo only through
+  `src/features/chat/api.ts`: `ChatHistoryReads` / `ChatHistoryWrites`, `HandoffReads`, and
+  `HandoffOutbound` (`handoff:update` / `handoff:complete` start or schedule the member's AI
+  on the conversation, so they are not a plain write).
 - A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
