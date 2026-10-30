@@ -8,7 +8,7 @@ import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
-import { AGENT_LOG_NOTICE_TEXT } from '../../lib/agentLogNotice'
+import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../lib/agentLogNotice'
 import { getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../../features/settings/api'
 import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from '../../features/settings/model'
 import type { EnvVarStatus } from '../../../shared/env-file'
@@ -291,7 +291,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
           {/* Always shown, whatever section is open (owner decision: members are told). */}
           <p className="mt-auto flex shrink-0 gap-1.5 border-t border-zinc-200 px-2.5 pt-3 text-[11px] leading-relaxed text-zinc-500 dark:border-white/[0.06] dark:text-zinc-400">
             <Info size={13} className="mt-0.5 shrink-0" aria-hidden />
-            <span>{AGENT_LOG_NOTICE_TEXT}</span>
+            <span><span className="block">{AGENT_LOG_NOTICE_TEXT}</span><span className="mt-1 block">{SANDBOX_NOTICE_TEXT}</span></span>
           </p>
         </nav>
 

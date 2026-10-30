@@ -57,7 +57,8 @@ clock + fake fetch).
 - **Telling the member** (owner decision): `src/lib/agentLogNotice.ts` holds the sentence; the
   chat shows `AgentLogNotice` once per account on this PC (localStorage
   `acb.agentLogNoticeSeen:<userId>`; non-modal `role="dialog"`, OK focused, Esc closes), and
-  the settings nav always shows the sentence. Spec `client/tests/ui/agent-log-notice.spec.ts`
+  the settings nav always shows the sentence (with the AI sandbox's `SANDBOX_NOTICE_TEXT` under it,
+  `agent-sandbox.md`). Spec `client/tests/ui/agent-log-notice.spec.ts`
   (`chat-header-ui.html?notice=1`; the other previews mark it seen).
 
 ## Contract
