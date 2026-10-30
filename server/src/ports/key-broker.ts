@@ -109,3 +109,37 @@ export interface BrokerKeyRepository {
   /** Newest first. */
   history(companyId: string, limit: number): BrokerChangeRow[]
 }
+
+export interface BrokerTokenRow {
+  id: string
+  companyId: string
+  userId: string
+  /** sha256 of the token value (hex); the value itself is never stored. */
+  tokenHash: string
+  /** JSON array of service names the token may be used for. */
+  services: string
+  /** The conversation's active department folder, when the app sent one. */
+  department: string | null
+  conversationId: string
+  createdAt: string
+  expiresAt: string
+  revokedAt: string | null
+}
+
+export interface BrokerTokenRepository {
+  insert(row: BrokerTokenRow): void
+  findByHash(tokenHash: string): BrokerTokenRow | null
+  /** Revoke one of the member's tokens; false when there is no such live token. */
+  revoke(companyId: string, userId: string, tokenId: string, at: string): boolean
+  /** Revoke every live token of a member (or of the company when userId is null). */
+  revokeAll(companyId: string, userId: string | null, at: string): number
+  /** Tokens of the member not yet expired or revoked. */
+  countLive(companyId: string, userId: string, now: string): number
+  /** Delete tokens that expired before `before`. */
+  pruneExpired(before: string): number
+}
+
+/** One-way digest of a token value (sha256 hex): what the token table stores and looks up. */
+export interface TokenDigest {
+  digest(token: string): string
+}

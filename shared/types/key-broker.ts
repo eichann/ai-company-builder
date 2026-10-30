@@ -134,6 +134,40 @@ export interface BrokerKeyCreate {
   allowPrivateContent?: boolean
 }
 
+// ---------------------------------------------------------------------------
+// Short-lived tokens (K3): POST …/me/broker-tokens (the desktop app, member session)
+// ---------------------------------------------------------------------------
+
+/** Why a requested service is not in the token. */
+export type BrokerUnavailableReason = 'no-key' | 'unknown-service'
+
+/** POST …/me/broker-tokens */
+export interface BrokerTokenRequest {
+  /** The chat conversation the token is for (recorded with every use). */
+  conversationId: string
+  /** Services to include; omitted = every service the member can use now. */
+  services?: string[]
+  /** The conversation's active department folder, when there is one. */
+  department?: string | null
+  /** Shorter than the server's lifetime if wanted (15 minutes at least). */
+  ttlMinutes?: number
+}
+
+export interface BrokerTokenIssued {
+  /** false: the server has no key-encryption key; no token. */
+  enabled: boolean
+  /**
+   * `acb_tok_…` — only for the chat's child processes (never logged, never
+   * shown); null when no requested service is usable.
+   */
+  token: string | null
+  tokenId: string | null
+  expiresAt: string | null
+  /** The services the token may be used for, and which kind of key each uses now. */
+  services: Array<{ service: string; source: BrokerKeyScope }>
+  unavailable: Array<{ service: string; reason: BrokerUnavailableReason }>
+}
+
 /** PATCH …/broker/keys/:keyId (an own key: status only). */
 export interface BrokerKeyUpdate {
   displayName?: string

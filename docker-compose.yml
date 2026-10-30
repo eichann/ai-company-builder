@@ -25,6 +25,8 @@ services:
       # Optional: without BROKER_KEK_HOST_FILE in .env the mount is /dev/null
       # and the broker stays off (the server runs as before).
       - BROKER_KEK_FILE=/run/secrets/broker-kek
+      # Lifetime of the key broker's tokens in minutes (15-60, default 30).
+      - BROKER_TOKEN_TTL_MINUTES=${BROKER_TOKEN_TTL_MINUTES:-30}
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").

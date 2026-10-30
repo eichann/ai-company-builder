@@ -361,6 +361,7 @@ When team members open the invitation link, they can register a new account and 
 | `DATA_DIR` | No | `./data` | Directory for SQLite databases. |
 | `REPOS_DIR` | No | `${DATA_DIR}/repos` | Directory for Git bare repositories. |
 | `BROKER_KEK_HOST_FILE` | No | — | Host path of the key broker's key-encryption key (mounted read-only into the api container as `BROKER_KEK_FILE`). Unset = the key broker ("API キー") is off. |
+| `BROKER_TOKEN_TTL_MINUTES` | No | `30` | Lifetime (15–60 minutes) of the key broker's short-lived tokens. |
 
 ### Key broker (optional)
 

@@ -86,7 +86,9 @@ GET  /api/config                                  setup state (no auth)
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service, PUT /broker/settings  key-broker.ts
+                              PUT /broker/services/:service, PUT /broker/settings,
+                              POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId
+                                                                              key-broker.ts
                                                                 (「API キー」: key-broker.md)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
