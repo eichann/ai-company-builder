@@ -9,8 +9,14 @@ import { agentCan, isAgentId, type AgentId } from '../../shared/agents/registry'
 
 /** Writes the memo with the agent that held the conversation (agents/registry.ts writeAgentHandoff). */
 type Writer = (provider: AgentId, request: Pick<HandoffRequest, 'input' | 'signal' | 'save'>) => Promise<HandoffMetrics>
-interface Options { idleMs: number; cooldownMs: number; turns: number; characters: number; jobsPerHour: number; now: () => number }
-const defaults: Options = { idleMs: 20_000, cooldownMs: 600_000, turns: 16, characters: 12_000, jobsPerHour: 4, now: Date.now }
+interface Options {
+  idleMs: number; cooldownMs: number; turns: number; characters: number; jobsPerHour: number; now: () => number
+  /** False while an administrator has stopped the AI (agent-stop.md): no memo is written, the job waits quietly. */
+  aiAllowed: () => boolean
+}
+const defaults: Options = { idleMs: 20_000, cooldownMs: 600_000, turns: 16, characters: 12_000, jobsPerHour: 4, now: Date.now, aiAllowed: () => true }
+/** How long a job waits before checking again whether the AI is still stopped. */
+const STOPPED_RETRY_MS = 60_000
 const keyOf = (company: string, id: string) => JSON.stringify([company, id])
 const atEnd = (a: Cursor, b: Cursor) => a.index === b.index && a.offset === b.offset
 
@@ -156,6 +162,7 @@ export class HandoffService {
         if (!session) { this.invalidate(company, id); continue }
         const state = this.store.read(company, id)
         if (!state.checkpoint || !agentCan(state.checkpoint.provider, 'handoff') || (state.memo && atEnd(state.memo.cursor, state.checkpoint.cursor))) { this.queue.delete(key); this.changed(company, id); continue }
+        if (!this.options.aiAllowed()) { wait = Math.min(wait, STOPPED_RETRY_MS); continue }
         const attempts = this.budget()
         const eligible = Math.max((state.lastAttempt ?? -Infinity) + this.options.cooldownMs, attempts.length >= this.options.jobsPerHour ? attempts[0] + 3600_000 : 0)
         if (eligible > this.options.now()) { wait = Math.min(wait, eligible - this.options.now()); continue }

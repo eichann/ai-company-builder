@@ -12,6 +12,7 @@ import type { AgentProgressEvent } from '../../shared/agent-progress'
 import type { AgentToolEvent } from '../../shared/agent-events'
 import type { ResolvedSandbox } from '../../shared/agents/sandbox-policy'
 import type { AgentSandboxUnavailable } from '../../../shared/core/agent-sandbox'
+import type { ToolStopCheck } from '../../shared/agent-stop'
 
 /**
  * The member's AI sandbox for one turn (「AI の囲い」, agent-sandbox.md): the
@@ -89,6 +90,12 @@ export interface AgentConnection {
     toolEventContext?: ToolEventContextInput
     /** The AI sandbox for this turn; absent = off. */
     sandbox?: TurnSandbox
+    /**
+     * The emergency stop (agent-stop.md), asked live before each tool call:
+     * a stopped kind (or the whole AI) → the call is refused and logged
+     * `stopped`. Absent = nothing is stopped.
+     */
+    toolStop?: ToolStopCheck
     /**
      * Variables added to this turn's AI process (the key broker's token and
      * relay URLs, client/shared/broker-env.ts); agent-env.ts still filters them.

@@ -208,8 +208,13 @@ test('turn abort: stops matching turns with a reason the stream ends with, and c
   assert.equal(a.signal.reason, 'stopped-by-admin')
   assert.equal(b.signal.aborted, false)
   assert.deepEqual(cancelled, ['conv-a'])
+  // The reply says who stopped it (kept with the conversation), then the transient part and the abort.
+  const notice = chunks[1] as { type: string; id: string }
   assert.deepEqual(chunks, [
     { type: 'start' },
+    { type: 'text-start', id: notice.id },
+    { type: 'text-delta', id: notice.id, delta: '\n\n※ 管理者が停止しました。' },
+    { type: 'text-end', id: notice.id },
     { type: TURN_STOPPED_PART_TYPE, data: { reason: 'stopped-by-admin' }, transient: true },
     { type: 'abort', reason: 'stopped-by-admin' },
   ])

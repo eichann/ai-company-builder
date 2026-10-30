@@ -12,6 +12,8 @@ export interface VoiceFormatterConfig {
   env: Record<string, string>
   /** Fixed part + the member's 「整え方の指示」, read when recording starts. Default: the built-in prompt. */
   systemPrompt?: string
+  /** False while an administrator has stopped the AI (agent-stop.md): the transcript is used as is, no AI is asked. */
+  aiAllowed?: () => boolean
 }
 /** Runs one agent's one-shot job (agents/registry.ts); tests inject their own. */
 export type VoiceAdapter = (agent: AgentId, request: OneShotTextRequest) => Promise<string>
@@ -21,6 +23,10 @@ export function createVoiceFormatter(config: VoiceFormatterConfig, adapter: Voic
   const snapshot = { ...config, env: { ...config.env }, systemPrompt: config.systemPrompt ?? VOICE_SYSTEM_PROMPT }
   return async (text, signal) => {
     if (signal.aborted) throw new Error('キャンセルしました')
+    if (snapshot.aiAllowed && !snapshot.aiAllowed()) {
+      console.info('[voice] the AI is stopped by an administrator; using the transcript as is')
+      return text
+    }
     const controller = new AbortController()
     const cancel = () => controller.abort()
     signal.addEventListener('abort', cancel, { once: true })

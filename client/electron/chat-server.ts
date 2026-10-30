@@ -32,6 +32,7 @@ import { RATE_LIMITS_PART_TYPE, type RateLimitSnapshot } from '../shared/rate-li
 import { AGENT_PROGRESS_PART_TYPE } from '../shared/agent-progress'
 import { createChatTurns } from './chat-turns'
 import { turnToolEvents } from './agents/tool-events'
+import type { ToolStopCheck } from '../shared/agent-stop'
 import type { ChatRequestOptions, GenerateTitleRequest, GenerateTitleResponse, PromptSuggestionResponse, RateLimitsResponse, SessionInfoResponse } from '../shared/chat-server-api'
 import crypto from 'crypto'
 import net from 'net'
@@ -75,6 +76,14 @@ export interface ChatServerConfig extends AgentHost {
   getBrokerEnv?: (request: { agent: AgentId; companyId: string; conversationId: string; department: string | null }) => Promise<Record<string, string>>
   /** Cancel a conversation's pending tool approvals and choice cards (a stopped turn). */
   cancelInteractions?: (appSessionId: string) => void
+  /**
+   * The emergency stop before a turn in this company (services/agent-stop.ts):
+   * `refused` = the AI is stopped (the turn is not started); `toolStopped`
+   * is asked live before each tool call. Unknown → nothing is stopped.
+   */
+  prepareAgentStop?: (companyId: string) => Promise<{ refused?: string; toolStopped: ToolStopCheck }>
+  /** False while an administrator has stopped the AI: titles are not generated (the renderer keeps its own). */
+  oneShotAiAllowed?: () => boolean
 }
 
 // ============================================================================
@@ -210,6 +219,9 @@ export async function startChatServer(config: ChatServerConfig) {
     if (!isAgentId(authMode)) return c.json({ error: '不明なAI接続方式です。' }, 400)
     const connection = createAgentConnection(authMode, config)
     const can = AGENTS[authMode].capabilities
+    // The emergency stop (agent-stop.md): a stopped AI never starts a turn.
+    const turnStop = companyId ? await Promise.resolve(config.prepareAgentStop?.(companyId)).catch(() => undefined) : undefined
+    if (turnStop?.refused) return c.json({ error: turnStop.refused, code: 'AI_STOPPED' }, 403)
 
     // Native agents own their system prompts; ACB supplies only workspace context.
     // API key mode: build full system prompt as before.
@@ -321,7 +333,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -343,8 +355,8 @@ export async function startChatServer(config: ChatServerConfig) {
     const tools = (() => {
       if (connection.ownsConversation) return undefined
       const toolEvents = turnToolEvents(config, authMode, modelRequest)
-      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents, turnEnv) : undefined
-      const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents) : undefined
+      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents, turnEnv, turnStop?.toolStopped) : undefined
+      const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents, turnStop?.toolStopped) : undefined
       if (!fsTools && !skillTools) return undefined
       return { ...fsTools, ...skillTools }
     })()
@@ -429,6 +441,8 @@ export async function startChatServer(config: ChatServerConfig) {
     function abortRelease() { release('failed') }
     config.onChatActivity?.(activityToken, true)
     running.signal.addEventListener('abort', abortRelease, { once: true })
+    // A stop that arrived while this turn was being prepared stops it now (every turn of the company is stopped).
+    if (turnStop?.toolStopped('other') === 'all') chatTurns.abort(info => info.companyId === companyId, 'stopped-by-admin')
     let result
     try { result = streamText({
       abortSignal: running.signal,
@@ -475,6 +489,8 @@ export async function startChatServer(config: ChatServerConfig) {
       return c.json({ error: 'No messages provided' }, 400)
     }
 
+    // The emergency stop: no AI call; the renderer treats an error as "no title".
+    if (config.oneShotAiAllowed && !config.oneShotAiAllowed()) return c.json({ error: 'stopped' } satisfies GenerateTitleResponse, 503)
     const requested = body.authMode || config.getAuthMode()
     // Anything the registry does not know gets the API connection, as it always did.
     const connection = createAgentConnection(isAgentId(requested) ? requested : 'api-key', config)

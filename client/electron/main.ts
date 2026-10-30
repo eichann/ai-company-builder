@@ -52,6 +52,8 @@ import { createCommitMessages } from './services/commit-messages'
 import { createAgentEventRecorder } from './services/agent-events'
 import { createAgentEventSender } from './services/agent-event-sender'
 import { createAgentPolicyStore } from './services/agent-policy-store'
+import { createAgentPushChannel } from './services/agent-push-channel'
+import { createAgentStop, type StoppableTurns } from './services/agent-stop'
 import { createSyncActivity } from './services/sync-activity'
 import os from 'node:os'
 
@@ -163,7 +165,7 @@ function createWindow() {
 // Chat server info (shared between app.whenReady and IPC handler)
 let chatServerInfo: { port: number; authToken: string } | null = null
 // Running chat turns (automatic sync waits while the AI works); set once the server started.
-let chatTurns: { runningCount(): number } | null = null
+let chatTurns: ({ runningCount(): number } & StoppableTurns) | null = null
 
 // local-file:// (images etc. from the company folder); the scheme must be
 // registered before app.whenReady().
@@ -249,12 +251,15 @@ registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: 
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
 const handoffStore = new HandoffStore(path.join(app.getPath('userData'), 'chat-handoffs'), localHistoryStore)
+// The emergency stop turns AI outside conversations off (hand-off memos, voice formatting, titles);
+// bound once the stop exists below — nothing runs AI before startup.
+let oneShotAiAllowed = (): boolean => true
 const handoffs = new HandoffService(localHistoryStore, handoffStore, async (provider, request) => {
   const cwd = path.join(app.getPath('userData'), 'handoff-worker')
   fs.mkdirSync(cwd, { recursive: true })
   const input = { ...request, cwd, env: shellEnv.env() }
   return writeAgentHandoff(provider, input, { getCli: claudeCli.path })
-}, (companyId, sessionId) => conversationWindows.send('handoff:changed', { companyId, sessionId }))
+}, (companyId, sessionId) => conversationWindows.send('handoff:changed', { companyId, sessionId }), { aiAllowed: () => oneShotAiAllowed() })
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
 // History writes are coalesced and asynchronous; whatever is still pending is written now.
@@ -285,7 +290,26 @@ const writeAccessStore = createWriteAccessStore({
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 // The member's AI policy per company (「AI の囲い」; M2's stop joins it), read at each chat turn.
-const agentPolicyStore = createAgentPolicyStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
+// The stop part is also kept on disk per account (the emergency stop survives a restart offline).
+const agentPolicyStore = createAgentPolicyStore({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  userId: session.userId,
+  dir: () => path.join(app.getPath('userData'), 'agent-policy'),
+})
+// The emergency stop (M2): the push channel's only effect is a policy refetch;
+// a received stop stops the company's running turns (services/agent-stop.ts).
+const agentPushChannel = createAgentPushChannel({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  refresh: (companyId, version) => {
+    if (version && agentPolicyStore.get(companyId)?.version === version) return
+    void agentPolicyStore.refresh(companyId)
+  },
+})
+app.on('before-quit', () => agentPushChannel.stopAll())
+const agentStop = createAgentStop({ policy: agentPolicyStore, watch: companyId => agentPushChannel.watch(companyId), turns: () => chatTurns })
+oneShotAiAllowed = () => agentStop.oneShotAiAllowed()
 // The key broker's short-lived tokens (memory only; key-broker.md K6).
 const brokerTokens = createBrokerTokenStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // Skills' web-app tools (features/tools): they get the key broker's variables like the chat.
@@ -311,6 +335,7 @@ registerAuthIpc(ipc, {
   onSignedOut: () => {
     writeAccessStore.clear()
     agentPolicyStore.clear()
+    agentPushChannel.stopAll()
     brokerTokens.clear()
     companyFilesApi.clear()
     agentEventSender.signedOut()
@@ -330,6 +355,7 @@ const commitMessageGenerator = createCommitMessages({
   claudeCli,
   shellEnv,
   cwd: () => path.join(app.getPath('userData'), 'commit-message'),
+  aiAllowed: () => agentStop.oneShotAiAllowed(),
 })
 const generateCommitMessage = commitMessageGenerator(createGit)
 
@@ -398,7 +424,7 @@ registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
 // declaration makes no-use-before-define (TDZ) hold by construction.
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
-  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }))
+  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }), () => agentStop.oneShotAiAllowed())
   serveLocalFiles(allowedRoots)
   // Start embedded Hono chat server
   try {
@@ -418,6 +444,7 @@ app.whenReady().then(async () => {
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents,
       agentPolicy: agentPolicyStore,
+      agentStop,
       serverUrl: getServerApiUrl,
       brokerTokens,
       requestInteraction: (request, appSessionId, signal) => {

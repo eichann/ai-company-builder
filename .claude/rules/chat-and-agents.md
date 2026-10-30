@@ -343,5 +343,7 @@ the server: `agent-events.md` ("Sending from the app").
   way. A main-process stop first pushes a transient `data-turn-stopped` part `{ reason }`
   (`stopped-by-admin` / `app-quit`), cancels the conversation's tool approvals
   (`ToolApprovals.cancel`) and choice cards (`AgentInteractions.cancelConversation`), then aborts
-  with the reason; the stream ends with an `abort` chunk carrying it (no error shown). Nothing
-  calls it in production yet.
+  with the reason; the stream ends with an `abort` chunk carrying it (no error shown). For
+  `stopped-by-admin` the reply first gets the text 「※ 管理者が停止しました。」. The emergency stop
+  calls it (`agent-stop.md`); agents also get the request's `toolStop` (a live check per tool
+  call, decision `stopped`).

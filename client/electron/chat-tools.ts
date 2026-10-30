@@ -7,7 +7,8 @@ import crypto from 'crypto'
 import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
 import { agentEnv } from './agents/agent-env'
 import { withoutBrokerEnv } from '../shared/broker-env'
-import type { GuardReason, ToolDecision, ToolEventTracker } from '../shared/agent-events'
+import { categorizeTool, type GuardReason, type ToolDecision, type ToolEventTracker } from '../shared/agent-events'
+import { AGENT_STOP_MESSAGES, type ToolStopCheck } from '../shared/agent-stop'
 
 // Approval callback type (optional, injected from chat-server)
 export type RequestApproval = (
@@ -37,11 +38,18 @@ function validatePath(filePath: string, workingDirectory: string): string {
  * (refusals are recorded at once), then `run` the work, which records how it
  * ended. Without a tracker it only runs.
  */
-function logCall(events: ToolEventTracker | undefined, tool: string, input: Record<string, unknown>, cwd?: string) {
+function logCall(events: ToolEventTracker | undefined, tool: string, input: Record<string, unknown>, cwd?: string, toolStop?: ToolStopCheck) {
   const call = { tool, input, cwd }
   let id: string | undefined
   return {
     decide(decision: ToolDecision, guardReason?: GuardReason) { id = events?.decide(id, call, decision, guardReason) },
+    /** The emergency stop (agent-stop.md): a stopped kind is refused and recorded as `stopped`. */
+    refuseIfStopped() {
+      const kind = toolStop?.(categorizeTool(tool))
+      if (!kind) return
+      id = events?.decide(id, call, 'stopped')
+      throw new Error(AGENT_STOP_MESSAGES.toolRefused(kind === 'all' ? null : kind))
+    },
     async run<T>(work: () => Promise<T>, failed?: (value: T) => boolean): Promise<T> {
       if (!id) id = events?.decide(undefined, call, 'auto-allowed')
       try {
@@ -101,7 +109,7 @@ const readSkillFileSchema = z.object({
   ),
 })
 
-export function createSkillTools(skillFolderPath: string, events?: ToolEventTracker) {
+export function createSkillTools(skillFolderPath: string, events?: ToolEventTracker, toolStop?: ToolStopCheck) {
   return {
     readSkillFile: tool({
       description:
@@ -109,7 +117,8 @@ export function createSkillTools(skillFolderPath: string, events?: ToolEventTrac
         'Path is relative to the skill folder root.',
       inputSchema: readSkillFileSchema,
       execute: async ({ path: filePath }) => {
-        const log = logCall(events, 'readSkillFile', { path: filePath }, skillFolderPath)
+        const log = logCall(events, 'readSkillFile', { path: filePath }, skillFolderPath, toolStop)
+        log.refuseIfStopped()
         return log.run(async () => {
           const absPath = validatePath(filePath, skillFolderPath)
           const content = await fs.readFile(absPath, 'utf-8')
@@ -120,14 +129,15 @@ export function createSkillTools(skillFolderPath: string, events?: ToolEventTrac
   }
 }
 
-export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard, events?: ToolEventTracker, turnEnv?: Record<string, string>) {
+export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard, events?: ToolEventTracker, turnEnv?: Record<string, string>, toolStop?: ToolStopCheck) {
   return {
     readFile: tool({
       description:
         'Read the contents of a file at the given path (relative to the working directory).',
       inputSchema: readFileSchema,
       execute: async ({ path: filePath }) => {
-        const log = logCall(events, 'readFile', { path: filePath })
+        const log = logCall(events, 'readFile', { path: filePath }, undefined, toolStop)
+        log.refuseIfStopped()
         return log.run(async () => {
           const absPath = validatePath(filePath, workingDirectory)
           const content = await fs.readFile(absPath, 'utf-8')
@@ -141,7 +151,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Write content to a file at the given path (relative to the working directory). Creates parent directories if needed.',
       inputSchema: writeFileSchema,
       execute: async ({ path: filePath, content }) => {
-        const log = logCall(events, 'writeFile', { path: filePath })
+        const log = logCall(events, 'writeFile', { path: filePath }, undefined, toolStop)
+        log.refuseIfStopped()
         // Read-only folder: refuse before asking the member to approve it.
         const guarded = writeGuard ? checkWritePath(writeGuard, validatePath(filePath, workingDirectory)) : undefined
         if (guarded?.deny) { log.decide('guard-denied', guarded.code); throw new Error(guarded.message) }
@@ -151,6 +162,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
           const result = await requestApproval('writeFile', { path: filePath }, crypto.randomUUID())
           log.decide(result.approved ? 'member-allowed' : 'member-denied')
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
+          // Stopped while the member was deciding.
+          log.refuseIfStopped()
         }
         return log.run(async () => {
           const absPath = validatePath(filePath, workingDirectory)
@@ -166,7 +179,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'List files and directories at the given path (relative to the working directory). Hidden files (starting with .) are excluded.',
       inputSchema: listDirectorySchema,
       execute: async ({ path: dirPath }) => {
-        const log = logCall(events, 'listDirectory', { path: dirPath })
+        const log = logCall(events, 'listDirectory', { path: dirPath }, undefined, toolStop)
+        log.refuseIfStopped()
         return log.run(async () => {
           const absPath = validatePath(dirPath, workingDirectory)
           const entries = await fs.readdir(absPath, { withFileTypes: true })
@@ -186,7 +200,8 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         'Execute a shell command in the working directory. Use for build, test, or inspection tasks. Dangerous commands are blocked.',
       inputSchema: executeCommandSchema,
       execute: async ({ command }) => {
-        const log = logCall(events, 'executeCommand', { command })
+        const log = logCall(events, 'executeCommand', { command }, undefined, toolStop)
+        log.refuseIfStopped()
         let guarded = decideToolWrite(writeGuard, 'Bash', { command }, workingDirectory)
         if (!guarded.deny) guarded = await decideReservedWrite(writeGuard, 'Bash', { command }, workingDirectory)
         if (guarded.deny) { log.decide('guard-denied', guarded.code); throw new Error(guarded.message) }
@@ -194,6 +209,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
           const result = await requestApproval('executeCommand', { command }, crypto.randomUUID())
           log.decide(result.approved ? 'member-allowed' : 'member-denied')
           if (!result.approved) throw new Error('ユーザーにより拒否されました')
+          log.refuseIfStopped()
         }
 
         // Block dangerous command patterns
