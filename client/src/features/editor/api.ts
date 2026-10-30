@@ -3,8 +3,8 @@
 // takes its port as the last parameter, defaulting to window.electronAPI.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 
-/** Reading an open file on this computer: its text, or its bytes (PDF). */
-export type EditorReads = ElectronPort<'readFile' | 'readFileBinary'>
+/** Reading an open file on this computer: its text, its bytes (PDF), whether it still exists. */
+export type EditorReads = ElectronPort<'readFile' | 'readFileBinary' | 'exists'>
 /**
  * Saving on this computer: the file, its folder when it was deleted, and the
  * disk version kept in the backups before overwriting a change made elsewhere.
@@ -14,6 +14,11 @@ export type EditorWrites = ElectronPort<'writeFile' | 'createDirectory' | 'backu
 /** The file's text, or null when it is gone. */
 export function readFile(filePath: string, reads: EditorReads = window.electronAPI) {
   return reads.readFile(filePath)
+}
+
+/** Whether a tab remembered from the last session can be reopened. */
+export function fileExists(filePath: string, reads: EditorReads = window.electronAPI) {
+  return reads.exists(filePath)
 }
 
 export function readFileBinary(filePath: string, reads: EditorReads = window.electronAPI) {

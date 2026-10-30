@@ -32,6 +32,12 @@ import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../l
 import { dragWidth, leftPanelDrag } from '../../lib/panelResize'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
 import { scanAffected, skillsScopesAffected } from '../../../shared/skills-refresh'
+import { unwatchCompany, watchCompany } from '../../shared/ipc/file-events'
+import { fileExists } from '../../features/editor/api'
+import { departmentFolderExists } from '../../features/workspace/api'
+import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../../features/skills/api'
+import { previewSync, revertChange, summarizeChanges, syncCompany } from '../../features/sync/api'
+import { signOut } from '../../features/auth/api'
 
 // Panel width constraints
 const MIN_LEFT_PANEL_WIDTH = 300
@@ -179,7 +185,7 @@ export function SkillCentricLayout() {
     let cancelled = false
     void (async () => {
       const checks = await Promise.all(
-        persisted.openFiles.map((p) => window.electronAPI.exists(p).catch(() => false))
+        persisted.openFiles.map((p) => fileExists(p).catch(() => false))
       )
       if (cancelled) return
       const allValid = checks.every(Boolean)
@@ -281,7 +287,7 @@ export function SkillCentricLayout() {
       rememberFolderExists(deptPathForCheck, exists)
       if (!cancelled) setFolderCheck({ path: deptPathForCheck, exists })
     }
-    window.electronAPI.exists(deptPathForCheck)
+    departmentFolderExists(deptPathForCheck)
       .then((exists: boolean) => record(exists))
       .catch(() => record(false))
     return () => { cancelled = true }
@@ -447,7 +453,7 @@ export function SkillCentricLayout() {
     let cancelled = false
     let retryTimer: number | null = null
     const open = (attempt: number) => {
-      void window.electronAPI.watchCompany(root).then(result => {
+      void watchCompany(root).then(result => {
         if (cancelled || result?.success !== false || attempt >= 5) return
         retryTimer = window.setTimeout(() => open(attempt + 1), 1000)
       }).catch(() => {})
@@ -456,7 +462,7 @@ export function SkillCentricLayout() {
     return () => {
       cancelled = true
       if (retryTimer != null) window.clearTimeout(retryTimer)
-      void window.electronAPI.unwatchCompany(root)
+      void unwatchCompany(root)
       perfMark('skill_layout.watch.stop')
     }
   }, [currentCompany?.rootPath])
@@ -618,16 +624,16 @@ export function SkillCentricLayout() {
 
     try {
       // Create .claude/skills directory if it doesn't exist
-      await window.electronAPI.createDirectory(skillsBasePath)
+      await createSkillDirectory(skillsBasePath)
 
       // Create skill directory
-      await window.electronAPI.createDirectory(skillPath)
+      await createSkillDirectory(skillPath)
 
       // Create subdirectories (always create these even if empty)
-      await window.electronAPI.createDirectory(`${skillPath}/rules`)
-      await window.electronAPI.createDirectory(`${skillPath}/references`)
-      await window.electronAPI.createDirectory(`${skillPath}/scripts`)
-      await window.electronAPI.createDirectory(`${skillPath}/tools`)
+      await createSkillDirectory(`${skillPath}/rules`)
+      await createSkillDirectory(`${skillPath}/references`)
+      await createSkillDirectory(`${skillPath}/scripts`)
+      await createSkillDirectory(`${skillPath}/tools`)
 
       // Create SKILL.md with frontmatter
       const promptContent = data.prompt || `このスキルを実行すると、AIアシスタントが「${data.name}」タスクを実行します。`
@@ -653,11 +659,11 @@ ${promptContent}
 <!-- references/ フォルダに参考資料を追加してください -->
 `
 
-      await window.electronAPI.writeFile(skillMdPath, skillMdContent)
+      await writeSkillFile(skillMdPath, skillMdContent)
 
       // Default to private (not shared): add to .gitignore
       const skillRelativePath = `${selectedDept.folder}/.claude/skills/${skillDirName}/`
-      await window.electronAPI.makeSkillPrivate(currentCompany.rootPath, skillRelativePath)
+      await makeSkillPrivate(currentCompany.rootPath, skillRelativePath)
 
       // Refresh skills list
       refreshSkills()
@@ -681,10 +687,10 @@ ${promptContent}
 
     try {
       // Ensure .claude/skills directory exists
-      await window.electronAPI.createDirectory(skillsBasePath)
+      await createSkillDirectory(skillsBasePath)
 
       // Copy entire skill directory
-      const copyResult = await window.electronAPI.copyItem(sourceSkillPath, destPath)
+      const copyResult = await copySkill(sourceSkillPath, destPath)
       if (!copyResult.success) {
         console.error('Failed to copy skill:', copyResult.error)
         return
@@ -692,13 +698,13 @@ ${promptContent}
 
       // Update SKILL.md frontmatter with new name
       const skillMdPath = `${destPath}/SKILL.md`
-      const content = await window.electronAPI.readFile(skillMdPath)
+      const content = await readSkillFile(skillMdPath)
       if (content) {
         const updated = content.replace(
           /^(---\n[\s\S]*?name:\s*).+$/m,
           `$1${name}`,
         )
-        await window.electronAPI.writeFile(skillMdPath, updated)
+        await writeSkillFile(skillMdPath, updated)
       }
 
       // Copied skills are public by default (user intentionally copied them)
@@ -719,13 +725,13 @@ ${promptContent}
     if (!skillFolderName) return
 
     const skillRelativePath = `${dept.folder}/.claude/skills/${skillFolderName}/`
-    await window.electronAPI.publishSkill(currentCompany.rootPath, skillRelativePath)
+    await publishSkill(currentCompany.rootPath, skillRelativePath)
     refreshSkills()
   }, [currentCompany?.rootPath, departments, refreshSkills])
 
   const handleToggleNurturing = useCallback(async (skill: Skill) => {
     if (!skill.files.skillMd) return
-    await window.electronAPI.toggleSkillNurturing(skill.files.skillMd, !skill.isNurturing)
+    await setSkillNurturing(skill.files.skillMd, !skill.isNurturing)
     refreshSkills()
   }, [refreshSkills])
 
@@ -775,7 +781,7 @@ ${promptContent}
     if (!currentCompany?.rootPath) return
     setIsLoadingPreview(true)
     try {
-      const result = await window.electronAPI.gitPreview(currentCompany.rootPath)
+      const result = await previewSync(currentCompany.rootPath)
       if (!result.success) {
         setSyncNotification({ type: 'error', message: result.error || 'プレビューに失敗しました' })
         return
@@ -799,7 +805,7 @@ ${promptContent}
     if (!currentCompany?.rootPath) return
     setIsLoadingSummary(true)
     try {
-      const result = await window.electronAPI.gitGenerateSummary(currentCompany.rootPath)
+      const result = await summarizeChanges(currentCompany.rootPath)
       if (result.success && result.summary) {
         setPreviewData(prev => prev ? { ...prev, summary: result.summary } : prev)
       }
@@ -817,7 +823,7 @@ ${promptContent}
     setSyncNotification(null)
 
     try {
-      const result = await window.electronAPI.gitSync(
+      const result = await syncCompany(
         currentCompany.rootPath,
         currentCompany.id,
         customCommitMessage || 'Sync from AI Company Builder'
@@ -922,9 +928,9 @@ ${promptContent}
 
   const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
     if (!currentCompany?.rootPath) return
-    await window.electronAPI.gitRevertFile(currentCompany.rootPath, filePath, fileStatus)
+    await revertChange(currentCompany.rootPath, filePath, fileStatus)
     // Refresh preview data
-    const result = await window.electronAPI.gitPreview(currentCompany.rootPath)
+    const result = await previewSync(currentCompany.rootPath)
     if (result.success) {
       if (result.totalCount === 0) {
         setShowPreview(false)
@@ -943,7 +949,7 @@ ${promptContent}
 
   const handleLogout = useCallback(async () => {
     try {
-      await window.electronAPI.signOut()
+      await signOut()
       setCurrentCompany(null)
     } catch (error) {
       console.error('Logout failed:', error)

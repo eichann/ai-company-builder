@@ -165,7 +165,9 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   are pruned at the start of each sync.
 - The renderer reaches backups through `src/features/sync/api.ts`: `BackupReads` (list),
   `BackupWrites` (put a file back) and `BackupOutbound` (open the folder in Finder / Explorer:
-  main hands it to another app, so it is a port of its own).
+  main hands it to another app, so it is a port of its own). The sync button uses
+  `SyncPreviewReads` (preview, never stages), `SyncRevertWrites` (「元に戻す」 one change),
+  `SyncSummaryOutbound` (the member's AI reads the diff) and `SyncOutbound` (`git:sync`).
 
 ## Commit message (step 9)
 
