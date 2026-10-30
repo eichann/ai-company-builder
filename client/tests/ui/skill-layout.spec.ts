@@ -151,3 +151,19 @@ test('skills: a skill the AI adds appears; a burst of events is one rescan', asy
   await page.waitForTimeout(500)
   expect((await calls(page, 'listSkills')).filter(([, force]) => force).length).toBe(forced.length)
 })
+
+// The app's shortcuts are commands (.claude/rules/commands.md): app-wide, so they work wherever the focus is.
+test('shortcuts: ⌘P opens the file-name search, ⌘⇧F the 検索 tab with the cursor in its box', async ({ page }) => {
+  await openPreview(page, 'skill-layout')
+  type Keys = { key: string; metaKey?: boolean; shiftKey?: boolean }
+  const press = (init: Keys) => page.evaluate((i: Keys) => {
+    (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { ...i, bubbles: true }))
+  }, init)
+  await press({ key: 'p', metaKey: true })
+  const nameSearch = page.getByPlaceholder('ファイル名で検索...')
+  await expect(nameSearch).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(nameSearch).toHaveCount(0)
+  await press({ key: 'f', metaKey: true, shiftKey: true })
+  await expect(page.getByPlaceholder('文言を検索... (Enter)')).toBeFocused()
+})
