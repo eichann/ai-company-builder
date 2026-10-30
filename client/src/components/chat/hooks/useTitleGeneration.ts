@@ -41,7 +41,7 @@ export function useTitleGeneration(o: TitleGenerationOptions): void {
     if (messages.length < 3) return
     // Fire-and-forget; failures fall back to the truncated user message title
     generateAndSaveTitle()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- runs on the status change only; `messages` and the callbacks change with every streamed token
   }, [status, messages.length, companyId])
 
   // Generate a concise title for the current session via the chat-server's title endpoint

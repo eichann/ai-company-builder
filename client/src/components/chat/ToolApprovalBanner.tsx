@@ -1,18 +1,11 @@
 import { useTranslation } from 'react-i18next'
 import { ShieldWarning } from '@phosphor-icons/react'
 import { getToolDisplayName } from './toolRows'
+import type { ToolApprovalRequest } from '../../../shared/ipc-contract'
 
 // ============================================================================
 // Tool Approval Banner
 // ============================================================================
-
-interface ToolApprovalRequest {
-  toolUseId: string
-  toolName: string
-  toolInput: Record<string, unknown>
-  /** Why the app asks (e.g. private content read in this conversation). */
-  reason?: string
-}
 
 export function ToolApprovalBanner({
   request,

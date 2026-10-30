@@ -157,7 +157,7 @@ export function useChatHistory(o: ChatHistoryOptions) {
       }
     })
     return unsubscribe
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one subscription per company: `stop` and `loadSessions` are new on every render
   }, [companyId])
 
   // Session functions

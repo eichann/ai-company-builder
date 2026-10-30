@@ -1,14 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, FolderOpen, ArrowCounterClockwise, Clock, File, Warning } from '@phosphor-icons/react'
 import { listBackups, openBackupFolder, restoreBackupFile } from '../../features/sync/api'
-
-interface BackupInfo {
-  id: string
-  timestamp: string
-  reason: string
-  files: string[]
-  path: string
-}
+import type { BackupInfo } from '../../../shared/ipc-contract'
 
 interface BackupHistorySlideOverProps {
   isOpen: boolean

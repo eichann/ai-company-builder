@@ -63,7 +63,7 @@ export function useNotDownloadedFolders(
       out.push({ name: name.normalize('NFC'), path: `${dirPath}/${name}`, isDirectory: true, notDownloaded: excluded })
     }
     return sortEntries(out)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- the two fields of `sparse` it reads are listed; the object itself is new on every render
   }, [repoRel, sparse.excludedPaths, sparse.notDownloadedFolderOf])
 
   const downloadFolder = useCallback(async (entry: FileEntry) => {

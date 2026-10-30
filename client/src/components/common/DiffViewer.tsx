@@ -21,7 +21,7 @@ interface CommitDiffProps extends DiffViewerBaseProps {
 
 type DiffViewerProps = StagedDiffProps | CommitDiffProps
 
-interface DiffLine {
+interface UnifiedDiffLine {
   type: 'add' | 'remove' | 'context' | 'header'
   content: string
   oldLineNo?: number
@@ -80,7 +80,7 @@ export function DiffModal({ isOpen, onClose, title, diffProps }: DiffModalProps)
 
 // --- Parsing ---
 
-function parseDiff(diff: string, isNewFile?: boolean, isDeletedFile?: boolean): DiffLine[] {
+function parseDiff(diff: string, isNewFile?: boolean, isDeletedFile?: boolean): UnifiedDiffLine[] {
   if (isNewFile || isDeletedFile) {
     const type = isNewFile ? 'add' : 'remove'
     return diff.split('\n').map((line, i) => ({
@@ -92,7 +92,7 @@ function parseDiff(diff: string, isNewFile?: boolean, isDeletedFile?: boolean): 
   }
 
   const lines = diff.split('\n')
-  const result: DiffLine[] = []
+  const result: UnifiedDiffLine[] = []
   let oldLine = 0
   let newLine = 0
 
@@ -122,7 +122,7 @@ function parseDiff(diff: string, isNewFile?: boolean, isDeletedFile?: boolean): 
   return result
 }
 
-function toSplitRows(lines: DiffLine[]): SplitRow[] {
+function toSplitRows(lines: UnifiedDiffLine[]): SplitRow[] {
   const rows: SplitRow[] = []
   let i = 0
 
@@ -144,8 +144,8 @@ function toSplitRows(lines: DiffLine[]): SplitRow[] {
     }
 
     // Collect consecutive removes and adds to pair them
-    const removes: DiffLine[] = []
-    const adds: DiffLine[] = []
+    const removes: UnifiedDiffLine[] = []
+    const adds: UnifiedDiffLine[] = []
 
     while (i < lines.length && lines[i].type === 'remove') {
       removes.push(lines[i])
@@ -178,7 +178,7 @@ function toSplitRows(lines: DiffLine[]): SplitRow[] {
 
 export function DiffViewer(props: DiffViewerProps) {
   const { rootPath, filePath } = props
-  const [diffLines, setDiffLines] = useState<DiffLine[]>([])
+  const [diffLines, setDiffLines] = useState<UnifiedDiffLine[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
