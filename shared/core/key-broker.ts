@@ -20,6 +20,13 @@ import { normalizeSandboxDomain } from './agent-sandbox'
 export type BrokerKeyScope = 'company' | 'user'
 export const BROKER_KEY_SCOPES: readonly BrokerKeyScope[] = ['company', 'user']
 
+/**
+ * Why the broker is off: no key-encryption key configured, or one the server
+ * refused (unreadable, malformed, readable by others / inside the data folder).
+ */
+export type BrokerStatusReason = 'not-configured' | 'kek-unreadable' | 'kek-invalid' | 'kek-insecure'
+export const BROKER_STATUS_REASONS: readonly BrokerStatusReason[] = ['not-configured', 'kek-unreadable', 'kek-invalid', 'kek-insecure']
+
 export type BrokerKeyStatus = 'active' | 'disabled'
 export const BROKER_KEY_STATUSES: readonly BrokerKeyStatus[] = ['active', 'disabled']
 

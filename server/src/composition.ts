@@ -40,6 +40,7 @@ import { createPrivateFolderService } from './services/private-folders'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createBrokerVault } from './services/broker-vault'
+import { createKeyBrokerService } from './services/key-broker'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -78,6 +79,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const repoStore = localRepoStore()
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
+  const brokerVault = createBrokerVault({ ...repos, brokerCipher })
 
   return {
     access: createAccessPolicy(repos.memberships),
@@ -94,7 +96,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
     agentEvents: createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) }),
     agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
-    brokerVault: createBrokerVault({ ...repos, brokerCipher }),
+    brokerVault,
+    keyBroker: createKeyBrokerService({ ...repos, ...shared, brokerVault }),
     companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,

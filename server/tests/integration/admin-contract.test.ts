@@ -22,6 +22,7 @@ import { execFileSync } from 'child_process'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
+import { randomBytes } from 'crypto'
 import { loadTypeShapes, type TypeShapes } from '../helpers/type-shape'
 
 const currentUser = vi.hoisted(() => ({ id: 'ac-owner' as string | null }))
@@ -74,6 +75,7 @@ const TYPES: Record<string, string> = {
   AgentEventViewers: 'AgentEventViewers',
   AgentSandbox: 'AgentSandboxView',
   SandboxImpact: 'SandboxImpact',
+  Broker: 'BrokerView',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -145,6 +147,10 @@ function record(callName: string, report: { errors: string[]; extra: string[] })
 const git = (args: string[], cwd?: string) => execFileSync('git', args, { stdio: 'pipe', ...(cwd ? { cwd } : {}) }).toString()
 
 beforeAll(async () => {
+  // The key broker on, with a throwaway KEK outside DATA_DIR (before the composition root loads).
+  const kekDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-kek-'))
+  writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'), { mode: 0o600 })
+  process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
   shapes = loadTypeShapes(
     `import type * as A from ${JSON.stringify(ADMIN_API.replace(/\.ts$/, ''))}\n`
     + `type Role = A.Role\n`
@@ -195,6 +201,7 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   // The same mounts as src/index.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
@@ -205,6 +212,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -310,6 +318,20 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
+  })
+
+  it('API keys (「API キー」)', async () => {
+    await expectShape('Broker', USERS.owner, 'GET', `${base}/broker`)
+    const created = await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/keys`, {
+      service: 'gemini', displayName: '契約テスト', secret: 'fake-test-key-NOT-REAL-contract-0000',
+      audience: { everyone: true, departmentIds: [], addUserIds: [], removeUserIds: [USERS.member] }, caps: { requestsPerDay: 10 },
+    })
+    const id = created.keys[0].id
+    await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/keys/${id}/secret`, { secret: 'fake-test-key-NOT-REAL-contract-1111' })
+    await expectShape('Broker', USERS.owner, 'PATCH', `${base}/broker/keys/${id}`, { status: 'disabled', allowPrivateContent: true })
+    await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/services/gmail`, { category: 'person', rule: 'user-only', ownKeyHosts: ['gmail.googleapis.com'] })
+    await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { memberKeysAllowed: false })
+    await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
   })
 
   it('invitations', async () => {
@@ -424,6 +446,31 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(first.rejections).toHaveLength(1)
     expect(second.rejections).toHaveLength(1)
     expect(second.rejections[0].id).not.toBe(first.rejections[0].id)
+  })
+
+  it('API keys: the admin\'s key, who-may-use, service rule and switch reach the database as chosen', async () => {
+    const created = await A.keyBrokerApi.create(CO, {
+      service: 'openai', displayName: '翻訳用', secret: 'fake-test-key-NOT-REAL-builder-2222',
+      destinations: { hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/'], models: ['gpt-5-mini'] },
+      audience: { everyone: false, departmentIds: [], addUserIds: [USERS.member], removeUserIds: [] },
+      caps: { requestsPerMemberPerDay: 50 }, allowPrivateContent: false,
+    })
+    const id = created.keys.find(k => k.displayName === '翻訳用')!.id
+    const stored = row('SELECT service, last4, destinations, audience, caps FROM broker_keys WHERE id = ?', id)
+    expect(stored.last4).toBe('2222')
+    expect(JSON.parse(stored.destinations)).toEqual({ hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/'], models: ['gpt-5-mini'] })
+    expect(JSON.parse(stored.audience).addUserIds).toEqual([USERS.member])
+    expect(JSON.parse(stored.caps).requestsPerMemberPerDay).toBe(50)
+    await A.keyBrokerApi.update(CO, id, { status: 'disabled' })
+    expect(row('SELECT status FROM broker_keys WHERE id = ?', id).status).toBe('disabled')
+    await A.keyBrokerApi.replaceSecret(CO, id, 'fake-test-key-NOT-REAL-builder-3333')
+    expect(row('SELECT last4 FROM broker_keys WHERE id = ?', id).last4).toBe('3333')
+    await A.keyBrokerApi.setService(CO, 'openai', { category: 'tool', rule: 'company-first', ownKeyHosts: ['api.openai.com'] })
+    expect(row('SELECT rule FROM broker_services WHERE company_id = ? AND service = ?', CO, 'openai').rule).toBe('company-first')
+    await A.keyBrokerApi.setMemberKeysAllowed(CO, true)
+    expect(row('SELECT member_keys_allowed FROM broker_settings WHERE company_id = ?', CO).member_keys_allowed).toBe(1)
+    await A.keyBrokerApi.remove(CO, id)
+    expect(row('SELECT id FROM broker_keys WHERE id = ?', id)).toBeUndefined()
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

@@ -8,10 +8,10 @@
  * Listing never returns the sealed secret; only `sealed()` does, and only the
  * vault service (services/broker-vault.ts) calls it.
  */
+import type { BrokerStatusReason } from '../../shared/core/key-broker'
 import type { SealedSecret, SecretCipher } from './secret-cipher'
 
-/** Why the broker is off (no usable key-encryption key). */
-export type BrokerStatusReason = 'not-configured' | 'kek-unreadable' | 'kek-invalid' | 'kek-insecure'
+export type { BrokerStatusReason }
 
 /** The vault's cipher, or why there is none (the server runs either way). */
 export type BrokerCipherState =

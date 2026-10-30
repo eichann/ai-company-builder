@@ -771,3 +771,49 @@ export const departmentsApi = {
       body: { userIds },
     }),
 }
+
+// ---------------------------------------------------------------------------
+// API keys (key broker, 「API キー」): shapes from shared/types/key-broker.ts.
+// Write-only: a key's value is sent to the server and never comes back.
+// ---------------------------------------------------------------------------
+
+export type {
+  BrokerChange,
+  BrokerChangeDetail,
+  BrokerKeyCreate,
+  BrokerKeySnapshot,
+  BrokerKeySummary,
+  BrokerKeyUpdate,
+  BrokerKeyUser,
+  BrokerServiceSetting,
+  BrokerServiceView,
+  BrokerSettings,
+  BrokerView,
+} from '../../../shared/types/key-broker'
+export type {
+  BrokerAudience,
+  BrokerCaps,
+  BrokerDestinations,
+  BrokerKeyRule,
+  BrokerKeyStatus,
+  BrokerServiceCategory,
+  BrokerStatusReason,
+} from '../../../shared/core/key-broker'
+
+import type { BrokerKeyCreate, BrokerKeyUpdate, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
+
+export const keyBrokerApi = {
+  get: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker`),
+  create: (companyId: string, key: BrokerKeyCreate) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys`, { method: 'POST', body: key }),
+  replaceSecret: (companyId: string, keyId: string, secret: string) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}/secret`, { method: 'PUT', body: { secret } }),
+  update: (companyId: string, keyId: string, update: BrokerKeyUpdate) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, { method: 'PATCH', body: update }),
+  remove: (companyId: string, keyId: string) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/keys/${enc(keyId)}`, { method: 'DELETE' }),
+  setService: (companyId: string, service: string, setting: BrokerServiceSetting) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, { method: 'PUT', body: setting }),
+  setMemberKeysAllowed: (companyId: string, memberKeysAllowed: boolean) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { memberKeysAllowed } }),
+}

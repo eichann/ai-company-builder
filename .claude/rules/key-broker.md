@@ -11,6 +11,14 @@ paths:
   - "server/tests/unit/local-secret-cipher.test.ts"
   - "server/tests/unit/broker-kek.test.ts"
   - "server/tests/unit/broker-vault.test.ts"
+  - "shared/types/key-broker.ts"
+  - "server/src/services/key-broker.ts"
+  - "server/src/routes/key-broker.ts"
+  - "server/tests/integration/key-broker.test.ts"
+  - "admin/src/app/companies/*/api-keys/**"
+  - "admin/src/components/key-broker/**"
+  - "admin/src/lib/key-broker.ts"
+  - "admin/tests/key-broker.test.tsx"
 ---
 
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
@@ -68,10 +76,43 @@ app). Order: K1 vault → K2 admin page → K3 tokens → K4 relay (Gemini → O
   `checkBrokerSecret` (printable ASCII, 8–4096, never an `acb_tok_` token; its errors never
   quote the value), `companyKeyEligibility`, `chooseBrokerKeySource`.
 
+## Admin API and page (K2, owner/admin)
+
+`routes/key-broker.ts` → `services/key-broker.ts`, under `/api/companies/:id`; shapes in
+`shared/types/key-broker.ts` (`BrokerView`), pinned by `admin-contract.test.ts`:
+`GET /broker`; `POST /broker/keys` (company key; `destinations` default to a built-in service's
+hosts, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
+(an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
+`{ category, rule, ownKeyHosts }`; `PUT /broker/settings` `{ memberKeysAllowed }`. Every change
+answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
+(`BrokerChangeDetail`: create / replace (last4 before → after) / update (changed fields) /
+delete / service / settings; the GET carries the latest 50). Check order who → body → rules;
+registering or replacing without a KEK → 503 `{ code: 'BROKER_OFF' }` (metadata edits,
+disable and delete still work). Audience departments must be the company's, people its members.
+
+- **Who may use a company key** (`usableBy`, and what tokens will use): removed by name →
+  never; added by name; everyone; or a member of one of its departments. **A member belongs to a
+  department when the permission rules let them read its folder** (`resolveAccess`; owners and
+  admins read everything) — ACB has no other department membership. With the default seed
+  (everyone reads everything) a department key is usable by everyone; the page's 「今使える人」
+  shows the effect.
+- Admin page 「API キー」 (`admin/src/app/companies/[id]/api-keys/page.tsx`, menu `api-keys`,
+  owners/admins): company keys and members' own keys (last 4, destinations, who, caps,
+  「非公開の内容を送ってよい」, status, 「今使える人」), register / edit settings / replace /
+  stop・resume / delete, the members' own-key switch, per-service 種類・決め方・自分の鍵の送り先,
+  the history. The value is a password field sent once in the POST (or the replace PUT); editing
+  never sends it. Without a KEK the page explains why and offers no registration
+  (`BROKER_OFF_TEXT`). Words and draft parsing: `admin/src/lib/key-broker.ts`.
+
 ## Tests
 
 `tests/unit/local-secret-cipher.test.ts` (envelope, context, tampering, re-wrap keeps the
 ciphertext), `tests/unit/broker-kek.test.ts` (which KEK files are refused; the generator never
 overwrites or prints a KEK), `tests/unit/broker-vault.test.ts` (no table holds a value, the
-listing carries no secret, a copied row does not open, rewrap, off without a KEK). Tests use
+listing carries no secret, a copied row does not open, rewrap, off without a KEK),
+`tests/integration/key-broker.test.ts` (**no plaintext key in any answer, error, log line or
+table** across every admin call, success and error; who may manage; audience rules; history;
+503 without a KEK), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
+sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
+off message). Tests use
 obviously fake values (`fake-test-key-NOT-REAL…`) and KEKs made in temp dirs.
