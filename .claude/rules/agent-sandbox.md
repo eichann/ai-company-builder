@@ -112,8 +112,9 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
 ## Observe and the log (S2)
 
 - The app reads its policy per chat turn: `services/agent-policy-store.ts` (`GET
-  /me/agent-policy`, 3 s budget, ETag; memory only — a failed refresh keeps the last answer, a
-  policy never received (or one that does not validate) = off this turn, logged).
+  /me/agent-policy`, 3 s budget, ETag; the sandbox part memory only — a failed refresh keeps the
+  last answer, a policy never received (or one that does not validate) = off this turn, logged;
+  the stop part is also kept on disk, `agent-stop.md`).
   `features/chat/server-config.ts` `getAgentSandbox` adds this computer's facts (home, userData,
   `PATH` folders, the server's host); `chat-server.ts` → `decideTurnSandbox(settings, host,
   capabilities.sandbox)` → the request's `sandbox` (`TurnSandbox`, `agents/connection.ts`).

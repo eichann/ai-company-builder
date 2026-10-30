@@ -18,7 +18,9 @@ import { CHOICE_TIMEOUT_MS, CODEX_CHOICE_SERVER, CODEX_CHOICE_TOOL } from '../..
 import { fromCodexRateLimits } from '../../shared/rate-limits'
 import type { SteerTarget } from './steering'
 import { turnToolEvents } from './tool-events'
-import { recordCodexApproval, recordCodexItem } from './codex-tool-events'
+import { codexToolCall, recordCodexApproval, recordCodexItem } from './codex-tool-events'
+import { categorizeTool } from '../../shared/agent-events'
+import { AGENT_STOP_MESSAGES } from '../../shared/agent-stop'
 import { checkInstalledCodex, type CodexVersionCheck } from './codex-version'
 import { withoutBrokerEnv } from '../../shared/broker-env'
 import { CODEX_SANDBOX_PROFILE, SANDBOX_MESSAGES, codexSandboxConfig } from '../../shared/agents/sandbox-policy'
@@ -159,6 +161,22 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         waitingForMember++; clearTimeout(timeout)
         try { return await wait() } finally { waitingForMember--; armTimeout() }
       }
+      // The emergency stop (agent-stop.md): Codex cannot refuse one call of a kind, so a stopped
+      // kind's approval is declined and a stopped kind that starts anyway ends the whole turn.
+      const stoppedKindOf = (toolName: string) => title ? null : request.toolStop?.(categorizeTool(toolName)) ?? null
+      const stopForAdmin = (kind: Exclude<ReturnType<typeof stoppedKindOf>, null>) => {
+        if (ended) return
+        console.log(`[codex] Turn stopped: ${kind} is stopped by an administrator`)
+        if (threadId && turnId) rpc?.send({ id: `interrupt-${turnId}`, method: 'turn/interrupt', params: { threadId, turnId } })
+        for (const id of openText) emit({ type: 'text-end', id })
+        openText.clear()
+        const id = `agent-stop-${crypto.randomUUID()}`
+        emit({ type: 'text-start', id })
+        emit({ type: 'text-delta', id, delta: `\n\n※ ${AGENT_STOP_MESSAGES.toolRefused(kind === 'all' ? null : kind)}` })
+        emit({ type: 'text-end', id })
+        emit({ type: 'finish', finishReason: { unified: 'other', raw: 'stopped-by-admin' }, usage: emptyUsage(), providerMetadata: { codex: { sessionId: threadId || '' } } })
+        finish()
+      }
       function abort() {
         if (threadId && turnId) rpc?.send({ id: `interrupt-${turnId}`, method: 'turn/interrupt', params: { threadId, turnId } })
         finish(new Error('応答を停止しました。'))
@@ -180,11 +198,23 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       const answerRequest = async (message: RpcMessage) => {
         const params = message.params || {}
         if (message.method === 'item/commandExecution/requestApproval' || message.method === 'item/fileChange/requestApproval') {
+          const approvalTool = message.method === 'item/commandExecution/requestApproval' ? 'Bash' : 'Write'
+          if (stoppedKindOf(approvalTool)) {
+            // Refused without asking the member; recorded as stopped.
+            toolEvents?.decide(typeof params.itemId === 'string' ? params.itemId : undefined, approvalTool === 'Bash' ? { tool: 'Bash', input: { command: params.command } } : { tool: 'Write' }, 'stopped')
+            const decisions = params.availableDecisions as unknown[] | undefined
+            rpc?.send({ id: message.id, result: { decision: !decisions || decisions.includes('decline') ? 'decline' : 'cancel' } })
+            return
+          }
           const asked = !title && !!config.requestToolApproval
           const approved = !title && config.requestToolApproval
             ? await config.requestToolApproval(message.method === 'item/commandExecution/requestApproval' ? 'Bash' : 'Write', params, crypto.randomUUID(), request.appSessionId)
             : { approved: false }
-          recordCodexApproval(toolEvents, message.method, params, { asked, approved: approved.approved })
+          // Stopped while the member was deciding: declined after all.
+          if (approved.approved && stoppedKindOf(approvalTool)) {
+            toolEvents?.decide(typeof params.itemId === 'string' ? params.itemId : undefined, approvalTool === 'Bash' ? { tool: 'Bash', input: { command: params.command } } : { tool: 'Write' }, 'stopped')
+            approved.approved = false
+          } else recordCodexApproval(toolEvents, message.method, params, { asked, approved: approved.approved })
           const decisions = params.availableDecisions as unknown[] | undefined
           const decision = approved.approved && (!decisions || decisions.includes('accept')) ? 'accept'
             : !decisions || decisions.includes('decline') ? 'decline' : 'cancel'
@@ -243,6 +273,13 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               }
               if (message.method === 'item/started' || message.method === 'item/completed') {
                 const item = p.item as { id: string; type: string; text?: string; command?: string; aggregatedOutput?: string; status?: string; server?: string; tool?: string; result?: unknown; arguments?: unknown }
+                const stopCall = message.method === 'item/started' ? codexToolCall(item) : undefined
+                const stoppedKind = stopCall ? stoppedKindOf(stopCall.tool) : null
+                if (stopCall && stoppedKind) {
+                  toolEvents?.decide(item.id, stopCall, 'stopped')
+                  stopForAdmin(stoppedKind)
+                  return
+                }
                 recordCodexItem(toolEvents, message.method, item)
                 if (item.type === 'agentMessage' && message.method === 'item/completed') {
                   if (!openText.has(item.id)) {

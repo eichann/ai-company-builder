@@ -22,6 +22,8 @@ import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../..
 import { turnToolEvents } from './tool-events'
 import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
 import { withoutBrokerEnv } from '../../shared/broker-env'
+import { categorizeTool } from '../../shared/agent-events'
+import { AGENT_STOP_MESSAGES } from '../../shared/agent-stop'
 import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -148,7 +150,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -160,6 +162,18 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const toolEvents = turnToolEvents(config, 'claude-code', { appSessionId, modelId, workingDirectory, toolEventContext, sandbox })
       // 「AI の囲い」 enforce: Claude Code's own sandbox, from the company policy (sandbox-policy.ts).
       const enforced = sandbox?.mode === 'enforce' ? claudeSandboxOptions(sandbox.resolved) : undefined
+      // The emergency stop (agent-stop.md), asked live: a stopped kind (or the whole AI) is refused
+      // before the tool runs, in every permission mode and for subagents (hooks run there too).
+      const stopReason = (toolName: string): string | undefined => {
+        const kind = toolStop?.(categorizeTool(toolName))
+        if (!kind) return undefined
+        console.log(`[hooks] Refused, stopped by an administrator: ${toolName}`)
+        return AGENT_STOP_MESSAGES.toolRefused(kind === 'all' ? null : kind)
+      }
+      const stoppedVerdict = (toolName: string): ToolVerdict<object> | undefined => {
+        const reason = stopReason(toolName)
+        return reason ? verdict({ continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'deny', permissionDecisionReason: reason } }, 'stopped') : undefined
+      }
       // PreToolUse decision: request UI approval for dangerous patterns (works even in
       // bypassPermissions). Each answer carries the decision it stands for (the action log).
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -168,6 +182,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         if (input.hook_event_name !== 'PreToolUse') {
           return verdict({ continue: true })
         }
+        const stopped = stoppedVerdict(String(input.tool_name))
+        if (stopped) return stopped
         // Background subagents outlive the turn, but the SDK closes the hook
         // control channel (CLI stdin) at the first result — their later hook
         // round-trips then fail open, bypassing the dangerous-command gate, and
@@ -244,6 +260,9 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
                 )
                 if (result.approved) {
                   console.log(`[hooks] User approved dangerous command: ${cmd}`)
+                  // Stopped while the member was deciding.
+                  const stoppedMeanwhile = stoppedVerdict(input.tool_name)
+                  if (stoppedMeanwhile) return stoppedMeanwhile
                   return verdict({
                     continue: true,
                     hookSpecificOutput: {
@@ -269,6 +288,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         }
         // The member just confirmed this very call: do not ask twice.
         if (confirmedPrivate) {
+          const stoppedMeanwhile = stoppedVerdict(String(input.tool_name))
+          if (stoppedMeanwhile) return stoppedMeanwhile
           return verdict({ continue: true, hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'allow', updatedInput: input.tool_input ?? {} } }, 'member-allowed', 'private-read')
         }
         // No decision: leave it to the permission mode. Returning 'allow' here
@@ -312,6 +333,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const approvals = permissionMode !== 'bypassPermissions' && !!config.requestToolApproval
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const decideCanUseTool = async (toolName: string, toolInput: Record<string, unknown>, options: any): Promise<ToolVerdict<object>> => {
+        const stopped = stopReason(toolName)
+        if (stopped) return verdict({ behavior: 'deny' as const, message: stopped }, 'stopped')
         if (toolName === CLAUDE_CHOICE_TOOL) {
           const answer = await answerAskUserQuestion(askUser, toolInput, options?.toolUseID, options?.signal)
           return verdict(answer, answer.behavior === 'allow' ? 'member-allowed' : 'member-denied')
@@ -333,6 +356,8 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           appSessionId,
         )
         if (result.approved) {
+          const stoppedMeanwhile = stopReason(toolName)
+          if (stoppedMeanwhile) return verdict({ behavior: 'deny' as const, message: stoppedMeanwhile }, 'stopped')
           return verdict({ behavior: 'allow' as const, updatedInput: toolInput }, 'member-allowed')
         }
         return verdict({

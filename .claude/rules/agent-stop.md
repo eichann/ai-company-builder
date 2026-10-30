@@ -9,6 +9,11 @@ paths:
   - "server/src/adapters/sqlite/agent-stops.ts"
   - "server/tests/integration/agent-stops.test.ts"
   - "server/tests/integration/broker-stop.test.ts"
+  - "client/shared/agent-stop.ts"
+  - "client/electron/services/agent-stop.ts"
+  - "client/electron/services/agent-push-channel.ts"
+  - "client/electron/services/agent-policy-store.ts"
+  - "client/tests/agent-stop.test.ts"
 ---
 
 # Emergency stop (monitoring M2, 「AI の緊急停止」) and the server → app push channel
@@ -74,3 +79,55 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   no `encode` in front of `/api/*`; a load balancer in front needs an idle timeout > 60 s
   (`docs/self-hosting/README*.md`). The admin's Next proxy (`admin/src/proxy.ts`) is only for
   setups without Caddy; the app talks to the server URL directly.
+
+## The app (main process)
+
+- `services/agent-push-channel.ts` (created in `main.ts`): one SSE connection per watched
+  company (≤ 5; a company is watched from its first chat turn), opened by main with `fetch`,
+  the session in the Cookie header, `X-ACB-Agent-Stop: 1`, `redirect: 'error'`. Its **only
+  effect** is `refresh(companyId, version)` → main refetches `/me/agent-policy` unless that
+  version is already cached; it has no window, file or command capability. The renderer never
+  sees the connection or the session.
+- **Unknown / malformed events dropped** (`client/shared/agent-stop.ts` `createSseParser`):
+  only `event: policy` with data exactly `{ kind, version }` (hex) counts; another kind, an extra
+  field, a mismatched name → dropped and logged by name only; a line over 1 KB ends the
+  connection. **https only** (`pushChannelUrl`: plain http only for localhost; no credentials in
+  the URL); the address is built from the signed-in server URL.
+- No data for 60 s → the connection is dropped; reconnect after 1 s doubling to 60 s, ×0.5–1.5
+  jitter (`reconnectDelay`), reset once an event arrived; 404 / 403 → that company is no longer
+  watched; sign-out and quit close everything. **Fallback**: `refresh(companyId)` every 60 s
+  per watched company, plus at each conversation start.
+- `services/agent-policy-store.ts`: parses `stop` (`parseAgentStopPolicy`; unknown kinds
+  dropped); the last stop received is kept per account and company in
+  `<userData>/agent-policy/<user>/<company>.json` (0600, tmp + rename), read back after a
+  restart (offline included). **Never received → nothing stops** (an answer without `stop`
+  from an older server counts as not received). `onStopChange` listeners run on a change.
+- `services/agent-stop.ts` (`createAgentStop`): `prepareTurn(companyId)` (watch, refresh with
+  3 s, `refused` = 「管理者が AI の利用を一時停止しています。…」 for a whole-AI stop) and the turn's
+  live `toolStopped(category)`; a received whole-AI stop calls the chat server's
+  `turns.abort(companyId, 'stopped-by-admin')`: the reply gets 「※ 管理者が停止しました。」
+  (text, kept with the conversation) and the transient `data-turn-stopped`, the conversation's
+  approval and choice cards are cancelled, the agent stops its usual way.
+  `aiCommitMessagesAllowed()` is false while any company the account has kept a stop for is
+  whole-AI stopped (sync cannot tell a repository's company at that point; stopping more is the
+  safe side): `services/commit-messages.ts` `withStop` → sync's fixed message.
+- `chat-server.ts`: `prepareAgentStop` before anything else of the turn (403 `AI_STOPPED`),
+  `toolStop` into the model request and the API-key tools, and a re-check after the turn is
+  tracked (a stop that arrived while it was prepared stops it).
+- Per agent (no agent-id branching outside the agents; the stop is a request field):
+  Claude — PreToolUse (every permission mode, subagents) and canUseTool refuse a stopped kind
+  with `AGENT_STOP_MESSAGES.toolRefused`, also when it was stopped while the member was answering
+  an approval; Codex — a stopped kind's approval is declined without asking, one that starts
+  anyway (`item/started`) ends the turn (`turn/interrupt` + the sentence); API key — inside the
+  tools. Every refusal is logged with decision `stopped` (M1, 「停止中のため拒否」).
+- Limits: an AI started outside ACB is not stopped (MDM, phase 2); an older app does not know
+  the stop (the admin count); a Claude command already running is cut when the turn stops;
+  Codex's interrupt may lag; titles / voice / hand-off one-shots are not stopped.
+
+Tests `client/tests/agent-stop.test.ts`: only an exact policy event counts and the rest is dropped
+(mutation: removing the field check fails it); the session goes in a header and an event can
+only cause a refetch; no https → no connection but the 60 s check runs; jittered backoff, idle
+drop, 404 stops watching; never received → no stop, the last stop survives a restart per
+account (0600); a whole-AI stop stops that company's turns only; the fixed commit message;
+Claude / Codex / API key refuse a stopped kind and log `stopped`; the chat server refuses a new
+turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop text and part.

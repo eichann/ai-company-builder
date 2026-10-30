@@ -4,6 +4,7 @@ import type { ChunkInjector } from './ui-stream-limits'
 import { STEER_PART_TYPE, canSteerText, type SteerRecord, type SteerResponse } from '../shared/steer'
 import { SUGGESTION_WAIT_MS, normalizeSuggestion } from '../shared/prompt-suggestion'
 import { TURN_STOPPED_PART_TYPE, type TurnStopReason } from '../shared/agent-events'
+import { AGENT_STOP_MESSAGES } from '../shared/agent-stop'
 
 interface Turn {
   steering: ReturnType<typeof createTurnSteering>
@@ -50,7 +51,16 @@ export function createChatTurns(waitMs = SUGGESTION_WAIT_MS, hooks: ChatTurnsOpt
     // The reason first, while the response is still open (transient: the
     // renderer reads it in onData, history never stores it); the stream then
     // ends with an `abort` chunk carrying the same reason.
-    try { turn.inject?.push({ type: TURN_STOPPED_PART_TYPE, data: { reason }, transient: true }) } catch { /* stream already over */ }
+    try {
+      // An administrator's stop is said in the reply itself (kept with the conversation).
+      if (reason === 'stopped-by-admin') {
+        const id = `turn-stopped-${crypto.randomUUID()}`
+        turn.inject?.push({ type: 'text-start', id })
+        turn.inject?.push({ type: 'text-delta', id, delta: `\n\n※ ${AGENT_STOP_MESSAGES.turnStopped}` })
+        turn.inject?.push({ type: 'text-end', id })
+      }
+      turn.inject?.push({ type: TURN_STOPPED_PART_TYPE, data: { reason }, transient: true })
+    } catch { /* stream already over */ }
     if (turn.info.appSessionId) {
       try { hooks.cancelInteractions?.(turn.info.appSessionId) } catch (error) { console.warn('[chat-server] cancelling pending questions failed:', error instanceof Error ? error.message : 'unknown') }
     }

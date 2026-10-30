@@ -20,6 +20,11 @@ export interface CommitMessagesDeps {
   shellEnv: ShellEnvironment
   /** A working directory for the one-shot CLI (<userData>/commit-message). */
   cwd: () => string
+  /**
+   * False while an administrator has stopped the AI (agent-stop.md): no AI is
+   * asked and sync commits its fixed message.
+   */
+  aiAllowed?: () => boolean
 }
 
 /**
@@ -28,8 +33,8 @@ export interface CommitMessagesDeps {
  */
 export type CommitMessagesFor = (gitFor: (repoPath: string) => SimpleGit) => CommitMessageGenerator
 
-export function createCommitMessages({ config, apiKey, claudeCli, shellEnv, cwd }: CommitMessagesDeps): CommitMessagesFor {
-  return (gitFor) => createCommitMessageGenerator({
+export function createCommitMessages({ config, apiKey, claudeCli, shellEnv, cwd, aiAllowed }: CommitMessagesDeps): CommitMessagesFor {
+  return (gitFor) => withStop(aiAllowed, createCommitMessageGenerator({
     readStaged: async (repoPath) => {
       const git: SimpleGit = gitFor(repoPath)
       // core.quotePath=false: Japanese names as text, not octal escapes.
@@ -46,5 +51,14 @@ export function createCommitMessages({ config, apiKey, claudeCli, shellEnv, cwd 
       fs.mkdirSync(dir, { recursive: true })
       return dir
     },
-  })
+  }))
+}
+
+/** The generator, or null (the fixed message) while the AI is stopped. */
+export function withStop(aiAllowed: (() => boolean) | undefined, generate: CommitMessageGenerator): CommitMessageGenerator {
+  if (!aiAllowed) return generate
+  return async (repoPath, opts) => {
+    if (!aiAllowed()) { console.log('[commit-message] the AI is stopped by an administrator; using the fixed message'); return null }
+    return generate(repoPath, opts)
+  }
 }

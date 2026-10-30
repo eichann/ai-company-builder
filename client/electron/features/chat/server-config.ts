@@ -20,6 +20,7 @@ import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
 import type { AgentPolicyStore } from '../../services/agent-policy-store'
+import type { AgentStop } from '../../services/agent-stop'
 import type { BrokerTokenStore } from '../../services/broker-token-store'
 import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
@@ -52,6 +53,8 @@ export interface ChatServerConfigDeps {
   agentEvents: AgentEventRecorder
   /** The member's AI policy per company (services/agent-policy-store.ts). */
   agentPolicy: AgentPolicyStore
+  /** The emergency stop (services/agent-stop.ts); absent = nothing is stopped. */
+  agentStop?: Pick<AgentStop, 'prepareTurn'>
   /** The server's URL (its host is always reachable from the sandbox). */
   serverUrl: () => string
   /** The key broker's tokens (services/broker-token-store.ts). */
@@ -144,6 +147,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       deps.toolApprovals.cancel(appSessionId)
       deps.cancelChoicePrompts(appSessionId)
     },
+    prepareAgentStop: deps.agentStop ? companyId => deps.agentStop!.prepareTurn(companyId) : undefined,
     onToolEvent: event => deps.agentEvents.record(event),
     toolEventPaths: () => deps.agentEvents.paths(),
 }
