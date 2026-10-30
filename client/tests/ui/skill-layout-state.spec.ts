@@ -1,6 +1,6 @@
 // What the main screen remembers and restores (tests/skill-layout-ui.tsx):
 // open file tabs and the left tab per company, the chosen department, and the
-// panel dividers. These pin the behaviour the SkillCentricLayout split
+// panel dividers (their widths saved per company). These pin the behaviour the SkillCentricLayout split
 // (Phase 4) moves into hooks and the split-tree layout. `keep: '1'` reloads
 // the page without clearing storage — an app restart; `seed` writes what an
 // earlier version of the app saved, so old saved state keeps restoring.
@@ -160,6 +160,42 @@ test.describe('panel dividers', () => {
     await showChat(page).click()
     await expect.poll(() => at(chatDivider(page))).toBe(990)
   })
+
+  test('widths come back per company at the next start; a company with nothing saved opens at the defaults', async ({ page }) => {
+    await openPreview(page, 'skill-layout')
+    await leftTab(page, 'ファイル').click()
+    await drag(page, treeDivider(page), 100)
+    await drag(page, chatDivider(page), 150)
+    await expect.poll(() => at(chatDivider(page))).toBe(700)
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+
+    await restart(page)
+    await expect.poll(() => at(chatDivider(page))).toBe(700)
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+
+    await switchCompany(page, 'other')
+    await leftTab(page, 'ファイル').click()
+    await expect.poll(() => at(chatDivider(page))).toBe(550)
+    await expect.poll(() => at(treeDivider(page))).toBe(200)
+
+    await switchCompany(page, 'demo')
+    await expect.poll(() => at(chatDivider(page))).toBe(700)
+    await expect.poll(() => at(treeDivider(page))).toBe(300)
+  })
+
+  for (const [what, saved] of [
+    ['unreadable', '{"version":1,"trees":'],
+    ['from a version this app does not know', JSON.stringify({ version: 99, trees: { screen: { sizes: [900, null] } } })],
+  ] as const) {
+    test(`a saved layout ${what} opens with the default widths, and dragging still works`, async ({ page }) => {
+      await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'layout:demo': saved }) })
+      await leftTab(page, 'ファイル').click()
+      expect(await at(chatDivider(page))).toBe(550)
+      expect(await at(treeDivider(page))).toBe(200)
+      await drag(page, chatDivider(page), 50)
+      await expect.poll(() => at(chatDivider(page))).toBe(600)
+    })
+  }
 
   test('⌘⇧C hides the chat and brings it back at the width it had', async ({ page }) => {
     await openPreview(page, 'skill-layout')
