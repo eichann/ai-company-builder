@@ -26,7 +26,7 @@ client/src/
     ui/             generic parts used by several features (dialogs, menus, badges, icons)
     hooks/          data hooks several features use (write access, sparse checkout, departments)
     lib/            logic that belongs to no single feature (paths, file events, perf marks)
-    ipc/            typed wrapper around window.electronAPI, when one is introduced
+    ipc/            window.electronAPI's types (electron-api.ts) and the ports of shared parts
   stores/           app-wide state (appStore, authStore); feature state lives in its feature
   i18n/  types/
 ```

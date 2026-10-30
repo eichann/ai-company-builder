@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MagnifyingGlass, X } from '@phosphor-icons/react'
 import { getFileIcon } from './FileIcons'
+import { listCompanyFiles } from '../../features/search/api'
 
 interface FileSearchModalProps {
   isOpen: boolean
@@ -24,7 +25,7 @@ export function FileSearchModal({ isOpen, onClose, rootPath, departmentFolder, o
   useEffect(() => {
     if (!isOpen || !rootPath) return
     let cancelled = false
-    window.electronAPI.gitListFiles(rootPath, departmentFolder).then(result => {
+    listCompanyFiles(rootPath, departmentFolder).then(result => {
       if (!cancelled && result.success) setAllFiles(result.files)
     }).catch(() => {})
     return () => { cancelled = true }
