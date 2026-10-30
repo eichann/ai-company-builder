@@ -7,7 +7,6 @@ import { SkillDetailPanel } from './SkillDetailPanel'
 import { NewSkillWizard } from './NewSkillWizard'
 import { CopySkillModal } from './CopySkillModal'
 import { FileTreePanel } from './FileTreePanel'
-import { COMPANY_TAB_ID } from './DepartmentTabs'
 import { TabbedEditorPanel } from './TabbedEditorPanel'
 import { ToolViewer } from './ToolViewer'
 import { ResizeHandle } from './ResizeHandle'
@@ -34,6 +33,8 @@ import { tabDepartmentLabels } from '../../lib/editorTabs'
 import { scanAffected, skillsScopesAffected } from '../../../shared/skills-refresh'
 import { unwatchCompany, watchCompany } from '../../shared/ipc/file-events'
 import { useEditorPersistence } from '../../features/editor/hooks/useEditorPersistence'
+import { useDepartmentSelection } from '../../features/workspace/hooks/useDepartmentSelection'
+import { COMPANY_TAB_ID } from '../../shared/lib/departments'
 import { departmentFolderExists } from '../../features/workspace/api'
 import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../../features/skills/api'
 import { previewSync, revertChange, summarizeChanges, syncCompany } from '../../features/sync/api'
@@ -75,30 +76,8 @@ export function SkillCentricLayout() {
     setLanguage(language === 'ja' ? 'en' : 'ja')
   }, [language, setLanguage])
 
-  // Department selection — restore last tab from localStorage, default to company-wide
-  const savedTabKey = currentCompany?.id ? `selectedDeptTab:${currentCompany.id}` : null
-  const [selectedDeptId, setSelectedDeptId] = useState<string>(() => {
-    if (savedTabKey) {
-      const saved = localStorage.getItem(savedTabKey)
-      if (saved) return saved
-    }
-    return COMPANY_TAB_ID
-  })
-
-  // Persist selected tab to localStorage
-  const setSelectedDeptIdWithSave = (id: string) => {
-    setSelectedDeptId(id)
-    if (savedTabKey) localStorage.setItem(savedTabKey, id)
-  }
-
-  // If restored tab is a department ID that doesn't exist (yet), fallback to company-wide
-  const prevDeptCountRef = useRef(0)
-  if (departments.length > 0 && prevDeptCountRef.current === 0) {
-    if (selectedDeptId !== COMPANY_TAB_ID && !departments.find(d => d.id === selectedDeptId)) {
-      setSelectedDeptIdWithSave(COMPANY_TAB_ID)
-    }
-  }
-  prevDeptCountRef.current = departments.length
+  // The department tab, saved per company; 全社 when the saved one is gone.
+  const { selectedDeptId, selectDepartment } = useDepartmentSelection(currentCompany?.id, departments)
 
   // Open file tabs, the active one and the left tab, saved per company.
   const { openFiles, setOpenFiles, activeFilePath, setActiveFilePath, leftTab, setLeftTab } =
@@ -389,7 +368,7 @@ export function SkillCentricLayout() {
   )
 
   const handleSelectDept = (id: string) => {
-    setSelectedDeptIdWithSave(id)
+    selectDepartment(id)
     setSelectedSkillId(null)
     // Open file tabs (and the active one) stay: they are one strip for the
     // whole company, labelled with their department when it is not this one.
