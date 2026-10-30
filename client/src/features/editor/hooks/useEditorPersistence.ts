@@ -3,22 +3,18 @@ import { fileExists } from '../api'
 
 // Per company, in localStorage under `editor:<company id>`: the open file tabs,
 // the active one, and the left panel tab. The left tab lives in the same entry
-// because existing installs saved it there; the caller says which ids are valid.
+// because existing installs saved it there. Any saved id is kept: the left
+// panel's registry shows the default for an id no panel has (an extension's
+// tab may register later).
 const EDITOR_STATE_KEY_PREFIX = 'editor:'
 
-type PersistedEditorState<Tab extends string> = {
+type PersistedEditorState = {
   openFiles: string[]
   activeFilePath: string | null
-  leftTab: Tab
+  leftTab: string
 }
 
-export interface LeftTabChoice<Tab extends string> {
-  /** Ids the screen can show; a saved id not in the list opens `fallback`. */
-  valid: ReadonlyArray<Tab>
-  fallback: Tab
-}
-
-function safeReadEditorState<Tab extends string>(companyId: string, tabs: LeftTabChoice<Tab>): PersistedEditorState<Tab> | null {
+function safeReadEditorState(companyId: string, defaultLeftTab: string): PersistedEditorState | null {
   try {
     const raw = localStorage.getItem(`${EDITOR_STATE_KEY_PREFIX}${companyId}`)
     if (!raw) return null
@@ -27,14 +23,14 @@ function safeReadEditorState<Tab extends string>(companyId: string, tabs: LeftTa
     return {
       openFiles: parsed.openFiles.filter((p: unknown): p is string => typeof p === 'string'),
       activeFilePath: typeof parsed.activeFilePath === 'string' ? parsed.activeFilePath : null,
-      leftTab: tabs.valid.includes(parsed.leftTab) ? parsed.leftTab : tabs.fallback,
+      leftTab: typeof parsed.leftTab === 'string' && parsed.leftTab ? parsed.leftTab : defaultLeftTab,
     }
   } catch {
     return null
   }
 }
 
-function safeWriteEditorState<Tab extends string>(companyId: string, state: PersistedEditorState<Tab>): void {
+function safeWriteEditorState(companyId: string, state: PersistedEditorState): void {
   try {
     localStorage.setItem(`${EDITOR_STATE_KEY_PREFIX}${companyId}`, JSON.stringify(state))
   } catch {
@@ -47,17 +43,15 @@ function safeWriteEditorState<Tab extends string>(companyId: string, state: Pers
  * company, restored when the company opens and saved on every change. Tabs of
  * files deleted meanwhile are dropped in the background.
  */
-export function useEditorPersistence<Tab extends string>(companyId: string | undefined, leftTabs: LeftTabChoice<Tab>) {
-  // The left tabs are fixed for the screen's lifetime.
-  const [tabs] = useState(leftTabs)
+export function useEditorPersistence(companyId: string | undefined, defaultLeftTab: string) {
   // Synchronously hydrate editor state from localStorage during the first render
   // so the persisted tabs/sidebar are visible immediately — no empty→populated
   // flicker. Background file-existence validation happens in the effect below.
   const initialEditorState = useState(() =>
-    companyId ? safeReadEditorState(companyId, tabs) : null
+    companyId ? safeReadEditorState(companyId, defaultLeftTab) : null
   )[0]
 
-  const [leftTab, setLeftTab] = useState<Tab>(() => initialEditorState?.leftTab ?? tabs.fallback)
+  const [leftTab, setLeftTab] = useState<string>(() => initialEditorState?.leftTab ?? defaultLeftTab)
   const [openFiles, setOpenFiles] = useState<string[]>(() => initialEditorState?.openFiles ?? [])
   const [activeFilePath, setActiveFilePath] = useState<string | null>(() => initialEditorState?.activeFilePath ?? null)
 
@@ -74,7 +68,7 @@ export function useEditorPersistence<Tab extends string>(companyId: string | und
     if (editorRestoredForId === companyId) return
 
     const targetCompanyId = companyId
-    const persisted = safeReadEditorState(targetCompanyId, tabs)
+    const persisted = safeReadEditorState(targetCompanyId, defaultLeftTab)
     const wasFirstMount = isFirstEditorMountRef.current
     isFirstEditorMountRef.current = false
 
@@ -85,7 +79,7 @@ export function useEditorPersistence<Tab extends string>(companyId: string | und
     if (!wasFirstMount) {
       setOpenFiles(persisted?.openFiles ?? [])
       setActiveFilePath(persisted?.activeFilePath ?? null)
-      setLeftTab(persisted?.leftTab ?? tabs.fallback)
+      setLeftTab(persisted?.leftTab ?? defaultLeftTab)
     }
 
     if (!persisted || persisted.openFiles.length === 0) {
@@ -110,7 +104,7 @@ export function useEditorPersistence<Tab extends string>(companyId: string | und
       setEditorRestoredForId(targetCompanyId)
     })()
     return () => { cancelled = true }
-  }, [companyId, editorRestoredForId, tabs])
+  }, [companyId, editorRestoredForId, defaultLeftTab])
 
   // Persist editor state whenever it changes. Gated on restoration having
   // completed for this company so the initial empty state can't clobber a

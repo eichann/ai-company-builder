@@ -116,7 +116,8 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
   `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`
   (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
   (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
-  background; an unknown `leftTab` opens the default tab. Existing installs hold this shape:
+  background; any `leftTab` string is kept and one no registered panel has opens the default tab
+  (`renderer-structure.md`, panel registry). Existing installs hold this shape:
   keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
