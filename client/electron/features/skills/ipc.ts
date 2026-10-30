@@ -6,6 +6,7 @@
 
 import fs from 'fs'
 import path from 'path'
+import { parseFrontmatter } from '../../../shared/skill-frontmatter'
 import { SkillsCache } from '../../../shared/skills-refresh'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -39,33 +40,11 @@ interface SkillInfo {
   }
 }
 
-// Parse YAML frontmatter from SKILL.md
+// The SKILL.md frontmatter (YAML; client/shared/skill-frontmatter.ts reads quoted and block values too).
 function parseSkillFrontmatter(content: string): { name?: string; description?: string; status?: string } {
-  const frontmatterMatch = content.match(/^---\n([\s\S]*?)\n---/)
-  if (!frontmatterMatch) return {}
-
-  const frontmatter = frontmatterMatch[1]
-  const result: { name?: string; description?: string; status?: string } = {}
-
-  // Parse name
-  const nameMatch = frontmatter.match(/^name:\s*(.+)$/m)
-  if (nameMatch) {
-    result.name = nameMatch[1].trim()
-  }
-
-  // Parse description
-  const descMatch = frontmatter.match(/^description:\s*(.+)$/m)
-  if (descMatch) {
-    result.description = descMatch[1].trim()
-  }
-
-  // Parse status
-  const statusMatch = frontmatter.match(/^status:\s*(.+)$/m)
-  if (statusMatch) {
-    result.status = statusMatch[1].trim()
-  }
-
-  return result
+  const fields = parseFrontmatter(content)
+  const text = (v: string | undefined) => (v === undefined ? undefined : v.trim() || undefined)
+  return { name: text(fields.name), description: text(fields.description), status: text(fields.status) }
 }
 
 /**
