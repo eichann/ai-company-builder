@@ -120,6 +120,14 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
   Overwriting first backs the disk version up (`editor:backupBeforeOverwrite` →
   `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder).
   Closing a tab whose save was cancelled asks before discarding.
+- `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
+  (each tab's text, loading, the watcher: follow the disk / mark external / missing),
+  `useFileSaving.ts` (autosave after 1 s, ⌘S, save before close, load the disk version, the
+  confirm), `useMarkdownView.ts` (preview / source mode, ⌘⇧M, scroll positions),
+  `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
+  `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
+  `hooks/usePreviewSearch.ts`, ⌘F), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
+  (image, PDF); `fileKinds.ts` decides how a file is shown.
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
   `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
 - Preview: `client/tests/editor-tabs-ui.html?view=external` (`editor-tabs.spec.ts`); `?view=tabs`
