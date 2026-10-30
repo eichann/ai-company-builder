@@ -1,151 +1,94 @@
 /**
- * Security Test: Authentication guards on all API endpoints
+ * Security Test: no endpoint answers a request that carries no sign-in.
  *
- * Every API endpoint (except explicitly public ones) must check
- * authentication before performing any action.
- * This test statically analyzes route files to ensure auth checks exist.
+ * Every handler of every route file in src/routes is called without a session
+ * (and without git Basic credentials); each must answer 401. Route files and
+ * handlers are discovered at run time, so a new endpoint is covered the day it
+ * is added, whichever helper it uses to check the session (getUserFromRequest,
+ * a route's own authenticateMember, git-http's Basic auth, …).
+ *
+ * The only endpoints meant to be reachable without a session are listed in
+ * PUBLIC_ENDPOINTS with their reason.
  */
-import { describe, it, expect } from 'vitest'
-import { readFileSync } from 'fs'
-import { join } from 'path'
+import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { readdirSync } from 'fs'
+import { join } from 'path'
+
+vi.mock('../../src/lib/auth', () => ({
+  getUserFromRequest: vi.fn().mockResolvedValue(null),
+  getUsersByIds: vi.fn().mockReturnValue(new Map()),
+  auth: {
+    handler: vi.fn().mockResolvedValue(new Response('', { status: 200 })),
+    api: { getSession: vi.fn().mockResolvedValue(null) },
+  },
+}))
+
+import { Hono } from 'hono'
 
 const ROUTES_DIR = join(__dirname, '../../src/routes')
 
-// Route files that are allowed to have unauthenticated endpoints
-const PUBLIC_ENDPOINT_EXCEPTIONS: Record<string, string[]> = {
-  // invitations.ts: GET /invitations/:token is public (token validation)
-  'invitations.ts': ['invitationsRoute.get(\'/invitations/:token\''],
+/** `<file> <METHOD> <path>` → why it needs no session. */
+const PUBLIC_ENDPOINTS: Record<string, string> = {
+  'invitations.ts GET /invitations/:token': 'the sign-up page validates an invitation link before an account exists',
 }
 
-// Route files where ALL endpoints are expected to be unauthenticated (stub/TODO)
-const FULLY_PUBLIC_ROUTES: string[] = [
-  'permissions.ts', // Dead code: route unmounted from index.ts (C-2 fix), file pending deletion
-]
+interface Endpoint { file: string; method: string; path: string; app: Hono }
 
-function getRouteFiles(): { name: string; content: string }[] {
-  return readdirSync(ROUTES_DIR)
-    .filter(f => f.endsWith('.ts'))
-    .map(f => ({
-      name: f,
-      content: readFileSync(join(ROUTES_DIR, f), 'utf-8'),
-    }))
-}
+const endpoints: Endpoint[] = []
 
-// Extract route handler blocks (e.g., `route.get('/path', async (c) => { ... })`)
-interface RouteHandler {
-  method: string
-  path: string
-  lineNumber: number
-  hasAuthCheck: boolean
-}
-
-function extractRouteHandlers(content: string): RouteHandler[] {
-  const handlers: RouteHandler[] = []
-  const lines = content.split('\n')
-
-  // Pattern: routeName.get|post|put|patch|delete('path', ...
-  // Skip commented-out lines (// or /*)
-  const routePattern = /(\w+)\.(get|post|put|patch|delete)\s*\(\s*['"`]([^'"`]+)['"`]/
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trimStart()
-    // Skip commented-out lines
-    if (line.startsWith('//') || line.startsWith('/*') || line.startsWith('*')) continue
-    const match = line.match(routePattern)
-    if (match) {
-      const method = match[2].toUpperCase()
-      const path = match[3]
-
-      // Scan ahead in the handler body for auth check
-      // Look for getUserFromRequest, authenticateGitRequest, or authAndAuthorize
-      let braceDepth = 0
-      let started = false
-      let hasAuth = false
-
-      for (let j = i; j < Math.min(i + 40, lines.length); j++) {
-        const line = lines[j]
-
-        if (line.includes('{')) {
-          braceDepth += (line.match(/{/g) || []).length
-          started = true
-        }
-        if (line.includes('}')) {
-          braceDepth -= (line.match(/}/g) || []).length
-        }
-
-        if (/getUserFromRequest|authenticateGitRequest|authAndAuthorize/.test(line)) {
-          hasAuth = true
-          break
-        }
-
-        // Stop if we've exited the handler
-        if (started && braceDepth <= 0) break
+beforeAll(async () => {
+  (await import('../../src/db')).initDatabase()
+  for (const file of readdirSync(ROUTES_DIR).filter(f => f.endsWith('.ts')).sort()) {
+    const mod = await import(join(ROUTES_DIR, file)) as Record<string, unknown>
+    for (const value of Object.values(mod)) {
+      if (!(value instanceof Hono)) continue
+      const app = new Hono().route('/', value)
+      for (const r of value.routes) {
+        if (r.method === 'ALL') continue // middleware
+        endpoints.push({ file, method: r.method, path: r.path, app })
       }
-
-      handlers.push({
-        method,
-        path,
-        lineNumber: i + 1,
-        hasAuthCheck: hasAuth,
-      })
     }
   }
+})
 
-  return handlers
+/**
+ * A concrete URL for a route pattern: each parameter becomes a harmless value.
+ * git's advertisement always carries ?service= (a request without it is refused
+ * before anything is read, so it would not reach the sign-in check).
+ */
+function concrete(path: string): string {
+  const url = path.replace(/:([A-Za-z_]+)(\{[^}]*\})?/g, (_, name: string) => (name === 'repo' ? 'company-x.git' : `${name}-x`))
+  return url.endsWith('/info/refs') ? `${url}?service=git-upload-pack` : url
 }
 
 describe('Authentication guards', () => {
-  it('all route files with endpoints must import an auth function', () => {
-    const violations: string[] = []
-
-    for (const { name, content } of getRouteFiles()) {
-      if (FULLY_PUBLIC_ROUTES.includes(name)) continue
-
-      // Check if file defines any route handlers
-      const hasHandlers = /\.\s*(get|post|put|patch|delete)\s*\(/.test(content)
-      if (!hasHandlers) continue
-
-      const hasAuthImport =
-        /getUserFromRequest/.test(content) ||
-        /authenticateGitRequest/.test(content)
-
-      if (!hasAuthImport) {
-        violations.push(name)
-      }
+  it('finds the endpoints of every route file', () => {
+    expect(endpoints.length).toBeGreaterThan(50)
+    const files = new Set(endpoints.map(e => e.file))
+    for (const file of ['companies.ts', 'departments.ts', 'permissions.ts', 'permission-rules.ts', 'private-folders.ts', 'git-http.ts', 'agent-events.ts']) {
+      expect(files, file).toContain(file)
     }
-
-    expect(
-      violations,
-      `These route files define endpoints but don't import any auth function: ${violations.join(', ')}`
-    ).toEqual([])
   })
 
-  it('every endpoint handler must call an auth check (except known public ones)', () => {
+  it('every endpoint answers 401 to a request without a session (except the listed public ones)', async () => {
     const violations: string[] = []
-
-    for (const { name, content } of getRouteFiles()) {
-      if (FULLY_PUBLIC_ROUTES.includes(name)) continue
-
-      const handlers = extractRouteHandlers(content)
-      const exceptions = PUBLIC_ENDPOINT_EXCEPTIONS[name] || []
-
-      for (const handler of handlers) {
-        if (handler.hasAuthCheck) continue
-
-        // Check if this is an allowed exception
-        const isException = exceptions.some(exc => content.includes(exc))
-        if (isException && handler.path.includes(':token')) continue
-
-        violations.push(
-          `${name}:${handler.lineNumber} — ${handler.method} ${handler.path} has no auth check`
-        )
+    const publicSeen = new Set<string>()
+    for (const e of endpoints) {
+      const key = `${e.file} ${e.method} ${e.path}`
+      const init: RequestInit = { method: e.method }
+      if (e.method !== 'GET' && e.method !== 'HEAD') {
+        init.body = '{}'
+        init.headers = { 'Content-Type': 'application/json' }
       }
+      const res = await e.app.request(concrete(e.path), init)
+      if (key in PUBLIC_ENDPOINTS) {
+        publicSeen.add(key)
+        continue
+      }
+      if (res.status !== 401) violations.push(`${key} → ${res.status}`)
     }
-
-    expect(
-      violations,
-      `These endpoints are missing authentication checks:\n${violations.join('\n')}`
-    ).toEqual([])
+    expect(violations, `These endpoints answer without a session:\n${violations.join('\n')}`).toEqual([])
+    expect([...publicSeen].sort(), 'a listed public endpoint no longer exists: remove it from PUBLIC_ENDPOINTS')
+      .toEqual(Object.keys(PUBLIC_ENDPOINTS).sort())
   })
 })

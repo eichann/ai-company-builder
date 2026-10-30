@@ -319,3 +319,107 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     expect(errorsSeen.map(e => `${e.call}: ${e.error}`)).toEqual([])
   })
 })
+
+/**
+ * The other direction: the admin's own request builders (admin/src/lib/api.ts:
+ * method, URL, query and body) are run against the real routes, and the
+ * server's state is read back. A request the server refuses throws ApiError;
+ * one it accepts but misreads (a renamed body field, a query parameter it does
+ * not know) leaves the database unchanged — either fails here.
+ */
+describe('the admin console\'s requests do what the admin means on the server', () => {
+  let A: typeof import('../../../admin/src/lib/api')
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let db: any
+  const row = (sql: string, ...args: unknown[]) => db.prepare(sql).get(...args) as Loose
+  const rules = (path: string) => db.prepare(`SELECT r.subject_type, r.subject_id, r.can_read, r.can_write FROM scope_rules r
+    JOIN scopes s ON s.id = r.scope_id WHERE s.company_id = ? AND s.path = ? ORDER BY r.subject_type, r.subject_id`).all(CO, path)
+
+  beforeAll(async () => {
+    A = await import('../../../admin/src/lib/api')
+    db = (await import('../../src/db')).db
+    currentUser.id = USERS.owner
+    vi.stubGlobal('fetch', (input: RequestInfo | URL, init?: RequestInit) => app.request(String(input), init))
+    // The member runs an app that recovers from a refused push, so taking
+    // writing away from them needs no "save anyway" (outdated-app guard).
+    const { WRITE_DENIED_RECOVERY_COMMIT_DATE } = await import('../../src/lib/client-version')
+    db.prepare(`INSERT OR REPLACE INTO client_activity (user_id, company_id, client_version, last_seen_at, updated_at) VALUES (?, ?, ?, ?, ?)`)
+      .run(USERS.member, CO, `0.0.1+a031b73.${WRITE_DENIED_RECOVERY_COMMIT_DATE}`, new Date().toISOString(), new Date().toISOString())
+  })
+  afterAll(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('company rename and member role change', async () => {
+    await A.companiesApi.rename(CO, '改名テスト')
+    expect(row('SELECT name FROM companies WHERE id = ?', CO).name).toBe('改名テスト')
+    await A.companiesApi.setMemberRole(CO, USERS.member, 'admin')
+    expect(row('SELECT role FROM memberships WHERE company_id = ? AND user_id = ?', CO, USERS.member).role).toBe('admin')
+    await A.companiesApi.setMemberRole(CO, USERS.member, 'member')
+    expect(row('SELECT role FROM memberships WHERE company_id = ? AND user_id = ?', CO, USERS.member).role).toBe('member')
+  })
+
+  it('department order and managers', async () => {
+    const dept = await A.departmentsApi.create(CO, { name: '総務部', folder: '総務部', icon: 'Folder', color: '#3b82f6' })
+    await A.departmentsApi.reorder(CO, [{ id: dept.id, sortOrder: 7 }])
+    expect(row('SELECT sort_order FROM departments WHERE id = ?', dept.id).sort_order).toBe(7)
+    await A.departmentsApi.setManagers(CO, dept.id, [USERS.member])
+    expect(db.prepare('SELECT user_id FROM department_managers WHERE department_id = ?').all(dept.id)).toEqual([{ user_id: USERS.member }])
+    expect((await A.departmentsApi.getManagers(CO, dept.id)).managers.map(m => m.userId)).toEqual([USERS.member])
+  })
+
+  it('permission edits: writing changes as asked, reading is never taken away', async () => {
+    const set = await A.permissionsApi.setRule(CO, '営業部', { subjectType: 'user', subjectId: USERS.member }, true)
+    expect(rules('営業部')).toContainEqual({ subject_type: 'user', subject_id: USERS.member, can_read: 1, can_write: 1 })
+    const ruleId = set.rules.find(r => r.subjectId === USERS.member)!.id
+
+    await A.permissionsApi.updateRule(CO, ruleId, false)
+    expect(rules('営業部')).toContainEqual({ subject_type: 'user', subject_id: USERS.member, can_read: 1, can_write: 0 })
+    const effective = await A.permissionsApi.effective(CO, '営業部')
+    expect(effective.members.find(m => m.userId === USERS.member)).toMatchObject({ read: true, write: false })
+
+    await A.permissionsApi.replaceScope(CO, '営業部', [
+      { subjectType: 'everyone', subjectId: null, canWrite: false },
+      { subjectType: 'user', subjectId: USERS.member, canWrite: true },
+    ])
+    expect(rules('営業部')).toEqual([
+      { subject_type: 'everyone', subject_id: null, can_read: 1, can_write: 0 },
+      { subject_type: 'user', subject_id: USERS.member, can_read: 1, can_write: 1 },
+    ])
+    const folders = await A.permissionsApi.folders(CO, '')
+    expect(folders.folders.find(f => f.path === '営業部')).toMatchObject({ hasRules: true })
+
+    const memberRule = row(`SELECT r.id FROM scope_rules r JOIN scopes s ON s.id = r.scope_id
+      WHERE s.company_id = ? AND s.path = ? AND r.subject_id = ?`, CO, '営業部', USERS.member).id
+    await A.permissionsApi.deleteRule(CO, memberRule)
+    expect(rules('営業部')).toEqual([{ subject_type: 'everyone', subject_id: null, can_read: 1, can_write: 0 }])
+
+    const scopeId = row('SELECT id FROM scopes WHERE company_id = ? AND path = ?', CO, '営業部').id
+    expect((await A.permissionsApi.resetScope(CO, scopeId)).removed).toBe(1)
+    expect(rules('営業部')).toEqual([])
+  })
+
+  it('push rejection filters and paging reach the query', async () => {
+    const now = new Date().toISOString()
+    const add = db.prepare(`INSERT INTO push_rejections (id, company_id, user_id, marker, paths, created_at) VALUES (?, ?, ?, ?, '[]', ?)`)
+    add.run('rej-2', CO, USERS.admin, 'SECRET_DETECTED', now)
+    add.run('rej-3', CO, USERS.member, 'SECRET_DETECTED', now)
+    const filtered = await A.pushRejectionsApi.list(CO, { userId: USERS.member, marker: 'SECRET_DETECTED' })
+    expect(filtered.rejections.map(r => r.id)).toEqual(['rej-3'])
+    expect(filtered.total).toBe(1)
+    const first = await A.pushRejectionsApi.list(CO, { limit: 1 })
+    const second = await A.pushRejectionsApi.list(CO, { limit: 1, offset: 1 })
+    expect(first.total).toBe(3)
+    expect(first.rejections).toHaveLength(1)
+    expect(second.rejections).toHaveLength(1)
+    expect(second.rejections[0].id).not.toBe(first.rejections[0].id)
+  })
+
+  it('an invitation gets the role and expiry the admin chose', async () => {
+    const inv = await A.invitationsApi.create(CO, 'admin', 30)
+    const stored = row('SELECT role, expires_at FROM invitations WHERE id = ?', inv.id)
+    expect(stored.role).toBe('admin')
+    expect((new Date(stored.expires_at).getTime() - Date.now()) / 86_400_000).toBeGreaterThan(29.9)
+    expect((await A.invitationsApi.list(CO)).map(i => i.id)).toContain(inv.id)
+  })
+})

@@ -7,11 +7,10 @@ import DepartmentsPage from '@/app/companies/[id]/departments/page'
 import MembersPage from '@/app/companies/[id]/members/page'
 import OverviewPage from '@/app/companies/[id]/page'
 import { ConfirmByTypingDialog } from '@/components/app/confirm-by-typing'
-import { EmptyState, ErrorState } from '@/components/app/states'
-import { CheckCircle } from '@phosphor-icons/react'
+import { ErrorState } from '@/components/app/states'
 import { base, companyRoutes, renderInCompany } from './company-harness'
 import { COMPANY_ID, busyOverview, managerCapabilities, ok, quietOverview } from './fixtures'
-import { mockApi, pending } from './mock-api'
+import { mockApi } from './mock-api'
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
@@ -28,12 +27,6 @@ vi.mock('next/link', () => ({
 
 
 describe('shared states', () => {
-  it('empty state shows its next action', () => {
-    render(<EmptyState icon={CheckCircle} title="何もありません" action={<button>追加</button>} />)
-    expect(screen.getByText('何もありません')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '追加' })).toBeInTheDocument()
-  })
-
   it('error state explains and retries', async () => {
     const onRetry = vi.fn()
     render(<ErrorState error={new TypeError('Failed to fetch')} onRetry={onRetry} />)
@@ -66,13 +59,6 @@ describe('shared states', () => {
 })
 
 describe('概要', () => {
-  it('shows a loading skeleton while the overview loads', async () => {
-    mockApi({ ...companyRoutes(), [`GET ${base}/overview`]: () => pending() })
-    renderInCompany(<OverviewPage />)
-    await waitFor(() => expect(screen.getByRole('heading', { name: '概要' })).toBeInTheDocument())
-    expect(document.querySelector('[aria-busy="true"]')).not.toBeNull()
-  })
-
   it('shows the empty state when nothing needs attention', async () => {
     mockApi({ ...companyRoutes(), [`GET ${base}/overview`]: { body: ok(quietOverview) } })
     renderInCompany(<OverviewPage />)

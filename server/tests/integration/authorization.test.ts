@@ -36,13 +36,11 @@ import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { departmentsRoute } from '../../src/routes/departments'
-import { gitRoute } from '../../src/routes/git'
 import { invitationsRoute } from '../../src/routes/invitations'
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
 app.route('/api/companies/:companyId/departments', departmentsRoute)
-app.route('/api/git', gitRoute)
 app.route('/api', invitationsRoute)
 
 function jsonReq(method: string, path: string, body?: unknown) {
@@ -149,14 +147,6 @@ describe('Authorization rejection (403) — member user without owner/admin role
     it('DELETE invitation → 403', async () => {
       const res = await jsonReq('DELETE', `/api/companies/${TEST_COMPANY_ID}/invitations/inv-1`)
       expect(res.status).toBe(403)
-    })
-  })
-
-  // --- Git repo administration is not an API any more ---
-  describe('git repo administration', () => {
-    it('DELETE /api/git/repos/:companyId no longer exists (404)', async () => {
-      const res = await jsonReq('DELETE', `/api/git/repos/${TEST_COMPANY_ID}`)
-      expect(res.status).toBe(404)
     })
   })
 
