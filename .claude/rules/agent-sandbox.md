@@ -18,6 +18,7 @@ paths:
   - "client/electron/services/agent-policy-store.ts"
   - "client/tests/sandbox-observe.test.ts"
   - "client/tests/sandbox-claude.test.ts"
+  - "client/tests/sandbox-codex.test.ts"
 ---
 
 # AI sandbox (「AI の囲い」): the company's policy, handed to the agents' own sandboxes
@@ -156,7 +157,36 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   possible exfiltration paths. A managed `enabledPlatforms` that leaves macOS out turns the
   sandbox off without an error (seen with a flag setting) — keep it out of the Jamf profile.
 
-Tests: `client/tests/sandbox-claude.test.ts` (the CLI gets the sandbox and the Read denies
+## Enforce with Codex (S4, macOS)
+
+- Registry `capabilities.sandbox` = true for Codex (Windows: Codex is not offered there).
+  `agents/codex.ts` under enforce (a chat with a working folder, not titles): the thread config
+  gets `codexSandboxConfig` (`default_permissions = "acb"`, `features.network_proxy = true`,
+  `permissions.acb` = `:workspace` + caches `write` + denied places `deny` + network only the
+  allowed hosts) and **no** `sandbox` parameter (a legacy mode in any layer switches profiles
+  off). Observe / off: `sandbox: 'workspace-write'` as before.
+- Self-check (findings §B.3): `thread/start` and `thread/resume` answer
+  `activePermissionProfile` (no experimental API needed, codex-cli 0.153.4). Not `{ id: "acb" }`
+  → `stop`: the turn never starts (`SANDBOX_MESSAGES.startFailedStop`); `record-only`: the turn
+  runs, the reply starts with the record-only notice. Verified: a `-c sandbox_mode=
+  "danger-full-access"` override does not displace the thread's profile; the thread-level
+  config wins.
+- Logging: a failed `commandExecution` item's `aggregatedOutput` goes through
+  `parseSandboxViolation` — Codex's proxy says only `CONNECT tunnel failed, response 403`
+  (`proxyRefused`), so the hosts are the ones the command named (`concern === 'host'`); a denied
+  place shows as `Operation not permitted`.
+- Verified on this Mac (codex-cli 0.153.4, `gpt-5.6-luna`, Jamf developer `requirements.toml`
+  present; `command/exec` under the same profile and a real chat turn + resume): api.github.com
+  200, generativelanguage.googleapis.com reached (403), example.org refused (curl 56, chat event
+  `blocked` + host), `~/.ssh/config` and `~/.aws/config` → `PermissionError`, company folder
+  read / append OK, `~/Desktop` write refused, start and resume both report the `acb` profile.
+- Not covered by Codex's sandbox: MCP servers, `web_search` (off when the Web reader is on),
+  Codex's own traffic. Unverified: the non-developer Jamf `requirements.toml` that bans full
+  access (`allowed_sandbox_modes`) together with permission profiles.
+
+Tests: `client/tests/sandbox-codex.test.ts` (enforce sends the profile and never a legacy mode;
+observe / off unchanged; a profile not in force stops the turn or runs it with the notice; a
+proxy-refused command and a denied read are logged blocked), `client/tests/sandbox-claude.test.ts` (the CLI gets the sandbox and the Read denies
 under enforce and nothing under observe / off; start failure → stop sentence or re-run with
 the notice; other failures never re-run; the refused host's sentence reaches the AI; Windows
 never enforces), `client/tests/sandbox-observe.test.ts` (observe marks hosts and denied places but never

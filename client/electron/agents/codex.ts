@@ -20,6 +20,7 @@ import type { SteerTarget } from './steering'
 import { turnToolEvents } from './tool-events'
 import { recordCodexApproval, recordCodexItem } from './codex-tool-events'
 import { checkInstalledCodex, type CodexVersionCheck } from './codex-version'
+import { CODEX_SANDBOX_PROFILE, SANDBOX_MESSAGES, codexSandboxConfig } from '../../shared/agents/sandbox-policy'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
 type StreamResult = Awaited<ReturnType<Model['doStream']>>
@@ -304,18 +305,31 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               ...(webResearchMcp ? { [WEB_RESEARCH_SERVER]: webResearchMcp.config } : {}),
               ...(askMcp ? { [CODEX_CHOICE_SERVER]: askMcp.config } : {}),
             }
+            // 「AI の囲い」 enforce (agent-sandbox.md): the app's permission profile
+            // instead of the legacy `sandbox` mode (any legacy mode switches profiles off).
+            const sandboxed = !title && !!request.workingDirectory && request.sandbox?.mode === 'enforce'
             // With the app's web research, Codex's own web search is off for this thread.
             const threadConfig = {
               ...(Object.keys(mcpServers).length > 0 ? { mcp_servers: mcpServers } : {}),
               ...(webResearchMcp ? { web_search: 'disabled' } : {}),
+              ...(sandboxed ? codexSandboxConfig(request.sandbox!.resolved) : {}),
             }
-            const params = { ...(Object.keys(threadConfig).length > 0 ? { config: threadConfig } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), sandbox: !title && request.workingDirectory ? 'workspace-write' : 'read-only', approvalPolicy: title ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: system || undefined }
-            const result = await rpc.request<{ thread: { id: string } }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {
+            const legacySandbox = sandboxed ? {} : { sandbox: !title && request.workingDirectory ? 'workspace-write' : 'read-only' }
+            const params = { ...(Object.keys(threadConfig).length > 0 ? { config: threadConfig } : {}), model: selected.id, modelProvider: 'openai', cwd: request.workingDirectory || os.tmpdir(), ...legacySandbox, approvalPolicy: title ? 'never' : 'on-request', approvalsReviewer: 'user', developerInstructions: system || undefined }
+            const result = await rpc.request<{ thread: { id: string }; activePermissionProfile?: { id?: unknown } | null }>(request.resumeId ? 'thread/resume' : 'thread/start', request.resumeId ? { ...params, threadId: request.resumeId, excludeTurns: true } : { ...params, ephemeral: title }).catch(error => {
               if (request.resumeId && error instanceof Error && error.message.trim() === `no rollout found for thread id ${request.resumeId}`) throw new MissingAgentSession(request.resumeId)
               throw error
             })
             threadId = result.thread.id
             emit({ type: 'response-metadata', id: threadId })
+            // Self-check: Codex says which profile is in force. Anything else (an older
+            // Codex, a config that overrides it) means the sandbox is not running.
+            if (sandboxed && (result.activePermissionProfile?.id ?? null) !== CODEX_SANDBOX_PROFILE) {
+              console.warn('[agent-sandbox] Codex did not apply the permission profile; following the company setting:', request.sandbox!.onUnavailable)
+              if (request.sandbox!.onUnavailable !== 'record-only') throw new Error(SANDBOX_MESSAGES.startFailedStop)
+              const id = `sandbox-notice-${crypto.randomUUID()}`
+              emit({ type: 'text-start', id }); emit({ type: 'text-delta', id, delta: `※ ${SANDBOX_MESSAGES.startFailedRecordOnly}\n\n` }); emit({ type: 'text-end', id })
+            }
             const input: Array<{ type: 'text'; text: string; text_elements: never[] } | { type: 'image'; url: string }> = []
             for (const message of options.prompt) {
               if (message.role === 'system' || message.role === 'tool') continue

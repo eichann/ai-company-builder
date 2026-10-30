@@ -130,8 +130,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   `.claude/hooks/`, skills / agents / commands. Codex: every `.codex/` between the project root
   and `cwd` (`config.toml`, `hooks.json`, `rules/`), but only when the member has trusted the
   folder in Codex (`[projects."<path>"] trust_level` in their `~/.codex/config.toml`); the app
-  never sets trust, and `thread/start` passes `sandbox` / `approvalPolicy` / `mcp_servers` but
-  nothing that turns the project layer off. Codex documents no key or flag that ignores a trusted
+  never sets trust, and `thread/start` passes `sandbox` / `approvalPolicy` / `mcp_servers` (under
+  the company sandbox's enforce: the app's permission profile instead of `sandbox`,
+  `agent-sandbox.md`) but nothing that turns the project layer off. Codex documents no key or flag that ignores a trusted
   project's `.codex/` (`project_root_markers` only changes root detection), so the app leaves it
   loading; shared config is legitimate when an owner/admin writes it.
 - The enforcement is the push checker: these paths are `[PROTECTED_CONFIG]` (owner/admin only,

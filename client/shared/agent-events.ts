@@ -493,7 +493,8 @@ export function createToolEventTracker(
   const blockedBy = (c: OpenCall, violation: SandboxViolation | undefined): OpenCall | undefined => {
     if (context.sandbox?.mode !== 'enforce' || !violation) return undefined
     const read = violation.read || (violation.notPermitted && c.concern === 'read')
-    if (violation.hosts.length === 0 && !read) return undefined
+    const host = violation.hosts.length > 0 || (violation.proxyRefused && c.concern === 'host')
+    if (!host && !read) return undefined
     const target = c.target.kind === 'command' && violation.hosts.length
       ? { ...c.target, hosts: [...new Set([...(c.target.hosts ?? []), ...violation.hosts])].slice(0, 5) }
       : c.target
