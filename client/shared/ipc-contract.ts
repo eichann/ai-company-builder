@@ -32,7 +32,7 @@ import type { WriteAccess } from './write-access'
 import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
-import type { OwnKeysResult } from './broker-keys'
+import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -434,6 +434,8 @@ export interface IpcInvokeChannels {
   'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
   'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
   'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
+  /** Moves a built-in service's key from the company folder's .env to the server (removed locally only after the server kept it). */
+  'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -693,6 +695,7 @@ export interface ElectronAPI {
   listOwnBrokerKeys: Invoke<'brokerKeys:list'>
   saveOwnBrokerKey: Invoke<'brokerKeys:save'>
   deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+  moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

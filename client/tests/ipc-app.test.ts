@@ -198,6 +198,46 @@ test('brokerKeys:save sends one\'s own API key to the server once and never hand
   assert.equal(h.server.requests.length, before)
 })
 
+test('brokerKeys:moveFromEnv takes the key out of the .env only after the server kept it, and never hands it to the renderer', async () => {
+  const OWN = 'fake-env-key-NOT-REAL-4Rt8Wq1Xv'
+  const company = h.companyDir('move-env-co')
+  await h.invoke('fs:registerAllowedRoot', company)
+  const envFile = path.join(company, '.env')
+  const original = `# keys\nOPENAI_API_KEY=${OWN}\nOTHER=keep-me\n`
+  fs.writeFileSync(envFile, original)
+  const view = { enabled: true, memberKeysAllowed: true, services: [{ service: 'openai', label: 'OpenAI', key: { last4: OWN.slice(-4) } }] }
+  const route = '/api/companies/co-move/me/broker-keys/openai'
+  const answers: unknown[] = []
+
+  // Refused (the service said the key does not work), offline: the .env is untouched.
+  h.server.on('PUT', route, { status: 400, json: { error: `refused ${OWN}`, code: 'KEY_REJECTED' } })
+  const refused = await h.invoke<{ success: boolean; error: string }>('brokerKeys:moveFromEnv', 'co-move', company, 'OPENAI_API_KEY')
+  answers.push(refused)
+  assert.equal(refused.success, false)
+  assert.match(refused.error, /この鍵は使えませんでした/)
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), original)
+  h.server.offline = true
+  answers.push(await h.invoke('brokerKeys:moveFromEnv', 'co-move', company, 'OPENAI_API_KEY'))
+  h.server.offline = false
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), original)
+
+  // Kept: the value went to the server once; only that name leaves the .env.
+  h.server.on('PUT', route, { json: { success: true, data: view } })
+  const moved = await h.invoke('brokerKeys:moveFromEnv', 'co-move', company, 'OPENAI_API_KEY')
+  answers.push(moved)
+  assert.deepEqual(moved, { success: true, data: view, removed: true })
+  assert.equal(JSON.parse(h.server.to(route).at(-1)!.body!).secret, OWN)
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), '# keys\nOTHER=keep-me\n')
+
+  // Nothing to move, or a name that is not a built-in service's key: nothing sent.
+  const before = h.server.requests.length
+  answers.push(await h.invoke('brokerKeys:moveFromEnv', 'co-move', company, 'OPENAI_API_KEY'))
+  answers.push(await h.invoke('brokerKeys:moveFromEnv', 'co-move', company, 'OTHER'))
+  assert.equal(h.server.requests.length, before)
+  for (const answer of answers) assert.ok(!JSON.stringify(answer).includes(OWN.slice(8)), 'the key reached the renderer')
+  assert.ok(!h.logs.join('\n').includes(OWN.slice(8)), 'the key was logged')
+})
+
 test('chat history: saves answer with a receipt and broadcast to the window; the unload flush is synchronous', async () => {
   const window = h.renderer()
   window.clearSent()

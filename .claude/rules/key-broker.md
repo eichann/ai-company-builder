@@ -43,6 +43,13 @@ paths:
   - "client/src/features/settings/own-keys*"
   - "client/src/features/settings/hooks/useOwnKeys.ts"
   - "client/src/features/settings/components/OwnKeysSection.tsx"
+  - "client/src/features/settings/components/MoveEnvKeysCard.tsx"
+  - "client/src/features/settings/hooks/useEnvKeyMove.ts"
+  - "client/src/features/chat/brokerKeyNeeds*"
+  - "client/src/features/chat/components/BrokerKeyNeededCard.tsx"
+  - "client/src/features/chat/hooks/useOwnKeyService.ts"
+  - "client/tests/broker-key-card-ui.*"
+  - "client/tests/ui/broker-key-card.spec.ts"
 ---
 
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
@@ -407,8 +414,39 @@ Main: `electron/features/broker/ipc.ts` (`brokerKeys:list|save|delete`; the sess
 in main). The pasted value crosses renderer → main → server once (PUT body), in a password field;
 **main's answers are the server's view or a sentence built from status codes only**
 (`client/shared/broker-keys.ts` `ownKeysErrorText`), so no server text that might quote the
-request reaches the renderer, and nothing is logged but the method and status. The page that
-used to be 「APIキー」 (the company folder's `.env` on this computer) is now 「APIキー（このPC）」.
+request reaches the renderer, and nothing is logged but the method and status. After a save the
+row says how the server's check went (`KEY_CHECK_TEXT`; `KEY_REJECTED` → 「この鍵は使えません
+でした…保存していません。」). The page that used to be 「APIキー」 (the company folder's `.env` on
+this computer) is now 「APIキー（このPC）」.
+
+**「自分の鍵」 is the one place for keys (owner, 2026-10-31).**
+- **From the chat**: when a reply has ended, `features/chat/brokerKeyNeeds.ts` finds the relay's
+  `[ACB_NO_KEY:<service>]` markers in tool outputs / errors and the AI's text (service names only,
+  ≤ 256 KB per part searched) and `components/chat/MessageParts.tsx` shows one
+  `features/chat/components/BrokerKeyNeededCard.tsx` per service: 「<サービス> の鍵がありません」,
+  the member's state read from `GET /me/broker-keys` (`hooks/useOwnKeyService.ts`, port
+  `OwnKeyStatusReads` in `features/chat/api.ts`) — may register → 「自分の鍵を登録する」 runs the
+  command `settings.openOwnKey { service }` (`commands.md`; AppShell opens Settings → 自分の鍵 with
+  that service shown, highlighted and its form open); not allowed / broker off → the reason and
+  「管理者に…してもらってください」, no button (a real request to the admin comes with the push
+  channel); a consultation's own window (no handler) → 「メインの画面の「設定 → 自分の鍵」から」. The
+  card never shows what was printed around the marker. Tests:
+  `src/features/chat/brokerKeyNeeds.test.ts`, `tests/ui/broker-key-card.spec.ts`.
+- **The old pages** 「APIキー（このPC）」 and 「環境変数（.env）」 say they are for older app versions
+  and special cases, recommending 「自分の鍵」 (`features/settings/components/MoveEnvKeysCard.tsx`
+  `LegacyKeysNote`), and offer 「この鍵をサーバーに移す」 for a built-in service's key in the `.env`
+  (`ENV_KEY_SERVICES`: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `GOOGLE_API_KEY`;
+  only where the server would take an own key, `own-keys.ts` `envKeysToMove`; last 4 only).
+  `brokerKeys:moveFromEnv(companyId, rootPath, name)` (main, `createEnvKeyMove`): main reads the
+  value (never the renderer), sends it like `brokerKeys:save`, and **removes the name from the
+  `.env` only after the server kept the key and only if the `.env` still holds that value**
+  (refused / offline / a failed write → the `.env` as it was). The page explains the trade-off:
+  scripts started from this app then get a token instead of the key (K6) and keep working;
+  scripts run outside the app that read the `.env` lose the key. The app's own API-key store
+  (「AI の接続」's Anthropic key, `config:setApiKey`) is not offered: the API-key chat mode calls
+  Anthropic with it directly (and `ANTHROPIC_*` is reserved for the agent's own CLI), so moving it
+  would break that mode. Test: `tests/ipc-app.test.ts` 「brokerKeys:moveFromEnv takes the key out of
+  the .env only after the server kept it」.
 
 ## Tests
 

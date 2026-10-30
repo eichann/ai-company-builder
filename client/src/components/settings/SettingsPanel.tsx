@@ -5,6 +5,7 @@ import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { AutoSyncSettings } from '../../features/settings/components/AutoSyncSettings'
 import { OwnKeysSection } from '../../features/settings/components/OwnKeysSection'
+import { LegacyKeysNote, MoveEnvKeysCard } from '../../features/settings/components/MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
 import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey } from '@phosphor-icons/react'
@@ -28,6 +29,8 @@ interface SettingsPanelProps {
   onClose: () => void
   /** Section to open first (default: ダウンロードするフォルダ). */
   initialTab?: TabType
+  /** 「自分の鍵」: the service to show first (from the chat's "no key" card). */
+  focusService?: string
 }
 
 export type TabType = 'sync' | 'autosync' | 'gitignore' | 'ownkeys' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions'
@@ -63,7 +66,7 @@ const INPUT = 'h-9 rounded-lg border border-zinc-200 bg-white px-3 text-[13px] t
 const TEXTAREA = 'h-80 w-full resize-none rounded-lg border border-zinc-200 bg-white px-4 py-3 font-mono text-[13px] leading-relaxed text-zinc-900 placeholder:text-zinc-400 focus:border-indigo-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/20 dark:border-white/10 dark:bg-white/[0.03] dark:text-zinc-100 dark:placeholder:text-zinc-500'
 const CODE = 'rounded bg-zinc-100 px-1 py-px font-mono text-[12px] text-zinc-700 dark:bg-white/10 dark:text-zinc-200'
 
-export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelProps) {
+export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: SettingsPanelProps) {
   const { currentCompany } = useAppStore()
   const { departments } = useDepartments(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
@@ -126,6 +129,12 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
     }
 
     loadFiles()
+  }, [currentCompany?.rootPath])
+
+  // After a key moved to the server: the .env changed in main, read its state again.
+  const reloadEnvStatus = useCallback(() => {
+    if (!currentCompany?.rootPath) return
+    void readCompanyEnvStatus(currentCompany.rootPath).then(r => { if (r.success && r.vars) setEnvStatus(r.vars) })
   }, [currentCompany?.rootPath])
 
   // Toggle visibility of a key
@@ -329,7 +338,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                 <Card className="p-5"><VoicePromptSettings /></Card>
               </div>
             ) : activeTab === 'ownkeys' ? (
-              <OwnKeysSection companyId={currentCompany.id} />
+              <OwnKeysSection companyId={currentCompany.id} focusService={focusService} />
             ) : activeTab === 'aienv' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="AIに渡す環境変数" description="このPCの環境変数のうち、AIと、AIが実行するコマンドから見えるものの設定です。" />
@@ -347,7 +356,9 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
               </div>
             ) : loading ? loadingState : activeTab === 'apikeys' ? (
               <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="APIキー" description="スキルやスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
+                <SectionHeader title="APIキー（このPC）" description="スキルやスクリプトが使う外部サービスのキーです。このPCの .env にだけ保存され、同期されません。" />
+                <LegacyKeysNote onOpenOwnKeys={() => setActiveTab('ownkeys')} />
+                <MoveEnvKeysCard companyId={currentCompany.id} rootPath={currentCompany.rootPath} env={envStatus} onMoved={reloadEnvStatus} />
                 <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
                   <div className="p-5">
                     <SubHeading>よく使うAPIキー</SubHeading>
@@ -450,6 +461,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
             ) : (
               <div className="space-y-5 px-8 pb-8 pt-7">
                 <SectionHeader title="環境変数（.env）" description={<>このPCの <code className={CODE}>.env</code> に、まとめて追加・上書きします。1行に1つ、<code className={CODE}>KEY=value</code> の形式で貼り付けてください。</>} />
+                <LegacyKeysNote onOpenOwnKeys={() => setActiveTab('ownkeys')} />
+                <MoveEnvKeysCard companyId={currentCompany.id} rootPath={currentCompany.rootPath} env={envStatus} onMoved={reloadEnvStatus} />
                 <textarea
                   value={pastedEnv}
                   onChange={(e) => {

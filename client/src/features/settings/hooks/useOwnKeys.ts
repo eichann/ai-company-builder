@@ -1,7 +1,7 @@
 // 「自分の鍵」: the member's view from the server, and registering / deleting
 // one's own key. The pasted value lives only in the form until it is sent.
 import { useCallback, useEffect, useState } from 'react'
-import type { MyBrokerKeys } from '../../../../shared/broker-keys'
+import { KEY_CHECK_TEXT, type MyBrokerKeys } from '../../../../shared/broker-keys'
 import { deleteOwnKey, listOwnKeys, saveOwnKey } from '../api'
 
 export function useOwnKeys(companyId: string) {
@@ -19,14 +19,14 @@ export function useOwnKeys(companyId: string) {
 
   useEffect(() => { void reload() }, [reload])
 
-  /** Sends the key; resolves to an error sentence, or null when saved. */
-  const save = useCallback(async (service: string, secret: string, displayName?: string): Promise<string | null> => {
+  /** Sends the key; resolves to why it was not saved, or how the server's one check of it went. */
+  const save = useCallback(async (service: string, secret: string, displayName?: string): Promise<{ error: string } | { checked: string | null }> => {
     setBusy(service)
     try {
       const r = await saveOwnKey(companyId, service, secret, displayName)
-      if (!r.success) return r.error
+      if (!r.success) return { error: r.error }
       setData(r.data)
-      return null
+      return { checked: r.data.check ? KEY_CHECK_TEXT[r.data.check.result] : null }
     } finally {
       setBusy(null)
     }

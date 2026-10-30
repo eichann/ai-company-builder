@@ -3,7 +3,7 @@
 // `chooseBrokerKeySource`) so the page never promises a key the server would
 // not use; the server decides again on every call.
 import { chooseBrokerKeySource } from '../../../../shared/core/key-broker'
-import { OWN_KEY_BLOCKED_TEXT, type MyBrokerService } from '../../../shared/broker-keys'
+import { ENV_KEY_SERVICES, OWN_KEY_BLOCKED_TEXT, type MyBrokerKeys, type MyBrokerService } from '../../../shared/broker-keys'
 
 export type OwnKeyTone = 'ok' | 'warn' | 'none'
 
@@ -45,4 +45,38 @@ export function ownKeyRow(s: MyBrokerService): OwnKeyRow {
     ? '自分の鍵を登録すると、AI がこのサービスを使えるようになります。'
     : s.ownKey.allowed ? '' : `${OWN_KEY_BLOCKED_TEXT[s.ownKey.reason]}使いたいときは管理者に頼んでください。`
   return { status: '未設定', tone: 'none', detail, canRegister }
+}
+
+/** A key on this computer's .env that could become one's own key on the server. */
+export interface EnvKeyToMove {
+  /** The .env name (`OPENAI_API_KEY`). */
+  name: string
+  service: string
+  label: string
+  last4: string | null
+  /** The server would take it as an own key now. */
+  canMove: boolean
+  /** Why not (or what moving replaces), in the member's words; '' for nothing to add. */
+  note: string
+}
+
+/**
+ * Built-in services' keys found in the company .env, and whether each can be
+ * moved to the server as the member's own key — offered only where the server
+ * would accept one (it decides again when the key is sent).
+ */
+export function envKeysToMove(env: Record<string, { set: boolean; last4?: string }>, data: MyBrokerKeys | null): EnvKeyToMove[] {
+  return Object.entries(ENV_KEY_SERVICES).flatMap(([name, service]): EnvKeyToMove[] => {
+    if (!env[name]?.set) return []
+    const s = data?.services.find(x => x.service === service)
+    const base = { name, service, label: s?.label ?? service, last4: env[name].last4 ?? null }
+    if (!data) return [{ ...base, canMove: false, note: 'サーバーに接続できないため、いまは移せません。' }]
+    if (!data.enabled) return [{ ...base, canMove: false, note: 'サーバーで鍵を預かる機能が、まだ使えるようになっていません。' }]
+    if (!s || !s.ownKey.allowed) {
+      const why = s && !s.ownKey.allowed ? OWN_KEY_BLOCKED_TEXT[s.ownKey.reason] : 'このサービスの自分の鍵は、まだ登録できません。'
+      return [{ ...base, canMove: false, note: `${why}移したいときは管理者に頼んでください。` }]
+    }
+    const replaces = s.key ? `サーバーにある自分の鍵（末尾 ${s.key.last4}）は、この鍵に置き換わります。` : ''
+    return [{ ...base, canMove: true, note: replaces }]
+  })
 }

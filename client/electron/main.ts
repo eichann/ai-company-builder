@@ -397,7 +397,7 @@ const privateFolderGuards = createPrivateFolderGuards({ api: privateFoldersApi, 
 registerPrivateFoldersIpc(ipc, { paths: allowedRoots, api: privateFoldersApi, guards: privateFolderGuards, activity: syncActivity })
 
 // The member's own API keys (「自分の鍵」, features/broker; key-broker.md).
-registerBrokerIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+registerBrokerIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, paths: allowedRoots })
 
 // The company folder on disk (features/fs): file tree, editor, watchers.
 const files = registerFsIpc(ipc, {

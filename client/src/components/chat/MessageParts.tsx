@@ -26,6 +26,8 @@ import { STEER_PART_TYPE, readSteerRecord } from '../../../shared/steer'
 import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, readReviewRecord } from '../../../shared/review-request'
 import { ReviewRequestCard } from './ReviewRequestCard'
 import { SteerInstructionView } from './SteerInstruction'
+import { BrokerKeyNeededCard } from '../../features/chat/components/BrokerKeyNeededCard'
+import { brokerKeyNeedsOf } from '../../features/chat/brokerKeyNeeds'
 import {
   GROUP_PAGE_SIZE,
   getToolDisplayName,
@@ -294,6 +296,8 @@ const TextPartView = memo(function TextPartView({ text, markdown, showCursor }: 
 export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts: UIMessage['parts']; isStreaming: boolean; markdown: boolean }) {
   const plan = useMemo(() => planParts(parts), [parts])
   const lastIndex = parts.length - 1
+  // Searched once the reply has ended (not per streamed chunk): a "no key" answer → a 「自分の鍵」 card.
+  const keyNeeds = useMemo(() => (isStreaming ? [] : brokerKeyNeedsOf(parts)), [parts, isStreaming])
 
   return (
     <>
@@ -327,6 +331,7 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         }
         return null
       })}
+      {keyNeeds.map(service => <BrokerKeyNeededCard key={`key-needed:${service}`} service={service} />)}
     </>
   )
 }

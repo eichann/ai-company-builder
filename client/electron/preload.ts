@@ -121,6 +121,7 @@ const api: ElectronAPI = {
   saveOwnBrokerKey: (companyId: string, service: string, secret: string, displayName?: string) =>
     invoke('brokerKeys:save', companyId, service, secret, displayName),
   deleteOwnBrokerKey: (companyId: string, service: string) => invoke('brokerKeys:delete', companyId, service),
+  moveEnvKeyToServer: (companyId: string, rootPath: string, name: string) => invoke('brokerKeys:moveFromEnv', companyId, rootPath, name),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>
