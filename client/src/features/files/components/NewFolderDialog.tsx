@@ -1,3 +1,4 @@
+// Over 300 lines on purpose: one dialog's form, its server answers and their wording.
 // 「新しいフォルダ…」 with 公開 / 非公開 (permission plan stage 3c, §1.3 A).
 //
 // 公開 creates the folder on disk as before. 非公開 asks the server, which
