@@ -45,7 +45,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 ## Watcher (`client/electron/company-watcher.ts`, opened via `features/fs/watchers.ts`)
 
 - One native `fs.watch(root, { recursive: true })` per company (FSEvents /
-  ReadDirectoryChangesW / inotify on Node ≥ 20), opened by `src/app/AppShell.tsx` when the company
+  ReadDirectoryChangesW / inotify on Node ≥ 20), opened by `useCompanyWatcher` (`src/features/files/hooks/`, used by `src/app/AppShell.tsx`) when the company
   opens (`watchCompany`, port `CompanyWatchReads` in `src/shared/ipc/file-events.ts`) and closed when it closes or the app quits — never per department or
   tab. chokidar opened one handle per directory and file and took ~30 s to close on the main
   thread; it stays only as the fallback for `ERR_FEATURE_UNAVAILABLE_ON_PLATFORM`.
@@ -90,7 +90,8 @@ plain tab switches only. A scan is stale after any event at/under a `.claude/ski
 root `.gitignore` (private marks → every scan), or a folder added/removed in the department.
 Main drops stale scans in `sendFileChanges`; the renderer rescans the shown list and the
 company-wide skills behind slash commands with `{ force: true }` (coalesced 120 ms, deferred
-≤ 1 s while typing in chat) and after every successful sync, keeping the list on screen.
+≤ 1 s while typing in chat; `src/features/skills/hooks/useSkillsAutoRefresh.ts`) and after every
+successful sync, keeping the list on screen.
 `.claude/commands` / `.claude/agents` are not listed.
 The renderer reaches skills only through `src/features/skills/api.ts`: ports `SkillReads` (list,
 read a file), `SkillToolRuns` (start / stop a skill's tool), `SkillOutbound` (open the tool's
