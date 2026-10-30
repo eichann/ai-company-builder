@@ -207,10 +207,10 @@ test('renderer src/shared never imports src/features or src/app', () => {
 
 /**
  * Renderer files that still call window.electronAPI directly (2026-10-29:
- * 44; 43 with doc-review's api.ts, 39 with skills' api.ts). Never add one:
- * new IPC calls go into the feature's api.ts or src/shared/ipc/. Remove a
- * file here when it stops calling it; a move-only PR renames its entry. The
- * count may only go down.
+ * 44; 43 with doc-review's api.ts, 39 with skills' api.ts, 36 with
+ * settings' api.ts). Never add one: new IPC calls go into the feature's api.ts
+ * or src/shared/ipc/. Remove a file here when it stops calling it; a move-only
+ * PR renames its entry. The count may only go down.
  */
 const DIRECT_IPC_FILES: readonly string[] = [
   'src/App.tsx',
@@ -231,9 +231,6 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/components/chat/remoteImage.ts',
   'src/components/chat/VoiceInputControl.tsx',
   'src/components/common/DiffViewer.tsx',
-  'src/components/settings/AgentEnvSettings.tsx',
-  'src/components/settings/DownloadFoldersSection.tsx',
-  'src/components/settings/SettingsPanel.tsx',
   'src/components/settings/VoicePromptSettings.tsx',
   'src/components/skill-ui/BackupHistorySlideOver.tsx',
   'src/components/skill-ui/CommitHistoryPanel.tsx',
@@ -253,7 +250,7 @@ const DIRECT_IPC_FILES: readonly string[] = [
   'src/stores/appStore.ts',
   'src/stores/authStore.ts',
 ]
-const DIRECT_IPC_CEILING = 39
+const DIRECT_IPC_CEILING = 36
 
 /** The renderer's data layer: the only new places allowed to reach window.electronAPI. */
 const isDataLayer = (clientPath: string) =>

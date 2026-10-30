@@ -7,6 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CaretRight, FolderSimple, FolderSimpleDashed, Lock, MagnifyingGlass, SpinnerGap, X, CheckCircle, WifiSlash, WarningCircle } from '@phosphor-icons/react'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
+import { findUncommittedChanges, getFolderSizes, onDownloadProgress } from '../../features/settings/api'
 import type { DepartmentConfig } from '../../types'
 import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../lib/download-selection'
 import { normalizeExclusions, pathKey } from '../../../shared/sparse-paths'
@@ -63,7 +64,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
   const deptNames = useMemo(() => new Map(departments.map(d => [pathKey(d.folder), d.name])), [departments])
 
   const loadLevel = useCallback(async (folder: string, measure: string[] = []) => {
-    const res = await window.electronAPI.folderSizes(rootPath, companyId, folder, measure)
+    const res = await getFolderSizes(rootPath, companyId, folder, measure)
     if (!res.success) throw new Error(res.error)
     setOffline(res.offline)
     const visible = res.folders.filter(f => !(folder === ROOT && f.name.startsWith('.')))
@@ -144,7 +145,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
   }, [q, nodes, deptNames])
 
   // --- apply
-  useEffect(() => window.electronAPI.onSparseProgress(({ repoPath, receivedBytes }) => {
+  useEffect(() => onDownloadProgress(({ repoPath, receivedBytes }) => {
     if (repoPath !== rootPath) return
     setPhase(p => (p.kind === 'applying' ? { kind: 'applying', receivedBytes } : p))
   }), [rootPath])
@@ -164,7 +165,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
   const startApply = useCallback(async () => {
     if (diff.excluded.length > 0) {
       setPhase({ kind: 'checking' })
-      const res = await window.electronAPI.sparseUncommittedChanges(rootPath, diff.excluded)
+      const res = await findUncommittedChanges(rootPath, diff.excluded)
       if (res.success && res.files.length > 0) {
         setPhase({ kind: 'confirm', files: res.files })
         return

@@ -11,6 +11,7 @@ paths:
   - "client/electron/features/download-choices/**"
   - "client/electron/features/company-setup/**"
   - "client/src/components/settings/**"
+  - "client/src/features/settings/**"
   - "client/src/components/auth/CompanySelector.tsx"
   - "client/src/lib/download-selection.ts"
   - "client/src/lib/company-folder-plan.ts"
@@ -123,7 +124,10 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   folders; sticky footer — changes are a draft until 適用 (取り消す drops it); applying asks
   first about uncommitted changes and shows bytes received. Offline: sizes 「—」, the draft is
   kept. The settings panel has a left section nav and shares `settings/ui.tsx` (neutral zinc,
-  one indigo accent, light and dark).
+  one indigo accent, light and dark). The panel reaches the main process only through
+  `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
+  (uncommitted changes, progress), and separate ports for the company `.env` (secret values),
+  `.gitignore`, the AI's environment-variable list and the git binary status.
 - File tree: a not-downloaded folder stays visible as a muted placeholder (dashed icon,
   「未ダウンロード」, 「ダウンロード」 on hover/focus and in its context menu) so nobody recreates
   it; it does not expand and is not a drop target. A failed download shows why (`role="alert"`

@@ -9,6 +9,7 @@ import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown,
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT } from '../../lib/agentLogNotice'
+import { getGitBinaryStatus, readCompanyEnv, readGitignore, writeCompanyEnv, writeGitignore } from '../../features/settings/api'
 
 // Common API key definitions
 const COMMON_API_KEYS = [
@@ -74,7 +75,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
 
   // Check which git binary is in use (warn when on the system git fallback)
   useEffect(() => {
-    window.electronAPI.gitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
+    getGitBinaryStatus().then(setGitBinaryStatus).catch(() => {})
   }, [])
 
   // Escape closes; focus starts inside the dialog.
@@ -94,7 +95,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
       setError(null)
       try {
         // Load .env
-        const result = await window.electronAPI.readEnv(currentCompany.rootPath)
+        const result = await readCompanyEnv(currentCompany.rootPath)
         if (result.success && result.vars) {
           setEnvVars(result.vars)
           // Separate common keys from custom keys
@@ -114,8 +115,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
         }
 
         // Load .gitignore
-        const gitignorePath = `${currentCompany.rootPath}/.gitignore`
-        const gitignoreResult = await window.electronAPI.readFile(gitignorePath)
+        const gitignoreResult = await readGitignore(currentCompany.rootPath)
         if (gitignoreResult) {
           setGitignoreContent(gitignoreResult)
         } else {
@@ -188,8 +188,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
     try {
       if (activeTab === 'gitignore') {
         // Save .gitignore
-        const gitignorePath = `${currentCompany.rootPath}/.gitignore`
-        const result = await window.electronAPI.writeFile(gitignorePath, gitignoreContent)
+        const result = await writeGitignore(currentCompany.rootPath, gitignoreContent)
         if (result) {
           setSaved(true)
           setTimeout(() => setSaved(false), 2000)
@@ -234,7 +233,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
           }
         }
 
-        const result = await window.electronAPI.writeEnv(currentCompany.rootPath, varsToSave)
+        const result = await writeCompanyEnv(currentCompany.rootPath, varsToSave)
         if (result.success) {
           setSaved(true)
           // Update state to reflect saved values
