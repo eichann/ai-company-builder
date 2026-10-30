@@ -10,7 +10,7 @@ import {
 } from '@phosphor-icons/react'
 import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
 import type { DepartmentConfig, Skill } from '../../types'
-import { COMPANY_TAB_ID } from './DepartmentTabs'
+import { COMPANY_TAB_ID } from '../../shared/lib/departments'
 import { listSkills, readSkillFile } from '../../features/skills/api'
 
 interface CopySkillModalProps {

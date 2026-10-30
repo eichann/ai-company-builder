@@ -20,9 +20,8 @@ import {
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { DepartmentConfig } from '../../types'
+import { COMPANY_TAB_ID } from '../../shared/lib/departments'
 
-// Special ID for the company-wide tab
-export const COMPANY_TAB_ID = '__company__'
 
 // Icon mapping - must match Admin UI's ICON_OPTIONS
 const iconMap: Record<string, React.ComponentType<IconProps>> = {
