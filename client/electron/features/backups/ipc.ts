@@ -9,6 +9,8 @@ import path from 'path'
 import { privateBackupsDir } from '../../sync/private-folders'
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { DesktopShell, PathGuard } from '../ports'
+import { notDownloadedRefusal } from '../fs/file-guards'
+import { keepCurrentVersion } from './keep-current'
 
 /** backup:list ids of private folders' backups (kept in .git, privateBackupsDir). */
 export const PRIVATE_BACKUP_ID_PREFIX = 'private:'
@@ -16,9 +18,14 @@ export const PRIVATE_BACKUP_ID_PREFIX = 'private:'
 export interface BackupsDeps {
   paths: PathGuard
   shell: Pick<DesktopShell, 'openPath'>
+  /** The server's sentence when `absPath` is at a folder name the member may not use; null to allow. */
+  reservedRefusal: (absPath: string) => Promise<string | null>
 }
 
-export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell }: BackupsDeps): void {
+/** Shown when the current version could not be kept: the restore did not run. */
+export const RESTORE_KEEP_FAILED = '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。'
+
+export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell, reservedRefusal }: BackupsDeps): void {
   // Get backup history
   ipc.handle('backup:list', async (_, unsafeRepoPath: string) => {
     try {
@@ -117,13 +124,18 @@ export function registerBackupsIpc(ipc: IpcRegistrar, { paths, shell }: BackupsD
       paths.validate(srcPath)
       paths.validate(destPath)
 
-      // Ensure destination directory exists
-      fs.mkdirSync(path.dirname(destPath), { recursive: true })
+      // Same refusals as every other write (files-and-editor.md).
+      const refused = notDownloadedRefusal(destPath) ?? await reservedRefusal(destPath)
+      if (refused) return { success: false, error: refused }
 
-      // Copy file
+      // What is there now is the member's work too: keep it before replacing it.
+      const kept = await keepCurrentVersion(paths, safeRepoPath, destPath, 'before_restore')
+      if (!kept.success) return { success: false, error: RESTORE_KEEP_FAILED }
+
+      fs.mkdirSync(path.dirname(destPath), { recursive: true })
       fs.copyFileSync(srcPath, destPath)
 
-      return { success: true, message: `Restored: ${filePath}` }
+      return { success: true, message: `Restored: ${filePath}`, ...(kept.backupPath ? { keptPath: kept.backupPath } : {}) }
     } catch (error) {
       console.error('Backup restore error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }

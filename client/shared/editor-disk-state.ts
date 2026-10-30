@@ -97,9 +97,16 @@ export function canAutosave(file: EditorFileState): boolean {
 
 export const EDITOR_OVERWRITE_REASON = 'editor_overwrite'
 
+/**
+ * Why the app kept a file's current version before replacing it: the editor
+ * overwrote a changed file, a backup was restored over it, or 「元に戻す」 in
+ * the sync preview undid it. Also the backup folder's suffix.
+ */
+export type KeepCurrentReason = typeof EDITOR_OVERWRITE_REASON | 'before_restore' | 'before_revert'
+
 export interface EditorOverwriteBackupMetadata {
   timestamp: string
-  reason: typeof EDITOR_OVERWRITE_REASON
+  reason: KeepCurrentReason
   /** Company-relative path of the file that was overwritten. */
   files: string[]
   /** True when kept in .git/acb-private-backups (the file is in a private folder). */
@@ -110,7 +117,7 @@ export type EditorOverwriteBackupPlan =
   | {
       /** Where the backup folder lives, relative to the company root. */
       base: '.backups' | '.git/acb-private-backups'
-      /** `<timestamp>_editor_overwrite` */
+      /** `<timestamp>_<reason>` (`_editor_overwrite` by default) */
       folder: string
       /** Company-relative path (forward slashes), also the path inside the backup folder. */
       rel: string
@@ -149,6 +156,8 @@ export function editorOverwriteBackupPlan(args: {
   /** A folder between the file and the root holds its own `.git`. */
   insideNestedRepo: boolean
   now: Date
+  /** The folder suffix; the editor's overwrite when left out. */
+  reason?: KeepCurrentReason
 }): EditorOverwriteBackupPlan {
   const root = args.rootPath.replace(/\\/g, '/').replace(/\/+$/, '')
   const file = args.filePath.replace(/\\/g, '/')
@@ -160,7 +169,7 @@ export function editorOverwriteBackupPlan(args: {
   const privateFolder = args.insideNestedRepo || args.privateFolders.some(f => atOrUnder(f, rel))
   return {
     base: privateFolder ? '.git/acb-private-backups' : '.backups',
-    folder: `${backupStamp(args.now)}_${EDITOR_OVERWRITE_REASON}`,
+    folder: `${backupStamp(args.now)}_${args.reason ?? EDITOR_OVERWRITE_REASON}`,
     rel,
     privateFolder,
   }

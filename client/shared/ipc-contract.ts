@@ -111,6 +111,15 @@ export interface SimpleResult {
 }
 
 /**
+ * A file operation that creates something at a name (new file, rename, move,
+ * copy). `name_taken`: something is already there and was left untouched;
+ * `error` is then a plain Japanese sentence for the member.
+ */
+export interface FileOpResult extends SimpleResult {
+  code?: 'name_taken'
+}
+
+/**
  * The API key as the renderer may see it: never the key itself
  * (electron/services/api-key-store.ts keeps it encrypted, main decrypts it
  * only where it is used).
@@ -306,6 +315,8 @@ export interface BackupRestoreResult {
   success: boolean
   message?: string
   error?: string
+  /** The backup folder holding what was there before the restore (none when nothing was there). */
+  keptPath?: string
 }
 
 export interface ToolInfo {
@@ -399,14 +410,15 @@ export interface IpcInvokeChannels {
   'fs:readFile': { args: [path: string]; result: string | null }
   'fs:readFileBinary': { args: [path: string]; result: ArrayBuffer | null }
   'fs:writeFile': { args: [path: string, content: string]; result: boolean }
+  'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
   'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
   'fs:createDirectory': { args: [path: string]; result: boolean }
   'fs:exists': { args: [path: string]; result: boolean }
   'fs:delete': { args: [path: string]; result: SimpleResult }
-  'fs:rename': { args: [oldPath: string, newPath: string]; result: { success: boolean; newPath?: string; error?: string } }
-  'fs:move': { args: [sourcePath: string, destPath: string]; result: SimpleResult }
-  'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: SimpleResult }
-  'fs:copy': { args: [sourcePath: string, destPath: string]; result: SimpleResult }
+  'fs:rename': { args: [oldPath: string, newPath: string]; result: FileOpResult & { newPath?: string } }
+  'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+  'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+  'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
   'fs:stat': { args: [path: string]; result: { success: boolean; data?: FileStats } }
   'fs:watch': { args: [rootPath: string]; result: SimpleResult }
   'fs:unwatch': { args: [rootPath: string]; result: SimpleResult }
@@ -455,7 +467,7 @@ export interface IpcInvokeChannels {
   // Skills and their tools (web apps)
   'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
   'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
-  'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
+  'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
   'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
   'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
@@ -581,6 +593,8 @@ export interface ElectronAPI {
   readFile: Invoke<'fs:readFile'>
   readFileBinary: Invoke<'fs:readFileBinary'>
   writeFile: Invoke<'fs:writeFile'>
+  /** Never replaces an existing file (`code: 'name_taken'`). */
+  createFile: Invoke<'fs:createFile'>
   /** Keep the disk version before the editor overwrites a file changed elsewhere (.backups/<ts>_editor_overwrite/). */
   backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
   createDirectory: Invoke<'fs:createDirectory'>

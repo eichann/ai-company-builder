@@ -106,14 +106,24 @@ export const INVALID_DEPARTMENT_FOLDER = 'Invalid department folder'
 
 export interface SkillsDeps {
   paths: PathGuard
+  /**
+   * Whether anything under `relFolder` (company-relative, ends with '/') is
+   * already shared: in the index or on the server's branch. A .gitignore line
+   * does not stop git from sharing tracked files, so such a skill cannot be
+   * made private. Unknown (no repository, git failed) → false.
+   */
+  isShared: (rootPath: string, relFolder: string) => Promise<boolean>
 }
+
+/** skills:makePrivate on a skill the company already has. */
+export const SKILL_ALREADY_SHARED = 'このスキルはすでに会社で共有されているため、非公開にはできません。'
 
 export interface SkillsFeature {
   /** A skill the AI (or anything else) created, changed or removed is scanned afresh by the next skills:list. */
   invalidateForChanges(changes: FileChange[]): void
 }
 
-export function registerSkillsIpc(ipc: IpcRegistrar, { paths }: SkillsDeps): SkillsFeature {
+export function registerSkillsIpc(ipc: IpcRegistrar, { paths, isShared }: SkillsDeps): SkillsFeature {
   // Skills scans (skills:list), reused for plain tab switches (5 s) and dropped
   // as soon as a watcher event makes them stale (invalidateForChanges) or the
   // renderer forces a refresh. Keys and staleness rules: shared/skills-refresh.ts.
@@ -372,11 +382,14 @@ export function registerSkillsIpc(ipc: IpcRegistrar, { paths }: SkillsDeps): Ski
     }
   })
 
-  // Add skill to .gitignore (used when creating a new skill)
+  // Add skill to .gitignore (used when creating a new skill). Never for a
+  // skill the company already has: the line would not stop sync from sharing
+  // it, and the app would show 「非公開」 for something everyone gets.
   ipc.handle('skills:makePrivate', async (_, rootPath: string, skillRelativePath: string) => {
     try {
       rootPath = paths.validate(rootPath)
       skillGitignoreEntry(skillRelativePath)
+      if (await isShared(rootPath, skillRelativePath)) return { success: false, error: SKILL_ALREADY_SHARED, code: 'already_shared' as const }
       const gitignorePath = paths.validate(path.join(rootPath, '.gitignore'))
       const content = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf-8') : ''
       const lines = content.split('\n')

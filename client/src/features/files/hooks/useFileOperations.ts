@@ -1,12 +1,28 @@
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
+import { fileNameProblem, folderPathProblem, NAME_TAKEN_MESSAGE } from '../../../../shared/file-names'
 import { lastSegment } from '../../../../shared/private-folder-ui'
-import { createDirectory, createEmptyFile, deleteItem, renameItem, reservedPathRefusal } from '../api'
+import { createDirectory, createEmptyFile, deleteItem, getStats, renameItem, reservedPathRefusal } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
+
+/** Something is at `path` already (getStats rejects or fails when nothing is). */
+async function isTaken(path: string): Promise<boolean> {
+  try {
+    return (await getStats(path)).success
+  } catch {
+    return false
+  }
+}
+
+/** Main's own refusals are sentences for the member (Japanese); a raw system error is not shown as is. */
+function failureMessage(mode: 'newFile' | 'newFolder' | 'rename', detail?: string): string {
+  const what = mode === 'rename' ? '名前を変更できませんでした。' : mode === 'newFolder' ? 'フォルダを作れませんでした。' : 'ファイルを作れませんでした。'
+  return detail && /[\u3040-\u30ff\u4e00-\u9fff]/.test(detail) ? detail : `${what}もう一度試してください。`
+}
 
 interface InputDialogState {
   isOpen: boolean
@@ -15,6 +31,8 @@ interface InputDialogState {
   mode: 'newFile' | 'newFolder' | 'rename'
   targetPath: string
   parentPath: string
+  /** Why the typed name was refused; the dialog stays open. */
+  error: string | null
 }
 
 interface DeleteDialogState {
@@ -50,6 +68,7 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
     mode: 'newFile',
     targetPath: '',
     parentPath: '',
+    error: null,
   })
   const [confirmDialog, setConfirmDialog] = useState<DeleteDialogState>({
     isOpen: false,
@@ -88,6 +107,7 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
       mode: 'newFile',
       targetPath: '',
       parentPath,
+      error: null,
     })
     closeContextMenu()
   }, [closeContextMenu, t, refuseNotDownloaded])
@@ -107,6 +127,7 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
       mode: 'rename',
       targetPath: entry.path,
       parentPath: parentDir(entry.path),
+      error: null,
     })
     closeContextMenu()
   }, [closeContextMenu, t, refusePrivateRoot])
@@ -165,20 +186,26 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
 
   const confirmInput = useCallback(async (value: string) => {
     const { mode, targetPath, parentPath } = inputDialog
+    const refuse = (error: string) => setInputDialog(prev => ({ ...prev, error }))
+
+    const problem = mode === 'newFolder' ? folderPathProblem(value) : fileNameProblem(value)
+    if (problem) { refuse(problem); return }
+    const newPath = `${parentPath}/${value}`
+    if (mode === 'rename' && newPath === targetPath) { setInputDialog(prev => ({ ...prev, isOpen: false })); return }
 
     // A name with a '/' could still lead into a folder that is not downloaded.
-    if (refuseNotDownloaded(`${parentPath}/${value}`) || await refuseReserved(`${parentPath}/${value}`)) {
+    if (refuseNotDownloaded(newPath) || await refuseReserved(newPath)) {
       setInputDialog(prev => ({ ...prev, isOpen: false }))
       return
     }
 
-    const newPath = `${parentPath}/${value}`
-    if (mode === 'newFile') {
-      await createEmptyFile(newPath)
-    } else if (mode === 'newFolder') {
-      await createDirectory(newPath)
-    } else if (mode === 'rename') {
-      await renameItem(targetPath, newPath)
+    // Main refuses to replace anything too; the check here keeps the dialog's sentence the same.
+    const result = mode === 'newFile' ? await createEmptyFile(newPath)
+      : mode === 'newFolder' ? (await isTaken(newPath) ? { success: false, error: NAME_TAKEN_MESSAGE } : { success: await createDirectory(newPath) })
+      : await renameItem(targetPath, newPath)
+    if (!result.success) {
+      refuse(result.error && 'code' in result && result.code === 'name_taken' ? result.error : failureMessage(mode, result.error))
+      return
     }
 
     // Show it at once (the watcher reports it too) and open the parent so the new item is visible.
@@ -186,29 +213,40 @@ export function useFileOperations({ model, privateFolders, setSelectedPaths, sho
 
     setInputDialog(prev => ({ ...prev, isOpen: false }))
   }, [inputDialog, showChangeIn, refuseNotDownloaded, refuseReserved])
-  const cancelInput = () => setInputDialog(prev => ({ ...prev, isOpen: false }))
+  const cancelInput = () => setInputDialog(prev => ({ ...prev, isOpen: false, error: null }))
 
   /** 公開 (or inside a private folder) from 「新しいフォルダ…」: on disk, as before. */
   const createPlainFolder = useCallback(async (parentPath: string, name: string) => {
-    if (refuseNotDownloaded(`${parentPath}/${name}`) || await refuseReserved(`${parentPath}/${name}`)) { setNewFolder(null); return }
-    await createDirectory(`${parentPath}/${name}`)
+    const target = `${parentPath}/${name}`
+    if (refuseNotDownloaded(target) || await refuseReserved(target)) { setNewFolder(null); return null }
+    const problem = folderPathProblem(name) ?? (await isTaken(target) ? NAME_TAKEN_MESSAGE : null)
+    if (problem) return problem
+    if (!await createDirectory(target)) return failureMessage('newFolder')
     await showChangeIn(parentPath, true)
     setNewFolder(null)
+    return null
   }, [showChangeIn, refuseNotDownloaded, refuseReserved])
 
   const confirmDelete = useCallback(async () => {
     const paths = confirmDialog.targetPaths || [confirmDialog.targetPath]
     const affectedParents = new Set<string>()
+    const failed: string[] = []
 
     for (const p of paths) {
-      await deleteItem(p)
+      const result = await deleteItem(p).catch(() => ({ success: false }))
+      if (!result.success) failed.push(p)
       affectedParents.add(parentDir(p))
     }
 
-    setSelectedPaths(new Set())
-    await Promise.all([...affectedParents].map(dir => model.invalidate(dir)))
+    // What could not be deleted stays selected, so the member sees which ones.
+    setSelectedPaths(new Set(failed))
     setConfirmDialog(prev => ({ ...prev, isOpen: false }))
-  }, [confirmDialog, model, setSelectedPaths])
+    await Promise.all([...affectedParents].map(dir => model.invalidate(dir)))
+    if (failed.length > 0) {
+      const names = failed.map(p => `「${p.slice(p.lastIndexOf('/') + 1)}」`).join('、')
+      warn(`${names}を削除できませんでした。${failed.length < paths.length ? 'ほかのものは削除しました。' : ''}開いているアプリがあれば閉じてから、もう一度試してください。`, 8000)
+    }
+  }, [confirmDialog, model, setSelectedPaths, warn])
   const cancelDelete = () => setConfirmDialog(prev => ({ ...prev, isOpen: false }))
 
   return {

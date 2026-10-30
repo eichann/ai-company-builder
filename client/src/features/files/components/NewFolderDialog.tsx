@@ -40,8 +40,8 @@ export interface NewFolderDialogProps {
   /** The private folder the parent is inside: plain folders there are private already. */
   insidePrivate: MyPrivateFolder | null
   onCancel: () => void
-  /** 公開 (or inside a private folder): create on disk as before. */
-  onCreatePlain: (name: string) => Promise<void> | void
+  /** 公開 (or inside a private folder): create on disk as before. Answers why it was refused (the dialog stays open). */
+  onCreatePlain: (name: string) => Promise<string | null | void> | void
   /** 非公開 was created on the server. */
   onCreatedPrivate: (result: Extract<CreatePrivateFolderResult, { success: true }>, name: string) => void
 }
@@ -120,7 +120,10 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
     setNameError(null)
     if (!isPrivate) {
       setBusy(true)
-      try { await onCreatePlain(trimmed) } finally { setBusy(false) }
+      try {
+        const refused = await onCreatePlain(trimmed)
+        if (refused) setNameError(refused)
+      } finally { setBusy(false) }
       return
     }
     if (!companyId) return

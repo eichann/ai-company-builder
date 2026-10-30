@@ -62,7 +62,7 @@ test('the header\'s 新規ファイル creates in the open file\'s folder, which
   await tree(page).getByRole('button', { name: '新規ファイル' }).click()
   await nameDialog(page, '新規ファイル', '11月.md')
   await expect(row(page, '11月.md')).toBeVisible()
-  expect(await calls(page)).toEqual([['writeFile', `${DEPT}/議事録/11月.md`, '']])
+  expect(await calls(page)).toEqual([['createFile', `${DEPT}/議事録/11月.md`, '']])
 })
 
 test('the menu on a closed folder creates inside it and opens it', async ({ page }) => {
@@ -74,7 +74,7 @@ test('the menu on a closed folder creates inside it and opens it', async ({ page
   await nameDialog(page, '新規ファイル', 'メモ.md')
   await expect(row(page, 'メモ.md')).toBeVisible()
   await expect(row(page, '10月.md')).toBeVisible()
-  expect(await calls(page)).toEqual([['writeFile', `${DEPT}/議事録/メモ.md`, '']])
+  expect(await calls(page)).toEqual([['createFile', `${DEPT}/議事録/メモ.md`, '']])
 })
 
 test('F2 renames and Del deletes only that item, each after a dialog', async ({ page }) => {
@@ -157,4 +157,50 @@ test('files dropped from Finder move in under a free name; other types and files
   await row(page, '議事録').dispatchEvent('drop', { dataTransfer: data })
   await expect(page.getByText(/setup\.exe: 非対応の形式\s+大きい\.pdf: 20MBを超えています/)).toBeVisible()
   expect(await calls(page)).toEqual([['moveFromExternal', '/Users/demo/Downloads/10月.md', `${DEPT}/議事録/10月 (1).md`]])
+})
+
+test('a new file or a rename onto a name that is taken is refused in the dialog; the file there is untouched', async ({ page }) => {
+  await open(page)
+  await row(page, 'README.md').click({ button: 'right' })
+  await page.getByRole('button', { name: '新規ファイル' }).last().click()
+  await nameDialog(page, '新規ファイル', 'README.md')
+  const taken = '同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。'
+  await expect(page.getByRole('alert')).toHaveText(taken)
+  // The dialog stays open with the typed name, so the member can change it.
+  await expect(page.getByRole('textbox')).toHaveValue('README.md')
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+
+  await row(page, 'ロゴ.png').focus()
+  await page.keyboard.press('F2')
+  await nameDialog(page, '名前を変更', 'README.md')
+  await expect(page.getByRole('alert')).toHaveText(taken)
+  await page.getByRole('button', { name: 'キャンセル' }).click()
+  await expect(row(page, 'ロゴ.png')).toBeVisible()
+  await expect(row(page, 'README.md')).toBeVisible()
+})
+
+test('a name another computer cannot hold is refused before anything is written', async ({ page }) => {
+  await open(page)
+  await row(page, 'README.md').click({ button: 'right' })
+  await page.getByRole('button', { name: '新規ファイル' }).last().click()
+  await nameDialog(page, '新規ファイル', '会議:10月.md')
+  await expect(page.getByRole('alert')).toHaveText('名前に < > : " | ? * は使えません（Windows のパソコンで開けなくなります）。')
+  await page.getByRole('textbox').fill('a/b.md')
+  await page.getByRole('button', { name: '作成' }).click()
+  await expect(page.getByRole('alert')).toHaveText('名前に「/」や「\\」は使えません。')
+  expect(await calls(page)).toEqual([])
+})
+
+test('when some items of a multi-delete fail, the rest are deleted and the failed ones are named and stay selected', async ({ page }) => {
+  await open(page)
+  await page.evaluate(dept => (window as unknown as { __acbFailDelete: Set<string> }).__acbFailDelete.add(`${dept}/README.md`), DEPT)
+  await row(page, 'README.md').click()
+  await row(page, 'ロゴ.png').click({ modifiers: ['Shift'] })
+  await row(page, 'ロゴ.png').click({ button: 'right' })
+  await page.getByRole('button', { name: '2件を削除' }).click()
+  await page.getByRole('button', { name: '削除', exact: true }).click()
+  await expect(page.getByText('「README.md」を削除できませんでした。ほかのものは削除しました。開いているアプリがあれば閉じてから、もう一度試してください。')).toBeVisible()
+  await expect(row(page, 'ロゴ.png')).toHaveCount(0)
+  await expect(row(page, 'README.md')).toBeVisible()
+  await expect(row(page, 'README.md')).toHaveClass(/bg-accent\/20/) // still selected
 })

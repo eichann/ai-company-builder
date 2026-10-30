@@ -15,7 +15,8 @@ interface NewSkillWizardProps {
   departmentName: string
   color: string
   onClose: () => void
-  onComplete: (skillData: { name: string; description: string; prompt: string; folderName: string }) => void
+  /** Answers why the skill was not made (shown here, the wizard stays open), or null. */
+  onComplete: (skillData: { name: string; description: string; prompt: string; folderName: string }) => Promise<string | null>
 }
 
 type Step = 'name' | 'description' | 'prompt' | 'confirm'
@@ -38,6 +39,8 @@ export function NewSkillWizard({
   const [folderNameEdited, setFolderNameEdited] = useState(false)
   const [description, setDescription] = useState('')
   const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   // Auto-generate folder name when name changes (unless manually edited)
   const handleNameChange = (newName: string) => {
@@ -65,6 +68,19 @@ export function NewSkillWizard({
 
   const currentStepIndex = steps.findIndex((s) => s.id === step)
 
+  const complete = async () => {
+    if (busy) return
+    setBusy(true)
+    setError(null)
+    try {
+      setError(await onComplete({ name: name.trim(), description: description.trim(), prompt: prompt.trim(), folderName }))
+    } catch {
+      setError('スキルを作成できませんでした。もう一度試してください。')
+    } finally {
+      setBusy(false)
+    }
+  }
+
   const handleNext = () => {
     if (step === 'name' && name.trim() && folderNameValid) {
       setStep('description')
@@ -73,7 +89,7 @@ export function NewSkillWizard({
     } else if (step === 'prompt') {
       setStep('confirm')
     } else if (step === 'confirm') {
-      onComplete({ name: name.trim(), description: description.trim(), prompt: prompt.trim(), folderName })
+      void complete()
     }
   }
 
@@ -300,11 +316,17 @@ export function NewSkillWizard({
           )}
         </div>
 
+        {error && (
+          <p role="alert" className="mx-6 mb-3 px-3 py-2 rounded-lg bg-red-500/10 border border-red-500/30 text-xs text-red-300">
+            {error}
+          </p>
+        )}
+
         {/* Footer */}
         <div className="flex items-center justify-between px-6 py-4 border-t border-zinc-800 bg-zinc-900/50">
           <button
             onClick={handleBack}
-            disabled={step === 'name'}
+            disabled={step === 'name' || busy}
             className={`
               flex items-center gap-2 px-4 py-2 rounded-lg
               text-sm font-medium
@@ -321,7 +343,7 @@ export function NewSkillWizard({
 
           <button
             onClick={handleNext}
-            disabled={step === 'name' && (!name.trim() || !folderNameValid)}
+            disabled={busy || (step === 'name' && (!name.trim() || !folderNameValid))}
             className={`
               flex items-center gap-2 px-5 py-2.5 rounded-lg
               text-sm font-medium text-white

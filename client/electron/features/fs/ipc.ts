@@ -1,20 +1,20 @@
 // The company folder on disk, for the file tree and the editor. Every path
 // from the renderer goes through the allowed-roots check (paths.validate);
 // writes are refused inside a folder not downloaded on this computer and at
-// a folder name the member may not use (a private folder they cannot read).
+// a folder name the member may not use (a private folder they cannot read),
+// and a new file, rename, move or copy never replaces what is already there.
 //   dialog:selectDirectory, fs:* (fs:startDrag is a send), fs:watch /
 //   fs:unwatch (sends fs:changes), editor:backupBeforeOverwrite
 
 import fs from 'fs'
 import path from 'path'
-import { notDownloadedUserMessage } from '../../../shared/sparse-paths'
-import { editorOverwriteBackupPlan, type EditorOverwriteBackupMetadata } from '../../../shared/editor-disk-state'
-import type { DirectoryTreeNode } from '../../../shared/ipc-contract'
+import type { DirectoryTreeNode, FileOpResult } from '../../../shared/ipc-contract'
 import type { FileChange } from '../../company-watcher'
 import type { IpcRegistrar } from '../../ipc/registrar'
-import { notDownloadedFolderFor } from '../../sync/not-downloaded'
-import { privateBackupsDir, readPrivateScopesCache } from '../../sync/private-folders'
+import { keepCurrentVersion } from '../backups/keep-current'
 import type { DesktopShell, PathGuard, WindowPort } from '../ports'
+import { NAME_TAKEN_MESSAGE } from '../../../shared/file-names'
+import { isAtomicSaveRename, nameTaken, notDownloadedRefusal } from './file-guards'
 import { createCompanyWatchers } from './watchers'
 
 export interface FsDeps {
@@ -35,21 +35,7 @@ export interface FsFeature {
   closeWatchers(): void
 }
 
-/**
- * Refuse an app file operation that would create or change something inside
- * a folder not downloaded on this computer (sparse exclusions): the member
- * cannot see the teammates' files there, and sync would hold the file back
- * instead of sharing it. The renderer disables these actions with the same
- * explanation; this is the backstop. Returns the message, or null to allow.
- */
-function notDownloadedRefusal(absPath: string): string | null {
-  const folder = notDownloadedFolderFor(absPath)
-  if (folder !== null) {
-    console.warn(`[fs] Refused a write into a folder that is not downloaded: ${absPath}`)
-    return notDownloadedUserMessage(folder.normalize('NFC'))
-  }
-  return null
-}
+const TAKEN: FileOpResult = { success: false, error: NAME_TAKEN_MESSAGE, code: 'name_taken' }
 
 const TREE_SKIP_DIRS = new Set(['node_modules', '.git', '.backups', '.workspace', '__pycache__', '.next', '.nuxt', 'dist', '.venv', 'venv'])
 
@@ -142,6 +128,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     }
   })
 
+  // Saving (the editor, the review sidecars): replaces the file on purpose.
   ipc.handle('fs:writeFile', async (_, filePath: string, content: string) => {
     try {
       const safePath = paths.validate(filePath)
@@ -153,47 +140,28 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
     }
   })
 
+  // A new file (the file tree's 新規ファイル, a new skill's SKILL.md): never
+  // replaces one that exists — writeFile did, and silently emptied it.
+  ipc.handle('fs:createFile', async (_, filePath: string, content: string) => {
+    try {
+      const safePath = paths.validate(filePath)
+      const refused = notDownloadedRefusal(safePath) ?? await reservedRefusal(safePath)
+      if (refused) return { success: false, error: refused }
+      await fs.promises.writeFile(safePath, typeof content === 'string' ? content : '', { encoding: 'utf-8', flag: 'wx' })
+      return { success: true }
+    } catch (error) {
+      if (error && typeof error === 'object' && 'code' in error && error.code === 'EEXIST') return TAKEN
+      return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
+    }
+  })
+
   // Before the editor overwrites a file someone else changed since the tab
-  // loaded it (the member confirmed): keep the disk version, byte for byte, in
-  // .backups/<ts>_editor_overwrite/ — or .git/acb-private-backups/ for a file in
-  // a private folder (never in that folder's working tree). Plan and rules:
-  // shared/editor-disk-state.ts.
+  // loaded it (the member confirmed): keep the disk version (features/backups/keep-current.ts).
   ipc.handle('editor:backupBeforeOverwrite', async (_, rootPath: string, filePath: string) => {
     try {
       const root = paths.validate(rootPath)
       const safePath = paths.validate(filePath)
-      let bytes: Buffer
-      try {
-        bytes = await fs.promises.readFile(safePath)
-      } catch {
-        return { success: true, skipped: 'missing' as const }
-      }
-      let insideNestedRepo = false
-      for (let dir = path.dirname(safePath); dir.startsWith(root + path.sep); dir = path.dirname(dir)) {
-        if (fs.existsSync(path.join(dir, '.git'))) { insideNestedRepo = true; break }
-      }
-      const cache = readPrivateScopesCache(root)
-      const plan = editorOverwriteBackupPlan({
-        rootPath: root,
-        filePath: safePath,
-        privateFolders: cache ? [...cache.scopes, ...(cache.pendingPublic ?? [])].map(s => s.path) : [],
-        insideNestedRepo,
-        now: new Date(),
-      })
-      if ('skip' in plan) return { success: true, skipped: plan.skip }
-      const backupDir = path.join(plan.privateFolder ? privateBackupsDir(root) : path.join(root, '.backups'), plan.folder)
-      // Inside the company by its real location too (.backups could be a link).
-      const target = paths.validate(path.join(backupDir, ...plan.rel.split('/')))
-      await fs.promises.mkdir(path.dirname(target), { recursive: true })
-      await fs.promises.writeFile(target, bytes)
-      const metadata: EditorOverwriteBackupMetadata = {
-        timestamp: new Date().toISOString(),
-        reason: 'editor_overwrite',
-        files: [plan.rel],
-        privateFolder: plan.privateFolder,
-      }
-      await fs.promises.writeFile(path.join(backupDir, '_metadata.json'), JSON.stringify(metadata, null, 2))
-      return { success: true, backupPath: backupDir }
+      return await keepCurrentVersion(paths, root, safePath, 'editor_overwrite')
     } catch (error) {
       console.error('[editor] backup before overwrite failed:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -245,6 +213,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       const safeNew = paths.validate(newPath)
       const refused = notDownloadedRefusal(safeNew) ?? await reservedRefusal(safeNew)
       if (refused) return { success: false, error: refused }
+      if (!isAtomicSaveRename(safeOld, safeNew) && await nameTaken(safeNew, safeOld)) return TAKEN
       await fs.promises.rename(safeOld, safeNew)
       return { success: true, newPath: safeNew }
     } catch (error) {
@@ -259,6 +228,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       const safeDest = paths.validate(destinationPath)
       const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
       if (refused) return { success: false, error: refused }
+      if (await nameTaken(safeDest, safeSrc)) return TAKEN
       await fs.promises.rename(safeSrc, safeDest)
       return { success: true }
     } catch (error) {
@@ -274,6 +244,7 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       const resolved = path.resolve(sourcePath)
       const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
       if (refused) return { success: false, error: refused }
+      if (await nameTaken(safeDest)) return TAKEN
 
       try {
         await fs.promises.rename(resolved, safeDest)
@@ -305,11 +276,12 @@ export function registerFsIpc(ipc: IpcRegistrar, deps: FsDeps): FsFeature {
       const safeDest = paths.validate(destinationPath)
       const refused = notDownloadedRefusal(safeDest) ?? await reservedRefusal(safeDest)
       if (refused) return { success: false, error: refused }
+      if (await nameTaken(safeDest)) return TAKEN
       const stat = await fs.promises.stat(safeSrc)
       if (stat.isDirectory()) {
-        await fs.promises.cp(safeSrc, safeDest, { recursive: true })
+        await fs.promises.cp(safeSrc, safeDest, { recursive: true, force: false, errorOnExist: true })
       } else {
-        await fs.promises.copyFile(safeSrc, safeDest)
+        await fs.promises.copyFile(safeSrc, safeDest, fs.constants.COPYFILE_EXCL)
       }
       return { success: true }
     } catch (error) {

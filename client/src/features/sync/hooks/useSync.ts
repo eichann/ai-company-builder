@@ -4,6 +4,8 @@ import { syncNoticeFor, syncNoticeHidesItself, type SyncNotice } from '../model'
 import { afterSync, recordRun } from '../autoSyncSchedule'
 import { updateAutoSyncState } from '../autoSyncState'
 
+const REVERT_FAILED = '元に戻せませんでした。もう一度試してください。'
+
 export interface SyncPreview {
   changes: { added: string[]; modified: string[]; deleted: string[] }
   totalCount: number
@@ -26,6 +28,8 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
   const [isLoadingPreview, setIsLoadingPreview] = useState(false)
   const [isLoadingSummary, setIsLoadingSummary] = useState(false)
   const [previewData, setPreviewData] = useState<SyncPreview | null>(null)
+  // The preview's 作業メモ: kept until a sync succeeds (a failed one must not lose it).
+  const [commitMemo, setCommitMemo] = useState('')
 
   const handlePreview = useCallback(async () => {
     if (!rootPath) return
@@ -78,7 +82,10 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
         companyId,
         customCommitMessage || 'Sync from AI Company Builder'
       )
-      if (result.success) await onSynced()
+      if (result.success) {
+        setCommitMemo('')
+        await onSynced()
+      }
       // A manual sync also restarts 「自動で送る」's clock and lifts an automatic stop it resolved.
       updateAutoSyncState(companyId, s => {
         const next = afterSync(s, result, { manual: true }).state
@@ -99,24 +106,29 @@ export function useSync({ rootPath, companyId, onSynced }: Options) {
     }
   }, [rootPath, companyId, onSynced])
 
-  const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
-    if (!rootPath) return
-    await revertChange(rootPath, filePath, fileStatus)
-    // Refresh preview data
-    const result = await previewSync(rootPath)
-    if (result.success) {
+  /** 「元に戻す」 one change; answers why it was not undone, or null. */
+  const handleRevertFile = useCallback(async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted'): Promise<string | null> => {
+    if (!rootPath) return REVERT_FAILED
+    const reverted = await revertChange(rootPath, filePath, fileStatus).catch(() => ({ success: false, error: undefined }))
+    // Refresh the list either way: a failed undo may still have changed something.
+    const result = await previewSync(rootPath).catch(() => null)
+    if (result?.success) {
       if (result.totalCount === 0) {
         setShowPreview(false)
         setPreviewData(null)
       } else {
-        setPreviewData(result)
+        setPreviewData(prev => ({ ...result, summary: prev?.summary ?? null }))
       }
     }
+    if (reverted.success) return null
+    // Main's own refusals are sentences for the member; a raw git error is not.
+    return reverted.error && /[\u3040-\u30ff\u4e00-\u9fff]/.test(reverted.error) ? reverted.error : REVERT_FAILED
   }, [rootPath])
 
   return {
     isSyncing, setIsSyncing, syncNotification, setSyncNotification, handleSync,
     showPreview, setShowPreview, isLoadingPreview, isLoadingSummary, previewData,
     handlePreview, handleRequestSummary, handleRevertFile,
+    commitMemo, setCommitMemo,
   }
 }

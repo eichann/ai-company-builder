@@ -52,7 +52,11 @@ const FOLDERS: MyPrivateFolder[] = [{
 
 const calls: unknown[][] = []
 const selected: string[] = []
-Object.assign(window, { __acbCalls: calls, __acbSelected: selected })
+// Paths whose delete fails (a file another app holds open), set by a spec.
+const failDelete = new Set<string>()
+Object.assign(window, { __acbCalls: calls, __acbSelected: selected, __acbFailDelete: failDelete })
+// What main answers when a name is taken (electron/features/fs: never replaces).
+const TAKEN = { success: false, error: '同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。', code: 'name_taken' as const }
 
 const split = (p: string) => [p.slice(0, p.lastIndexOf('/')), p.slice(p.lastIndexOf('/') + 1)] as const
 const find = (p: string) => { const [dir, name] = split(p); return DISK[dir]?.find(e => e.name === name) }
@@ -86,11 +90,16 @@ installElectronAPI({
     if (!find(p)) throw new Error('not found')
     return { success: true }
   },
-  writeFile: async (p, content) => { calls.push(['writeFile', p, content]); if (!find(p)) add(p, false); return true },
+  createFile: async (p, content) => { calls.push(['createFile', p, content]); if (find(p)) return TAKEN; add(p, false); return { success: true } },
   createDirectory: async p => { calls.push(['createDirectory', p]); add(p, true); return true },
-  renameItem: async (from, to) => { calls.push(['renameItem', from, to]); return move(from, to) },
-  moveItem: async (from, to) => { calls.push(['moveItem', from, to]); return move(from, to) },
-  deleteItem: async p => { calls.push(['deleteItem', p]); remove(p); return { success: true } },
+  renameItem: async (from, to) => { calls.push(['renameItem', from, to]); return find(to) ? TAKEN : move(from, to) },
+  moveItem: async (from, to) => { calls.push(['moveItem', from, to]); return find(to) ? TAKEN : move(from, to) },
+  deleteItem: async p => {
+    calls.push(['deleteItem', p])
+    if (failDelete.has(p)) return { success: false, error: 'EBUSY' }
+    remove(p)
+    return { success: true }
+  },
   moveFromExternal: async (from, to) => { calls.push(['moveFromExternal', from, to]); add(to, false); return { success: true } },
   // A name a private folder this member cannot read already uses (the server knows).
   reservedPathRefusal: async p => (split(p)[1] === '人事評価' ? '「人事評価」という名前は使えません。別の名前にしてください。' : null),

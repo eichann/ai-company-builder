@@ -12,7 +12,7 @@ import { test, after, before } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
-import { loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harness/main-harness.ts'
+import { commitRepo, git, loadMain, writeFiles, SERVER_URL, type MainHarness } from './ipc-harness/main-harness.ts'
 import type { ChatSession } from '../shared/chat-history'
 
 let h: MainHarness
@@ -392,4 +392,25 @@ test('chat server: its port and token reach the renderer on request and after ea
   window.clearSent()
   window.emit('did-finish-load')
   assert.deepEqual(window.sentOn('chat-server:info'), [[info]])
+})
+
+test('skills:makePrivate never marks a skill the company already has: shared here, or on the server not yet pulled', async () => {
+  // A .gitignore line does not keep tracked files out of a sync: the app
+  // would show 「非公開」 while every teammate gets the skill.
+  const root = h.companyDir('skills-shared-co')
+  await h.invoke('fs:registerAllowedRoot', root)
+  commitRepo(h.base, root, { '.gitignore': 'node_modules/\n', '営業/.claude/skills/shared/SKILL.md': '---\nname: s\n---\n' })
+  // A teammate's skill on origin/main that this computer has not checked out.
+  git(h.base, root, ['update-ref', 'refs/remotes/origin/main', git(h.base, root, ['rev-parse', 'HEAD']).trim()])
+  commitRepo(h.base, root, { '営業/.claude/skills/theirs/SKILL.md': 'x' }, 'theirs')
+  git(h.base, root, ['update-ref', 'refs/remotes/origin/main', 'HEAD'])
+  git(h.base, root, ['reset', '-q', '--hard', 'HEAD~1'])
+  const before = fs.readFileSync(path.join(root, '.gitignore'), 'utf-8')
+  const refused = { success: false, error: 'このスキルはすでに会社で共有されているため、非公開にはできません。', code: 'already_shared' }
+  assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/shared/'), refused)
+  assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/theirs/'), refused)
+  assert.equal(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), before)
+  // A new skill nobody has is still made private.
+  assert.deepEqual(await h.invoke('skills:makePrivate', root, '営業/.claude/skills/mine/'), { success: true })
+  assert.match(fs.readFileSync(path.join(root, '.gitignore'), 'utf-8'), /# Private skills\n営業\/\.claude\/skills\/mine\/$/)
 })

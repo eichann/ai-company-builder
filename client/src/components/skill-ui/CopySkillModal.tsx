@@ -20,7 +20,8 @@ interface CopySkillModalProps {
   departments: DepartmentConfig[]
   color: string
   onClose: () => void
-  onCopy: (sourceSkillPath: string, name: string, folderName: string) => void
+  /** Answers why nothing was copied (shown here, the modal stays open), or null. */
+  onCopy: (sourceSkillPath: string, name: string, folderName: string) => Promise<string | null>
   /** Folders excluded by sparse checkout (not available locally) */
   unsyncedFolders?: Set<string>
 }
@@ -62,6 +63,7 @@ export function CopySkillModal({
   const [folderName, setFolderName] = useState('')
   const [folderNameEdited, setFolderNameEdited] = useState(false)
   const [isCopying, setIsCopying] = useState(false)
+  const [copyError, setCopyError] = useState<string | null>(null)
 
   const selectedSkill = skills.find(s => s.id === selectedSkillId)
 
@@ -159,8 +161,11 @@ export function CopySkillModal({
   const handleCopy = async () => {
     if (!selectedSkill?.skillPath || !name.trim() || !folderNameValid) return
     setIsCopying(true)
+    setCopyError(null)
     try {
-      onCopy(selectedSkill.skillPath, name.trim(), folderName)
+      setCopyError(await onCopy(selectedSkill.skillPath, name.trim(), folderName))
+    } catch {
+      setCopyError('スキルをコピーできませんでした。もう一度試してください。')
     } finally {
       setIsCopying(false)
     }
@@ -321,6 +326,9 @@ export function CopySkillModal({
                       <p className="text-xs text-red-400 mt-1">英小文字で始まり、英数字・ハイフン・アンダースコアのみ</p>
                     )}
                   </div>
+                  {copyError && (
+                    <p role="alert" className="text-xs text-red-500 dark:text-red-400">{copyError}</p>
+                  )}
                   <button
                     onClick={handleCopy}
                     disabled={!name.trim() || !folderNameValid || isCopying}

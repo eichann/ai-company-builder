@@ -15,6 +15,10 @@ import type { AppGit } from '../../services/app-git'
 import type { CommitMessagesFor } from '../../services/commit-messages'
 import { previewChanges, withScratchIndex } from '../../sync/preview'
 import type { PathGuard } from '../ports'
+import { keepCurrentVersion } from '../backups/keep-current'
+
+/** Shown when the member's version could not be kept: nothing was undone. */
+export const REVERT_KEEP_FAILED = '今の内容を .backups に保存できなかったため、元に戻しませんでした。何も変更していません。'
 
 export interface GitHistoryDeps {
   paths: PathGuard
@@ -56,11 +60,20 @@ export function registerGitHistoryIpc(ipc: IpcRegistrar, { paths, git: appGit, c
     }
   })
 
-  // Revert a file's changes (git checkout HEAD -- <file> or git rm for new files)
+  // 「元に戻す」 one change: an added file is deleted, a modified or deleted one
+  // gets HEAD's version back. The member's version on disk is first kept in
+  // .backups/<ts>_before_revert/ (or the private backups); if that fails,
+  // nothing changes.
   ipc.handle('git:revertFile', async (_, repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
     try {
       const safePath = paths.validate(repoPath)
       const git: SimpleGit = appGit.create(safePath)
+
+      if (fileStatus === 'added' || fileStatus === 'modified') {
+        const onDisk = paths.validate(path.join(safePath, filePath), { followFinal: false })
+        const kept = await keepCurrentVersion(paths, safePath, onDisk, 'before_revert')
+        if (!kept.success) return { success: false, error: REVERT_KEEP_FAILED }
+      }
 
       if (fileStatus === 'added') {
         // New file: drop it from the index if it is there (preview no longer

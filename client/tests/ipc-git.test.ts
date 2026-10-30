@@ -106,6 +106,8 @@ test('history, backup and sync handlers check the allowed roots too; commits are
 test('working-tree handlers on a repository: preview, diffs, revert, log, show, list, grep', async () => {
   const repo = path.join(root, 'work')
   commitRepo(h.base, repo, { 'a.md': 'a\n', 'b.md': 'b\n', 'dir/c.md': 'needle\n' })
+  // Sync keeps .backups/ ignored in every company (step 3); 「元に戻す」 keeps the member's version there.
+  fs.appendFileSync(path.join(repo, '.git', 'info', 'exclude'), '.backups/\n')
   const first = git(h.base, repo, ['rev-parse', 'HEAD']).trim()
   commitRepo(h.base, repo, { 'dir/d.md': 'd\n' }, 'second\n\nbody line')
   fs.writeFileSync(path.join(repo, 'a.md'), 'a2\n')
@@ -127,6 +129,17 @@ test('working-tree handlers on a repository: preview, diffs, revert, log, show, 
   }
   assert.equal(fs.existsSync(path.join(repo, 'new.md')), false)
   assert.equal(fs.readFileSync(path.join(repo, 'a.md'), 'utf-8'), 'a\n')
+  // 「元に戻す」 first kept the member's versions (an added file is deleted, a modified one replaced).
+  const kept = fs.readdirSync(path.join(repo, '.backups')).sort()
+  assert.equal(kept.length, 2)
+  assert.ok(kept.every(k => /_before_revert(_\d+)?$/.test(k)), kept.join())
+  const keptFiles = kept.map(k => fs.readdirSync(path.join(repo, '.backups', k)).filter(f => f !== '_metadata.json')[0]).sort()
+  assert.deepEqual(keptFiles, ['a.md', 'new.md'])
+  for (const k of kept) {
+    const [file] = fs.readdirSync(path.join(repo, '.backups', k)).filter(f => f !== '_metadata.json')
+    assert.equal(fs.readFileSync(path.join(repo, '.backups', k, file), 'utf-8'), file === 'a.md' ? 'a2\n' : 'new\n')
+    assert.equal(JSON.parse(fs.readFileSync(path.join(repo, '.backups', k, '_metadata.json'), 'utf-8')).reason, 'before_revert')
+  }
   assert.equal(fs.readFileSync(path.join(repo, 'b.md'), 'utf-8'), 'b\n')
   assert.equal((await h.invoke<{ hasChanges: boolean }>('git:preview', repo)).hasChanges, false)
 
@@ -314,4 +327,46 @@ test('backup:list / backup:restore: both backup places, newest first, private id
     ['2026-02-21_14-30-00.000', 'missing.md', 'Backup file not found'],
   ]
   for (const [id, file, error] of refusals) assert.deepEqual(await h.invoke('backup:restore', repo, id, file), { success: false, error }, `${id} ${file}`)
+})
+
+test('backup:restore keeps what is there now before replacing it, and refuses where any other write is refused', async () => {
+  const repo = path.join(root, 'restore-keep')
+  writeFiles(repo, {
+    '.backups/2026-04-01T00-00-00-000/営業/提案.md': 'old version',
+    '.backups/2026-04-01T00-00-00-000/営業部/a.md': 'x',
+    '.backups/2026-04-01T00-00-00-000/評価/a.md': 'x',
+    '営業/提案.md': 'today\'s work',
+    // 営業部 left out on this computer; 評価 a name a private folder uses.
+    '.git/acb-sparse-config.json': JSON.stringify({ excluded: ['営業部'] }),
+    '.git/config': '[core]\n\tsparseCheckout = true\n',
+    '.git/info/sparse-checkout': '/*\n!/営業部/\n',
+    '.git/acb-private-scopes.json': JSON.stringify({ companyId: 'co-r', version: '1', fetchedAt: '', scopes: [] }),
+  })
+  h.server.on('POST', '/api/companies/co-r/paths/check', req => {
+    const { paths } = JSON.parse(req.body ?? '{}') as { paths: string[] }
+    return { json: { success: true, data: { results: paths.map(p => ({ path: p, usable: !p.startsWith('評価') })) } } }
+  })
+  const id = '2026-04-01T00-00-00-000'
+  const restored = await h.invoke<{ success: boolean; keptPath?: string }>('backup:restore', repo, id, '営業/提案.md')
+  assert.equal(restored.success, true)
+  assert.equal(fs.readFileSync(path.join(repo, '営業', '提案.md'), 'utf-8'), 'old version')
+  assert.match(path.basename(restored.keptPath ?? ''), /_before_restore$/)
+  assert.equal(fs.readFileSync(path.join(restored.keptPath!, '営業', '提案.md'), 'utf-8'), 'today\'s work')
+
+  const notDownloaded = await h.invoke<{ success: boolean; error: string }>('backup:restore', repo, id, '営業部/a.md')
+  assert.equal(notDownloaded.success, false)
+  assert.match(notDownloaded.error, /営業部/)
+  assert.deepEqual(await h.invoke('backup:restore', repo, id, '評価/a.md'), { success: false, error: '『評価』というフォルダ名は使えません。別の名前にしてください。' })
+  assert.equal(fs.existsSync(path.join(repo, '営業部')) || fs.existsSync(path.join(repo, '評価')), false)
+
+  // When the current version cannot be kept, nothing is replaced.
+  fs.rmSync(path.join(repo, '.backups', path.basename(restored.keptPath!)), { recursive: true })
+  fs.writeFileSync(path.join(repo, '営業', '提案.md'), 'newer work')
+  fs.chmodSync(path.join(repo, '.backups'), 0o555)
+  try {
+    assert.deepEqual(await h.invoke('backup:restore', repo, id, '営業/提案.md'), { success: false, error: '今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。' })
+  } finally {
+    fs.chmodSync(path.join(repo, '.backups'), 0o755)
+  }
+  assert.equal(fs.readFileSync(path.join(repo, '営業', '提案.md'), 'utf-8'), 'newer work')
 })

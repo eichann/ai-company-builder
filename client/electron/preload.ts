@@ -73,6 +73,7 @@ const api: ElectronAPI = {
   readFile: (path: string) => invoke('fs:readFile', path),
   readFileBinary: (path: string) => invoke('fs:readFileBinary', path),
   writeFile: (path: string, content: string) => invoke('fs:writeFile', path, content),
+  createFile: (path: string, content: string) => invoke('fs:createFile', path, content),
   backupBeforeOverwrite: (rootPath: string, filePath: string) =>
     invoke('editor:backupBeforeOverwrite', rootPath, filePath),
   createDirectory: (path: string) => invoke('fs:createDirectory', path),
