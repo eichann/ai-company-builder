@@ -88,7 +88,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 
 ## Previews never show a stale file
 
-`src/lib/fileVersions.ts` bumps a per-path counter on every event; images and PDFs load
+`src/lib/fileVersions.ts` bumps a per-path counter on every event (read through
+`features/editor/hooks/useFileVersion.ts`); images and PDFs load
 `local-file://<path>?v=<n>` (`client/shared/local-file-url.ts`). The protocol handler
 (`electron/local-file-protocol.ts`) drops the query, applies the allowed-roots check and answers
 `Cache-Control: no-store`. An open file that is deleted shows a notice; one replaced reloads.

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { useAppStore } from '../stores/appStore'
-import { evaluateWrite, repoRelativePath, type WriteAccess } from '../../shared/write-access'
-import { canReadWriteAccess, getWriteAccess, onWriteAccessChanged } from '../shared/ipc/write-access'
+import { useAppStore } from '../../stores/appStore'
+import { evaluateWrite, repoRelativePath, type WriteAccess } from '../../../shared/write-access'
+import { canReadWriteAccess, getWriteAccess, onWriteAccessChanged } from '../ipc/write-access'
 
 /**
  * The signed-in member's write access in the current company (閲覧のみ

@@ -5,7 +5,6 @@
  * same name (the AI rewrites an image, or writes a temp file and renames it
  * over) is fetched again instead of served from Chromium's image cache.
  */
-import { useSyncExternalStore } from 'react'
 import { normalizePathSeparators } from '../shared/lib/path'
 
 const keyOf = (p: string) => normalizePathSeparators(p).replace(/\/+$/, '')
@@ -42,12 +41,3 @@ export class FileVersionStore {
 }
 
 export const fileVersions = new FileVersionStore()
-
-/** The current version of a file (0 until the watcher reports something for it). */
-export function useFileVersion(path: string | null | undefined): number {
-  return useSyncExternalStore(
-    fileVersions.subscribe,
-    () => (path ? fileVersions.get(path) : 0),
-    () => 0,
-  )
-}

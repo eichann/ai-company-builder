@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react'
 import { Warning } from '@phosphor-icons/react'
-import { useFileVersion } from '../../../lib/fileVersions'
+import { useFileVersion } from '../hooks/useFileVersion'
 import { localFileUrl } from '../../../../shared/local-file-url'
 import { readFileBinary } from '../api'
 

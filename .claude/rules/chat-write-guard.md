@@ -7,7 +7,7 @@ paths:
   - "client/electron/features/private-folders/guards.ts"
   - "client/shared/write-access.ts"
   - "shared/core/write-access.ts"
-  - "client/src/hooks/useWriteAccess.ts"
+  - "client/src/shared/hooks/useWriteAccess.ts"
   - "client/src/shared/ipc/write-access.ts"
   - "client/src/shared/ui/ReadOnlyBadge.tsx"
   - "server/src/routes/permissions.ts"

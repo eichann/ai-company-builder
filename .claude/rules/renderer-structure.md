@@ -24,7 +24,7 @@ client/src/
     *.test.ts         node tests, next to the code they test
   shared/
     ui/             generic parts used by several features (dialogs, menus, badges, icons)
-    hooks/          data hooks several features use (write access, sparse checkout, departments)
+    hooks/          hooks two or more features use (write access, sparse checkout, departments)
     lib/            logic that belongs to no single feature (paths, file events, perf marks)
     ipc/            window.electronAPI's types (electron-api.ts) and the ports of shared parts
     commands/       the renderer's command registry and shortcut dispatch (commands.md)
@@ -44,8 +44,8 @@ not call it `review`: in the app "review" already means 「確認をお願いす
 
 ## Legacy folders
 
-`components/` (all of it: `skill-ui/`, `common/`, `settings/`, `auth/`, `chat/`), `hooks/`,
-`lib/` and `utils/` are legacy. `skill-ui/` in particular holds far more than skills (file tree,
+`components/` (all of it: `skill-ui/`, `common/`, `settings/`, `auth/`, `chat/`), `lib/` and
+`utils/` are legacy (`src/hooks/` was emptied into `shared/hooks/` and the features' `hooks/`). `skill-ui/` in particular holds far more than skills (file tree,
 editor, review, search, history, backups).
 
 - New features and new modules of a feature go to `features/<name>/` (or `shared/`), never into a
@@ -84,13 +84,21 @@ editor, review, search, history, backups).
    their concern (`useDepartmentSelection`, `useEditorPersistence`); presentational parts take
    props and render; React-free computation is a pure function in `model.ts`. The chat panel
    (`components/chat/`, `chat-ui-and-history.md`) is the model to follow.
-6. **About 300 lines per file.** A new or split file over ~300 lines states in one or two lines
+6. **One hook per `use*.ts` file, in its owner's `hooks/`.** A hook lives in the `hooks/` of
+   the feature that uses it; only a hook two or more features use goes to `shared/hooks/` (the
+   skeleton `app/` does not count as a feature). Do not gather all hooks in one folder, and do
+   not export a hook from a file named otherwise (`lib/fileVersions.ts` keeps the store,
+   `features/editor/hooks/useFileVersion.ts` the hook), so a hook is found by its file name.
+   Exceptions, kept in the file of their mechanism: a store's selector hooks (`useAppStore`,
+   `agentStatusStore.ts`, `consultationStatusStore.ts`) and the command registry's hooks
+   (`useCommandHandler`, `useCommandAvailable`, `useKeybindings` in `shared/commands/commands.ts`).
+7. **About 300 lines per file.** A new or split file over ~300 lines states in one or two lines
    at its top why it stays whole. Do not split finer than that: hopping between tiny files costs
    more reading than it saves.
-7. **Comments say why, not what.** Inline comments at most two lines; no links or change history
+8. **Comments say why, not what.** Inline comments at most two lines; no links or change history
    in comments. Long background belongs in the internal `docs/architecture/` notes; rules that
    must hold belong in `.claude/rules/`.
-8. **Nest at most 3–4 levels** (`features/<name>/components/X.tsx` is the deepest normal case).
+9. **Nest at most 3–4 levels** (`features/<name>/components/X.tsx` is the deepest normal case).
 
 ## How to move code
 
