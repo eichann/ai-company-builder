@@ -17,7 +17,13 @@ export function useChatWindows(companyId: string, onReturned: (sessionId: string
   useEffect(() => {
     let alive = true
     const apply = (list: ChatWindowInfo[]) => {
-      if (alive) setWindows(new Map(list.filter(w => w.companyId === companyId).map(w => [w.sessionId, w.status])))
+      if (!alive) return
+      const next = new Map(list.filter(w => w.companyId === companyId).map(w => [w.sessionId, w.status]))
+      // Same windows, same statuses: keep the map (no re-render of the panel and list).
+      setWindows(prev => prev.size === next.size && [...next].every(([id, s]) => {
+        const p = prev.get(id)
+        return p && p.state === s.state && p.kind === s.kind && p.line === s.line
+      }) ? prev : next)
     }
     void listChatWindows().then(list => apply(list ?? [])).catch(() => {})
     const unsubscribe = onChatWindowsChanged(change => {
