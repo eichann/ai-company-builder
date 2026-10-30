@@ -1,5 +1,5 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
-// Preview page for the main screen (SkillCentricLayout: department tabs,
+// Preview page for the main screen (src/app/AppShell.tsx: department tabs,
 // skills / files / search / history, the editor and the chat), with the
 // preload API faked (no Electron, git, server or AI). Synthetic data only.
 // Open /tests/skill-layout-ui.html?theme=…&download=…&keep=…&seed=…
@@ -20,7 +20,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
-import { SkillCentricLayout } from '../src/components/skill-ui/SkillCentricLayout'
+import { AppShell } from '../src/app/AppShell'
 import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/electron-api'
 
 const params = new URLSearchParams(location.search)
@@ -200,6 +200,6 @@ openCompany(COMPANY)
 // App.tsx shows the screen only while a company is open.
 function Screen() {
   const company = useAppStore(s => s.currentCompany)
-  return company ? <SkillCentricLayout /> : null
+  return company ? <AppShell /> : null
 }
 createRoot(document.getElementById('root')!).render(<div className="h-screen"><Screen /></div>)

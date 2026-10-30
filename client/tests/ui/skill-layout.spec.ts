@@ -1,4 +1,4 @@
-// The main screen (SkillCentricLayout) with the preload API faked
+// The main screen (src/app/AppShell.tsx) with the preload API faked
 // (tests/skill-layout-ui.tsx). Pure parts are pinned elsewhere — file tree
 // planning and per-department caching (file-tree-model.test.ts), which file
 // events rescan skills (skills-refresh.test.ts), write-access evaluation
