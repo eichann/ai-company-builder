@@ -1100,7 +1100,7 @@ export function TabbedEditorPanel({
               {/* Markdown content or diff view */}
               <div
                 ref={mdPreviewContainerRef}
-                className="flex-1 relative"
+                className="flex-1 min-w-0 relative"
                 onMouseUp={textSelection.handleMouseUp}
               >
                 {showDiff && review.activeReview?.snapshot ? (

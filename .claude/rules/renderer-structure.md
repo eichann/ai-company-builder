@@ -148,6 +148,11 @@ D7–D9, confirmed 2026-10-30).
   window-wide shortcuts) removed first (chat input from other features already names its pane:
   the `chat.*` commands, `commands.md`). Changing the saved shape means a new
   `version` and reading the old one (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`).
+  A pane that takes the remaining space (and the left side while the chat is hidden) has
+  `min-width` = its limit or 0, never the flex default `auto`: otherwise wide content (many tabs,
+  a long source line) stretched it past the window, leaving the document in a sliver at the
+  right edge and the show-chat button off screen. Inner flex rows that hold a document need
+  `min-w-0` for the same reason (`skill-layout-state.spec.ts` 「⌘⇧C with …」).
 - **Extension UI stays isolated.** Extension screens will run in an isolated frame and get only
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into
   read / write / send-outside operations so permissions can be decided in one place.

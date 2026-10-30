@@ -221,4 +221,53 @@ test.describe('panel dividers', () => {
     await expect(showChat(page)).toHaveCount(0)
     await expect.poll(() => at(chatDivider(page))).toBe(650)
   })
+
+  // With the chat hidden the left side takes the rest of the window. Wide content (a long
+  // source line, many tabs) must scroll inside the editor, not stretch the side past the window:
+  // the document then sat in a sliver at the right edge and the button to show the chat was gone.
+  const SALES = `${ROOT}/営業部/売上表.md`
+  for (const [what, view, openFiles, shown] of [
+    ['a Markdown file with lines wider than the editor (source view)', 'editor', [GUIDE, SALES], (page: Page) => page.locator('.cm-editor')],
+    ['many open tabs (preview)', 'preview',
+      [GUIDE, SALES, SUPPLIES, `${ROOT}/README.md`, `${ROOT}/総務/規程/就業規則.md`, `${ROOT}/営業部/提案書/A社_提案.md`, `${ROOT}/営業部/提案書/B社_提案.md`],
+      (page: Page) => page.getByRole('heading', { name: '売上表', level: 1 })],
+  ] as const) {
+    test(`⌘⇧C with ${what}: the editor fills the room up to the window's right edge`, async ({ page }) => {
+      await openPreview(page, 'skill-layout', { seed: JSON.stringify({
+        'editor:demo': editorState([...openFiles], SALES, 'files'),
+        mdViewMode: view,
+      }) })
+      await expect(shown(page)).toBeVisible()
+      const fitsWindow = async () => {
+        const width = page.viewportSize()!.width
+        const tree = (await treeDivider(page).boundingBox())!
+        const button = (await showChat(page).boundingBox())!
+        const box = (await shown(page).boundingBox())!
+        const left = tree.x + tree.width
+        // The show-chat button sits at the window's right edge, the editor between it and the tree.
+        expect(Math.round(button.x + button.width)).toBe(width)
+        if (view === 'editor') {
+          expect(box.x).toBeGreaterThanOrEqual(left - 1)
+          expect(box.x + box.width).toBeLessThanOrEqual(button.x + 1)
+          expect(box.width).toBeGreaterThan(button.x - left - 2)
+        } else {
+          // The preview centres the document (at most 768 px) in the editor.
+          expect(box.x).toBeGreaterThanOrEqual(left)
+          expect(box.x + box.width).toBeLessThanOrEqual(button.x)
+          expect(Math.abs(box.x + box.width / 2 - (left + button.x) / 2)).toBeLessThan(20)
+        }
+      }
+
+      await toggleChatShortcut(page)
+      await expect(showChat(page)).toBeVisible()
+      await fitsWindow()
+      await page.setViewportSize({ width: 1000, height: 800 })
+      await fitsWindow()
+
+      await toggleChatShortcut(page)
+      await expect(showChat(page)).toHaveCount(0)
+      expect(await at(chatDivider(page))).toBe(550)
+      expect(await at(treeDivider(page))).toBe(200)
+    })
+  }
 })
