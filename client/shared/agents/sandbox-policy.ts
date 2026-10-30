@@ -282,6 +282,12 @@ export interface SandboxViolation {
   read: boolean
   /** The command failed with `Operation not permitted` (a denied place, when the command names one). */
   notPermitted: boolean
+  /**
+   * The local proxy refused a connection (`CONNECT tunnel failed, response 403`):
+   * a host outside the list, when the command names one. Codex reports no
+   * host, only this (verified on codex-cli 0.153.4).
+   */
+  proxyRefused: boolean
 }
 
 /**
@@ -294,7 +300,8 @@ export function parseSandboxViolation(output: unknown): SandboxViolation | undef
   if (typeof output !== 'string' || !output) return undefined
   const block = /<sandbox_violations>([\s\S]*?)<\/sandbox_violations>/.exec(output)?.[1]
   const notPermitted = /Operation not permitted/.test(output)
-  if (block === undefined && !notPermitted) return undefined
+  const proxyRefused = /CONNECT tunnel failed, response 403/.test(output)
+  if (block === undefined && !notPermitted && !proxyRefused) return undefined
   const hosts: string[] = []
   let read = false
   for (const line of (block ?? '').split('\n')) {
@@ -304,7 +311,7 @@ export function parseSandboxViolation(output: unknown): SandboxViolation | undef
       if (!hosts.includes(host) && hosts.length < MAX_HOSTS) hosts.push(host)
     } else if (/deny file-/.test(line)) read = true
   }
-  return { hosts, read, notPermitted }
+  return { hosts, read, notPermitted, proxyRefused }
 }
 
 // ---------------------------------------------------------------------------

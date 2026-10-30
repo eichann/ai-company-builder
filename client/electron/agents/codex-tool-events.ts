@@ -5,8 +5,9 @@
 // Codex declined on its own is `policy-denied`. Paired by the item id.
 
 import type { ToolCall, ToolEventTracker } from '../../shared/agent-events'
+import { parseSandboxViolation } from '../../shared/agents/sandbox-policy'
 
-interface CodexItem { id?: unknown; type?: unknown; command?: unknown; cwd?: unknown; changes?: unknown; server?: unknown; tool?: unknown; arguments?: unknown; status?: unknown }
+interface CodexItem { id?: unknown; type?: unknown; command?: unknown; cwd?: unknown; changes?: unknown; server?: unknown; tool?: unknown; arguments?: unknown; status?: unknown; aggregatedOutput?: unknown }
 
 /** The item as the action log sees it (undefined: not a tool call). */
 export function codexToolCall(item: CodexItem): ToolCall | undefined {
@@ -29,7 +30,9 @@ export function recordCodexItem(tracker: ToolEventTracker | undefined, method: s
   if (method === 'item/started') tracker.start(item.id, call)
   else if (method === 'item/completed') {
     if (item.status === 'declined') tracker.decide(item.id, call, 'policy-denied')
-    else tracker.finish(item.id, item.status === 'failed' ? 'error' : 'ok', call)
+    // A failed command's output tells whether the sandbox (enforce) refused it.
+    else if (item.status === 'failed') tracker.finish(item.id, 'error', call, undefined, item.type === 'commandExecution' ? parseSandboxViolation(item.aggregatedOutput) : undefined)
+    else tracker.finish(item.id, 'ok', call)
   }
 }
 

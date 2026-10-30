@@ -260,7 +260,8 @@ const CODEX: AgentDescriptor = {
     handoff: true,
     oneShotText: true,
     webReader: true,
-    sandbox: false,
+    // macOS: Codex's permission profile + network proxy (codexSandboxConfig), checked per thread.
+    sandbox: true,
     commitMessageFallback: false,
     privateFolderCommitMessages: false,
     liveModelCatalog: true,
