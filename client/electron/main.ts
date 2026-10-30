@@ -251,12 +251,15 @@ registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: 
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
 const handoffStore = new HandoffStore(path.join(app.getPath('userData'), 'chat-handoffs'), localHistoryStore)
+// The emergency stop turns AI outside conversations off (hand-off memos, voice formatting, titles);
+// bound once the stop exists below — nothing runs AI before startup.
+let oneShotAiAllowed = (): boolean => true
 const handoffs = new HandoffService(localHistoryStore, handoffStore, async (provider, request) => {
   const cwd = path.join(app.getPath('userData'), 'handoff-worker')
   fs.mkdirSync(cwd, { recursive: true })
   const input = { ...request, cwd, env: shellEnv.env() }
   return writeAgentHandoff(provider, input, { getCli: claudeCli.path })
-}, (companyId, sessionId) => conversationWindows.send('handoff:changed', { companyId, sessionId }))
+}, (companyId, sessionId) => conversationWindows.send('handoff:changed', { companyId, sessionId }), { aiAllowed: () => oneShotAiAllowed() })
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
 // History writes are coalesced and asynchronous; whatever is still pending is written now.
@@ -306,6 +309,7 @@ const agentPushChannel = createAgentPushChannel({
 })
 app.on('before-quit', () => agentPushChannel.stopAll())
 const agentStop = createAgentStop({ policy: agentPolicyStore, watch: companyId => agentPushChannel.watch(companyId), turns: () => chatTurns })
+oneShotAiAllowed = () => agentStop.oneShotAiAllowed()
 // The key broker's short-lived tokens (memory only; key-broker.md K6).
 const brokerTokens = createBrokerTokenStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
 // Skills' web-app tools (features/tools): they get the key broker's variables like the chat.
@@ -351,7 +355,7 @@ const commitMessageGenerator = createCommitMessages({
   claudeCli,
   shellEnv,
   cwd: () => path.join(app.getPath('userData'), 'commit-message'),
-  aiAllowed: () => agentStop.aiCommitMessagesAllowed(),
+  aiAllowed: () => agentStop.oneShotAiAllowed(),
 })
 const generateCommitMessage = commitMessageGenerator(createGit)
 
@@ -420,7 +424,7 @@ registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
 // declaration makes no-use-before-define (TDZ) hold by construction.
 app.whenReady().then(async () => {
   if (!hasInstanceLock) return
-  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }))
+  registerVoiceInput(claudeCli.path, shellEnv.env, () => ({ authMode: config.authMode(), apiKey: apiKey.read() }), () => agentStop.oneShotAiAllowed())
   serveLocalFiles(allowedRoots)
   // Start embedded Hono chat server
   try {

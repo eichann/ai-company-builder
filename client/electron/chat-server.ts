@@ -82,6 +82,8 @@ export interface ChatServerConfig extends AgentHost {
    * is asked live before each tool call. Unknown → nothing is stopped.
    */
   prepareAgentStop?: (companyId: string) => Promise<{ refused?: string; toolStopped: ToolStopCheck }>
+  /** False while an administrator has stopped the AI: titles are not generated (the renderer keeps its own). */
+  oneShotAiAllowed?: () => boolean
 }
 
 // ============================================================================
@@ -487,6 +489,8 @@ export async function startChatServer(config: ChatServerConfig) {
       return c.json({ error: 'No messages provided' }, 400)
     }
 
+    // The emergency stop: no AI call; the renderer treats an error as "no title".
+    if (config.oneShotAiAllowed && !config.oneShotAiAllowed()) return c.json({ error: 'stopped' } satisfies GenerateTitleResponse, 503)
     const requested = body.authMode || config.getAuthMode()
     // Anything the registry does not know gets the API connection, as it always did.
     const connection = createAgentConnection(isAgentId(requested) ? requested : 'api-key', config)

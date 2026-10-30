@@ -12,7 +12,10 @@
  * - A stop of the whole AI arrives: every running turn of that company stops
  *   with 「管理者が停止しました」, its approval and choice cards cancelled
  *   (chat-turns.ts `abort`).
- * - Sync's AI commit message is off while any company is stopped (fixed text).
+ * - AI outside conversations (sync's commit message, chat titles, voice
+ *   formatting, hand-off memos) is off while any company the account kept a
+ *   whole-AI stop for is stopped: those callers fall back quietly (fixed text,
+ *   no title, the raw transcript, no memo) and no AI is asked.
  * - Never received a policy → nothing is stopped (owner decision).
  */
 import { AGENT_STOP_MESSAGES, stoppedKind, type AgentStopPolicy, type AgentStopToolKind } from '../../shared/agent-stop'
@@ -64,8 +67,8 @@ export function createAgentStop(deps: AgentStopDeps) {
       return { toolStopped }
     },
 
-    /** Sync's commit message may be written by the AI (no company has the whole AI stopped). */
-    aiCommitMessagesAllowed(): boolean {
+    /** AI outside conversations may run (no company has the whole AI stopped). */
+    oneShotAiAllowed(): boolean {
       return deps.policy.stoppedCompanies().length === 0
     },
   }

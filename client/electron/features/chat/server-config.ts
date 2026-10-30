@@ -54,7 +54,7 @@ export interface ChatServerConfigDeps {
   /** The member's AI policy per company (services/agent-policy-store.ts). */
   agentPolicy: AgentPolicyStore
   /** The emergency stop (services/agent-stop.ts); absent = nothing is stopped. */
-  agentStop?: Pick<AgentStop, 'prepareTurn'>
+  agentStop?: Pick<AgentStop, 'prepareTurn' | 'oneShotAiAllowed'>
   /** The server's URL (its host is always reachable from the sandbox). */
   serverUrl: () => string
   /** The key broker's tokens (services/broker-token-store.ts). */
@@ -148,6 +148,7 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
       deps.cancelChoicePrompts(appSessionId)
     },
     prepareAgentStop: deps.agentStop ? companyId => deps.agentStop!.prepareTurn(companyId) : undefined,
+    oneShotAiAllowed: deps.agentStop ? () => deps.agentStop!.oneShotAiAllowed() : undefined,
     onToolEvent: event => deps.agentEvents.record(event),
     toolEventPaths: () => deps.agentEvents.paths(),
 }

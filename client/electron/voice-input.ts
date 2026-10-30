@@ -30,7 +30,7 @@ class UnavailableSpeechProvider implements SpeechRecognitionProvider {
   start(): never { throw new Error('このOSの音声認識は未対応です') }
 }
 
-export function registerVoiceInput(getCli: () => string, getEnv: () => Record<string, string>, getSettings: () => { authMode: AuthMode; apiKey?: string }) {
+export function registerVoiceInput(getCli: () => string, getEnv: () => Record<string, string>, getSettings: () => { authMode: AuthMode; apiKey?: string }, aiAllowed?: () => boolean) {
   const provider: SpeechRecognitionProvider & { devices(): Promise<VoiceDeviceList>; warmUp(): void; dispose(): void } = process.platform === 'darwin'
     ? new AppleSpeechProvider(app.isPackaged ? path.join(process.resourcesPath, 'voice/acb-speech') : path.join(app.getAppPath(), 'native/bin/acb-speech'))
     : new UnavailableSpeechProvider()
@@ -78,7 +78,7 @@ export function registerVoiceInput(getCli: () => string, getEnv: () => Record<st
     requestedAt = Date.now()
     const cwd = path.join(app.getPath('userData'), 'voice-polisher')
     mkdirSync(cwd, { recursive: true })
-    const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd, systemPrompt: prompts.systemPrompt() })
+    const formatter = createVoiceFormatter({ ...getSettings(), getCli, env: getEnv(), cwd, systemPrompt: prompts.systemPrompt(), aiAllowed })
     await session.start(id, deviceId as string | undefined, formatter)
   })
   ipc.handle('voice:stop', (event, id: string) => { if (owner === event.sender) session.stop(id) })

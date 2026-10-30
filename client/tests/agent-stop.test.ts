@@ -228,14 +228,14 @@ test('never received → nothing is stopped; once received, the last stop is kep
     const stop = createAgentStop({ policy: store, watch: () => {}, turns: () => null, log: quiet })
     assert.match((await stop.prepareTurn('co')).refused ?? '', /管理者が AI の利用を一時停止しています/)
     assert.equal(online.headers[0]['X-ACB-Agent-Stop'], '1')
-    assert.equal(stop.aiCommitMessagesAllowed(), false)
+    assert.equal(stop.oneShotAiAllowed(), false)
     const file = path.join(dir, 'u1', 'co.json')
     if (process.platform !== 'win32') assert.equal(fs.statSync(file).mode & 0o777, 0o600)
 
     // Restarted offline: the last state still stops; another account on this PC is not affected.
     const restarted = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u1', dir: () => dir, fetch: policyFetch([]).f, log: quiet })
     const again = createAgentStop({ policy: restarted, watch: () => {}, turns: () => null, log: quiet })
-    assert.equal(again.aiCommitMessagesAllowed(), false, 'kept stops count before any conversation')
+    assert.equal(again.oneShotAiAllowed(), false, 'kept stops count before any conversation')
     assert.ok((await again.prepareTurn('co')).refused)
     const other = createAgentPolicyStore({ baseUrl: () => 'https://acb.example.jp', cookies: () => ['s=1'], userId: () => 'u2', dir: () => dir, fetch: policyFetch([]).f, log: quiet })
     assert.equal((await createAgentStop({ policy: other, watch: () => {}, turns: () => null, log: quiet }).prepareTurn('co')).refused, undefined)
@@ -388,4 +388,70 @@ test('the chat server refuses a new turn while the AI is stopped, before any age
   } finally {
     server.server.close()
   }
+})
+
+// ---------------------------------------------------------------------------
+// AI outside conversations stops too (owner decision 2026-10-31): no AI call,
+// a quiet fallback.
+// ---------------------------------------------------------------------------
+
+test('titles: no AI is asked while the AI is stopped (the renderer keeps its own title)', async () => {
+  const { startChatServer } = await import('../electron/chat-server')
+  let asked = 0
+  let allowed = false
+  const server = await startChatServer({
+    getAuthMode: () => 'api-key', getApiKey: () => { asked++; return undefined }, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude',
+    oneShotAiAllowed: () => allowed,
+  })
+  const title = () => fetch(`http://127.0.0.1:${server.port}/api/generate-title`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages: [{ role: 'user', content: 'こんにちは' }] }),
+  })
+  try {
+    assert.equal((await title()).status, 503)
+    assert.equal(asked, 0)
+    allowed = true
+    await title()
+    assert.ok(asked > 0, 'with the AI allowed the agent is asked again')
+  } finally {
+    server.server.close()
+  }
+})
+
+test('voice formatting: the transcript is used as is while the AI is stopped', async () => {
+  const { createVoiceFormatter } = await import('../electron/voice-formatter')
+  let asked = 0
+  let allowed = false
+  const format = createVoiceFormatter(
+    { authMode: 'api-key', apiKey: 'k', getCli: () => '/test/claude', cwd: '/tmp', env: {}, aiAllowed: () => allowed },
+    async () => { asked++; return '整えた文' },
+  )
+  assert.equal(await format('えーと会議は明日です', new AbortController().signal), 'えーと会議は明日です')
+  assert.equal(asked, 0)
+  allowed = true
+  assert.equal(await format('えーと会議は明日です', new AbortController().signal), '整えた文')
+  assert.equal(asked, 1)
+})
+
+test('hand-off memos: no memo is written while the AI is stopped, and no error is shown', async t => {
+  const { ChatHistoryStore } = await import('../electron/chat-history-store')
+  const { HandoffStore } = await import('../electron/handoff/store')
+  const { HandoffService } = await import('../electron/handoff/service')
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'acb-stop-handoff-'))
+  t.after(() => fs.rmSync(dir, { recursive: true, force: true }))
+  const history = new ChatHistoryStore(path.join(dir, 'history'))
+  const store = new HandoffStore(path.join(dir, 'memos'), history)
+  history.save('company', {
+    companyId: 'company', id: 'chat', title: 'chat', createdAt: '2026-01-01', updatedAt: '2026-01-01',
+    messages: [{ id: 'u1', role: 'user', content: '質問', timestamp: '2026-01-01' }, { id: 'a1', role: 'assistant', content: '回答', timestamp: '2026-01-01' }],
+  })
+  let written = 0
+  const service = new HandoffService(history, store, async () => { written++; throw new Error('must not run') }, () => {}, { idleMs: 1, turns: 1, aiAllowed: () => false })
+  t.after(() => service.dispose())
+  service.complete('company', 'chat', { messageId: 'a1', content: '回答', provider: 'codex' })
+  await new Promise(resolve => setTimeout(resolve, 50))
+  assert.equal(written, 0)
+  assert.equal(store.read('company', 'chat').error, undefined)
 })

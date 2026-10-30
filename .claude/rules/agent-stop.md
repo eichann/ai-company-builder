@@ -108,9 +108,13 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   `turns.abort(companyId, 'stopped-by-admin')`: the reply gets 「※ 管理者が停止しました。」
   (text, kept with the conversation) and the transient `data-turn-stopped`, the conversation's
   approval and choice cards are cancelled, the agent stops its usual way.
-  `aiCommitMessagesAllowed()` is false while any company the account has kept a stop for is
-  whole-AI stopped (sync cannot tell a repository's company at that point; stopping more is the
-  safe side): `services/commit-messages.ts` `withStop` → sync's fixed message.
+  `oneShotAiAllowed()` is false while any company the account has kept a stop for is
+  whole-AI stopped (these jobs cannot tell their company reliably; stopping more is the safe
+  side), and then **no AI outside conversations runs** (owner decision 2026-10-31), each falling
+  back quietly: sync's commit message → the fixed text (`services/commit-messages.ts`
+  `withStop`); chat titles → `/api/generate-title` answers 503 (the renderer keeps its title);
+  voice formatting → the transcript as is (`voice-formatter.ts` `aiAllowed`); hand-off memos →
+  the job waits and re-checks every 60 s, no error shown (`handoff/service.ts` `aiAllowed`).
 - `chat-server.ts`: `prepareAgentStop` before anything else of the turn (403 `AI_STOPPED`),
   `toolStop` into the model request and the API-key tools, and a re-check after the turn is
   tracked (a stop that arrived while it was prepared stops it).
@@ -122,12 +126,14 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   tools. Every refusal is logged with decision `stopped` (M1, 「停止中のため拒否」).
 - Limits: an AI started outside ACB is not stopped (MDM, phase 2); an older app does not know
   the stop (the admin count); a Claude command already running is cut when the turn stops;
-  Codex's interrupt may lag; titles / voice / hand-off one-shots are not stopped.
+  Codex's interrupt may lag; a stop of one member or one tool kind leaves the AI outside
+  conversations running. The reason is never shown to members (owner decision).
 
 Tests `client/tests/agent-stop.test.ts`: only an exact policy event counts and the rest is dropped
 (mutation: removing the field check fails it); the session goes in a header and an event can
 only cause a refetch; no https → no connection but the 60 s check runs; jittered backoff, idle
 drop, 404 stops watching; never received → no stop, the last stop survives a restart per
-account (0600); a whole-AI stop stops that company's turns only; the fixed commit message;
+account (0600); a whole-AI stop stops that company's turns only; the fixed commit message, no
+title, the raw voice transcript and no hand-off memo while stopped (each mutation-checked);
 Claude / Codex / API key refuse a stopped kind and log `stopped`; the chat server refuses a new
 turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop text and part.
