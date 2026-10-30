@@ -129,6 +129,8 @@ test('⌘F in a Markdown preview finds text: count, next, previous, Escape close
   await tab(page, LONG_DOC).click()
   await page.getByRole('button', { name: 'プレビュー' }).click()
   await expect(page.getByRole('heading', { name: '第1回' })).toBeVisible()
+  // The pressed button is gone: the editor takes the focus back on the next frame (slow runners lag).
+  await expect.poll(() => page.evaluate(() => !!document.activeElement?.closest('[data-command-area="editor"]'))).toBe(true)
   await shortcut(page, { key: 'f' })
   const box = page.getByPlaceholder('検索...')
   await expect(box).toBeFocused()
