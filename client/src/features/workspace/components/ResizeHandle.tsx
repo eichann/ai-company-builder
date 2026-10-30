@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { createResizeDrag } from '../../lib/panelResize'
+import { createResizeDrag } from '../panelResize'
 
 interface ResizeHandleProps {
   /** Drag started: the parent snapshots the panel's current width. */
