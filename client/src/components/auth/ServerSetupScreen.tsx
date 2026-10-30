@@ -7,6 +7,7 @@ import {
   CheckCircle,
   Buildings,
 } from '@phosphor-icons/react'
+import { setServerUrl, validateServerUrl } from '../../features/auth/api'
 
 interface Props {
   onComplete: () => void
@@ -30,10 +31,10 @@ export function ServerSetupScreen({ onComplete }: Props) {
       }
       normalizedUrl = normalizedUrl.replace(/\/+$/, '')
 
-      const result = await window.electronAPI.validateServerUrl(normalizedUrl)
+      const result = await validateServerUrl(normalizedUrl)
 
       if (result.valid) {
-        await window.electronAPI.setServerUrl(normalizedUrl)
+        await setServerUrl(normalizedUrl)
         setValidated(true)
         setTimeout(() => onComplete(), 500)
       } else {

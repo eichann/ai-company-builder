@@ -5,6 +5,18 @@ import type { Company, Department } from '../../types'
 import { DEPARTMENT_TEMPLATES } from '../../types'
 import { planFolderSetup, type FolderSetupPlan } from '../../lib/company-folder-plan'
 import { formatBytes } from '../../lib/download-selection'
+import { getDepartments } from '../../shared/ipc/departments'
+import {
+  chooseFolder,
+  companyPathExists,
+  createCompany,
+  createCompanyFolder,
+  getCompanies,
+  inspectCompanyFolder,
+  onSetupProgress,
+  readCompanyFolder,
+  setUpCompanyFolder,
+} from '../../features/company/api'
 import {
   Buildings,
   Plus,
@@ -78,14 +90,14 @@ export function CompanySelector() {
 
   useEffect(() => {
     if (viewMode !== 'setup') return
-    return window.electronAPI.onSetupProgress(({ receivedBytes }) => setReceivedBytes(receivedBytes))
+    return onSetupProgress(({ receivedBytes }) => setReceivedBytes(receivedBytes))
   }, [viewMode])
 
   async function loadCompanies() {
     setIsLoading(true)
     setError(null)
     try {
-      const result = await window.electronAPI.getCompanies()
+      const result = await getCompanies()
       if (result.success && result.data) {
         setCompanies(result.data)
       } else {
@@ -104,7 +116,7 @@ export function CompanySelector() {
     setIsCreating(true)
     setError(null)
     try {
-      const result = await window.electronAPI.createCompany(newCompanyName.trim())
+      const result = await createCompany(newCompanyName.trim())
       if (result.success && result.data) {
         // Add to list and select it
         setCompanies([result.data, ...companies])
@@ -122,7 +134,7 @@ export function CompanySelector() {
   }
 
   async function handleSelectDirectory() {
-    const path = await window.electronAPI.selectDirectory()
+    const path = await chooseFolder()
     if (path) {
       setLocalPath(path)
     }
@@ -131,7 +143,7 @@ export function CompanySelector() {
   // 既存のフォルダを開く: the chosen folder itself is the company folder.
   async function handleOpenExistingFolder() {
     if (!selectedCompany) return
-    const path = await window.electronAPI.selectDirectory()
+    const path = await chooseFolder()
     if (!path) return
     setLocalPath(path)
     await prepareSetup(path, 'clone')
@@ -153,10 +165,10 @@ export function CompanySelector() {
     setError(null)
     let plan: FolderSetupPlan
     try {
-      const inspected = await window.electronAPI.gitInspectCompanyFolder(companyPath, selectedCompany.id).catch(() => null)
+      const inspected = await inspectCompanyFolder(companyPath, selectedCompany.id).catch(() => null)
       plan = planFolderSetup(inspected)
       if (plan.kind === 'firstSetup') {
-        const result = await window.electronAPI.getDepartments(selectedCompany.id).catch(() => null)
+        const result = await getDepartments(selectedCompany.id).catch(() => null)
         const departments = (result?.success && result.data ? result.data : [])
           .filter(d => d.folder && !d.folder.includes('/'))
           .map(d => ({ id: d.id, name: d.name, folder: d.folder }))
@@ -200,12 +212,12 @@ export function CompanySelector() {
 
     try {
       // Create directory if it doesn't exist
-      await window.electronAPI.createDirectory(companyPath)
+      await createCompanyFolder(companyPath)
 
       // Setup git remote — this will clone if remote has content
       // (only the picked departments, when some were picked)
       setSetupStep('git')
-      const gitResult = await window.electronAPI.gitSetupCompanyRemote(
+      const gitResult = await setUpCompanyFolder(
         companyPath,
         selectedCompany.id,
         selectedFolders.length > 0 ? selectedFolders : undefined,
@@ -225,12 +237,12 @@ export function CompanySelector() {
 
       // Read departments from folder (may be cloned from server or empty)
       setSetupStep('folder')
-      const entries = await window.electronAPI.readDirectory(companyPath)
+      const entries = await readCompanyFolder(companyPath)
       const departments: Department[] = []
 
       for (const entry of entries) {
         if (entry.isDirectory && !entry.name.startsWith('_') && !entry.name.startsWith('.')) {
-          const hasAgentMd = await window.electronAPI.exists(`${entry.path}/AGENT.md`)
+          const hasAgentMd = await companyPathExists(`${entry.path}/AGENT.md`)
           const template = DEPARTMENT_TEMPLATES.find((t) => t.name === entry.name)
 
           departments.push({
