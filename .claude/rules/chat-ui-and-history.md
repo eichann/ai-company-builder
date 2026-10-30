@@ -41,6 +41,9 @@ one place an added agent brings its own controls; everything else asks the regis
   + `useToolApprovals`, `useSteering` + `useQueuedSendFlush`, `usePromptSuggestion`,
   `useStreamingChat` + `useRateLimitsRefresh`, `useChatAutoScroll`, `useConsultationStatus`, `useAgentModelSelection`,
   `useChatTabs`, `useAgentAuth`, `useChatServer`.
+- Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
+  and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the active tab as
+  `inputRequest` (`commands.md`); there is no store field for chat input.
 - Order inside `ChatPanelChat` matters: `useConversation`, `useChatDraft`,
   `useChatRequestContext`, `useMessageAttachments`, `useChatTransport`, `usePromptSuggestion`
   and `useSteering` run before `useChat` (the transport and onFinish read their refs or report

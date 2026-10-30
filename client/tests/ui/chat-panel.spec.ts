@@ -409,3 +409,24 @@ test('editing a message resends it like a normal send: saved first without the l
   await expect(page.getByText('単価を見直して')).toHaveCount(0)
   await expect(page.locator('[title="営業部/価格表/2026-10改定.pdf"]').locator('visible=true')).toBeVisible()
 })
+
+// chat.newConsultation is what a skill's 実行 runs; chat.insertText fills the composer (commands.md).
+test('chat commands: a new consultation sends its message; inserted text waits in the composer; another pane is not reached', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  const run = (id: string, args: Record<string, unknown>) =>
+    page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
+  const chatBodies = () => chat(page, c => c.requests.filter(r => r.path === '/api/chat').map(r => JSON.stringify(r.body)))
+  await expect(input(page)).toBeVisible()
+  await run('chat.newConsultation', { message: '/monthly-report ' })
+  await expect.poll(async () => (await chatBodies()).length).toBe(1)
+  expect((await chatBodies())[0]).toContain('/monthly-report')
+  await turnStarted(page)
+  await chat(page, c => c.finish())
+
+  await run('chat.insertText', { text: '来月の予算について' })
+  await typed(page).toBe('来月の予算について')
+  await run('chat.insertText', { text: '別の欄あて', pane: 'right' })
+  await page.waitForTimeout(300)
+  await typed(page).toBe('来月の予算について')
+  expect(await chatBodies()).toHaveLength(1)
+})

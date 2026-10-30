@@ -287,6 +287,7 @@ export function AppShell() {
             departmentPath={rootPath}
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
+            paneId={paneId}
           />
         ) : (
         <>
