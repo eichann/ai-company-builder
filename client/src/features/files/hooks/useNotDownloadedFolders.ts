@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { normalizePathSeparators } from '../../../utils/path'
+import { normalizePathSeparators } from '../../../shared/lib/path'
 import { useSparseCheckout } from '../../../hooks/useSparseCheckout'
 import { notDownloadedUserMessage, pathKey } from '../../../../shared/sparse-paths'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'

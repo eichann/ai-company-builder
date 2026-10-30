@@ -1,7 +1,7 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { MagnifyingGlass, X, CircleNotch } from '@phosphor-icons/react'
 import { getFileIcon } from '../../shared/ui/fileIcon'
-import { CodeEditor } from './CodeEditor'
+import { CodeEditor } from '../../shared/ui/CodeEditor'
 import { readSearchHit, searchFileContents } from '../../features/search/api'
 
 interface GrepMatch {

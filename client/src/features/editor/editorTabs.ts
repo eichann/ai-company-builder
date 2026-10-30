@@ -2,7 +2,7 @@
 // tabs keeps every open file. A tab whose file lives outside the selected
 // department carries a short department label so the member can tell
 // 「台本.md」 of コンテンツG from one in another department.
-import { normalizePathSeparators } from '../utils/path'
+import { normalizePathSeparators } from '../../shared/lib/path'
 
 export interface TabDepartment { id: string; name: string; folder: string }
 
@@ -43,9 +43,4 @@ export function tabDepartmentLabels(openFiles: string[], context: { rootPath: st
     labels[filePath] = dept ? dept.name : COMPANY_ROOT_LABEL
   }
   return labels
-}
-
-/** Whether `filePath` is inside `folderPath` (or is it), separator-insensitive. */
-export function isPathWithin(filePath: string, folderPath: string): boolean {
-  return isInside(normalizePathSeparators(filePath), normalizePathSeparators(folderPath).replace(/\/+$/, ''))
 }

@@ -6,7 +6,7 @@
  * over) is fetched again instead of served from Chromium's image cache.
  */
 import { useSyncExternalStore } from 'react'
-import { normalizePathSeparators } from '../utils/path'
+import { normalizePathSeparators } from '../shared/lib/path'
 
 const keyOf = (p: string) => normalizePathSeparators(p).replace(/\/+$/, '')
 

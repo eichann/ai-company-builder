@@ -11,8 +11,8 @@ import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
-import { TabbedEditorPanel } from '../src/components/skill-ui/TabbedEditorPanel'
-import { tabDepartmentLabels } from '../src/lib/editorTabs'
+import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
+import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
 
 const params = new URLSearchParams(location.search)
