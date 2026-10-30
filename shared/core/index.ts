@@ -8,6 +8,7 @@
  *   reserved-paths.ts     private-folder paths reserved in the company repository
  *   instruction-files.ts  CLAUDE.md / CLAUDE.local.md / AGENTS.md / AGENTS.override.md
  *   write-access.ts       evaluating GET /me/write-access for a path (the app)
+ *   client-version.ts     desktop-app build identity: parsing and ordering
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -20,3 +21,4 @@ export * from './permissions'
 export * from './reserved-paths'
 export * from './instruction-files'
 export * from './write-access'
+export * from './client-version'

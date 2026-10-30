@@ -5,11 +5,11 @@
 //   指定した人だけ  → everyone: read only + one edit rule per chosen member / role
 //
 // These helpers convert between that choice and the server's rule rows, and
-// compute who can edit under a choice before it is saved, mirroring
-// shared/core/permissions.ts (owner/admin always edit; on the deciding
-// scope a user rule beats a role rule beats the everyone rule).
+// compute who can edit under a choice before it is saved with the server's
+// own rule, shared/core/permissions.ts (owner/admin always edit; on the
+// deciding scope a user rule beats a role rule beats the everyone rule).
+import { applicableRules, resolveAccess, type ScopeRule, type ScopeWithRules } from '../../../shared/core/permissions'
 import type { EffectiveMember, Member, PermissionRule, RuleInput } from './api'
-import { isAdminRole } from './format'
 
 export type EditMode = 'inherit' | 'everyone' | 'specific'
 
@@ -116,19 +116,27 @@ export function describeRules(rules: PermissionRule[], members: Member[]): strin
  * so the preview follows the choice before it is saved.
  */
 export function previewAccess(members: Member[], rules: PermissionRule[] | RuleInput[], decidingPath: string): EffectiveMember[] {
+  // The server's own evaluation (shared/core/permissions.ts resolveAccess):
+  // the deciding place as the one scope with rules. A rule input carries no
+  // read flag: every rule the console writes lets its subject read.
+  const scopeRules: ScopeRule[] = rules.map((r, i) => ({
+    id: `preview-${i}`,
+    subjectType: r.subjectType,
+    subjectId: r.subjectId,
+    canRead: 'canRead' in r ? r.canRead : true,
+    canWrite: r.canWrite,
+  }))
+  const scope: ScopeWithRules = { id: 'preview', path: decidingPath, kind: 'folder', departmentId: null, repoId: null, rules: scopeRules }
   return members.map((m) => {
     const base = { userId: m.userId, name: m.name, email: m.email, role: m.role }
-    if (isAdminRole(m.role)) return { ...base, read: true, write: true, reason: 'role' as const, decidedBy: null }
-    const userRules = rules.filter((r) => r.subjectType === 'user' && r.subjectId === m.userId)
-    const roleRules = rules.filter((r) => r.subjectType === 'role' && r.subjectId === m.role)
-    const applicable = userRules.length > 0 ? userRules : roleRules.length > 0 ? roleRules : rules.filter((r) => r.subjectType === 'everyone')
-    const write = applicable.some((r) => r.canWrite)
-    const first = applicable[0]
+    const access = resolveAccess('', m.userId, decidingPath, { getMemberRole: () => m.role, listScopes: () => [scope] })
+    if (access.source.reason === 'role') return { ...base, read: true, write: true, reason: 'role' as const, decidedBy: null }
+    const first = applicableRules(scopeRules, m.userId, m.role)[0]
     return {
       ...base,
-      read: applicable.length > 0,
-      write,
-      reason: applicable.length > 0 ? ('rule' as const) : ('no-rule' as const),
+      read: access.read,
+      write: access.write,
+      reason: access.source.reason,
       decidedBy: first
         ? {
             scopeId: '',

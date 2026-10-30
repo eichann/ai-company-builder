@@ -81,36 +81,12 @@ export function formatBuild(build: ClientBuild | null | undefined, raw?: string 
   return build.dev ? `開発版 ${base}` : base
 }
 
-/** Parses a raw "<semver>+<sha>.<YYYYMMDDHHmmss>" when no parsed build is at hand. */
-export function parseBuild(raw: string | null | undefined): ClientBuild | null {
-  if (!raw) return null
-  const m = /^(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(?:\+([0-9A-Za-z-]+)(?:\.(\d{14}))?)?$/.exec(raw.trim())
-  if (!m) return null
-  const date = m[3] && !/^0+$/.test(m[3]) ? m[3] : null
-  return {
-    semver: m[1],
-    sha: m[2] && m[2] !== 'nogit' ? m[2] : null,
-    commitDate: date,
-    dev: /-(.*\.)?dev(\.|$)/.test(m[1]),
-  }
-}
-
 /**
- * Orders builds like the server (compareClientVersions in
- * server/src/lib/client-version.ts): semver core, then a release ranks above
- * a pre-release of the same core, then the commit date breaks ties.
+ * Parsing a raw "<semver>+<sha>.<YYYYMMDDHHmmss>" and ranking builds are the
+ * server's own rules (shared/core/client-version.ts): the members page marks
+ * "outdated" exactly where the server's version gates would.
  */
-export function compareBuilds(a: ClientBuild, b: ClientBuild): number {
-  const core = (s: string) => s.split('-')[0].split('.').map(Number)
-  const [ac, bc] = [core(a.semver), core(b.semver)]
-  for (let i = 0; i < 3; i++) {
-    if (ac[i] !== bc[i]) return Math.sign(ac[i] - bc[i])
-  }
-  const [ap, bp] = [a.semver.includes('-'), b.semver.includes('-')]
-  if (ap !== bp) return ap ? -1 : 1
-  const [ad, bd] = [a.commitDate ?? '', b.commitDate ?? '']
-  return ad < bd ? -1 : ad > bd ? 1 : 0
-}
+export { compareClientBuilds as compareBuilds, parseClientBuild as parseBuild } from '../../../shared/core/client-version'
 
 function commitDateLabel(d: string): string {
   return `${d.slice(0, 4)}/${Number(d.slice(4, 6))}/${Number(d.slice(6, 8))}`

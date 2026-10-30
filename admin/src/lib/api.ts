@@ -4,6 +4,7 @@
 // server, and without a reverse proxy the admin's own /api/* proxy
 // (src/proxy.ts) forwards them. Either way the session cookie is first-party.
 
+import type { ClientBuild } from '../../../shared/core/client-version'
 import type {
   AgentEventPage,
   AgentEventQuery,
@@ -237,12 +238,7 @@ export const overviewApi = {
 // Client activity (#102; owner / admin)
 // ---------------------------------------------------------------------------
 
-export interface ClientBuild {
-  semver: string
-  sha: string | null
-  commitDate: string | null
-  dev: boolean
-}
+export type { ClientBuild } from '../../../shared/core/client-version'
 
 export interface ClientActivity {
   userId: string

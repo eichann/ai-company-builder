@@ -16,7 +16,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { ScopeRepository } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
-import { parseClientVersion, supportsAgentEvents } from '../lib/client-version'
+import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 
@@ -221,9 +221,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
           email: userInfo?.email ?? null,
           name: userInfo?.name ?? null,
           clientVersion: row?.client_version ?? null,
-          build: parsed
-            ? { semver: `${parsed.major}.${parsed.minor}.${parsed.patch}${parsed.prerelease.length ? `-${parsed.prerelease.join('.')}` : ''}`, sha: parsed.sha, commitDate: parsed.commitDate, dev: parsed.dev }
-            : null,
+          build: parsed ? clientBuildOf(parsed) : null,
           clientPlatform: row?.client_platform ?? null,
           lastSeenAt: row?.last_seen_at ?? null,
           lastFetchAt: row?.last_fetch_at ?? null,
