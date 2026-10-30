@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { useAppStore } from '../stores/appStore'
 import { evaluateWrite, repoRelativePath, type WriteAccess } from '../../shared/write-access'
+import { canReadWriteAccess, getWriteAccess, onWriteAccessChanged } from '../shared/ipc/write-access'
 
 /**
  * The signed-in member's write access in the current company (閲覧のみ
@@ -15,15 +16,15 @@ export function useWriteAccess() {
 
   useEffect(() => {
     setAccess(null)
-    if (!companyId || !window.electronAPI?.getWriteAccess) return
+    if (!companyId || !canReadWriteAccess()) return
     let active = true
-    window.electronAPI.getWriteAccess(companyId)
+    getWriteAccess(companyId)
       .then(value => { if (active) setAccess(value) })
       .catch(() => { /* unknown: no badges */ })
-    const off = window.electronAPI.onWriteAccessChanged(({ companyId: changed, access: next }) => {
+    const off = onWriteAccessChanged(({ companyId: changed, access: next }) => {
       if (active && changed === companyId) setAccess(next)
     })
-    return () => { active = false; off() }
+    return () => { active = false; off?.() }
   }, [companyId])
 
   /** true when `absPath` is inside the company and the member may not write there. */

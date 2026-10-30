@@ -26,6 +26,7 @@ import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../shared/private-folder-help
 import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHelp'
 // The server's department folder-name rule (private folder names follow it too).
 import { isValidFolderName } from '../../../../shared/core/names'
+import { createPrivateFolder, getPrivateFolderCreateContext } from '../../features/files/api'
 
 export interface NewFolderDialogProps {
   isOpen: boolean
@@ -79,7 +80,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
     if (insidePrivate || !companyId) return
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { setCtx({ status: 'offline' }); return }
     let active = true
-    window.electronAPI.getPrivateFolderCreateContext(companyId, parentRel)
+    getPrivateFolderCreateContext(companyId, parentRel)
       .then(res => {
         if (!active) return
         if (res.success) setCtx({ status: 'ready', context: res.context })
@@ -125,7 +126,7 @@ function NewFolderForm({ companyId, meId, parentRel, placeLabel, insidePrivate, 
     if (typeof navigator !== 'undefined' && navigator.onLine === false) { setError(OFFLINE_REASON); return }
     setBusy(true)
     try {
-      const res = await window.electronAPI.createPrivateFolder(companyId, {
+      const res = await createPrivateFolder(companyId, {
         parentPath: parentRel,
         name: trimmed,
         viewers: viewerIds,

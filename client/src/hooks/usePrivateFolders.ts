@@ -3,6 +3,8 @@ import { create } from 'zustand'
 import { useAppStore } from '../stores/appStore'
 import { repoRelativePath } from '../../shared/write-access'
 import { isPrivateRoot, privateFolderOf, type MyPrivateFolder } from '../../shared/private-folder-ui'
+import { onWriteAccessChanged } from '../shared/ipc/write-access'
+import { canReadPrivateFolders, getMyPrivateFolders } from '../features/files/api'
 
 interface PrivateFolderState {
   /** companyId → the private folders this member can read (unknown until loaded). */
@@ -19,9 +21,9 @@ interface PrivateFolderState {
 export const usePrivateFolderStore = create<PrivateFolderState>((set) => ({
   byCompany: {},
   load: async (companyId) => {
-    if (!window.electronAPI?.getMyPrivateFolders) return
+    if (!canReadPrivateFolders()) return
     try {
-      const res = await window.electronAPI.getMyPrivateFolders(companyId)
+      const res = await getMyPrivateFolders(companyId)
       if (res.success) set(s => ({ byCompany: { ...s.byCompany, [companyId]: res.folders } }))
     } catch {
       // Keep what we had.
@@ -38,7 +40,7 @@ export function usePrivateFolders() {
   useEffect(() => {
     if (!companyId) return
     void load(companyId)
-    const off = window.electronAPI?.onWriteAccessChanged?.(({ companyId: changed }) => {
+    const off = onWriteAccessChanged(({ companyId: changed }) => {
       if (changed === companyId) void load(companyId)
     })
     return () => { off?.() }

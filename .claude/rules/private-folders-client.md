@@ -10,6 +10,7 @@ paths:
   - "client/src/hooks/usePrivateFolders.ts"
   - "client/src/components/skill-ui/PrivateFolderHelp.tsx"
   - "client/src/components/skill-ui/NewFolderDialog.tsx"
+  - "client/src/features/files/api.ts"
   - "client/tests/private-folder*"
   - "client/tests/sync/private-folders.test.ts"
 ---
@@ -27,7 +28,10 @@ repository, and nothing it shows to a non-reader, may name a private folder. Ful
 `cloneUrlAllowed`, `privateBackupsDir`), `sync/private-sync.ts` (prepare / place / read-only
 sync), `sync/path-check.ts` (`POST …/paths/check`), `sync/reserved-path.ts` (`[RESERVED_PATH]`),
 orchestration in `sync/git-sync.ts`; IPC `features/private-folders/` (`guards.ts` serves the
-chat guards and the file-operation refusal).
+chat guards and the file-operation refusal). The renderer reaches them through
+`src/features/files/api.ts`: `PrivateFolderReads` (the member's readable folders, who may
+create where) and `PrivateFolderOutbound` (create one: the server makes its repository; only
+people, never the chat).
 
 ## Model
 
