@@ -1,13 +1,13 @@
 // Performance baselines for #151 at company size (15k files): one recursive
 // watcher per company, and a lazy file tree whose first view is one small
 // read. Behaviour at small size is covered by tests/company-watcher.test.ts
-// and tests/file-tree-model.test.ts; these add the scale and the numbers.
+// and src/features/files/fileTreeModel.test.ts; these add the scale and the numbers.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import path from 'node:path'
 import { CompanyWatcher } from '../../electron/company-watcher'
-import { FileTreeModel, type FileTreeIO, type RawDirEntry } from '../../src/lib/fileTreeModel'
+import { FileTreeModel, type FileTreeIO, type RawDirEntry } from '../../src/features/files/fileTreeModel'
 import { budget, generateCompanyTree, scratch, timeMs } from './perf'
 
 const tree = scratch('tree')

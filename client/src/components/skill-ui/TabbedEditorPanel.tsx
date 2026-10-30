@@ -28,7 +28,7 @@ import { MarkdownDiffView, type MarkdownDiffViewHandle } from '../../features/do
 import { markReviewSeen } from '../../features/doc-review/model'
 import { useAuthStore } from '../../stores/authStore'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
-import { ReadOnlyBadge } from './ReadOnlyBadge'
+import { ReadOnlyBadge } from '../../shared/ui/ReadOnlyBadge'
 import { backupBeforeOverwrite, createDirectory, readFile, readFileBinary, writeFile } from '../../features/editor/api'
 import { subscribeFileChanges } from '../../lib/fileEvents'
 import { useFileVersion } from '../../lib/fileVersions'
@@ -43,7 +43,7 @@ import {
   type EditorFileState,
 } from '../../../shared/editor-disk-state'
 import { useAppStore } from '../../stores/appStore'
-import { ConfirmDialog } from '../common/ConfirmDialog'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 
 /**
  * An open tab. `originalContent` is the disk version the tab last loaded or

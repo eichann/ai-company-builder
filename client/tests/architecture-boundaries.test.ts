@@ -219,7 +219,10 @@ const featureOf = (clientPath: string): string | null => /^src\/features\/([^/]+
  * Each must keep occurring; add one only with a reason the owner would
  * accept (otherwise let app/ compose the two through props).
  */
-const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {}
+const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
+  'files -> doc-review':
+    'the tree hides review sidecars and marks documents with reviews (pure model.ts only: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
+}
 
 /** Feature pairs a set of (importing file, imported path) edges crosses. */
 function crossFeatureImports(edges: Array<[file: string, imported: string]>): Array<[pair: string, where: string]> {

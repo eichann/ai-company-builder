@@ -12,7 +12,7 @@
  * cached listing is marked stale and re-read when it is expanded. Content
  * changes ('change') never re-read anything: a listing shows names only.
  */
-import { normalizePathSeparators } from '../utils/path'
+import { normalizePathSeparators } from '../../utils/path'
 
 export interface RawDirEntry {
   name: string

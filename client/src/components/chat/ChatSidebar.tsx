@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { CaretDown, ChatCircleDots, CheckCircle, CircleNotch, Eye, MagnifyingGlass, Plus, PushPin, PencilSimple, ShieldWarning, Sparkle, Trash, WarningCircle, X } from '@phosphor-icons/react'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
-import { ConfirmDialog } from '../common/ConfirmDialog'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 
 import { paginateConversationRows, buildConversationRows, isEmptyConversation, type ConversationTab } from '../../lib/conversationRows'
 import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../../lib/consultationStatus'

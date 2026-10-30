@@ -12,7 +12,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { SettingsPanel } from '../src/components/settings/SettingsPanel'
-import { FileTreePanel } from '../src/components/skill-ui/FileTreePanel'
+import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { dispatchFileChanges } from '../src/lib/fileEvents'
 
 const params = new URLSearchParams(location.search)

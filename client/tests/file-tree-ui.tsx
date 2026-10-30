@@ -12,7 +12,7 @@ import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
-import { FileTreePanel } from '../src/components/skill-ui/FileTreePanel'
+import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { installElectronAPI } from './ui/fixtures/electron-api'
 import type { MyPrivateFolder } from '../shared/private-folder-ui'
 

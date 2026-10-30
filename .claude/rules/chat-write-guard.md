@@ -9,7 +9,7 @@ paths:
   - "shared/core/write-access.ts"
   - "client/src/hooks/useWriteAccess.ts"
   - "client/src/shared/ipc/write-access.ts"
-  - "client/src/components/skill-ui/ReadOnlyBadge.tsx"
+  - "client/src/shared/ui/ReadOnlyBadge.tsx"
   - "server/src/routes/permissions.ts"
   - "client/tests/write-guard.test.ts"
   - "client/tests/write-access*.test.ts"

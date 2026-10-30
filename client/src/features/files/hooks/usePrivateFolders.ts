@@ -1,10 +1,10 @@
 import { useCallback, useEffect } from 'react'
 import { create } from 'zustand'
-import { useAppStore } from '../stores/appStore'
-import { repoRelativePath } from '../../shared/write-access'
-import { isPrivateRoot, privateFolderOf, type MyPrivateFolder } from '../../shared/private-folder-ui'
-import { onWriteAccessChanged } from '../shared/ipc/write-access'
-import { canReadPrivateFolders, getMyPrivateFolders } from '../features/files/api'
+import { useAppStore } from '../../../stores/appStore'
+import { repoRelativePath } from '../../../../shared/write-access'
+import { isPrivateRoot, privateFolderOf, type MyPrivateFolder } from '../../../../shared/private-folder-ui'
+import { onWriteAccessChanged } from '../../../shared/ipc/write-access'
+import { canReadPrivateFolders, getMyPrivateFolders } from '../api'
 
 interface PrivateFolderState {
   /** companyId → the private folders this member can read (unknown until loaded). */
