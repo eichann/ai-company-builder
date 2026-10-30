@@ -11,6 +11,11 @@
  *
  * Precedence, per variable name (compared case-insensitively — Windows
  * environment names are):
+ *   0. a key broker variable (`BROKER_ENV_NAMES`: GEMINI_API_KEY,
+ *      OPENAI_BASE_URL, ACB_GEMINI_API_KEY, …) is kept only with a value the app
+ *      sets — a broker token, the no-key placeholder, a relay URL — and dropped
+ *      otherwise, so a real key or another base URL from the member's shell
+ *      never reaches the AI (client/shared/broker-env.ts);
  *   1. an ACB-set key (`ACB_SET_KEYS`) is always kept;
  *   2. a deny match (`DENY_*`) is always dropped — also when the member listed
  *      the name in the per-machine pass-through setting;
@@ -19,6 +24,8 @@
  *
  * Dropped names (never values) are logged once each per app start.
  */
+
+import { BROKER_ENV_NAMES, brokerOrigin, isBrokerEnvValue } from '../../shared/broker-env'
 
 export const ALLOW_NAMES: readonly string[] = [
   // POSIX basics
@@ -86,6 +93,7 @@ const upper = (names: readonly string[]) => new Set(names.map(name => name.toUpp
 const ALLOW = upper(ALLOW_NAMES)
 const ACB_SET = upper(ACB_SET_KEYS)
 const DENY = upper(DENY_NAMES)
+const BROKER = upper(BROKER_ENV_NAMES)
 
 /** True when the name looks like a secret (rule 2). */
 export function isDeniedName(name: string): boolean {
@@ -107,15 +115,20 @@ export interface AgentEnvResult {
   dropped: string[]
 }
 
-/** Rules 1–4 over `source`; `extraNames` = the member's pass-through names. */
-export function buildAgentEnv(source: Record<string, string | undefined>, extraNames: readonly string[] = []): AgentEnvResult {
+/**
+ * Rules 0–4 over `source`; `extraNames` = the member's pass-through names;
+ * `serverOrigin` = the company server (`https://…`) whose relay URLs may pass.
+ */
+export function buildAgentEnv(source: Record<string, string | undefined>, extraNames: readonly string[] = [], serverOrigin = ''): AgentEnvResult {
   const extra = upper(extraNames.filter(name => PASSTHROUGH_NAME.test(name)))
   const env: Record<string, string> = {}
   const dropped: string[] = []
   for (const [name, value] of Object.entries(source)) {
     if (typeof value !== 'string') continue
     const key = name.toUpperCase()
-    const keep = ACB_SET.has(key) || (!isDeniedName(name) && (isAllowedName(key) || extra.has(key)))
+    const keep = BROKER.has(key)
+      ? isBrokerEnvValue(name, value, serverOrigin)
+      : ACB_SET.has(key) || (!isDeniedName(name) && (isAllowedName(key) || extra.has(key)))
     if (keep) env[name] = value
     else dropped.push(name)
   }
@@ -148,12 +161,14 @@ export function normalizePassthroughNames(names: readonly unknown[]): string[] {
 // --- The app's instance: configured once by main.ts ------------------------
 
 let passthrough: () => readonly string[] = () => []
+let serverOrigin: () => string = () => ''
 let log: (line: string) => void = line => console.log(line)
 const reported = new Set<string>()
 
 /** main.ts: where the member's pass-through names come from (config.json), and the log. */
-export function configureAgentEnv(options: { passthroughNames: () => readonly string[]; log?: (line: string) => void }): void {
+export function configureAgentEnv(options: { passthroughNames: () => readonly string[]; serverUrl?: () => string; log?: (line: string) => void }): void {
   passthrough = options.passthroughNames
+  if (options.serverUrl) { const url = options.serverUrl; serverOrigin = () => brokerOrigin(url()) }
   if (options.log) log = options.log
 }
 
@@ -166,7 +181,9 @@ export function configureAgentEnv(options: { passthroughNames: () => readonly st
 export function agentEnv(source: Record<string, string | undefined>): Record<string, string> {
   let extra: readonly string[] = []
   try { extra = passthrough() } catch { /* unreadable settings: no extras */ }
-  const { env, dropped } = buildAgentEnv(source, extra)
+  let origin = ''
+  try { origin = serverOrigin() } catch { /* no server: no relay URLs */ }
+  const { env, dropped } = buildAgentEnv(source, extra, origin)
   const fresh = dropped.filter(name => !reported.has(name))
   if (fresh.length) {
     for (const name of fresh) reported.add(name)
@@ -179,5 +196,6 @@ export function agentEnv(source: Record<string, string | undefined>): Record<str
 export function resetAgentEnvForTests(): void {
   reported.clear()
   passthrough = () => []
+  serverOrigin = () => ''
   log = line => console.log(line)
 }

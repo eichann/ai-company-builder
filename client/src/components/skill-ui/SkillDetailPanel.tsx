@@ -21,6 +21,7 @@ import {
 } from '@phosphor-icons/react'
 import type { Skill, SkillTool } from '../../types'
 import { startSkillTool, stopSkillTool } from '../../features/skills/api'
+import { useAppStore } from '../../stores/appStore'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 
@@ -398,7 +399,7 @@ function ToolsTab({
     setLoadingTools(prev => new Set(prev).add(tool.path))
 
     try {
-      const result = await startSkillTool(tool.path, tool.startCommand)
+      const result = await startSkillTool(tool.path, tool.startCommand, useAppStore.getState().currentCompany?.id)
       if (result.success && result.port) {
         setRunningTools(prev => new Map(prev).set(tool.path, result.port!))
       } else {

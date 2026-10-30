@@ -89,6 +89,11 @@ export interface AgentConnection {
     toolEventContext?: ToolEventContextInput
     /** The AI sandbox for this turn; absent = off. */
     sandbox?: TurnSandbox
+    /**
+     * Variables added to this turn's AI process (the key broker's token and
+     * relay URLs, client/shared/broker-env.ts); agent-env.ts still filters them.
+     */
+    turnEnv?: Record<string, string>
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

@@ -132,7 +132,8 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
   the `/api/me` user fields). Test: `ipc-app.test.ts` ("auth:signIn / auth:signUp never hand the
   session token").
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
-  `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start`;
+  `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
+  company id only selects the key broker's token, `key-broker.md` K6);
   `skills:publish` / `makePrivate` refuse a multi-line entry; `skills:toggleNurturing` only a
   `SKILL.md`; `shell:openExternal` only `http:` / `https:` / `mailto:` (`electron/external-url.ts`).
 - A commit the renderer names reaches git only as a hex object id (`commitIdArg`,

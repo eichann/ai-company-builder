@@ -6,6 +6,7 @@ import { exec } from 'child_process'
 import crypto from 'crypto'
 import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
 import { agentEnv } from './agents/agent-env'
+import { withoutBrokerEnv } from '../shared/broker-env'
 import type { GuardReason, ToolDecision, ToolEventTracker } from '../shared/agent-events'
 
 // Approval callback type (optional, injected from chat-server)
@@ -119,7 +120,7 @@ export function createSkillTools(skillFolderPath: string, events?: ToolEventTrac
   }
 }
 
-export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard, events?: ToolEventTracker) {
+export function createFileSystemTools(workingDirectory: string, requestApproval?: RequestApproval, writeGuard?: WriteGuard, events?: ToolEventTracker, turnEnv?: Record<string, string>) {
   return {
     readFile: tool({
       description:
@@ -243,7 +244,7 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
               cwd: workingDirectory,
               timeout: 30_000,
               maxBuffer: 1024 * 1024, // 1 MB
-              env: agentEnv({ ...process.env, FORCE_COLOR: '0' }),
+              env: agentEnv({ ...withoutBrokerEnv(process.env), ...turnEnv, FORCE_COLOR: '0' }),
             },
             (error, stdout, stderr) => {
               const out = truncate(stdout, 10_000) // 10 KB

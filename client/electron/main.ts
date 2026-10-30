@@ -42,6 +42,7 @@ import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { registerPrivateFoldersIpc } from './features/private-folders/ipc'
 import { registerBrokerIpc } from './features/broker/ipc'
+import { createBrokerTokenStore } from './services/broker-token-store'
 import { createPrivateFolderGuards } from './features/private-folders/guards'
 import { registerGitHistoryIpc } from './features/git-history/ipc'
 import { createAppGit } from './services/app-git'
@@ -84,12 +85,11 @@ const apiKey = createApiKeyStore(config, secretBox, message => console.log(messa
 const shellEnv = createShellEnvironment()
 // Every AI process gets an allowlisted environment plus the member's own
 // pass-through names (agents/agent-env.ts).
-configureAgentEnv({ passthroughNames: () => config.load().agentEnvPassthrough ?? [] })
+configureAgentEnv({ passthroughNames: () => config.load().agentEnvPassthrough ?? [], serverUrl: () => config.serverUrl() })
 const claudeCli = createClaudeCli()
 
-// Skills and their web-app tools (features/skills, features/tools).
+// Skills (features/skills); their web-app tools are registered with the key broker's tokens below.
 const skills = registerSkillsIpc(ipc, { paths: allowedRoots })
-const tools = registerToolsIpc(ipc, { paths: allowedRoots, shellEnv, shell: desktopShell })
 
 function createWindow() {
   const disableElectronSpellcheck =
@@ -166,9 +166,6 @@ app.on('activate', () => {
   }
 })
 
-// On quit: stop the skill tools (the company watchers close in their own handler, registered below).
-app.on('before-quit', () => tools.stopAll())
-
 registerEnvIpc(ipc, { paths: allowedRoots })
 
 registerSettingsIpc(ipc, { config, apiKey, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
@@ -220,6 +217,11 @@ const writeAccessStore = createWriteAccessStore({
 // here in the main process; answers are cached briefly per member.
 // The member's AI policy per company (「AI の囲い」; M2's stop joins it), read at each chat turn.
 const agentPolicyStore = createAgentPolicyStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
+// The key broker's short-lived tokens (memory only; key-broker.md K6).
+const brokerTokens = createBrokerTokenStore({ baseUrl: getServerApiUrl, cookies: session.cookies })
+// Skills' web-app tools (features/tools): they get the key broker's variables like the chat.
+const tools = registerToolsIpc(ipc, { paths: allowedRoots, shellEnv, shell: desktopShell, brokerEnv: request => brokerTokens.envFor(request) })
+app.on('before-quit', () => tools.stopAll())
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
 // The AI action log (monitoring M1): the recorder (memory + console) and its
@@ -240,6 +242,7 @@ registerAuthIpc(ipc, {
   onSignedOut: () => {
     writeAccessStore.clear()
     agentPolicyStore.clear()
+    brokerTokens.clear()
     companyFilesApi.clear()
     agentEventSender.signedOut()
   },
@@ -345,6 +348,7 @@ app.whenReady().then(async () => {
       agentEvents,
       agentPolicy: agentPolicyStore,
       serverUrl: getServerApiUrl,
+      brokerTokens,
       requestInteraction: (request, appSessionId, signal) => {
         const owner = mainWindow?.webContents
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })

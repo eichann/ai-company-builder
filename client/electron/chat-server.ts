@@ -67,6 +67,12 @@ export interface ChatServerConfig extends AgentHost {
    * (「AI の囲い」, sandbox-policy.ts); undefined = unknown (off this turn).
    */
   getAgentSandbox?: (companyId: string, companyRoot: string) => Promise<{ settings: AgentSandboxSettings; host: SandboxHost } | undefined>
+  /**
+   * The key broker's variables for this turn's AI process (K6, broker-env.ts):
+   * the consultation's short-lived token where SDKs look for an API key and
+   * the relay where they look for a base URL; {} when the broker is off.
+   */
+  getBrokerEnv?: (request: { agent: AgentId; companyId: string; conversationId: string; department: string | null }) => Promise<Record<string, string>>
   /** Cancel a conversation's pending tool approvals and choice cards (a stopped turn). */
   cancelInteractions?: (appSessionId: string) => void
 }
@@ -311,7 +317,11 @@ export async function startChatServer(config: ChatServerConfig) {
     if (sandboxDecision?.mode === 'enforce') finalSystemPrompt = (finalSystemPrompt || '') + SANDBOX_INSTRUCTIONS
     const sandbox: TurnSandbox | undefined = sandboxInput && sandboxDecision && sandboxDecision.mode !== 'off'
       ? { mode: sandboxDecision.mode, resolved: sandboxDecision.resolved, home: sandboxInput.host.home, onUnavailable: sandboxDecision.onUnavailable } : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox }
+    // The key broker (key-broker.md K6): a token per consultation, refreshed before it runs out.
+    const turnEnv = companyId && appSessionId
+      ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
+      : undefined
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -333,7 +343,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const tools = (() => {
       if (connection.ownsConversation) return undefined
       const toolEvents = turnToolEvents(config, authMode, modelRequest)
-      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents) : undefined
+      const fsTools = workingDirectory ? createFileSystemTools(workingDirectory, config.requestToolApproval, writeGuard, toolEvents, turnEnv) : undefined
       const skillTools = skillInfo?.skillFolderPath ? createSkillTools(skillInfo.skillFolderPath, toolEvents) : undefined
       if (!fsTools && !skillTools) return undefined
       return { ...fsTools, ...skillTools }

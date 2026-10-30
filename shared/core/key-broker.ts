@@ -354,6 +354,14 @@ export function clampBrokerTokenTtl(minutes: number): number {
   return Math.min(BROKER_TOKEN_TTL_MINUTES.max, Math.max(BROKER_TOKEN_TTL_MINUTES.min, Math.round(minutes)))
 }
 
+/**
+ * What the app puts where a service's key would go when the company has keys
+ * for that service but none this member may use for this work: the relay
+ * answers it with the plain-Japanese "this needs a key" message instead of an
+ * SDK's "missing API key". Not a secret.
+ */
+export const BROKER_NO_KEY_PLACEHOLDER = 'acb_tok_none'
+
 /** The shape of a token value (prefix + 64 hex characters). Anything else is refused before a lookup. */
 export function looksLikeBrokerToken(value: unknown): value is string {
   return typeof value === 'string' && /^acb_tok_[0-9a-f]{64}$/.test(value)

@@ -35,8 +35,9 @@ export function readSkillFile(filePath: string, reads: SkillReads = window.elect
   return reads.readFile(filePath)
 }
 
-export function startSkillTool(toolPath: string, startCommand?: string, runs: SkillToolRuns = window.electronAPI) {
-  return runs.startTool(toolPath, startCommand)
+/** Starts a skill's tool; with the company, it gets that company's API key broker variables (key-broker.md). */
+export function startSkillTool(toolPath: string, startCommand?: string, companyId?: string, runs: SkillToolRuns = window.electronAPI) {
+  return runs.startTool(toolPath, startCommand, companyId)
 }
 
 export function stopSkillTool(toolPath: string, runs: SkillToolRuns = window.electronAPI) {

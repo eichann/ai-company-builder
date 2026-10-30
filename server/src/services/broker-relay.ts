@@ -22,6 +22,7 @@
  * the order of the guards reads top to bottom.
  */
 import {
+  BROKER_NO_KEY_PLACEHOLDER,
   builtinBrokerService,
   looksLikeBrokerToken,
   normalizeBrokerModel,
@@ -136,8 +137,8 @@ function tokenRefusal(reason: BrokerTokenRefusal, info: BrokerServiceInfo | unde
   }
 }
 
-/** The one credential the client sent (header forms or `?key=`), or what is wrong with it. */
-function credentialOf(headers: Array<[string, string]>, query: URLSearchParams): { token: string } | { error: 'none' | 'real-key' } {
+/** Every credential value the client sent (header forms and `?key=`). */
+function credentialValues(headers: Array<[string, string]>, query: URLSearchParams): string[] {
   const values: string[] = []
   for (const [name, value] of headers) {
     if (!(CREDENTIAL_HEADERS as readonly string[]).includes(name)) continue
@@ -145,6 +146,12 @@ function credentialOf(headers: Array<[string, string]>, query: URLSearchParams):
     if (v.trim()) values.push(v.trim())
   }
   for (const v of query.getAll('key')) if (v.trim()) values.push(v.trim())
+  return values
+}
+
+/** The one credential the client sent (header forms or `?key=`), or what is wrong with it. */
+function credentialOf(headers: Array<[string, string]>, query: URLSearchParams): { token: string } | { error: 'none' | 'real-key' } {
+  const values = credentialValues(headers, query)
   if (values.length === 0) return { error: 'none' }
   // Anything that is not one of our tokens may be a real key: never forwarded.
   if (!values.every(looksLikeBrokerToken)) return { error: 'real-key' }
@@ -315,6 +322,11 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const query = new URLSearchParams(q < 0 ? '' : req.pathAndQuery.slice(q + 1))
 
       // 1. The token, before anything else (no token → 401, whatever the path).
+      const info0 = builtinBrokerService(req.service)
+      if (credentialValues(req.headers, query).includes(BROKER_NO_KEY_PLACEHOLDER)) {
+        // The app had no key for this member and service: say so in plain Japanese.
+        return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(info0, req.service))
+      }
       let credential = credentialOf(req.headers, query)
       if ('error' in credential && credential.error === 'none') {
         const token = uploadToken(req.service, rawPath, query)

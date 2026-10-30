@@ -182,8 +182,8 @@ const api: ElectronAPI = {
     invoke('skills:toggleNurturing', skillMdPath, makeNurturing),
 
   // Tools (Web apps in skills)
-  startTool: (toolPath: string, startCommand?: string) =>
-    invoke('tools:start', toolPath, startCommand),
+  startTool: (toolPath: string, startCommand?: string, companyId?: string) =>
+    invoke('tools:start', toolPath, startCommand, companyId),
   stopTool: (toolPath: string) =>
     invoke('tools:stop', toolPath),
   openExternal: (url: string) =>

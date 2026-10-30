@@ -21,6 +21,7 @@ import { createClaudeSteer, tapQuery } from './steering'
 import { AGENTS, claudeCliEffort, claudeCliModel, type AgentEffort } from '../../shared/agents/registry'
 import { turnToolEvents } from './tool-events'
 import { createDeniedCallWatcher, recordCanUseTool, recordPreToolUse, recordToolEnd, verdict, type ToolVerdict } from './claude-tool-events'
+import { withoutBrokerEnv } from '../../shared/broker-env'
 import { CLAUDE_SANDBOX_UNAVAILABLE_RE, SANDBOX_MESSAGES, claudeSandboxOptions, parseSandboxViolation, sandboxConcern, sandboxRefusalContext } from '../../shared/agents/sandbox-policy'
 
 type StreamPart = Awaited<ReturnType<ReturnType<typeof claudeCode>['doStream']>>['stream'] extends ReadableStream<infer P> ? P : never
@@ -147,7 +148,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -402,7 +403,12 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
           // CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: without it the CLI stops
           // suggesting once the plan is near its usage limit
           // (status `allowed_warning`), which heavy members hit most days.
-          env: onPromptSuggestion ? { ...config.getShellEnv(), CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : config.getShellEnv(),
+          // The key broker's variables for this consultation (turnEnv) replace any of the same names.
+          env: {
+            ...withoutBrokerEnv(config.getShellEnv()),
+            ...turnEnv,
+            ...(onPromptSuggestion ? { CLAUDE_CODE_ENABLE_PROMPT_SUGGESTION: 'true' } : {}),
+          },
           settingSources: ['user', 'project'],
           // With the app's web research, the CLI's own web tools are off for the
           // whole session, subagents included (a deny beats any allow, in every

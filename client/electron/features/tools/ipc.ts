@@ -27,6 +27,11 @@ export interface ToolsDeps {
   paths: PathGuard
   shellEnv: ShellEnvironment
   shell: Pick<DesktopShell, 'openExternal'>
+  /**
+   * The key broker's variables for a tool of this company (key-broker.md K6):
+   * a token for `tool:<path>` and the skill's department; {} when off.
+   */
+  brokerEnv?: (request: { companyId: string; conversationId: string; department: string | null }) => Promise<Record<string, string>>
 }
 
 export interface ToolsFeature {
@@ -34,11 +39,11 @@ export interface ToolsFeature {
   stopAll(): void
 }
 
-export function registerToolsIpc(ipc: IpcRegistrar, { paths, shellEnv, shell }: ToolsDeps): ToolsFeature {
+export function registerToolsIpc(ipc: IpcRegistrar, { paths, shellEnv, shell, brokerEnv }: ToolsDeps): ToolsFeature {
   const runningTools: Map<string, RunningTool> = new Map()
 
   // Start a tool (Web app)
-  ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev') => {
+  ipc.handle('tools:start', async (_, unsafeToolPath: string, startCommand: string = 'dev', companyId?: string) => {
     try {
       // A skill's tool folder (<…>/.claude/skills/<skill>/tools/<tool>) inside
       // a company, and one of the scripts the skills scan offers: this runs
@@ -129,7 +134,14 @@ export function registerToolsIpc(ipc: IpcRegistrar, { paths, shellEnv, shell }: 
       const logFd = fs.openSync(logPath, 'w')
       const npmArgs = ['run', startCommand, '--', '--port', port.toString()]
       // shellEnv.env() handles the Windows Path-key replacement; PORT rides along
-      const toolEnv = { ...shellEnv.env(), PORT: port.toString() }
+      // The key broker's token and relay URLs for this company's tool (they win over
+      // the shell's variables of the same names). A tool running past the token's
+      // lifetime (≤ 60 min) must be restarted to get a new one.
+      const department = rel.startsWith('.claude/') ? null : rel.split('/')[0]
+      const broker = typeof companyId === 'string' && companyId && brokerEnv
+        ? await brokerEnv({ companyId, conversationId: `tool:${rel}`, department }).catch(() => ({}))
+        : {}
+      const toolEnv = { ...shellEnv.env(), ...broker, PORT: port.toString() }
 
       console.log('[tools:start] About to spawn: npm', npmArgs.join(' '))
       let childProcess: ChildProcess
