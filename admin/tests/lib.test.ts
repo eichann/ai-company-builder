@@ -9,7 +9,9 @@ import { ruleAccessLabel } from '@/lib/permission-labels'
 import { safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
 import { members } from './fixtures'
-import { compareClientVersions, parseClientVersion } from '../../server/src/lib/client-version'
+// The server's parser and order (server/src/lib/client-version.ts re-exports
+// these; the admin image has no server/ to import from).
+import { compareClientVersions, parseClientVersion } from '../../shared/core/client-version'
 
 describe('dates', () => {
   it('reads SQLite datetime() values as UTC', () => {
