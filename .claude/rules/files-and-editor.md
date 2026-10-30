@@ -20,6 +20,10 @@ paths:
   - "client/src/shared/ipc/file-events.ts"
   - "client/src/features/files/**"
   - "client/src/features/editor/**"
+  - "client/src/app/WindowCloseGuard.tsx"
+  - "client/electron/services/close-guard.ts"
+  - "client/tests/close-guard.test.ts"
+  - "client/src/shared/lib/unsavedEdits.ts"
   - "client/src/features/workspace/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
@@ -37,10 +41,6 @@ paths:
   - "client/tests/file-names.test.ts"
   - "client/tests/keep-work-ui.*"
   - "client/tests/ui/keep-work.spec.ts"
-  - "client/src/app/WindowCloseGuard.tsx"
-  - "client/electron/services/close-guard.ts"
-  - "client/tests/close-guard.test.ts"
-  - "client/src/shared/lib/unsavedEdits.ts"
 ---
 
 # File watching, file tree, editor, search
