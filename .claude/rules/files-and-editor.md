@@ -7,7 +7,6 @@ paths:
   - "client/electron/git-search.ts"
   - "client/electron/local-file-protocol.ts"
   - "client/src/lib/fileEvents.ts"
-  - "client/src/lib/fileTreeModel.ts"
   - "client/src/lib/fileVersions.ts"
   - "client/src/lib/folderExists.ts"
   - "client/src/lib/line-diff.ts"
@@ -27,7 +26,6 @@ paths:
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
   - "client/tests/company-watcher.test.ts"
-  - "client/tests/file-tree-model.test.ts"
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
   - "client/tests/doc-review-ui.*"
@@ -59,7 +57,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 - Renderer: one subscription (`src/lib/fileEvents.ts` `subscribeFileChanges`, over
   `src/shared/ipc/file-events.ts` `FileChangeReads`); consumers filter by path prefix.
 
-## File tree (`src/lib/fileTreeModel.ts`, `components/skill-ui/FileTreePanel.tsx`)
+## File tree (`src/features/files/`: `fileTreeModel.ts`, `components/FileTreePanel.tsx`)
 
 - One model per shown folder in a module-level registry (switching back is instant), all fed by
   the watcher. First view reads two levels (`readDirectoryTree(…, 1)`); deeper folders load on
@@ -187,7 +185,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - The review diff (`src/lib/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder
-  test), `file-tree-model.test.ts`, `local-file-url.test.ts`, `line-diff.test.ts`; perf budgets in
+  test), `src/features/files/fileTreeModel.test.ts`, `local-file-url.test.ts`, `line-diff.test.ts`; perf budgets in
   `client/tests/perf/` (`testing.md`). Preview `download-folders-ui.html?view=filetree` exposes
   `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
 - The renderer reaches these through read-only ports: `src/features/search/api.ts`

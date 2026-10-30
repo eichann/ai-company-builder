@@ -127,7 +127,7 @@ test('department folder names: server, admin and the app accept exactly the same
       assert.equal(accepts(name), expected, `${copy}(${JSON.stringify(name)})`)
     }
   }
-  assertUsesCoreNames('client/src/components/skill-ui/NewFolderDialog.tsx', ['isValidFolderName'])
+  assertUsesCoreNames('client/src/features/files/components/NewFolderDialog.tsx', ['isValidFolderName'])
 })
 
 // ---------------------------------------------------------------------------

@@ -1,6 +1,6 @@
 // The file tree's own behaviour (tests/file-tree-ui.tsx): what a member's
 // clicks, keys, menus and drops do to the company folder. The model's refresh
-// rules are pinned by file-tree-model.test.ts; private-folder screens by
+// rules are pinned by fileTreeModel.test.ts; private-folder screens by
 // private-folders.spec.ts; not-downloaded folders by download-folders.spec.ts.
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'

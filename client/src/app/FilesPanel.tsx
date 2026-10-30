@@ -1,4 +1,4 @@
-import { FileTreePanel } from '../components/skill-ui/FileTreePanel'
+import { FileTreePanel } from '../features/files/components/FileTreePanel'
 import { TabbedEditorPanel } from '../components/skill-ui/TabbedEditorPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
 import { PANE_LIMITS, type SplitNode } from '../features/workspace/layoutTree'

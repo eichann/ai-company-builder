@@ -15,25 +15,25 @@ import {
   FolderSimpleDashed,
   LockSimple,
 } from '@phosphor-icons/react'
-import { ContextMenu, type ContextMenuItem } from '../common/ContextMenu'
-import { normalizePathSeparators } from '../../utils/path'
-import { isPathWithin } from '../../lib/editorTabs'
-import { InputDialog } from '../common/InputDialog'
-import { ConfirmDialog } from '../common/ConfirmDialog'
-import { FolderIcon } from '../../shared/ui/FileIcons'
-import { getFileIcon } from '../../shared/ui/fileIcon'
-import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
-import { detectReviewStatus, hasUnseenReviews, isReviewSidecarFile } from '../../features/doc-review/model'
-import { ReadOnlyBadge } from './ReadOnlyBadge'
-import { useWriteAccess } from '../../hooks/useWriteAccess'
-import { useSparseCheckout } from '../../hooks/useSparseCheckout'
-import { notDownloadedUserMessage, pathKey } from '../../../shared/sparse-paths'
+import { ContextMenu, type ContextMenuItem } from '../../../shared/ui/ContextMenu'
+import { normalizePathSeparators } from '../../../utils/path'
+import { isPathWithin } from '../../../lib/editorTabs'
+import { InputDialog } from '../../../shared/ui/InputDialog'
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
+import { FolderIcon } from '../../../shared/ui/FileIcons'
+import { getFileIcon } from '../../../shared/ui/fileIcon'
+import { isPerfCutEnabled, perfMark } from '../../../lib/perfDiagnostics'
+import { detectReviewStatus, hasUnseenReviews, isReviewSidecarFile } from '../../doc-review/model'
+import { ReadOnlyBadge } from '../../../shared/ui/ReadOnlyBadge'
+import { useWriteAccess } from '../../../hooks/useWriteAccess'
+import { useSparseCheckout } from '../../../hooks/useSparseCheckout'
+import { notDownloadedUserMessage, pathKey } from '../../../../shared/sparse-paths'
 import { NewFolderDialog } from './NewFolderDialog'
-import { createDirectory, createEmptyFile, deleteItem, getStats, moveFromExternal, moveItem, readDirectory, readDirectoryTree, renameItem, reservedPathRefusal, startDrag } from '../../features/files/api'
-import { usePrivateFolders } from '../../hooks/usePrivateFolders'
-import { useAppStore } from '../../stores/appStore'
-import { useAuthStore } from '../../stores/authStore'
-import { boundaryCrossing, crossingMessage, lastSegment, viewersLabel, type MyPrivateFolder } from '../../../shared/private-folder-ui'
+import { createDirectory, createEmptyFile, deleteItem, getStats, moveFromExternal, moveItem, readDirectory, readDirectoryTree, renameItem, reservedPathRefusal, startDrag } from '../api'
+import { usePrivateFolders } from '../hooks/usePrivateFolders'
+import { useAppStore } from '../../../stores/appStore'
+import { useAuthStore } from '../../../stores/authStore'
+import { boundaryCrossing, crossingMessage, lastSegment, viewersLabel, type MyPrivateFolder } from '../../../../shared/private-folder-ui'
 import {
   applyEventsToFileTreeModels,
   getFileTreeModel,
@@ -43,8 +43,8 @@ import {
   type FileEntry,
   type FileTreeIO,
   type RawDirEntry,
-} from '../../lib/fileTreeModel'
-import { subscribeFileChanges } from '../../lib/fileEvents'
+} from '../fileTreeModel'
+import { subscribeFileChanges } from '../../../lib/fileEvents'
 
 // Allowed file extensions for external drop
 const ALLOWED_DROP_EXTENSIONS = new Set([
@@ -308,7 +308,7 @@ export function FileTreePanel({
 
   const departmentPath = departmentFolder ? `${rootPath}/${departmentFolder}` : rootPath
 
-  // The tree's data lives in a model per folder (src/lib/fileTreeModel.ts):
+  // The tree's data lives in a model per folder (../fileTreeModel.ts):
   // cached across department switches, fed by the company's watcher, loaded
   // lazily (a folder is read when expanded; an event re-reads only its parent).
   installModelEvents()

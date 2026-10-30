@@ -1,6 +1,6 @@
 // The main screen (src/app/AppShell.tsx) with the preload API faked
 // (tests/skill-layout-ui.tsx). Pure parts are pinned elsewhere — file tree
-// planning and per-department caching (file-tree-model.test.ts), which file
+// planning and per-department caching (fileTreeModel.test.ts), which file
 // events rescan skills (skills-refresh.test.ts), write-access evaluation
 // (write-access.test.ts), search caps in main (git-search.test.ts). These
 // tests pin what the SkillCentricLayout split (R3) can break: what stays
@@ -25,7 +25,7 @@ test('switching departments keeps the file tree mounted with what was expanded o
   await leftTab(page, 'ファイル').click()
   const folder = page.getByRole('button', { name: '提案書', exact: true })
   await expect(folder).toBeVisible()
-  // First-level folders open on first view (file-tree-model.test.ts); their files are listed.
+  // First-level folders open on first view (fileTreeModel.test.ts); their files are listed.
   await expect(page.getByRole('button', { name: 'A社_提案.md' })).toBeVisible()
   // The member collapses one of them.
   await page.getByRole('button', { name: '顧客', exact: true }).click()
@@ -41,7 +41,7 @@ test('switching departments keeps the file tree mounted with what was expanded o
   await deptTab(page, '営業部').click()
   await expect(page.getByRole('button', { name: 'A社_提案.md' })).toBeVisible()
   // The 営業部 tree came back from the cache: no cold tree read, at most the
-  // cheap check of its root (file-tree-model.test.ts "catches up when shown again").
+  // cheap check of its root (fileTreeModel.test.ts "catches up when shown again").
   const under = (args: unknown[][]) => args.map(a => a[0] as string).filter(dir => dir.startsWith(`${ROOT}/営業部`))
   expect(under((await calls(page, 'readDirectoryTree')).slice(treeReadsBefore))).toEqual([])
   expect(under((await calls(page, 'readDirectory')).slice(readsBefore)).filter(dir => dir !== `${ROOT}/営業部`)).toEqual([])

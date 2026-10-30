@@ -8,7 +8,7 @@
 // Only people create private folders, here: the chat has no tool for it.
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, Globe, LockSimple, MagnifyingGlass, Plus, SpinnerGap, X } from '@phosphor-icons/react'
-import { Button, Callout } from '../settings/ui'
+import { Button, Callout } from '../../../components/settings/ui'
 import {
   NOT_ALLOWED_REASON,
   OFFLINE_REASON,
@@ -21,12 +21,12 @@ import {
   type MyPrivateFolder,
   type PrivateFolderCreateContext,
   type PrivateFolderMemberOption,
-} from '../../../shared/private-folder-ui'
-import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../shared/private-folder-help'
+} from '../../../../shared/private-folder-ui'
+import { MANAGERS_MAY_CHANGE_VIEWERS } from '../../../../shared/private-folder-help'
 import { PrivateFolderHelpLink, PrivateFolderHelpPanel } from './PrivateFolderHelp'
 // The server's department folder-name rule (private folder names follow it too).
-import { isValidFolderName } from '../../../../shared/core/names'
-import { createPrivateFolder, getPrivateFolderCreateContext } from '../../features/files/api'
+import { isValidFolderName } from '../../../../../shared/core/names'
+import { createPrivateFolder, getPrivateFolderCreateContext } from '../api'
 
 export interface NewFolderDialogProps {
   isOpen: boolean
