@@ -179,6 +179,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   `web_search: 'disabled'` in the thread config. A separate reader (the member's agent on its
   strong chat model, web tools only, no settings, empty temp folder) reads the web and digs into
   linked pages.
+- 「AI の囲い」 (`agent-sandbox.md`): under the company's `enforce`, the chat passes the SDK
+  `sandbox` option (strictAllowlist, no unsandboxed commands, denied places, the company's
+  hosts) and `Read(...)` denies in the same flag settings; registry `capabilities.sandbox`.
 
 ## Choice prompts (the AI asks, the member picks)
 

@@ -192,7 +192,8 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     handoff: true,
     oneShotText: true,
     webReader: true,
-    sandbox: false,
+    // macOS / Linux (sandboxPlatform): Claude Code's own sandbox via the SDK `sandbox` option.
+    sandbox: true,
     commitMessageFallback: true,
     privateFolderCommitMessages: false,
     liveModelCatalog: false,
