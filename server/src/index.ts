@@ -23,6 +23,7 @@ import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './lib/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
+import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
 import { redactBrokerQuery } from './lib/log-redaction'
@@ -174,6 +175,7 @@ app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
+app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)

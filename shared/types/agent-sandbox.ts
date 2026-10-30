@@ -4,6 +4,7 @@
  * (validation, defaults) are in shared/core/agent-sandbox.ts.
  */
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
+import type { AgentStopPolicy } from './agent-stop'
 
 /** A member whose mode differs from the company's (rollout: owner's PC → a department → everyone). */
 export interface AgentSandboxOverride {
@@ -46,10 +47,15 @@ export interface AgentSandboxPolicy extends AgentSandboxSettings {
 
 /**
  * GET …/me/agent-policy (any member): what the app's AI must follow. `version`
- * (also the ETag) changes whenever the answer changes. The emergency stop
- * (monitoring M2) adds its part here.
+ * (also the ETag) changes whenever the answer changes; the push channel
+ * (`/me/events`) announces new versions.
  */
 export interface AgentPolicy {
   version: string
   sandbox: AgentSandboxPolicy
+  /**
+   * The emergency stop (monitoring M2, agent-stop.ts). Absent from an older
+   * server: the app then stops nothing.
+   */
+  stop?: AgentStopPolicy
 }

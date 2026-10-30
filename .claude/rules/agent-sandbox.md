@@ -97,8 +97,9 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   /agent-sandbox/overrides/:userId { mode | null }` (owner/admin; the user must be a member;
   null = follow the company), `GET /me/agent-policy` (any member) → `{ version, sandbox: {
   ...setting, mode: their override or the company's, source: 'member' | 'company' } }`, ETag =
-  version, `If-None-Match` → 304. This is the endpoint M2 (emergency stop) extends — one policy
-  fetch for the app, not one per feature. Overrides of people who left are not shown and do
+  version, `If-None-Match` → 304. The emergency stop (M2) adds `stop` to the same answer and
+  version (`services/agent-policy.ts`, `agent-stop.md`) — one policy fetch for the app, not one
+  per feature; a sandbox change is announced on the push channel (`/me/events`). Overrides of people who left are not shown and do
   not apply (nobody else asks for their policy).
 - Admin 「AI の囲い」 (`admin/src/app/companies/[id]/agent-sandbox/page.tsx`, nav entry for
   owner/admin): company mode (使わない / 記録だけ / 囲う), what a PC that cannot start the sandbox

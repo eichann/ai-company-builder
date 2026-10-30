@@ -19,6 +19,7 @@ import { sqliteClientActivityRepository } from './adapters/sqlite/client-activit
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
 import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
+import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
@@ -41,6 +42,9 @@ import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createAgentStopService } from './services/agent-stops'
+import { createAgentPolicyService } from './services/agent-policy'
+import { createPushChannel } from './services/push-channel'
 import { createBrokerVault } from './services/broker-vault'
 import { createKeyBrokerService } from './services/key-broker'
 import { createBrokerTokenService } from './services/broker-tokens'
@@ -82,6 +86,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     agentSandbox: sqliteAgentSandboxRepository(conn),
+    agentStops: sqliteAgentStopRepository(conn),
     brokerKeys: sqliteKeyBrokerRepository(conn),
     brokerTokens: sqliteBrokerTokenRepository(conn),
     orphanedScopes: gitOrphanedScopeReader(),
@@ -98,6 +103,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
   const keyBroker = createKeyBrokerService({ ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()) })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
+  // The emergency stop (M2) and the push channel that announces policy changes.
+  const push = createPushChannel()
+  const agentSandbox = createAgentSandboxService({ ...repos, ...shared })
+  const agentStops = createAgentStopService({
+    ...repos, ...shared,
+    brokerEnabled: () => brokerVault.status().enabled,
+    onChange: companyId => agentPolicy.announce(companyId),
+  })
+  const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
   })
@@ -116,7 +130,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
     agentEvents,
-    agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
+    agentSandbox,
+    agentStops,
+    agentPolicy,
+    push,
     brokerVault,
     keyBroker,
     brokerTokens,
@@ -131,6 +148,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       nowMs: () => shared.clock.nowMs(),
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
+      companyStopped: agentStops.companyStopped,
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     companyFiles: companyFileViews(conn),
