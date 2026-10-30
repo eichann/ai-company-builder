@@ -267,11 +267,39 @@ export function initDatabase(conn: Database.Database = sqlite) {
       after TEXT NOT NULL
     );
 
+    -- The AI sandbox setting per company (「AI の囲い」; defaults apply while no row exists).
+    CREATE TABLE IF NOT EXISTS agent_sandbox_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      settings TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
+    -- A member whose sandbox mode differs from the company's (staged rollout).
+    CREATE TABLE IF NOT EXISTS agent_sandbox_overrides (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      mode TEXT NOT NULL CHECK (mode IN ('off', 'observe', 'enforce')),
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id)
+    );
+
+    -- Every change of the setting or an override: who, when, what (JSON).
+    CREATE TABLE IF NOT EXISTS agent_sandbox_history (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      changed_at TEXT NOT NULL,
+      changed_by TEXT NOT NULL,
+      change TEXT NOT NULL
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_event_settings_history_company ON agent_event_settings_history(company_id, changed_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_sandbox_history_company ON agent_sandbox_history(company_id, changed_at);
     CREATE INDEX IF NOT EXISTS idx_scope_repos_company_id ON scope_repos(company_id);
     CREATE INDEX IF NOT EXISTS idx_scopes_department_id ON scopes(department_id);
     CREATE INDEX IF NOT EXISTS idx_scope_rules_scope_id ON scope_rules(scope_id);

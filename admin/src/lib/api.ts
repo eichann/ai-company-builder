@@ -604,6 +604,29 @@ export const agentEventsApi = {
 }
 
 // ---------------------------------------------------------------------------
+// AI sandbox (「AI の囲い」): shapes from shared/types/agent-sandbox.ts
+// ---------------------------------------------------------------------------
+
+export type {
+  AgentSandboxChange,
+  AgentSandboxOverride,
+  AgentSandboxView,
+} from '../../../shared/types/agent-sandbox'
+export type { AgentSandboxMode, AgentSandboxSettings, AgentSandboxUnavailable } from '../../../shared/core/agent-sandbox'
+
+import type { AgentSandboxView } from '../../../shared/types/agent-sandbox'
+import type { AgentSandboxMode, AgentSandboxSettings } from '../../../shared/core/agent-sandbox'
+
+export const agentSandboxApi = {
+  get: (companyId: string) => getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox`),
+  update: (companyId: string, settings: AgentSandboxSettings) =>
+    getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox`, { method: 'PUT', body: settings }),
+  /** A member's own mode (staged rollout); null = follow the company again. */
+  setOverride: (companyId: string, userId: string, mode: AgentSandboxMode | null) =>
+    getData<AgentSandboxView>(`/api/companies/${enc(companyId)}/agent-sandbox/overrides/${enc(userId)}`, { method: 'PUT', body: { mode } }),
+}
+
+// ---------------------------------------------------------------------------
 // Invitations
 // ---------------------------------------------------------------------------
 

@@ -18,6 +18,7 @@ import { sqlitePrivateFolderRepository } from './adapters/sqlite/private-folders
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
+import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
 import { betterAuthAccountDirectory } from './adapters/accounts'
@@ -32,6 +33,7 @@ import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
 import { createAgentEventService } from './services/agent-events'
+import { createAgentSandboxService } from './services/agent-sandbox'
 
 export function createServices(conn: Database.Database) {
   const repos = {
@@ -45,6 +47,7 @@ export function createServices(conn: Database.Database) {
     pushRejections: sqlitePushRejectionRepository(),
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
+    agentSandbox: sqliteAgentSandboxRepository(conn),
     orphanedScopes: gitOrphanedScopeReader(),
   }
   const shared = {
@@ -71,6 +74,7 @@ export function createServices(conn: Database.Database) {
     }),
     privateFolders: createPrivateFolderService({ ...repos, ...shared, repoStore, companyLock: processCompanyLock }),
     agentEvents: createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) }),
+    agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
     companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,

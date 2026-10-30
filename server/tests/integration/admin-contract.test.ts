@@ -72,6 +72,7 @@ const TYPES: Record<string, string> = {
   AgentEventSettings: 'AgentEventSettings',
   AgentEventRetentionPreview: 'AgentEventRetentionPreview',
   AgentEventViewers: 'AgentEventViewers',
+  AgentSandbox: 'AgentSandboxView',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -192,6 +193,7 @@ beforeAll(async () => {
   const { privateFoldersRoute } = await import('../../src/routes/private-folders')
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
+  const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
   // The same mounts as src/index.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
@@ -201,6 +203,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', permissionRulesRoute)
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
+  app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -299,6 +302,12 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('AgentEventSettings', USERS.owner, 'PUT', `${base}/agent-events/settings`, { retentionDays: 90, viewers: 'admins-and-managers' })
     await expectShape('AgentEventRetentionPreview', USERS.owner, 'GET', `${base}/agent-events/settings/retention-preview?days=30`)
     await expectShape('AgentEventViewers', USERS.owner, 'GET', `${base}/agent-events/viewers?mode=admins-and-managers`)
+  })
+
+  it('AI sandbox (「AI の囲い」)', async () => {
+    await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
+    await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
+    await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
   })
 
   it('invitations', async () => {

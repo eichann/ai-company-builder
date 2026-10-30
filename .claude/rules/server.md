@@ -79,6 +79,9 @@ GET  /api/config                                  setup state (no auth)
                               GET|PUT /agent-events/settings (+ /retention-preview),
                               GET /agent-events/viewers                       agent-events.ts
                                                                 (AI action log: agent-events.md)
+                              GET|PUT /agent-sandbox, PUT /agent-sandbox/overrides/:userId,
+                              GET /me/agent-policy                            agent-sandbox.ts
+                                                                (「AI の囲い」: agent-sandbox.md)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts
