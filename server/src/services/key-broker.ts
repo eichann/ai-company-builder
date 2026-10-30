@@ -73,6 +73,8 @@ export interface KeyBrokerDeps {
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
+  /** The caps' day now (YYYY-MM-DD); default the UTC day. */
+  brokerDay?: () => string
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -136,6 +138,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
 
   function view(companyId: string): BrokerView {
     const rows = brokerKeys.list(companyId)
+    const usage = brokerKeys.usageByKey(companyId, deps.brokerDay ? deps.brokerDay() : clock.now().slice(0, 10))
     const members = memberships.listByCompany(companyId)
     const history = brokerKeys.history(companyId, HISTORY_LIMIT)
     const people = accounts.byIds([...new Set([
@@ -175,6 +178,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         updatedBy: row.updatedBy,
         secretUpdatedAt: row.secretUpdatedAt,
         usableBy,
+        usageToday: usage.get(row.id) ?? { requests: 0, tokens: 0 },
       }
     })
 
@@ -374,6 +378,24 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         const at = clock.now()
         brokerKeys.update(member.companyId, keyId, changes, at, member.userId, changeRow(member, at, keyId, {
           action: 'update', service: row.service, displayName: after.displayName, before: b, after: a,
+        }))
+      }
+      return ok(view(member.companyId))
+    },
+
+    /**
+     * POST …/broker/stop-all — the emergency stop's 「鍵」 unit for everything:
+     * every active key (company and own) is disabled at once (the relay re-decides
+     * on every call, so a running AI gets 「管理者が…止めています」 at its next call). Each key's
+     * stop is in the history; resuming is per key.
+     */
+    stopAll(member: Member): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const at = clock.now()
+      for (const row of brokerKeys.list(member.companyId).filter(r => r.status === 'active')) {
+        brokerKeys.update(member.companyId, row.id, { status: 'disabled' }, at, member.userId, changeRow(member, at, row.id, {
+          action: 'update', service: row.service, displayName: row.displayName, before: { status: 'active' }, after: { status: 'disabled' },
         }))
       }
       return ok(view(member.companyId))

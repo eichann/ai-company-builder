@@ -17,11 +17,19 @@ import { normalizeRepoPath } from '../core/paths'
 
 export const AGENT_EVENT_VERSION = 1
 
-export const AGENT_KINDS = ['claude-code', 'codex', 'api-key'] as const
-/** The agent that made the call (the app's AuthMode). */
+export const AGENT_KINDS = ['claude-code', 'codex', 'api-key', 'script'] as const
+/**
+ * The agent that made the call (the app's AuthMode), or `script`: a program
+ * that called an API through the key broker's relay (recorded by the server).
+ */
 export type AgentKind = typeof AGENT_KINDS[number]
 
-export const TOOL_CATEGORIES = ['read', 'write', 'command', 'web', 'mcp-external', 'app-tool', 'subagent', 'question', 'other'] as const
+export const TOOL_CATEGORIES = ['read', 'write', 'command', 'web', 'mcp-external', 'app-tool', 'subagent', 'question', 'other', 'broker'] as const
+/**
+ * Recorded by the server only (the key broker's relay, K5): the app may not
+ * send these — an event claiming them is rejected.
+ */
+export const SERVER_ONLY_CATEGORIES: readonly ToolCategory[] = ['broker']
 export type ToolCategory = typeof TOOL_CATEGORIES[number]
 
 /**
@@ -51,6 +59,9 @@ export const GUARD_REASONS = [
   'denied-read',
   // The agent's sandbox blocked a command (a host outside the company's list, a denied place).
   'sandbox',
+  // The key broker's relay refused a call (K5): no key the member may use for this work, a
+  // destination (path / model) the key does not allow, an internal address, a daily cap.
+  'key-not-available', 'destination-not-allowed', 'internal-address', 'over-cap',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 
@@ -86,6 +97,15 @@ export type ToolTarget =
   | { kind: 'web'; host?: string }
   | { kind: 'mcp'; server: string; tool?: string }
   | { kind: 'subagent'; subagentType?: string }
+  /**
+   * One call through the key broker's relay (server-recorded): the service, the destination
+   * host and path (no query), the model, the provider's status, sizes and tokens — never a body,
+   * a header or a key. `source`: the company's key or the member's own.
+   */
+  | {
+    kind: 'broker'; service: string; host?: string; path?: string; model?: string; status?: number
+    bytesIn?: number; bytesOut?: number; tokensIn?: number; tokensOut?: number; source?: 'company' | 'user'
+  }
   | { kind: 'none' }
 
 /** One tool call, as the app sends it (POST …/agent-events). */
@@ -245,6 +265,26 @@ export function parseToolTarget(raw: unknown): ToolTarget | null {
       const subagentType = text(v.subagentType, 40, NAME_RE)
       return subagentType ? { kind: 'subagent', subagentType } : { kind: 'subagent' }
     }
+    case 'broker': {
+      const service = text(v.service, 40, NAME_RE)
+      if (!service) return null
+      const host = typeof v.host === 'string' ? text(v.host.toLowerCase(), 255, HOST_RE) : undefined
+      const path = text(v.path, 200)
+      const model = text(v.model, 100)
+      const n = (x: unknown) => count(x, Number.MAX_SAFE_INTEGER)
+      const status = count(v.status, 999)
+      const source = v.source === 'company' || v.source === 'user' ? v.source : undefined
+      return {
+        kind: 'broker', service,
+        ...(host ? { host } : {}), ...(path ? { path } : {}), ...(model ? { model } : {}),
+        ...(status !== undefined ? { status } : {}),
+        ...(n(v.bytesIn) !== undefined ? { bytesIn: n(v.bytesIn) } : {}),
+        ...(n(v.bytesOut) !== undefined ? { bytesOut: n(v.bytesOut) } : {}),
+        ...(n(v.tokensIn) !== undefined ? { tokensIn: n(v.tokensIn) } : {}),
+        ...(n(v.tokensOut) !== undefined ? { tokensOut: n(v.tokensOut) } : {}),
+        ...(source ? { source } : {}),
+      }
+    }
     case 'none':
       return { kind: 'none' }
     default:
@@ -269,6 +309,8 @@ export function parseAgentToolEvent(raw: unknown): AgentToolEvent | null {
   const target = parseToolTarget(v.target)
   if (!id || !callId || !at || !tool || !target) return null
   if (!has(AGENT_KINDS, v.agent) || !has(TOOL_CATEGORIES, v.category) || !has(TOOL_DECISIONS, v.decision)) return null
+  // What only the server records (the relay's calls) cannot come from the app.
+  if (SERVER_ONLY_CATEGORIES.includes(v.category) || v.agent === 'script' || target.kind === 'broker') return null
 
   const durationMs = count(v.durationMs, MAX_DURATION_MS)
   const conversationId = text(v.conversationId, 100)

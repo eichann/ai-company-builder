@@ -92,6 +92,11 @@ events through it), the read shapes and the limits. The admin re-exports the rea
   blocked) and `skill`; command targets optional `hosts`; guard reasons `denied-read` and
   `sandbox`.
 
+- **Server-recorded events** (`recordServerEvent`): the key broker's relay files one event per
+  API call (category `broker`, agent `script`, target kind `broker`; `key-broker.md` K5). Same
+  table and readers; `parseAgentToolEvent` refuses these values from apps (`SERVER_ONLY_CATEGORIES`).
+  Guard reasons `key-not-available`, `destination-not-allowed`, `internal-address`, `over-cap`.
+
 ## Who reads what
 
 - Owner/admin: everything. Members: 403. A department manager: only while `viewers` is

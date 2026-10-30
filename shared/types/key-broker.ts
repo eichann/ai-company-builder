@@ -49,6 +49,8 @@ export interface BrokerKeySummary {
   secretUpdatedAt: string
   /** Who can use it now (active members; for a disabled key, who could). */
   usableBy: BrokerKeyUser[]
+  /** The relay's use of this key today (the caps' day): calls forwarded and tokens counted. */
+  usageToday: { requests: number; tokens: number }
 }
 
 export interface BrokerServiceView {
@@ -145,7 +147,7 @@ export interface BrokerKeyCreate {
 // ---------------------------------------------------------------------------
 
 /** Why a requested service is not in the token. */
-export type BrokerUnavailableReason = 'no-key' | 'unknown-service'
+export type BrokerUnavailableReason = 'no-key' | 'unknown-service' | 'stopped'
 
 /** POST …/me/broker-tokens */
 export interface BrokerTokenRequest {

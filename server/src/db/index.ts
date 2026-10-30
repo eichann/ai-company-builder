@@ -338,6 +338,19 @@ export function initDatabase(conn: Database.Database = sqlite) {
     );
 
     -- Whether members may register their own keys (default on while no row exists).
+    -- The relay's daily use per key and member (K5 caps): requests counted
+    -- when forwarded, tokens when the answer ends. day = YYYY-MM-DD in the
+    -- broker's day (BROKER_DAY_UTC_OFFSET_MINUTES, default Japan).
+    CREATE TABLE IF NOT EXISTS broker_usage (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      key_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      day TEXT NOT NULL,
+      requests INTEGER NOT NULL DEFAULT 0,
+      tokens INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (company_id, key_id, user_id, day)
+    );
+
     CREATE TABLE IF NOT EXISTS broker_settings (
       company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
       member_keys_allowed INTEGER NOT NULL,

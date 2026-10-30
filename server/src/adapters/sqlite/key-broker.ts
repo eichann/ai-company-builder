@@ -149,6 +149,29 @@ export function sqliteKeyBrokerRepository(conn: Database.Database): BrokerKeyRep
         addHistory(companyId, change)
       })()
     },
+    usage(companyId, keyId, userId, day) {
+      const r = conn.prepare(`
+        SELECT COALESCE(SUM(requests), 0) AS requests, COALESCE(SUM(tokens), 0) AS tokens,
+          COALESCE(SUM(CASE WHEN user_id = ? THEN requests ELSE 0 END), 0) AS member_requests,
+          COALESCE(SUM(CASE WHEN user_id = ? THEN tokens ELSE 0 END), 0) AS member_tokens
+        FROM broker_usage WHERE company_id = ? AND key_id = ? AND day = ?
+      `).get(userId, userId, companyId, keyId, day) as { requests: number; tokens: number; member_requests: number; member_tokens: number }
+      return { requests: r.requests, tokens: r.tokens, memberRequests: r.member_requests, memberTokens: r.member_tokens }
+    },
+    usageByKey(companyId, day) {
+      const rows = conn.prepare('SELECT key_id, SUM(requests) AS requests, SUM(tokens) AS tokens FROM broker_usage WHERE company_id = ? AND day = ? GROUP BY key_id')
+        .all(companyId, day) as Array<{ key_id: string; requests: number; tokens: number }>
+      return new Map(rows.map(r => [r.key_id, { requests: r.requests, tokens: r.tokens }]))
+    },
+    addUsage(companyId, keyId, userId, day, requests, tokens) {
+      conn.prepare(`
+        INSERT INTO broker_usage (company_id, key_id, user_id, day, requests, tokens) VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_id, key_id, user_id, day) DO UPDATE SET requests = requests + excluded.requests, tokens = tokens + excluded.tokens
+      `).run(companyId, keyId, userId, day, requests, tokens)
+    },
+    pruneUsage(beforeDay) {
+      return conn.prepare('DELETE FROM broker_usage WHERE day < ?').run(beforeDay).changes
+    },
     history(companyId, limit) {
       return (conn.prepare(`
         SELECT id, key_id, action, changed_at, changed_by, change FROM broker_history
