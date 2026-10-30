@@ -109,7 +109,6 @@ export function SyncPreviewDialog({
   isOpen,
   onClose,
   changes,
-  totalCount: _totalCount,
   summary,
   isLoadingSummary,
   onRequestSummary,

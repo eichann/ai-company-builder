@@ -1,6 +1,6 @@
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { MagnifyingGlass, X, CircleNotch } from '@phosphor-icons/react'
-import { getFileIcon } from './FileIcons'
+import { getFileIcon } from '../../shared/ui/fileIcon'
 import { CodeEditor } from './CodeEditor'
 import { readSearchHit, searchFileContents } from '../../features/search/api'
 
