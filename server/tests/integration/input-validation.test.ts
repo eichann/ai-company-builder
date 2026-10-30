@@ -5,6 +5,7 @@
  * before processing them.
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { execFileSync } from 'child_process'
 
 const TEST_USER = {
   id: 'user-owner-input',
@@ -37,6 +38,8 @@ import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { departmentsRoute } from '../../src/routes/departments'
 import { invitationsRoute } from '../../src/routes/invitations'
+import { localRepoStore } from '../../src/adapters/git-repo-store'
+import { companyRepoPath } from '../../src/lib/config'
 
 const app = new Hono()
 app.route('/api/companies', companiesRoute)
@@ -52,7 +55,15 @@ function jsonReq(method: string, path: string, body?: unknown) {
   return app.request(path, init)
 }
 
-beforeAll(() => {
+/** The shared branch's commit and root entries: "unchanged" means this is equal. */
+const mainState = () => {
+  const repo = companyRepoPath(TEST_COMPANY_ID)
+  const commit = execFileSync('git', ['-C', repo, 'rev-parse', 'main']).toString().trim()
+  const root = execFileSync('git', ['-C', repo, 'ls-tree', '--name-only', 'main']).toString()
+  return `${commit}\n${root}`
+}
+
+beforeAll(async () => {
   initDatabase()
 
   const timestamp = new Date().toISOString()
@@ -67,7 +78,16 @@ beforeAll(() => {
     INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at)
     VALUES (?, ?, ?, 'owner', ?, ?)
   `).run('m-owner', TEST_USER.id, TEST_COMPANY_ID, timestamp, timestamp)
-})
+
+  // A real company repository with one department folder, so a request that
+  // got past the name check would reach git (and answer something else than 400).
+  const store = localRepoStore()
+  await store.seedCompanyRepo(TEST_COMPANY_ID, await store.createCompanyRepo(TEST_COMPANY_ID), ['rename-test'])
+  db.prepare(`
+    INSERT INTO departments (id, company_id, name, folder, sort_order, is_active, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0, 1, ?, ?)
+  `).run('dept-rename-test', TEST_COMPANY_ID, 'Rename Test', 'rename-test', timestamp, timestamp)
+}, 120_000)
 
 describe('Input validation (400) — malformed inputs', () => {
   // --- Company creation ---
@@ -107,39 +127,11 @@ describe('Input validation (400) — malformed inputs', () => {
       expect(res.status).toBe(400)
     })
 
-    it('folder with path traversal "../" → 400', async () => {
+    it('folder with path traversal "../" → 400, the shared branch unchanged', async () => {
+      const before = mainState()
       const res = await jsonReq('POST', base, { name: 'Evil', folder: '../etc' })
       expect(res.status).toBe(400)
-    })
-
-    it('folder starting with dot → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Hidden', folder: '.hidden' })
-      expect(res.status).toBe(400)
-    })
-
-    it('folder with slash → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Nested', folder: 'a/b' })
-      expect(res.status).toBe(400)
-    })
-
-    it('folder with shell metacharacters → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Cmd', folder: 'test;rm -rf' })
-      expect(res.status).toBe(400)
-    })
-
-    it('folder with backticks → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Inject', folder: '`whoami`' })
-      expect(res.status).toBe(400)
-    })
-
-    it('folder with $() → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Inject', folder: '$(id)' })
-      expect(res.status).toBe(400)
-    })
-
-    it('folder starting with hyphen → 400', async () => {
-      const res = await jsonReq('POST', base, { name: 'Dash', folder: '-rf' })
-      expect(res.status).toBe(400)
+      expect(mainState()).toBe(before)
     })
   })
 
@@ -147,20 +139,17 @@ describe('Input validation (400) — malformed inputs', () => {
   describe('PUT /api/companies/:id/departments/:id', () => {
     const base = `/api/companies/${TEST_COMPANY_ID}/departments`
 
-    it('new folder with path traversal → rejected (400 or 500)', async () => {
-      // Note: In the PUT handler, getWorkingDir() runs before isValidFolderName().
-      // In test env (no git repo), getWorkingDir throws → 500.
-      // In production (with git repo), isValidFolderName correctly returns 400.
-      // Either way, the traversal attempt never reaches the filesystem.
-      const timestamp = new Date().toISOString()
-      db.prepare(`
-        INSERT OR IGNORE INTO departments (id, company_id, name, folder, sort_order, is_active, created_at, updated_at)
-        VALUES (?, ?, ?, ?, 0, 1, ?, ?)
-      `).run('dept-rename-test', TEST_COMPANY_ID, 'Rename Test', 'rename-test', timestamp, timestamp)
-
-      const res = await jsonReq('PUT', `${base}/dept-rename-test`, { folder: '../etc' })
-      // Must NOT succeed (200/201)
-      expect(res.status).toBeGreaterThanOrEqual(400)
+    // The rename's own name check (services/departments.ts update): the
+    // characters themselves are covered by the name rule's tests; this pins
+    // that the endpoint refuses before touching the repository.
+    it('renaming to an invalid folder name → exactly 400, the shared branch and the department unchanged', async () => {
+      const before = mainState()
+      for (const folder of ['../etc', 'a/b', '.hidden', '-rf', 'x;rm -rf ~']) {
+        const res = await jsonReq('PUT', `${base}/dept-rename-test`, { folder })
+        expect(res.status, folder).toBe(400)
+      }
+      expect(mainState()).toBe(before)
+      expect((db.prepare('SELECT folder FROM departments WHERE id = ?').get('dept-rename-test') as { folder: string }).folder).toBe('rename-test')
     })
   })
 
@@ -190,7 +179,4 @@ describe('Input validation (400) — malformed inputs', () => {
       expect(res.status).toBe(400)
     })
   })
-
-  // Note: git repo creation (POST /api/git/repos) validates companyId
-  // via sanitization regex. This is covered by the static path-traversal tests.
 })
