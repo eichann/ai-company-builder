@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { newChatTab, persistedChatTabs, restoreChatTabs, safeReadChatTabs, safeWriteChatTabs, type ChatTab } from '../chatTabsStorage'
+import { onChatHistoryChanged } from '../../../features/chat/api'
 
 /**
  * The open chat tabs of a company: restored from localStorage, remembered on
@@ -43,7 +44,7 @@ export function useChatTabs(companyId: string | undefined, newChatTitle: string)
 
   useEffect(() => {
     if (!companyId) return
-    return window.electronAPI.onChatHistoryChanged(({ companyId: changedCompanyId, deletedSessionId }) => {
+    return onChatHistoryChanged(({ companyId: changedCompanyId, deletedSessionId }) => {
       if (changedCompanyId !== companyId || !deletedSessionId) return
       const remaining = tabsRef.current.filter(tab => tab.sessionId !== deletedSessionId)
       if (remaining.length === tabsRef.current.length) return

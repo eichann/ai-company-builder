@@ -3,6 +3,7 @@ import type { UIMessage } from 'ai'
 import type { AgentSession, AuthMode } from '../../../../shared/agent'
 import type { ChatServerClient } from '../chatServerClient'
 import { uiMessageToSessionMessage } from '../chatSessionMessages'
+import { patchChatSession, recordHandoffTurn } from '../../../features/chat/api'
 
 /** Saves the conversation: `override` = these messages instead of the current ones; `sync` = flush now (unload, tab switch, before sending). */
 export type SaveConversation = (override?: UIMessage[], sync?: boolean, clearDraft?: boolean) => Promise<boolean>
@@ -78,7 +79,7 @@ export function completeHandoffTurn(
   void (async () => {
     if (conversation.appSessionIdRef.current !== receipt.sessionId || companyIdRef.current !== receipt.companyId) return
     if (!await conversation.saveRef.current(turn.finishedMessages)) return
-    await window.electronAPI.completeHandoffTurn(receipt.companyId, receipt.sessionId, { messageId: turn.message.id, content, provider: receipt.provider })
+    await recordHandoffTurn(receipt.companyId, receipt.sessionId, { messageId: turn.message.id, content, provider: receipt.provider })
   })().catch(() => { conversation.setHistoryError('履歴は保存されましたが、引き継ぎメモの更新予約ができませんでした。') })
 }
 
@@ -94,11 +95,11 @@ export function persistAgentSession(
     .then(data => {
       if (data.agentSession) {
         if (conversation.appSessionIdRef.current === finishedSessionId) conversation.agentSessionRef.current = data.agentSession
-        void window.electronAPI.patchChatSession(companyId, finishedSessionId, { agentSession: data.agentSession }).catch(() => {})
+        void patchChatSession(companyId, finishedSessionId, { agentSession: data.agentSession }).catch(() => {})
       }
       if (data.claudeSessionId) {
         if (conversation.appSessionIdRef.current === finishedSessionId) conversation.claudeSessionIdRef.current = data.claudeSessionId
-        void window.electronAPI.patchChatSession(companyId, finishedSessionId, { claudeSessionId: data.claudeSessionId }).catch(() => {})
+        void patchChatSession(companyId, finishedSessionId, { claudeSessionId: data.claudeSessionId }).catch(() => {})
       }
     })
     .catch(() => {})

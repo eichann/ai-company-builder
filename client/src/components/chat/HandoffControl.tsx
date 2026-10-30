@@ -3,6 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react'
 import { Note, X } from '@phosphor-icons/react'
 import type { HandoffView } from '../../../shared/handoff'
 import { agentShortLabel } from '../../../shared/agents/registry'
+import { getHandoff, onHandoffChanged, updateHandoff } from '../../features/chat/api'
 
 export function HandoffControl({ companyId, sessionId, active = true }: { companyId: string; sessionId: string; active?: boolean }) {
   const [view, setView] = useState<HandoffView | null>(null)
@@ -13,15 +14,15 @@ export function HandoffControl({ companyId, sessionId, active = true }: { compan
   useEffect(() => {
     let alive = true
     setView(null); setError(''); dialog.current?.close()
-    const refresh = () => void window.electronAPI.getHandoff(companyId, sessionId).then(value => { if (alive) { setView(value); setError('') } }).catch(() => { if (alive) setError('引き継ぎメモを読み込めませんでした。履歴は保持されています。') })
+    const refresh = () => void getHandoff(companyId, sessionId).then(value => { if (alive) { setView(value); setError('') } }).catch(() => { if (alive) setError('引き継ぎメモを読み込めませんでした。履歴は保持されています。') })
     refreshRef.current = refresh
     refresh()
-    const off = window.electronAPI.onHandoffChanged(scope => { if (scope.companyId === companyId && scope.sessionId === sessionId) refresh() })
+    const off = onHandoffChanged(scope => { if (scope.companyId === companyId && scope.sessionId === sessionId) refresh() })
     return () => { alive = false; off() }
   }, [companyId, sessionId])
   useEffect(() => { if (!active) dialog.current?.close() }, [active])
   async function update() {
-    try { await window.electronAPI.updateHandoff(companyId, sessionId); setError('') }
+    try { await updateHandoff(companyId, sessionId); setError('') }
     catch (e) { setError(e instanceof Error ? e.message : '更新を開始できませんでした') }
   }
   const label = view?.status === 'running' ? '整理中…' : view?.status === 'queued' ? '更新待ち' : view?.status === 'error' || error ? '更新を確認' : view?.status === 'unsupported' ? '未対応' : view?.updatedAt ? `${new Date(view.updatedAt).toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })} 保存` : '未作成'
