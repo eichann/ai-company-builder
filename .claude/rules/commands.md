@@ -53,6 +53,12 @@ a package (zod, the schema language the app's AI tools already take: `loopback-m
 Only operations that cross features, are invoked from outside (a shortcut, later the AI or an
 extension) become commands. Calls inside one feature stay direct function calls.
 
+## The commands
+
+| Id | Class | Handler | Callers |
+|---|---|---|---|
+| `file.open` `{ path }` | view | `src/app/AppShell.tsx`: files tab, opens and keeps the tab (as Cmd+P's choice) | a review request's files (`ReviewRequestCard.tsx`; shown as links only while a handler exists, `useCommandAvailable`) |
+
 ## Handlers and shortcuts
 
 - A handler registers where it runs: `useCommandHandler(id, handler, { target?, acceptsKey? })`
