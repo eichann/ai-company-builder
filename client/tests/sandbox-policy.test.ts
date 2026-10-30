@@ -141,3 +141,13 @@ test('a too-old Codex never starts: the chat shows the notice and the settings c
   assert.equal(status.available, false)
   assert.match(status.error ?? '', /古いため/)
 })
+
+test('Windows stays record only, and its paths never break the recording', async () => {
+  const { decideTurnSandbox, sandboxPlatform, sandboxConcern } = await import('../shared/agents/sandbox-policy')
+  assert.equal(sandboxPlatform('win32'), false)
+  const decision = decideTurnSandbox({ mode: 'enforce', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/秘密'], onUnavailable: 'record-only' }, { home: 'C:\\Users\\member', companyRoot: 'C:\\Users\\member\\Documents\\acme' }, sandboxPlatform('win32'))
+  assert.ok(decision.mode === 'observe' && decision.degraded)
+  if (decision.mode === 'off') return
+  assert.equal(sandboxConcern(decision.resolved, 'Bash', { command: 'curl https://evil.example.org' }, 'C:\\Users\\member'), 'host')
+  assert.doesNotThrow(() => sandboxConcern(decision.resolved, 'Read', { file_path: 'C:\\Users\\member\\.ssh\\config' }, 'C:\\Users\\member'))
+})

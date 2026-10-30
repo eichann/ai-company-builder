@@ -33,6 +33,25 @@ start the sandbox runs "record only" at first; Windows is record only; the defau
 is below, editable per company in the admin. Background: `docs/sandbox-web-broker-findings.md`
 (internal).
 
+## Rollout, members, managed settings
+
+- Rollout (owner decision): 「AI の囲い」 → company mode 「記録だけ」 → 「メンバーごとの動作」 sets the
+  owner to 「囲う」 for a week → read 「囲うと止まる操作」 and add needed hosts → a department's
+  members to 「囲う」 for a week → the company mode 「囲う」. Keep 「囲いを開始できない PC では」 on
+  「記録だけで続ける」 until every PC runs it; then 「AI を使えなくする」 if wanted.
+- Member notice: `SANDBOX_NOTICE_TEXT` (`client/src/lib/agentLogNotice.ts`), always in Settings
+  under the action-log notice; refusals reach the member through the AI
+  (`blockedHostMessage`, `BLOCKED_READ_MESSAGE`) and the start failures as plain sentences
+  (`SANDBOX_MESSAGES`).
+- Windows (S5): Claude Code enforce never runs there (`sandboxPlatform`); Codex is not offered
+  on Windows. Enforce + `record-only` records; + `stop` answers 403 `unavailableStop`. Windows
+  paths only feed the observe marks (best effort; never throws — tested).
+- The company Macs' Jamf managed settings (Claude `permissions.deny` of secret places, Codex
+  `requirements.toml` `deny_read`) work alongside: Claude merges `Read(...)` denies into the
+  sandbox's denyRead; Codex's thread profile started with the developer requirements present.
+  Both lists include `~/.config/gcloud`, which the Vertex (gcloud ADC) skills need — those skills
+  stop under the managed settings already, sandbox or not.
+
 ## Pieces
 
 - `shared/core/agent-sandbox.ts` (pure, server + admin + app): `AgentSandboxSettings` (`mode`
