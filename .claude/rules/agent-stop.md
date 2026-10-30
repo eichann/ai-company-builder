@@ -14,6 +14,10 @@ paths:
   - "client/electron/services/agent-push-channel.ts"
   - "client/electron/services/agent-policy-store.ts"
   - "client/tests/agent-stop.test.ts"
+  - "admin/src/app/companies/*/agent-stop/**"
+  - "admin/src/components/agent-stop/**"
+  - "admin/src/lib/agent-stop.ts"
+  - "admin/tests/agent-stop.test.tsx"
 ---
 
 # Emergency stop (monitoring M2, 「AI の緊急停止」) and the server → app push channel
@@ -123,7 +127,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   with `AGENT_STOP_MESSAGES.toolRefused`, also when it was stopped while the member was answering
   an approval; Codex — a stopped kind's approval is declined without asking, one that starts
   anyway (`item/started`) ends the turn (`turn/interrupt` + the sentence); API key — inside the
-  tools. Every refusal is logged with decision `stopped` (M1, 「停止中のため拒否」).
+  tools. Every refusal is logged with decision `stopped` (M1: 「AI の停止中のため拒否」).
 - Limits: an AI started outside ACB is not stopped (MDM, phase 2); an older app does not know
   the stop (the admin count); a Claude command already running is cut when the turn stops;
   Codex's interrupt may lag; a stop of one member or one tool kind leaves the AI outside
@@ -137,3 +141,23 @@ account (0600); a whole-AI stop stops that company's turns only; the fixed commi
 title, the raw voice transcript and no hand-off memo while stopped (each mutation-checked);
 Claude / Codex / API key refuse a stopped kind and log `stopped`; the chat server refuses a new
 turn before any agent starts. `client/tests/agent-tool-events.test.ts`: the stop text and part.
+
+## Admin console (「AI の緊急停止」)
+
+- **On every page** (owner/admin): `components/agent-stop/stop-bar.tsx` at the top of the main
+  area (`AppShell`) — 「AI を止める」 and, while something is stopped, 「AI を止めています（N 件）。
+  一覧と解除」. The dialog (`stop-dialog.tsx`): だれの AI を (全員 / one member, a native select),
+  何を止めるか (AI のすべて (default) / コマンドの実行 / ファイルの書き込み / Web へのアクセス /
+  外部の MCP), 理由 (optional, ≤ 500, admins only), a sentence of what will happen, 止める. The
+  bar and the page share one query (`agent-stop-context.tsx`, `AgentStopProvider` in
+  `AppShell`), so a stop shows on both at once. Members and managers never load it.
+- **Page** `admin/src/app/companies/[id]/agent-stop/page.tsx` (nav `agent-stop`, owner/admin):
+  いま止めているもの with 解除 (asks first, `ConfirmDialog`), 「停止に対応していないアプリ: N 人」 (names
+  and builds behind 「一覧を表示」, 「版は不明」), API キー (counts, 「すべての鍵を止める」 →
+  `POST /broker/stop-all` with a confirmation, a link to 「API キー」; shown only while the broker
+  is on), これまでの停止と解除. Words: `admin/src/lib/agent-stop.ts` (`Record` per tool kind).
+  Types re-exported from `admin/src/lib/api.ts` (`agentStopApi`), pinned by `admin-contract.test.ts`.
+- The log shows stopped calls as 「AI の停止中のため拒否」 (decision `stopped`, `agent-events.md`).
+  Tests `admin/tests/agent-stop.test.tsx`: owners/admins only and a manager loads nothing; the
+  bar stops exactly the chosen member + kind and then shows the stop; the default is everyone +
+  the whole AI; a release asks first and sends that stop's id; the unsupported count and names.
