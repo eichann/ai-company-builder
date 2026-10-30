@@ -59,15 +59,34 @@ export interface BrokerServiceInfo {
    * `?key=`, and sends the key only this way).
    */
   credential: BrokerCredentialHeader
+  /**
+   * The one free, read-only request that tells whether a key is valid (asked
+   * once when a key is registered or replaced): GET this path on the first
+   * default host, with these extra headers, no body. `rejected` lists the
+   * answers that mean "this key does not work" (the key is then not saved);
+   * any other non-2xx answer is "could not tell".
+   */
+  check: { path: string; headers: Readonly<Record<string, string>>; rejected: readonly number[] }
 }
 
 export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
 
 /** The services the relay knows from the start (stage 1: Gemini → OpenAI → Anthropic). */
 export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
-  { service: 'gemini', label: 'Google Gemini', category: 'tool', defaultHosts: ['generativelanguage.googleapis.com'], credential: 'x-goog-api-key' },
-  { service: 'openai', label: 'OpenAI', category: 'tool', defaultHosts: ['api.openai.com'], credential: 'authorization' },
-  { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key' },
+  // Gemini answers an invalid key with 400 API_KEY_INVALID, a key not allowed to use the API with 403.
+  {
+    service: 'gemini', label: 'Google Gemini', category: 'tool', defaultHosts: ['generativelanguage.googleapis.com'], credential: 'x-goog-api-key',
+    check: { path: '/v1beta/models', headers: {}, rejected: [400, 401, 403] },
+  },
+  // 403 is not "invalid" here: a restricted project key may lack the models permission and still work for chat.
+  {
+    service: 'openai', label: 'OpenAI', category: 'tool', defaultHosts: ['api.openai.com'], credential: 'authorization',
+    check: { path: '/v1/models', headers: {}, rejected: [401] },
+  },
+  {
+    service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key',
+    check: { path: '/v1/models', headers: { 'anthropic-version': '2023-06-01' }, rejected: [401] },
+  },
 ]
 
 export function builtinBrokerService(service: string): BrokerServiceInfo | undefined {
@@ -339,6 +358,73 @@ export function chooseBrokerKeySource(
   return available.company ? 'company' : available.user ? 'user' : null
 }
 
+/** Members may register own keys for a service with this setting (the company-wide switch aside). */
+export function serviceAllowsOwnKeys(setting: { rule: BrokerKeyRule; ownKeyHosts: readonly string[] }): boolean {
+  return setting.rule !== 'company-only' && setting.ownKeyHosts.length > 0
+}
+
+/**
+ * The admin's one switch per service 「メンバーが自分の鍵を使ってよい」, for a
+ * service whose destination is known (`knownHosts`: a built-in service's hosts,
+ * a generic service's one host). On: own keys may go to exactly those hosts;
+ * 「会社の鍵だけ」 becomes 「会社の鍵が優先、なければ自分の鍵」 (a company key the
+ * member may use still wins); 「自分の鍵だけ」 and 会社優先 stay. Off: no own-key
+ * destinations and 「会社の鍵だけ」 (registered own keys stay but are not used).
+ * null: the destination is not known, so the hosts must be typed.
+ */
+export function ownKeysSwitchSetting(
+  current: { rule: BrokerKeyRule },
+  knownHosts: readonly string[],
+  allowed: boolean,
+): { rule: BrokerKeyRule; ownKeyHosts: string[] } | null {
+  if (!allowed) return { rule: 'company-only', ownKeyHosts: [] }
+  if (knownHosts.length === 0) return null
+  return { rule: current.rule === 'company-only' ? 'company-first' : current.rule, ownKeyHosts: [...knownHosts] }
+}
+
+// ---------------------------------------------------------------------------
+// Checking a key once when it is saved: one free, read-only request to the
+// service's fixed host. The words say no more than that.
+// ---------------------------------------------------------------------------
+
+/**
+ * - `valid`: the service accepted the key (a 2xx answer to the check request);
+ * - `rejected`: the service said the key does not work (it is not saved);
+ * - `unreachable`: the server could not reach the service (saved);
+ * - `unconfirmed`: an answer that tells neither (rate limit, a restricted key; saved);
+ * - `not-checkable`: no check request is known for the service (saved).
+ */
+export type BrokerKeyCheckResult = 'valid' | 'rejected' | 'unreachable' | 'unconfirmed' | 'not-checkable'
+export const BROKER_KEY_CHECK_RESULTS: readonly BrokerKeyCheckResult[] = ['valid', 'rejected', 'unreachable', 'unconfirmed', 'not-checkable']
+
+/** What a check answer means. */
+export function brokerKeyCheckOutcome(status: number, rejected: readonly number[]): BrokerKeyCheckResult {
+  if (status >= 200 && status < 300) return 'valid'
+  if (rejected.includes(status)) return 'rejected'
+  return 'unconfirmed'
+}
+
+// ---------------------------------------------------------------------------
+// The relay's "this needs a key" answer carries a marker the app finds in what
+// the AI or a tool printed, to offer 「自分の鍵」 for that service. The marker
+// holds the service name only — never a key or a token.
+// ---------------------------------------------------------------------------
+
+const NO_KEY_MARKER = /\[ACB_NO_KEY:([a-z0-9][a-z0-9_-]{0,39})\]/g
+
+/** The relay's plain-Japanese answer when no key may be used, with the marker for the app. */
+export function brokerNoKeyMessage(label: string, service: string): string {
+  const marker = isValidBrokerServiceName(service) ? ` [ACB_NO_KEY:${service}]` : ''
+  return `この作業には ${label} の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。${marker}`
+}
+
+/** Services named by "needs a key" markers in a text (first seen first, each once). */
+export function findBrokerNoKeyServices(text: string): string[] {
+  const out: string[] = []
+  for (const m of text.matchAll(NO_KEY_MARKER)) if (!out.includes(m[1])) out.push(m[1])
+  return out
+}
+
 // ---------------------------------------------------------------------------
 // Short-lived tokens (K3): what the app hands the chat's child processes.
 // ---------------------------------------------------------------------------
@@ -460,6 +546,15 @@ export function parseRelayBaseUrl(input: unknown): Parsed<{ host: string; basePa
   return { value: { host, basePath } }
 }
 
+/** A generic service's check path (GET, no body, after its base path): a plain path, no query, ≤ 200. */
+export function normalizeRelayCheckPath(input: unknown): string | undefined {
+  const value = normalizeBrokerPathPrefix(input)
+  return value && value.length <= BROKER_RELAY_LIMITS.basePath ? value : undefined
+}
+
+/** Statuses of a generic service's check that mean the key does not work. */
+export const RELAY_CHECK_REJECTED: readonly number[] = [401, 403]
+
 /** A generic service as the company registered it. */
 export interface BrokerRelayDefinition {
   /** What people see (「顧客管理」, `HubSpot`). */
@@ -472,6 +567,12 @@ export interface BrokerRelayDefinition {
   header: string
   /** The header's value, with `{key}` where the key goes. */
   format: string
+  /**
+   * Optional: a free, read-only path (GET, no body, put after `basePath`) that
+   * answers 2xx for a working key and 401 / 403 for a bad one — asked once
+   * when a key is saved. Absent: keys are not checked.
+   */
+  checkPath?: string
 }
 
 /** `https://host/base` of a definition (what the admin typed, normalised). */
@@ -490,7 +591,12 @@ export function parseBrokerRelayDefinition(input: unknown): Parsed<BrokerRelayDe
   if (!header) return { error: 'header must be a plain header name (not Host, Cookie, Content-*, X-Forwarded-*, …)' }
   const format = normalizeRelayFormat(input.format ?? BROKER_KEY_SLOT)
   if (!format) return { error: `format must contain ${BROKER_KEY_SLOT} exactly once (printable ASCII, at most ${BROKER_RELAY_LIMITS.format} characters)` }
-  return { value: { label: label.value, host: base.value.host, basePath: base.value.basePath, header, format } }
+  let checkPath: string | undefined
+  if (input.checkPath !== undefined && input.checkPath !== null && input.checkPath !== '') {
+    checkPath = normalizeRelayCheckPath(input.checkPath)
+    if (!checkPath) return { error: 'checkPath must be a plain path starting with / (no query, %, .., // or spaces)' }
+  }
+  return { value: { label: label.value, host: base.value.host, basePath: base.value.basePath, header, format, ...(checkPath ? { checkPath } : {}) } }
 }
 
 /** A stored definition (JSON the server wrote), or null when it is not one. */

@@ -190,6 +190,39 @@ describe('own keys (「自分の鍵」)', () => {
     expect(await off.ownBrokerKeys.save(bob, 'openai', { secret: FAKE_C })).toMatchObject({ ok: false, kind: 'unavailable', body: { code: 'BROKER_OFF' } })
   })
 
+  it('the admin\'s one switch per service: on → own keys to the built-in host (会社優先), off → 会社の鍵だけ; owner/admin only', async () => {
+    const own = (user: string, service: string, body: unknown) => call(user, 'PUT', `${BASE}/broker/services/${service}/own-keys`, body)
+    expect((await own('ok-alice', 'gemini', { allowed: true })).status).toBe(403)
+    expect(svc((await call('ok-alice', 'GET', `${BASE}/me/broker-keys`)).json.data, 'gemini').ownKey).toEqual({ allowed: false, reason: 'company-only' })
+
+    const on = await own('ok-owner', 'gemini', { allowed: true })
+    expect(on.status).toBe(200)
+    expect(svc(on.json.data, 'gemini')).toMatchObject({ rule: 'company-first', ownKeyHosts: ['generativelanguage.googleapis.com'] })
+    expect(on.json.data.history[0]).toMatchObject({ change: { action: 'service', service: 'gemini', after: { rule: 'company-first' } } })
+    expect(svc((await call('ok-alice', 'GET', `${BASE}/me/broker-keys`)).json.data, 'gemini').ownKey)
+      .toEqual({ allowed: true, hosts: ['generativelanguage.googleapis.com'] })
+    expect((await save('ok-alice', 'gemini', { secret: FAKE_C })).status).toBe(200)
+    const alice = { companyId: CO, userId: 'ok-alice', role: 'member' }
+    expect(services.brokerTokens.issue(alice, { conversationId: 'sw', services: ['gemini'] }).value.services).toEqual([{ service: 'gemini', source: 'user' }])
+
+    // Off: the registered key stays but is not used, and nothing new can be registered.
+    const off = await own('ok-owner', 'gemini', { allowed: false })
+    expect(svc(off.json.data, 'gemini')).toMatchObject({ rule: 'company-only', ownKeyHosts: [] })
+    expect(services.brokerTokens.issue(alice, { conversationId: 'sw2', services: ['gemini'] }).value.services).toEqual([])
+    expect((await save('ok-alice', 'gemini', { secret: FAKE_C })).json).toMatchObject({ code: 'OWN_KEY_NOT_ALLOWED', reason: 'company-only' })
+    expect((await call('ok-alice', 'DELETE', `${BASE}/me/broker-keys/gemini`)).status).toBe(200)
+
+    // 「自分の鍵だけ」 stays as it is when switched on.
+    await services.keyBroker.setService(owner, 'anthropic', { category: 'tool', rule: 'user-only', ownKeyHosts: [] })
+    expect(svc((await own('ok-owner', 'anthropic', { allowed: true })).json.data, 'anthropic')).toMatchObject({ rule: 'user-only', ownKeyHosts: ['api.anthropic.com'] })
+    // A service without a known destination needs its hosts typed; unknown names and bad bodies are refused.
+    await services.keyBroker.setService(owner, 'gmail', { category: 'person', rule: 'user-only', ownKeyHosts: [] })
+    const typed = await own('ok-owner', 'gmail', { allowed: true })
+    expect([typed.status, typed.json.code]).toEqual([400, 'HOSTS_REQUIRED'])
+    expect((await own('ok-owner', 'no-such-service', { allowed: true })).status).toBe(404)
+    expect((await own('ok-owner', 'gemini', { allowed: 'yes' })).status).toBe(400)
+  })
+
   it('no key value in any answer, error, log line or table', async () => {
     await save('ok-alice', 'openai', { secret: FAKE_C }) // one left in place, so a live sealed value is checked
     expect(seen.length).toBeGreaterThan(15)

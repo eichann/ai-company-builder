@@ -50,7 +50,9 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   (`key-broker.md`). Same in `docs/self-hosting/docker-compose.production.yml`.
   `BROKER_TOKEN_TTL_MINUTES` (15–60, default 30) sets the tokens' lifetime;
   `BROKER_MAX_REQUEST_MB` (100) and `BROKER_UPSTREAM_TIMEOUT_SECONDS` (600) bound the relay;
-  `BROKER_DAY_UTC_OFFSET_MINUTES` (540, Japan) is where the daily caps' day begins.
+  `BROKER_DAY_UTC_OFFSET_MINUTES` (540, Japan) is where the daily caps' day begins;
+  `BROKER_KEY_CHECK` (on; `off` for a server without internet access, and in the server tests)
+  checks a key once when it is saved.
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
   never prints a query on `/api/broker/` (a token may be in `?key=`: `lib/log-redaction.ts`).
 - Required env (`.env`, from `.env.example`): `AUTH_SECRET` (`openssl rand -base64 32`),

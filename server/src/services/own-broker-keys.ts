@@ -29,7 +29,7 @@ import type { DepartmentRepository } from '../ports/departments'
 import type { BrokerKeyRepository, BrokerKeyRow } from '../ports/key-broker'
 import type { Member } from './access'
 import type { BrokerVault } from './broker-vault'
-import { BROKER_OFF_ERROR, type KeyBrokerService } from './key-broker'
+import { BROKER_OFF_ERROR, KEY_REJECTED_ERROR, type KeyBrokerService } from './key-broker'
 import { ok, refuse, type Outcome } from './outcome'
 
 export interface OwnBrokerKeyDeps {
@@ -154,6 +154,10 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
       const allowance = ownKeyAllowance(member.companyId, service)
       if (!allowance.allowed) return refuse('forbidden', OWN_KEY_BLOCKED_ERROR[allowance.reason], { code: 'OWN_KEY_NOT_ALLOWED', reason: allowance.reason })
       if (!brokerVault.status().enabled) return refuse('unavailable', BROKER_OFF_ERROR, { code: 'BROKER_OFF' })
+      // One read-only request to the service's fixed host; a key it refuses is not saved.
+      const check = await keyBroker.checkKey(member.companyId, service, secret.value, allowance.hosts)
+      if (check === 'rejected') return refuse('bad-request', KEY_REJECTED_ERROR, { code: 'KEY_REJECTED' })
+      const answer = (): MyBrokerKeys => (check ? { ...view(member), check: { service, result: check } } : view(member))
 
       const existing = ownRow(member, service)
       const keyId = existing?.id ?? ids.newId()
@@ -165,7 +169,7 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
       const current = ownRow(member, service)
       if (current && current.id === keyId) {
         brokerKeys.replaceSecret(member.companyId, keyId, sealed, last4, at, member.userId, changeRow(member, at, keyId, {
-          action: 'replace', service, displayName: current.displayName, last4Before: current.last4, last4After: last4,
+          action: 'replace', service, displayName: current.displayName, last4Before: current.last4, last4After: last4, ...(check ? { check } : {}),
         }))
         const changes: { displayName?: string; destinations?: string } = {}
         if (displayName && displayName !== current.displayName) changes.displayName = displayName
@@ -179,7 +183,7 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
             after: { ...(changes.displayName ? { displayName: after.displayName } : {}), ...(changes.destinations ? { destinations: after.destinations } : {}) },
           }))
         }
-        return ok(view(member))
+        return ok(answer())
       }
       if (current) return refuse('conflict', 'Your key for this service changed meanwhile; try again')
       const row: BrokerKeyRow = {
@@ -202,8 +206,8 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
         updatedBy: member.userId,
         secretUpdatedAt: at,
       }
-      brokerKeys.insert(row, sealed, changeRow(member, at, keyId, { action: 'create', key: snapshot(row) }))
-      return ok(view(member))
+      brokerKeys.insert(row, sealed, changeRow(member, at, keyId, { action: 'create', key: snapshot(row), ...(check ? { check } : {}) }))
+      return ok(answer())
     },
 
     /** DELETE …/me/broker-keys/:service — always allowed (even with own keys switched off). */

@@ -12,6 +12,9 @@ const testDataDir = mkdtempSync(join(tmpdir(), 'acb-test-'))
 // Set env vars BEFORE any route/db module is imported
 process.env.DATA_DIR = testDataDir
 process.env.REPOS_DIR = join(testDataDir, 'repos')
+// The key broker never checks a key against a real provider in tests; the check's own
+// tests pass a fake upstream (tests/integration/broker-key-check.test.ts).
+process.env.BROKER_KEY_CHECK = 'off'
 
 // Create repos directory (some routes check this at import time)
 mkdirSync(join(testDataDir, 'repos'), { recursive: true })

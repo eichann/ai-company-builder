@@ -350,6 +350,7 @@ curl -sI https://your-domain.com/api/me 2>&1 | head -5
 | `BROKER_MAX_REQUEST_MB` | いいえ | `100` | キーブローカーの中継（`/api/broker/…`）が送る内容の上限（MB）。 |
 | `BROKER_UPSTREAM_TIMEOUT_SECONDS` | いいえ | `600` | 中継が送り先の返事を待つ時間（秒）。 |
 | `BROKER_DAY_UTC_OFFSET_MINUTES` | いいえ | `540` | API キーの1日の上限の区切り（UTC からの分。540 = 日本時間）。 |
+| `BROKER_KEY_CHECK` | いいえ | `on` | 鍵を登録・差し替えたとき、発行元に無料の読み取り専用の問い合わせを1回して、使える鍵か確かめます。インターネットに出られないサーバーでは `off`（確かめずに保存）。 |
 
 ### API キーの預かり（任意）
 

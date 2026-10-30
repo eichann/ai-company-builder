@@ -9,6 +9,7 @@ import type {
   BrokerCaps,
   BrokerDestinations,
   BrokerEligibility,
+  BrokerKeyCheckResult,
   BrokerKeyRule,
   BrokerKeyScope,
   BrokerKeyStatus,
@@ -104,9 +105,20 @@ export interface BrokerKeySnapshot {
 
 export type BrokerServiceSetting = { category: BrokerServiceCategory; rule: BrokerKeyRule; ownKeyHosts: string[] }
 
+/** PUT …/broker/services/:service/own-keys — the one switch 「メンバーが自分の鍵を使ってよい」 (a service whose destination is known). */
+export interface BrokerOwnKeysSwitch {
+  allowed: boolean
+}
+
+/** How the one check of a just-saved key went (never anything of the key itself). */
+export interface BrokerKeyCheck {
+  service: string
+  result: BrokerKeyCheckResult
+}
+
 export type BrokerChangeDetail =
-  | { action: 'create'; key: BrokerKeySnapshot }
-  | { action: 'replace'; service: string; displayName: string; last4Before: string; last4After: string }
+  | { action: 'create'; key: BrokerKeySnapshot; check?: BrokerKeyCheckResult }
+  | { action: 'replace'; service: string; displayName: string; last4Before: string; last4After: string; check?: BrokerKeyCheckResult }
   | { action: 'update'; service: string; displayName: string; before: Partial<BrokerKeySnapshot>; after: Partial<BrokerKeySnapshot> }
   | { action: 'delete'; key: BrokerKeySnapshot }
   | { action: 'service'; service: string; before: BrokerServiceSetting | null; after: BrokerServiceSetting }
@@ -134,6 +146,11 @@ export interface BrokerView {
   departments: Array<{ id: string; name: string; folder: string }>
   /** Newest first, at most 50. */
   history: BrokerChange[]
+  /**
+   * Only in the answer of registering / replacing a key: how its one check
+   * went (absent when the server does not check keys).
+   */
+  check?: BrokerKeyCheck
 }
 
 /** POST …/broker/keys: a company key. */
@@ -160,6 +177,8 @@ export interface BrokerRelayServiceSave {
   format?: string
   /** Only when the service is new (default `tool`). */
   category?: BrokerServiceCategory
+  /** A free, read-only GET path (after the base path) that tells whether a key works; '' / absent = none. */
+  checkPath?: string
 }
 
 // ---------------------------------------------------------------------------
@@ -250,6 +269,8 @@ export interface MyBrokerKeys {
   enabled: boolean
   memberKeysAllowed: boolean
   services: MyBrokerService[]
+  /** Only in the answer of PUT: how the one check of the saved key went (absent when the server does not check keys). */
+  check?: BrokerKeyCheck
 }
 
 /** PUT …/me/broker-keys/:service — register or replace one's own key (the value is write-only). */

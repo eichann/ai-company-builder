@@ -372,6 +372,7 @@ When team members open the invitation link, they can register a new account and 
 | `BROKER_MAX_REQUEST_MB` | No | `100` | Largest request body the key broker's relay (`/api/broker/…`) forwards. |
 | `BROKER_UPSTREAM_TIMEOUT_SECONDS` | No | `600` | How long the relay waits for the provider's answer. |
 | `BROKER_DAY_UTC_OFFSET_MINUTES` | No | `540` | Where the API keys' daily caps begin, in minutes east of UTC (540 = Japan). |
+| `BROKER_KEY_CHECK` | No | `on` | Check a key once when it is registered or replaced (one free, read-only request to the provider). `off` on a server without internet access (keys are saved unchecked). |
 
 ### Key broker (optional)
 
