@@ -17,9 +17,9 @@ access in `company-files.md`. Full text and incidents: `docs/architecture/server
 routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service, map the answer
   → services/   business rules; authorization through services/access.ts (shared/core roles)
     → ports/    interfaces (repositories, RepoStore, CompanyLock, Clock/IdGenerator,
-                AccountDirectory, SecretCipher, Transactions)
+                AccountDirectory, SecretCipher, UpstreamClient, Transactions)
         ↑ adapters/   sqlite/* repositories, git-repo-store.ts, accounts.ts, system.ts,
-                      company-files.ts, local-secret-cipher.ts, kek-file.ts
+                      company-files.ts, local-secret-cipher.ts, kek-file.ts, upstream-https.ts
 src/composition.ts — the only module that imports adapters; routes take `services` from it
 src/cli/           operator commands (generate-broker-kek.ts), each its own composition root
 ```
@@ -91,6 +91,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+/api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
+                              (token instead of a session; key-broker.md)      broker-relay.ts
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts

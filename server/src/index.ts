@@ -24,6 +24,8 @@ import { clientActivityMiddleware } from './lib/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { keyBrokerRoute } from './routes/key-broker'
+import { brokerRelayRoute } from './routes/broker-relay'
+import { redactBrokerQuery } from './lib/log-redaction'
 import { scheduleAgentEventRetention } from './lib/agent-event-retention'
 import { services } from './composition'
 
@@ -102,7 +104,8 @@ authDb.close()
 const app = new Hono()
 
 // Middleware
-app.use('*', logger())
+// The relay accepts a token in ?key= (Gemini's form): request lines never show a query there.
+app.use('*', logger((line, ...rest) => console.log(redactBrokerQuery(line), ...rest)))
 app.use('*', cors({
   origin: [
     'http://localhost:5173',
@@ -172,6 +175,7 @@ app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
 app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
+app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)

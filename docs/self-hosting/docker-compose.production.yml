@@ -27,6 +27,9 @@ services:
       # Optional key broker KEK (README "Key broker"); /dev/null = broker off.
       - BROKER_KEK_FILE=/run/secrets/broker-kek
       - BROKER_TOKEN_TTL_MINUTES=${BROKER_TOKEN_TTL_MINUTES:-30}
+      # The relay's largest request (MB) and wait for an answer (seconds).
+      - BROKER_MAX_REQUEST_MB=${BROKER_MAX_REQUEST_MB:-100}
+      - BROKER_UPSTREAM_TIMEOUT_SECONDS=${BROKER_UPSTREAM_TIMEOUT_SECONDS:-600}
     # Runs the code baked into the image (no source mount, read-only root
     # filesystem): updates need `up -d --build`, as in the guide's Updating
     # section. The server writes only under /app/data and /tmp.

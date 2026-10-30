@@ -27,6 +27,9 @@ services:
       - BROKER_KEK_FILE=/run/secrets/broker-kek
       # Lifetime of the key broker's tokens in minutes (15-60, default 30).
       - BROKER_TOKEN_TTL_MINUTES=${BROKER_TOKEN_TTL_MINUTES:-30}
+      # The relay's largest request (MB) and wait for an answer (seconds).
+      - BROKER_MAX_REQUEST_MB=${BROKER_MAX_REQUEST_MB:-100}
+      - BROKER_UPSTREAM_TIMEOUT_SECONDS=${BROKER_UPSTREAM_TIMEOUT_SECONDS:-600}
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").

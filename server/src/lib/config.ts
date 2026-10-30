@@ -35,6 +35,12 @@ export const BROKER_KEK_FILE = process.env.BROKER_KEK_FILE?.trim() || null
 /** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
 export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
 
+/** The relay's largest request body in MB (default 100; key-broker.md). */
+export const BROKER_MAX_REQUEST_MB = Number(process.env.BROKER_MAX_REQUEST_MB) || 100
+
+/** How long the relay waits for an upstream's response headers, in seconds (default 600: long AI answers). */
+export const BROKER_UPSTREAM_TIMEOUT_SECONDS = Number(process.env.BROKER_UPSTREAM_TIMEOUT_SECONDS) || 600
+
 /** A company's bare repository; the id is reduced to [A-Za-z0-9_-]. */
 export function companyRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)

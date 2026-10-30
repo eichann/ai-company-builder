@@ -140,7 +140,13 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
       }
       return lines
     }
-    case 'settings':
-      return [`メンバーが自分の鍵を登録: ${c.before.memberKeysAllowed ? '許可' : '不可'} → ${c.after.memberKeysAllowed ? '許可' : '不可'}`]
+    case 'settings': {
+      const lines: string[] = []
+      if (c.before.memberKeysAllowed !== c.after.memberKeysAllowed) {
+        lines.push(`メンバーが自分の鍵を登録: ${c.before.memberKeysAllowed ? '許可' : '不可'} → ${c.after.memberKeysAllowed ? '許可' : '不可'}`)
+      }
+      if (c.after.internalHosts) lines.push(`社内の宛先の例外 → ${c.after.internalHosts.join('、') || 'なし'}`)
+      return lines
+    }
   }
 }

@@ -21,6 +21,14 @@ paths:
   - "admin/tests/key-broker.test.tsx"
   - "server/src/services/broker-tokens.ts"
   - "server/tests/integration/broker-tokens.test.ts"
+  - "server/src/services/broker-relay.ts"
+  - "server/src/routes/broker-relay.ts"
+  - "server/src/ports/upstream.ts"
+  - "server/src/adapters/upstream-https.ts"
+  - "server/src/lib/net-ranges.ts"
+  - "server/src/lib/log-redaction.ts"
+  - "server/tests/integration/broker-relay*.test.ts"
+  - "server/tests/unit/net-ranges.test.ts"
   - "server/src/services/own-broker-keys.ts"
   - "server/tests/integration/own-broker-keys.test.ts"
   - "client/shared/broker-keys.ts"
@@ -33,7 +41,7 @@ paths:
 # API key broker (「API キー」): the vault, the admin page, short-lived tokens
 
 The server holds the company's API keys; the AI only ever gets a short-lived token, and the
-relay (K4, planned) swaps it for the real key on the way upstream. Owner decisions
+relay (K4) swaps it for the real key on the way upstream. Owner decisions
 (2026-10-22 … 10-30): keys are never returned in plain text; a **company key** (owner/admin
 registers it; two dials: which departments' work × which people, + per-person exceptions) and a
 member's **own key**
@@ -96,7 +104,7 @@ up by the owner, 2026-10-30: right after the two dials).
 `GET /broker`; `POST /broker/keys` (company key; `destinations` default to a built-in service's
 hosts, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
 (an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
-`{ category, rule, ownKeyHosts }`; `PUT /broker/settings` `{ memberKeysAllowed }`. Every change
+`{ category, rule, ownKeyHosts }`; `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
 answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
 (`BrokerChangeDetail`: create / replace (last4 before → after) / update (changed fields) /
 delete / service / settings; the GET carries the latest 50). Check order who → body → rules;
@@ -149,6 +157,50 @@ disable and delete still work). Audience departments must be the company's, peop
   rule, or removing the member stops the token at once. The grant names the key, its
   destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
 
+## The relay (K4)
+
+`/api/broker/<service>/<upstream path>` (`routes/broker-relay.ts` → `services/broker-relay.ts`
+→ port `UpstreamClient` ← `adapters/upstream-https.ts`), for the built-in services (gemini,
+openai, anthropic; a generic relay is K9). No ACB session: the token is the sign-in.
+
+1. **Token first**: from `Authorization: Bearer`, `x-api-key`, `x-goog-api-key` or `?key=`;
+   none → 401 `ACB_NO_TOKEN` (whatever the path). **Anything that is not an `acb_tok_` token →
+   401 `ACB_REAL_KEY_REFUSED`, never forwarded** (a script with a hard-coded key). Unknown service
+   → 404. `validate(token, service)` refusals → 401 `ACB_TOKEN_INVALID` / 403 `ACB_NOT_MEMBER` /
+   403 `ACB_NO_KEY` (「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から
+   登録してください。」) / 503 `ACB_BROKER_OFF`. Error bodies are
+   `{ type: 'error', error: { type, code, status, message } }` (read by all three SDKs).
+2. **Destinations**: the host is the built-in host when the key allows it, else the key's first
+   host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
+   characters or `.`/`..` segments (400 `ACB_BAD_PATH`); the URL parser has already resolved
+   `%2e%2e`. Key path prefixes and models are enforced (403 `ACB_DESTINATION_NOT_ALLOWED`); the
+   model comes from the path (`/models/<m>`, Gemini) or the JSON body's `model`.
+3. **Body**: JSON is read (≤ 32 MB) for the model check (and K5's record); anything else
+   streams. `BROKER_MAX_REQUEST_MB` (default 100) → 413 `ACB_TOO_LARGE` (declared or counted).
+4. **Key swap**: `vault.reveal` → only the service's `credential` header
+   (`BrokerServiceInfo.credential`: gemini `x-goog-api-key`, openai `Authorization: Bearer`,
+   anthropic `x-api-key`). Dropped upstream: every credential header, `?key=`, cookies,
+   `x-forwarded-*`, `forwarded`, `via`, `x-acb-*`, origin, referer, hop-by-hop;
+   `accept-encoding: identity` (K5 reads usage).
+5. **Way out** (`adapters/upstream-https.ts`): DNS once; **any** answer in a private / internal
+   range (`lib/net-ranges.ts`: loopback, RFC 1918, 100.64/10, link-local incl.
+   169.254.169.254, ULA, multicast, documentation, reserved; IPv4 inside mapped / NAT64 / 6to4
+   IPv6) → 403 `ACB_PRIVATE_ADDRESS` before connecting, unless the host is in the company's
+   **`internalHosts`** exception (`PUT /broker/settings { internalHosts }`, exact names, recorded
+   in the history; each use logs `[broker] … allowed by the company's exception`). The connection
+   goes to the checked address (no DNS-rebinding window), TLS verified against the host name,
+   `BROKER_UPSTREAM_TIMEOUT_SECONDS` (600) for the headers. Failures → 502 / 504.
+6. **Answer**: streamed as is. Redirects are never followed: a `Location` /
+   `x-goog-upload-url` / `content-location` to one of the key's hosts is rewritten to
+   `<PUBLIC_URL>/api/broker/<service>/…` (without `key=`); a redirect elsewhere → 502
+   `ACB_REDIRECT_REFUSED`. Gemini resumable uploads: the relay remembers which token started an
+   `upload_id` (memory, 1 h) so chunks sent without a key header continue. Headers holding the
+   key are dropped; error bodies (≥ 400, ≤ 1 MB) have the key and the token replaced by
+   `[hidden]`. `set-cookie`, `alt-svc` and hop-by-hop headers are dropped.
+- WebSocket (Gemini Live, OpenAI Realtime) is not relayed in stage 1.
+- Logs: never a header, body, key or token; the request log hides `/api/broker/` queries
+  (`lib/log-redaction.ts`).
+
 ## A member's own keys (K8, 「自分の鍵」)
 
 `services/own-broker-keys.ts`, routes in `routes/key-broker.ts` (any member, the desktop app):
@@ -189,7 +241,16 @@ form's conversion; history;
 503 without a KEK), `tests/integration/broker-tokens.test.ts` (tokens only for usable
 services, both dials (another department or none → no key; a dial change stops a live token),
 rule / own key / switch, every validation refusal, TTL bounds, the per-member bound,
-**no token or key value in any log line or table**), `tests/integration/own-broker-keys.test.ts`
+**no token or key value in any log line or table**), `tests/integration/broker-relay.test.ts` (fake upstream: every token form, the key only in
+the service's header, a real-looking key refused unforwarded, destinations / models / bad paths,
+the Japanese no-key refusal, upload URL rewrite + continuation, redirects, a provider echoing the
+key, internal destination, size limit, revoked token, **no key in any answer, log line or table,
+no token in any log line**), `tests/integration/broker-relay-https.test.ts` (real HTTPS to a
+local provider with its own certificate: internal address refused before connecting and allowed
+by the exception, one internal answer among several refuses, one DNS lookup, TLS checked against
+the name, the whole route end to end — SSRF guard mutation-checked), `tests/unit/net-ranges.test.ts`
+(every internal form refused, public ones pass; the request log hides relay queries),
+`tests/integration/own-broker-keys.test.ts`
 (own keys only where allowed (switch, rule, destinations), one per service, an admin's stop
 survives a replace, deleting only one's own, a token then uses it, 503 without a KEK, **no key
 value in any answer, error, log line or table**), `client/tests/ipc-app.test.ts`

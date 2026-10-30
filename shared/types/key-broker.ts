@@ -70,6 +70,12 @@ export interface BrokerServiceView {
 export interface BrokerSettings {
   /** Members may register their own keys (default true). */
   memberKeysAllowed: boolean
+  /**
+   * Hosts the relay may reach although they resolve to a private / internal
+   * address (loopback, 10.x, 169.254.x, …). Empty by default: such addresses
+   * are refused. An explicit, recorded exception for an in-house system.
+   */
+  internalHosts: string[]
   updatedAt: string | null
   updatedBy: string | null
 }
@@ -96,7 +102,7 @@ export type BrokerChangeDetail =
   | { action: 'update'; service: string; displayName: string; before: Partial<BrokerKeySnapshot>; after: Partial<BrokerKeySnapshot> }
   | { action: 'delete'; key: BrokerKeySnapshot }
   | { action: 'service'; service: string; before: BrokerServiceSetting | null; after: BrokerServiceSetting }
-  | { action: 'settings'; before: { memberKeysAllowed: boolean }; after: { memberKeysAllowed: boolean } }
+  | { action: 'settings'; before: { memberKeysAllowed: boolean; internalHosts?: string[] }; after: { memberKeysAllowed: boolean; internalHosts?: string[] } }
 
 export interface BrokerChange {
   id: string

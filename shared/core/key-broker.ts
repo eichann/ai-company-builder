@@ -53,13 +53,21 @@ export interface BrokerServiceInfo {
   category: BrokerServiceCategory
   /** Where the relay sends this service's requests unless the key says otherwise. */
   defaultHosts: readonly string[]
+  /**
+   * How the real key travels upstream: `Authorization: Bearer`, `x-api-key`
+   * or `x-goog-api-key` (the relay accepts the token in any of them, or in
+   * `?key=`, and sends the key only this way).
+   */
+  credential: BrokerCredentialHeader
 }
+
+export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
 
 /** The services the relay knows from the start (stage 1: Gemini → OpenAI → Anthropic). */
 export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
-  { service: 'gemini', label: 'Google Gemini', category: 'tool', defaultHosts: ['generativelanguage.googleapis.com'] },
-  { service: 'openai', label: 'OpenAI', category: 'tool', defaultHosts: ['api.openai.com'] },
-  { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'] },
+  { service: 'gemini', label: 'Google Gemini', category: 'tool', defaultHosts: ['generativelanguage.googleapis.com'], credential: 'x-goog-api-key' },
+  { service: 'openai', label: 'OpenAI', category: 'tool', defaultHosts: ['api.openai.com'], credential: 'authorization' },
+  { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key' },
 ]
 
 export function builtinBrokerService(service: string): BrokerServiceInfo | undefined {
@@ -190,6 +198,14 @@ export function parseBrokerDestinations(input: unknown): Parsed<BrokerDestinatio
   const models = uniqueList(input.models, normalizeBrokerModel, BROKER_LIMITS.models, 'destinations.models')
   if ('error' in models) return models
   return { value: { hosts: hosts.value, pathPrefixes: pathPrefixes.value, models: models.value } }
+}
+
+/**
+ * Hosts the relay may reach although they resolve to a private address (the
+ * company's exception for an in-house system): exact names, like destinations.
+ */
+export function parseInternalHosts(input: unknown): Parsed<string[]> {
+  return uniqueList(input, normalizeBrokerHost, BROKER_LIMITS.hosts, 'internalHosts')
 }
 
 /** Own-key destinations of a service: may be empty (= members cannot register own keys for it). */

@@ -341,6 +341,9 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE TABLE IF NOT EXISTS broker_settings (
       company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
       member_keys_allowed INTEGER NOT NULL,
+      -- JSON array of hosts the relay may reach although they resolve to a
+      -- private / internal address (the admin's explicit exception, K4).
+      internal_hosts TEXT NOT NULL DEFAULT '[]',
       updated_at TEXT NOT NULL,
       updated_by TEXT NOT NULL
     );
@@ -402,6 +405,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // Single-use invitation links (lib/invitation-signup.ts).
   migrateInvitationClaims(conn)
   migrateAgentEventSandbox(conn)
+  migrateBrokerSettings(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
@@ -416,6 +420,12 @@ function migrateAgentEventSandbox(conn: Database.Database): void {
   if (!cols.has('sandbox')) conn.exec(`ALTER TABLE agent_events ADD COLUMN sandbox TEXT`)
   if (!cols.has('skill')) conn.exec(`ALTER TABLE agent_events ADD COLUMN skill TEXT`)
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_company_sandbox ON agent_events(company_id, at) WHERE sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox')`)
+}
+
+/** The relay's internal-host exception (K4), added after broker_settings shipped. */
+function migrateBrokerSettings(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(broker_settings)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('internal_hosts')) conn.exec(`ALTER TABLE broker_settings ADD COLUMN internal_hosts TEXT NOT NULL DEFAULT '[]'`)
 }
 
 // Helper functions for common operations

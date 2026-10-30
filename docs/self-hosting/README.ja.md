@@ -341,6 +341,8 @@ curl -sI https://your-domain.com/api/me 2>&1 | head -5
 | `REPOS_DIR` | いいえ | `${DATA_DIR}/repos` | Git ベアリポジトリのディレクトリ。 |
 | `BROKER_KEK_HOST_FILE` | いいえ | — | API キーを預かる機能（キーブローカー）の「鍵の鍵」のホスト上のパス（api コンテナには読み取り専用で `BROKER_KEK_FILE` として渡ります）。未設定なら機能はオフ。 |
 | `BROKER_TOKEN_TTL_MINUTES` | いいえ | `30` | キーブローカーの短命の通行証の有効期間（15〜60分）。 |
+| `BROKER_MAX_REQUEST_MB` | いいえ | `100` | キーブローカーの中継（`/api/broker/…`）が送る内容の上限（MB）。 |
+| `BROKER_UPSTREAM_TIMEOUT_SECONDS` | いいえ | `600` | 中継が送り先の返事を待つ時間（秒）。 |
 
 ### API キーの預かり（任意）
 

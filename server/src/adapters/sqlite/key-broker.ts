@@ -135,17 +135,17 @@ export function sqliteKeyBrokerRepository(conn: Database.Database): BrokerKeyRep
       })()
     },
     settings(companyId) {
-      const r = conn.prepare('SELECT member_keys_allowed, updated_at, updated_by FROM broker_settings WHERE company_id = ?')
-        .get(companyId) as { member_keys_allowed: number; updated_at: string; updated_by: string } | undefined
-      return r ? { memberKeysAllowed: r.member_keys_allowed === 1, updatedAt: r.updated_at, updatedBy: r.updated_by } : null
+      const r = conn.prepare('SELECT member_keys_allowed, internal_hosts, updated_at, updated_by FROM broker_settings WHERE company_id = ?')
+        .get(companyId) as { member_keys_allowed: number; internal_hosts: string; updated_at: string; updated_by: string } | undefined
+      return r ? { memberKeysAllowed: r.member_keys_allowed === 1, internalHosts: r.internal_hosts, updatedAt: r.updated_at, updatedBy: r.updated_by } : null
     },
     saveSettings(companyId, s, change) {
       conn.transaction(() => {
         conn.prepare(`
-          INSERT INTO broker_settings (company_id, member_keys_allowed, updated_at, updated_by) VALUES (?, ?, ?, ?)
+          INSERT INTO broker_settings (company_id, member_keys_allowed, internal_hosts, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
           ON CONFLICT(company_id) DO UPDATE SET member_keys_allowed = excluded.member_keys_allowed,
-            updated_at = excluded.updated_at, updated_by = excluded.updated_by
-        `).run(companyId, s.memberKeysAllowed ? 1 : 0, s.updatedAt, s.updatedBy)
+            internal_hosts = excluded.internal_hosts, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+        `).run(companyId, s.memberKeysAllowed ? 1 : 0, s.internalHosts, s.updatedAt, s.updatedBy)
         addHistory(companyId, change)
       })()
     },
