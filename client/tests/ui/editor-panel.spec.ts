@@ -15,7 +15,7 @@ const writes = (page: Page) => page.evaluate(() => (window as unknown as { __acb
 /** What automatic sync reads before it runs (src/shared/lib/unsavedEdits.ts). */
 const unsavedForSync = (page: Page) => page.evaluate(() => (window as unknown as { __acbHasUnsavedEdits: () => boolean }).__acbHasUnsavedEdits())
 const pinned = (page: Page) => page.evaluate(() => (window as unknown as { __acbPinned: string[] }).__acbPinned)
-/** A shortcut as macOS reports it (⌘⇧M arrives as key 'm'), sent to the focused element. */
+/** A shortcut as macOS reports it (⌘⇧V arrives as key 'v'), sent to the focused element. */
 const shortcut = (page: Page, init: { key: string; shiftKey?: boolean }) => page.evaluate((i) => {
   (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { ...i, metaKey: true, bubbles: true, cancelable: true }))
 }, init)
@@ -70,7 +70,7 @@ test('the editor\'s shortcuts reach it only while the focus is inside it', async
   await typeAtEnd(page, '\n追記')
   await page.getByRole('button', { name: '営業部' }).click()
   await shortcut(page, { key: 's' })
-  await shortcut(page, { key: 'm', shiftKey: true })
+  await shortcut(page, { key: 'v', shiftKey: true })
   await expect(editor(page)).toBeVisible()
   expect(await writes(page)).toEqual([])
 
@@ -106,10 +106,10 @@ test('a preview tab is kept (pinned) at its first edit', async ({ page }) => {
   await expect.poll(() => pinned(page)).toEqual([`${ROOT}/README.md`])
 })
 
-test('⌘⇧M switches a Markdown file between editor and preview, and the choice is kept at the next start', async ({ page }) => {
+test('⌘⇧V switches a Markdown file between editor and preview, and the choice is kept at the next start', async ({ page }) => {
   await open(page)
   await editor(page).click()
-  await shortcut(page, { key: 'm', shiftKey: true })
+  await shortcut(page, { key: 'v', shiftKey: true })
   await expect(page.getByRole('heading', { name: '台本' })).toBeVisible()
   await expect(editor(page)).toHaveCount(0)
 
@@ -120,7 +120,7 @@ test('⌘⇧M switches a Markdown file between editor and preview, and the choic
 
   await tab(page, `${ROOT}/営業部/顧客リスト.csv`).click()
   await editor(page).click()
-  await shortcut(page, { key: 'm', shiftKey: true })
+  await shortcut(page, { key: 'v', shiftKey: true })
   await expect(editor(page)).toContainText('A社,山田')
 })
 

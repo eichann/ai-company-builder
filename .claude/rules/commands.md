@@ -67,7 +67,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 検索 left tab, cursor in its box | the shortcut |
 | `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
-| `editor.togglePreview` `{ pane? }` ⌘⇧M (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
+| `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
 
 A chat pane keeps the request until its active tab can act (history read): the tab then starts a
@@ -95,11 +95,11 @@ is elsewhere (the file tree, the chat). UI test: `tests/ui/editor-panel.spec.ts`
 - Still a window-wide listener (not a command yet; it fires for the active chat tab, and must
   become a chat-area shortcut before a second chat pane): voice input's start / stop key
   (member-configurable, `VoiceInputControl.tsx`, `window` capture, stops the event, with its own
-  Escape and dialog checks). Its default ⌘⇧M (Ctrl+Shift+M) is also `editor.togglePreview`'s key:
-  while the chat's voice input is active it takes the key first, even in the editor. Dialog-local Escape
+  Escape and dialog checks; default ⌘⇧M). `editor.togglePreview` moved to ⌘⇧V (owner, 2026-10-30;
+  VS Code's Markdown preview key) so the two no longer collide. Dialog-local Escape
   handlers (`ConfirmDialog`, `InputDialog`, `ContextMenu`, `DiffViewer`, `FileSearchModal`,
   `SyncPreviewDialog`, `SettingsPanel`) stay where they are.
 - UI tests: `tests/ui/skill-layout.spec.ts` 「shortcuts」 (⌘P, ⌘⇧F),
-  `skill-layout-state.spec.ts` (⌘⇧C) and `editor-panel.spec.ts` (⌘S, ⌘⇧M, ⌘F, focus only).
+  `skill-layout-state.spec.ts` (⌘⇧C) and `editor-panel.spec.ts` (⌘S, ⌘⇧V, ⌘F, focus only).
 - `runCommand` logs a failure (`[commands] <id> failed: <code>`) and resolves to undefined; it
   never logs arguments (paths, what a member typed).

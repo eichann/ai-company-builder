@@ -58,7 +58,7 @@ export const COMMANDS = defineCommands([
     id: 'editor.togglePreview', title: 'プレビューと編集を切り替える', class: 'view',
     args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
     target: { arg: 'pane', area: 'editor' },
-    keybinding: { key: 'mod+shift+m', area: 'editor' },
+    keybinding: { key: 'mod+shift+v', area: 'editor' },
   },
   {
     // The search box of a Markdown preview (the source editor has its own ⌘F).

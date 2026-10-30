@@ -127,14 +127,14 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
   `useEditorReview.ts` (the review of the active document); parts `EditorTabBar`,
   `EditorNotices` (閲覧のみ, deleted, external change, notice, error), `MarkdownPreview` (+
   `hooks/usePreviewSearch.ts`), `MarkdownPreviewPane` (preview + review UI), `BinaryPreviews`
-  (image, PDF); `fileKinds.ts` decides how a file is shown. ⌘S, ⌘⇧M and ⌘F are the commands
+  (image, PDF); `fileKinds.ts` decides how a file is shown. ⌘S, ⌘⇧V and ⌘F are the commands
   `editor.save` / `editor.togglePreview` / `editor.find`, delivered only while the focus is in
   that editor (`commands.md`).
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
   `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
 - Preview: `client/tests/editor-tabs-ui.html?view=external` (`editor-tabs.spec.ts`); `?view=tabs`
   for the panel itself (`editor-panel.spec.ts`: autosave after 1 s, ⌘S, closing saves first,
-  preview tabs pinned on double-click / first edit, ⌘⇧M and its remembered mode, ⌘F in a
+  preview tabs pinned on double-click / first edit, ⌘⇧V and its remembered mode, ⌘F in a
   preview, the preview's scroll position, image / PDF views).
 - Open tabs, the active tab and the left panel tab are saved per company in localStorage
   `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`

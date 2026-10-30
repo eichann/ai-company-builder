@@ -26,7 +26,7 @@ interface TabbedEditorPanelProps {
   onCloseFile: (path: string) => void
   onPinFile?: (path: string) => void
   gotoLine?: number | null
-  /** This editor's pane: its shortcuts (⌘S, ⌘⇧M, ⌘F) work only while the focus is inside it. */
+  /** This editor's pane: its shortcuts (⌘S, ⌘⇧V, ⌘F) work only while the focus is inside it. */
   paneId?: string
 }
 
