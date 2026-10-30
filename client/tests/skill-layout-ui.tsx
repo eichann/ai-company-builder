@@ -46,7 +46,7 @@ const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 type Entry = { name: string; isDirectory: boolean }
 const DISK: Record<string, Entry[]> = {
   [ROOT]: [{ name: '営業部', isDirectory: true }, { name: '総務', isDirectory: true }, { name: 'README.md', isDirectory: false }],
-  [`${ROOT}/営業部`]: [{ name: '提案書', isDirectory: true }, { name: '顧客', isDirectory: true }, { name: '営業の進め方.md', isDirectory: false }],
+  [`${ROOT}/営業部`]: [{ name: '提案書', isDirectory: true }, { name: '顧客', isDirectory: true }, { name: '営業の進め方.md', isDirectory: false }, { name: '売上表.md', isDirectory: false }],
   [`${ROOT}/営業部/提案書`]: [{ name: 'A社_提案.md', isDirectory: false }, { name: 'B社_提案.md', isDirectory: false }],
   [`${ROOT}/営業部/顧客`]: [{ name: '一覧.csv', isDirectory: false }],
   [`${ROOT}/総務`]: [{ name: '規程', isDirectory: true }, { name: '備品.md', isDirectory: false }],
@@ -57,6 +57,23 @@ const FILES: Record<string, string> = {
   [`${ROOT}/総務/備品.md`]: '# 備品\n\nコピー用紙は総務へ。',
   [`${ROOT}/営業部/営業の進め方.md`]: '# 営業の進め方\n\n毎週月曜に共有します。',
   [`${OTHER_ROOT}/議事録.md`]: '# 議事録\n\n別会社の定例。',
+  [`${ROOT}/README.md`]: '# 株式会社デモ\n\n会社の共有フォルダです。',
+  [`${ROOT}/営業部/提案書/A社_提案.md`]: '# A社 提案\n\nA社への提案の骨子。',
+  [`${ROOT}/営業部/提案書/B社_提案.md`]: '# B社 提案\n\nB社への提案の骨子。',
+  [`${ROOT}/総務/規程/就業規則.md`]: '# 就業規則\n\n第1条 目的',
+  // Lines wider than the editor (in its source view): they scroll inside the editor, never widen the screen.
+  [`${ROOT}/営業部/売上表.md`]: [
+    '# 売上表',
+    '',
+    `| 顧客 | ${Array.from({ length: 12 }, (_, i) => `${i + 1}月の売上と前年同月比のメモ`).join(' | ')} |`,
+    `|${' --- |'.repeat(13)}`,
+    `| A社 | ${Array.from({ length: 12 }, (_, i) => `${(i + 1) * 100}万円（前年比 ${100 + i}%）`).join(' | ')} |`,
+    `| 資料 | ${Array.from({ length: 12 }, (_, i) => `https://example.com/sales/2026/${i + 1}/monthly-report.pdf`).join(' | ')} |`,
+    '',
+    '```',
+    `集計式: ${Array.from({ length: 12 }, (_, i) => `month_${i + 1}_sales * rate_${i + 1}`).join(' + ')}`,
+    '```',
+  ].join('\n'),
 }
 const listDir = (dir: string) => (DISK[dir] ?? []).map(e => ({ ...e, path: `${dir}/${e.name}` }))
 type TreeNode = { name: string; isDirectory: boolean; path: string; children?: TreeNode[] }

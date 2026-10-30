@@ -29,14 +29,15 @@ export function SplitView(props: SplitViewProps) {
         const size = split.sizes[i]
         const isCollapsed = child.id === collapsed
         const min = limits[child.id]?.min
-        const sizing = isCollapsed
-          ? 'hidden'
-          : size == null || anyCollapsed ? 'flex-1' : 'flex-shrink-0'
+        const fills = !isCollapsed && (size == null || anyCollapsed)
+        const sizing = isCollapsed ? 'hidden' : fills ? 'flex-1' : 'flex-shrink-0'
+        // A pane taking the remaining space stops at its limit, never at its content's width
+        // (wide tabs or lines would push it past the window: flex items default to min-width auto).
         const style = isCollapsed
           ? undefined
-          : size != null && !anyCollapsed
-            ? (row ? { width: size } : { height: size })
-            : size == null && min != null ? (row ? { minWidth: min } : { minHeight: min }) : undefined
+          : fills
+            ? (row ? { minWidth: min ?? 0 } : { minHeight: min ?? 0 })
+            : (row ? { width: size! } : { height: size! })
         const next = split.children[i + 1]
         const nextIsCollapsed = next != null && next.id === collapsed
         return (
