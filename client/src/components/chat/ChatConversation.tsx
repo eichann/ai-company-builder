@@ -26,6 +26,7 @@ import { useQueuedSendFlush, useSteering } from './hooks/useSteering'
 import { usePromptSuggestion } from './hooks/usePromptSuggestion'
 import { useChatAutoScroll } from './hooks/useChatAutoScroll'
 import { useConsultationStatus } from './hooks/useConsultationStatus'
+import { useDiscardBlankOnLeave } from '../../features/chat/hooks/useDiscardBlankOnLeave'
 import { useAgentModelSelection } from './hooks/useAgentModelSelection'
 import { useRateLimitsRefresh, useStreamingChat } from './hooks/useStreamingChat'
 import { ChatHeader } from './ChatHeader'
@@ -55,11 +56,13 @@ export interface ChatPanelChatProps {
   sidebarOpen: boolean
   initialSessionId?: string | null
   onSessionIdChange?: (sessionId: string | null) => void
+  /** Closes this tab: the member left it for another conversation with nothing typed (useDiscardBlankOnLeave). */
+  onLeftBlank?: () => void
 }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const pendingChatInput = useAppStore((state) => state.pendingChatInput)
@@ -174,6 +177,10 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
     onTitleChange,
   })
 
+  // Images and files attached in the input and not sent yet (the composer owns them).
+  const unsentAttachmentsRef = useRef(0)
+  const handleAttachmentsChange = useCallback((count: number) => { unsentAttachmentsRef.current = count }, [])
+
   const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isActive, isRestoringSession, messages, status })
 
   const handleInputActivity = useCallback(() => {
@@ -240,6 +247,21 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
 
   useConsultationStatus({ tabId, isActive, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
+
+  // Left for another conversation with nothing typed: the tab closes and the empty conversation goes.
+  useDiscardBlankOnLeave({
+    isActive,
+    companyId: currentCompany?.id,
+    sessionId: currentSessionId,
+    readLeft: () => ({
+      ready: historyReadyRef.current && !deletedRef.current,
+      hasMessages: messagesRef.current.some(message => message.id !== '1' || message.role === 'user'),
+      draft: draftInputRef.current,
+      attachments: unsentAttachmentsRef.current,
+      busy: running || queuedSends.length > 0 || !!pendingApproval || !!currentInteraction || !!handoffRequestRef.current,
+    }),
+    close: () => onLeftBlank?.(),
+  })
 
   // 「確認をお願いします」 (ReviewRequestCard): the request in the latest reply waits for the member.
   const pendingReviewId = running ? undefined : pendingReviewOf(messages[messages.length - 1])?.id
@@ -366,6 +388,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
             apiRef={chatInputApiRef}
             suggestion={offeredSuggestion}
             onSuggestionCleared={suggestions.clearPromptSuggestion}
+            onAttachmentsChange={handleAttachmentsChange}
           />
         </div>
       </div>

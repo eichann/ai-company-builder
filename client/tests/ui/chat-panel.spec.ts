@@ -205,9 +205,47 @@ test('a reply that finishes while the member is elsewhere is marked 新着 at th
   await row.click()
   await expect(page.getByText('まとめました。').locator('visible=true')).toBeVisible()
   await expect(row).toContainText('新着')
-  await sidebar.getByRole('button', { name: /^新しい会話/ }).click()
+  await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
   await expect(row).not.toContainText('新着')
   await expect(open.getByRole('button', { name: /^議事録をまとめて/ })).toBeVisible()
+})
+
+test('a new conversation left for another with nothing typed goes away; one with a draft stays', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual' })
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  const open = sidebar.getByRole('region', { name: '開いている相談' })
+  const rows = open.locator('[data-conversation-id]')
+  const newConversation = sidebar.getByRole('button', { name: 'AIに相談する', exact: true })
+  await expect(rows).toHaveCount(1)
+  await expect(input(page)).toBeVisible()
+
+  // Opening new conversations one after another leaves no trail of blank ones.
+  await newConversation.click()
+  await expect(rows).toHaveCount(1)
+  await newConversation.click()
+  await expect(rows).toHaveCount(1)
+
+  // An unsent draft is kept when the member moves on; the blank one they left is not.
+  await input(page).click()
+  await page.keyboard.insertText('来週の会議の議題')
+  await newConversation.click()
+  await expect(rows).toHaveCount(2)
+  // (The preview's history store keeps nothing, so the row shows no 下書き line: pick the other tab.)
+  await open.locator('button:not([aria-current])', { hasText: '新しい会話' }).click()
+  await expect(rows).toHaveCount(1)
+  await typed(page).toBe('来週の会議の議題')
+  // Nothing went to 「終わったもの」 on the way.
+  await expect(sidebar.getByRole('region', { name: '終わったもの' })).toHaveCount(0)
+
+  // A sent conversation is kept when the member moves on; the blank one they leave for it is not.
+  await send(page, 'を整理して')
+  await turnStarted(page)
+  await chat(page, c => c.finish())
+  await newConversation.click()
+  const sent = open.getByRole('button', { name: /^来週の会議の議題を整理して/ })
+  await sent.click()
+  await expect(rows).toHaveCount(1)
+  await expect(sent).toHaveAttribute('aria-current', 'page')
 })
 
 test('「確認をお願いします」: the AI asks for a review and stops; 「あなたの番」 until the member answers, files open in the editor', async ({ page }) => {
