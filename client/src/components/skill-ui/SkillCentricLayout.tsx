@@ -9,7 +9,7 @@ import { CopySkillModal } from './CopySkillModal'
 import { FileTreePanel } from './FileTreePanel'
 import { TabbedEditorPanel } from './TabbedEditorPanel'
 import { ToolViewer } from './ToolViewer'
-import { ResizeHandle } from '../../features/workspace/components/ResizeHandle'
+import { SplitView } from '../../features/workspace/components/SplitView'
 import { ChatPanel } from '../chat/ChatPanel'
 import { SettingsPanel } from '../settings'
 import { BackupHistorySlideOver } from './BackupHistorySlideOver'
@@ -28,7 +28,8 @@ import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
 import { subscribeFileChanges } from '../../lib/fileEvents'
 import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../lib/folderExists'
-import { dragWidth, leftPanelDrag } from '../../features/workspace/panelResize'
+import { useSplitLayout } from '../../features/workspace/hooks/useSplitLayout'
+import { PANE_LIMITS } from '../../features/workspace/layoutTree'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
 import { scanAffected, skillsScopesAffected } from '../../../shared/skills-refresh'
 import { unwatchCompany, watchCompany } from '../../shared/ipc/file-events'
@@ -40,14 +41,16 @@ import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSk
 import { previewSync, revertChange, summarizeChanges, syncCompany } from '../../features/sync/api'
 import { signOut } from '../../features/auth/api'
 
-// Panel width constraints
-const MIN_LEFT_PANEL_WIDTH = 300
-const MAX_LEFT_PANEL_WIDTH = 1200
-const MIN_CHAT_WIDTH = 280
-const MIN_FILE_TREE_WIDTH = 120
-const MAX_FILE_TREE_WIDTH = 400
-
 type LeftPanelTab = 'skills' | 'files' | 'search' | 'history'
+
+// Classes of each pane of the split tree besides its size (SplitView adds that).
+const PANE_CLASSES: Record<string, string> = {
+  side: 'relative flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900',
+  fileTree: 'overflow-hidden',
+  editor: 'min-w-0',
+}
+const paneClassName = (paneId: string) => PANE_CLASSES[paneId] ?? ''
+const dividerLabel = (splitId: string) => splitId === 'files' ? 'ファイルツリーとエディタの境目' : '左の欄とチャットの境目'
 
 const VALID_LEFT_TABS: ReadonlyArray<LeftPanelTab> = ['skills', 'files', 'search', 'history']
 const LEFT_TABS = { valid: VALID_LEFT_TABS, fallback: 'skills' } as const
@@ -89,13 +92,9 @@ export function SkillCentricLayout() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [showFileSearch, setShowFileSearch] = useState(false)
 
-  // Panel width state (resizable)
-  const [leftPanelWidth, setLeftPanelWidth] = useState(550)
-  const [fileTreeWidth, setFileTreeWidth] = useState(200)
-  const [chatCollapsed, setChatCollapsed] = useState(false)
-  const leftPanelWidthBeforeCollapseRef = useRef(550)
-  const fileTreeWidthRef = useRef(fileTreeWidth)
-  useEffect(() => { fileTreeWidthRef.current = fileTreeWidth }, [fileTreeWidth])
+  // Pane sizes as a split tree, saved per company; the chat is one leaf and can be hidden.
+  const { layout, collapsed: collapsedPane, toggleCollapsed, startResize, resize } = useSplitLayout(currentCompany?.id)
+  const toggleChat = useCallback(() => toggleCollapsed('chat'), [toggleCollapsed])
 
   // Modals
   const [showNewSkillWizard, setShowNewSkillWizard] = useState(false)
@@ -275,10 +274,6 @@ export function SkillCentricLayout() {
     }
   }, [])
 
-  // Ref to hold latest leftPanelWidth for keyboard shortcut (avoids re-registering listener)
-  const leftPanelWidthRef = useRef(leftPanelWidth)
-  useEffect(() => { leftPanelWidthRef.current = leftPanelWidth }, [leftPanelWidth])
-
   // Keyboard shortcuts: Cmd+Shift+F → search tab, Cmd+P → file search modal, Cmd+Shift+C → toggle chat
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -295,19 +290,12 @@ export function SkillCentricLayout() {
       if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'c') {
         if (isChatInputRecentlyActive()) return
         e.preventDefault()
-        setChatCollapsed(prev => {
-          if (!prev) {
-            leftPanelWidthBeforeCollapseRef.current = leftPanelWidthRef.current
-          } else {
-            setLeftPanelWidth(leftPanelWidthBeforeCollapseRef.current)
-          }
-          return !prev
-        })
+        toggleChat()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [setLeftTab])
+  }, [setLeftTab, toggleChat])
 
   // One recursive watcher for the whole company, opened with the company and
   // kept across department switches (closing chokidar's per-department
@@ -606,48 +594,6 @@ ${promptContent}
     refreshSkills()
   }, [refreshSkills])
 
-  // Resizing: each drag snapshots the width at pointerdown and derives the
-  // width from the pointer's total offset (see features/workspace/panelResize.ts).
-  const fileTreeDragStartRef = useRef(fileTreeWidth)
-  const handleFileTreeResizeStart = useCallback(() => {
-    fileTreeDragStartRef.current = fileTreeWidthRef.current
-  }, [])
-  const handleFileTreeResize = useCallback((offset: number) => {
-    setFileTreeWidth(dragWidth(fileTreeDragStartRef.current, offset, MIN_FILE_TREE_WIDTH, MAX_FILE_TREE_WIDTH))
-  }, [])
-
-  const OVER_DRAG_COLLAPSE = 60 // collapse after dragging 60px past max
-
-  const leftPanelDragStartRef = useRef(leftPanelWidth)
-  const handleLeftPanelResizeStart = useCallback(() => {
-    leftPanelDragStartRef.current = leftPanelWidthRef.current
-  }, [])
-  const handleLeftPanelResize = useCallback((offset: number) => {
-    const dynamicMaxWidth = Math.min(MAX_LEFT_PANEL_WIDTH, window.innerWidth - MIN_CHAT_WIDTH - 10)
-    const { width, collapse } = leftPanelDrag(leftPanelDragStartRef.current, offset, {
-      min: MIN_LEFT_PANEL_WIDTH, max: dynamicMaxWidth, collapseAfter: OVER_DRAG_COLLAPSE,
-    })
-    setLeftPanelWidth(width)
-    if (collapse) {
-      // The divider unmounts with the chat, which ends this drag.
-      leftPanelWidthBeforeCollapseRef.current = width
-      setChatCollapsed(true)
-    }
-  }, [])
-
-  const toggleChat = useCallback(() => {
-    setChatCollapsed(prev => {
-      if (!prev) {
-        // Save current width before collapsing
-        leftPanelWidthBeforeCollapseRef.current = leftPanelWidth
-      } else {
-        // Restore previous width
-        setLeftPanelWidth(leftPanelWidthBeforeCollapseRef.current)
-      }
-      return !prev
-    })
-  }, [leftPanelWidth])
-
   const handlePreview = useCallback(async () => {
     if (!currentCompany?.rootPath) return
     setIsLoadingPreview(true)
@@ -939,15 +885,39 @@ ${promptContent}
         </div>
       )}
 
-      {/* Main Content */}
-      <div className="flex-1 flex overflow-hidden">
+      {/* Main Content: the split tree (features/workspace/layoutTree.ts); the chat is one pane */}
+      <SplitView
+        split={layout.screen}
+        limits={PANE_LIMITS}
+        collapsed={collapsedPane}
+        className="flex-1 overflow-hidden"
+        paneClassName={paneClassName}
+        dividerLabel={dividerLabel}
+        onResizeStart={startResize}
+        onResize={resize}
+        renderCollapsed={() => (
+          <button
+            onClick={toggleChat}
+            className="flex-shrink-0 w-6 flex flex-col items-center justify-center gap-1 bg-gray-100 dark:bg-zinc-800 border-l border-gray-200 dark:border-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer group"
+            title="AIチャットを表示 (⌘⇧C)"
+          >
+            <CaretLeft size={14} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
+            <ChatCircle size={16} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
+          </button>
+        )}
+        renderPane={(paneId) => paneId === 'chat' ? (
+          // Always mounted to keep its state while hidden.
+          <ChatPanel
+            departmentPath={currentCompany?.rootPath}
+            activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
+            slashCommands={slashCommands}
+            onOpenFile={handleFileSearchSelect}
+          />
+        ) : (
+        <>
         {/* Left side. The not-downloaded prompt is an overlay: the file tree
             and the other tabs stay mounted underneath (no cold re-read on a
             department switch), hidden while it shows. */}
-        <div
-          className={`relative flex flex-col border-r border-gray-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 ${chatCollapsed ? 'flex-1' : 'flex-shrink-0'}`}
-          style={chatCollapsed ? undefined : { width: leftPanelWidth }}
-        >
           <div
             className={`flex-1 min-h-0 flex flex-col ${isSelectedDeptUnsynced ? 'invisible' : ''}`}
             aria-hidden={isSelectedDeptUnsynced || undefined}
@@ -1071,8 +1041,15 @@ ${promptContent}
               )}
 
               {/* Files Tab - always mounted, hidden via CSS to preserve state */}
-              <div className={`h-full flex min-w-0 ${leftTab !== 'files' ? 'hidden' : ''}`}>
-                <div className="flex-shrink-0 overflow-hidden" style={{ width: fileTreeWidth }}>
+              <SplitView
+                split={layout.files}
+                limits={PANE_LIMITS}
+                className={`h-full min-w-0 ${leftTab !== 'files' ? 'hidden' : ''}`}
+                paneClassName={paneClassName}
+                dividerLabel={dividerLabel}
+                onResizeStart={startResize}
+                onResize={resize}
+                renderPane={(filesPaneId) => filesPaneId === 'fileTree' ? (
                   <FileTreePanel
                     rootPath={currentCompany?.rootPath || ''}
                     departmentFolder={effectiveDeptFolder}
@@ -1081,9 +1058,7 @@ ${promptContent}
                     onDoubleClickFile={handlePinFile}
                     onPrivateFolderCreated={handlePrivateFolderCreated}
                   />
-                </div>
-                <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" label="ファイルツリーとエディタの境目" />
-                <div className="flex-1 min-w-0">
+                ) : (
                   <TabbedEditorPanel
                     openFiles={openFiles}
                     activeFilePath={activeFilePath}
@@ -1093,8 +1068,8 @@ ${promptContent}
                     onCloseFile={handleCloseFile}
                     onPinFile={handlePinFile}
                   />
-                </div>
-              </div>
+                )}
+              />
             </div>
           </div>
           {isSelectedDeptUnsynced && (
@@ -1147,36 +1122,9 @@ ${promptContent}
               </div>
             </div>
           )}
-        </div>
-
-        {/* Resize Handle (hidden when chat is collapsed) */}
-        {!chatCollapsed && <ResizeHandle onResizeStart={handleLeftPanelResizeStart} onResize={handleLeftPanelResize} direction="horizontal" label="左の欄とチャットの境目" />}
-
-        {/* Right Panel (Chat) */}
-        {/* Collapsed tab to restore (only shown when collapsed) */}
-        {chatCollapsed && (
-          <button
-            onClick={toggleChat}
-            className="flex-shrink-0 w-6 flex flex-col items-center justify-center gap-1 bg-gray-100 dark:bg-zinc-800 border-l border-gray-200 dark:border-zinc-700 hover:bg-gray-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer group"
-            title="AIチャットを表示 (⌘⇧C)"
-          >
-            <CaretLeft size={14} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
-            <ChatCircle size={16} className="text-gray-400 dark:text-zinc-500 group-hover:text-gray-600 dark:group-hover:text-zinc-300 transition-colors" />
-          </button>
+        </>
         )}
-        {/* ChatPanel is always mounted to preserve state across collapse/expand. Hidden via CSS when collapsed. */}
-        <div
-          className={chatCollapsed ? 'hidden' : 'flex-1'}
-          style={chatCollapsed ? undefined : { minWidth: MIN_CHAT_WIDTH }}
-        >
-          <ChatPanel
-            departmentPath={currentCompany?.rootPath}
-            activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
-            slashCommands={slashCommands}
-            onOpenFile={handleFileSearchSelect}
-          />
-        </div>
-      </div>
+      />
 
       {/* New Skill Wizard Modal */}
       {showNewSkillWizard && selectedDept && (

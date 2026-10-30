@@ -123,19 +123,26 @@ editor, review, search, history, backups).
 
 ## Planned shape of the screen (build toward it, do not hard-code around it)
 
-These are the agreed direction for the skeleton work (splitting `SkillCentricLayout.tsx`). The
-owner confirms them again before that work starts.
+These are the owner's decisions for the skeleton work (splitting `SkillCentricLayout.tsx`;
+D7–D9, confirmed 2026-10-30).
 
 - **Panel registry.** The left panel's tabs (today `type LeftPanelTab = 'skills' | 'files' |
   'search' | 'history'` and `VALID_LEFT_TABS` in `SkillCentricLayout.tsx`) become a list of
   registered panels, the four current ones included, so a later extension adds a tab without
   special cases. A remembered tab id that is not registered falls back to the default tab. Same
   idea as the agent registry (`client/shared/agents/registry.ts`).
-- **Split-tree layout.** Panel sizes become a tree of horizontal / vertical splits saved per
-  company, the chat pane one leaf of it, instead of fixed columns with three widths. The first
-  version builds only the tree that looks like today's screen; multiple chat panes come later and
-  need the chat's "one panel on screen" assumptions (`isActive`, `pendingChatInput`, window-wide
-  shortcuts) removed first.
+- **Split-tree layout (built, Phase 4-3).** Pane sizes are a tree of row / column splits, the
+  chat pane one leaf: `src/features/workspace/layoutTree.ts` (tree, limits, saved shape),
+  `hooks/useSplitLayout.ts` (per company in localStorage `layout:<company id>` =
+  `{ version: 1, trees: { screen, files } }`, written only when the member drags; nothing saved,
+  unreadable, another version or another tree shape → today's look; sizes clamped to the limits in
+  code; which pane is hidden is not saved) and `components/SplitView.tsx` on the in-house
+  `ResizeHandle` (`react-resizable-panels` was prototyped and not taken: its collapse model
+  differs from "drag 60 px past the max hides the chat", it stores percentages, and it released
+  weekly with API breaks across majors). Today the tree has the screen's look only; multiple chat
+  panes come later and need the chat's "one panel on screen" assumptions (`isActive`,
+  `pendingChatInput`, window-wide shortcuts) removed first. Changing the saved shape means a new
+  `version` and reading the old one (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`).
 - **Extension UI stays isolated.** Extension screens will run in an isolated frame and get only
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into
   read / write / send-outside operations so permissions can be decided in one place.
