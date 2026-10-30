@@ -331,6 +331,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PATCH', `${base}/broker/keys/${id}`, { status: 'disabled', allowPrivateContent: true })
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/services/gmail`, { category: 'person', rule: 'user-only', ownKeyHosts: ['gmail.googleapis.com'] })
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { memberKeysAllowed: false })
+    await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
   })
 

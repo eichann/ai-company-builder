@@ -48,7 +48,10 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   checkout and `./data`) is mounted read-only at `/run/secrets/broker-kek`
   (`BROKER_KEK_FILE`); unset → `/dev/null` is mounted and the broker stays off
   (`key-broker.md`). Same in `docs/self-hosting/docker-compose.production.yml`.
-  `BROKER_TOKEN_TTL_MINUTES` (15–60, default 30) sets the tokens' lifetime.
+  `BROKER_TOKEN_TTL_MINUTES` (15–60, default 30) sets the tokens' lifetime;
+  `BROKER_MAX_REQUEST_MB` (100) and `BROKER_UPSTREAM_TIMEOUT_SECONDS` (600) bound the relay.
+  The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
+  never prints a query on `/api/broker/` (a token may be in `?key=`: `lib/log-redaction.ts`).
 - Required env (`.env`, from `.env.example`): `AUTH_SECRET` (`openssl rand -base64 32`),
   `PUBLIC_URL`. Node heap is capped (`NODE_OPTIONS=--max-old-space-size`, 2048 api / 1024 admin)
   so a slow leak restarts cleanly.

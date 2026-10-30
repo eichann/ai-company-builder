@@ -29,7 +29,7 @@ const services: BrokerView['services'] = [
 
 const view: BrokerView = {
   status: { enabled: true, reason: null },
-  settings: { memberKeysAllowed: true, updatedAt: null, updatedBy: null },
+  settings: { memberKeysAllowed: true, internalHosts: [], updatedAt: null, updatedBy: null },
   services,
   keys: [],
   departments: [{ id: 'd_sales', name: '営業部', folder: '営業部' }, { id: 'd_dev', name: '開発部', folder: 'development' }],

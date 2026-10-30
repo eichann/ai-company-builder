@@ -241,6 +241,18 @@ describe('API keys (key broker admin)', () => {
     expect(off.json.data.history[0].change).toEqual({ action: 'settings', before: { memberKeysAllowed: true }, after: { memberKeysAllowed: false } })
   })
 
+  it('the relay\'s internal-host exception: exact names only, recorded, empty by default', async () => {
+    expect((await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.settings.internalHosts).toEqual([])
+    for (const bad of [['10.0.0.5'], ['localhost'], ['*.corp.example.com'], ['crm.internal'], 'crm.example.com']) {
+      expect((await call('kb-owner', 'PUT', `${BASE}/broker/settings`, { internalHosts: bad })).status, JSON.stringify(bad)).toBe(400)
+    }
+    expect((await call('kb-sales', 'PUT', `${BASE}/broker/settings`, { internalHosts: ['crm.example.com'] })).status).toBe(403)
+    const r = await call('kb-admin', 'PUT', `${BASE}/broker/settings`, { internalHosts: ['CRM.example.com'] })
+    expect(r.json.data.settings).toMatchObject({ internalHosts: ['crm.example.com'], memberKeysAllowed: false })
+    expect(r.json.data.history[0].change).toEqual({ action: 'settings', before: { memberKeysAllowed: false, internalHosts: [] }, after: { memberKeysAllowed: false, internalHosts: ['crm.example.com'] } })
+    expect(services.keyBroker.internalHosts(CO)).toEqual(['crm.example.com'])
+  })
+
   it('disable and delete are recorded', async () => {
     const id = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys[0].id
     const d = await call('kb-owner', 'PATCH', `${BASE}/broker/keys/${id}`, { status: 'disabled' })

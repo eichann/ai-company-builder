@@ -28,8 +28,10 @@ import { companyFileViews } from './adapters/company-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
-import { BROKER_KEK_FILE, BROKER_TOKEN_TTL_MINUTES, DATA_DIR } from './lib/config'
+import { httpsUpstream } from './adapters/upstream-https'
+import { BROKER_KEK_FILE, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
+import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
@@ -43,6 +45,7 @@ import { createBrokerVault } from './services/broker-vault'
 import { createKeyBrokerService } from './services/key-broker'
 import { createBrokerTokenService } from './services/broker-tokens'
 import { createOwnBrokerKeyService } from './services/own-broker-keys'
+import { createBrokerRelay } from './services/broker-relay'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -56,7 +59,12 @@ export function brokerCipherFromEnv(): BrokerCipherState {
   return { enabled: true, cipher }
 }
 
-export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv()) {
+export interface ServiceOptions {
+  /** The relay's way out (tests: a fake upstream). */
+  upstream?: UpstreamClient
+}
+
+export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
   const repos = {
     companies: sqliteCompanyRepository(conn),
     memberships: sqliteMembershipRepository(conn),
@@ -84,6 +92,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
   const keyBroker = createKeyBrokerService({ ...repos, ...shared, brokerVault })
+  const brokerTokens = createBrokerTokenService({
+    ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
+  })
 
   return {
     access: createAccessPolicy(repos.memberships),
@@ -102,8 +113,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentSandbox: createAgentSandboxService({ ...repos, ...shared }),
     brokerVault,
     keyBroker,
-    brokerTokens: createBrokerTokenService({
-      ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
+    brokerTokens,
+    brokerRelay: createBrokerRelay({
+      brokerTokens,
+      brokerVault,
+      keyBroker,
+      upstream: options.upstream ?? httpsUpstream(),
+      maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
+      headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     companyFiles: companyFileViews(conn),

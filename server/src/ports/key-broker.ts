@@ -83,6 +83,8 @@ export interface StoredBrokerService {
 
 export interface StoredBrokerSettings {
   memberKeysAllowed: boolean
+  /** JSON array of hosts allowed to resolve to private addresses (the relay's exception). */
+  internalHosts: string
   updatedAt: string
   updatedBy: string
 }

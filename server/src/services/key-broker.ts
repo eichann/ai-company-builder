@@ -32,6 +32,7 @@ import {
   parseBrokerDestinations,
   parseBrokerDisplayName,
   parseOwnKeyHosts,
+  parseInternalHosts,
   type BrokerAudience,
   type BrokerCaps,
   type BrokerDestinations,
@@ -198,7 +199,12 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const status = brokerVault.status()
     return {
       status: { enabled: status.enabled, reason: status.enabled ? null : status.reason },
-      settings: { memberKeysAllowed: settings?.memberKeysAllowed ?? true, updatedAt: settings?.updatedAt ?? null, updatedBy: settings?.updatedBy ?? null },
+      settings: {
+        memberKeysAllowed: settings?.memberKeysAllowed ?? true,
+        internalHosts: settings ? parseJson<string[]>(settings.internalHosts, []) : [],
+        updatedAt: settings?.updatedAt ?? null,
+        updatedBy: settings?.updatedBy ?? null,
+      },
       services,
       keys,
       departments: departments.listByCompany(companyId).map(d => ({ id: d.id, name: d.name, folder: d.folder })),
@@ -406,18 +412,39 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       return ok(view(member.companyId))
     },
 
-    /** PUT …/broker/settings { memberKeysAllowed } */
+    /** PUT …/broker/settings { memberKeysAllowed?, internalHosts? } (at least one) */
     setSettings(member: Member, body: unknown): Outcome<BrokerView> {
       const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
       if (!allowed.ok) return allowed
-      if (!isObject(body) || typeof body.memberKeysAllowed !== 'boolean') return refuse('bad-request', 'memberKeysAllowed must be true or false')
-      const before = brokerKeys.settings(member.companyId)?.memberKeysAllowed ?? true
-      if (before !== body.memberKeysAllowed) {
+      if (!isObject(body) || (body.memberKeysAllowed === undefined && body.internalHosts === undefined)) {
+        return refuse('bad-request', 'memberKeysAllowed must be true or false')
+      }
+      if (body.memberKeysAllowed !== undefined && typeof body.memberKeysAllowed !== 'boolean') return refuse('bad-request', 'memberKeysAllowed must be true or false')
+      const hosts = body.internalHosts === undefined ? null : parseInternalHosts(body.internalHosts)
+      if (hosts && 'error' in hosts) return refuse('bad-request', hosts.error)
+      const stored = brokerKeys.settings(member.companyId)
+      const before = { memberKeysAllowed: stored?.memberKeysAllowed ?? true, internalHosts: stored ? parseJson<string[]>(stored.internalHosts, []) : [] }
+      const after = {
+        memberKeysAllowed: typeof body.memberKeysAllowed === 'boolean' ? body.memberKeysAllowed : before.memberKeysAllowed,
+        internalHosts: hosts ? hosts.value : before.internalHosts,
+      }
+      if (!same(before, after)) {
         const at = clock.now()
-        brokerKeys.saveSettings(member.companyId, { memberKeysAllowed: body.memberKeysAllowed, updatedAt: at, updatedBy: member.userId },
-          changeRow(member, at, null, { action: 'settings', before: { memberKeysAllowed: before }, after: { memberKeysAllowed: body.memberKeysAllowed } }))
+        const hostsChanged = !same(before.internalHosts, after.internalHosts)
+        brokerKeys.saveSettings(member.companyId, { memberKeysAllowed: after.memberKeysAllowed, internalHosts: JSON.stringify(after.internalHosts), updatedAt: at, updatedBy: member.userId },
+          changeRow(member, at, null, {
+            action: 'settings',
+            before: { memberKeysAllowed: before.memberKeysAllowed, ...(hostsChanged ? { internalHosts: before.internalHosts } : {}) },
+            after: { memberKeysAllowed: after.memberKeysAllowed, ...(hostsChanged ? { internalHosts: after.internalHosts } : {}) },
+          }))
       }
       return ok(view(member.companyId))
+    },
+
+    /** Hosts the relay may reach at private addresses (the company's explicit exception). */
+    internalHosts(companyId: string): string[] {
+      const stored = brokerKeys.settings(companyId)
+      return stored ? parseJson<string[]>(stored.internalHosts, []) : []
     },
 
     /** The service's decision rule and own-key hosts (defaults when unset) — for tokens and the relay. */

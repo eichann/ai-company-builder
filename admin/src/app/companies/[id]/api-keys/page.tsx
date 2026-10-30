@@ -4,7 +4,7 @@
 // the page shows the last four characters, never a value.
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { ClockCounterClockwise, Key, LockSimple, Plus, SlidersHorizontal, UserCircle, Warning } from '@phosphor-icons/react'
+import { ClockCounterClockwise, Key, LockSimple, Plus, ShieldWarning, SlidersHorizontal, UserCircle, Warning } from '@phosphor-icons/react'
 
 import { KeyForm, createBody, type KeyFormValues } from '@/components/key-broker/key-form'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -14,6 +14,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import {
   companiesApi,
   keyBrokerApi,
@@ -210,6 +211,11 @@ export default function ApiKeysPage() {
           </Card>
 
           <ServicesCard view={data} busy={busy} onSave={(s, setting) => run('サービスの設定を保存しました', () => keyBrokerApi.setService(companyId, s, setting))} />
+          <InternalHostsCard
+            hosts={data.settings.internalHosts}
+            busy={busy}
+            onSave={(hosts) => run('社内の宛先の例外を保存しました', () => keyBrokerApi.setInternalHosts(companyId, hosts))}
+          />
           <HistoryCard view={data} names={names} />
         </div>
       ) : null}
@@ -444,6 +450,33 @@ function ServiceRow({ s, busy, onSave }: { s: BrokerServiceView; busy: boolean; 
         保存
       </Button>
     </li>
+  )
+}
+
+/** The relay refuses internal addresses; an admin may name in-house hosts as an exception. */
+function InternalHostsCard({ hosts, busy, onSave }: { hosts: string[]; busy: boolean; onSave: (hosts: string[]) => void }) {
+  const [text, setText] = useState(hosts.join('\n'))
+  const bad = invalidHosts(text)
+  const changed = hostsOf(text).join('\n') !== hosts.join('\n')
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <ShieldWarning size={16} />
+          社内の宛先（例外）
+        </CardTitle>
+        <CardDescription>
+          AI 経由の送信は、社内・家庭内のアドレス（127.0.0.1、10.x、192.168.x、169.254.x など）を指す宛先には送りません。社内のシステムに送る必要があるときだけ、そのホスト名をここに書いてください。変更は履歴に残ります。
+        </CardDescription>
+      </CardHeader>
+      <div className="space-y-2 border-t px-5 py-3">
+        <Textarea aria-label="社内の宛先として許可するホスト" className="min-h-16 font-mono" placeholder="例: crm.example.co.jp" value={text} onChange={(e) => setText(e.target.value)} />
+        {bad.length > 0 && <p role="alert" className="text-sm text-destructive">使えない書き方があります: {bad.join('、')}（ホスト名だけを書きます。IP アドレスは書けません）</p>}
+        <Button size="sm" variant="outline" disabled={busy || bad.length > 0 || !changed} onClick={() => onSave(hostsOf(text))}>
+          保存
+        </Button>
+      </div>
+    </Card>
   )
 }
 

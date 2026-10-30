@@ -816,4 +816,7 @@ export const keyBrokerApi = {
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}`, { method: 'PUT', body: setting }),
   setMemberKeysAllowed: (companyId: string, memberKeysAllowed: boolean) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { memberKeysAllowed } }),
+  /** The relay's exception: hosts allowed to resolve to an internal address. */
+  setInternalHosts: (companyId: string, internalHosts: string[]) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { internalHosts } }),
 }
