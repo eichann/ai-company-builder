@@ -8,6 +8,9 @@ import { compareBuilds, formatBuild, formatRelative, latest, parseBuild, parseSe
 import { safeRedirect } from '@/lib/redirect'
 import { explainRejection } from '@/lib/rejections'
 import { members } from './fixtures'
+// The server's parser and order (server/src/lib/client-version.ts re-exports
+// these; the admin image has no server/ to import from).
+import { compareClientVersions, parseClientVersion } from '../../shared/core/client-version'
 
 describe('dates', () => {
   it('reads SQLite datetime() values as UTC', () => {
@@ -40,18 +43,22 @@ describe('client builds', () => {
     expect(formatBuild(null, 'weird')).toBe('weird')
   })
 
-  it('parses raw versions like the server', () => {
-    expect(parseBuild('0.0.1+95346af.20261021031200')).toEqual({ semver: '0.0.1', sha: '95346af', commitDate: '20261021031200', dev: false })
-    expect(parseBuild('0.0.1-dev+nogit.00000000000000')).toEqual({ semver: '0.0.1-dev', sha: null, commitDate: null, dev: true })
-    expect(parseBuild(null)).toBeNull()
-  })
-
-  it('orders builds: core, then release over pre-release, then commit date', () => {
-    const b = (semver: string, commitDate: string | null) => ({ semver, sha: null, commitDate, dev: semver.includes('dev') })
-    expect(compareBuilds(b('0.0.2', '20260101000000'), b('0.0.1', '20261231000000'))).toBe(1)
-    expect(compareBuilds(b('0.0.1-dev', '20261231000000'), b('0.0.1', '20260101000000'))).toBe(-1)
-    expect(compareBuilds(b('0.0.1', '20261001000000'), b('0.0.1', '20261021000000'))).toBe(-1)
-    expect(compareBuilds(b('0.0.1', '20261021000000'), b('0.0.1', '20261021000000'))).toBe(0)
+  // The members page marks "outdated" with compareBuilds over the parsed
+  // builds the API sends; the server's gates rank the raw versions. Same order.
+  it('ranks the builds the API sends exactly as the server ranks the raw versions', () => {
+    const raws = [
+      '0.0.1+95346af.20261021031200', '0.0.1+95346af.20261022000000', '0.0.1-dev+95346af.20261231000000',
+      '0.0.1-dev.2+aaaaaaa.20261021031200', '0.0.1-alpha+aaaaaaa.20261021031200', '0.0.1-1+aaaaaaa.20261021031200',
+      '0.0.1+nogit.00000000000000', '0.0.2+bbbbbbb.20250101000000', '0.1.0', '1.0.0-rc.1+ccccccc.20261021031200',
+      '0.0.10+ddddddd.20240101000000',
+    ]
+    for (const a of raws) {
+      for (const b of raws) {
+        const server = Math.sign(compareClientVersions(parseClientVersion(a)!, parseClientVersion(b)!))
+        expect(Math.sign(compareBuilds(parseBuild(a)!, parseBuild(b)!)), `${a} vs ${b}`).toBe(server)
+      }
+    }
+    expect(parseBuild('not a version')).toBeNull()
   })
 })
 
@@ -137,7 +144,7 @@ describe('per-place edit choice', () => {
     expect(sameDraft({ mode: 'everyone', editors: [tanaka] }, { mode: 'everyone', editors: [] })).toBe(true)
   })
 
-  it('previews access like the server and finds who loses edit', () => {
+  it('the preview decides edit by the server rule (owner/admin always, user rule beats role) and finds who loses edit', () => {
     const open = previewAccess(members, [rule('everyone', null, true)], '')
     const only = previewAccess(members, rulesFromDraft({ mode: 'specific', editors: [] }), '営業部')
     expect(only.find((m) => m.userId === 'u_owner')).toMatchObject({ write: true, reason: 'role' })
@@ -145,6 +152,12 @@ describe('per-place edit choice', () => {
     expect(losingEdit(open, only).map((m) => m.userId)).toEqual(['u_member'])
     const userBeatsRole = previewAccess(members, [rule('everyone', null, false), rule('role', 'member', true), rule('user', 'u_member', false)], '')
     expect(userBeatsRole.find((m) => m.userId === 'u_member')?.write).toBe(false)
+    // A rule the server stored as "no read" (a private folder's everyone rule)
+    // previews as no access, as GET /permissions/effective reports it.
+    const others = [...members, { ...members[2], id: 'm4', userId: 'u_other', email: 'other@example.com', name: '山田 次郎' }]
+    const closed = previewAccess(others, [{ ...rule('everyone', null, false), canRead: false }, rule('user', 'u_member', true)], '秘密')
+    expect(closed.find((m) => m.userId === 'u_member')).toMatchObject({ read: true, write: true })
+    expect(closed.find((m) => m.userId === 'u_other')).toMatchObject({ read: false, write: false, reason: 'no-rule' })
   })
 
   it('describes a rule set in one line', () => {
