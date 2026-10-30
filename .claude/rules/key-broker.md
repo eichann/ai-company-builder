@@ -249,6 +249,13 @@ who uses it).
   `ACB_BAD_PATH`), plus everything the built-in relay drops. The key goes only in the configured
   header (`relayCredentialValue`); response headers holding the key or the token are dropped,
   error bodies have both `[hidden]`.
+- Admin page: card 「登録したサービス」 (`admin/src/components/key-broker/relay-services.tsx`):
+  register / change (label, ベース URL, 鍵の渡し方: `Authorization: Bearer` / `X-API-Key` / その他
+  = header + `{key}` format, 種類 for a new one) / delete (disabled while keys exist), with the
+  script variable names (`brokerServiceEnvNames`); drafts checked by `relayDraftErrors`
+  (`admin/src/lib/key-broker.ts`, the core's rules, Japanese sentences). In the key form a
+  generic service's host is read-only and the POST carries only that host. History lines for
+  `relay-service` in `brokerChangeLines`.
 - Records (`broker:<id>`), stop, caps, private-address refusal with the `internalHosts`
   exception, size / time limits and log redaction are the built-in relay's. Token counts are not
   read from a generic service's answers (`UsageScanner` is for the AI providers), so only request
@@ -392,5 +399,6 @@ value in any answer, error, log line or table**), `client/tests/ipc-app.test.ts`
 no part of the key even when the server quotes it; nothing logged), `client/src/features/settings/own-keys.test.ts`
 (the page never promises a key the server would not use), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
 sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
-off message). Tests use
+off message; a generic service is saved only with https to one exact host and a safe header,
+and its keys go only there). Tests use
 obviously fake values (`fake-test-key-NOT-REAL…`) and KEKs made in temp dirs.

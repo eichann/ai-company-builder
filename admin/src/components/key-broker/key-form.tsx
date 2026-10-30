@@ -60,7 +60,9 @@ export function KeyForm({
   const [serviceChoice, setServiceChoice] = useState(editing ? editing.service : services[0]?.service ?? OTHER)
   const [customService, setCustomService] = useState('')
   const service = serviceChoice === OTHER ? customService.trim() : serviceChoice
-  const builtin = services.find((s) => s.service === service && s.builtin)
+  const builtin = services.find((s) => s.service === service && (s.builtin || s.relay))
+  /** A registered service (K9): its keys go to its one host, nowhere else. */
+  const relay = services.find((s) => s.service === service)?.relay ?? null
   const [displayName, setDisplayName] = useState(editing?.displayName ?? '')
   const [secret, setSecret] = useState('')
   const [hosts, setHosts] = useState((editing?.destinations.hosts ?? builtin?.defaultHosts ?? []).join('\n'))
@@ -82,7 +84,7 @@ export function KeyForm({
 
   const chooseService = (value: string) => {
     setServiceChoice(value)
-    const s = services.find((x) => x.service === value && x.builtin)
+    const s = services.find((x) => x.service === value && (x.builtin || x.relay))
     if (!editing && s) setHosts(s.defaultHosts.join('\n'))
   }
 
@@ -91,9 +93,9 @@ export function KeyForm({
   if (service && !isValidBrokerServiceName(service)) errors.push('サービス名は半角の小文字・数字・「-」「_」で書いてください')
   const secretCheck = editing || !secret ? null : checkBrokerSecret(secret)
   if (secretCheck && 'error' in secretCheck) errors.push('キーは8文字以上、空白なしで貼り付けてください')
-  const badHosts = invalidHosts(hosts)
+  const badHosts = invalidHosts(relay ? relay.host : hosts)
   if (badHosts.length) errors.push(`送り先に使えない書き方があります: ${badHosts.join('、')}（「*」・IP アドレス・localhost・https:// やパスは書けません）`)
-  const missing = !service || !displayName.trim() || (!editing && !secret.trim()) || hostsOf(hosts).length === 0
+  const missing = !service || !displayName.trim() || (!editing && !secret.trim()) || hostsOf(relay ? relay.host : hosts).length === 0
     || (!allDepartments && departmentIds.length === 0)
   const badPaths = invalidPathPrefixes(paths)
   if (badPaths.length) errors.push(`パスに使えない書き方があります: ${badPaths.join('、')}`)
@@ -109,7 +111,7 @@ export function KeyForm({
       service,
       displayName: displayName.trim(),
       secret: secret.trim(),
-      destinations: { hosts: hostsOf(hosts), pathPrefixes: pathPrefixesOf(paths), models: modelsOf(models) },
+      destinations: { hosts: relay ? [relay.host] : hostsOf(hosts), pathPrefixes: pathPrefixesOf(paths), models: modelsOf(models) },
       audience: {
         allDepartments,
         departmentIds: allDepartments ? [] : departmentIds,
@@ -176,8 +178,12 @@ export function KeyForm({
 
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-medium">送ってよい宛先</legend>
-        <Textarea aria-label="送ってよいホスト" className="min-h-16 font-mono" value={hosts} onChange={(e) => setHosts(e.target.value)} />
-        <p className="text-xs text-muted-foreground">1行に1つ、ホスト名をそのまま書きます（例: generativelanguage.googleapis.com）。</p>
+        <Textarea aria-label="送ってよいホスト" className="min-h-16 font-mono" readOnly={!!relay} value={relay ? relay.host : hosts} onChange={(e) => setHosts(e.target.value)} />
+        <p className="text-xs text-muted-foreground">
+          {relay
+            ? `このサービスの送り先は、登録したときの ${relay.host} に決まっています（「登録したサービス」で変えられます）。`
+            : '1行に1つ、ホスト名をそのまま書きます（例: generativelanguage.googleapis.com）。'}
+        </p>
         <div className="grid gap-2 sm:grid-cols-2">
           <Textarea aria-label="使ってよいパス" placeholder="パスを絞る場合（例: /v1beta/models/）" className="min-h-16 font-mono" value={paths} onChange={(e) => setPaths(e.target.value)} />
           <Textarea aria-label="使ってよいモデル" placeholder="モデルを絞る場合（例: gemini-2.5-flash）" className="min-h-16 font-mono" value={models} onChange={(e) => setModels(e.target.value)} />

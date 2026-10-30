@@ -6,7 +6,12 @@ import {
   normalizeBrokerHost,
   normalizeBrokerModel,
   normalizeBrokerPathPrefix,
+  normalizeRelayFormat,
+  normalizeRelayHeaderName,
+  parseBrokerDisplayName,
+  parseRelayBaseUrl,
   relayBaseUrl,
+  isValidRelayServiceId,
   upgradeBrokerAudience,
   type BrokerAudience,
   type BrokerCaps,
@@ -15,7 +20,17 @@ import {
   type BrokerServiceCategory,
   type BrokerStatusReason,
 } from '../../../shared/core/key-broker'
-export { checkBrokerSecret, isValidBrokerServiceName } from '../../../shared/core/key-broker'
+export {
+  BROKER_KEY_SLOT,
+  brokerServiceEnvNames,
+  checkBrokerSecret,
+  isValidBrokerServiceName,
+  isValidRelayServiceId,
+  normalizeRelayFormat,
+  normalizeRelayHeaderName,
+  parseRelayBaseUrl,
+  relayBaseUrl,
+} from '../../../shared/core/key-broker'
 import type { BrokerChangeDetail, BrokerKeySnapshot } from '../../../shared/types/key-broker'
 
 export const CATEGORY_LABELS: Record<BrokerServiceCategory, string> = {
@@ -167,3 +182,35 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
     }
   }
 }
+
+/** A generic service being typed in the admin's form (K9). */
+export interface RelayDraft {
+  service: string
+  label: string
+  baseUrl: string
+  header: string
+  format: string
+}
+
+/**
+ * What is written wrongly in a generic-service draft, in plain Japanese (the
+ * server applies the same rules: shared/core). Empty = it can be saved.
+ */
+export function relayDraftErrors(d: RelayDraft, opts: { existing: boolean }): string[] {
+  const errors: string[] = []
+  if (!opts.existing && d.service && !isValidRelayServiceId(d.service)) {
+    errors.push('サービス名は半角の英小文字と数字で、言葉の区切りは「-」です（例: crm、case-master）。gemini・openai・anthropic は使えません。')
+  }
+  if (d.label && 'error' in parseBrokerDisplayName(d.label)) errors.push('表示名は80文字までで書いてください。')
+  if (d.baseUrl && 'error' in parseRelayBaseUrl(d.baseUrl)) {
+    errors.push('送り先は https:// で始まる住所で書きます（例: https://api.example.com/v2）。http・ポート番号・IP アドレス・localhost・社内向けの名前（.local / .internal）・? 以降は書けません。')
+  }
+  if (d.header && !normalizeRelayHeaderName(d.header)) {
+    errors.push('鍵を入れるヘッダの名前に使えない書き方です（Host・Cookie・Content-…・X-Forwarded-… などは使えません）。')
+  }
+  if (d.format && !normalizeRelayFormat(d.format)) errors.push('値の形には {key} をちょうど1つ入れます（例: Bearer {key}）。半角の文字だけが使えます。')
+  return errors
+}
+
+/** The draft is complete (every field filled). */
+export const relayDraftComplete = (d: RelayDraft) => !!(d.service && d.label.trim() && d.baseUrl.trim() && d.header.trim() && d.format.trim())

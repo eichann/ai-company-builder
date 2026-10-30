@@ -500,6 +500,16 @@ export function readBrokerRelayDefinition(input: unknown): BrokerRelayDefinition
   return 'error' in parsed ? null : parsed.value
 }
 
+/**
+ * The variables a script reads for a service in the app (K6/K9):
+ * `ACB_<SERVICE>_API_KEY` (the token) and `ACB_<SERVICE>_BASE_URL` (the relay),
+ * the service upper-cased with anything else than A–Z / 0–9 as `_`.
+ */
+export function brokerServiceEnvNames(service: string): { key: string; baseUrl: string } {
+  const name = service.toUpperCase().replace(/[^A-Z0-9]/g, '_')
+  return { key: `ACB_${name}_API_KEY`, baseUrl: `ACB_${name}_BASE_URL` }
+}
+
 /** The header value sent upstream: the format with the key in its slot. */
 export function relayCredentialValue(format: string, secret: string): string {
   const [before, after] = format.split(BROKER_KEY_SLOT)

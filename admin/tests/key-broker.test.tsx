@@ -1,8 +1,10 @@
 // 「API キー」 (the key broker's admin page): who sees it, that a key's value is
 // sent once and never shown, that editing never sends a value, that a
 // destination which is not an exact host cannot be saved, that the two dials
-// (which departments' work, which people) reach the request as chosen, and
-// what the page says when the server has no key-encryption key.
+// (which departments' work, which people) reach the request as chosen, that
+// a generic service (K9) is saved only with https to one exact host and a
+// safe header, its keys going only there, and what the page says when the
+// server has no key-encryption key.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
@@ -138,6 +140,69 @@ describe('API キー', () => {
     expect(within(dialog).getByRole('alert')).toHaveTextContent('*.googleapis.com')
     expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
     expect(calls.some((c) => c.method === 'POST')).toBe(false)
+  })
+
+  it('a generic service (K9) cannot be saved with an address that is not https to one exact public host', async () => {
+    const calls = stubApi(ownerCapabilities)
+    renderInCompany(<ApiKeysPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'サービスを登録' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('サービス名（英字）'), 'crm')
+    await userEvent.type(within(dialog).getByLabelText('表示名'), '顧客管理')
+    const url = within(dialog).getByLabelText('送り先（ベース URL）')
+    for (const bad of ['http://api.crm.example.com', 'https://10.0.0.5', 'https://api.crm.example.com:8443', 'https://crm.internal']) {
+      await userEvent.clear(url)
+      await userEvent.type(url, bad)
+      expect(within(dialog).getByRole('alert'), bad).toHaveTextContent('https://')
+      expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
+    }
+    // A header that would let the key frame or route the request.
+    await userEvent.clear(url)
+    await userEvent.type(url, 'https://api.crm.example.com/v2')
+    await userEvent.selectOptions(within(dialog).getByLabelText('鍵の渡し方'), 'custom')
+    await userEvent.type(within(dialog).getByLabelText('鍵を入れるヘッダの名前'), 'Host')
+    expect(within(dialog).getByRole('alert')).toHaveTextContent('ヘッダ')
+    expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
+  })
+
+  it('a generic service is registered with its destination and header, and its keys can go only to that host', async () => {
+    const crm = {
+      service: 'crm', label: '顧客管理', builtin: false, category: 'system' as const, rule: 'company-only' as const, ownKeyHosts: [], defaultHosts: ['api.crm.example.com'],
+      companyKeys: 0, userKeys: 0, updatedAt: '2026-10-30T00:00:00.000Z',
+      relay: { label: '顧客管理', host: 'api.crm.example.com', basePath: '/v2', header: 'authorization', format: 'Bearer {key}' },
+    }
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/broker/relay-services/crm`]: () => ({ body: ok({ ...view, services: [...services, crm] }) }),
+      [`POST ${base}/broker/keys`]: () => ({ body: ok({ ...view, services: [...services, crm] }) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'サービスを登録' }))
+    let dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('サービス名（英字）'), 'crm')
+    await userEvent.type(within(dialog).getByLabelText('表示名'), '顧客管理')
+    await userEvent.clear(within(dialog).getByLabelText('送り先（ベース URL）'))
+    await userEvent.type(within(dialog).getByLabelText('送り先（ベース URL）'), 'https://api.crm.example.com/v2')
+    await userEvent.selectOptions(within(dialog).getByLabelText('種類'), 'system')
+    await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    expect(calls.find((c) => c.method === 'PUT')!.body).toEqual({
+      label: '顧客管理', baseUrl: 'https://api.crm.example.com/v2', header: 'authorization', format: 'Bearer {key}', category: 'system',
+    })
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    // The names a script reads in the app.
+    expect(await screen.findByText('ACB_CRM_BASE_URL・ACB_CRM_API_KEY')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: 'API キーを登録' }))
+    dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByLabelText('サービス'), 'crm')
+    const hosts = within(dialog).getByRole('textbox', { name: '送ってよいホスト' })
+    expect(hosts).toHaveAttribute('readonly')
+    await userEvent.type(within(dialog).getByLabelText('名前'), 'CRM')
+    await userEvent.type(within(dialog).getByLabelText('キー'), FAKE)
+    await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ service: 'crm', destinations: { hosts: ['api.crm.example.com'] } })
   })
 
   it('without a key-encryption key on the server: says so and offers no registration', async () => {
