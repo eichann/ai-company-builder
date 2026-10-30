@@ -12,7 +12,11 @@ export function useEnvKeyMove(companyId: string, rootPath: string, onMoved: () =
 
   useEffect(() => {
     let live = true
-    void listOwnKeys(companyId).then(r => { if (live) setData(r.success ? r.data : null) })
+    // Not reachable (an older main, offline): nothing is offered for moving.
+    void Promise.resolve()
+      .then(() => listOwnKeys(companyId))
+      .then(r => { if (live) setData(r?.success ? r.data : null) })
+      .catch(() => { if (live) setData(null) })
     return () => { live = false }
   }, [companyId])
 

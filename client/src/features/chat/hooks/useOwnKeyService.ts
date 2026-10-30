@@ -15,10 +15,11 @@ export function useOwnKeyService(companyId: string | undefined, service: string)
   useEffect(() => {
     if (!companyId) { setState({ kind: 'unknown' }); return }
     let live = true
-    void listOwnBrokerKeys(companyId)
+    void Promise.resolve()
+      .then(() => listOwnBrokerKeys(companyId))
       .then(r => {
         if (!live) return
-        setState(r.success ? { kind: 'known', enabled: r.data.enabled, service: r.data.services.find(s => s.service === service) ?? null } : { kind: 'unknown' })
+        setState(r?.success ? { kind: 'known', enabled: r.data.enabled, service: r.data.services.find(s => s.service === service) ?? null } : { kind: 'unknown' })
       })
       .catch(() => { if (live) setState({ kind: 'unknown' }) })
     return () => { live = false }

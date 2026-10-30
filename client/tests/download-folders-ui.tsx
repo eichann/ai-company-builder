@@ -56,6 +56,15 @@ const childrenOf = (p: string) => {
 }
 
 let excluded = ['営業部', 'コンテンツ/動画/2025年度']
+// The company .env on this computer (status only) and the member's own-key view on the server.
+const envVars: Record<string, { set: boolean; last4?: string }> = { ANTHROPIC_API_KEY: { set: true, last4: 'ab12' } }
+const ownKeys = {
+  enabled: true,
+  memberKeysAllowed: true,
+  services: [
+    { service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', rule: 'company-first', ownKey: { allowed: true, hosts: ['api.anthropic.com'] }, companyKeys: [], key: null },
+  ],
+}
 const progressListeners = new Set<(d: { repoPath: string; receivedBytes: number }) => void>()
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms))
 
@@ -90,7 +99,14 @@ const tree = (dir: string, depth: number, max: number): TreeNode[] =>
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
-    getEnvStatus: async () => ({ success: true, vars: { ANTHROPIC_API_KEY: { set: true, last4: 'ab12' } } }),
+    getEnvStatus: async () => ({ success: true, vars: { ...envVars } }),
+    listOwnBrokerKeys: async () => ({ success: true, data: ownKeys }),
+    // Main reads the value, sends it and removes it from the .env once the server kept it.
+    moveEnvKeyToServer: async (_companyId: string, _root: string, name: string) => {
+      ;((window as unknown as { __acbMoved: unknown[] }).__acbMoved ??= []).push(name)
+      delete envVars[name]
+      return { success: true, removed: true, data: { ...ownKeys, check: { service: 'anthropic', result: 'valid' } } }
+    },
     readFile: async () => '.backups/\n.env*\nnode_modules/\n',
     writeFile: async () => true,
     updateEnv: async (_root: string, changes: Record<string, string | null>) => {
