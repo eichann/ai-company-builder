@@ -316,7 +316,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
         onToggleSidebar={standalone ? undefined : onToggleSidebar}
         sidebarOpen={sidebarOpen}
         onShowSettings={onShowSettings}
-        onOpenInWindow={onOpenInWindow && currentSessionId ? () => onOpenInWindow(currentSessionId) : undefined}
+        onOpenInWindow={onOpenInWindow ? () => { if (currentSessionId) onOpenInWindow(currentSessionId) } : undefined}
         openInWindowBlocked={running || !!pendingApproval || !!currentInteraction}
       />
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isActive} />}
