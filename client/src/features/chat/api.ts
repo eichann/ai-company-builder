@@ -226,3 +226,10 @@ export function openFileInMainWindow(filePath: string, files: ChatWindowFiles = 
 export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFromChatWindow'>[0], files: ChatWindowFiles = window.electronAPI) {
   return files.onFileRequestedFromChatWindow(callback)
 }
+
+/** Asking the company server which services the member may use and their own keys (last 4 only): the chat's "no key" card. */
+export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
+
+export function listOwnBrokerKeys(companyId: string, reads: OwnKeyStatusReads = window.electronAPI) {
+  return reads.listOwnBrokerKeys(companyId)
+}

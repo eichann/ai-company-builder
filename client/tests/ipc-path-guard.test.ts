@@ -50,6 +50,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'editor:backupBeforeOverwrite': { args: [IN, IN_FILE], paths: [0, 1] },
   'env:status': { args: [IN], paths: [0] },
   'env:update': { args: [IN, { A: '1' }], paths: [0] },
+  'brokerKeys:moveFromEnv': { args: ['co', IN, 'OPENAI_API_KEY'], paths: [1] },
   'privateFolders:reservedPathRefusal': { args: [IN_FILE], paths: [0] },
   'git:sync': { args: [IN, 'co', 'msg'], paths: [0] },
   'git:autoSync': { args: [IN, 'co', 'receive', { unsavedEdits: false, needsMember: false, offline: false }], paths: [0] },

@@ -85,6 +85,8 @@ export function AppShell() {
   const searchInputRef = useRef<HTMLInputElement>(null)
   const [showFileSearch, setShowFileSearch] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  // Settings opened on 「自分の鍵」 for one service (the chat's "no key" card); null = the usual first page.
+  const [settingsFocus, setSettingsFocus] = useState<{ service?: string; at: number } | null>(null)
   const [showBackupHistory, setShowBackupHistory] = useState(false)
 
   // The history panel follows the department only while shown (it runs git log).
@@ -159,6 +161,10 @@ export function AppShell() {
   useCommandHandler('file.search', () => setShowFileSearch(true))
   // Just typed in the chat: ⌘⇧C stays with the chat input instead of hiding it.
   useCommandHandler('layout.toggleChat', toggleChat, { acceptsKey: () => !isChatInputRecentlyActive() })
+  useCommandHandler('settings.openOwnKey', ({ service }) => {
+    setSettingsFocus({ service, at: Date.now() })
+    setShowSettings(true)
+  })
 
   const handleSelectDept = (id: string) => {
     selectDepartment(id)
@@ -327,7 +333,8 @@ export function AppShell() {
         onCloseFileSearch={() => setShowFileSearch(false)}
         onFileSearchSelect={handleFileSearchSelect}
         showSettings={showSettings}
-        onCloseSettings={() => { setShowSettings(false); sparseCheckout.refresh() }}
+        settingsFocus={settingsFocus}
+        onCloseSettings={() => { setShowSettings(false); setSettingsFocus(null); sparseCheckout.refresh() }}
         showBackupHistory={showBackupHistory}
         setShowBackupHistory={setShowBackupHistory}
       />

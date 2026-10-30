@@ -223,6 +223,11 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   ts/tsx/js/jsx, python, bash/sh/zsh, json, yaml, markdown, html/xml, css/scss, sql, diff, go,
   rust, java, kotlin, swift, c/cpp/csharp, ruby, php, powershell, toml, ini, docker, graphql);
   others render plain. This keeps the renderer bundle under its budget (2.48 MB → 1.97 MB).
+- A finished reply is searched once (not per streamed chunk) for the key broker's "no key" marker
+  (`features/chat/brokerKeyNeeds.ts`); each service found gets a 「<サービス> の鍵がありません」
+  card after the parts (`features/chat/components/BrokerKeyNeededCard.tsx`, `key-broker.md`
+  「自分の鍵」 is the one place for keys). Tool outputs are not stored in history, so a restored
+  conversation shows the card only when the AI's text kept the marker.
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.

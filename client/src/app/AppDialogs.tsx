@@ -24,6 +24,8 @@ interface Props {
   onCloseFileSearch: () => void
   onFileSearchSelect: (filePath: string) => void
   showSettings: boolean
+  /** Open settings on 「自分の鍵」 for this service (a new request remounts the panel). */
+  settingsFocus: { service?: string; at: number } | null
   onCloseSettings: () => void
   showBackupHistory: boolean
   setShowBackupHistory: Dispatch<SetStateAction<boolean>>
@@ -32,7 +34,7 @@ interface Props {
 /** What opens over the main screen: skill dialogs, Cmd+P, settings, backups, a skill's tool, the sync preview and notice. */
 export function AppDialogs(props: Props) {
   const { rootPath, departments, selectedDeptId, selectedDept, departmentFolder, unsyncedFolders, skillsTab, sync } = props
-  const { showFileSearch, onCloseFileSearch, onFileSearchSelect, showSettings, onCloseSettings, showBackupHistory, setShowBackupHistory } = props
+  const { showFileSearch, onCloseFileSearch, onFileSearchSelect, showSettings, settingsFocus, onCloseSettings, showBackupHistory, setShowBackupHistory } = props
   return (
     <>
         {/* New Skill Wizard Modal */}
@@ -69,7 +71,11 @@ export function AppDialogs(props: Props) {
 
         {/* Settings Panel Modal */}
         {showSettings && (
-          <SettingsPanel onClose={onCloseSettings} />
+          <SettingsPanel
+            key={settingsFocus?.at ?? 'settings'}
+            onClose={onCloseSettings}
+            {...(settingsFocus ? { initialTab: 'ownkeys' as const, focusService: settingsFocus.service } : {})}
+          />
         )}
 
         {/* Backup History Slide Over */}

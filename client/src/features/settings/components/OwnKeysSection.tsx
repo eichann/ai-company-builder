@@ -1,7 +1,7 @@
 // Settings → 「自分の鍵」: which services the AI may use, with which key, and
 // the member's own keys (register / replace / delete). A key is typed into a
 // password field, sent once and never shown again — only its last 4.
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, Card, SectionHeader } from '../../../components/settings/ui'
 import type { MyBrokerService } from '../../../../shared/broker-keys'
@@ -15,7 +15,7 @@ const TONE: Record<OwnKeyTone, string> = {
   none: 'bg-zinc-100 text-zinc-600 ring-zinc-200 dark:bg-white/[0.06] dark:text-zinc-300 dark:ring-white/10',
 }
 
-export function OwnKeysSection({ companyId }: { companyId: string }) {
+export function OwnKeysSection({ companyId, focusService }: { companyId: string; focusService?: string }) {
   const { data, error, loading, busy, save, remove } = useOwnKeys(companyId)
 
   return (
@@ -40,7 +40,7 @@ export function OwnKeysSection({ companyId }: { companyId: string }) {
           )}
           <Card className="divide-y divide-zinc-100 dark:divide-white/[0.06]">
             {data.services.map(s => (
-              <ServiceRow key={s.service} s={s} enabled={data.enabled} busy={busy === s.service} onSave={save} onRemove={remove} />
+              <ServiceRow key={s.service} s={s} enabled={data.enabled} busy={busy === s.service} focused={s.service === focusService} onSave={save} onRemove={remove} />
             ))}
           </Card>
         </>
@@ -49,31 +49,42 @@ export function OwnKeysSection({ companyId }: { companyId: string }) {
   )
 }
 
-function ServiceRow({ s, enabled, busy, onSave, onRemove }: {
+function ServiceRow({ s, enabled, busy, focused, onSave, onRemove }: {
   s: MyBrokerService
   enabled: boolean
   busy: boolean
-  onSave: (service: string, secret: string, displayName?: string) => Promise<string | null>
+  /** Opened from the chat's "no key" card for this service: shown, and its form open when one can register. */
+  focused: boolean
+  onSave: (service: string, secret: string, displayName?: string) => Promise<{ error: string } | { checked: string | null }>
   onRemove: (service: string) => Promise<string | null>
 }) {
   const row = ownKeyRow(s)
-  const [open, setOpen] = useState(false)
+  const [open, setOpen] = useState(focused && enabled && row.canRegister)
   const [secret, setSecret] = useState('')
   const [message, setMessage] = useState<string | null>(null)
+  const [checked, setChecked] = useState<string | null>(null)
+  const sectionRef = useRef<HTMLElement>(null)
   const inputId = `own-key-${s.service}`
+
+  useEffect(() => {
+    if (!focused) return
+    sectionRef.current?.scrollIntoView({ block: 'center' })
+    document.getElementById(inputId)?.focus()
+  }, [focused, inputId])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     if (!secret.trim()) return
-    const failed = await onSave(s.service, secret)
-    if (failed) { setMessage(failed); return }
+    const result = await onSave(s.service, secret)
+    if ('error' in result) { setMessage(result.error); setChecked(null); return }
     setSecret('')
     setOpen(false)
     setMessage(null)
+    setChecked(result.checked)
   }
 
   return (
-    <section className="space-y-2 p-5" aria-label={s.label}>
+    <section ref={sectionRef} className={`space-y-2 p-5 ${focused ? 'bg-indigo-50/60 dark:bg-indigo-500/[0.06]' : ''}`} aria-label={s.label}>
       <div className="flex flex-wrap items-center gap-2">
         <span className="text-[14px] font-medium">{s.label}</span>
         <span className={`rounded-md px-1.5 py-0.5 text-[11px] ring-1 ${TONE[row.tone]}`}>{row.status}</span>
@@ -84,7 +95,7 @@ function ServiceRow({ s, enabled, busy, onSave, onRemove }: {
             </Button>
           )}
           {s.key && (
-            <Button size="sm" variant="ghost" disabled={busy} onClick={async () => setMessage(await onRemove(s.service))}>
+            <Button size="sm" variant="ghost" disabled={busy} onClick={async () => { setChecked(null); setMessage(await onRemove(s.service)) }}>
               削除
             </Button>
           )}
@@ -103,6 +114,7 @@ function ServiceRow({ s, enabled, busy, onSave, onRemove }: {
         </form>
       )}
       {message && <p role="alert" className="text-[12px] text-red-600 dark:text-red-400">{message}</p>}
+      {checked && <p role="status" className="text-[12px] text-zinc-600 dark:text-zinc-300">{checked}</p>}
     </section>
   )
 }

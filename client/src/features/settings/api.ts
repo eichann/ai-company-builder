@@ -28,6 +28,12 @@ export type OwnKeyReads = ElectronPort<'listOwnBrokerKeys'>
 /** Sending one's own API key to the company server (once; it never comes back), or deleting it there. */
 export type OwnKeyOutbound = ElectronPort<'saveOwnBrokerKey' | 'deleteOwnBrokerKey'>
 
+/**
+ * Moving a key from the company .env to the company server as one's own key: main reads the
+ * value (never the renderer), sends it, and removes it from the .env only after the server kept it.
+ */
+export type EnvKeyMoveOutbound = ElectronPort<'moveEnvKeyToServer'>
+
 export function getGitBinaryStatus(reads: GitBinaryReads = window.electronAPI) {
   return reads.gitBinaryStatus()
 }
@@ -88,4 +94,9 @@ export function saveOwnKey(companyId: string, service: string, secret: string, d
 
 export function deleteOwnKey(companyId: string, service: string, outbound: OwnKeyOutbound = window.electronAPI) {
   return outbound.deleteOwnBrokerKey(companyId, service)
+}
+
+/** Sends the .env key `name` to the server as one's own key; the .env loses it only once the server kept it. */
+export function moveEnvKeyToServer(companyId: string, rootPath: string, name: string, outbound: EnvKeyMoveOutbound = window.electronAPI) {
+  return outbound.moveEnvKeyToServer(companyId, rootPath, name)
 }

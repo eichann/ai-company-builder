@@ -34,7 +34,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (git:preview, diffs, revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
   `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
-  the member's own API keys: `key-broker.md`), `download-choices`
+  the member's own API keys, and `brokerKeys:moveFromEnv`, which reads a `.env` key in main, sends
+  it and removes it locally only after the server kept it: `key-broker.md`), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;

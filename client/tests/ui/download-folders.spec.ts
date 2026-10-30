@@ -85,6 +85,19 @@ test.describe('settings', () => {
     expect(updates).toEqual([{ OPENAI_API_KEY: 'sk-FAKE-typed', ANTHROPIC_API_KEY: null }])
   })
 
+  test('APIキー（このPC）: says it is for older apps, and moves a built-in key to the server (last 4 only)', async ({ page }) => {
+    await openPreview(page, 'download-folders')
+    await page.getByRole('button', { name: 'APIキー' }).click()
+    await expect(page.getByText('古い版のアプリや、特別な場合のための画面です')).toBeVisible()
+    const row = page.getByRole('listitem', { name: 'Anthropic（Claude API）（ANTHROPIC_API_KEY）' })
+    await expect(row).toContainText('末尾 ab12')
+    await row.getByRole('button', { name: 'この鍵をサーバーに移す' }).click()
+    await expect(page.getByRole('status').filter({ hasText: 'サーバーに移し、この PC の .env から消しました。鍵が有効なことを確かめました。' })).toBeVisible()
+    expect(await page.evaluate(() => (window as unknown as { __acbMoved: unknown[] }).__acbMoved)).toEqual(['ANTHROPIC_API_KEY'])
+    // The .env no longer holds it: the page reads its state again.
+    await expect(page.getByRole('textbox', { name: 'Anthropic', exact: true })).not.toHaveAttribute('placeholder', /設定済み/)
+  })
+
   // The owner-approved defaults and that a choice survives a restart (stored on this PC).
   test('自動同期: receive on every 15 minutes and send off by default; turning send on keeps its times after a restart', async ({ page }) => {
     await openPreview(page, 'download-folders')
