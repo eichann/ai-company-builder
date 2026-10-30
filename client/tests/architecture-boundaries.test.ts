@@ -4,7 +4,8 @@
 // .claude/rules/ipc-and-main-process.md and chat-and-agents.md.
 //
 //   client/shared/            pure: imports only itself and the repository's
-//                             shared/ (no packages, no Node, no Electron)
+//                             shared/ (no packages, no Node, no Electron);
+//                             listed folders may use one listed package
 //   electron/features|services|ipc/
 //                             never import Electron (the shell injects it)
 //   electron/agents/          the agents; never import the shell, features,
@@ -80,10 +81,29 @@ function violations(files: string[], allowed: (t: string, file: string) => boole
   return out
 }
 
+/**
+ * Packages a client/shared folder may import, with the reason. Each must be
+ * pure JavaScript (no Node, DOM or Electron) and keep being used.
+ */
+const CLIENT_SHARED_PACKAGES: Record<string, { pkg: string; reason: string }> = {
+  'shared/commands/': {
+    pkg: 'zod',
+    reason: 'command arguments are zod objects, the schema language the app\'s AI tools already take (loopback-mcp ZodRawShape)',
+  },
+}
+
+const clientSharedMayImport = (t: string, file: string) =>
+  t.startsWith('shared/') || t.startsWith('../shared/')
+  || Object.entries(CLIENT_SHARED_PACKAGES).some(([dir, { pkg }]) => rel(file).startsWith(dir) && t === `pkg:${pkg}`)
+
 test('client/shared imports only itself and the repository shared/', () => {
   const files = sourceFiles(join(CLIENT, 'shared'))
   assert.ok(files.length > 0)
-  assert.deepEqual(violations(files, t => t.startsWith('shared/') || t.startsWith('../shared/')), [])
+  assert.deepEqual(violations(files, clientSharedMayImport), [])
+  const stale = Object.entries(CLIENT_SHARED_PACKAGES).filter(([dir, { pkg }]) =>
+    !files.some(f => rel(f).startsWith(dir) && importsOf(f).includes(pkg)))
+  assert.deepEqual(stale.map(([dir]) => dir), [], 'remove package exceptions that no longer occur')
+  assert.equal(clientSharedMayImport('pkg:zod', join(CLIENT, 'shared/agent.ts')), false, 'the exception is per folder (self-test)')
 })
 
 test('main-process features, services and ipc never import Electron', () => {

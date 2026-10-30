@@ -27,6 +27,7 @@ client/src/
     hooks/          data hooks several features use (write access, sparse checkout, departments)
     lib/            logic that belongs to no single feature (paths, file events, perf marks)
     ipc/            window.electronAPI's types (electron-api.ts) and the ports of shared parts
+    commands/       the renderer's command registry and shortcut dispatch (commands.md)
   stores/           app-wide state (appStore, authStore); feature state lives in its feature
   i18n/  types/
 ```
@@ -149,6 +150,10 @@ D7–D9, confirmed 2026-10-30).
 - **Extension UI stays isolated.** Extension screens will run in an isolated frame and get only
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into
   read / write / send-outside operations so permissions can be decided in one place.
+
+- **Commands (built, E1).** A feature that needs another feature's operation, or a shortcut,
+  goes through a named command (`runCommand('file.open', { path })`), not a new React context, a
+  store field or a window-wide key listener: `commands.md`.
 
 Add a left tab by registering a panel, and a pane by changing the layout tree; ask first before
 adding either for an extension (loading extensions is not built yet).
