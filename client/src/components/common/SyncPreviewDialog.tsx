@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CaretDown, CaretRight, Plus, PencilSimple, Minus, X, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
 import { DiffModal } from './DiffViewer'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 
 interface SyncPreviewDialogProps {
   isOpen: boolean
@@ -11,9 +12,22 @@ interface SyncPreviewDialogProps {
   isLoadingSummary?: boolean
   onRequestSummary?: () => void
   rootPath: string
-  onRevertFile?: (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<void>
+  /** Undo one change; answers why it was not undone (shown in the dialog), or null. */
+  onRevertFile?: (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => Promise<string | null>
   onSync?: (commitMessage?: string) => void
   isSyncing?: boolean
+  /** The 作業メモ: kept by the caller until a sync succeeds, so a failed sync does not lose it. */
+  commitMessage: string
+  onCommitMessageChange: (message: string) => void
+}
+
+type FileStatus = 'added' | 'modified' | 'deleted'
+
+/** What 「元に戻す」 will do to this file, in the member's words. */
+function revertConfirmMessage(displayName: string, status: FileStatus): string {
+  if (status === 'added') return `「${displayName}」は追加したファイルです。元に戻すと、このファイルは削除されます。\n今の内容は .backups に保存します。`
+  if (status === 'modified') return `「${displayName}」を最後に同期したときの内容に戻します。\n今の内容は .backups に保存します。`
+  return `削除した「${displayName}」を、最後に同期したときの内容で戻します。`
 }
 
 const COLLAPSE_THRESHOLD = 20
@@ -116,23 +130,26 @@ export function SyncPreviewDialog({
   onRevertFile,
   onSync,
   isSyncing,
+  commitMessage,
+  onCommitMessageChange: setCommitMessage,
 }: SyncPreviewDialogProps) {
   const [revertingFiles, setRevertingFiles] = useState<Set<string>>(new Set())
-  const [commitMessage, setCommitMessage] = useState('')
-  const [commitBoxExpanded, setCommitBoxExpanded] = useState(false)
+  const [revertAsk, setRevertAsk] = useState<{ filePath: string; fileStatus: FileStatus } | null>(null)
+  const [revertError, setRevertError] = useState<string | null>(null)
+  const [commitBoxExpanded, setCommitBoxExpanded] = useState(!!commitMessage.trim())
 
   useEffect(() => {
     if (!isOpen) return
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'Escape') {
+      if (e.key === 'Escape' && !revertAsk) {
         onClose()
       }
     }
     document.addEventListener('keydown', handleKeyDown)
     return () => document.removeEventListener('keydown', handleKeyDown)
-  }, [isOpen, onClose])
+  }, [isOpen, onClose, revertAsk])
 
-  // Note: commit message is intentionally preserved across dialog open/close
+  // The commit message is kept by the caller across open/close and a failed sync.
 
   if (!isOpen) return null
 
@@ -149,15 +166,21 @@ export function SyncPreviewDialog({
   }
   const filteredTotalCount = filteredChanges.added.length + filteredChanges.modified.length + filteredChanges.deleted.length
 
-  const handleRevert = async (filePath: string, fileStatus: 'added' | 'modified' | 'deleted') => {
+  const handleRevert = (filePath: string, fileStatus: FileStatus) => {
     if (!onRevertFile) return
-    const displayName = filePath.split('/').pop() || filePath
-    const confirmed = window.confirm(`「${displayName}」の変更を元に戻しますか？この操作は取り消せません。`)
-    if (!confirmed) return
+    setRevertError(null)
+    setRevertAsk({ filePath, fileStatus })
+  }
 
+  const runRevert = async () => {
+    if (!onRevertFile || !revertAsk) return
+    const { filePath, fileStatus } = revertAsk
+    setRevertAsk(null)
     setRevertingFiles(prev => new Set(prev).add(filePath))
     try {
-      await onRevertFile(filePath, fileStatus)
+      setRevertError(await onRevertFile(filePath, fileStatus))
+    } catch {
+      setRevertError('元に戻せませんでした。もう一度試してください。')
     } finally {
       setRevertingFiles(prev => {
         const next = new Set(prev)
@@ -210,6 +233,12 @@ export function SyncPreviewDialog({
           </div>
         )}
 
+        {revertError && (
+          <p role="alert" className="mb-2 px-3 py-2 rounded-md bg-red-500/10 border border-red-500/30 text-xs text-red-500 dark:text-red-300">
+            {revertError}
+          </p>
+        )}
+
         {/* File list */}
         <div className="max-h-[50vh] overflow-auto space-y-1">
           <FileSection
@@ -254,7 +283,6 @@ export function SyncPreviewDialog({
                 if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !isSyncing) {
                   e.preventDefault()
                   onSync(commitMessage.trim() || undefined)
-                  setCommitMessage('')
                   setCommitBoxExpanded(false)
                 }
               }}
@@ -267,7 +295,7 @@ export function SyncPreviewDialog({
             />
             <p className="text-[10px] text-text-secondary/50 text-left">Enter で改行・⌘+Enterで同期</p>
             <button
-              onClick={() => { onSync(commitMessage.trim() || undefined); setCommitMessage(''); setCommitBoxExpanded(false) }}
+              onClick={() => { onSync(commitMessage.trim() || undefined); setCommitBoxExpanded(false) }}
               disabled={isSyncing}
               className="w-full flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium rounded-md bg-accent text-white hover:bg-accent/90 disabled:opacity-50 transition-colors"
             >
@@ -295,6 +323,19 @@ export function SyncPreviewDialog({
             閉じる
           </button>
         </div>
+      </div>
+
+      <div onClick={(e) => e.stopPropagation()}>
+        <ConfirmDialog
+          isOpen={revertAsk !== null}
+          title="変更を元に戻しますか？"
+          message={revertAsk ? revertConfirmMessage(revertAsk.filePath.split('/').pop() || revertAsk.filePath, revertAsk.fileStatus) : ''}
+          confirmText="元に戻す"
+          danger={revertAsk?.fileStatus === 'added'}
+          confirmOnEnter={false}
+          onConfirm={() => { void runRevert() }}
+          onCancel={() => setRevertAsk(null)}
+        />
       </div>
     </div>
   )

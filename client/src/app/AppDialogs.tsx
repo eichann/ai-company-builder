@@ -107,6 +107,8 @@ export function AppDialogs(props: Props) {
             onSync={(commitMessage) => { sync.setShowPreview(false); sync.handleSync(commitMessage) }}
             isSyncing={sync.isSyncing}
             onRevertFile={sync.handleRevertFile}
+            commitMessage={sync.commitMemo}
+            onCommitMessageChange={sync.setCommitMemo}
           />
         )}
 

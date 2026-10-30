@@ -3,14 +3,14 @@
 // port as the last parameter, defaulting to window.electronAPI.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 
-/** Reading on this computer: the skill list of a folder, a skill's files. */
-export type SkillReads = ElectronPort<'listSkills' | 'readFile'>
+/** Reading on this computer: the skill list of a folder, a skill's files, whether a folder name is taken. */
+export type SkillReads = ElectronPort<'listSkills' | 'readFile' | 'exists'>
 /** Running a skill's tool (a local dev server under `.claude/skills/<skill>/tools/`). */
 export type SkillToolRuns = ElectronPort<'startTool' | 'stopTool'>
 /** Leaving the app: opening a URL in the member's browser. */
 export type SkillOutbound = ElectronPort<'openExternal'>
 /** Making or changing a skill's files on this computer: new skill, copy, 育成中 mark. */
-export type SkillWrites = ElectronPort<'createDirectory' | 'writeFile' | 'copyItem' | 'toggleSkillNurturing'>
+export type SkillWrites = ElectronPort<'createDirectory' | 'createFile' | 'writeFile' | 'copyItem' | 'toggleSkillNurturing'>
 /**
  * Marking a skill private or shared (the company .gitignore): written on this
  * computer, but it decides whether the next sync sends the skill to everyone.
@@ -49,15 +49,25 @@ export function openInBrowser(url: string, outbound: SkillOutbound = window.elec
   return outbound.openExternal(url)
 }
 
+/** Something (a skill folder, a file) is already at `path` on this computer. */
+export function pathExists(path: string, reads: SkillReads = window.electronAPI) {
+  return reads.exists(path)
+}
+
 export function createSkillDirectory(dirPath: string, writes: SkillWrites = window.electronAPI) {
   return writes.createDirectory(dirPath)
+}
+
+/** A new file: never replaces one that exists (`code: 'name_taken'`). */
+export function createSkillFile(filePath: string, content: string, writes: SkillWrites = window.electronAPI) {
+  return writes.createFile(filePath, content)
 }
 
 export function writeSkillFile(filePath: string, content: string, writes: SkillWrites = window.electronAPI) {
   return writes.writeFile(filePath, content)
 }
 
-/** Copies a whole skill folder. */
+/** Copies a whole skill folder; never onto an existing one (`code: 'name_taken'`). */
 export function copySkill(sourcePath: string, destPath: string, writes: SkillWrites = window.electronAPI) {
   return writes.copyItem(sourcePath, destPath)
 }
@@ -66,7 +76,7 @@ export function setSkillNurturing(skillMdPath: string, makeNurturing: boolean, w
   return writes.toggleSkillNurturing(skillMdPath, makeNurturing)
 }
 
-/** Keeps the skill out of the next sync (`.gitignore`). */
+/** Keeps the skill out of the next sync (`.gitignore`); refused (`already_shared`) for a skill the company has. */
 export function makeSkillPrivate(rootPath: string, skillRelativePath: string, sharing: SkillSharingWrites = window.electronAPI) {
   return sharing.makeSkillPrivate(rootPath, skillRelativePath)
 }

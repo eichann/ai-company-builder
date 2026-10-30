@@ -38,18 +38,21 @@ export function useSkillsTab({ rootPath, departments, departmentFolder, departme
     if (folderName) void runCommand('chat.newConsultation', { message: `/${folderName} ` })
   }, [skills])
 
-  const create = useCallback(async (data: NewSkillInput) => {
-    const id = await createSkill(data)
-    if (!id) return
+  /** Answers why nothing was made (the dialog stays open and shows it), or null when done. */
+  const create = useCallback(async (data: NewSkillInput): Promise<string | null> => {
+    const result = await createSkill(data)
+    if ('error' in result) return result.error
     setWizardOpen(false)
-    setSelectedSkillId(id)
+    setSelectedSkillId(result.id)
+    return null
   }, [createSkill])
 
-  const copy = useCallback(async (sourceSkillPath: string, name: string, folderName: string) => {
-    const id = await copySkillHere(sourceSkillPath, name, folderName)
-    if (!id) return
+  const copy = useCallback(async (sourceSkillPath: string, name: string, folderName: string): Promise<string | null> => {
+    const result = await copySkillHere(sourceSkillPath, name, folderName)
+    if ('error' in result) return result.error
     setCopyOpen(false)
-    setSelectedSkillId(id)
+    setSelectedSkillId(result.id)
+    return null
   }, [copySkillHere])
 
   return {

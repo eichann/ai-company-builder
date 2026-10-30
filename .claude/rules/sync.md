@@ -18,6 +18,9 @@ paths:
   - "client/src/shared/lib/autoSyncSettings.ts"
   - "client/src/shared/lib/unsavedEdits.ts"
   - "client/src/features/settings/components/AutoSyncSettings.tsx"
+  - "client/electron/features/backups/**"
+  - "client/src/components/skill-ui/BackupHistorySlideOver.tsx"
+  - "client/tests/keep-work-ui.*"
 ---
 
 # Client sync (`git:sync`)
@@ -166,7 +169,8 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
 - `.backups/` (gitignored, local only): `<ts>/` conflict copies + `_metadata.json`
   (`conflictFiles`, `deletedConflictFiles`); `<ts>_protected/`, `_write_denied/`,
   `_outside_checkout/` (`folders`, `files`, `serverFiles`), `_reserved_path/` (+ `reasons`),
-  `_editor_overwrite/` (disk version an editor tab overwrote), `_nested_repo/` (reason
+  `_editor_overwrite/` (disk version an editor tab overwrote), `_before_restore/` (what a
+  復元 replaced), `_before_revert/` (the member's version 「元に戻す」 removed or replaced), `_nested_repo/` (reason
   `nested_repo_overwrite`, `repos`, `files`: this computer's version of files in a locally
   excluded nested repo that a teammate shared at the same path).
 - Private folders' backups live in `.git/acb-private-backups/` (`_private`, `_protected`,
@@ -174,6 +178,15 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
   are pruned at the start of each sync.
+- 復元 (`backup:restore`) and 「元に戻す」 (`git:revertFile`, added / modified) first keep the file
+  on disk with `features/backups/keep-current.ts` (the private backups for a private folder or a
+  nested repository); if that fails nothing changes
+  (「今の内容を .backups に保存できなかったため、復元しませんでした。何も変更していません。」 /
+  「…元に戻しませんでした。…」). 復元 is refused where every other write is (not downloaded, a
+  reserved name). Both ask in an in-app dialog first (Enter does not confirm) and show failures in
+  the panel / dialog; the preview's 作業メモ lives in `useSync` (`commitMemo`) and is cleared only by
+  a successful sync. Tests: `ipc-git.test.ts`, `tests/ui/keep-work.spec.ts`
+  (`keep-work-ui.html?view=preview|backups`).
 - The renderer reaches backups through `src/features/sync/api.ts`: `BackupReads` (list),
   `BackupWrites` (put a file back) and `BackupOutbound` (open the folder in Finder / Explorer:
   main hands it to another app, so it is a port of its own). The sync button uses

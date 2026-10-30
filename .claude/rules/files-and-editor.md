@@ -33,6 +33,10 @@ paths:
   - "client/tests/ui/editor-*.spec.ts"
   - "client/tests/ui/doc-review.spec.ts"
   - "client/tests/skills-refresh.test.ts"
+  - "client/shared/file-names.ts"
+  - "client/tests/file-names.test.ts"
+  - "client/tests/keep-work-ui.*"
+  - "client/tests/ui/keep-work.spec.ts"
 ---
 
 # File watching, file tree, editor, search
@@ -81,6 +85,20 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   drop: takes a file from anywhere on the computer), `ReservedNameOutbound` (the typed name goes to
   the server's `paths/check`), `FileDragOutbound` (Alt-drag hands a file to another app), plus the
   private-folder ports (`private-folders-client.md`).
+- **Nothing is replaced by accident** (owner, 2026-10-31: 新規ファイル with an existing name emptied
+  that file, a rename onto a taken name replaced it, and sync spread it). Main is the authority:
+  `fs:createFile` writes with `wx`; `fs:rename` / `fs:move` / `fs:moveFromExternal` / `fs:copy`
+  refuse a target that exists (`code: 'name_taken'`,
+  「同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。」,
+  `features/fs/file-guards.ts`), except the same entry under another spelling (a case-only
+  rename) and the review's temporary save file renamed over its own sidecar. `fs:writeFile` is
+  saving and replaces on purpose (editor, sidecars). The tree checks typed names first
+  (`client/shared/file-names.ts`: no `/ \ < > : " | ? *`, control characters, trailing space or
+  dot, Windows device names, `.git`, > 255 bytes) and keeps the dialog open with the reason
+  (`InputDialog` `error`); a multi-delete names what failed and keeps it selected. Tests:
+  `ipc-fs.test.ts` 「…never replaces what is already there…」, `file-names.test.ts`,
+  `file-tree.spec.ts`. Deletes still remove at once (moving them to the OS trash is an open
+  proposal to the owner).
 - UI test: `client/tests/ui/file-tree.spec.ts` on the preview `client/tests/file-tree-ui.html`
   (selection and ⌘/shift ranges, new file / rename / delete and their dialogs, the reserved-name
   and private-root refusals, internal moves and the private-edge confirm, Finder drops: free
@@ -109,6 +127,13 @@ The renderer reaches skills only through `src/features/skills/api.ts`: ports `Sk
 read a file), `SkillToolRuns` (start / stop a skill's tool), `SkillOutbound` (open the tool's
 page in the browser), `SkillWrites` (new skill, copy, 育成中) and `SkillSharingWrites` (private /
 publish: the `.gitignore` line that decides whether the next sync shares the skill).
+New skill and copy never replace a skill folder that exists (checked first, then main's
+`fs:createFile` / `fs:copy`); a new skill is marked private before anything is written, and
+`skills:makePrivate` refuses (`already_shared`) a folder the index or `origin/main` already has —
+a `.gitignore` line does not stop sync from sharing tracked files (`features/skills/shared-check.ts`,
+test `ipc-app.test.ts` 「skills:makePrivate never marks…」). The wizard and the copy modal wait for
+the result, disable their buttons meanwhile and show the reason (`role="alert"`); preview
+`client/tests/keep-work-ui.html?view=skills` (`tests/ui/keep-work.spec.ts`).
 
 ## External changes to open files (`client/shared/editor-disk-state.ts`, `TabbedEditorPanel`)
 
@@ -119,7 +144,8 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
 - Every save first re-reads the disk: if it is no longer the loaded version, autosave stops and
   ⌘S / closing the tab asks 「外部の変更を上書きして保存」 / 「キャンセル」 (Enter does not confirm).
   Overwriting first backs the disk version up (`editor:backupBeforeOverwrite` →
-  `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder).
+  `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder;
+  `features/backups/keep-current.ts`, shared with 復元 and 「元に戻す」, `sync.md` "Backups").
   Closing a tab whose save was cancelled asks before discarding.
 - `src/features/editor/components/TabbedEditorPanel.tsx` only composes: `hooks/useOpenFiles.ts`
   (each tab's text, loading, the watcher: follow the disk / mark external / missing),

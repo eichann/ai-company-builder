@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 import type { DepartmentConfig } from '../../../types'
 import type { Skill } from '../model'
-import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../api'
-import { newSkillMarkdown, renameSkillMarkdown, type NewSkillInput } from '../model'
+import { copySkill, createSkillDirectory, createSkillFile, makeSkillPrivate, pathExists, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../api'
+import { newSkillMarkdown, renameSkillMarkdown, skillNameTakenMessage, SKILL_ALREADY_SHARED_MESSAGE, SKILL_CREATE_FAILED, SKILL_COPY_FAILED, type NewSkillInput, type SkillActionResult } from '../model'
 
 interface Options {
   rootPath: string | undefined
@@ -16,65 +16,57 @@ interface Options {
 
 /**
  * Creating (private until shared), copying, sharing and marking skills 育成中.
- * Create and copy answer the new skill's id, or null when nothing was made.
+ * Create and copy never replace a skill that exists; they answer the new
+ * skill's id, or the sentence saying why nothing was made.
  */
 export function useSkillActions({ rootPath, departments, departmentFolder, departmentId, refreshSkills }: Options) {
-  const createSkill = useCallback(async (data: NewSkillInput): Promise<string | null> => {
-    if (!rootPath || !departmentFolder) return null
+  const createSkill = useCallback(async (data: NewSkillInput): Promise<SkillActionResult> => {
+    if (!rootPath || !departmentFolder) return { error: SKILL_CREATE_FAILED }
 
-    // Use the provided folder name (already validated as alphanumeric with - and _)
+    // The folder name is validated by the wizard (shared/core/names.ts).
     const skillDirName = data.folderName
-
     const skillsBasePath = `${rootPath}/${departmentFolder}/.claude/skills`
     const skillPath = `${skillsBasePath}/${skillDirName}`
-    const skillMdPath = `${skillPath}/SKILL.md`
 
     try {
-      // Create .claude/skills directory if it doesn't exist
-      await createSkillDirectory(skillsBasePath)
+      if (await pathExists(skillPath)) return { error: skillNameTakenMessage(skillDirName) }
 
-      // Create skill directory
-      await createSkillDirectory(skillPath)
+      // Private until shared — but never a skill the company already has
+      // (main refuses: the .gitignore line would not keep it private).
+      const marked = await makeSkillPrivate(rootPath, `${departmentFolder}/.claude/skills/${skillDirName}/`)
+      if (!marked.success) return { error: marked.code === 'already_shared' ? SKILL_ALREADY_SHARED_MESSAGE : SKILL_CREATE_FAILED }
 
-      // Create subdirectories (always create these even if empty)
-      await createSkillDirectory(`${skillPath}/rules`)
-      await createSkillDirectory(`${skillPath}/references`)
-      await createSkillDirectory(`${skillPath}/scripts`)
-      await createSkillDirectory(`${skillPath}/tools`)
-
-      await writeSkillFile(skillMdPath, newSkillMarkdown(data))
-
-      // Default to private (not shared): add to .gitignore
-      const skillRelativePath = `${departmentFolder}/.claude/skills/${skillDirName}/`
-      await makeSkillPrivate(rootPath, skillRelativePath)
+      for (const dir of [skillsBasePath, skillPath, ...['rules', 'references', 'scripts', 'tools'].map(d => `${skillPath}/${d}`)]) {
+        if (!await createSkillDirectory(dir)) return { error: SKILL_CREATE_FAILED }
+      }
+      const written = await createSkillFile(`${skillPath}/SKILL.md`, newSkillMarkdown(data))
+      if (!written.success) return { error: written.code === 'name_taken' ? skillNameTakenMessage(skillDirName) : SKILL_CREATE_FAILED }
 
       refreshSkills()
-      return `${departmentId}-${skillDirName}`
+      return { id: `${departmentId}-${skillDirName}` }
     } catch (error) {
       console.error('Failed to create skill:', error)
-      // TODO: Show error message to user
-      return null
+      return { error: SKILL_CREATE_FAILED }
     }
   }, [rootPath, departmentFolder, departmentId, refreshSkills])
 
-  const copySkillHere = useCallback(async (sourceSkillPath: string, name: string, folderName: string): Promise<string | null> => {
-    if (!rootPath || !departmentFolder) return null
+  const copySkillHere = useCallback(async (sourceSkillPath: string, name: string, folderName: string): Promise<SkillActionResult> => {
+    if (!rootPath || !departmentFolder) return { error: SKILL_COPY_FAILED }
 
     const skillsBasePath = `${rootPath}/${departmentFolder}/.claude/skills`
     const destPath = `${skillsBasePath}/${folderName}`
 
     try {
-      // Ensure .claude/skills directory exists
-      await createSkillDirectory(skillsBasePath)
+      if (await pathExists(destPath)) return { error: skillNameTakenMessage(folderName) }
+      if (!await createSkillDirectory(skillsBasePath)) return { error: SKILL_COPY_FAILED }
 
-      // Copy entire skill directory
       const copyResult = await copySkill(sourceSkillPath, destPath)
       if (!copyResult.success) {
         console.error('Failed to copy skill:', copyResult.error)
-        return null
+        return { error: copyResult.code === 'name_taken' ? skillNameTakenMessage(folderName) : SKILL_COPY_FAILED }
       }
 
-      // Update SKILL.md frontmatter with new name
+      // The copy gets its new name in SKILL.md.
       const skillMdPath = `${destPath}/SKILL.md`
       const content = await readSkillFile(skillMdPath)
       if (content) {
@@ -84,10 +76,10 @@ export function useSkillActions({ rootPath, departments, departmentFolder, depar
       // Copied skills are public by default (user intentionally copied them)
 
       refreshSkills()
-      return `${departmentId}-${folderName}`
+      return { id: `${departmentId}-${folderName}` }
     } catch (error) {
       console.error('Failed to copy skill:', error)
-      return null
+      return { error: SKILL_COPY_FAILED }
     }
   }, [rootPath, departmentFolder, departmentId, refreshSkills])
 

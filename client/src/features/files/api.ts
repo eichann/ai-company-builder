@@ -40,7 +40,7 @@ export function createPrivateFolder(
 /** Reading the company folder on this computer: folder listings, whether a name is taken. */
 export type FileTreeReads = ElectronPort<'readDirectory' | 'readDirectoryTree' | 'getStats'>
 /** Changing the company folder on this computer: new file or folder, rename, move inside it, delete. */
-export type FileTreeWrites = ElectronPort<'writeFile' | 'createDirectory' | 'renameItem' | 'moveItem' | 'deleteItem'>
+export type FileTreeWrites = ElectronPort<'createFile' | 'createDirectory' | 'renameItem' | 'moveItem' | 'deleteItem'>
 /**
  * Moving a file dropped from Finder into the company folder: it takes a file
  * from anywhere on this computer (the original is gone), so it has its own port.
@@ -67,8 +67,9 @@ export function getStats(path: string, reads: FileTreeReads = window.electronAPI
   return reads.getStats(path)
 }
 
+/** Never replaces a file that exists (`code: 'name_taken'`). */
 export function createEmptyFile(filePath: string, writes: FileTreeWrites = window.electronAPI) {
-  return writes.writeFile(filePath, '')
+  return writes.createFile(filePath, '')
 }
 
 export function createDirectory(dirPath: string, writes: FileTreeWrites = window.electronAPI) {

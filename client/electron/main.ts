@@ -39,6 +39,7 @@ import { registerFsIpc } from './features/fs/ipc'
 import { registerSyncIpc } from './features/sync/ipc'
 import { createChatServerConfig } from './features/chat/server-config'
 import { registerSkillsIpc } from './features/skills/ipc'
+import { skillIsShared } from './features/skills/shared-check'
 import { registerToolsIpc } from './features/tools/ipc'
 import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
@@ -92,8 +93,6 @@ const shellEnv = createShellEnvironment()
 configureAgentEnv({ passthroughNames: () => config.load().agentEnvPassthrough ?? [], serverUrl: () => config.serverUrl() })
 const claudeCli = createClaudeCli()
 
-// Skills (features/skills); their web-app tools are registered with the key broker's tokens below.
-const skills = registerSkillsIpc(ipc, { paths: allowedRoots })
 
 /**
  * The web preferences of every app window: the main one and the consultation
@@ -349,6 +348,12 @@ registerAuthIpc(ipc, {
 // commit messages (electron/services/).
 const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(app.getPath('userData'), 'git') })
 const createGit = appGit.create
+
+// Skills (features/skills); their web-app tools are registered with the key broker's tokens below.
+const skills = registerSkillsIpc(ipc, {
+  paths: allowedRoots,
+  isShared: (rootPath, relFolder) => skillIsShared(appGit.create(rootPath, { GIT_NO_LAZY_FETCH: '1' }), relFolder),
+})
 const commitMessageGenerator = createCommitMessages({
   config,
   apiKey: apiKey.read,
@@ -417,7 +422,7 @@ registerCompanySetupIpc(ipc, {
 })
 registerDownloadChoicesIpc(ipc, { paths: allowedRoots, appGit, session, serverUrl: getServerApiUrl, privateFolders: gitSync, activity: syncActivity })
 
-registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell })
+registerBackupsIpc(ipc, { paths: allowedRoots, shell: desktopShell, reservedRefusal: absPath => privateFolderGuards.reservedRefusal(absPath) })
 
 // Startup runs last, once every store and service above is initialised: the
 // chat server config below captures them, and keeping the use after the

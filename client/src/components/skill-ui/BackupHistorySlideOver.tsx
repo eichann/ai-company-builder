@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import { X, FolderOpen, ArrowCounterClockwise, Clock, File, Warning } from '@phosphor-icons/react'
 import { listBackups, openBackupFolder, restoreBackupFile } from '../../features/sync/api'
 import type { BackupInfo } from '../../../shared/ipc-contract'
+import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
 
 interface BackupHistorySlideOverProps {
   isOpen: boolean
@@ -15,6 +16,9 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
   const [error, setError] = useState<string | null>(null)
   const [expandedBackup, setExpandedBackup] = useState<string | null>(null)
   const [restoringFile, setRestoringFile] = useState<string | null>(null)
+  // Restoring replaces the file in the company folder: asked first (main keeps the current version).
+  const [restoreAsk, setRestoreAsk] = useState<{ backupId: string; filePath: string } | null>(null)
+  const [restoreNotice, setRestoreNotice] = useState<{ ok: boolean; text: string } | null>(null)
 
   const loadBackups = useCallback(async () => {
     if (!rootPath) return
@@ -47,16 +51,24 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
   }
 
   const handleRestoreFile = async (backupId: string, filePath: string) => {
+    setRestoreAsk(null)
     setRestoringFile(`${backupId}:${filePath}`)
+    setRestoreNotice(null)
     try {
       const result = await restoreBackupFile(rootPath, backupId, filePath)
       if (result.success) {
-        alert(`復元しました: ${filePath}`)
+        setRestoreNotice({
+          ok: true,
+          text: result.keptPath
+            ? `「${filePath}」を復元しました。それまでの内容は .backups に保存しました。`
+            : `「${filePath}」を復元しました。`,
+        })
+        void loadBackups()
       } else {
-        alert(`復元に失敗しました: ${result.error}`)
+        setRestoreNotice({ ok: false, text: restoreFailureText(result.error) })
       }
-    } catch (err) {
-      alert(`復元に失敗しました: ${err instanceof Error ? err.message : 'Unknown error'}`)
+    } catch {
+      setRestoreNotice({ ok: false, text: restoreFailureText() })
     } finally {
       setRestoringFile(null)
     }
@@ -81,6 +93,12 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
     switch (reason) {
       case 'conflict':
         return '競合'
+      case 'editor_overwrite':
+        return '上書き保存の前の内容'
+      case 'before_restore':
+        return '復元の前の内容'
+      case 'before_revert':
+        return '「元に戻す」の前の内容'
       default:
         return reason
     }
@@ -114,6 +132,17 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
               <X size={20} />
             </button>
           </div>
+
+          {restoreNotice && (
+            <p
+              role={restoreNotice.ok ? 'status' : 'alert'}
+              className={`mx-6 mt-3 px-3 py-2 rounded-lg text-xs ${restoreNotice.ok
+                ? 'bg-green-50 text-green-800 dark:bg-green-500/10 dark:text-green-300'
+                : 'bg-red-50 text-red-700 dark:bg-red-500/10 dark:text-red-300'}`}
+            >
+              {restoreNotice.text}
+            </p>
+          )}
 
           {/* Content */}
           <div className="flex-1 overflow-y-auto">
@@ -182,7 +211,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
                               </span>
                             </div>
                             <button
-                              onClick={() => handleRestoreFile(backup.id, file)}
+                              onClick={() => setRestoreAsk({ backupId: backup.id, filePath: file })}
                               disabled={restoringFile === `${backup.id}:${file}`}
                               className="flex items-center gap-1 px-2 py-1 text-xs text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-500/10 rounded transition-colors disabled:opacity-50"
                             >
@@ -208,6 +237,22 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
           </div>
         </div>
       </div>
+
+      <ConfirmDialog
+        isOpen={restoreAsk !== null}
+        title="バックアップから復元しますか？"
+        message={restoreAsk ? `「${restoreAsk.filePath}」を、このバックアップの内容に置き換えます。\n今の内容は .backups に保存してから置き換えます。` : ''}
+        confirmText="復元する"
+        confirmOnEnter={false}
+        onConfirm={() => { if (restoreAsk) void handleRestoreFile(restoreAsk.backupId, restoreAsk.filePath) }}
+        onCancel={() => setRestoreAsk(null)}
+      />
     </>
   )
+}
+
+/** Main's refusals (not downloaded, a reserved name, could not keep the current version) are already sentences. */
+function restoreFailureText(error?: string): string {
+  if (error && /[\u3040-\u30ff\u4e00-\u9fff]/.test(error)) return error
+  return '復元できませんでした。もう一度試してください。'
 }

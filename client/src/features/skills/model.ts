@@ -34,6 +34,16 @@ export interface Skill {
 
 export interface NewSkillInput { name: string; description: string; prompt: string; folderName: string }
 
+/** What creating or copying a skill answers: the new skill's id, or why nothing was made (shown in the dialog). */
+export type SkillActionResult = { id: string } | { error: string }
+
+export function skillNameTakenMessage(folderName: string): string {
+  return `フォルダ名「${folderName}」のスキルはすでにあります。別のフォルダ名にしてください（今あるスキルはそのままです）。`
+}
+export const SKILL_ALREADY_SHARED_MESSAGE = 'このフォルダ名のスキルはすでに会社で共有されています。別のフォルダ名にしてください。'
+export const SKILL_CREATE_FAILED = 'スキルを作成できませんでした。もう一度試してください。'
+export const SKILL_COPY_FAILED = 'スキルをコピーできませんでした。もう一度試してください。'
+
 /** The SKILL.md of a new skill (frontmatter + the sections the wizard fills in). */
 export function newSkillMarkdown(data: NewSkillInput): string {
   const promptContent = data.prompt || `このスキルを実行すると、AIアシスタントが「${data.name}」タスクを実行します。`

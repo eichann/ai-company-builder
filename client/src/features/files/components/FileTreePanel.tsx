@@ -220,6 +220,7 @@ export function FileTreePanel({
         isOpen={ops.inputDialog.isOpen}
         title={ops.inputDialog.title}
         defaultValue={ops.inputDialog.defaultValue}
+        error={ops.inputDialog.error}
         placeholder={ops.inputDialog.mode === 'newFile' ? 'filename.txt' : ops.inputDialog.mode === 'newFolder' ? 'folder-name' : ''}
         onConfirm={ops.confirmInput}
         onCancel={ops.cancelInput}

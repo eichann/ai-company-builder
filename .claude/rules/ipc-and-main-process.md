@@ -148,7 +148,9 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start` (its optional
   company id only selects the key broker's token, `key-broker.md` K6);
-  `skills:publish` / `makePrivate` refuse a multi-line entry; `skills:toggleNurturing` only a
+  `skills:publish` / `makePrivate` refuse a multi-line entry (`makePrivate` also a skill already
+  shared); `fs:createFile` / `rename` / `move` / `moveFromExternal` / `copy` never replace an
+  existing target (`files-and-editor.md`); `skills:toggleNurturing` only a
   `SKILL.md`; `shell:openExternal` only `http:` / `https:` / `mailto:` (`electron/external-url.ts`).
 - A commit the renderer names reaches git only as a hex object id (`commitIdArg`,
   `/^[0-9a-f]{4,64}$/i`, `git-search.ts`; `showCommitArgs` / `commitFileDiffArgs`), and paths

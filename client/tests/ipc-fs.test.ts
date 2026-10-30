@@ -232,6 +232,43 @@ test('rename, move and copy bring the whole content along; a file dropped in fro
   assert.equal(fs.existsSync(dropped), false)
 })
 
+test('a new file, rename, move, copy or Finder drop never replaces what is already there; saving still does', async () => {
+  // 新規ファイル with an existing name emptied that file, and a rename onto a
+  // taken name silently replaced it — the next sync spread the loss.
+  const dir = shapes('taken')
+  writeFiles(dir, { 'keep.md': 'keep me', 'other.md': 'other', 'folder/inner.md': 'inner', 'sub-copy/x.md': 'mine' })
+  const at = (...p: string[]) => path.join(dir, ...p)
+  const taken = { success: false, error: '同じ名前のファイルまたはフォルダがすでにあります。別の名前にしてください。', code: 'name_taken' }
+  assert.deepEqual(await h.invoke('fs:createFile', at('keep.md'), ''), taken)
+  assert.deepEqual(await h.invoke('fs:rename', at('other.md'), at('keep.md')), taken)
+  assert.deepEqual(await h.invoke('fs:rename', at('other.md'), at('folder')), taken)
+  assert.deepEqual(await h.invoke('fs:move', at('other.md'), at('keep.md')), taken)
+  assert.deepEqual(await h.invoke('fs:copy', at('other.md'), at('keep.md')), taken)
+  assert.deepEqual(await h.invoke('fs:copy', at('sub'), at('sub-copy')), taken)
+  const dropped = path.join(h.companyDir('finder-taken'), 'keep.md')
+  fs.writeFileSync(dropped, 'from finder')
+  assert.deepEqual(await h.invoke('fs:moveFromExternal', dropped, at('keep.md')), taken)
+  assert.equal(fs.readFileSync(at('keep.md'), 'utf-8'), 'keep me')
+  assert.equal(fs.readFileSync(at('other.md'), 'utf-8'), 'other')
+  assert.equal(fs.readFileSync(at('folder', 'inner.md'), 'utf-8'), 'inner')
+  assert.deepEqual(fs.readdirSync(at('sub-copy')), ['x.md'])
+  assert.equal(fs.readFileSync(dropped, 'utf-8'), 'from finder')
+
+  // A free name works; a case-only rename is the same file, not a taken name.
+  assert.deepEqual(await h.invoke('fs:createFile', at('new.md'), 'hello'), { success: true })
+  assert.equal(fs.readFileSync(at('new.md'), 'utf-8'), 'hello')
+  assert.deepEqual(await h.invoke('fs:rename', at('new.md'), at('New.md')), { success: true, newPath: at('New.md') })
+  assert.deepEqual(fs.readdirSync(dir).filter(n => n.toLowerCase() === 'new.md'), ['New.md'])
+  // Saving replaces on purpose: the editor, and the review's temporary file renamed over its sidecar.
+  assert.equal(await h.invoke('fs:writeFile', at('keep.md'), 'saved'), true)
+  fs.writeFileSync(at('.keep.md.acb-tmp-0a1b'), 'atomic')
+  assert.deepEqual(await h.invoke('fs:rename', at('.keep.md.acb-tmp-0a1b'), at('keep.md')), { success: true, newPath: at('keep.md') })
+  assert.equal(fs.readFileSync(at('keep.md'), 'utf-8'), 'atomic')
+  // Only over its own target: a temporary file of another name is refused like any rename.
+  fs.writeFileSync(at('.other.md.acb-tmp-0a1b'), 'x')
+  assert.deepEqual(await h.invoke('fs:rename', at('.other.md.acb-tmp-0a1b'), at('keep.md')), taken)
+})
+
 test('deleting a folder removes everything in it; deleting what is not there reports a failure', async () => {
   const dir = shapes('delete')
   assert.deepEqual(await h.invoke('fs:delete', path.join(dir, 'sub')), { success: true })
