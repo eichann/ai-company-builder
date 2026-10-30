@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import i18n from '../i18n'
-import type { Company } from '../types'
+import type { CompanyView } from '../types'
 import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
 import { resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../lib/aiModels'
 
@@ -69,7 +69,7 @@ interface AppState {
   language: Language
 
   // Company state
-  currentCompany: Company | null
+  currentCompany: CompanyView | null
 
   // AI model state
   aiModel: AIModel
@@ -83,8 +83,8 @@ interface AppState {
   setLanguage: (language: Language) => void
   setAIModel: (model: AIModel) => void
   setAIEffort: (effort: AIEffort) => void
-  setCurrentCompany: (company: Company | null) => void
-  addCompany: (company: Company) => void
+  setCurrentCompany: (company: CompanyView | null) => void
+  addCompany: (company: CompanyView) => void
 
   // Chat markdown rendering toggle
   setChatMarkdownRender: (enabled: boolean) => void

@@ -6,7 +6,7 @@ import { LoginScreen } from './components/auth/LoginScreen'
 import { CompanySelector } from './components/auth/CompanySelector'
 import { ServerSetupScreen } from './components/auth/ServerSetupScreen'
 import { SpinnerGap } from '@phosphor-icons/react'
-import type { Company } from './types'
+import type { CompanyView } from './types'
 import { checkRememberedCompany } from './lib/restore-company'
 import { getServerUrl } from './features/auth/api'
 import { companyPathExists, getCompanies } from './features/company/api'
@@ -14,7 +14,7 @@ import { registerCompanyFolder } from './shared/ipc/allowed-folders'
 
 const LAST_COMPANY_KEY_PREFIX = 'lastCompany:'
 
-function safeReadLastCompany(userId: string): Company | null {
+function safeReadLastCompany(userId: string): CompanyView | null {
   try {
     const raw = localStorage.getItem(`${LAST_COMPANY_KEY_PREFIX}${userId}`)
     if (!raw) return null
@@ -26,7 +26,7 @@ function safeReadLastCompany(userId: string): Company | null {
   }
 }
 
-function safeWriteLastCompany(userId: string, company: Company | null): void {
+function safeWriteLastCompany(userId: string, company: CompanyView | null): void {
   try {
     const key = `${LAST_COMPANY_KEY_PREFIX}${userId}`
     if (company) localStorage.setItem(key, JSON.stringify(company))

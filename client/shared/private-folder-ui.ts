@@ -5,17 +5,10 @@
  * crosses the public/private boundary, who may create a private folder where.
  *
  * Paths here are company-relative, '/'-separated (normalizeRepoPath).
- * Mirrors shared/types/private-folders.ts (MyPrivateFolder) at the repo root.
  */
+import type { MyPrivateFolder } from '../../shared/types/private-folders'
 
-export interface MyPrivateFolder {
-  scopeId: string
-  path: string
-  canWrite: boolean
-  /** Members who can read it, owners/admins included. */
-  viewerCount: number
-  viewers: Array<{ userId: string; name: string | null; role: string }>
-}
+export type { MyPrivateFolder } from '../../shared/types/private-folders'
 
 export interface PrivateFolderMemberOption {
   userId: string

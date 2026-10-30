@@ -1,5 +1,6 @@
 import { useCallback } from 'react'
-import type { DepartmentConfig, Skill } from '../../../types'
+import type { DepartmentConfig } from '../../../types'
+import type { Skill } from '../model'
 import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../api'
 import { newSkillMarkdown, renameSkillMarkdown, type NewSkillInput } from '../model'
 

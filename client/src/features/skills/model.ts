@@ -1,6 +1,36 @@
 // Pure parts of skills: the SKILL.md a new skill starts with, renaming a
 // copied one, and the slash commands the chat offers.
-import type { DepartmentConfig, Skill } from '../../types'
+import type { DepartmentConfig } from '../../types'
+
+/** A web app inside a skill's folder (`tools/<name>/`). */
+export interface SkillTool {
+  name: string           // Folder name (e.g., "movie-studio")
+  displayName: string    // From package.json name or folder name
+  path: string           // Absolute path to tool directory
+  hasPackageJson: boolean
+  startCommand?: string  // "dev" or "start"
+  port?: number          // If running, the port number
+}
+
+export interface Skill {
+  id: string
+  name: string
+  description: string
+  icon?: string
+  departmentId: string
+  group?: string          // Hierarchy group label (e.g., "全社", "営業部", "営業部 / 顧客A案件")
+  isPrivate?: boolean     // true = .gitignore に含まれ同期されない（不可逆: 公開したら戻せない）
+  isNurturing?: boolean   // true = 育て中（SKILL.md frontmatter status: nurturing）
+  skillPath?: string      // Absolute path to skill directory
+  // File paths relative to department folder
+  files: {
+    skillMd?: string      // SKILL.md
+    rules?: string[]      // Rule files
+    references?: string[] // Reference files
+    scripts?: string[]    // Script files
+    tools?: SkillTool[]   // Web app tools
+  }
+}
 
 export interface NewSkillInput { name: string; description: string; prompt: string; folderName: string }
 

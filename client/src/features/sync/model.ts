@@ -1,7 +1,5 @@
 // What the member is told after 「サーバーと同期」, from what sync reported.
-import type { syncCompany } from './api'
-
-export type SyncResult = Awaited<ReturnType<typeof syncCompany>>
+import type { GitResult } from '../../../shared/ipc-contract'
 
 export interface SyncNotice {
   type: 'success' | 'warning' | 'error'
@@ -11,7 +9,7 @@ export interface SyncNotice {
 }
 
 /** The notice for a finished sync; the first thing sync had to set aside wins. */
-export function syncNoticeFor(result: SyncResult): SyncNotice {
+export function syncNoticeFor(result: GitResult): SyncNotice {
   if (!result.success) {
     return { type: 'error', message: result.error || '同期に失敗しました' }
   }
@@ -79,7 +77,7 @@ export function syncNoticeFor(result: SyncResult): SyncNotice {
 }
 
 /** A clean success hides itself after 3 s; anything sync set aside stays until dismissed. */
-export function syncNoticeHidesItself(result: SyncResult): boolean {
+export function syncNoticeHidesItself(result: GitResult): boolean {
   const hasWarnings = result.hadConflicts ||
     (result.restoredProtectedFiles && result.restoredProtectedFiles.length > 0) ||
     (result.restoredWriteDeniedFiles && result.restoredWriteDeniedFiles.length > 0) ||

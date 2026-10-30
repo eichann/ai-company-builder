@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react'
-import type { DepartmentConfig, Skill, SkillTool } from '../../../types'
+import type { DepartmentConfig } from '../../../types'
+import type { Skill, SkillTool } from '../model'
 import { runCommand } from '../../../shared/commands/commands'
 import type { NewSkillInput } from '../model'
 import { useSkillActions } from './useSkillActions'

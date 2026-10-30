@@ -1,11 +1,12 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { syncNoticeFor, syncNoticeHidesItself, type SyncResult } from './model'
+import type { GitResult } from '../../../shared/ipc-contract'
+import { syncNoticeFor, syncNoticeHidesItself } from './model'
 
-const result = (fields: Partial<SyncResult>): SyncResult => ({ success: true, ...fields }) as SyncResult
+const result = (fields: Partial<GitResult>): GitResult => ({ success: true, ...fields }) as GitResult
 
 test('whatever sync set aside is a warning that stays until dismissed, pointing at the backup', () => {
-  const cases: Array<[Partial<SyncResult>, string]> = [
+  const cases: Array<[Partial<GitResult>, string]> = [
     [{ restoredProtectedFiles: ['.claude/settings.json'], protectedBackupPath: '/b/protected' }, '/b/protected'],
     [{ restoredWriteDeniedFiles: ['総務/規程.md'], writeDeniedBackupPath: '/b/denied' }, '/b/denied'],
     [{ untrackedPersonalFiles: ['.personal/memo.md'], backupPath: '/b/personal' }, '/b/personal'],

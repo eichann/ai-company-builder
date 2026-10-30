@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import type { Skill } from '../../../types'
+import type { Skill } from '../model'
 import { listSkills } from '../api'
 
 interface UseSkillsOptions {

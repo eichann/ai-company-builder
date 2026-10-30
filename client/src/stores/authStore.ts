@@ -1,13 +1,6 @@
 import { create } from 'zustand'
 import * as authApi from '../features/auth/api'
-
-export interface AuthUser {
-  id: string
-  email: string
-  name: string | null
-  image: string | null
-  emailVerified: boolean
-}
+import type { AuthUser } from '../../shared/ipc-contract'
 
 interface AuthState {
   user: AuthUser | null

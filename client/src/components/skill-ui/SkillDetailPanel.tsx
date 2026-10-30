@@ -19,7 +19,7 @@ import {
   Warning,
   Flask
 } from '@phosphor-icons/react'
-import type { Skill, SkillTool } from '../../types'
+import type { Skill, SkillTool } from '../../features/skills/model'
 import { startSkillTool, stopSkillTool } from '../../features/skills/api'
 import { useAppStore } from '../../stores/appStore'
 
