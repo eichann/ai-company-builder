@@ -175,6 +175,8 @@ test('a choice question waits above the input of its own conversation, survives 
   const yourTurn = sidebar.getByRole('region', { name: 'あなたの番' })
   await expect(yourTurn.getByRole('button', { name: /^提案書を作って/ })).toBeVisible()
   await expect(sidebar.getByText('あなたの番 1')).toBeVisible()
+  // What waits for the member cannot be folded away.
+  await expect(yourTurn.getByRole('button', { name: /^あなたの番/ })).toHaveCount(0)
   await chat(page, c => { c.send({ type: 'text-start', id: 't2' }); c.text('t2', '（回答をお待ちしています）'); c.send({ type: 'text-end', id: 't2' }) })
   await sidebar.getByRole('button', { name: /^提案書を作って/ }).click()
   await expect(card).toBeVisible()
@@ -197,7 +199,7 @@ test('a reply that finishes while the member is elsewhere is marked 新着 at th
   await sidebar.getByRole('button', { name: 'AIに相談する', exact: true }).click()
   await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', 'まとめました。'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
   const open = sidebar.getByRole('region', { name: '開いている相談' })
-  await expect(open.getByRole('button').first()).toHaveAccessibleName(/^議事録をまとめて/)
+  await expect(open.locator('[data-conversation-id] > button').first()).toHaveAccessibleName(/^議事録をまとめて/)
   await expect(row).toContainText('新着')
   await expect(row).toContainText('返事が届いています')
 
@@ -246,6 +248,37 @@ test('a new conversation left for another with nothing typed goes away; one with
   await sent.click()
   await expect(rows).toHaveCount(1)
   await expect(sent).toHaveAttribute('aria-current', 'page')
+})
+
+test('a group heading folds its rows, stays folded after a reload, and a search still shows its matches', async ({ page }) => {
+  await openPreview(page, 'chat-header', { turn: 'manual', storage: 'keep' })
+  const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
+  const heading = sidebar.getByRole('button', { name: /^開いている相談/ })
+  const row = sidebar.getByRole('button', { name: /^新しい会話/ })
+  await expect(row).toBeVisible()
+  await expect(heading).toHaveAttribute('aria-expanded', 'true')
+
+  await heading.click()
+  await expect(heading).toHaveAttribute('aria-expanded', 'false')
+  await expect(heading).toContainText('1件')
+  await expect(row).toBeHidden()
+  // The conversation itself stays on screen.
+  await expect(input(page)).toBeVisible()
+  // Keyboard: Enter opens it again, Space folds it.
+  await heading.press('Enter')
+  await expect(row).toBeVisible()
+  await heading.press('Space')
+  await expect(row).toBeHidden()
+
+  await page.reload()
+  await expect(heading).toHaveAttribute('aria-expanded', 'false')
+  await expect(row).toBeHidden()
+
+  // A search shows matches in a folded group; clearing it folds the group again.
+  await sidebar.getByRole('textbox', { name: '相談を検索' }).fill('新しい')
+  await expect(row).toBeVisible()
+  await sidebar.getByRole('button', { name: '検索をクリア' }).click()
+  await expect(row).toBeHidden()
 })
 
 test('「確認をお願いします」: the AI asks for a review and stops; 「あなたの番」 until the member answers, files open in the editor', async ({ page }) => {

@@ -28,12 +28,14 @@ import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 //   ?turn=manual   the reply streams only what window.__acbChat sends (the
 //                  Playwright UI tests drive it: tests/ui/chat-panel.spec.ts)
 //   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
+//   ?storage=keep  keep localStorage across reloads (remembered folded groups)
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const agent = params.get('agent') === 'codex' ? 'codex' : 'claude-code'
 const scenario = params.get('limits') || 'ok'
-try { localStorage.clear() } catch { /* preview only */ }
+// ?storage=keep: a reload keeps what the page remembered (a new Playwright page starts empty anyway).
+if (params.get('storage') !== 'keep') { try { localStorage.clear() } catch { /* preview only */ } }
 // The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('preview-user')
 const longHistory = params.get('history') === 'long'
