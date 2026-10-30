@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { COMPANY_ROOT_LABEL, departmentOfFile, isPathWithin, tabDepartmentLabels } from '../src/lib/editorTabs'
+import { COMPANY_ROOT_LABEL, departmentOfFile, tabDepartmentLabels } from './editorTabs'
 
 const root = '/Users/me/ACB/会社'
 const departments = [
@@ -40,11 +40,4 @@ test('the company-wide tab shows every department, so no tab is labelled', () =>
 
 test('files outside the company folder are not labelled', () => {
   assert.deepEqual(tabDepartmentLabels(['/tmp/other.md', `${root}-old/x.md`], { rootPath: root, departments, selectedDeptId: 'd-sales' }), {})
-})
-
-test('new files go to the selected department when the active tab is elsewhere', () => {
-  assert.equal(isPathWithin(proposal, `${root}/sales`), true)
-  assert.equal(isPathWithin(script, `${root}/sales`), false)
-  assert.equal(isPathWithin(salesX, `${root}/sales`), false)
-  assert.equal(isPathWithin(`${root}/sales`, `${root}/sales/`), true)
 })

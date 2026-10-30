@@ -220,6 +220,8 @@ const featureOf = (clientPath: string): string | null => /^src\/features\/([^/]+
  * accept (otherwise let app/ compose the two through props).
  */
 const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
+  'editor -> doc-review':
+    'a Markdown preview tab shows the review banners, side panel, comment popover and snapshot diff, driven by the open file and the editor\'s scroll and selection',
   'files -> doc-review':
     'the tree hides review sidecars and marks documents with reviews (pure model.ts only: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
 }
