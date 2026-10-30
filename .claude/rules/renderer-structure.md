@@ -69,7 +69,8 @@ editor, review, search, history, backups).
    list in the boundary test that may only shrink. The IPC contract itself (channels, arguments,
    `client/shared/ipc-contract.ts`) does not change for this: `ipc-and-main-process.md`.
    **Small ports, never one client object** (owner, 2026-10-29): an `api.ts` names only the
-   methods it uses (`ElectronPort<'readFile' | …>`, `src/shared/ipc/electron-api.ts`), grouped
+   methods it uses (`ElectronPort<'readFile' | …>`, for `voiceInput` `VoiceInputPort<…>`, both in
+   `src/shared/ipc/electron-api.ts`), grouped
    by what they can do — read on this computer, write on this computer, send outside — so a
    later plugin bridge can be handed exactly one group. No wrapper of the whole API, and no
    stand-in that pretends something exists: what a setup lacks is a capability the UI reads.

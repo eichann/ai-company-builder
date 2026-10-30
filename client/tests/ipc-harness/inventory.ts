@@ -240,6 +240,10 @@ function rendererUses(): Set<string> {
     for (const m of text.matchAll(/\bElectronPort<([^>]+)>/g)) {
       for (const name of m[1].matchAll(/'(\w+)'/g)) used.add(name[1])
     }
+    for (const m of text.matchAll(/\bVoiceInputPort<([^>]+)>/g)) {
+      used.add('voiceInput')
+      for (const name of m[1].matchAll(/'(\w+)'/g)) used.add(`voiceInput.${name[1]}`)
+    }
   }
   return used
 }

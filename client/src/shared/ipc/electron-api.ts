@@ -19,3 +19,6 @@ export type { ElectronAPI }
 
 /** Only the named methods of the API: what one data-access unit may use. */
 export type ElectronPort<K extends keyof ElectronAPI> = Pick<ElectronAPI, K>
+
+/** Only the named methods of `window.electronAPI.voiceInput`, the one nested part of the API. */
+export type VoiceInputPort<K extends keyof ElectronAPI['voiceInput']> = { voiceInput: Pick<ElectronAPI['voiceInput'], K> }

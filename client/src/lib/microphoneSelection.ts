@@ -1,4 +1,5 @@
 import type { VoiceDevice, VoiceDeviceList } from '../../shared/voice-input'
+import { listMicrophones } from '../features/voice/api'
 const KEY = 'acb.voice.microphone'
 function readSelection() { try { return localStorage.getItem(KEY) } catch { return null } }
 const savedSelection = readSelection()
@@ -39,7 +40,7 @@ export const microphoneSelection = {
   refresh: () => {
     if (pending) return pending
     update({ refreshing: true })
-    pending = window.electronAPI.voiceInput.devices()
+    pending = listMicrophones()
       .then(apply, () => apply({ ok: false, error: 'failed' }))
       .finally(() => { pending = undefined; update({ refreshing: false }) })
     return pending

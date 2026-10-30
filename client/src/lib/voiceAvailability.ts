@@ -1,5 +1,6 @@
 import type { VoiceCapabilities, VoiceDevice } from '../../shared/voice-input'
 import { microphoneSelection, type DeviceFailure } from './microphoneSelection'
+import { getVoiceCapabilities } from '../features/voice/api'
 
 // Whether speech recognition can run on this Mac, shared by every chat input
 // (like microphoneSelection) so all of them show the same state and a retry in
@@ -14,7 +15,7 @@ function update(value: Partial<State>) { state = { ...state, ...value }; listene
 function probe() {
   if (pending) return pending
   update({ checking: true })
-  pending = window.electronAPI.voiceInput.capabilities()
+  pending = getVoiceCapabilities()
     .then(caps => update({ caps }), () => update({ caps: { available: false, reason: '音声入力の状態を確認できませんでした', retryable: true } }))
     .finally(() => { pending = undefined; update({ checking: false }) })
   return pending
