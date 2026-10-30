@@ -31,6 +31,8 @@ paths:
   - "client/tests/git-search.test.ts"
   - "client/tests/editor-*"
   - "client/tests/doc-review-ui.*"
+  - "client/tests/file-tree-ui.*"
+  - "client/tests/ui/file-tree.spec.ts"
   - "client/tests/ui/doc-review.spec.ts"
   - "client/tests/skills-refresh.test.ts"
 ---
@@ -74,6 +76,10 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   drop: takes a file from anywhere on the computer), `ReservedNameOutbound` (the typed name goes to
   the server's `paths/check`), `FileDragOutbound` (Alt-drag hands a file to another app), plus the
   private-folder ports (`private-folders-client.md`).
+- UI test: `client/tests/ui/file-tree.spec.ts` on the preview `client/tests/file-tree-ui.html`
+  (selection and ⌘/shift ranges, new file / rename / delete and their dialogs, the reserved-name
+  and private-root refusals, internal moves and the private-edge confirm, Finder drops: free
+  name, type and 20 MB refusals, hidden sidecars and the review mark).
 
 ## Previews never show a stale file
 
