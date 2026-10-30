@@ -11,11 +11,13 @@ interface ResizeHandleProps {
    */
   onResize: (offset: number) => void
   direction?: 'horizontal' | 'vertical'
+  /** Accessible name of the divider (what it separates). */
+  label: string
 }
 
 type Drag = ReturnType<typeof createResizeDrag> & { pointerId: number; restore: () => void }
 
-export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal' }: ResizeHandleProps) {
+export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal', label }: ResizeHandleProps) {
   const [isDragging, setIsDragging] = useState(false)
   const dragRef = useRef<Drag | null>(null)
   // Latest callback without restarting a drag in progress when the parent re-renders.
@@ -82,6 +84,9 @@ export function ResizeHandle({ onResizeStart, onResize, direction = 'horizontal'
 
   return (
     <div
+      role="separator"
+      aria-orientation={direction === 'horizontal' ? 'vertical' : 'horizontal'}
+      aria-label={label}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}

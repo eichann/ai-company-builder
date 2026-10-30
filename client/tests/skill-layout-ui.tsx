@@ -1,10 +1,14 @@
+/* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
 // Preview page for the main screen (SkillCentricLayout: department tabs,
 // skills / files / search / history, the editor and the chat), with the
 // preload API faked (no Electron, git, server or AI). Synthetic data only.
-// Open /tests/skill-layout-ui.html?theme=…&download=…
+// Open /tests/skill-layout-ui.html?theme=…&download=…&keep=…&seed=…
 //
 //   theme     light (default) | dark
 //   download  ok (default) | offline — what 「ダウンロードして同期を開始」 gets
+//   keep      1 = keep what the previous load saved (an app restart); otherwise storage starts empty
+//   seed      JSON {key: value} written to localStorage before the screen mounts
+//             (what an earlier version of the app saved)
 //
 // Departments: 営業部 (downloaded), 開発部 (not downloaded on this computer),
 // 総務 (read-only for this member). window.__acbLayout lets the Playwright UI
@@ -22,12 +26,21 @@ import { emitter, installElectronAPI, type ElectronAPI } from './ui/fixtures/ele
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
 const downloadOffline = params.get('download') === 'offline'
-try { localStorage.clear() } catch { /* preview only */ }
+try {
+  if (params.get('keep') !== '1') localStorage.clear()
+  for (const [key, value] of Object.entries(JSON.parse(params.get('seed') ?? '{}') as Record<string, string>)) localStorage.setItem(key, value)
+} catch { /* preview only */ }
 // The one-time AI action log notice only with ?notice=1 (it would cover the chat in the other specs).
 if (params.get('notice') !== '1') markAgentLogNoticeSeen('u_me')
 
 const ROOT = '/Users/demo/会社'
 const COMPANY = 'demo'
+// A second company (with no departments of its own on disk) for per-company state.
+const OTHER_ROOT = '/Users/demo/別会社'
+const COMPANIES: Record<string, { name: string; rootPath: string }> = {
+  [COMPANY]: { name: '株式会社デモ', rootPath: ROOT },
+  other: { name: '別会社', rootPath: OTHER_ROOT },
+}
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms))
 
 type Entry = { name: string; isDirectory: boolean }
@@ -38,10 +51,12 @@ const DISK: Record<string, Entry[]> = {
   [`${ROOT}/営業部/顧客`]: [{ name: '一覧.csv', isDirectory: false }],
   [`${ROOT}/総務`]: [{ name: '規程', isDirectory: true }, { name: '備品.md', isDirectory: false }],
   [`${ROOT}/総務/規程`]: [{ name: '就業規則.md', isDirectory: false }],
+  [OTHER_ROOT]: [{ name: '議事録.md', isDirectory: false }],
 }
 const FILES: Record<string, string> = {
   [`${ROOT}/総務/備品.md`]: '# 備品\n\nコピー用紙は総務へ。',
   [`${ROOT}/営業部/営業の進め方.md`]: '# 営業の進め方\n\n毎週月曜に共有します。',
+  [`${OTHER_ROOT}/議事録.md`]: '# 議事録\n\n別会社の定例。',
 }
 const listDir = (dir: string) => (DISK[dir] ?? []).map(e => ({ ...e, path: `${dir}/${e.name}` }))
 type TreeNode = { name: string; isDirectory: boolean; path: string; children?: TreeNode[] }
@@ -155,7 +170,36 @@ Object.assign(window, {
   },
 })
 
-useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '山田 花子', image: null, emailVerified: true } })
-useAppStore.setState({ currentCompany: { id: COMPANY, name: '株式会社デモ', rootPath: ROOT, departments: [], createdAt: new Date() } })
+const openCompany = (id: string) => useAppStore.setState({ currentCompany: { id, ...COMPANIES[id], departments: [], createdAt: new Date() } })
 
-createRoot(document.getElementById('root')!).render(<div className="h-screen"><SkillCentricLayout /></div>)
+// Did the editor ever show its empty state (「ファイルを選択してください」)? A restored
+// tab strip must be there from the first frame, not filled in after an empty one.
+let editorWasEmpty = false
+new MutationObserver(records => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.textContent?.includes('ファイルを選択してください')) editorWasEmpty = true
+    }
+  }
+}).observe(document.getElementById('root')!, { childList: true, subtree: true })
+
+Object.assign((window as unknown as { __acbLayout: object }).__acbLayout, {
+  editorWasEmpty: () => editorWasEmpty,
+  /** Like the app: back to the company list (the screen unmounts), then open another company. */
+  async switchCompany(id: string) {
+    useAppStore.setState({ currentCompany: null })
+    await sleep(50)
+    editorWasEmpty = false
+    openCompany(id)
+  },
+})
+
+useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '山田 花子', image: null, emailVerified: true } })
+openCompany(COMPANY)
+
+// App.tsx shows the screen only while a company is open.
+function Screen() {
+  const company = useAppStore(s => s.currentCompany)
+  return company ? <SkillCentricLayout /> : null
+}
+createRoot(document.getElementById('root')!).render(<div className="h-screen"><Screen /></div>)

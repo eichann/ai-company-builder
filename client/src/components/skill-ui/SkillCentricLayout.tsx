@@ -1211,7 +1211,7 @@ ${promptContent}
                     onPrivateFolderCreated={handlePrivateFolderCreated}
                   />
                 </div>
-                <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" />
+                <ResizeHandle onResizeStart={handleFileTreeResizeStart} onResize={handleFileTreeResize} direction="horizontal" label="ファイルツリーとエディタの境目" />
                 <div className="flex-1 min-w-0">
                   <TabbedEditorPanel
                     openFiles={openFiles}
@@ -1279,7 +1279,7 @@ ${promptContent}
         </div>
 
         {/* Resize Handle (hidden when chat is collapsed) */}
-        {!chatCollapsed && <ResizeHandle onResizeStart={handleLeftPanelResizeStart} onResize={handleLeftPanelResize} direction="horizontal" />}
+        {!chatCollapsed && <ResizeHandle onResizeStart={handleLeftPanelResizeStart} onResize={handleLeftPanelResize} direction="horizontal" label="左の欄とチャットの境目" />}
 
         {/* Right Panel (Chat) */}
         {/* Collapsed tab to restore (only shown when collapsed) */}
