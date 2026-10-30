@@ -2,7 +2,8 @@
 // placeholder (tests/download-folders-ui.tsx). Tri-state / toggle / size rules
 // are pinned by tests/download-selection.test.ts and sparse rules by
 // sparse-paths.test.ts; here: the tree's ARIA, the draft footer, apply with
-// progress, the uncommitted-changes confirmation, offline, and the placeholder.
+// progress, the uncommitted-changes confirmation, offline, and the placeholder;
+// and the APIキー page, which never shows a saved value.
 import { test, expect, type Page } from '@playwright/test'
 import { openPreview } from './helpers'
 
@@ -68,6 +69,21 @@ test.describe('settings', () => {
     await expect(box(page, '営業部')).toBeChecked()
     await expect(page.getByRole('button', { name: '適用', exact: true })).toBeVisible()
   })
+
+  test('APIキー: a saved key shows only 「設定済み（末尾 …）」; a save sends typed keys and removals only', async ({ page }) => {
+    await openPreview(page, 'download-folders')
+    await page.getByRole('button', { name: 'APIキー' }).click()
+    const anthropic = page.getByRole('textbox', { name: 'Anthropic', exact: true })
+    await expect(anthropic).toHaveValue('')
+    await expect(anthropic).toHaveAttribute('placeholder', '設定済み（末尾 ab12）。変更するときだけ入力')
+    await page.getByRole('textbox', { name: 'OpenAI', exact: true }).fill('sk-FAKE-typed')
+    await page.getByRole('button', { name: 'ANTHROPIC_API_KEY を削除' }).click()
+    await expect(anthropic).toBeDisabled()
+    await page.getByRole('button', { name: '保存', exact: true }).click()
+    await expect(page.getByRole('button', { name: '保存しました' })).toBeVisible()
+    const updates = await page.evaluate(() => (window as unknown as { __acbEnvUpdates: unknown[] }).__acbEnvUpdates)
+    expect(updates).toEqual([{ OPENAI_API_KEY: 'sk-FAKE-typed', ANTHROPIC_API_KEY: null }])
+  })
 })
 
 test.describe('file tree', () => {
@@ -91,4 +107,5 @@ test.describe('file tree', () => {
     const names = await page.getByRole('button', { name: /\.md$/ }).allTextContents()
     expect(names.indexOf('AIの新規.md')).toBe(names.indexOf('2026-10-連載.md') + 1)
   })
+
 })

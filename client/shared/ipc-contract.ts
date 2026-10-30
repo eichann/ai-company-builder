@@ -28,6 +28,7 @@ import type { VoicePromptSettings } from './voice-prompt'
 import type { ChatHistoryChange, ChatMetadataPatch, ChatSaveReceipt, ChatSession, ChatSessionSummary } from './chat-history'
 import type { PermissionMode } from './permission-mode'
 import type { WriteAccess } from './write-access'
+import type { EnvVarStatus } from './env-file'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
 
 // ---------------------------------------------------------------------------
@@ -139,9 +140,10 @@ export interface EditorBackupResult {
   error?: string
 }
 
-export interface EnvResult {
+/** The company .env as the renderer sees it: per name set / last four characters, never a value. */
+export interface EnvStatusResult {
   success: boolean
-  vars?: Record<string, string>
+  vars?: Record<string, EnvVarStatus>
   error?: string
 }
 
@@ -438,8 +440,9 @@ export interface IpcInvokeChannels {
   'backup:openFolder': { args: [backupPath: string]; result: SimpleResult }
 
   // Environment variables (.env file)
-  'env:read': { args: [rootPath: string]; result: EnvResult }
-  'env:write': { args: [rootPath: string, vars: Record<string, string>]; result: SimpleResult }
+  'env:status': { args: [rootPath: string]; result: EnvStatusResult }
+  /** A string sets or replaces that name (empty removes it), null removes it; other names stay. */
+  'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
 
   // Skills and their tools (web apps)
   'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
@@ -583,8 +586,8 @@ export interface ElectronAPI {
   onFileChanges: Subscribe<'fs:changes'>
 
   // Environment variables
-  readEnv: Invoke<'env:read'>
-  writeEnv: Invoke<'env:write'>
+  getEnvStatus: Invoke<'env:status'>
+  updateEnv: Invoke<'env:update'>
 
   // Skills
   listSkills: Invoke<'skills:list'>

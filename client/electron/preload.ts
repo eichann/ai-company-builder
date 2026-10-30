@@ -158,9 +158,9 @@ const api: ElectronAPI = {
   backupOpenFolder: (backupPath: string) =>
     invoke('backup:openFolder', backupPath),
 
-  // Environment variables (.env file)
-  readEnv: (rootPath: string) => invoke('env:read', rootPath),
-  writeEnv: (rootPath: string, vars: Record<string, string>) => invoke('env:write', rootPath, vars),
+  // Environment variables (.env file): status only, never values
+  getEnvStatus: (rootPath: string) => invoke('env:status', rootPath),
+  updateEnv: (rootPath: string, changes: Record<string, string | null>) => invoke('env:update', rootPath, changes),
 
   // Skills
   listSkills: (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }) =>
