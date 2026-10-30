@@ -60,6 +60,8 @@ export interface BrokerRelayDeps {
   maxRequestBytes: number
   headersTimeoutMs: number
   log?: Pick<Console, 'warn'>
+  /** The emergency stop (M2, agent-stop.md): the whole AI of this company is stopped → every call is refused. */
+  companyStopped?: (companyId: string) => boolean
 }
 
 export interface RelayRequest {
@@ -393,6 +395,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const grant = checked.grant
       meta.grant = grant
       if (!builtin && !relay) return unknownService()
+      if (deps.companyStopped?.(grant.companyId)) return jsonError(403, 'ACB_STOPPED', '管理者が AI の利用を一時停止しています。再開されるまで使えません。', grant)
       if (relay) {
         // The service's own header must carry this token (in its format) or be absent: anything else may be a real key.
         const own = req.headers.filter(([n]) => n === relay.header).map(([, v]) => relayCredentialOf(relay.format, v))

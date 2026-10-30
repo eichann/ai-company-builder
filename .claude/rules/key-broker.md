@@ -284,6 +284,8 @@ who uses it).
   「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
   the history; resuming is per key. Tokens are not revoked, so the AI gets the "stopped" answer
   (revoking would answer "token expired").
+  A company-wide stop of the whole AI (M2, `agent-stop.md`) also refuses every relay call with
+  `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。…」 until it is released.
 - **Daily caps** (the key's `caps`): `broker_usage` (company, key, member, day: requests,
   tokens); the day is `BROKER_DAY_UTC_OFFSET_MINUTES` (default 540 = Japan, `brokerDayOf`). Before
   forwarding: total or member requests / tokens at or over a cap → 429 `ACB_OVER_CAP`

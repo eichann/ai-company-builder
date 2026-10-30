@@ -8,6 +8,7 @@ paths:
   - "server/src/ports/agent-stops.ts"
   - "server/src/adapters/sqlite/agent-stops.ts"
   - "server/tests/integration/agent-stops.test.ts"
+  - "server/tests/integration/broker-stop.test.ts"
 ---
 
 # Emergency stop (monitoring M2, 「AI の緊急停止」) and the server → app push channel
@@ -34,6 +35,14 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 - `GET /me/agent-policy` (`routes/agent-sandbox.ts`, `services/agent-policy.ts`) now carries
   `stop: { all, tools }`, merged for the caller (everyone's stops and their own); the version
   (ETag) hashes sandbox + stop, so a stop changes it. Sandbox changes announce too.
+- **The key broker** (owner decision 2026-10-31): while a company-wide stop of the whole AI is
+  in force (`user_id` NULL, `tool` NULL; `agentStops.companyStopped`), the relay refuses every
+  call of that company server-side — so old or modified apps cannot get around it — with 403
+  `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。再開されるまで使えません。」, nothing
+  forwarded, recorded `stopped`; a release restores it. Narrower stops (a member, a tool kind)
+  leave the relay alone; 「すべての鍵を止める」 stays separate. One optional dependency
+  (`BrokerRelayDeps.companyStopped`, composed in `composition.ts`), one check after the token is
+  validated. Test `server/tests/integration/broker-stop.test.ts` (mutation-checked).
 - **Apps that do not follow the stop** (「停止に対応していないアプリ」): an app that follows it
   sends `X-ACB-Agent-Stop: 1` on `/me/agent-policy` and `/me/events`, recorded with its
   `X-ACB-Client-Version`. A member is counted when `client_activity` has a build for them and it

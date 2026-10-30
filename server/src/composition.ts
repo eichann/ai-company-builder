@@ -148,6 +148,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       nowMs: () => shared.clock.nowMs(),
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
+      companyStopped: agentStops.companyStopped,
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     companyFiles: companyFileViews(conn),

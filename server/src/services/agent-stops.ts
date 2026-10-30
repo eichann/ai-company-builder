@@ -167,6 +167,11 @@ export function createAgentStopService(deps: AgentStopDeps) {
       return { all, tools }
     },
 
+    /** A company-wide stop of the whole AI is in force (the key broker's relay refuses every call). */
+    companyStopped(companyId: string): boolean {
+      return agentStops.active(companyId).some(r => r.userId === null && r.tool === null)
+    },
+
     /** The member's app said it follows the stop (X-ACB-Agent-Stop), with its build. */
     seen(member: Member, clientVersion: string | null): void {
       agentStops.seen(member.companyId, member.userId, clientVersion, clock.now())
