@@ -33,6 +33,8 @@ paths:
   - "server/tests/unit/broker-relay-definition.test.ts"
   - "server/src/services/own-broker-keys.ts"
   - "server/tests/integration/own-broker-keys.test.ts"
+  - "server/src/services/broker-key-check.ts"
+  - "server/tests/integration/broker-key-check.test.ts"
   - "client/shared/broker-keys.ts"
   - "client/shared/broker-env.ts"
   - "client/electron/services/broker-token-store.ts"
@@ -109,7 +111,8 @@ up by the owner, 2026-10-30: right after the two dials).
 `GET /broker`; `POST /broker/keys` (company key; `destinations` default to a built-in service's
 hosts or a generic service's host, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
 (an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
-`{ category, rule, ownKeyHosts }`; `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
+`{ category, rule, ownKeyHosts }`; `PUT /broker/services/:service/own-keys { allowed }` (the one
+switch, below); `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
 answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
 (`BrokerChangeDetail`: create / replace (last4 before → after) / update (changed fields) /
 delete / service / settings; the GET carries the latest 50). Check order who → body → rules;
@@ -136,6 +139,39 @@ disable and delete still work). Audience departments must be the company's, peop
   the history. The value is a password field sent once in the POST (or the replace PUT); editing
   never sends it. Without a KEK the page explains why and offers no registration
   (`BROKER_OFF_TEXT`). Words and draft parsing: `admin/src/lib/key-broker.ts`.
+
+- **One switch per service** 「メンバーが自分の鍵を使ってよい」 (owner, 2026-10-31):
+  `PUT /broker/services/:service/own-keys { allowed }` for a service whose destination is known
+  (built-in: its hosts; generic: its one host) sets the rule and the own-key hosts together
+  (`ownKeysSwitchSetting`, shared/core): on → own keys may go to exactly those hosts and
+  「会社の鍵だけ」 becomes 会社優先 (a company key the member may use still wins; 「自分の鍵だけ」 and
+  会社優先 stay); off → no own-key hosts and 「会社の鍵だけ」 (registered own keys stay, unused). A
+  service with keys only (no known host) → 400 `HOSTS_REQUIRED`: its hosts are typed in
+  `PUT /broker/services/:service`. History action `service`, like the detailed form.
+
+## Checking a key when it is saved (owner, 2026-10-31)
+
+`services/broker-key-check.ts`, called by `keyBroker.create` / `replaceSecret` and
+`ownBrokerKeys.save` after the KEK check and before `vault.seal`: **one GET without a body** to
+the service's fixed host, the key in the service's own header only, through the relay's
+`UpstreamClient` (https, the connection to the checked address, private addresses refused unless
+in `internalHosts`, 10 s). Built-in: `BrokerServiceInfo.check` — Gemini `GET /v1beta/models`,
+OpenAI `GET /v1/models`, Anthropic `GET /v1/models` + `anthropic-version: 2023-06-01` — on the
+built-in host, and only when the key's destinations include it (else `not-checkable`, nothing
+sent). Generic (K9): the definition's optional `checkPath` (a plain path, no query, put after
+`basePath`); none → `not-checkable`. Only the status is read (the body is drained and dropped).
+Result (`BrokerKeyCheckResult`): 2xx → `valid`; the service's `rejected` statuses (Gemini 400 /
+401 / 403 — its answer to an invalid key is 400 API_KEY_INVALID; OpenAI and Anthropic 401 only,
+since a restricted OpenAI project key may lack the models permission and still chat; generic
+401 / 403) → **`rejected`: not saved**, 400 `{ code: 'KEY_REJECTED' }` (a replaced key stays
+the old one, no history row); a network failure → `unreachable`, anything else →
+`unconfirmed`; both saved. The answer of the save carries `check: { service, result }`
+(`BrokerView.check`, `MyBrokerKeys.check`) and the history's create / replace detail `check`.
+Logged: `[broker] key check <service>: <result or failure> (status n)`, never the key.
+`BROKER_KEY_CHECK=off` (`lib/config.ts`, compose; the server tests' `tests/setup.ts`) saves
+without a check and answers no `check`. The words say no more than validity:
+「鍵が有効なことを確かめました」 / 「この鍵は使えませんでした（発行元の画面で確かめてください）」 /
+「確かめられませんでした（通信できません）」 / 「この鍵は、実際に使うまで確かめられません」.
 
 ## Short-lived tokens (K3)
 
@@ -174,7 +210,9 @@ the sign-in.
    401 `ACB_REAL_KEY_REFUSED`, never forwarded** (a script with a hard-coded key). Unknown service
    → 404. `validate(token, service)` refusals → 401 `ACB_TOKEN_INVALID` / 403 `ACB_NOT_MEMBER` /
    403 `ACB_NO_KEY` (「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から
-   登録してください。」) / 503 `ACB_BROKER_OFF`. Error bodies are
+   登録してください。 [ACB_NO_KEY:<service>]」, `brokerNoKeyMessage`; the marker names the service
+   only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) / 503
+   `ACB_BROKER_OFF`. Error bodies are
    `{ type: 'error', error: { type, code, status, message } }` (read by all three SDKs).
 2. **Destinations**: the host is the built-in host when the key allows it, else the key's first
    host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
@@ -213,7 +251,8 @@ conservative default implemented: **only owners/admins** register, change or rem
 (department managers cannot; no per-department definitions — the key's two dials still decide
 who uses it).
 
-- `PUT /broker/relay-services/:service { label, baseUrl, header, format?, category? }`,
+- `PUT /broker/relay-services/:service { label, baseUrl, header, format?, category?, checkPath? }`
+  (`checkPath`: the optional read-only GET that checks a key when it is saved, above),
   `DELETE /broker/relay-services/:service` (`services/key-broker.ts`
   `setRelayService` / `deleteRelayService`, history action `relay-service` with the definition
   before / after). Stored as `broker_services.relay` (JSON `BrokerRelayDefinition` { label, host,
@@ -398,8 +437,13 @@ only, the host fixed for every key, base path, the key only in the configured he
 the token / cookies / hop-by-hop / the client's copy of the header never forwarded, a real-looking
 key refused unforwarded, redirects, record / stop-all / caps, own keys, no host change or removal
 while keys exist, the additive migration, **no key in any answer, log line or table**),
-`tests/integration/own-broker-keys.test.ts`
-(own keys only where allowed (switch, rule, destinations), one per service, an admin's stop
+`tests/integration/broker-key-check.test.ts` (the check goes only to the fixed host — not sent
+when the key may not go there or a generic service has no check path —, GET without a body, the
+key only in the service's header; a refused key is not saved and a replaced one stays; network
+failure / unclear answer saved with that result; off → nothing sent; the marker; **no key in any
+answer, log line or table**), `tests/integration/own-broker-keys.test.ts`
+(own keys only where allowed (switch, rule, destinations), the admin's one switch per service,
+one per service, an admin's stop
 survives a replace, deleting only one's own, a token then uses it, 503 without a KEK, **no key
 value in any answer, error, log line or table**), `client/tests/ipc-app.test.ts`
 (「brokerKeys:save … never hands it back to the renderer」: refusals and offline answers carry

@@ -9,6 +9,7 @@
  *   PATCH  /broker/keys/:keyId            destinations, who, caps, flag, status
  *   DELETE /broker/keys/:keyId
  *   PUT    /broker/services/:service      { category, rule, ownKeyHosts }
+ *   PUT    /broker/services/:service/own-keys { allowed } the one switch 「メンバーが自分の鍵を使ってよい」
  *   PUT    /broker/relay-services/:service { label, baseUrl, header, format?, category? } a generic service (K9)
  *   DELETE /broker/relay-services/:service once no key exists for it
  *   PUT    /broker/settings               { memberKeysAllowed?, internalHosts? }
@@ -21,6 +22,10 @@
  *   GET    /me/broker-keys                 「自分の鍵」: services, company keys one may use, one's own keys (last 4)
  *   PUT    /me/broker-keys/:service        { secret, displayName? } register / replace one's own key (K8)
  *   DELETE /me/broker-keys/:service        delete one's own key
+ *
+ * Registering or replacing a key (company or own) checks it once with a free,
+ * read-only request to the service's fixed host: a key the service refuses →
+ * 400 KEY_REJECTED (not saved); otherwise the answer carries `check`.
  *
  * No answer ever carries a key's value. Non-members get 404 like every
  * company route. Registering / replacing answers 503 BROKER_OFF without a
@@ -91,6 +96,12 @@ keyBrokerRoute.put('/broker/services/:service', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, keyBroker.setService(member, c.req.param('service'), await jsonBody(c)))
+})
+
+keyBrokerRoute.put('/broker/services/:service/own-keys', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, keyBroker.setOwnKeys(member, c.req.param('service'), await jsonBody(c)))
 })
 
 keyBrokerRoute.put('/broker/relay-services/:service', async (c) => {

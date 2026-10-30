@@ -86,7 +86,8 @@ GET  /api/config                                  setup state (no auth)
                                                                 (「AI の囲い」: agent-sandbox.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service, PUT|DELETE /broker/relay-services/:service,
+                              PUT /broker/services/:service (+ /own-keys),
+                              PUT|DELETE /broker/relay-services/:service,
                               PUT /broker/settings, POST /broker/stop-all,
                               POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service

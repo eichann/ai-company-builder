@@ -29,7 +29,7 @@ import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from '.
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -46,6 +46,7 @@ import { createKeyBrokerService } from './services/key-broker'
 import { createBrokerTokenService } from './services/broker-tokens'
 import { createOwnBrokerKeyService } from './services/own-broker-keys'
 import { createBrokerRelay } from './services/broker-relay'
+import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -67,6 +68,8 @@ export function brokerDayOf(ms: number): string {
 export interface ServiceOptions {
   /** The relay's way out (tests: a fake upstream). */
   upstream?: UpstreamClient
+  /** Check keys once when they are saved (default: BROKER_KEY_CHECK). */
+  keyCheck?: boolean
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -96,7 +99,14 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
-  const keyBroker = createKeyBrokerService({ ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()) })
+  const upstream = options.upstream ?? httpsUpstream()
+  // The key check needs the company's generic services and exceptions (keyBroker); keyBroker asks it before saving.
+  let keyCheck: BrokerKeyCheckService | null = null
+  const keyBroker = createKeyBrokerService({
+    ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
+    checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
+  })
+  keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
@@ -124,7 +134,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       brokerTokens,
       brokerVault,
       keyBroker,
-      upstream: options.upstream ?? httpsUpstream(),
+      upstream,
       brokerKeys: repos.brokerKeys,
       record: agentEvents.recordServerEvent,
       dayOf: brokerDayOf,

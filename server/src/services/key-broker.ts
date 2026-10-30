@@ -41,9 +41,11 @@ import {
   parseBrokerDisplayName,
   parseOwnKeyHosts,
   parseInternalHosts,
+  ownKeysSwitchSetting,
   type BrokerAudience,
   type BrokerCaps,
   type BrokerDestinations,
+  type BrokerKeyCheckResult,
   type BrokerKeyRule,
   type BrokerKeyScope,
   type BrokerKeyStatus,
@@ -72,6 +74,11 @@ import { ok, refuse, type Outcome } from './outcome'
 
 export const KEY_BROKER_FORBIDDEN = 'Only owners and admins can manage API keys'
 export const BROKER_OFF_ERROR = 'The key broker is off: the server has no key-encryption key (BROKER_KEK_FILE)'
+/** The refusal when the service said the key does not work (the check on saving); never quotes the key. */
+export const KEY_REJECTED_ERROR = 'The service refused this key (one read-only check request); it was not saved'
+
+/** Checks a key once before it is saved (services/broker-key-check.ts); null = checking is off. */
+export type BrokerKeyChecker = (companyId: string, service: string, secret: string, hosts: readonly string[]) => Promise<BrokerKeyCheckResult | null>
 const HISTORY_LIMIT = 50
 
 export interface KeyBrokerDeps {
@@ -84,6 +91,8 @@ export interface KeyBrokerDeps {
   ids: IdGenerator
   /** The caps' day now (YYYY-MM-DD); default the UTC day. */
   brokerDay?: () => string
+  /** The one check of a key being saved (default: none). */
+  checkKey?: BrokerKeyChecker
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -119,8 +128,14 @@ function snapshot(row: BrokerKeyRow): BrokerKeySnapshot {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
+/** The view, with how the saved key's check went (when keys are checked). */
+function withCheck(view: BrokerView, service: string, check: BrokerKeyCheckResult | null): BrokerView {
+  return check ? { ...view, check: { service, result: check } } : view
+}
+
 export function createKeyBrokerService(deps: KeyBrokerDeps) {
   const { brokerKeys, brokerVault, memberships, departments, accounts, clock, ids } = deps
+  const checkKey: BrokerKeyChecker = deps.checkKey ?? (async () => null)
 
   /**
    * The department a consultation is in, from the folder the app sent
@@ -259,6 +274,17 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     return parseBrokerCaps({ ...base, ...input })
   }
 
+  /** Saves a service's rule and own-key hosts (history: action `service`). */
+  function saveServiceSetting(member: Member, service: string, stored: StoredBrokerService | undefined, after: BrokerServiceSetting) {
+    const before = stored ? serviceSettingOf(stored, service) : null
+    if (same(before, after)) return
+    const at = clock.now()
+    brokerKeys.saveService(member.companyId, {
+      service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
+      relay: stored?.relay ?? null, updatedAt: at, updatedBy: member.userId,
+    }, changeRow(member, at, null, { action: 'service', service, before, after }))
+  }
+
   return {
     /** GET …/broker */
     get(member: Member): Outcome<BrokerView> {
@@ -295,6 +321,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const audienceError = checkAudience(member.companyId, audience.value)
       if (audienceError) return refuse('bad-request', audienceError)
       if (!brokerVault.status().enabled) return refuse('unavailable', BROKER_OFF_ERROR, { code: 'BROKER_OFF' })
+      const check = await checkKey(member.companyId, service, secret.value, destinations.value.hosts)
+      if (check === 'rejected') return refuse('bad-request', KEY_REJECTED_ERROR, { code: 'KEY_REJECTED' })
 
       const keyId = ids.newId()
       const sealed = await brokerVault.seal(member.companyId, keyId, secret.value)
@@ -319,8 +347,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         updatedBy: member.userId,
         secretUpdatedAt: at,
       }
-      brokerKeys.insert(row, sealed, changeRow(member, at, keyId, { action: 'create', key: snapshot(row) }))
-      return ok(view(member.companyId))
+      brokerKeys.insert(row, sealed, changeRow(member, at, keyId, { action: 'create', key: snapshot(row), ...(check ? { check } : {}) }))
+      return ok(withCheck(view(member.companyId), service, check))
     },
 
     /** PUT …/broker/keys/:keyId/secret: replace the value (company or own key). */
@@ -330,8 +358,11 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
       const secret = checkBrokerSecret(body.secret)
       if ('error' in secret) return refuse('bad-request', secret.error)
-      if (!brokerKeys.find(member.companyId, keyId)) return refuse('not-found', 'API key not found')
+      const existing = brokerKeys.find(member.companyId, keyId)
+      if (!existing) return refuse('not-found', 'API key not found')
       if (!brokerVault.status().enabled) return refuse('unavailable', BROKER_OFF_ERROR, { code: 'BROKER_OFF' })
+      const check = await checkKey(member.companyId, existing.service, secret.value, decoded(existing).destinations.hosts)
+      if (check === 'rejected') return refuse('bad-request', KEY_REJECTED_ERROR, { code: 'KEY_REJECTED' })
       const sealed = await brokerVault.seal(member.companyId, keyId, secret.value)
       const current = brokerKeys.find(member.companyId, keyId)
       if (!current) return refuse('not-found', 'API key not found')
@@ -339,8 +370,9 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const last4 = brokerSecretLast4(secret.value)
       brokerKeys.replaceSecret(member.companyId, keyId, sealed, last4, at, member.userId, changeRow(member, at, keyId, {
         action: 'replace', service: current.service, displayName: current.displayName, last4Before: current.last4, last4After: last4,
+        ...(check ? { check } : {}),
       }))
-      return ok(view(member.companyId))
+      return ok(withCheck(view(member.companyId), current.service, check))
     },
 
     /** PATCH …/broker/keys/:keyId: settings of a company key; an own key's status only. */
@@ -453,15 +485,32 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const stored = serviceSettings(member.companyId).get(service)
       const hostsError = relayHostsError(relayOf(stored), hosts.value, 'ownKeyHosts')
       if (hostsError) return refuse('bad-request', hostsError)
-      const before = stored ? serviceSettingOf(stored, service) : null
-      const after: BrokerServiceSetting = { category: body.category, rule: body.rule, ownKeyHosts: hosts.value }
-      if (!same(before, after)) {
-        const at = clock.now()
-        brokerKeys.saveService(member.companyId, {
-          service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
-          relay: stored?.relay ?? null, updatedAt: at, updatedBy: member.userId,
-        }, changeRow(member, at, null, { action: 'service', service, before, after }))
-      }
+      saveServiceSetting(member, service, stored, { category: body.category, rule: body.rule, ownKeyHosts: hosts.value })
+      return ok(view(member.companyId))
+    },
+
+    /**
+     * PUT …/broker/services/:service/own-keys { allowed } — the one switch
+     * 「メンバーが自分の鍵を使ってよい」 for a service whose destination is known
+     * (built-in: its hosts; generic: its one host): own keys may go exactly
+     * there and 「会社の鍵だけ」 becomes 会社優先 (`ownKeysSwitchSetting`). Off:
+     * no own-key hosts, 「会社の鍵だけ」. A service with keys only (no known
+     * host) → 400 `HOSTS_REQUIRED`: its hosts are typed in the detailed form.
+     */
+    setOwnKeys(member: Member, service: string, body: unknown): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isValidBrokerServiceName(service)) return refuse('bad-request', 'service must be a lower-case ASCII name (a-z, 0-9, -, _)')
+      if (!isObject(body) || typeof body.allowed !== 'boolean') return refuse('bad-request', 'allowed must be true or false')
+      const stored = serviceSettings(member.companyId).get(service)
+      const builtin = builtinBrokerService(service)
+      const relay = builtin ? null : relayOf(stored)
+      if (!builtin && !relay && !stored && !brokerKeys.list(member.companyId).some(r => r.service === service)) return refuse('not-found', 'Unknown service')
+      const knownHosts = builtin ? builtin.defaultHosts : relay ? [relay.host] : []
+      const current = serviceSettingOf(stored, service)
+      const next = ownKeysSwitchSetting(current, knownHosts, body.allowed)
+      if (!next) return refuse('bad-request', 'This service has no known destination: set its own-key hosts with PUT …/broker/services/:service', { code: 'HOSTS_REQUIRED' })
+      saveServiceSetting(member, service, stored, { category: current.category, ...next })
       return ok(view(member.companyId))
     },
 
@@ -588,6 +637,9 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
 
     /** The consultation's department (dial ①), for tokens. */
     departmentIdOfFolder,
+
+    /** The one check of a key being saved (own keys use it too). */
+    checkKey,
   }
 }
 

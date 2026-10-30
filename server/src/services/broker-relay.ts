@@ -28,6 +28,7 @@
  */
 import {
   BROKER_NO_KEY_PLACEHOLDER,
+  brokerNoKeyMessage,
   BROKER_TOKEN_PREFIX,
   builtinBrokerService,
   isValidBrokerServiceName,
@@ -133,15 +134,15 @@ function jsonError(status: number, code: RelayErrorCode, message: string, grant:
   return { status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body, grant, code }
 }
 
-const NEEDS_KEY = (label: string) =>
-  `この作業には ${label} の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。`
+/** 「この作業には <サービス> の鍵が必要です。…」 + the marker the app turns into a 「自分の鍵」 card. */
+const NEEDS_KEY = brokerNoKeyMessage
 
-function tokenRefusal(reason: BrokerTokenRefusal, label: string): RelayAnswer {
+function tokenRefusal(reason: BrokerTokenRefusal, label: string, service: string): RelayAnswer {
   switch (reason) {
     case 'broker-off': return jsonError(503, 'ACB_BROKER_OFF', 'サーバーで API キーを預かる機能が、まだ使えるようになっていません。管理者に相談してください。')
     case 'not-member': return jsonError(403, 'ACB_NOT_MEMBER', 'この会社のメンバーではないため、鍵を使えません。')
     case 'service-not-granted':
-    case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(label))
+    case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(label, service))
     case 'key-stopped': return jsonError(403, 'ACB_STOPPED', `管理者が ${label} の鍵を止めています。再開されるまで使えません。`)
     default: return jsonError(401, 'ACB_TOKEN_INVALID', 'ACB の通行証の期限が切れたか、使えなくなりました。新しい相談でもう一度お試しください。')
   }
@@ -364,7 +365,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       if (credentialValues(req.headers, query).includes(BROKER_NO_KEY_PLACEHOLDER)
         || (!builtin && req.headers.some(([, v]) => v.trim().endsWith(BROKER_NO_KEY_PLACEHOLDER)))) {
         // The app had no key for this member and service: say so in plain Japanese.
-        return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(builtin?.label ?? req.service))
+        return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(builtin?.label ?? req.service, req.service))
       }
       let credential = credentialOf(req.headers, query, !builtin)
       if ('error' in credential && credential.error === 'none') {
@@ -388,7 +389,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         // A name that is neither built in nor one of the company's generic services: not ours (not recorded).
         if (!builtin && !relay && checked.who) return unknownService()
         meta.who = checked.who
-        return tokenRefusal(checked.reason, target.label)
+        return tokenRefusal(checked.reason, target.label, req.service)
       }
       const grant = checked.grant
       meta.grant = grant
@@ -453,7 +454,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       }
 
       const secret = await brokerVault.reveal(grant.companyId, grant.keyId)
-      if (!secret) return tokenRefusal('no-key', target.label)
+      if (!secret) return tokenRefusal('no-key', target.label, req.service)
       const headers: Record<string, string> = {}
       for (const [name, value] of req.headers) {
         if (DROP_REQUEST.has(name) || name.startsWith('x-forwarded-') || name.startsWith('x-acb-')) continue

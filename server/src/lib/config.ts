@@ -41,6 +41,13 @@ export const BROKER_MAX_REQUEST_MB = Number(process.env.BROKER_MAX_REQUEST_MB) |
 /** How long the relay waits for an upstream's response headers, in seconds (default 600: long AI answers). */
 export const BROKER_UPSTREAM_TIMEOUT_SECONDS = Number(process.env.BROKER_UPSTREAM_TIMEOUT_SECONDS) || 600
 
+/**
+ * Whether a key is checked once when it is registered or replaced (one free,
+ * read-only request to the service's fixed host; key-broker.md). `off` for a
+ * server that cannot reach the internet, and in the test suite. Default on.
+ */
+export const BROKER_KEY_CHECK = process.env.BROKER_KEY_CHECK?.trim().toLowerCase() !== 'off'
+
 /** Where the relay's day (daily caps) begins, as minutes east of UTC (default 540 = Japan). */
 export const BROKER_DAY_UTC_OFFSET_MINUTES = Number.isFinite(Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)) && process.env.BROKER_DAY_UTC_OFFSET_MINUTES
   ? Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)
