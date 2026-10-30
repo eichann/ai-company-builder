@@ -63,8 +63,9 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   expand. An event re-reads only the changed path's parent if it is on screen; a collapsed or
   off-screen folder is marked stale and re-read when shown; `change` re-reads nothing
   (`planTreeRefresh`, unit-tested). Rows are memoised (`TreeRow`).
-- The not-downloaded department prompt is an overlay (the tree stays mounted); the
-  "folder exists" check is keyed per folder (`src/lib/folderExists.ts`); left tabs stay mounted
+- The not-downloaded department prompt is an overlay (the tree stays mounted;
+  `download-choices.md`); the "folder exists" check is keyed per folder (`src/lib/folderExists.ts`,
+  used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
   once opened (history follows the department only while shown, since it runs `git log`).
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
 - IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),

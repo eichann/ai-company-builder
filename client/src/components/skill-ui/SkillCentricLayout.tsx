@@ -1,6 +1,6 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
-import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Cloud, DownloadSimple, Info, ChatCircle, CaretLeft, WarningCircle, WifiSlash } from '@phosphor-icons/react'
+import { CloudArrowUp, GearSix, House, Lightning, FolderSimple, SignOut, Sun, Moon, Globe, SpinnerGap, FolderOpen, X, ClockCounterClockwise, ListChecks, GitCommit, MagnifyingGlass, Info, ChatCircle, CaretLeft } from '@phosphor-icons/react'
 import { DepartmentTabs } from './DepartmentTabs'
 import { SkillGrid } from './SkillGrid'
 import { SkillDetailPanel } from './SkillDetailPanel'
@@ -27,7 +27,6 @@ import { isPerfCutEnabled, perfMark } from '../../lib/perfDiagnostics'
 import { isChatInputRecentlyActive } from '../../lib/chatInputActivity'
 import { usePrivateFolderStore } from '../../hooks/usePrivateFolders'
 import { subscribeFileChanges } from '../../lib/fileEvents'
-import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../lib/folderExists'
 import { useSplitLayout } from '../../features/workspace/hooks/useSplitLayout'
 import { PANE_LIMITS } from '../../features/workspace/layoutTree'
 import { tabDepartmentLabels } from '../../lib/editorTabs'
@@ -36,7 +35,9 @@ import { unwatchCompany, watchCompany } from '../../shared/ipc/file-events'
 import { useEditorPersistence } from '../../features/editor/hooks/useEditorPersistence'
 import { useDepartmentSelection } from '../../features/workspace/hooks/useDepartmentSelection'
 import { COMPANY_TAB_ID } from '../../shared/lib/departments'
-import { departmentFolderExists } from '../../features/workspace/api'
+import { useDepartmentAvailability } from '../../features/workspace/hooks/useDepartmentAvailability'
+import { useDepartmentDownload } from '../../features/sync/hooks/useDepartmentDownload'
+import { DepartmentDownloadPrompt } from '../../features/sync/components/DepartmentDownloadPrompt'
 import { copySkill, createSkillDirectory, makeSkillPrivate, publishSkill, readSkillFile, setSkillNurturing, writeSkillFile } from '../../features/skills/api'
 import { previewSync, revertChange, summarizeChanges, syncCompany } from '../../features/sync/api'
 import { signOut } from '../../features/auth/api'
@@ -71,9 +72,6 @@ export function SkillCentricLayout() {
 
   // Sparse checkout state
   const sparseCheckout = useSparseCheckout({ rootPath: currentCompany?.rootPath || '' })
-
-  const [isDownloading, setIsDownloading] = useState(false)
-  const [downloadError, setDownloadError] = useState<{ offline: boolean; message: string } | null>(null)
 
   const toggleLanguage = useCallback(() => {
     setLanguage(language === 'ja' ? 'en' : 'ja')
@@ -125,55 +123,14 @@ export function SkillCentricLayout() {
 
   const isCompanyWide = selectedDeptId === COMPANY_TAB_ID
 
-  // Compute which department folders are not checked out (sparse checkout)
-  const unsyncedFolders = useMemo(() => {
-    if (!sparseCheckout.enabled) return undefined
-    const set = new Set<string>()
-    for (const dept of departments) {
-      if (!sparseCheckout.isCheckedOut(dept.folder)) {
-        set.add(dept.folder)
-      }
-    }
-    return set.size > 0 ? set : undefined
-  }, [sparseCheckout.enabled, sparseCheckout.excludedPaths, departments])
-
   const selectedDept = useMemo(
     () => departments.find((d) => d.id === selectedDeptId),
     [departments, selectedDeptId]
   )
 
-  // Check if the currently selected department folder exists on disk. The
-  // answer is keyed by folder: an answer for the previous department never
-  // applies to this one (that flashed the download prompt and remounted the
-  // file tree on every switch), and answers are remembered per folder.
-  const deptPathForCheck = currentCompany?.rootPath && selectedDept?.folder && !isCompanyWide
-    ? `${currentCompany.rootPath}/${selectedDept.folder}`
-    : null
-  const [folderCheck, setFolderCheck] = useState<FolderCheck | null>(null)
-  useEffect(() => {
-    if (!deptPathForCheck) return
-    let cancelled = false
-    const record = (exists: boolean) => {
-      rememberFolderExists(deptPathForCheck, exists)
-      if (!cancelled) setFolderCheck({ path: deptPathForCheck, exists })
-    }
-    departmentFolderExists(deptPathForCheck)
-      .then((exists: boolean) => record(exists))
-      .catch(() => record(false))
-    return () => { cancelled = true }
-  }, [deptPathForCheck, sparseCheckout.excludedPaths])
-  const deptFolderExists = folderExistsFor(folderCheck, deptPathForCheck)
-
-  // Department is unsynced if sparse checkout says so OR if the folder doesn't exist
-  const isSelectedDeptUnsynced = useMemo(() => {
-    if (!selectedDeptId || isCompanyWide) return false
-    // If folder doesn't exist on disk, it's unsynced regardless of sparse checkout state
-    if (!deptFolderExists) return true
-    // Also check sparse checkout state
-    if (!unsyncedFolders) return false
-    const dept = departments.find(d => d.id === selectedDeptId)
-    return dept ? unsyncedFolders.has(dept.folder) : false
-  }, [selectedDeptId, isCompanyWide, deptFolderExists, unsyncedFolders, departments])
+  // Which departments are not on this computer, and whether the selected one shows the download prompt.
+  const { unsyncedFolders, isSelectedDeptUnsynced, markDownloaded } =
+    useDepartmentAvailability(currentCompany?.rootPath, departments, selectedDept, isCompanyWide, sparseCheckout)
 
   // The effective path for file tree and chat
   const effectiveDeptFolder = isCompanyWide ? '' : (selectedDept?.folder || '')
@@ -200,31 +157,16 @@ export function SkillCentricLayout() {
     departmentId: isCompanyWide ? '' : COMPANY_TAB_ID, // Skip when already viewing company tab (avoid duplicate)
     departmentName: '全社',
   })
-  const handleDownloadDepartment = useCallback(async () => {
-    if (!selectedDept?.folder) return
-    setIsDownloading(true)
-    setDownloadError(null)
-    try {
-      const folder = selectedDept.folder
-      const result = await sparseCheckout.apply(sparseCheckout.excludedPaths.filter(p => p !== folder))
-      if (result.success) {
-        const deptPath = currentCompany?.rootPath ? `${currentCompany.rootPath}/${folder}` : null
-        if (deptPath) {
-          rememberFolderExists(deptPath, true)
-          setFolderCheck({ path: deptPath, exists: true })
-        }
-        refreshSkills()
-      } else {
-        // Say why instead of silently showing the button again.
-        setDownloadError({ offline: !!result.offline, message: result.error || 'ダウンロードできませんでした' })
-      }
-    } catch (err) {
-      setDownloadError({ offline: false, message: err instanceof Error ? err.message : 'ダウンロードできませんでした' })
-    } finally {
-      setIsDownloading(false)
-    }
-  }, [selectedDept?.folder, sparseCheckout, refreshSkills, currentCompany?.rootPath])
-  useEffect(() => { setDownloadError(null) }, [selectedDept?.folder])
+  const handleDepartmentDownloaded = useCallback((folder: string) => {
+    markDownloaded(folder)
+    refreshSkills()
+  }, [markDownloaded, refreshSkills])
+  const { isDownloading, downloadError, download: handleDownloadDepartment } = useDepartmentDownload({
+    folder: selectedDept?.folder,
+    excludedPaths: sparseCheckout.excludedPaths,
+    apply: sparseCheckout.apply,
+    onDownloaded: handleDepartmentDownloaded,
+  })
 
   // Skills rescans requested by file events, coalesced (120 ms, deferred up to
   // 1 s while the member is typing in the chat): the shown list and/or the
@@ -1073,54 +1015,13 @@ ${promptContent}
             </div>
           </div>
           {isSelectedDeptUnsynced && (
-            /* Unsynced department — download prompt */
-            <div className="absolute inset-0 z-10 flex items-center justify-center bg-gray-50 dark:bg-zinc-950">
-              <div className="text-center max-w-md px-6">
-                <div className="w-20 h-20 rounded-2xl bg-gray-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-6">
-                  <Cloud size={40} className="text-gray-400 dark:text-zinc-500" />
-                </div>
-                <h2 className="text-xl font-semibold text-gray-800 dark:text-zinc-200 mb-2">
-                  {selectedDept?.name}
-                </h2>
-                <p className="text-gray-500 dark:text-zinc-400 mb-8">
-                  この部署のファイルはまだダウンロードされていません。
-                  ダウンロードすると、ファイルの閲覧・編集・AIチャットが利用できます。
-                </p>
-                <button
-                  onClick={handleDownloadDepartment}
-                  disabled={isDownloading}
-                  className="
-                    inline-flex items-center gap-2.5 px-6 py-3 rounded-xl
-                    text-white font-medium text-sm
-                    transition-all hover:brightness-110 active:scale-[0.98]
-                    disabled:opacity-50 disabled:cursor-not-allowed
-                  "
-                  style={{ backgroundColor: selectedDept?.color || '#6366f1' }}
-                >
-                  {isDownloading ? (
-                    <SpinnerGap size={18} className="animate-spin" />
-                  ) : (
-                    <DownloadSimple size={18} weight="bold" />
-                  )}
-                  {isDownloading ? 'ダウンロード中...' : 'ダウンロードして同期を開始'}
-                </button>
-                {downloadError && !isDownloading && (
-                  <p
-                    role="alert"
-                    className={`mt-4 inline-flex items-start gap-2 text-left text-sm ${downloadError.offline ? 'text-zinc-700 dark:text-zinc-200' : 'text-red-600 dark:text-red-300'}`}
-                  >
-                    {downloadError.offline
-                      ? <WifiSlash size={16} className="mt-0.5 shrink-0 text-zinc-500" />
-                      : <WarningCircle size={16} weight="fill" className="mt-0.5 shrink-0" />}
-                    <span className="break-words">
-                      {downloadError.offline
-                        ? 'インターネットにつながっているときにダウンロードできます。何も変更していません。'
-                        : `ダウンロードできませんでした：${downloadError.message}`}
-                    </span>
-                  </p>
-                )}
-              </div>
-            </div>
+            <DepartmentDownloadPrompt
+              departmentName={selectedDept?.name}
+              color={selectedDept?.color}
+              isDownloading={isDownloading}
+              error={downloadError}
+              onDownload={handleDownloadDepartment}
+            />
           )}
         </>
         )}

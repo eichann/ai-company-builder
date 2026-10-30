@@ -17,6 +17,9 @@ paths:
   - "client/src/lib/company-folder-plan.ts"
   - "client/src/lib/restore-company.ts"
   - "client/src/hooks/useSparseCheckout.ts"
+  - "client/src/features/sync/hooks/useDepartmentDownload.ts"
+  - "client/src/features/sync/components/DepartmentDownloadPrompt.tsx"
+  - "client/src/features/workspace/hooks/useDepartmentAvailability.ts"
   - "client/src/shared/ipc/download-choices.ts"
   - "client/tests/download-folders-ui.*"
   - "client/tests/sync/partial-clone.test.ts"
@@ -136,5 +139,11 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   It goes through `src/shared/ipc/download-choices.ts`: `ExcludedFolderReads` (the list) and
   `DownloadChoiceOutbound` (applying downloads from the server and syncs a left-out private
   folder one last time, so it is not a plain write).
+- A department tab whose folder is not on this computer (left out, or missing on disk:
+  `src/features/workspace/hooks/useDepartmentAvailability.ts`) shows
+  `src/features/sync/components/DepartmentDownloadPrompt.tsx` over the still-mounted left panel;
+  「ダウンロードして同期を開始」 (`hooks/useDepartmentDownload.ts`) downloads that one folder. Offline it
+  says 「インターネットにつながっているときにダウンロードできます。何も変更していません。」 and keeps the
+  prompt; another department starts without the old error (`client/tests/ui/skill-layout.spec.ts`).
 - Preview: `client/tests/download-folders-ui.html?view=settings|filetree&theme=light|dark&state=normal|offline|slow|confirm|applyOffline`
   (serve with `npx vite -c tests/ui/vite.config.ts`; see `testing.md`).
