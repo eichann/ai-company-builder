@@ -3,7 +3,7 @@
 // keys only through the key broker (.claude/rules/key-broker.md, K6): the
 // short-lived token where the SDKs look for a key, and the relay where they
 // look for a base URL. Pure: main builds it, agent-env.ts filters with it.
-import { BROKER_NO_KEY_PLACEHOLDER, looksLikeBrokerToken } from '../../shared/core/key-broker'
+import { BROKER_NO_KEY_PLACEHOLDER, brokerServiceEnvNames, looksLikeBrokerToken } from '../../shared/core/key-broker'
 import type { BrokerTokenIssued } from '../../shared/types/key-broker'
 
 /**
@@ -19,21 +19,34 @@ export const BROKER_SERVICE_ENV: Readonly<Record<string, { keys: readonly string
   anthropic: { keys: ['ANTHROPIC_API_KEY'], baseUrl: ['ANTHROPIC_BASE_URL'], suffix: '' },
 }
 
-/** `ACB_GEMINI_API_KEY`, `ACB_GEMINI_BASE_URL`, … */
-export function acbServiceEnv(service: string): { key: string; baseUrl: string } {
-  const name = service.toUpperCase().replace(/[^A-Z0-9]/g, '_')
-  return { key: `ACB_${name}_API_KEY`, baseUrl: `ACB_${name}_BASE_URL` }
-}
+/**
+ * `ACB_GEMINI_API_KEY`, `ACB_GEMINI_BASE_URL`, … — also for a company's generic
+ * services (K9: `crm` → `ACB_CRM_*`, `case-master` → `ACB_CASE_MASTER_*`),
+ * which have no SDK names of their own.
+ */
+export const acbServiceEnv = brokerServiceEnvNames
 
 /** The relay's root as scripts reach it (also `ACB_BROKER_URL`). */
 export const ACB_BROKER_URL = 'ACB_BROKER_URL'
 
-/** Every variable name this module may set. */
+/** Every fixed variable name this module may set (plus `ACB_<SERVICE>_API_KEY` / `_BASE_URL` of any service). */
 export const BROKER_ENV_NAMES: readonly string[] = [
   ACB_BROKER_URL,
   ...Object.entries(BROKER_SERVICE_ENV).flatMap(([service, e]) => [...e.keys, ...e.baseUrl, acbServiceEnv(service).key, acbServiceEnv(service).baseUrl]),
 ]
 const NAMES = new Set(BROKER_ENV_NAMES.map(n => n.toUpperCase()))
+/** A generic service's names (K9): the services are the company's, so the shape decides. */
+const SERVICE_NAME = /^ACB_[A-Z0-9_]+_(API_KEY|BASE_URL)$/i
+
+/**
+ * A name the broker owns: only the app's values may pass under it (rule 0 of
+ * agent-env.ts), whatever the member's shell holds — also for services the
+ * app has not heard of yet (`ACB_CRM_BASE_URL=https://elsewhere` would send
+ * the token there).
+ */
+export function isBrokerEnvName(name: string): boolean {
+  return NAMES.has(name.toUpperCase()) || SERVICE_NAME.test(name)
+}
 
 /**
  * The variables for one AI process or tool. Services the token covers get the
@@ -69,7 +82,7 @@ export function brokerEnv(serverUrl: string, issued: BrokerTokenIssued | null, r
 /** The environment without any broker variable (before a turn's own are added). */
 export function withoutBrokerEnv<V extends string | undefined>(env: Record<string, V>): Record<string, V> {
   const out: Record<string, V> = {}
-  for (const [name, value] of Object.entries(env)) if (!NAMES.has(name.toUpperCase())) out[name] = value
+  for (const [name, value] of Object.entries(env)) if (!isBrokerEnvName(name)) out[name] = value
   return out
 }
 
@@ -85,7 +98,7 @@ export function brokerOrigin(serverUrl: string): string {
  * send the token elsewhere, from the member's own environment never does.
  */
 export function isBrokerEnvValue(name: string, value: string, origin: string): boolean {
-  if (!NAMES.has(name.toUpperCase())) return false
+  if (!isBrokerEnvName(name)) return false
   if (/(_URL)$/i.test(name)) {
     if (!origin || !(value === `${origin}/api/broker` || value.startsWith(`${origin}/api/broker/`))) return false
     return /^\/api\/broker(\/[a-z0-9_-]+(\/v1)?)?$/.test(value.slice(origin.length))
