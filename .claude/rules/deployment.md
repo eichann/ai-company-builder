@@ -44,6 +44,10 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   `/api/*` is forwarded by `admin/src/proxy.ts`, which reads `API_PROXY_URL` at run time
   (`http://api:3001` on the compose network). The admin Dockerfile copies `shared/` into its
   build stage.
+- Optional key broker KEK: `BROKER_KEK_HOST_FILE` (host path, root-owned `0600`, outside the
+  checkout and `./data`) is mounted read-only at `/run/secrets/broker-kek`
+  (`BROKER_KEK_FILE`); unset → `/dev/null` is mounted and the broker stays off
+  (`key-broker.md`). Same in `docs/self-hosting/docker-compose.production.yml`.
 - Required env (`.env`, from `.env.example`): `AUTH_SECRET` (`openssl rand -base64 32`),
   `PUBLIC_URL`. Node heap is capped (`NODE_OPTIONS=--max-old-space-size`, 2048 api / 1024 admin)
   so a slow leak restarts cleanly.

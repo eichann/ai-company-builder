@@ -1,50 +1,126 @@
 /**
- * SecretCipher with a key held by this process: AES-256-GCM, a random 96-bit
- * IV per message, the context bound as additional authenticated data.
+ * Envelope encryption of the key broker's secrets (ports/secret-cipher.ts)
+ * with a KEK held by this process (stage 1: a file, adapters/kek-file.ts).
  *
- * Ciphertext: `v1.<iv>.<tag>.<data>` (base64url). The version prefix lets a
- * KMS-backed cipher (envelope encryption) coexist with stored v1 values
- * during a migration.
+ * - `envelopeSecretCipher(current, previous)`: a fresh random 256-bit data key
+ *   per secret encrypts the value (AES-256-GCM, 96-bit nonce, the context as
+ *   additional data); the data key is wrapped by `current`. `open` unwraps with
+ *   whichever wrapper's kekId matches the row (`previous` = KEKs being retired).
+ * - `localKeyWrapper(kek)`: wraps data keys with AES-256-GCM under the KEK;
+ *   wrapped form `w1.<nonce>.<tag>.<data>` (base64url). Its id is a one-way
+ *   fingerprint of the KEK (`local:<16 hex>`), safe to store and log.
  *
- * Not used by anything yet (the key broker that will use it is planned).
- * Where the key comes from is the caller's decision; it is never generated
- * or persisted here.
+ * Never generates or persists a KEK, and never logs a value.
  */
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto'
-import type { SecretCipher } from '../ports/secret-cipher'
+import { createCipheriv, createDecipheriv, createHash, randomBytes } from 'crypto'
+import type { KeyWrapper, SealedSecret, SecretCipher, SecretContext } from '../ports/secret-cipher'
 
-const VERSION = 'v1'
-const IV_BYTES = 12
+export const ENVELOPE_SCHEME = 'env1'
+const NONCE_BYTES = 12
+const TAG_BYTES = 16
+const KEY_BYTES = 32
 
 /** Context as bytes: keys sorted, so `{a, b}` and `{b, a}` are the same context. */
-function contextBytes(context: Record<string, string> | undefined): Buffer {
-  const entries = Object.entries(context ?? {}).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-  return Buffer.from(JSON.stringify(entries), 'utf8')
+function contextBytes(context: SecretContext, layer: string): Buffer {
+  const entries = Object.entries(context).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+  return Buffer.from(JSON.stringify([layer, entries]), 'utf8')
 }
 
-export function localSecretCipher(key: Buffer): SecretCipher {
-  if (key.length !== 32) throw new Error('localSecretCipher: the key must be 32 bytes (AES-256)')
-  const k = Buffer.from(key)
+function gcmEncrypt(key: Buffer, plaintext: Buffer, aad: Buffer) {
+  const nonce = randomBytes(NONCE_BYTES)
+  const cipher = createCipheriv('aes-256-gcm', key, nonce)
+  cipher.setAAD(aad)
+  const data = Buffer.concat([cipher.update(plaintext), cipher.final()])
+  return { nonce, tag: cipher.getAuthTag(), data }
+}
 
+function gcmDecrypt(key: Buffer, nonce: Buffer, tag: Buffer, data: Buffer, aad: Buffer): Buffer {
+  if (nonce.length !== NONCE_BYTES || tag.length !== TAG_BYTES) throw new Error('secret-cipher: malformed envelope')
+  const decipher = createDecipheriv('aes-256-gcm', key, nonce)
+  decipher.setAAD(aad)
+  decipher.setAuthTag(tag)
+  return Buffer.concat([decipher.update(data), decipher.final()])
+}
+
+/** One-way id of a KEK: lets rows say which KEK wrapped them without revealing it. */
+export function kekFingerprint(kek: Buffer): string {
+  return createHash('sha256').update('acb-broker-kek-id\0').update(kek).digest('hex').slice(0, 16)
+}
+
+export function localKeyWrapper(kek: Buffer): KeyWrapper {
+  if (kek.length !== KEY_BYTES) throw new Error('localKeyWrapper: the KEK must be 32 bytes (AES-256)')
+  const k = Buffer.from(kek)
+  const kekId = `local:${kekFingerprint(k)}`
   return {
-    async encrypt(plaintext, context) {
-      const iv = randomBytes(IV_BYTES)
-      const cipher = createCipheriv('aes-256-gcm', k, iv)
-      cipher.setAAD(contextBytes(context))
-      const data = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()])
-      const tag = cipher.getAuthTag()
-      return [VERSION, iv.toString('base64url'), tag.toString('base64url'), data.toString('base64url')].join('.')
+    kekId,
+    async wrap(dataKey, context) {
+      const { nonce, tag, data } = gcmEncrypt(k, Buffer.from(dataKey), contextBytes(context, 'wrap'))
+      return ['w1', nonce, tag, data].map(p => (typeof p === 'string' ? p : p.toString('base64url'))).join('.')
     },
-
-    async decrypt(ciphertext, context) {
-      const parts = ciphertext.split('.')
-      if (parts.length !== 4 || parts[0] !== VERSION) throw new Error('localSecretCipher: unsupported ciphertext')
-      const [, iv, tag, data] = parts.map(p => Buffer.from(p, 'base64url'))
-      if (iv.length !== IV_BYTES || tag.length !== 16) throw new Error('localSecretCipher: unsupported ciphertext')
-      const decipher = createDecipheriv('aes-256-gcm', k, iv)
-      decipher.setAAD(contextBytes(context))
-      decipher.setAuthTag(tag)
-      return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8')
+    async unwrap(wrapped, context) {
+      const parts = wrapped.split('.')
+      if (parts.length !== 4 || parts[0] !== 'w1') throw new Error('localKeyWrapper: unsupported wrapped key')
+      const [nonce, tag, data] = parts.slice(1).map(p => Buffer.from(p, 'base64url'))
+      const key = gcmDecrypt(k, nonce, tag, data, contextBytes(context, 'wrap'))
+      if (key.length !== KEY_BYTES) throw new Error('localKeyWrapper: unsupported wrapped key')
+      return key
     },
   }
+}
+
+export function envelopeSecretCipher(current: KeyWrapper, previous: KeyWrapper[] = []): SecretCipher {
+  const wrappers = new Map([...previous, current].map(w => [w.kekId, w]))
+  wrappers.set(current.kekId, current)
+
+  async function dataKeyOf(sealed: SealedSecret, context: SecretContext): Promise<Buffer> {
+    if (sealed.scheme !== ENVELOPE_SCHEME) throw new Error('secret-cipher: unsupported scheme')
+    const wrapper = wrappers.get(sealed.kekId)
+    if (!wrapper) throw new Error('secret-cipher: the key-encryption key of this secret is not loaded')
+    return Buffer.from(await wrapper.unwrap(sealed.wrappedKey, context))
+  }
+
+  return {
+    kekId: current.kekId,
+
+    async seal(plaintext, context) {
+      const dataKey = randomBytes(KEY_BYTES)
+      try {
+        const { nonce, tag, data } = gcmEncrypt(dataKey, Buffer.from(plaintext, 'utf8'), contextBytes(context, 'value'))
+        return {
+          scheme: ENVELOPE_SCHEME,
+          ciphertext: data.toString('base64url'),
+          nonce: nonce.toString('base64url'),
+          tag: tag.toString('base64url'),
+          wrappedKey: await current.wrap(dataKey, context),
+          kekId: current.kekId,
+        }
+      } finally {
+        dataKey.fill(0)
+      }
+    },
+
+    async open(sealed, context) {
+      const dataKey = await dataKeyOf(sealed, context)
+      try {
+        const b = (s: string) => Buffer.from(s, 'base64url')
+        return gcmDecrypt(dataKey, b(sealed.nonce), b(sealed.tag), b(sealed.ciphertext), contextBytes(context, 'value')).toString('utf8')
+      } finally {
+        dataKey.fill(0)
+      }
+    },
+
+    async rewrap(sealed, context) {
+      const dataKey = await dataKeyOf(sealed, context)
+      try {
+        return { ...sealed, wrappedKey: await current.wrap(dataKey, context), kekId: current.kekId }
+      } finally {
+        dataKey.fill(0)
+      }
+    },
+  }
+}
+
+/** The stage-1 cipher: envelope encryption under a local KEK (32 bytes). */
+export function localSecretCipher(kek: Buffer, previousKeks: Buffer[] = []): SecretCipher {
+  return envelopeSecretCipher(localKeyWrapper(kek), previousKeks.map(localKeyWrapper))
 }

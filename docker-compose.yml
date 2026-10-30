@@ -21,6 +21,10 @@ services:
       - HOST_REPOS_DIR=${HOST_REPOS_DIR:-/app/data/repos}
       # Cap Node heap so a slow leak triggers a clean OOM-restart instead of dragging the host down
       - NODE_OPTIONS=--max-old-space-size=2048
+      # The key broker's key-encryption key (KEK), mounted read-only below.
+      # Optional: without BROKER_KEK_HOST_FILE in .env the mount is /dev/null
+      # and the broker stays off (the server runs as before).
+      - BROKER_KEK_FILE=/run/secrets/broker-kek
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").
@@ -34,6 +38,9 @@ services:
       # SQLite databases, company repositories, archives
       - ./data:/app/data
       - api-tmp:/tmp
+      # Key broker KEK: a root-owned 0600 file OUTSIDE ./data (database backups
+      # must not contain it) and outside this checkout. See .env.example.
+      - ${BROKER_KEK_HOST_FILE:-/dev/null}:/run/secrets/broker-kek:ro
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch(\"http://localhost:3001/api/config\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]

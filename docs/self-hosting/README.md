@@ -360,6 +360,25 @@ When team members open the invitation link, they can register a new account and 
 | `PORT` | No | `3001` | API server port. |
 | `DATA_DIR` | No | `./data` | Directory for SQLite databases. |
 | `REPOS_DIR` | No | `${DATA_DIR}/repos` | Directory for Git bare repositories. |
+| `BROKER_KEK_HOST_FILE` | No | — | Host path of the key broker's key-encryption key (mounted read-only into the api container as `BROKER_KEK_FILE`). Unset = the key broker ("API キー") is off. |
+
+### Key broker (optional)
+
+The server can hold your company's API keys encrypted and give the AI only short-lived tokens.
+The keys are encrypted with a key-encryption key (KEK) in a file on the host:
+
+```bash
+sudo install -d -m 700 /etc/acb
+docker compose run --rm --no-deps -v /etc/acb:/kek api \
+  node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
+echo 'BROKER_KEK_HOST_FILE=/etc/acb/broker-kek' >> .env
+docker compose up -d api   # the log says "Key broker: on"
+```
+
+- Keep the file outside the checkout and outside `data/` (backups of `data/` must not contain
+  it), owner-only (`600`). The server refuses a file readable by others or inside `DATA_DIR`.
+- Store a copy of its contents in a password manager, off the server. Without it, every stored
+  key is unreadable after a loss of the server.
 
 ### Ports
 
@@ -422,6 +441,7 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 | Authentication database | `data/auth.sqlite` | **Critical** |
 | Git repositories | `data/repos/` | **Critical** |
 | Environment file | `.env` | **Critical** |
+| Key broker KEK (if used) | e.g. `/etc/acb/broker-kek` | **Critical** — keep its copy in a password manager, never next to the database backups |
 
 Older versions also kept working copies in `data/workdirs/`. Current versions no longer use
 them; the directory needs no backup and can be deleted.

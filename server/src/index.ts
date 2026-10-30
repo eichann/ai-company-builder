@@ -36,6 +36,12 @@ initDatabase()
   console.log(`Configured ${total - failed}/${total} bare repositories${failed > 0 ? ` (${failed} failed)` : ''}`)
 }
 
+// The key broker (API keys): on only with a usable key-encryption key file.
+{
+  const broker = services.brokerVault.status()
+  console.log(broker.enabled ? `Key broker: on (key-encryption key ${broker.kekId})` : `Key broker: off — ${broker.detail}`)
+}
+
 // Clean up expired sessions on startup
 const authDb = new Database(AUTH_DB_PATH)
 

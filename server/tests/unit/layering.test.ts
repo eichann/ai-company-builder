@@ -9,7 +9,8 @@
  * - services/ import ports, other services, shared/core and the pure lib
  *   helpers listed below — never a database, Hono, git, the file system or
  *   an adapter.
- * - adapters/ are imported only by the composition root (and tests).
+ * - adapters/ are imported only by the composition root, operator commands
+ *   in cli/ (each its own root) and tests.
  * - routes/ that have moved to services run no SQL themselves.
  */
 import { describe, expect, it } from 'vitest'
@@ -66,7 +67,8 @@ describe('server layering', () => {
   it('only the composition root imports adapters', () => {
     for (const file of tsFiles(SRC)) {
       const rel = relative(SRC, file)
-      if (rel === 'composition.ts' || rel.startsWith('adapters/')) continue
+      // cli/: operator commands run on their own (e.g. generate-broker-kek.ts), each its own composition root.
+      if (rel === 'composition.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
       for (const spec of importsOf(file)) {
         expect(target(file, spec), `${rel}: ${spec}`).not.toMatch(/^adapters\//)
       }

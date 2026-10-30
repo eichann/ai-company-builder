@@ -339,6 +339,22 @@ curl -sI https://your-domain.com/api/me 2>&1 | head -5
 | `PORT` | いいえ | `3001` | API サーバーのポート。 |
 | `DATA_DIR` | いいえ | `./data` | SQLite データベースのディレクトリ。 |
 | `REPOS_DIR` | いいえ | `${DATA_DIR}/repos` | Git ベアリポジトリのディレクトリ。 |
+| `BROKER_KEK_HOST_FILE` | いいえ | — | API キーを預かる機能（キーブローカー）の「鍵の鍵」のホスト上のパス（api コンテナには読み取り専用で `BROKER_KEK_FILE` として渡ります）。未設定なら機能はオフ。 |
+
+### API キーの預かり（任意）
+
+サーバーが会社の API キーを暗号化して預かり、AI には短命の通行証だけを渡せます。キーはホスト上のファイルにある「鍵の鍵」（KEK）で暗号化されます。
+
+```bash
+sudo install -d -m 700 /etc/acb
+docker compose run --rm --no-deps -v /etc/acb:/kek api \
+  node --import tsx src/cli/generate-broker-kek.ts /kek/broker-kek
+echo 'BROKER_KEK_HOST_FILE=/etc/acb/broker-kek' >> .env
+docker compose up -d api   # ログに "Key broker: on" と出ます
+```
+
+- ファイルはチェックアウトの外、`data/` の外（`data/` のバックアップに含めない）に置き、所有者だけが読める状態（`600`）にします。他人が読める・`DATA_DIR` の中にある場合、サーバーは使いません。
+- 中身の控えをサーバーの外（パスワード管理ツール）に1つ保管してください。失うと、預けたキーはすべて読めなくなります。
 
 ### ポート
 
@@ -401,6 +417,7 @@ sudo dpkg-reconfigure -plow unattended-upgrades
 | 認証DB | `data/auth.sqlite` | **最重要** |
 | Git リポジトリ | `data/repos/` | **最重要** |
 | 環境変数ファイル | `.env` | **最重要** |
+| キーブローカーの鍵の鍵（使う場合） | 例 `/etc/acb/broker-kek` | **最重要**。控えはパスワード管理ツールに。DB のバックアップと同じ場所に置かない |
 
 以前のバージョンは `data/workdirs/` に作業用のコピーを置いていました。現在のバージョンは使わないため、
 バックアップは不要で、削除してかまいません。

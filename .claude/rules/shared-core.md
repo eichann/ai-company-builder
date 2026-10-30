@@ -33,6 +33,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
+| `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services, destination / audience / caps / secret validation, `companyKeyEligibility`, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
