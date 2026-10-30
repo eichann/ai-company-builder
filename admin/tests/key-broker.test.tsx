@@ -23,8 +23,8 @@ vi.mock('next/navigation', () => ({
 const FAKE = 'fake-test-key-NOT-REAL-admin-0123456789'
 
 const services: BrokerView['services'] = [
-  { service: 'gemini', label: 'Google Gemini', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['generativelanguage.googleapis.com'], companyKeys: 0, userKeys: 0, updatedAt: null },
-  { service: 'openai', label: 'OpenAI', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.openai.com'], companyKeys: 0, userKeys: 0, updatedAt: null },
+  { service: 'gemini', label: 'Google Gemini', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['generativelanguage.googleapis.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null },
+  { service: 'openai', label: 'OpenAI', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.openai.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null },
 ]
 
 const view: BrokerView = {
