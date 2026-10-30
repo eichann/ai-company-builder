@@ -109,6 +109,12 @@ publish: the `.gitignore` line that decides whether the next sync shares the ski
 - The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
   `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
 - Preview: `client/tests/editor-tabs-ui.html?view=external`.
+- Open tabs, the active tab and the left panel tab are saved per company in localStorage
+  `editor:<company id>` = `{ openFiles, activeFilePath, leftTab }`
+  (`src/features/editor/hooks/useEditorPersistence.ts`). They are read during the first render
+  (no empty editor before the tabs appear); tabs of files deleted meanwhile are dropped in the
+  background; an unknown `leftTab` opens the default tab. Existing installs hold this shape:
+  keep reading it (`client/tests/ui/skill-layout-state.spec.ts` seeds it).
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
 
