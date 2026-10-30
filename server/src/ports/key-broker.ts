@@ -63,7 +63,7 @@ export interface BrokerChangeRow {
   changedBy: string
   /** The key concerned, when the change is about one. */
   keyId: string | null
-  /** create | replace | update | delete | service | settings */
+  /** create | replace | update | delete | service | relay-service | settings */
   action: string
   /** JSON of the change, never containing a secret. */
   change: string
@@ -77,6 +77,8 @@ export interface StoredBrokerService {
   rule: string
   /** JSON array of hosts members' own keys for this service may be sent to. */
   ownKeyHosts: string
+  /** JSON of BrokerRelayDefinition for a generic service the company registered (K9); null otherwise. */
+  relay: string | null
   updatedAt: string
   updatedBy: string
 }
@@ -106,6 +108,8 @@ export interface BrokerKeyRepository {
 
   services(companyId: string): StoredBrokerService[]
   saveService(companyId: string, service: StoredBrokerService, change: BrokerChangeRow): void
+  /** Forget a service's settings (a generic service removed). */
+  deleteService(companyId: string, service: string, change: BrokerChangeRow): void
   settings(companyId: string): StoredBrokerSettings | null
   saveSettings(companyId: string, settings: StoredBrokerSettings, change: BrokerChangeRow): void
   /** Newest first. */

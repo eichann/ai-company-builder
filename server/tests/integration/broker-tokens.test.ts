@@ -155,7 +155,7 @@ describe('broker tokens', () => {
     expect(v).toMatchObject({ ok: true, grant: { userId: 'bt-sales', companyId: CO, service: 'gemini', source: 'company', conversationId: 'conv-1',
       destinations: { hosts: ['generativelanguage.googleapis.com'] } } })
     expect(await services.brokerVault.reveal(v.grant.companyId, v.grant.keyId)).toBe(FAKE_COMPANY)
-    expect(services.brokerTokens.validate(d.token, 'openai')).toEqual({ ok: false, reason: 'service-not-granted' })
+    expect(services.brokerTokens.validate(d.token, 'openai')).toMatchObject({ ok: false, reason: 'service-not-granted' })
   })
 
   it('dial ②: a person the key is not for gets no Gemini token, even in 営業部', async () => {

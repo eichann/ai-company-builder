@@ -13,6 +13,11 @@
  * the token against the chat's department) and ② by whom (全員 or listed
  * people, ± per-person exceptions). `usableBy` lists dial ②; dial ① is
  * decided per consultation. Own keys: the owner.
+ *
+ * Generic services (K9, `PUT …/broker/relay-services/:service`): an
+ * owner/admin names the one https host (and base path) and the header the key
+ * travels in; every key for the service — company or own — may go to that
+ * host only.
  */
 import {
   BROKER_KEY_RULES,
@@ -26,7 +31,10 @@ import {
   companyKeyEligibility,
   defaultBrokerRule,
   isValidBrokerServiceName,
+  isValidRelayServiceId,
   parseBrokerAudience,
+  parseBrokerRelayDefinition,
+  readBrokerRelayDefinition,
   upgradeBrokerAudience,
   parseBrokerCaps,
   parseBrokerDestinations,
@@ -39,6 +47,7 @@ import {
   type BrokerKeyRule,
   type BrokerKeyScope,
   type BrokerKeyStatus,
+  type BrokerRelayDefinition,
   type BrokerServiceCategory,
 } from '../../shared/core/key-broker'
 import { pathKey } from '../../shared/core/paths'
@@ -127,6 +136,17 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     return new Map(brokerKeys.services(companyId).map(s => [s.service, s]))
   }
 
+  /** A generic service's definition (K9), or null (built-in, keys only, or unreadable). */
+  function relayOf(stored: StoredBrokerService | undefined): BrokerRelayDefinition | null {
+    return stored?.relay ? readBrokerRelayDefinition(parseJson<unknown>(stored.relay, null)) : null
+  }
+
+  /** A generic service's keys go to its one host: refused otherwise. */
+  function relayHostsError(relay: BrokerRelayDefinition | null, hosts: string[], what: string): string | null {
+    if (!relay || hosts.every(h => h === relay.host)) return null
+    return `${what}: this service's requests go to ${relay.host} only`
+  }
+
   function serviceSettingOf(stored: StoredBrokerService | undefined, service: string): BrokerServiceSetting {
     const category: BrokerServiceCategory = stored && has(BROKER_SERVICE_CATEGORIES, stored.category)
       ? stored.category
@@ -187,12 +207,14 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const services: BrokerServiceView[] = names.map(service => {
       const builtin = builtinBrokerService(service)
       const setting = serviceSettingOf(stored.get(service), service)
+      const relay = builtin ? null : relayOf(stored.get(service))
       return {
         service,
-        label: builtin?.label ?? service,
+        label: builtin?.label ?? relay?.label ?? service,
         builtin: !!builtin,
         ...setting,
-        defaultHosts: builtin ? [...builtin.defaultHosts] : [],
+        defaultHosts: builtin ? [...builtin.defaultHosts] : relay ? [relay.host] : [],
+        relay,
         companyKeys: rows.filter(r => r.service === service && r.scope === 'company').length,
         userKeys: rows.filter(r => r.service === service && r.scope === 'user').length,
         updatedAt: stored.get(service)?.updatedAt ?? null,
@@ -257,10 +279,14 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const secret = checkBrokerSecret(body.secret)
       if ('error' in secret) return refuse('bad-request', secret.error)
       const builtin = builtinBrokerService(service)
-      const destinations = body.destinations === undefined && builtin
-        ? { value: { hosts: [...builtin.defaultHosts], pathPrefixes: [], models: [] } }
+      const relay = builtin ? null : relayOf(serviceSettings(member.companyId).get(service))
+      const defaultHosts = builtin ? builtin.defaultHosts : relay ? [relay.host] : null
+      const destinations = body.destinations === undefined && defaultHosts
+        ? { value: { hosts: [...defaultHosts], pathPrefixes: [], models: [] } }
         : parseBrokerDestinations(body.destinations)
       if ('error' in destinations) return refuse('bad-request', destinations.error)
+      const hostsError = relayHostsError(relay, destinations.value.hosts, 'destinations.hosts')
+      if (hostsError) return refuse('bad-request', hostsError)
       const audience = parseBrokerAudience(body.audience)
       if ('error' in audience) return refuse('bad-request', audience.error)
       const caps = parseBrokerCaps(body.caps)
@@ -337,6 +363,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (body.destinations !== undefined) {
         const v = parseBrokerDestinations(body.destinations)
         if ('error' in v) return refuse('bad-request', v.error)
+        const hostsError = relayHostsError(relayOf(serviceSettings(member.companyId).get(row.service)), v.value.hosts, 'destinations.hosts')
+        if (hostsError) return refuse('bad-request', hostsError)
         after.destinations = v.value
       }
       if (body.audience !== undefined) {
@@ -423,14 +451,77 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const hosts = parseOwnKeyHosts(body.ownKeyHosts ?? [])
       if ('error' in hosts) return refuse('bad-request', hosts.error)
       const stored = serviceSettings(member.companyId).get(service)
+      const hostsError = relayHostsError(relayOf(stored), hosts.value, 'ownKeyHosts')
+      if (hostsError) return refuse('bad-request', hostsError)
       const before = stored ? serviceSettingOf(stored, service) : null
       const after: BrokerServiceSetting = { category: body.category, rule: body.rule, ownKeyHosts: hosts.value }
       if (!same(before, after)) {
         const at = clock.now()
         brokerKeys.saveService(member.companyId, {
-          service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts), updatedAt: at, updatedBy: member.userId,
+          service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
+          relay: stored?.relay ?? null, updatedAt: at, updatedBy: member.userId,
         }, changeRow(member, at, null, { action: 'service', service, before, after }))
       }
+      return ok(view(member.companyId))
+    },
+
+    /**
+     * PUT …/broker/relay-services/:service { label, baseUrl, header, format?, category? } —
+     * register or change a generic service (K9). Its host cannot change while
+     * keys exist for it (they were registered for the old host): 409
+     * `SERVICE_HAS_KEYS`.
+     */
+    setRelayService(member: Member, service: string, body: unknown): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isValidRelayServiceId(service)) {
+        return refuse('bad-request', 'service must be 2–32 lower-case letters and digits, words joined by "-", starting with a letter, and not a built-in service')
+      }
+      if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
+      const def = parseBrokerRelayDefinition(body)
+      if ('error' in def) return refuse('bad-request', def.error)
+      if (body.category !== undefined && !has(BROKER_SERVICE_CATEGORIES, body.category)) return refuse('bad-request', 'category must be person, tool or system')
+      const stored = serviceSettings(member.companyId).get(service)
+      const before = relayOf(stored)
+      const after = def.value
+      if (!before) {
+        const keys = brokerKeys.list(member.companyId).filter(r => r.service === service)
+        if (keys.some(r => parseJson<BrokerDestinations>(r.destinations, { hosts: [], pathPrefixes: [], models: [] }).hosts.some(h => h !== after.host))) {
+          return refuse('conflict', 'Keys registered for this service go to other hosts; delete them first', { code: 'SERVICE_HAS_KEYS' })
+        }
+      }
+      if (before && before.host !== after.host && brokerKeys.list(member.companyId).some(r => r.service === service)) {
+        return refuse('conflict', 'The host cannot change while keys exist for this service; delete them first', { code: 'SERVICE_HAS_KEYS' })
+      }
+      if (same(before, after)) return ok(view(member.companyId))
+      const setting = stored ? serviceSettingOf(stored, service) : null
+      const category: BrokerServiceCategory = setting?.category ?? (body.category as BrokerServiceCategory | undefined) ?? 'tool'
+      const at = clock.now()
+      brokerKeys.saveService(member.companyId, {
+        service,
+        category,
+        rule: setting?.rule ?? defaultBrokerRule(category),
+        // Own keys may go only to the service's host.
+        ownKeyHosts: JSON.stringify((setting?.ownKeyHosts ?? []).filter(h => h === after.host)),
+        relay: JSON.stringify(after),
+        updatedAt: at,
+        updatedBy: member.userId,
+      }, changeRow(member, at, null, { action: 'relay-service', service, before, after }))
+      return ok(view(member.companyId))
+    },
+
+    /** DELETE …/broker/relay-services/:service — only once no key exists for it (409 `SERVICE_HAS_KEYS`). */
+    deleteRelayService(member: Member, service: string): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const stored = isValidRelayServiceId(service) ? serviceSettings(member.companyId).get(service) : undefined
+      const before = relayOf(stored)
+      if (!before) return refuse('not-found', 'Service not found')
+      if (brokerKeys.list(member.companyId).some(r => r.service === service)) {
+        return refuse('conflict', 'Delete the keys registered for this service first', { code: 'SERVICE_HAS_KEYS' })
+      }
+      const at = clock.now()
+      brokerKeys.deleteService(member.companyId, service, changeRow(member, at, null, { action: 'relay-service', service, before, after: null }))
       return ok(view(member.companyId))
     },
 
@@ -472,6 +563,17 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     /** The service's decision rule and own-key hosts (defaults when unset) — for tokens and the relay. */
     serviceSetting(companyId: string, service: string): BrokerServiceSetting {
       return serviceSettingOf(serviceSettings(companyId).get(service), service)
+    },
+
+    /** A generic service's definition (K9) — where the relay sends it and how; undefined when not one. */
+    relayService(companyId: string, service: string): BrokerRelayDefinition | undefined {
+      if (builtinBrokerService(service) || !isValidRelayServiceId(service)) return undefined
+      return relayOf(serviceSettings(companyId).get(service)) ?? undefined
+    },
+
+    /** What people see for a service: the built-in label, a generic service's label, else its name. */
+    serviceLabel(companyId: string, service: string): string {
+      return builtinBrokerService(service)?.label ?? relayOf(serviceSettings(companyId).get(service))?.label ?? service
     },
 
     /** Members may register own keys (default on). */

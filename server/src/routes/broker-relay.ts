@@ -1,7 +1,7 @@
 /**
  * The key broker's relay (K4), mounted at /api/broker:
  *
- *   * /api/broker/:service/<upstream path>   gemini, openai, anthropic
+ *   * /api/broker/:service/<upstream path>   gemini, openai, anthropic, and the company's generic services (K9)
  *
  * The caller is a script the AI runs (or a tool started from the app) with an
  * `acb_tok_` token where the service's API key would go — `Authorization:

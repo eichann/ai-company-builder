@@ -6,6 +6,7 @@ import {
   normalizeBrokerHost,
   normalizeBrokerModel,
   normalizeBrokerPathPrefix,
+  relayBaseUrl,
   upgradeBrokerAudience,
   type BrokerAudience,
   type BrokerCaps,
@@ -145,6 +146,15 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
       if (!b || b.ownKeyHosts.join() !== c.after.ownKeyHosts.join()) {
         lines.push(`${c.service}: 自分の鍵の送り先 → ${c.after.ownKeyHosts.join('、') || 'なし'}`)
       }
+      return lines
+    }
+    case 'relay-service': {
+      if (!c.after) return [`${c.service}: 登録したサービスを削除（${c.before ? relayBaseUrl(c.before) : ''}）`]
+      if (!c.before) return [`${c.service}: サービス「${c.after.label}」を登録（送り先 ${relayBaseUrl(c.after)}、鍵を入れるヘッダ ${c.after.header}）`]
+      const lines: string[] = []
+      if (c.before.label !== c.after.label) lines.push(`${c.service}: 名前 ${c.before.label} → ${c.after.label}`)
+      if (relayBaseUrl(c.before) !== relayBaseUrl(c.after)) lines.push(`${c.service}: 送り先 → ${relayBaseUrl(c.after)}`)
+      if (c.before.header !== c.after.header || c.before.format !== c.after.format) lines.push(`${c.service}: 鍵の渡し方 → ${c.after.header}: ${c.after.format}`)
       return lines
     }
     case 'settings': {

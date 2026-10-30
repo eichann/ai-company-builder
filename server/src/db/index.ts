@@ -435,10 +435,13 @@ function migrateAgentEventSandbox(conn: Database.Database): void {
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_company_sandbox ON agent_events(company_id, at) WHERE sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox')`)
 }
 
-/** The relay's internal-host exception (K4), added after broker_settings shipped. */
+/** The relay's internal-host exception (K4) and generic services (K9), added after the broker's tables shipped. */
 function migrateBrokerSettings(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(broker_settings)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('internal_hosts')) conn.exec(`ALTER TABLE broker_settings ADD COLUMN internal_hosts TEXT NOT NULL DEFAULT '[]'`)
+  // A generic relay service's definition (K9): JSON { label, host, basePath, header, format }, null otherwise.
+  const serviceCols = new Set((conn.prepare(`PRAGMA table_info(broker_services)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!serviceCols.has('relay')) conn.exec(`ALTER TABLE broker_services ADD COLUMN relay TEXT`)
 }
 
 // Helper functions for common operations

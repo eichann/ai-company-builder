@@ -9,6 +9,8 @@
  *   PATCH  /broker/keys/:keyId            destinations, who, caps, flag, status
  *   DELETE /broker/keys/:keyId
  *   PUT    /broker/services/:service      { category, rule, ownKeyHosts }
+ *   PUT    /broker/relay-services/:service { label, baseUrl, header, format?, category? } a generic service (K9)
+ *   DELETE /broker/relay-services/:service once no key exists for it
  *   PUT    /broker/settings               { memberKeysAllowed?, internalHosts? }
  *   POST   /broker/stop-all               stop every key and token now (emergency stop)
  *
@@ -89,6 +91,18 @@ keyBrokerRoute.put('/broker/services/:service', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, keyBroker.setService(member, c.req.param('service'), await jsonBody(c)))
+})
+
+keyBrokerRoute.put('/broker/relay-services/:service', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, keyBroker.setRelayService(member, c.req.param('service'), await jsonBody(c)))
+})
+
+keyBrokerRoute.delete('/broker/relay-services/:service', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, keyBroker.deleteRelayService(member, c.req.param('service')))
 })
 
 keyBrokerRoute.put('/broker/settings', async (c) => {

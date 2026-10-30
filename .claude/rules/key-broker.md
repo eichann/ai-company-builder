@@ -30,6 +30,7 @@ paths:
   - "server/tests/integration/broker-relay*.test.ts"
   - "server/tests/integration/broker-records.test.ts"
   - "server/tests/unit/net-ranges.test.ts"
+  - "server/tests/unit/broker-relay-definition.test.ts"
   - "server/src/services/own-broker-keys.ts"
   - "server/tests/integration/own-broker-keys.test.ts"
   - "client/shared/broker-keys.ts"
@@ -106,7 +107,7 @@ up by the owner, 2026-10-30: right after the two dials).
 `routes/key-broker.ts` → `services/key-broker.ts`, under `/api/companies/:id`; shapes in
 `shared/types/key-broker.ts` (`BrokerView`), pinned by `admin-contract.test.ts`:
 `GET /broker`; `POST /broker/keys` (company key; `destinations` default to a built-in service's
-hosts, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
+hosts or a generic service's host, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
 (an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
 `{ category, rule, ownKeyHosts }`; `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
 answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
@@ -165,7 +166,8 @@ disable and delete still work). Audience departments must be the company's, peop
 
 `/api/broker/<service>/<upstream path>` (`routes/broker-relay.ts` → `services/broker-relay.ts`
 → port `UpstreamClient` ← `adapters/upstream-https.ts`), for the built-in services (gemini,
-openai, anthropic; a generic relay is K9). No ACB session: the token is the sign-in.
+openai, anthropic) and the company's generic services (K9, below). No ACB session: the token is
+the sign-in.
 
 1. **Token first**: from `Authorization: Bearer`, `x-api-key`, `x-goog-api-key` or `?key=`;
    none → 401 `ACB_NO_TOKEN` (whatever the path). **Anything that is not an `acb_tok_` token →
@@ -202,6 +204,55 @@ openai, anthropic; a generic relay is K9). No ACB session: the token is the sign
    key are dropped; error bodies (≥ 400, ≤ 1 MB) have the key and the token replaced by
    `[hidden]`. `set-cookie`, `alt-svc` and hop-by-hop headers are dropped.
 - WebSocket (Gemini Live, OpenAI Realtime) is not relayed in stage 1.
+
+## Generic services (K9): a header-type API without code
+
+An owner/admin registers a service by its destination and how the key travels; scripts then
+call `/api/broker/<id>/…` with the token like a built-in one. Owner decision left open,
+conservative default implemented: **only owners/admins** register, change or remove one
+(department managers cannot; no per-department definitions — the key's two dials still decide
+who uses it).
+
+- `PUT /broker/relay-services/:service { label, baseUrl, header, format?, category? }`,
+  `DELETE /broker/relay-services/:service` (`services/key-broker.ts`
+  `setRelayService` / `deleteRelayService`, history action `relay-service` with the definition
+  before / after). Stored as `broker_services.relay` (JSON `BrokerRelayDefinition` { label, host,
+  basePath, header, format }; additive column, `migrateBrokerSettings`); category / rule /
+  own-key hosts are the same row (`PUT /broker/services/:service`). The view's service carries
+  `relay` and `defaultHosts: [host]`.
+- Rules (`shared/core/key-broker.ts`): id `isValidRelayServiceId` — `^[a-z][a-z0-9]*(-[a-z0-9]+)*$`,
+  2–32, never a built-in name, no `_` (so `ACB_<ID>_*` with `-` → `_` is one name per service);
+  `parseRelayBaseUrl` — `https://` only, port 443 only, no user / query / fragment, the host by
+  the destination rules (exact name: no IP, `localhost`, `.local`, `.internal`, wildcard), a
+  plain base path (no `%`, `..`, `//`); `normalizeRelayHeaderName` — a token-character name, not
+  host / connection / te / trailer / transfer-encoding / upgrade / expect / cookie / set-cookie /
+  forwarded / via / x-real-ip / origin / referer / accept / accept-encoding / user-agent / range /
+  location / date nor `proxy-*`, `content-*`, `x-forwarded-*`, `x-acb-*`, `sec-*`,
+  `access-control-*`; `normalizeRelayFormat` — printable ASCII with `{key}` exactly once
+  (`Bearer {key}`, `Token token={key}`, `{key}`). A stored definition that no longer passes
+  (`readBrokerRelayDefinition`) is not used.
+- **The host is fixed at registration**: every key for the service (company keys, and own keys
+  through `ownKeyHosts`) may name only that host (400 otherwise); the relay sends only there,
+  with `basePath` put before the client's path (key path prefixes compare against the client's
+  path); the host cannot change, nor the service be removed, while any key for it exists (409
+  `SERVICE_HAS_KEYS`); a definition for a name that already has keys elsewhere is refused the
+  same way. Redirects / `content-location` are rewritten only for that host and under the base
+  path (which is stripped); anything else → 502 `ACB_REDIRECT_REFUSED`.
+- **The token**: the company is not known before the token, so for a non-built-in service a
+  credential header (`Authorization`, `x-api-key`, `x-goog-api-key`) holding exactly one token
+  counts as it (`Token token=acb_tok_…`), and with none there, the one token-shaped value in any
+  header. After validation, the service's own header must carry that token in its format or be
+  absent, else 401 `ACB_REAL_KEY_REFUSED` (nothing sent). A non-built-in name that is not one of
+  the company's generic services → 404 `ACB_UNKNOWN_SERVICE` (also with a valid token).
+- **Never upstream**: the client's copy of the configured header, any header whose value
+  contains the token, any query parameter containing it (a path containing it → 400
+  `ACB_BAD_PATH`), plus everything the built-in relay drops. The key goes only in the configured
+  header (`relayCredentialValue`); response headers holding the key or the token are dropped,
+  error bodies have both `[hidden]`.
+- Records (`broker:<id>`), stop, caps, private-address refusal with the `internalHosts`
+  exception, size / time limits and log redaction are the built-in relay's. Token counts are not
+  read from a generic service's answers (`UsageScanner` is for the AI providers), so only request
+  caps bite.
 
 ## Record, stop and caps (K5)
 
@@ -327,6 +378,12 @@ local provider with its own certificate: internal address refused before connect
 by the exception, one internal answer among several refuses, one DNS lookup, TLS checked against
 the name, the whole route end to end — SSRF guard mutation-checked), `tests/unit/net-ranges.test.ts`
 (every internal form refused, public ones pass; the request log hides relay queries),
+`tests/unit/broker-relay-definition.test.ts` (K9 ids, base URLs, header names and formats that
+would open the relay are refused), `tests/integration/broker-relay-generic.test.ts` (K9: owner/admin
+only, the host fixed for every key, base path, the key only in the configured header and format,
+the token / cookies / hop-by-hop / the client's copy of the header never forwarded, a real-looking
+key refused unforwarded, redirects, record / stop-all / caps, own keys, no host change or removal
+while keys exist, the additive migration, **no key in any answer, log line or table**),
 `tests/integration/own-broker-keys.test.ts`
 (own keys only where allowed (switch, rule, destinations), one per service, an admin's stop
 survives a replace, deleting only one's own, a token then uses it, 503 without a KEK, **no key

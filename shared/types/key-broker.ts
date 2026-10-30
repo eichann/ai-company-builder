@@ -12,6 +12,7 @@ import type {
   BrokerKeyRule,
   BrokerKeyScope,
   BrokerKeyStatus,
+  BrokerRelayDefinition,
   BrokerServiceCategory,
   BrokerStatusReason,
 } from '../core/key-broker'
@@ -61,8 +62,13 @@ export interface BrokerServiceView {
   rule: BrokerKeyRule
   /** Hosts members' own keys for this service may be sent to (empty = no own keys). */
   ownKeyHosts: string[]
-  /** Where a built-in service's requests go (empty for others). */
+  /** Where a built-in service's requests go (a generic service: its one host; empty for others). */
   defaultHosts: string[]
+  /**
+   * A generic service the company registered (K9): where its requests go and
+   * how the key travels. null for built-in services and names with keys only.
+   */
+  relay: BrokerRelayDefinition | null
   companyKeys: number
   userKeys: number
   /** null while the defaults apply. */
@@ -104,6 +110,7 @@ export type BrokerChangeDetail =
   | { action: 'update'; service: string; displayName: string; before: Partial<BrokerKeySnapshot>; after: Partial<BrokerKeySnapshot> }
   | { action: 'delete'; key: BrokerKeySnapshot }
   | { action: 'service'; service: string; before: BrokerServiceSetting | null; after: BrokerServiceSetting }
+  | { action: 'relay-service'; service: string; before: BrokerRelayDefinition | null; after: BrokerRelayDefinition | null }
   | { action: 'settings'; before: { memberKeysAllowed: boolean; internalHosts?: string[] }; after: { memberKeysAllowed: boolean; internalHosts?: string[] } }
 
 export interface BrokerChange {
@@ -140,6 +147,19 @@ export interface BrokerKeyCreate {
   audience: BrokerAudience
   caps?: Partial<BrokerCaps>
   allowPrivateContent?: boolean
+}
+
+/** PUT …/broker/relay-services/:service — register or change a generic service (K9). */
+export interface BrokerRelayServiceSave {
+  label: string
+  /** `https://<host>[/<base path>]` — the host is fixed for the service. */
+  baseUrl: string
+  /** The header the key goes in (`authorization`, `x-api-key`, …). */
+  header: string
+  /** The header's value with `{key}` where the key goes (default `{key}`). */
+  format?: string
+  /** Only when the service is new (default `tool`). */
+  category?: BrokerServiceCategory
 }
 
 // ---------------------------------------------------------------------------

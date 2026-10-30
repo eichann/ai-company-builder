@@ -18,14 +18,24 @@
  *   adapter connects to the address it checked) unless the company named the
  *   host as an exception.
  * - Request size and waiting time are bounded.
+ * - Generic services (K9) work the same way: the company's definition fixes
+ *   the one https host (and a base path put before every path) and the header
+ *   the key travels in (`relayCredentialValue`); the client's copy of that
+ *   header is never forwarded, and no header or query value that carries the
+ *   token is either.
  * This file is long because each step is one guard of the same request; it stays whole so
  * the order of the guards reads top to bottom.
  */
 import {
   BROKER_NO_KEY_PLACEHOLDER,
+  BROKER_TOKEN_PREFIX,
   builtinBrokerService,
+  isValidBrokerServiceName,
   looksLikeBrokerToken,
   normalizeBrokerModel,
+  relayCredentialOf,
+  relayCredentialValue,
+  type BrokerRelayDefinition,
   type BrokerServiceInfo,
 } from '../../shared/core/key-broker'
 import type { AgentToolEvent, GuardReason, ToolDecision } from '../../shared/types/agent-events'
@@ -123,40 +133,65 @@ function jsonError(status: number, code: RelayErrorCode, message: string, grant:
   return { status, headers: [['content-type', 'application/json; charset=utf-8'], ['cache-control', 'no-store']], body, grant, code }
 }
 
-const NEEDS_KEY = (s: BrokerServiceInfo | undefined, service: string) =>
-  `この作業には ${s?.label ?? service} の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。`
+const NEEDS_KEY = (label: string) =>
+  `この作業には ${label} の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。`
 
-function tokenRefusal(reason: BrokerTokenRefusal, info: BrokerServiceInfo | undefined, service: string): RelayAnswer {
+function tokenRefusal(reason: BrokerTokenRefusal, label: string): RelayAnswer {
   switch (reason) {
     case 'broker-off': return jsonError(503, 'ACB_BROKER_OFF', 'サーバーで API キーを預かる機能が、まだ使えるようになっていません。管理者に相談してください。')
     case 'not-member': return jsonError(403, 'ACB_NOT_MEMBER', 'この会社のメンバーではないため、鍵を使えません。')
     case 'service-not-granted':
-    case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(info, service))
-    case 'key-stopped': return jsonError(403, 'ACB_STOPPED', `管理者が ${info?.label ?? service} の鍵を止めています。再開されるまで使えません。`)
+    case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(label))
+    case 'key-stopped': return jsonError(403, 'ACB_STOPPED', `管理者が ${label} の鍵を止めています。再開されるまで使えません。`)
     default: return jsonError(401, 'ACB_TOKEN_INVALID', 'ACB の通行証の期限が切れたか、使えなくなりました。新しい相談でもう一度お試しください。')
   }
 }
 
-/** Every credential value the client sent (header forms and `?key=`). */
-function credentialValues(headers: Array<[string, string]>, query: URLSearchParams): string[] {
+/** A token-shaped string anywhere in a value (a generic service's own header form). */
+const TOKEN_IN_VALUE = new RegExp(`${BROKER_TOKEN_PREFIX}[0-9a-f]{64}`, 'g')
+
+/**
+ * Every credential value the client sent (header forms and `?key=`). `inFormat`:
+ * a generic service's own value shape (`Token token=…`) is not known before the
+ * token names the company, so a value holding exactly one token counts as it.
+ */
+function credentialValues(headers: Array<[string, string]>, query: URLSearchParams, inFormat = false): string[] {
   const values: string[] = []
   for (const [name, value] of headers) {
     if (!(CREDENTIAL_HEADERS as readonly string[]).includes(name)) continue
-    const v = name === 'authorization' ? value.replace(/^Bearer\s+/i, '') : value
-    if (v.trim()) values.push(v.trim())
+    let v = (name === 'authorization' ? value.replace(/^Bearer\s+/i, '') : value).trim()
+    const tokens = inFormat ? v.match(TOKEN_IN_VALUE) ?? [] : []
+    if (tokens.length === 1) v = tokens[0]
+    if (v) values.push(v)
   }
   for (const v of query.getAll('key')) if (v.trim()) values.push(v.trim())
   return values
 }
 
 /** The one credential the client sent (header forms or `?key=`), or what is wrong with it. */
-function credentialOf(headers: Array<[string, string]>, query: URLSearchParams): { token: string } | { error: 'none' | 'real-key' } {
-  const values = credentialValues(headers, query)
+function credentialOf(headers: Array<[string, string]>, query: URLSearchParams, inFormat: boolean): { token: string } | { error: 'none' | 'real-key' } {
+  const values = credentialValues(headers, query, inFormat)
   if (values.length === 0) return { error: 'none' }
   // Anything that is not one of our tokens may be a real key: never forwarded.
   if (!values.every(looksLikeBrokerToken)) return { error: 'real-key' }
   if (new Set(values).size > 1) return { error: 'real-key' }
   return { token: values[0] }
+}
+
+/**
+ * A generic service's token where its definition is not known yet (before the
+ * token names the company): the one token-shaped value in any header, or none.
+ */
+function tokenInAnyHeader(headers: Array<[string, string]>): string | null {
+  const found = new Set(headers.flatMap(([, value]) => value.match(TOKEN_IN_VALUE) ?? []))
+  return found.size === 1 ? [...found][0] : null
+}
+
+/** Where one service's requests go and how its key travels: built-in, or a company's generic service. */
+interface RelayTarget {
+  label: string
+  builtin: BrokerServiceInfo | null
+  relay: BrokerRelayDefinition | null
 }
 
 /** The upstream path, checked: '/'-rooted, no `.` / `..` segments, no encoded '/' or '\', no control characters. */
@@ -284,14 +319,16 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         }
       }
       const failed = answer.status >= 400 ? 'error' : 'ok'
+      // Token counts are read from the AI providers' answers only; a generic service's body is not scanned.
+      const scansUsage = !!builtinBrokerService(req.service)
       if (answer.body === null || answer.body instanceof Uint8Array) {
-        const usage = new UsageScanner()
-        if (answer.body) usage.feed(answer.body)
+        const usage = scansUsage ? new UsageScanner() : null
+        if (answer.body && usage) usage.feed(answer.body)
         finish(answer.body?.byteLength ?? 0, usage, failed)
         return answer
       }
       const source = answer.body
-      const usage = new UsageScanner()
+      const usage = scansUsage ? new UsageScanner() : null
       return {
         ...answer,
         body: (async function* () {
@@ -300,7 +337,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
           try {
             for await (const chunk of source) {
               bytes += chunk.byteLength
-              usage.feed(chunk)
+              usage?.feed(chunk)
               yield chunk
             }
             outcome = failed
@@ -322,36 +359,53 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const query = new URLSearchParams(q < 0 ? '' : req.pathAndQuery.slice(q + 1))
 
       // 1. The token, before anything else (no token → 401, whatever the path).
-      const info0 = builtinBrokerService(req.service)
-      if (credentialValues(req.headers, query).includes(BROKER_NO_KEY_PLACEHOLDER)) {
+      const builtin = builtinBrokerService(req.service) ?? null
+      const realKey = () => jsonError(401, 'ACB_REAL_KEY_REFUSED', '本物の API キーが送られてきたため、送らずに止めました。鍵はスクリプトや .env に書かず、ACB に預けてください（管理者に頼むか、設定の『自分の鍵』から登録）。')
+      if (credentialValues(req.headers, query).includes(BROKER_NO_KEY_PLACEHOLDER)
+        || (!builtin && req.headers.some(([, v]) => v.trim().endsWith(BROKER_NO_KEY_PLACEHOLDER)))) {
         // The app had no key for this member and service: say so in plain Japanese.
-        return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(info0, req.service))
+        return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(builtin?.label ?? req.service))
       }
-      let credential = credentialOf(req.headers, query)
+      let credential = credentialOf(req.headers, query, !builtin)
       if ('error' in credential && credential.error === 'none') {
-        const token = uploadToken(req.service, rawPath, query)
-        if (token) credential = { token }
+        // Gemini upload chunks without a key; a generic service's token in its own header.
+        const found = uploadToken(req.service, rawPath, query) ?? (builtin ? null : tokenInAnyHeader(req.headers))
+        if (found) credential = { token: found }
       }
       if ('error' in credential) {
         return credential.error === 'none'
           ? jsonError(401, 'ACB_NO_TOKEN', 'ACB の通行証がありません。ACB のアプリの中から実行してください。')
-          : jsonError(401, 'ACB_REAL_KEY_REFUSED', '本物の API キーが送られてきたため、送らずに止めました。鍵はスクリプトや .env に書かず、ACB に預けてください（管理者に頼むか、設定の『自分の鍵』から登録）。')
+          : realKey()
       }
-      const info = builtinBrokerService(req.service)
-      if (!info) return jsonError(404, 'ACB_UNKNOWN_SERVICE', `「${req.service}」は ACB の中継先として登録されていません。`)
-      const checked = brokerTokens.validate(credential.token, req.service)
+      const token = credential.token
+      const unknownService = () => jsonError(404, 'ACB_UNKNOWN_SERVICE', `「${req.service}」は ACB の中継先として登録されていません。`, meta.grant ?? null)
+      if (!builtin && !isValidBrokerServiceName(req.service)) return unknownService()
+      const checked = brokerTokens.validate(token, req.service)
+      const companyId = checked.ok ? checked.grant.companyId : checked.who?.companyId
+      const relay = builtin || !companyId ? null : keyBroker.relayService(companyId, req.service) ?? null
+      const target: RelayTarget = { label: builtin?.label ?? relay?.label ?? req.service, builtin, relay }
       if (!checked.ok) {
+        // A name that is neither built in nor one of the company's generic services: not ours (not recorded).
+        if (!builtin && !relay && checked.who) return unknownService()
         meta.who = checked.who
-        return tokenRefusal(checked.reason, info, req.service)
+        return tokenRefusal(checked.reason, target.label)
       }
       const grant = checked.grant
       meta.grant = grant
+      if (!builtin && !relay) return unknownService()
+      if (relay) {
+        // The service's own header must carry this token (in its format) or be absent: anything else may be a real key.
+        const own = req.headers.filter(([n]) => n === relay.header).map(([, v]) => relayCredentialOf(relay.format, v))
+        if (own.some(v => v !== token)) return { ...realKey(), grant }
+      }
 
-      // 2. Where it may go: the key's destinations.
+      // 2. Where it may go: the key's destinations (a generic service: its one host, always).
       const path = checkPath(rawPath)
-      if (!path) return jsonError(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。', grant)
-      const { hosts, pathPrefixes, models } = grant.destinations
-      const host = hosts.includes(info.defaultHosts[0]) ? info.defaultHosts[0] : hosts[0]
+      if (!path || path.path.includes(token)) return jsonError(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。', grant)
+      const { pathPrefixes, models } = grant.destinations
+      const hosts = relay ? grant.destinations.hosts.filter(h => h === relay.host) : grant.destinations.hosts
+      const host = relay || !builtin ? hosts[0] : hosts.includes(builtin.defaultHosts[0]) ? builtin.defaultHosts[0] : hosts[0]
+      const basePath = relay?.basePath ?? ''
       if (!host) return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵には送ってよい宛先がありません。', grant)
       meta.host = host
       meta.path = path.decoded
@@ -395,20 +449,24 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         || (caps.requestsPerMemberPerDay !== null && used.memberRequests >= caps.requestsPerMemberPerDay)
         || (caps.tokensPerMemberPerDay !== null && used.memberTokens >= caps.tokensPerMemberPerDay)
       if (over) {
-        return jsonError(429, 'ACB_OVER_CAP', `${info.label} の鍵の、今日の上限に達しました。明日になるのを待つか、管理者に上限を見直してもらってください。`, grant)
+        return jsonError(429, 'ACB_OVER_CAP', `${target.label} の鍵の、今日の上限に達しました。明日になるのを待つか、管理者に上限を見直してもらってください。`, grant)
       }
 
       const secret = await brokerVault.reveal(grant.companyId, grant.keyId)
-      if (!secret) return tokenRefusal('no-key', info, req.service)
+      if (!secret) return tokenRefusal('no-key', target.label)
       const headers: Record<string, string> = {}
       for (const [name, value] of req.headers) {
         if (DROP_REQUEST.has(name) || name.startsWith('x-forwarded-') || name.startsWith('x-acb-')) continue
+        // Our token never goes upstream, in whatever header it came.
+        if (name === relay?.header || value.includes(token)) continue
         headers[name] = headers[name] ? `${headers[name]}, ${value}` : value
       }
       headers['accept-encoding'] = 'identity'
-      if (info.credential === 'authorization') headers.authorization = `Bearer ${secret}`
-      else headers[info.credential] = secret
+      if (relay) headers[relay.header] = relayCredentialValue(relay.format, secret)
+      else if (builtin?.credential === 'authorization') headers.authorization = `Bearer ${secret}`
+      else if (builtin) headers[builtin.credential] = secret
       query.delete('key')
+      for (const [name, value] of [...query]) if (value.includes(token) || name.includes(token)) query.delete(name)
       const search = query.toString()
 
       brokerKeys.addUsage(grant.companyId, grant.keyId, grant.userId, day, 1, 0)
@@ -418,7 +476,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const result = await upstream.send({
         host,
         method: req.method,
-        path: `${path.path}${search ? `?${search}` : ''}`,
+        path: `${basePath}${path.path}${search ? `?${search}` : ''}`,
         headers,
         body: counted,
         allowPrivateHosts: keyBroker.internalHosts(grant.companyId),
@@ -438,8 +496,10 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         let url: URL
         try { url = new URL(value, `https://${host}`) } catch { return null }
         if (url.protocol !== 'https:' || !hosts.includes(url.hostname.toLowerCase()) || url.port) return null
+        // A generic service's URLs come back without its base path (the relay puts it back); others are not ours.
+        if (basePath && url.pathname !== basePath && !url.pathname.startsWith(`${basePath}/`)) return null
         url.searchParams.delete('key')
-        return `${req.publicBase}/api/broker/${req.service}${url.pathname}${url.search}`
+        return `${req.publicBase}/api/broker/${req.service}${url.pathname.slice(basePath.length) || '/'}${url.search}`
       }
       const out: Array<[string, string]> = []
       let redirectRefused = false
@@ -447,19 +507,19 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         if (DROP_RESPONSE.has(name)) continue
         if (name === 'location' || name === 'x-goog-upload-url' || name === 'content-location') {
           const rewritten = relayUrl(value)
-          if (rewritten && name === 'x-goog-upload-url') rememberUpload(rewritten, credential.token)
+          if (rewritten && name === 'x-goog-upload-url') rememberUpload(rewritten, token)
           if (rewritten && !rewritten.includes(secret)) out.push([name, rewritten])
           else if (name === 'location' && res.status >= 300 && res.status < 400) redirectRefused = true
           continue
         }
-        if (value.includes(secret)) continue
+        if (value.includes(secret) || value.includes(token)) continue
         out.push([name, value])
       }
       if (redirectRefused) return jsonError(502, 'ACB_REDIRECT_REFUSED', '送り先が、許可されていない場所への転送を返したため止めました。', grant)
 
       if (res.status >= 400) {
         const bytes = await readAll(res.body, ERROR_BODY_LIMIT).catch(() => null)
-        const text = replaceAll(bytes ? new TextDecoder().decode(bytes) : '', [secret, credential.token])
+        const text = replaceAll(bytes ? new TextDecoder().decode(bytes) : '', [secret, token])
         return { status: res.status, headers: out.filter(([n]) => n !== 'content-length'), body: new TextEncoder().encode(text), grant }
       }
       return { status: res.status, headers: out, body: res.body, grant }

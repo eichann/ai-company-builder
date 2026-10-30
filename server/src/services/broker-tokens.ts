@@ -212,9 +212,9 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       if (Date.parse(row.expiresAt) <= clock.nowMs()) return { ok: false, reason: 'expired' }
       const role = memberships.roleOf(row.companyId, row.userId)
       if (role === null) return { ok: false, reason: 'not-member' }
-      if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted' }
-      const key = resolveKey(row.companyId, row.userId, row.department, service)
       const who: BrokerTokenHolder = { tokenId: row.id, companyId: row.companyId, userId: row.userId, conversationId: row.conversationId, department: row.department }
+      if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted', who }
+      const key = resolveKey(row.companyId, row.userId, row.department, service)
       if (!key) return { ok: false, reason: stoppedReason(row.companyId, row.userId, row.department, service), who }
       return {
         ok: true,
