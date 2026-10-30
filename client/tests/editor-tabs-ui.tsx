@@ -15,6 +15,7 @@ import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEdito
 import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
 import { useKeybindings } from '../src/shared/commands/commands'
+import { hasUnsavedEdits } from '../src/shared/lib/unsavedEdits'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -65,7 +66,7 @@ function externalDelete(p: string) {
   delete files[p]
   emitChanges?.([{ type: 'unlink', path: p }])
 }
-Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned })
+Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned, __acbHasUnsavedEdits: hasUnsavedEdits })
 
 export function Preview() {
   // As AppShell does: shortcuts reach the focused area only.

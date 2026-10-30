@@ -12,6 +12,8 @@ const editor = (page: Page) => page.locator('.cm-content[role="textbox"]')
 const tab = (page: Page, path: string) => page.getByTitle(path, { exact: true })
 const closeButton = (page: Page, path: string) => page.locator('div.group', { has: tab(page, path) }).getByRole('button')
 const writes = (page: Page) => page.evaluate(() => (window as unknown as { __acbWrites: Array<[string, string]> }).__acbWrites)
+/** What automatic sync reads before it runs (src/shared/lib/unsavedEdits.ts). */
+const unsavedForSync = (page: Page) => page.evaluate(() => (window as unknown as { __acbHasUnsavedEdits: () => boolean }).__acbHasUnsavedEdits())
 const pinned = (page: Page) => page.evaluate(() => (window as unknown as { __acbPinned: string[] }).__acbPinned)
 /** A shortcut as macOS reports it (⌘⇧M arrives as key 'm'), sent to the focused element. */
 const shortcut = (page: Page, init: { key: string; shiftKey?: boolean }) => page.evaluate((i) => {
@@ -35,17 +37,20 @@ async function typeAtEnd(page: Page, text: string) {
   await page.keyboard.insertText(text)
 }
 
-test('an edit is saved a second after the last keystroke; until then the tab says it is unsaved', async ({ page }) => {
+test('an edit is saved a second after the last keystroke; until then the tab says it is unsaved and automatic sync waits', async ({ page }) => {
   await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
   const state = await open(page)
   await pauseClock(page)
+  expect(await unsavedForSync(page)).toBe(false)
   await typeAtEnd(page, '\n追記')
   await expect(page.getByText('自動保存 (未保存の変更あり)')).toBeVisible()
+  expect(await unsavedForSync(page), 'automatic sync must see the unsaved tab').toBe(true)
   await page.clock.runFor(900)
   expect(await writes(page)).toEqual([])
   await page.clock.runFor(300)
   await expect.poll(() => writes(page)).toEqual([[SCRIPT, '# 台本\n\n第12回の構成案です。\n追記']])
   await expect(page.getByText('自動保存 (未保存の変更あり)')).toHaveCount(0)
+  expect(await unsavedForSync(page)).toBe(false)
   expectNoPageErrors(state)
 })
 

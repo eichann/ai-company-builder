@@ -210,7 +210,7 @@ both only while the app is open:
   `autoSyncSkipReason` (`client/shared/auto-sync.ts`) skips silently when the last sync needs the
   member, offline, a sync / receive / private-folder sync holds a lock (`gitSync.isRunning`), a
   download-choice change or private-folder creation runs (`services/sync-activity.ts`), the
-  editor has unsaved edits (`src/shared/lib/unsavedEdits.ts`, published by the editor), or a chat
+  editor has unsaved edits (`src/shared/lib/unsavedEdits.ts`, published by the editor's `features/editor/hooks/useOpenFiles.ts`), or a chat
   turn is running (`chat-turns.ts` `runningCount`). Malformed renderer state counts as "wait".
 - Timer: renderer `src/features/sync/hooks/useAutoSync.ts` (first look 60 s after the company
   opens, then every 30 s); when a run is due is pure `autoSyncSchedule.ts`: measured from the
