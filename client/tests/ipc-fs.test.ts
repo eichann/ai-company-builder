@@ -65,8 +65,8 @@ test('every path-taking fs handler refuses paths outside the allowed roots, with
     ['fs:moveFromExternal', t => [inside, t], err],
     ['fs:watch', t => [path.dirname(t)], err],
     ['fs:unwatch', t => [path.dirname(t)], err],
-    ['env:read', t => [path.dirname(t)], err],
-    ['env:write', t => [path.dirname(t), { A: '1' }], err],
+    ['env:status', t => [path.dirname(t)], err],
+    ['env:update', t => [path.dirname(t), { A: '1' }], err],
     ['editor:backupBeforeOverwrite', t => [path.dirname(t), t], err],
     ['editor:backupBeforeOverwrite', t => [root, t], err],
     ['privateFolders:reservedPathRefusal', t => [t], null],
@@ -313,20 +313,56 @@ test('editor:backupBeforeOverwrite: the disk version, byte for byte, in .backups
   assert.deepEqual(await h.invoke('editor:backupBeforeOverwrite', company, path.join(company, '.backups', 'x', 'y.md')), { success: true, skipped: 'internal' })
 })
 
-test('env:read / env:write: the .env format, and .gitignore always keeps .env local', async () => {
+// Fake values only: what the test proves is that none of them reach the renderer.
+const FAKE_ENV = {
+  OPENAI_API_KEY: 'sk-FAKE-openai-value-9f3c',
+  CUSTOM_TOKEN: 'FAKE token with spaces 7d2e',
+  SHORT_PIN: 'pin1',
+}
+
+test('env:status never hands a .env value to the renderer: set and last four characters only', async () => {
+  const company = h.companyDir('env-secret-co')
+  await h.invoke('fs:registerAllowedRoot', company)
+  fs.writeFileSync(path.join(company, '.env'), `# keys\nOPENAI_API_KEY=${FAKE_ENV.OPENAI_API_KEY}\nCUSTOM_TOKEN="${FAKE_ENV.CUSTOM_TOKEN}"\nSHORT_PIN=${FAKE_ENV.SHORT_PIN}\nEMPTY=\n`)
+  const status = await h.invoke('env:status', company)
+  assert.deepEqual(status, {
+    success: true,
+    vars: { OPENAI_API_KEY: { set: true, last4: '9f3c' }, CUSTOM_TOKEN: { set: true, last4: '7d2e' }, SHORT_PIN: { set: true }, EMPTY: { set: false } },
+  })
+  const wire = JSON.stringify(status)
+  for (const value of Object.values(FAKE_ENV)) {
+    // No value, nor any 5-character piece of one, is in the answer.
+    for (let i = 0; i + 5 <= value.length; i++) assert.ok(!wire.includes(value.slice(i, i + 5)), 'a .env value reached the renderer')
+  }
+  assert.ok(!wire.includes(FAKE_ENV.SHORT_PIN))
+  // The value-returning channels are gone, so no renderer can ask for them.
+  for (const channel of ['env:read', 'env:write']) assert.equal(h.fake.handlers.has(channel), false, channel)
+})
+
+test('env:update: sets, replaces and removes names in place; refuses bad input; .gitignore keeps .env local', async () => {
   const company = h.companyDir('env-co')
   await h.invoke('fs:registerAllowedRoot', company)
-  assert.deepEqual(await h.invoke('env:read', company), { success: true, vars: {} })
-  fs.writeFileSync(path.join(company, '.env'), '# comment\n\nA=1\n B = "two words" \nC=\'q\'\nnoequals\n=empty\nD=x=y\n')
-  assert.deepEqual(await h.invoke('env:read', company), { success: true, vars: { A: '1', B: 'two words', C: 'q', D: 'x=y' } })
+  const envFile = path.join(company, '.env')
+  assert.deepEqual(await h.invoke('env:status', company), { success: true, vars: {} })
 
   fs.writeFileSync(path.join(company, '.gitignore'), 'node_modules/\n.env')
-  assert.deepEqual(await h.invoke('env:write', company, { KEY: 'plain', SPACED: 'a b', HASH: 'a#b', EQ: 'a=b' }), { success: true })
-  assert.equal(fs.readFileSync(path.join(company, '.env'), 'utf-8'), 'KEY=plain\nSPACED="a b"\nHASH="a#b"\nEQ="a=b"\n')
+  assert.deepEqual(await h.invoke('env:update', company, { KEY: 'plain', SPACED: 'a b', HASH: 'a#b', EQ: 'a=b' }), { success: true })
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), 'KEY=plain\nSPACED="a b"\nHASH="a#b"\nEQ="a=b"\n')
   const healed = 'node_modules/\n.env\n# Secrets — never sync (local only)\n.env.*\n!.env.example\n!.env.sample\n'
   assert.equal(fs.readFileSync(path.join(company, '.gitignore'), 'utf-8'), healed)
-  await h.invoke('env:write', company, { KEY: 'again' })
+
+  fs.writeFileSync(envFile, '# mine\nKEY=plain\nKEEP=1\nGONE=x\n')
+  assert.deepEqual(await h.invoke('env:update', company, { KEY: 'again', GONE: null, NEW: 'n' }), { success: true })
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), '# mine\nKEY=again\nKEEP=1\nNEW=n\n')
   assert.equal(fs.readFileSync(path.join(company, '.gitignore'), 'utf-8'), healed) // idempotent
+
+  const before = fs.readFileSync(envFile, 'utf-8')
+  for (const bad of [{ 'A=B': 'x' }, { A: 'x\nINJECTED=1' }, { A: 5 }, ['A']] as unknown as Record<string, string>[]) {
+    const result = await h.invoke('env:update', company, bad)
+    assert.equal(result.success, false)
+    assert.match(result.error ?? '', /使えません|読み取れません/)
+  }
+  assert.equal(fs.readFileSync(envFile, 'utf-8'), before)
 })
 
 test('local-file:// serves files inside the allowed roots only, never cached', async () => {

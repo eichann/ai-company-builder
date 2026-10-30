@@ -126,7 +126,7 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   kept. The settings panel has a left section nav and shares `settings/ui.tsx` (neutral zinc,
   one indigo accent, light and dark). The panel reaches the main process only through
   `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
-  (uncommitted changes, progress), and separate ports for the company `.env` (secret values),
+  (uncommitted changes, progress), and separate ports for the company `.env` (status only),
   `.gitignore`, the AI's environment-variable list and the git binary status.
 - File tree: a not-downloaded folder stays visible as a muted placeholder (dashed icon,
   「未ダウンロード」, 「ダウンロード」 on hover/focus and in its context menu) so nobody recreates

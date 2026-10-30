@@ -119,6 +119,13 @@ the `local-file` protocol; a fake server sits behind global `fetch` (`main-harne
 - Operations on the entry itself (`fs:delete`, rename/move source, `git:revertFile` of a new file)
   judge the link, not its target (delete uses `lstat`), so a link inside can still be removed. The
   file tree lists links without descending into them.
+- Secret values never go to the renderer. The company `.env` (skills' API keys) is answered
+  by `env:status` as per name `{ set, last4? }` (`client/shared/env-file.ts`; every entry counts
+  as secret, `last4` only for values of 12+ characters) and changed by `env:update` (a value sets
+  or replaces one name, `null` removes it; other lines and comments stay; bad names, line breaks
+  and non-strings are refused). Same shape as `config:getApiKeyStatus`. The value-returning
+  `env:read` / whole-file `env:write` were removed (renderer and main ship together). Test:
+  `ipc-fs.test.ts` ("env:status never hands a .env value to the renderer").
 - `backup:openFolder` opens only a folder directly under `.backups/` or `acb-private-backups/`;
   `tools:start` only `<…>/.claude/skills/<skill>/tools/<tool>` with `dev` / `start`;
   `skills:publish` / `makePrivate` refuse a multi-line entry; `skills:toggleNurturing` only a

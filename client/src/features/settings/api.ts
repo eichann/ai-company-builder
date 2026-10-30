@@ -1,16 +1,16 @@
 // The settings panel's access to the main process, as small ports over the IPC
 // contract (src/shared/ipc/electron-api.ts), one per capability. Every function
 // takes its port as the last parameter, defaulting to window.electronAPI.
-// The company .env holds secret values, so it has ports of its own: a reader
-// of .gitignore or of this computer's settings never gets them.
+// The company .env holds secret values, so it has ports of its own, and even
+// those never read a value back: only per name whether it is set.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
-/** Reading the company folder's .env: names and secret values (API keys). */
-export type CompanyEnvReads = ElectronPort<'readEnv'>
-/** Writing the company folder's .env. */
-export type CompanyEnvWrites = ElectronPort<'writeEnv'>
+/** Reading the company folder's .env: names, set or not, last four characters — never a value. */
+export type CompanyEnvReads = ElectronPort<'getEnvStatus'>
+/** Setting, replacing or removing names in the company folder's .env. */
+export type CompanyEnvWrites = ElectronPort<'updateEnv'>
 /** Reading the company folder's .gitignore. */
 export type GitignoreReads = ElectronPort<'readFile'>
 /** Writing the company folder's .gitignore. */
@@ -28,12 +28,13 @@ export function getGitBinaryStatus(reads: GitBinaryReads = window.electronAPI) {
   return reads.gitBinaryStatus()
 }
 
-export function readCompanyEnv(rootPath: string, reads: CompanyEnvReads = window.electronAPI) {
-  return reads.readEnv(rootPath)
+export function readCompanyEnvStatus(rootPath: string, reads: CompanyEnvReads = window.electronAPI) {
+  return reads.getEnvStatus(rootPath)
 }
 
-export function writeCompanyEnv(rootPath: string, vars: Record<string, string>, writes: CompanyEnvWrites = window.electronAPI) {
-  return writes.writeEnv(rootPath, vars)
+/** A string sets or replaces that name, null removes it; names not listed stay as they are. */
+export function updateCompanyEnv(rootPath: string, changes: Record<string, string | null>, writes: CompanyEnvWrites = window.electronAPI) {
+  return writes.updateEnv(rootPath, changes)
 }
 
 const gitignorePath = (rootPath: string) => `${rootPath}/.gitignore`

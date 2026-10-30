@@ -90,10 +90,13 @@ const tree = (dir: string, depth: number, max: number): TreeNode[] =>
 Object.assign(window, {
   electronAPI: {
     gitBinaryStatus: async () => ({ bundled: true, binary: 'bundled' }),
-    readEnv: async () => ({ success: true, vars: { ANTHROPIC_API_KEY: 'sk-ant-xxxxxxxx' } }),
+    getEnvStatus: async () => ({ success: true, vars: { ANTHROPIC_API_KEY: { set: true, last4: 'ab12' } } }),
     readFile: async () => '.backups/\n.env*\nnode_modules/\n',
     writeFile: async () => true,
-    writeEnv: async () => ({ success: true }),
+    updateEnv: async (_root: string, changes: Record<string, string | null>) => {
+      ;((window as unknown as { __acbEnvUpdates: unknown[] }).__acbEnvUpdates ??= []).push(changes)
+      return { success: true }
+    },
     getDepartments: async () => ({ success: true, data: DEPARTMENTS }),
     getWriteAccess: async () => null,
     onWriteAccessChanged: () => () => {},

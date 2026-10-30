@@ -5,11 +5,13 @@ import { AgentEnvSettings } from './AgentEnvSettings'
 import { DownloadFoldersSection } from './DownloadFoldersSection'
 import { Button, Callout, Card, SectionHeader, SubHeading } from './ui'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info } from '@phosphor-icons/react'
 import { useAppStore } from '../../stores/appStore'
 import { useDepartments } from '../../hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT } from '../../lib/agentLogNotice'
-import { getGitBinaryStatus, readCompanyEnv, readGitignore, writeCompanyEnv, writeGitignore } from '../../features/settings/api'
+import { getGitBinaryStatus, readCompanyEnvStatus, readGitignore, updateCompanyEnv, writeGitignore } from '../../features/settings/api'
+import { envChangesToSave, envDraftsFromText, envStatusLabel, normalizeEnvName } from '../../features/settings/model'
+import type { EnvVarStatus } from '../../../shared/env-file'
 
 // Common API key definitions
 const COMMON_API_KEYS = [
@@ -18,6 +20,7 @@ const COMMON_API_KEYS = [
   { key: 'GOOGLE_API_KEY', label: 'Google AI', placeholder: 'AIza...' },
   { key: 'AZURE_OPENAI_API_KEY', label: 'Azure OpenAI', placeholder: '' },
 ]
+const commonKeySet = new Set(COMMON_API_KEYS.map(k => k.key))
 
 interface SettingsPanelProps {
   onClose: () => void
@@ -61,11 +64,14 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
   const { departments } = useDepartments(currentCompany?.id)
   const [gitBinaryStatus, setGitBinaryStatus] = useState<{ bundled: boolean; binary: string } | null>(null)
   const [activeTab, setActiveTab] = useState<TabType>(initialTab)
-  const [envVars, setEnvVars] = useState<Record<string, string>>({})
+  // Saved .env values never reach the renderer: only their status, plus what is typed here.
+  const [envStatus, setEnvStatus] = useState<Record<string, EnvVarStatus>>({})
+  const [envDrafts, setEnvDrafts] = useState<Record<string, string>>({})
+  const [removedKeys, setRemovedKeys] = useState<Set<string>>(new Set())
+  const [addedKeys, setAddedKeys] = useState<string[]>([])
   const [visibleKeys, setVisibleKeys] = useState<Set<string>>(new Set())
-  const [customKeys, setCustomKeys] = useState<Array<{ key: string; value: string }>>([])
   const [newKeyName, setNewKeyName] = useState('')
-  const [rawEnvContent, setRawEnvContent] = useState('')
+  const [pastedEnv, setPastedEnv] = useState('')
   const [gitignoreContent, setGitignoreContent] = useState('')
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -94,22 +100,9 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
       setLoading(true)
       setError(null)
       try {
-        // Load .env
-        const result = await readCompanyEnv(currentCompany.rootPath)
+        const result = await readCompanyEnvStatus(currentCompany.rootPath)
         if (result.success && result.vars) {
-          setEnvVars(result.vars)
-          // Separate common keys from custom keys
-          const commonKeySet = new Set(COMMON_API_KEYS.map(k => k.key))
-          const customEntries = Object.entries(result.vars)
-            .filter(([key]) => !commonKeySet.has(key))
-            .map(([key, value]) => ({ key, value }))
-          setCustomKeys(customEntries)
-          // Build raw content
-          setRawEnvContent(
-            Object.entries(result.vars)
-              .map(([k, v]) => `${k}=${v}`)
-              .join('\n')
-          )
+          setEnvStatus(result.vars)
         } else if (result.error) {
           setError(result.error)
         }
@@ -144,39 +137,49 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
     })
   }, [])
 
-  // Update a common API key value
-  const updateCommonKey = useCallback((key: string, value: string) => {
-    setEnvVars(prev => ({ ...prev, [key]: value }))
+  const customKeys = [...Object.keys(envStatus).filter(k => !commonKeySet.has(k)), ...addedKeys.filter(k => !(k in envStatus))]
+
+  const updateDraft = useCallback((key: string, value: string) => {
+    setEnvDrafts(prev => ({ ...prev, [key]: value }))
     setSaved(false)
   }, [])
 
-  // Update a custom key
-  const updateCustomKey = useCallback((index: number, field: 'key' | 'value', value: string) => {
-    setCustomKeys(prev => {
-      const next = [...prev]
-      next[index] = { ...next[index], [field]: value }
+  // Marks a saved name for removal on save, or undoes that.
+  const toggleRemoved = useCallback((key: string) => {
+    setRemovedKeys(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
       return next
     })
     setSaved(false)
   }, [])
 
-  // Add a new custom key
   const addCustomKey = useCallback(() => {
     if (!newKeyName.trim()) return
-    const keyName = newKeyName.trim().toUpperCase().replace(/[^A-Z0-9_]/g, '_')
-    if (COMMON_API_KEYS.some(k => k.key === keyName) || customKeys.some(k => k.key === keyName)) {
+    const normalized = normalizeEnvName(newKeyName)
+    if ('error' in normalized) {
+      setError(normalized.error)
+      return
+    }
+    const keyName = normalized.name
+    if (commonKeySet.has(keyName) || keyName in envStatus || addedKeys.includes(keyName)) {
       setError('このキー名は既に存在します')
       return
     }
-    setCustomKeys(prev => [...prev, { key: keyName, value: '' }])
+    setError(null)
+    setAddedKeys(prev => [...prev, keyName])
     setNewKeyName('')
     setSaved(false)
-  }, [newKeyName, customKeys])
+  }, [newKeyName, envStatus, addedKeys])
 
-  // Remove a custom key
-  const removeCustomKey = useCallback((index: number) => {
-    setCustomKeys(prev => prev.filter((_, i) => i !== index))
-    setSaved(false)
+  const removeAddedKey = useCallback((key: string) => {
+    setAddedKeys(prev => prev.filter(k => k !== key))
+    setEnvDrafts(prev => {
+      const next = { ...prev }
+      delete next[key]
+      return next
+    })
   }, [])
 
   // Save all changes
@@ -196,48 +199,18 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
           setError('保存に失敗しました')
         }
       } else {
-        // Save .env
-        let varsToSave: Record<string, string>
-
-        if (activeTab === 'advanced') {
-          // Parse raw content
-          varsToSave = {}
-          const lines = rawEnvContent.split('\n')
-          for (const line of lines) {
-            const trimmed = line.trim()
-            if (!trimmed || trimmed.startsWith('#')) continue
-            const eqIndex = trimmed.indexOf('=')
-            if (eqIndex > 0) {
-              const key = trimmed.slice(0, eqIndex).trim()
-              let value = trimmed.slice(eqIndex + 1).trim()
-              // Remove quotes
-              if ((value.startsWith('"') && value.endsWith('"')) ||
-                  (value.startsWith("'") && value.endsWith("'"))) {
-                value = value.slice(1, -1)
-              }
-              varsToSave[key] = value
-            }
-          }
-        } else {
-          // Build from common keys + custom keys
-          varsToSave = {}
-          for (const { key } of COMMON_API_KEYS) {
-            if (envVars[key]) {
-              varsToSave[key] = envVars[key]
-            }
-          }
-          for (const { key, value } of customKeys) {
-            if (key && value) {
-              varsToSave[key] = value
-            }
-          }
-        }
-
-        const result = await writeCompanyEnv(currentCompany.rootPath, varsToSave)
+        // .env: only typed values and removals are sent; main merges them into the file.
+        const drafts = { ...envDrafts, ...envDraftsFromText(pastedEnv) }
+        const changes = envChangesToSave(drafts, removedKeys)
+        const result = await updateCompanyEnv(currentCompany.rootPath, changes)
         if (result.success) {
+          const status = await readCompanyEnvStatus(currentCompany.rootPath)
+          if (status.success && status.vars) setEnvStatus(status.vars)
+          setEnvDrafts({})
+          setRemovedKeys(new Set())
+          setAddedKeys([])
+          setPastedEnv('')
           setSaved(true)
-          // Update state to reflect saved values
-          setEnvVars(varsToSave)
           setTimeout(() => setSaved(false), 2000)
         } else {
           setError(result.error || '保存に失敗しました')
@@ -248,7 +221,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
     } finally {
       setSaving(false)
     }
-  }, [currentCompany?.rootPath, activeTab, envVars, customKeys, rawEnvContent, gitignoreContent])
+  }, [currentCompany?.rootPath, activeTab, envDrafts, removedKeys, pastedEnv, gitignoreContent])
 
   // Handle backdrop click
   const handleBackdropClick = (e: React.MouseEvent) => {
@@ -369,27 +342,20 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                     <SubHeading>よく使うAPIキー</SubHeading>
                     <div className="mt-4 space-y-3">
                       {COMMON_API_KEYS.map(({ key, label, placeholder }) => (
-                        <div key={key} className="flex items-center gap-4">
-                          <label htmlFor={`env-${key}`} className="w-32 shrink-0 text-[13px] text-zinc-600 dark:text-zinc-300">{label}</label>
-                          <div className="relative flex-1">
-                            <input
-                              id={`env-${key}`}
-                              type={visibleKeys.has(key) ? 'text' : 'password'}
-                              value={envVars[key] || ''}
-                              onChange={(e) => updateCommonKey(key, e.target.value)}
-                              placeholder={placeholder}
-                              className={`${INPUT} w-full pr-10 font-mono`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => toggleVisibility(key)}
-                              aria-label={visibleKeys.has(key) ? '隠す' : '表示する'}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                            >
-                              {visibleKeys.has(key) ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                        </div>
+                        <EnvKeyRow
+                          key={key}
+                          name={key}
+                          label={<label htmlFor={`env-${key}`} className="w-32 shrink-0 text-[13px] text-zinc-600 dark:text-zinc-300">{label}</label>}
+                          inputId={`env-${key}`}
+                          status={envStatus[key]}
+                          draft={envDrafts[key] ?? ''}
+                          placeholder={placeholder}
+                          visible={visibleKeys.has(key)}
+                          removed={removedKeys.has(key)}
+                          onDraft={value => updateDraft(key, value)}
+                          onToggleVisible={() => toggleVisibility(key)}
+                          onToggleRemoved={() => toggleRemoved(key)}
+                        />
                       ))}
                     </div>
                   </div>
@@ -397,43 +363,20 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
                   <div className="p-5">
                     <SubHeading>カスタム環境変数</SubHeading>
                     <div className="mt-4 space-y-3">
-                      {customKeys.map((item, index) => (
-                        <div key={index} className="flex items-center gap-3">
-                          <input
-                            type="text"
-                            value={item.key}
-                            onChange={(e) => updateCustomKey(index, 'key', e.target.value.toUpperCase())}
-                            placeholder="KEY_NAME"
-                            aria-label="キー名"
-                            className={`${INPUT} w-44 shrink-0 font-mono`}
-                          />
-                          <div className="relative flex-1">
-                            <input
-                              type={visibleKeys.has(`custom-${index}`) ? 'text' : 'password'}
-                              value={item.value}
-                              onChange={(e) => updateCustomKey(index, 'value', e.target.value)}
-                              placeholder="value"
-                              aria-label={`${item.key || 'キー'} の値`}
-                              className={`${INPUT} w-full pr-10 font-mono`}
-                            />
-                            <button
-                              type="button"
-                              onClick={() => toggleVisibility(`custom-${index}`)}
-                              aria-label={visibleKeys.has(`custom-${index}`) ? '隠す' : '表示する'}
-                              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
-                            >
-                              {visibleKeys.has(`custom-${index}`) ? <EyeSlash size={16} /> : <Eye size={16} />}
-                            </button>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => removeCustomKey(index)}
-                            aria-label={`${item.key || 'キー'} を削除`}
-                            className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
-                          >
-                            <Trash size={16} />
-                          </button>
-                        </div>
+                      {customKeys.map(key => (
+                        <EnvKeyRow
+                          key={key}
+                          name={key}
+                          label={<code className={`${CODE} w-44 shrink-0 truncate py-1.5`} title={key}>{key}</code>}
+                          status={envStatus[key]}
+                          draft={envDrafts[key] ?? ''}
+                          placeholder="値"
+                          visible={visibleKeys.has(key)}
+                          removed={removedKeys.has(key)}
+                          onDraft={value => updateDraft(key, value)}
+                          onToggleVisible={() => toggleVisibility(key)}
+                          onToggleRemoved={() => (key in envStatus ? toggleRemoved(key) : removeAddedKey(key))}
+                        />
                       ))}
 
                       <div className="flex items-center gap-3">
@@ -456,6 +399,7 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
 
                 <Callout tone="info">
                   <p>APIキーは <code className={CODE}>.env</code> ファイルに保存されます。スクリプトから <code className={CODE}>process.env.OPENAI_API_KEY</code> などで参照できます。</p>
+                  <p className="mt-1">保存したキーは安全のため画面に表示しません（末尾4文字だけ表示します）。変えるときは新しいキーを入力して保存してください。</p>
                   <p className="mt-1">入力したキーを含む <code className={CODE}>.env</code> は同期されません（このPCにのみ保存されます）。</p>
                 </Callout>
               </div>
@@ -494,19 +438,40 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
               </div>
             ) : (
               <div className="space-y-5 px-8 pb-8 pt-7">
-                <SectionHeader title="環境変数（.env）" description={<>このPCの <code className={CODE}>.env</code> を直接編集します。1行に1つ、<code className={CODE}>KEY=value</code> の形式で書きます。</>} />
+                <SectionHeader title="環境変数（.env）" description={<>このPCの <code className={CODE}>.env</code> に、まとめて追加・上書きします。1行に1つ、<code className={CODE}>KEY=value</code> の形式で貼り付けてください。</>} />
                 <textarea
-                  value={rawEnvContent}
+                  value={pastedEnv}
                   onChange={(e) => {
-                    setRawEnvContent(e.target.value)
+                    setPastedEnv(e.target.value)
                     setSaved(false)
                   }}
-                  aria-label=".env の内容"
+                  aria-label=".env に追加する内容"
                   placeholder="OPENAI_API_KEY=sk-...&#10;ANTHROPIC_API_KEY=sk-ant-..."
                   className={TEXTAREA}
                   spellCheck={false}
                 />
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">コメント行は <code className={CODE}>#</code> で始めてください。</p>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400">ここに書いた名前だけが変わり、ほかの項目はそのまま残ります。<code className={CODE}>#</code> で始まる行と、値が空の行は無視されます。</p>
+                <Card className="p-5">
+                  <SubHeading>保存されている項目</SubHeading>
+                  <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">値は安全のため表示しません。</p>
+                  {Object.keys(envStatus).length === 0 ? (
+                    <p className="mt-3 text-[13px] text-zinc-500 dark:text-zinc-400">まだありません。</p>
+                  ) : (
+                    <ul className="mt-3 space-y-2">
+                      {Object.keys(envStatus).map(key => (
+                        <li key={key} className="flex items-center gap-3 text-[13px]">
+                          <code className={`${CODE} truncate`} title={key}>{key}</code>
+                          <span className={removedKeys.has(key) ? 'text-red-600 dark:text-red-300' : 'text-zinc-500 dark:text-zinc-400'}>
+                            {removedKeys.has(key) ? '保存すると削除されます' : envStatusLabel(envStatus[key])}
+                          </span>
+                          <Button variant="ghost" className="ml-auto shrink-0" onClick={() => toggleRemoved(key)}>
+                            {removedKeys.has(key) ? '元に戻す' : <><Trash size={14} />削除</>}
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
+                </Card>
               </div>
             )}
           </div>
@@ -527,6 +492,63 @@ export function SettingsPanel({ onClose, initialTab = 'sync' }: SettingsPanelPro
           )}
         </div>
       </div>
+    </div>
+  )
+}
+
+/** One .env name: its saved status (never the value), a box for a new value, and removal. */
+function EnvKeyRow({ name, label, inputId, status, draft, placeholder, visible, removed, onDraft, onToggleVisible, onToggleRemoved }: {
+  name: string
+  label: ReactNode
+  inputId?: string
+  status: EnvVarStatus | undefined
+  draft: string
+  placeholder: string
+  visible: boolean
+  removed: boolean
+  onDraft: (value: string) => void
+  onToggleVisible: () => void
+  onToggleRemoved: () => void
+}) {
+  const saved = !!status?.set
+  const statusText = removed ? '保存すると削除されます' : envStatusLabel(status)
+  return (
+    <div className="flex items-center gap-3">
+      {label}
+      <div className="relative flex-1">
+        <input
+          id={inputId}
+          type={visible ? 'text' : 'password'}
+          value={removed ? '' : draft}
+          disabled={removed}
+          onChange={(e) => onDraft(e.target.value)}
+          placeholder={removed ? statusText : saved ? `${statusText}。変更するときだけ入力` : placeholder}
+          aria-label={inputId ? undefined : `${name} の値`}
+          aria-describedby={`env-status-${name}`}
+          className={`${INPUT} w-full pr-10 font-mono disabled:opacity-60`}
+        />
+        <span id={`env-status-${name}`} className="sr-only">{statusText}</span>
+        <button
+          type="button"
+          onClick={onToggleVisible}
+          aria-label={visible ? '隠す' : '表示する'}
+          className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200"
+        >
+          {visible ? <EyeSlash size={16} /> : <Eye size={16} />}
+        </button>
+      </div>
+      {saved || !inputId ? (
+        <button
+          type="button"
+          onClick={onToggleRemoved}
+          aria-label={removed ? `${name} の削除を取り消す` : `${name} を削除`}
+          className="rounded-lg p-2 text-zinc-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-400/10 dark:hover:text-red-300"
+        >
+          {removed ? <ArrowCounterClockwise size={16} /> : <Trash size={16} />}
+        </button>
+      ) : (
+        <span className="w-8 shrink-0" aria-hidden />
+      )}
     </div>
   )
 }
