@@ -100,7 +100,10 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   `CLAUDE_CODE_*`, `CLAUDE_AGENT_SDK_*`, `ACB_*`, FORCE_COLOR, and the Windows essentials
   (SystemRoot, ComSpec, PATHEXT, APPDATA, LOCALAPPDATA, USERPROFILE, ProgramFiles*, WINDIR, …).
   Names compare case-insensitively. The CLIs sign in with their own stored login, not env.
-- Precedence: `ACB_SET_KEYS` (what the app / SDK set) always kept → deny always dropped (`TOKEN`,
+- Precedence: key broker variables (`client/shared/broker-env.ts`: `GEMINI_API_KEY`,
+  `OPENAI_BASE_URL`, `ACB_*_API_KEY`, …) only with the app's values (a broker token, the
+  placeholder, a relay URL on the company server) and dropped otherwise (`key-broker.md` K6) →
+  `ACB_SET_KEYS` (what the app / SDK set) always kept → deny always dropped (`TOKEN`,
   `SECRET`, `PASSWORD`, `PASSPHRASE`, `CREDENTIAL`, `API_KEY`, `ACCESS_KEY`, `PRIVATE_KEY`,
   `COOKIE`, `DATABASE_URL`, … anywhere; `_KEY` / `_DSN` / `_PAT` endings; `AWS_`, `AZURE_`,
   `GOOGLE_APPLICATION_`; CLAUDECODE, REDIS_URL, …) → allowlist or the member's pass-through

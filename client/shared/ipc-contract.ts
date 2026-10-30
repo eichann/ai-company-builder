@@ -456,7 +456,7 @@ export interface IpcInvokeChannels {
   'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
   'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
   'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
-  'tools:start': { args: [toolPath: string, startCommand?: string]; result: StartToolResult }
+  'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
   'tools:stop': { args: [toolPath: string]; result: StopToolResult }
   'shell:openExternal': { args: [url: string]; result: SimpleResult }
 

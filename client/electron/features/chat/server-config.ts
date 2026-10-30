@@ -20,6 +20,8 @@ import type { ClaudeCli } from '../../services/claude-cli'
 import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
 import type { AgentPolicyStore } from '../../services/agent-policy-store'
+import type { BrokerTokenStore } from '../../services/broker-token-store'
+import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
 import { notDownloadedFolders } from '../../sync/not-downloaded'
 import type { WriteAccessStore } from '../../write-access-store'
@@ -52,6 +54,8 @@ export interface ChatServerConfigDeps {
   agentPolicy: AgentPolicyStore
   /** The server's URL (its host is always reachable from the sandbox). */
   serverUrl: () => string
+  /** The key broker's tokens (services/broker-token-store.ts). */
+  brokerTokens?: BrokerTokenStore
 }
 
 function hostOf(url: string): string | undefined {
@@ -92,6 +96,8 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         getPrivateFolderView: () => deps.privateFolders.guardView(root),
       }
     },
+    getBrokerEnv: async ({ agent, companyId, conversationId, department }) =>
+      deps.brokerTokens ? deps.brokerTokens.envFor({ companyId, conversationId, department, reservedServices: agentBrokerReservedServices(agent) }) : {},
     getAgentSandbox: async (companyId, root) => {
       const policy = await deps.agentPolicy.refresh(companyId, { timeoutMs: 3000 })
       if (!policy) return undefined

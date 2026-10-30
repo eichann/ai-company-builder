@@ -33,6 +33,9 @@ paths:
   - "server/src/services/own-broker-keys.ts"
   - "server/tests/integration/own-broker-keys.test.ts"
   - "client/shared/broker-keys.ts"
+  - "client/shared/broker-env.ts"
+  - "client/electron/services/broker-token-store.ts"
+  - "client/tests/broker-*.test.ts"
   - "client/electron/features/broker/**"
   - "client/src/features/settings/own-keys*"
   - "client/src/features/settings/hooks/useOwnKeys.ts"
@@ -233,6 +236,42 @@ openai, anthropic; a generic relay is K9). No ACB session: the token is the sign
 - Logs: never a header, body, key or token; the request log hides `/api/broker/` queries
   (`lib/log-redaction.ts`).
 
+## The app (K6): tokens into the AI's and tools' environment
+
+- `client/electron/services/broker-token-store.ts` (created in `main.ts`, cleared on sign-out):
+  `POST /me/broker-tokens` with the session, one token per (company, consultation or
+  `tool:<path>`, department), memory only, never logged or sent to the renderer; reused until
+  less than 10 minutes (`REFRESH_MARGIN_MS`) are left, then replaced — every chat turn asks
+  (`ChatServerConfig.getBrokerEnv`, `features/chat/server-config.ts`), so a turn starts with a
+  token that outlives it. Offline / refused / an older server (404) → no broker variables that
+  turn (logged without the token); 3 s budget.
+- `client/shared/broker-env.ts` `brokerEnv(serverUrl, issued, reservedServices)`: per service
+  the token goes where its SDKs look for a key (gemini `GEMINI_API_KEY` and `GOOGLE_API_KEY` —
+  google-genai prefers the latter —, openai `OPENAI_API_KEY`, anthropic `ANTHROPIC_API_KEY`) and
+  the relay where they look for a base URL (`GOOGLE_GEMINI_BASE_URL` = `<origin>/api/broker/gemini`,
+  `OPENAI_BASE_URL` = …`/openai/v1`, `ANTHROPIC_BASE_URL` = …`/anthropic`), plus always
+  `ACB_<SERVICE>_API_KEY` / `ACB_<SERVICE>_BASE_URL` and `ACB_BROKER_URL`. Services the company
+  has keys for but this member may not use here (`no-key` / `stopped`) get the placeholder
+  `acb_tok_none` (`BROKER_NO_KEY_PLACEHOLDER`): the relay answers it with
+  「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。」
+  without contacting anyone. Services nobody configured get nothing, so scripts keep their old
+  behaviour until K7.
+- **The agent's own CLI never gets its vendor's standard variables** (registry
+  `brokerReservedServices`: Claude Code `anthropic`, Codex `openai`): `ANTHROPIC_API_KEY` /
+  `ANTHROPIC_BASE_URL` would switch the Claude Code CLI from the member's login to the company's
+  key (and `OPENAI_*` Codex). Scripts in those chats use the `ACB_ANTHROPIC_*` / `ACB_OPENAI_*`
+  names (K7 list).
+- Where it goes: the chat's AI process (`turnEnv` on the turn request: Claude Code `env`, Codex's
+  app-server, the API-key mode's commands) and tools started from the app (`tools:start` takes
+  the company id; `tool:<rel path>` token, the skill's department; the shell variables of the same
+  names are replaced). A tool running longer than the token (≤ 60 min) must be restarted.
+- `agents/agent-env.ts` rule 0: a broker variable passes to an AI process only with a value the
+  app sets — an `acb_tok_` token, the placeholder, or a relay URL on the company server's origin
+  (`configureAgentEnv({ serverUrl })`) — so a real key, or a base URL that would send the token
+  elsewhere, from the member's shell or pass-through setting never does.
+- The sandbox (「AI の囲い」) already allows the ACB server's host, so scripts reach the relay
+  with nothing else allowed.
+
 ## A member's own keys (K8, 「自分の鍵」)
 
 `services/own-broker-keys.ts`, routes in `routes/key-broker.ts` (any member, the desktop app):
@@ -277,7 +316,10 @@ rule / own key / switch, every validation refusal, TTL bounds, the per-member bo
 the service's header, a real-looking key refused unforwarded, destinations / models / bad paths,
 the Japanese no-key refusal, upload URL rewrite + continuation, redirects, a provider echoing the
 key, internal destination, size limit, revoked token, **no key in any answer, log line or table,
-no token in any log line**), `tests/integration/broker-records.test.ts` (one record per call with who / department / host
+no token in any log line**), `client/tests/broker-env.test.ts` (the agent's CLI never gets its vendor's variables; placeholder
+vs nothing; a shell key or a foreign relay URL never reaches an AI process),
+`client/tests/broker-token-store.test.ts` (one token per consultation and department, refreshed
+before expiry, failure → nothing, no token in the log), `tests/integration/broker-records.test.ts` (one record per call with who / department / host
 / path / model / sizes / tokens and nothing secret, tokens split across chunks, refusals filed by
 who decided, stop-all → `stopped` on the next call and resume, member and token caps
 (mutation-checked), an app cannot forge a relay record), `tests/integration/broker-relay-https.test.ts` (real HTTPS to a

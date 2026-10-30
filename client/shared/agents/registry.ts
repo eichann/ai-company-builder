@@ -130,6 +130,14 @@ export interface AgentDescriptor<ModelId extends string = string> {
   readonly tasks: AgentTaskModels
   readonly capabilities: AgentCapabilities
   /**
+   * Key broker services whose standard variables (`ANTHROPIC_API_KEY` /
+   * `ANTHROPIC_BASE_URL`, `OPENAI_*`) this agent's own CLI reads for itself:
+   * the app never sets those for it — the CLI would leave the member's login
+   * for the company's key — only the `ACB_<SERVICE>_*` names
+   * (client/shared/broker-env.ts).
+   */
+  readonly brokerReservedServices: readonly string[]
+  /**
    * The oldest CLI the app starts (`<cli> --version`, cli-version.ts): older
    * ones lack what the app relies on (for Codex: permission profiles and the
    * network proxy the sandbox uses). Undefined = no check.
@@ -177,6 +185,7 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     handoff: CLAUDE_LIGHT_MODEL,
     webReader: CLAUDE_CHAT_MODEL,
   },
+  brokerReservedServices: ['anthropic'],
   capabilities: {
     ownsConversation: true,
     steering: true,
@@ -245,6 +254,7 @@ const CODEX: AgentDescriptor = {
     // No webReader entry: the Web reader runs on the catalog's default chat
     // model at its default effort (owner decision 2026-10-29: not the light one).
   },
+  brokerReservedServices: ['openai'],
   capabilities: {
     ownsConversation: true,
     steering: true,
@@ -284,6 +294,7 @@ const API_KEY: AgentDescriptor = {
     commitMessage: 'claude-haiku-5-5',
     voice: 'claude-haiku-4-5-20251001',
   },
+  brokerReservedServices: [],
   capabilities: {
     ownsConversation: false,
     steering: false,
@@ -321,6 +332,11 @@ export function agentDescriptor(id: unknown): AgentDescriptor | undefined {
 /** The short name shown for an agent ('Claude', 'Codex', 'API'); 'Claude' for anything unknown, as the UI always showed. */
 export function agentShortLabel(id: unknown): string {
   return agentDescriptor(id)?.shortLabel ?? AGENTS['claude-code'].shortLabel
+}
+
+/** Key broker services this agent's CLI reads the standard variables of (never set for it). */
+export function agentBrokerReservedServices(id: unknown): readonly string[] {
+  return agentDescriptor(id)?.brokerReservedServices ?? []
 }
 
 /** One capability of an id; false for an unknown id. */

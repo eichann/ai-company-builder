@@ -20,6 +20,7 @@ import type { SteerTarget } from './steering'
 import { turnToolEvents } from './tool-events'
 import { recordCodexApproval, recordCodexItem } from './codex-tool-events'
 import { checkInstalledCodex, type CodexVersionCheck } from './codex-version'
+import { withoutBrokerEnv } from '../../shared/broker-env'
 import { CODEX_SANDBOX_PROFILE, SANDBOX_MESSAGES, codexSandboxConfig } from '../../shared/agents/sandbox-policy'
 
 type Model = Extract<LanguageModel, { specificationVersion: 'v3' }>
@@ -223,7 +224,8 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             const version = await checkVersion(config.getShellEnv())
             if (!version.ok) throw new Error(version.message)
             if (ended) return
-            rpc = createRpc(config.getShellEnv())
+            // The key broker's variables for this consultation (turnEnv) replace any of the same names.
+            rpc = createRpc({ ...withoutBrokerEnv(config.getShellEnv()), ...request.turnEnv })
             rpc.onFailure = error => finish(error)
             rpc.onMessage = message => {
               if (ended) return
