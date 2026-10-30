@@ -76,3 +76,24 @@ test('an AI process gets broker variables only with the app\'s values, never a r
   assert.ok(!JSON.stringify(withBroker).includes('NOT-REAL'))
   assert.ok(!JSON.stringify(withBroker).includes('evil'))
 })
+
+test('a company\'s generic service (K9) gets ACB_<SERVICE>_* only, and the shell cannot supply them', () => {
+  const generic: BrokerTokenIssued = {
+    ...issued,
+    services: [{ service: 'crm', source: 'company' }, { service: 'case-master', source: 'user' }],
+    unavailable: [{ service: 'billing', reason: 'stopped' }],
+  }
+  const env = brokerEnv(SERVER, generic)
+  assert.equal(env.ACB_CRM_API_KEY, TOKEN)
+  assert.equal(env.ACB_CRM_BASE_URL, 'https://acb.example.co.jp/api/broker/crm')
+  assert.equal(env.ACB_CASE_MASTER_BASE_URL, 'https://acb.example.co.jp/api/broker/case-master')
+  assert.equal(env.ACB_BILLING_API_KEY, BROKER_NO_KEY_PLACEHOLDER)
+  const ORIGIN = 'https://acb.example.co.jp'
+  // A base URL for a service the app has not heard of, from the shell, would send the token elsewhere.
+  const shell = { PATH: '/usr/bin', ACB_CRM_BASE_URL: 'https://evil.example.com/api/broker/crm', ACB_OTHER_BASE_URL: 'https://evil.example.com/x', ACB_THEME: 'dark' }
+  assert.deepEqual(buildAgentEnv(shell, ['ACB_OTHER_BASE_URL'], ORIGIN).env, { PATH: '/usr/bin', ACB_THEME: 'dark' })
+  const withBroker = buildAgentEnv({ ...shell, ...env }, [], ORIGIN).env
+  assert.equal(withBroker.ACB_CRM_BASE_URL, 'https://acb.example.co.jp/api/broker/crm')
+  assert.equal(withBroker.ACB_CRM_API_KEY, TOKEN)
+  assert.ok(!JSON.stringify(withBroker).includes('evil'))
+})

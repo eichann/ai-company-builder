@@ -314,6 +314,13 @@ who uses it).
   「この作業には <サービス> の鍵が必要です。管理者に頼むか、設定の『自分の鍵』から登録してください。」
   without contacting anyone. Services nobody configured get nothing, so scripts keep their old
   behaviour until K7.
+- **Generic services (K9)** have no SDK names: they get only `ACB_<SERVICE>_API_KEY` (the token)
+  and `ACB_<SERVICE>_BASE_URL` (`<origin>/api/broker/<id>`; the relay adds the base path), the
+  name from `brokerServiceEnvNames` (`shared/core`, `-` → `_`; the admin page shows the same
+  names). A script sends the token in the service's header, in `Authorization: Bearer`, or in
+  `x-api-key`. `isBrokerEnvName` treats **every** `ACB_*_API_KEY` / `ACB_*_BASE_URL` as a broker
+  name (rule 0), so such a variable from the member's shell or pass-through list never reaches
+  an AI process — the app does not know the company's services in advance.
 - **The agent's own CLI never gets its vendor's standard variables** (registry
   `brokerReservedServices`: Claude Code `anthropic`, Codex `openai`): `ANTHROPIC_API_KEY` /
   `ANTHROPIC_BASE_URL` would switch the Claude Code CLI from the member's login to the company's

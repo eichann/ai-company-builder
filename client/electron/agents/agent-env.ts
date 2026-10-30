@@ -11,9 +11,10 @@
  *
  * Precedence, per variable name (compared case-insensitively — Windows
  * environment names are):
- *   0. a key broker variable (`BROKER_ENV_NAMES`: GEMINI_API_KEY,
- *      OPENAI_BASE_URL, ACB_GEMINI_API_KEY, …) is kept only with a value the app
- *      sets — a broker token, the no-key placeholder, a relay URL — and dropped
+ *   0. a key broker variable (`isBrokerEnvName`: GEMINI_API_KEY,
+ *      OPENAI_BASE_URL, ACB_<SERVICE>_API_KEY / _BASE_URL of any service, …)
+ *      is kept only with a value the app sets — a broker token, the no-key
+ *      placeholder, a relay URL — and dropped
  *      otherwise, so a real key or another base URL from the member's shell
  *      never reaches the AI (client/shared/broker-env.ts);
  *   1. an ACB-set key (`ACB_SET_KEYS`) is always kept;
@@ -25,7 +26,7 @@
  * Dropped names (never values) are logged once each per app start.
  */
 
-import { BROKER_ENV_NAMES, brokerOrigin, isBrokerEnvValue } from '../../shared/broker-env'
+import { brokerOrigin, isBrokerEnvName, isBrokerEnvValue } from '../../shared/broker-env'
 
 export const ALLOW_NAMES: readonly string[] = [
   // POSIX basics
@@ -93,7 +94,6 @@ const upper = (names: readonly string[]) => new Set(names.map(name => name.toUpp
 const ALLOW = upper(ALLOW_NAMES)
 const ACB_SET = upper(ACB_SET_KEYS)
 const DENY = upper(DENY_NAMES)
-const BROKER = upper(BROKER_ENV_NAMES)
 
 /** True when the name looks like a secret (rule 2). */
 export function isDeniedName(name: string): boolean {
@@ -126,7 +126,7 @@ export function buildAgentEnv(source: Record<string, string | undefined>, extraN
   for (const [name, value] of Object.entries(source)) {
     if (typeof value !== 'string') continue
     const key = name.toUpperCase()
-    const keep = BROKER.has(key)
+    const keep = isBrokerEnvName(key)
       ? isBrokerEnvValue(name, value, serverOrigin)
       : ACB_SET.has(key) || (!isDeniedName(name) && (isAllowedName(key) || extra.has(key)))
     if (keep) env[name] = value
