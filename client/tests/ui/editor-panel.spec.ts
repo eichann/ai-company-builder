@@ -58,6 +58,22 @@ test('⌘S saves at once, without waiting for the autosave', async ({ page }) =>
   await expect.poll(() => writes(page)).toEqual([[SCRIPT, '# 台本\n\n第12回の構成案です。\n追記']])
 })
 
+test('the editor\'s shortcuts reach it only while the focus is inside it', async ({ page }) => {
+  await page.clock.install({ time: new Date('2026-01-01T00:00:00') })
+  await open(page)
+  await pauseClock(page)
+  await typeAtEnd(page, '\n追記')
+  await page.getByRole('button', { name: '営業部' }).click()
+  await shortcut(page, { key: 's' })
+  await shortcut(page, { key: 'm', shiftKey: true })
+  await expect(editor(page)).toBeVisible()
+  expect(await writes(page)).toEqual([])
+
+  await editor(page).click()
+  await shortcut(page, { key: 's' })
+  await expect.poll(() => writes(page)).toEqual([[SCRIPT, '# 台本\n\n第12回の構成案です。\n追記']])
+})
+
 test('closing a tab with edits saves them first; a clean tab just closes', async ({ page }) => {
   await open(page)
   await typeAtEnd(page, '\n閉じる前の追記')

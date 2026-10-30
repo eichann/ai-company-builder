@@ -22,8 +22,8 @@ interface Deps {
 }
 
 /**
- * Saving: autosave a second after the last keystroke, ⌘S, saving before a tab
- * closes, and loading the disk version instead — each one never silently over
+ * Saving: autosave a second after the last keystroke, an explicit save
+ * (`editor.save`, ⌘S), saving before a tab closes, and loading the disk version instead — each one never silently over
  * someone else's version (files-and-editor.md, External changes).
  */
 export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, updateFile, rootPath, setError, setNotice }: Deps) {
@@ -151,18 +151,6 @@ export function useFileSaving({ activeFilePath, fileContents, fileContentsRef, u
     updateFile(filePath, f => ({ ...f, content: disk, originalContent: disk, missing: false, external: undefined, keepMine: false }))
     return true
   }, [askConfirm, updateFile, setError])
-
-  // Keyboard shortcut for save
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 's') {
-        e.preventDefault()
-        handleSave()
-      }
-    }
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [handleSave])
 
   /** Saves before closing — asking first if the file changed on disk; resolves false to keep the tab open. */
   const saveBeforeClose = async (path: string): Promise<boolean> => {

@@ -9,7 +9,8 @@ import { fileNameOf, isImageFile, isMarkdownFile, isPdfFile } from '../fileKinds
 import { useOpenFiles } from '../hooks/useOpenFiles'
 import { useFileSaving } from '../hooks/useFileSaving'
 import { useEditorReview } from '../hooks/useEditorReview'
-import { useMarkdownViewMode, useScrollMemory, useToggleViewShortcut, type MdViewMode } from '../hooks/useMarkdownView'
+import { useMarkdownViewMode, useScrollMemory, type MdViewMode } from '../hooks/useMarkdownView'
+import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import { EditorTabBar } from './EditorTabBar'
 import { EditorError, EditorNotice, ExternalChangeBanner, MissingFileNotice, ReadOnlyNotice } from './EditorNotices'
 import { LocalImage, PdfPreview } from './BinaryPreviews'
@@ -25,6 +26,8 @@ interface TabbedEditorPanelProps {
   onCloseFile: (path: string) => void
   onPinFile?: (path: string) => void
   gotoLine?: number | null
+  /** This editor's pane: its shortcuts (⌘S, ⌘⇧M, ⌘F) work only while the focus is inside it. */
+  paneId?: string
 }
 
 export function TabbedEditorPanel({
@@ -36,6 +39,7 @@ export function TabbedEditorPanel({
   onCloseFile,
   onPinFile,
   gotoLine,
+  paneId = 'editor',
 }: TabbedEditorPanelProps) {
   const { isReadOnly } = useWriteAccess()
   const [error, setError] = useState<string | null>(null)
@@ -47,6 +51,11 @@ export function TabbedEditorPanel({
   const scroll = useScrollMemory(openFiles, activeFilePath, mdViewMode)
   const { saveCurrentScrollPosition } = scroll
   const isActivePreviewTab = activeFilePath === previewFilePath
+  const rootRef = useRef<HTMLDivElement>(null)
+  // The button just pressed may be gone after the switch: keep the focus (and so ⌘S, ⌘F) in this editor.
+  const keepFocusInEditor = () => requestAnimationFrame(() => {
+    if (!document.activeElement || document.activeElement === document.body) rootRef.current?.focus({ preventScroll: true })
+  })
   const [showDiff, setShowDiff] = useState(false)
 
   // The review reloads when a sidecar of the active file changes (the watcher in useOpenFiles).
@@ -83,8 +92,13 @@ export function TabbedEditorPanel({
     }
     saveCurrentScrollPosition()
     setMdViewModePersisted(mode)
+    keepFocusInEditor()
   }, [saveCurrentScrollPosition, review.otherInProgressReviews, setMdViewModePersisted])
-  useToggleViewShortcut(activeFilePath, mdViewMode, handleSetMdViewMode)
+  const activeIsMarkdown = !!activeFilePath && isMarkdownFile(activeFilePath)
+  useCommandHandler('editor.togglePreview', () => {
+    if (activeIsMarkdown) handleSetMdViewMode(mdViewMode === 'preview' ? 'editor' : 'preview')
+  }, { target: paneId, acceptsKey: () => activeIsMarkdown })
+  useCommandHandler('editor.save', () => saving.handleSave(), { target: paneId })
 
   const handleContentChange = useCallback((newContent: string) => {
     if (!activeFilePath) return
@@ -97,7 +111,10 @@ export function TabbedEditorPanel({
 
   const handleCloseTab = async (e: React.MouseEvent, path: string) => {
     e.stopPropagation()
-    if (await saving.saveBeforeClose(path)) onCloseFile(path)
+    if (await saving.saveBeforeClose(path)) {
+      onCloseFile(path)
+      keepFocusInEditor()
+    }
   }
 
   if (openFiles.length === 0) {
@@ -111,7 +128,8 @@ export function TabbedEditorPanel({
 
   const { confirmRequest } = saving
   return (
-    <div className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30">
+    // tabIndex: a click on the preview (nothing focusable) still puts the focus in this editor's area.
+    <div ref={rootRef} {...commandArea('editor', paneId)} tabIndex={-1} className="h-full flex flex-col bg-gray-50 dark:bg-zinc-900/30 outline-none">
       <EditorTabBar
         openFiles={openFiles}
         fileContents={fileContents}
@@ -186,6 +204,7 @@ export function TabbedEditorPanel({
           <PdfPreview filePath={activeFilePath} />
         ) : activeFile && activeFilePath && isMarkdownFile(activeFilePath) && mdViewMode === 'preview' ? (
           <MarkdownPreviewPane
+            paneId={paneId}
             filePath={activeFilePath}
             content={activeFile.content}
             review={review}

@@ -58,18 +58,3 @@ export function useMarkdownViewMode() {
   }, [])
   return { mdViewMode, setMdViewModePersisted }
 }
-
-/** ⌘⇧M: toggle the active Markdown file between source and preview. */
-export function useToggleViewShortcut(activeFilePath: string | null, mdViewMode: MdViewMode, setMode: (mode: MdViewMode) => void) {
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'm') {
-        if (!activeFilePath || !isMarkdownFile(activeFilePath)) return
-        e.preventDefault()
-        setMode(mdViewMode === 'preview' ? 'editor' : 'preview')
-      }
-    }
-    document.addEventListener('keydown', handler)
-    return () => document.removeEventListener('keydown', handler)
-  }, [activeFilePath, mdViewMode, setMode])
-}

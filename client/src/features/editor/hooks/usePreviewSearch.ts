@@ -1,16 +1,19 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCommandHandler } from '../../../shared/commands/commands'
 
 const MATCH_CLASS = 'bg-yellow-200 dark:bg-yellow-500/40 rounded-sm'
 const CURRENT_MATCH_CLASS = 'bg-orange-300 dark:bg-orange-500/60 rounded-sm ring-2 ring-orange-400'
 
 /**
- * Search inside a rendered Markdown preview (⌘F): marks every match in the
- * DOM under `bodyRef` (skipping review highlights) and scrolls to the current one.
+ * Search inside a rendered Markdown preview (`editor.find`, ⌘F in the focused
+ * editor): marks every match in the DOM under `bodyRef` (skipping review
+ * highlights) and scrolls to the current one.
  */
 export function usePreviewSearch(
   innerRef: React.MutableRefObject<HTMLDivElement | null>,
   bodyRef: React.MutableRefObject<HTMLDivElement | null>,
   content: string,
+  paneId: string,
 ) {
   const [searchOpen, setSearchOpen] = useState(false)
   const [searchText, setSearchText] = useState('')
@@ -18,21 +21,11 @@ export function usePreviewSearch(
   const [currentMatch, setCurrentMatch] = useState(0)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
-  // Open search with Cmd+F
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') {
-        // Only handle if this preview is visible (check if innerRef is in viewport)
-        if (!innerRef.current || !innerRef.current.offsetParent) return
-        e.preventDefault()
-        e.stopPropagation()
-        setSearchOpen(true)
-        requestAnimationFrame(() => searchInputRef.current?.focus())
-      }
-    }
-    document.addEventListener('keydown', handler, true)
-    return () => document.removeEventListener('keydown', handler, true)
-  }, [innerRef])
+  // A hidden preview lets the key through.
+  useCommandHandler('editor.find', () => {
+    setSearchOpen(true)
+    requestAnimationFrame(() => searchInputRef.current?.focus())
+  }, { target: paneId, acceptsKey: () => !!innerRef.current?.offsetParent })
 
   // Apply search highlights
   useEffect(() => {

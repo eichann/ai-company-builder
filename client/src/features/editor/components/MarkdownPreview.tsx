@@ -16,8 +16,10 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
   basePath: string
   initialScrollRatio?: number
   highlightRanges?: HighlightRange[]
+  /** The editor pane this preview is in: `editor.find` (⌘F) reaches this one only. */
+  paneId: string
 }>(
-  function MarkdownPreview({ content, basePath, initialScrollRatio, highlightRanges }, ref) {
+  function MarkdownPreview({ content, basePath, initialScrollRatio, highlightRanges, paneId }, ref) {
     const innerRef = useRef<HTMLDivElement | null>(null)
     const bodyRef = useRef<HTMLDivElement | null>(null)
     const components = useMemo(() => ({
@@ -34,7 +36,7 @@ export const MarkdownPreview = React.forwardRef<HTMLDivElement, {
       ),
     }), [basePath])
 
-    const search = usePreviewSearch(innerRef, bodyRef, content)
+    const search = usePreviewSearch(innerRef, bodyRef, content, paneId)
 
     // Restore scroll position by ratio after mount
     useEffect(() => {

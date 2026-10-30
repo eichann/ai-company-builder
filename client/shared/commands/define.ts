@@ -25,8 +25,8 @@ export const COMMAND_CLASSES: readonly CommandClass[] = ['view', 'local', 'outbo
  * A part of the screen that can hold the keyboard focus and receive its own
  * shortcuts. `app` is the whole window: every focus is inside it.
  */
-export type CommandArea = 'app' | 'chat'
-export const COMMAND_AREAS: readonly CommandArea[] = ['app', 'chat']
+export type CommandArea = 'app' | 'chat' | 'editor'
+export const COMMAND_AREAS: readonly CommandArea[] = ['app', 'chat', 'editor']
 
 export interface CommandKeybinding {
   /**

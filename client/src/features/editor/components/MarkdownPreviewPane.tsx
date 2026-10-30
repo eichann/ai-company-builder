@@ -11,6 +11,7 @@ import type { EditorReview } from '../hooks/useEditorReview'
 import { MarkdownPreview } from './MarkdownPreview'
 
 interface Props {
+  paneId: string
   filePath: string
   content: string
   review: EditorReview['review']
@@ -26,7 +27,7 @@ interface Props {
 
 /** A Markdown file shown rendered, with its review: banners, highlights, comments, history and the snapshot diff. */
 export function MarkdownPreviewPane({
-  filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit,
+  paneId, filePath, content, review, textSelection, showDiff, setShowDiff, previewRef, initialScrollRatio, onShowEditor, onEdit,
 }: Props) {
   const mdPreviewContainerRef = useRef<HTMLDivElement>(null)
   const diffViewRef = useRef<MarkdownDiffViewHandle | null>(null)
@@ -64,6 +65,7 @@ export function MarkdownPreviewPane({
           ) : (
           <MarkdownPreview
             ref={previewRef}
+            paneId={paneId}
             content={content}
             basePath={filePath.substring(0, filePath.lastIndexOf('/'))}
             initialScrollRatio={initialScrollRatio}
