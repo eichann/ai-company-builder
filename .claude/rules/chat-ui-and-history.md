@@ -129,7 +129,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `client/tests/chat-windows.test.ts` (registry, mutation-checked), `tests/ui/chat-panel.spec.ts`
   「a consultation in its own window」.
 - **Statuses cross windows.** The window publishes its tab's status as usual and reports it to
-  main (`chatWindow:reportStatus`, `useReportWindowStatus`); main broadcasts `chatWindow:changed`
+  main (`chatWindow:reportStatus`, `features/chat/hooks/useReportWindowStatus.ts`); main broadcasts `chatWindow:changed`
   to the main window, whose list groups the row by that status (あなたの番, AIが作業中, 新着 count as
   for a tab; `statusOfTab`). Test: `src/features/chat/chatWindows.test.ts`.
 - **Moving needs a quiet consultation.** Turns are driven by the page (its `/api/chat` request;

@@ -8,7 +8,8 @@ import { ChatAuthChecking, ChatSetupNeeded } from '../components/chat/ChatAuthGa
 import { useChatServer } from '../components/chat/hooks/useChatServer'
 import { useAgentAuth } from '../components/chat/hooks/useAgentAuth'
 import { useConsultationStatuses } from '../components/chat/consultationStatusStore'
-import { useChatWindowSelf, useReportWindowStatus } from '../features/chat/hooks/useChatWindowSelf'
+import { useChatWindowSelf } from '../features/chat/hooks/useChatWindowSelf'
+import { useReportWindowStatus } from '../features/chat/hooks/useReportWindowStatus'
 
 // A consultation's own window (「別ウィンドウで開く」, `?window=chat`): only
 // the chat of the one consultation main assigned to this window — header,

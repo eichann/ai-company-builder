@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
-import { IDLE_WINDOW_STATUS, type ChatWindowContext, type ChatWindowStatus } from '../../../../shared/chat-windows'
-import { getChatSession, getChatWindowContext, onChatHistoryChanged, reportChatWindowStatus } from '../api'
+import type { ChatWindowContext } from '../../../../shared/chat-windows'
+import { getChatSession, getChatWindowContext, onChatHistoryChanged } from '../api'
 
 export type ChatWindowSelfState =
   | { kind: 'loading' }
@@ -32,12 +32,4 @@ export function useChatWindowSelf(): ChatWindowSelfState {
     return onChatHistoryChanged(change => { if (change.deletedSessionId === sessionId) window.close() })
   }, [sessionId])
   return state
-}
-
-/** Tells the main window's list how this window's consultation stands (あなたの番, 作業中, …). */
-export function useReportWindowStatus(status: ChatWindowStatus | undefined): void {
-  const { state, kind, line } = status ?? IDLE_WINDOW_STATUS
-  useEffect(() => {
-    void reportChatWindowStatus({ state, ...(kind ? { kind } : {}), line }).catch(() => {})
-  }, [state, kind, line])
 }
