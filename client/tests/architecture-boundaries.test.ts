@@ -28,6 +28,11 @@
 //                             (src/features/<name>/api.ts, src/shared/ipc/);
 //                             the files that still call it directly are a
 //                             list that may only shrink.
+//   type names                an exported type's name is defined nowhere else in
+//                             client/src, client/shared or shared (listed
+//                             exceptions only)
+//   exhaustive-deps           disabled in client/src at most as often as today,
+//                             each time with a reason
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -294,4 +299,88 @@ test('the renderer checks catch violations (self-test)', () => {
   }
   assert.ok(isDataLayer('src/features/doc-review/api.ts') && isDataLayer('src/shared/ipc/client.ts'))
   assert.ok(!isDataLayer('src/features/doc-review/hooks/useApi.ts'))
+})
+
+/**
+ * Type names defined more than once on purpose (an exported definition plus
+ * another of the same name anywhere in client/src, client/shared or shared),
+ * as name: reason. Each must keep occurring.
+ */
+const TYPE_NAME_EXCEPTIONS: Record<string, string> = {
+}
+
+/** `interface X` / `type X =`, exported or not; re-exports (`export type { X } from …`) and import lists are not definitions. */
+const TYPE_DEFINITION = /^[ \t]*(export[ \t]+)?(?:declare[ \t]+)?(?:interface[ \t]+([A-Za-z_$][\w$]*)|type[ \t]+([A-Za-z_$][\w$]*)[ \t]*(?:<[^\n]*?>)?[ \t]*=)/gm
+
+/** Names defined in more than one file where at least one of the definitions is exported: name → files. */
+function duplicateTypeNames(files: Array<[file: string, source: string]>): Record<string, string[]> {
+  const byName = new Map<string, Map<string, boolean>>()
+  for (const [file, source] of files) {
+    for (const m of stripComments(source).matchAll(TYPE_DEFINITION)) {
+      const name = m[2] ?? m[3]
+      const where = byName.get(name) ?? new Map<string, boolean>()
+      where.set(file, (where.get(file) ?? false) || !!m[1])
+      byName.set(name, where)
+    }
+  }
+  return Object.fromEntries([...byName]
+    .filter(([, where]) => where.size > 1 && [...where.values()].some(Boolean))
+    .map(([name, where]) => [name, [...where.keys()].sort()]))
+}
+
+const REPO = join(CLIENT, '..')
+
+test('an exported type name is defined in one place only (client/src, client/shared, shared)', () => {
+  const files = [join(CLIENT, 'src'), join(CLIENT, 'shared'), join(REPO, 'shared')]
+    .flatMap(dir => sourceFiles(dir))
+    .map(f => [relative(REPO, f), readFileSync(f, 'utf8')] as [string, string])
+  assert.ok(files.length > 100)
+  const duplicates = duplicateTypeNames(files)
+  const unexpected = Object.entries(duplicates)
+    .filter(([name]) => !(name in TYPE_NAME_EXCEPTIONS))
+    .map(([name, where]) => `${name}: ${where.join(', ')}`)
+  assert.deepEqual(unexpected, [], 'import the one definition (contract types: shared/types, client/shared/ipc-contract.ts), or name the other after its role (renderer-structure.md "Where types go")')
+  const stale = Object.keys(TYPE_NAME_EXCEPTIONS).filter(name => !(name in duplicates))
+  assert.deepEqual(stale, [], 'remove exceptions that no longer occur')
+})
+
+/**
+ * Turning off react-hooks/exhaustive-deps hides a stale value from the linter,
+ * so the count may only go down (lower this when one goes), and each says why:
+ * `-- reason` on the directive, or a comment on the line above it.
+ */
+const MAX_EXHAUSTIVE_DEPS_DISABLES = 9
+
+const EXHAUSTIVE_DEPS_DISABLE = /eslint-disable(?:-next-line|-line)?\s+[^\n]*react-hooks\/exhaustive-deps/
+
+/** Disables of exhaustive-deps in one file: where, and whether a reason is given. */
+function exhaustiveDepsDisables(file: string, source: string): Array<{ where: string; reasoned: boolean }> {
+  const lines = source.split('\n')
+  return lines.flatMap((line, i) => {
+    if (!EXHAUSTIVE_DEPS_DISABLE.test(line)) return []
+    const reasoned = /exhaustive-deps\s+--\s*\S/.test(line) || /^\s*\/\/(?!\s*eslint-)\s*\S/.test(lines[i - 1] ?? '')
+    return [{ where: `${file}:${i + 1}`, reasoned }]
+  })
+}
+
+test('exhaustive-deps is turned off no more often than today, and each time with a reason', () => {
+  const disables = sourceFiles(join(CLIENT, 'src'), { tests: true })
+    .flatMap(f => exhaustiveDepsDisables(rel(f), readFileSync(f, 'utf8')))
+  assert.ok(disables.length <= MAX_EXHAUSTIVE_DEPS_DISABLES,
+    `${disables.length} disables (at most ${MAX_EXHAUSTIVE_DEPS_DISABLES}): list the dependency, or move the value into a ref or the effect`)
+  assert.deepEqual(disables.filter(d => !d.reasoned).map(d => d.where), [],
+    'say why after `--` on the directive, or in a comment on the line above')
+  assert.deepEqual(exhaustiveDepsDisables('x.ts', [
+    'a', '  // eslint-disable-next-line react-hooks/exhaustive-deps', '}, [a])',
+    '  // keeps the first value', '  // eslint-disable-next-line react-hooks/exhaustive-deps', '}, [])',
+    '  // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount', '}, [])',
+  ].join('\n')), [{ where: 'x.ts:2', reasoned: false }, { where: 'x.ts:5', reasoned: true }, { where: 'x.ts:7', reasoned: true }], 'self-test')
+})
+
+test('the duplicate type name check sees definitions, not re-exports or imports (self-test)', () => {
+  assert.deepEqual(duplicateTypeNames([
+    ['a.ts', 'export interface Company { id: string }\nexport type Pair<T> = [T, T]\ninterface Props { a: string }'],
+    ['b.ts', "type Company = { id: number }\nexport type { Pair } from './a'\nimport { type Pair as P } from './a'\ninterface Props { b: string }"],
+    ['c.ts', 'export type Pair<T extends string = string> = T[]\n// interface Company {}'],
+  ]), { Company: ['a.ts', 'b.ts'], Pair: ['a.ts', 'c.ts'] })
 })

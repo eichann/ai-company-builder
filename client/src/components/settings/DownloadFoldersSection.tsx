@@ -90,7 +90,7 @@ export function DownloadFoldersSection({ rootPath, companyId, departments }: Pro
     } finally {
       setInitialLoading(false)
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `draft` left out: editing the draft must not reload the tree, only applying does
   }, [loadLevel, applied])
 
   useEffect(() => { if (!sparse.isLoading) void loadRoot() }, [sparse.isLoading, loadRoot])

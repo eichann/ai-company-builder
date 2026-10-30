@@ -100,6 +100,30 @@ editor, review, search, history, backups).
    must hold belong in `.claude/rules/`.
 9. **Nest at most 3–4 levels** (`features/<name>/components/X.tsx` is the deepest normal case).
 
+## Where types go
+
+Agents find a type by its name, so one name means one definition: two types called `Company`
+with different fields send a fix to the wrong one. Three places:
+
+1. **Contract types** (the server API, IPC): defined only in `shared/types/` and
+   `client/shared/ipc-contract.ts`. The renderer imports them and never copies them; a re-export
+   (`export type { X } from …`) is fine.
+2. **One feature's types**: in that feature's `model.ts` (a `types.ts` when it grows), e.g.
+   `Skill` / `SkillTool` in `features/skills/model.ts`, `FileEntry` in `features/files/fileTreeModel.ts`.
+3. **Screen types several features share**: `client/src/types/` (`DepartmentConfig`,
+   `CompanyView`). Build them from the contract type when they are one (`CompanyView extends
+   Pick<Company, …>`); when they really are something else, give a name that says the role
+   (`CompanyView`, `DepartmentFolder`), never the contract type's name (owner decision D10).
+
+`client/tests/architecture-boundaries.test.ts` fails when an exported type's name is defined
+(`interface X`, `type X =`) in another file of `client/src`, `client/shared` or `shared`; a file's
+private `Props` / `Options` do not count unless the name is also exported somewhere. Deliberate
+duplicates go into `TYPE_NAME_EXCEPTIONS` there with a reason (none today).
+
+The same test caps `// eslint-disable… react-hooks/exhaustive-deps` in `client/src` at today's
+count (`MAX_EXHAUSTIVE_DEPS_DISABLES`; lower it when one goes, never raise it) and requires a
+reason with each: `-- reason` on the directive, or a comment on the line above.
+
 ## How to move code
 
 - **Move-only PRs are separate from PRs that change behaviour.** A move-only PR is `git mv` plus
