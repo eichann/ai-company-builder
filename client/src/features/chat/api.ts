@@ -180,6 +180,12 @@ export function openInBrowser(url: string, outbound: ChatOutbound = window.elect
 export type ChatWindowViews = ElectronPort<'openChatWindow' | 'focusChatWindow' | 'listChatWindows' | 'closeChatWindows' | 'onChatWindowsChanged'>
 /** A consultation's own window: which consultation it shows, and its status for the main window's list. */
 export type ChatWindowSelf = ElectronPort<'getChatWindowContext' | 'reportChatWindowStatus'>
+/**
+ * File links across windows: a consultation's window asks main to open a file
+ * in the main window's editor (main checks it and brings the main window to
+ * the front); the main window hears the checked path. Nothing leaves the computer.
+ */
+export type ChatWindowFiles = ElectronPort<'openFileInMainWindow' | 'onFileRequestedFromChatWindow'>
 
 export function openChatWindow(sessionId: string, request: Args<'openChatWindow'>[1], views: ChatWindowViews = window.electronAPI) {
   return views.openChatWindow(sessionId, request)
@@ -209,4 +215,14 @@ export function getChatWindowContext(self: ChatWindowSelf = window.electronAPI) 
 
 export function reportChatWindowStatus(status: Args<'reportChatWindowStatus'>[0], self: ChatWindowSelf = window.electronAPI) {
   return self.reportChatWindowStatus(status)
+}
+
+/** In a consultation's own window: open a file of its company folder in the main window's editor. */
+export function openFileInMainWindow(filePath: string, files: ChatWindowFiles = window.electronAPI) {
+  return files.openFileInMainWindow(filePath)
+}
+
+/** In the main window: a consultation's window asked to open a file (checked by main); returns the unsubscribe. */
+export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFromChatWindow'>[0], files: ChatWindowFiles = window.electronAPI) {
+  return files.onFileRequestedFromChatWindow(callback)
 }

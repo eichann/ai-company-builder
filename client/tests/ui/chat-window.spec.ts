@@ -32,3 +32,19 @@ test('a window main gave no consultation says so instead of showing an empty cha
   await openPreview(page, 'chat-window', { context: 'none' })
   await expect(page.getByRole('alert')).toHaveText('この画面に表示する相談がありません。ウィンドウを閉じてください。')
 })
+
+test('a review request\'s file links open in the main window\'s editor; a file main refuses says why', async ({ page }) => {
+  const state = await openPreview(page, 'chat-window', { review: '1' })
+  const card = page.getByRole('group', { name: '確認をお願いします' })
+  await expect(card).toContainText('見積書のたたき台', { timeout: 15_000 })
+  const opened = () => page.evaluate(() => (window as unknown as { __acbWindow: { openedInMain: string[] } }).__acbWindow.openedInMain)
+  // A link, as in the main window (this window's file.open hands it to main).
+  await card.getByRole('button', { name: '営業部/見積/たたき台.md' }).click()
+  await expect.poll(opened).toEqual(['/tmp/acb-preview/営業部/見積/たたき台.md'])
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  await card.getByRole('button', { name: '営業部/見積/古い版.md' }).click()
+  await expect(page.getByRole('alert')).toContainText('このファイルが見つからないため、開けませんでした。')
+  await page.getByRole('alert').getByRole('button', { name: '閉じる' }).click()
+  await expect(page.getByRole('alert')).toHaveCount(0)
+  expectNoPageErrors(state)
+})

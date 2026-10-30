@@ -22,7 +22,7 @@
 
 import type { HandoffCompletion, HandoffView } from './handoff'
 import type { AgentInteractionRequest, AgentInteractionResponse } from './agent-interaction'
-import type { ChatWindowContext, ChatWindowInfo, ChatWindowOpenRequest, ChatWindowOpenResult, ChatWindowStatus, ChatWindowsChange } from './chat-windows'
+import type { ChatWindowContext, ChatWindowFileRequest, ChatWindowInfo, ChatWindowOpenFileResult, ChatWindowOpenRequest, ChatWindowOpenResult, ChatWindowStatus, ChatWindowsChange } from './chat-windows'
 import type { AuthMode, CodexStatus } from './agent'
 import type { VoiceCapabilities, VoiceDeviceList, VoiceEvent, VoiceInputAPI } from './voice-input'
 import type { VoicePromptSettings } from './voice-prompt'
@@ -494,13 +494,15 @@ export interface IpcInvokeChannels {
   'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
   'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
   // 「別ウィンドウで開く」 (shared/chat-windows.ts): open / focus / list / closeAll from the main
-  // window only; getContext / reportStatus from a consultation's own window only.
+  // window only; getContext / reportStatus / openFile from a consultation's own window only.
   'chatWindow:open': { args: [sessionId: string, request: ChatWindowOpenRequest]; result: ChatWindowOpenResult }
   'chatWindow:focus': { args: [sessionId: string]; result: boolean }
   'chatWindow:list': { args: []; result: ChatWindowInfo[] }
   'chatWindow:closeAll': { args: []; result: void }
   'chatWindow:getContext': { args: []; result: ChatWindowContext | null }
   'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
+  // A file link in a consultation's window: opened in the main window's editor (a file in its company folder only).
+  'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
 }
 
 /** renderer → main, fire and forget: ipcRenderer.send(channel, ...args). */
@@ -530,6 +532,8 @@ export interface IpcEventChannels {
   'chatHistory:changed': [data: ChatHistoryChange]
   'chat-server:info': [info: ChatServerInfo]
   'chatWindow:changed': [change: ChatWindowsChange]
+  // To the main window only: a consultation's window asked to open this file (checked by main).
+  'chatWindow:fileRequested': [request: ChatWindowFileRequest]
 }
 
 export type InvokeChannel = keyof IpcInvokeChannels
@@ -714,4 +718,6 @@ export interface ElectronAPI {
   onChatWindowsChanged: Subscribe<'chatWindow:changed'>
   getChatWindowContext: Invoke<'chatWindow:getContext'>
   reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
+  openFileInMainWindow: Invoke<'chatWindow:openFile'>
+  onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
 }

@@ -258,6 +258,8 @@ const api: ElectronAPI = {
   onChatWindowsChanged: callback => subscribe('chatWindow:changed', callback),
   getChatWindowContext: () => invoke('chatWindow:getContext'),
   reportChatWindowStatus: (status: ChatWindowStatus) => invoke('chatWindow:reportStatus', status),
+  openFileInMainWindow: (filePath: string) => invoke('chatWindow:openFile', filePath),
+  onFileRequestedFromChatWindow: callback => subscribe('chatWindow:fileRequested', callback),
 }
 
 // The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).

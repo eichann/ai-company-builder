@@ -143,11 +143,20 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   main window closing close every window without asking; quitting closes all.
 - The window (`src/app/ChatWindowApp.tsx`, `?window=chat` in `src/main.tsx`) shows only that
   consultation's chat (`ChatPanelChat` with `standalone`: no new-chat or list buttons): header,
-  messages, composer, voice input, cards, review requests (their file links hide: no `file.open`
-  handler there). Company, department and slash commands come from main (`chatWindow:getContext`,
+  messages, composer, voice input, cards, review requests. Company, department and slash commands come from main (`chatWindow:getContext`,
   what the main window had when it opened); the title follows the consultation; a deleted
   conversation closes the window. Preview `client/tests/chat-window-ui.html`, spec
   `tests/ui/chat-window.spec.ts`.
+- **File links open in the main window** (owner decision 3 of 「別ウィンドウで開く」). The window
+  has no editor, so its own `file.open` handler (`features/chat/hooks/useOpenFileInMainWindow.ts`)
+  asks main (`chatWindow:openFile`, a file-open-only channel, no generic command relay); main
+  accepts it only from a registered consultation window and only for a file of that window's
+  company folder (allowed roots by real location, no `..`, not in a folder left out on this
+  computer, present on disk: a private folder the member cannot read is not, and no refusal names
+  the path), brings the main window to the front and sends it `chatWindow:fileRequested`, which
+  the main window runs as `file.open` (`useFilesFromChatWindows`, in `AppShell.tsx`). A refusal
+  shows in the window for a few seconds. Tests: `tests/chat-windows.test.ts`,
+  `tests/ipc-chat-windows.test.ts`, `tests/ui/chat-window.spec.ts`, `tests/ui/skill-layout.spec.ts`.
 
 ## Talking to the chat server
 

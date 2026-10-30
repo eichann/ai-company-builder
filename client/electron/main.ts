@@ -27,6 +27,7 @@ import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
 import { createBroadcastPort, createChatWindowHost, createMessageBoxHost, createWindowPort, desktopShell, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
 import { registerChatWindowsIpc } from './features/chat-windows/ipc'
+import { notDownloadedFolderFor } from './sync/not-downloaded'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
 import { registerChatHistoryIpc } from './features/chat-history/ipc'
@@ -206,6 +207,17 @@ const chatWindows = registerChatWindowsIpc(ipc, {
   paths: allowedRoots,
   isMainWindow: senderId => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === senderId,
   mainWindow: createWindowPort(() => mainWindow),
+  focusMainWindow: () => {
+    if (!mainWindow || mainWindow.isDestroyed()) return false
+    if (mainWindow.isMinimized()) mainWindow.restore()
+    mainWindow.show()
+    mainWindow.focus()
+    return true
+  },
+  files: {
+    notDownloadedFolder: notDownloadedFolderFor,
+    isFile: filePath => { try { return fs.statSync(filePath).isFile() } catch { return false } },
+  },
 })
 // Their status shows only in the main window's list, so they close with it.
 closeChatWindowsWithMain = () => chatWindows.closeAll()

@@ -35,6 +35,7 @@ import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
 import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -177,6 +178,8 @@ export function AppShell() {
     handlePinFile(filePath)
   }, [handleOpenFile, handlePinFile, setLeftTab])
   useCommandHandler('file.open', ({ path }) => handleFileSearchSelect(path))
+  // A file link in a consultation's own window opens here (that window has no editor).
+  useFilesFromChatWindows()
 
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [

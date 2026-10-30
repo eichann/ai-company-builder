@@ -10,6 +10,7 @@ import { useAgentAuth } from '../components/chat/hooks/useAgentAuth'
 import { useConsultationStatuses } from '../components/chat/consultationStatusStore'
 import { useChatWindowSelf } from '../features/chat/hooks/useChatWindowSelf'
 import { useReportWindowStatus } from '../features/chat/hooks/useReportWindowStatus'
+import { useOpenFileInMainWindow } from '../features/chat/hooks/useOpenFileInMainWindow'
 
 // A consultation's own window (「別ウィンドウで開く」, `?window=chat`): only
 // the chat of the one consultation main assigned to this window — header,
@@ -49,6 +50,8 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
   useEffect(() => { if (context.title) document.title = context.title }, [context.title])
 
   useReportWindowStatus(useConsultationStatuses().get(TAB_ID))
+  // File links (a review request's files) open in the main window's editor.
+  const fileNotice = useOpenFileInMainWindow()
 
   if (!companyReady || auth.isChecking || !chatServer) return <ChatAuthChecking />
   const settingsOverlay = showSettings && (
@@ -80,6 +83,12 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
           : <ChatSetupNeeded claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError} onOpenSettings={openSettings} />}
       </div>
       {settingsOverlay}
+      {fileNotice.notice && (
+        <div role="alert" className="absolute inset-x-3 bottom-3 z-20 flex items-start gap-2 rounded-lg border border-amber-500/40 bg-amber-50 px-3 py-2 text-xs text-amber-900 shadow dark:bg-zinc-800 dark:text-amber-200">
+          <span className="flex-1">{fileNotice.notice}</span>
+          <button type="button" onClick={fileNotice.dismiss} className="shrink-0 rounded px-1 hover:bg-amber-500/10">閉じる</button>
+        </div>
+      )}
     </div>
   )
 }
