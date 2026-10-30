@@ -114,6 +114,11 @@ const api: ElectronAPI = {
     invoke('privateFolders:createContext', companyId, parentPath),
   createPrivateFolder: (companyId: string, input: CreatePrivateFolderRequest) =>
     invoke('privateFolders:create', companyId, input),
+  // The member's own API keys (「自分の鍵」): last 4 only ever comes back.
+  listOwnBrokerKeys: (companyId: string) => invoke('brokerKeys:list', companyId),
+  saveOwnBrokerKey: (companyId: string, service: string, secret: string, displayName?: string) =>
+    invoke('brokerKeys:save', companyId, service, secret, displayName),
+  deleteOwnBrokerKey: (companyId: string, service: string) => invoke('brokerKeys:delete', companyId, service),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

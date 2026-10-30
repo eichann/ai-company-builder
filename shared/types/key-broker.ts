@@ -177,3 +177,55 @@ export interface BrokerKeyUpdate {
   allowPrivateContent?: boolean
   status?: BrokerKeyStatus
 }
+
+// ---------------------------------------------------------------------------
+// A member's own keys (K8): …/me/broker-keys (any member, the app's 「自分の鍵」)
+// ---------------------------------------------------------------------------
+
+/** Why a member cannot register an own key for a service. */
+export type OwnKeyBlocked =
+  /** The company switched members' own keys off. */
+  | 'member-keys-off'
+  /** The service uses company keys only (「会社の鍵だけ」). */
+  | 'company-only'
+  /** The admin has not allowed any destination for own keys of this service. */
+  | 'no-destinations'
+
+/** A member's own key as the app shows it (never its value). */
+export interface OwnBrokerKey {
+  id: string
+  displayName: string
+  last4: string
+  /** Where it may be sent (the service's own-key hosts when it was registered). */
+  hosts: string[]
+  /** 'disabled' when an admin stopped it. */
+  status: BrokerKeyStatus
+  secretUpdatedAt: string
+}
+
+export interface MyBrokerService {
+  service: string
+  label: string
+  category: BrokerServiceCategory
+  rule: BrokerKeyRule
+  /** Whether the member may register an own key now, or why not. */
+  ownKey: { allowed: true; hosts: string[] } | { allowed: false; reason: OwnKeyBlocked }
+  /** Active company keys this member may use (dial ②), and for which departments' work (dial ①). */
+  companyKeys: Array<{ displayName: string; allDepartments: boolean; departments: string[] }>
+  /** The member's own key for this service, if any. */
+  key: OwnBrokerKey | null
+}
+
+/** GET …/me/broker-keys, and the answer of PUT / DELETE …/me/broker-keys/:service. */
+export interface MyBrokerKeys {
+  /** false: the server has no key-encryption key (nothing can be registered or used). */
+  enabled: boolean
+  memberKeysAllowed: boolean
+  services: MyBrokerService[]
+}
+
+/** PUT …/me/broker-keys/:service — register or replace one's own key (the value is write-only). */
+export interface OwnBrokerKeySave {
+  secret: string
+  displayName?: string
+}

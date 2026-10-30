@@ -167,6 +167,37 @@ test('auth:signIn / auth:signUp never hand the session token (or anything of the
   assert.ok((h.server.to('/api/auth/sign-out').at(-1)!.headers.get('Cookie') ?? '').includes(FAKE_TOKEN))
 })
 
+test('brokerKeys:save sends one\'s own API key to the server once and never hands it back to the renderer', async () => {
+  const OWN = 'fake-own-key-NOT-REAL-7Hq2Lm9Pz'
+  const view = { enabled: true, memberKeysAllowed: true, services: [{ service: 'openai', label: 'OpenAI', key: { last4: OWN.slice(-4) } }] }
+  h.server.on('PUT', '/api/companies/co-1/me/broker-keys/openai', { json: { success: true, data: view } })
+  const saved = await h.invoke('brokerKeys:save', 'co-1', 'openai', ` ${OWN} `)
+  assert.deepEqual(saved, { success: true, data: view })
+  const sent = h.server.to('/api/companies/co-1/me/broker-keys/openai').at(-1)!
+  assert.equal(JSON.parse(sent.body!).secret, OWN)
+
+  // A refusal is told from status codes alone — even a server that quotes the request gets no echo.
+  h.server.on('PUT', '/api/companies/co-1/me/broker-keys/gemini', { status: 403, json: { error: `refused ${OWN}`, code: 'OWN_KEY_NOT_ALLOWED', reason: 'company-only' } })
+  h.server.on('PUT', '/api/companies/co-1/me/broker-keys/anthropic', { status: 400, json: { error: `bad key ${OWN}` } })
+  const refused = [
+    await h.invoke<{ success: boolean; error: string }>('brokerKeys:save', 'co-1', 'gemini', OWN),
+    await h.invoke<{ success: boolean; error: string }>('brokerKeys:save', 'co-1', 'anthropic', OWN),
+  ]
+  assert.match(refused[0].error, /会社の鍵だけを使う設定です/)
+  h.server.offline = true
+  refused.push(await h.invoke('brokerKeys:save', 'co-1', 'openai', OWN))
+  h.server.offline = false
+  for (const answer of refused) {
+    assert.equal(answer.success, false)
+    assert.ok(!JSON.stringify(answer).includes(OWN.slice(8)), 'the key reached the renderer')
+  }
+  assert.ok(!h.logs.join('\n').includes(OWN.slice(8)), 'the key was logged')
+  // A service name that is not one never reaches the server.
+  const before = h.server.requests.length
+  assert.equal((await h.invoke<{ success: boolean }>('brokerKeys:save', 'co-1', '../x', OWN)).success, false)
+  assert.equal(h.server.requests.length, before)
+})
+
 test('chat history: saves answer with a receipt and broadcast to the window; the unload flush is synchronous', async () => {
   const window = h.renderer()
   window.clearSent()

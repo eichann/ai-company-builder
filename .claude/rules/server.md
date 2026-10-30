@@ -87,7 +87,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
                               PUT /broker/services/:service, PUT /broker/settings,
-                              POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId
+                              POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,
+                              GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts

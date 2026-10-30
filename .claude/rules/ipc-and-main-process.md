@@ -33,7 +33,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   editor:backupBeforeOverwrite; company watchers in `fs/watchers.ts`), `git-history`
   (git:preview, diffs, revert, summary, log, showCommit, listFiles, grep, getBinaryStatus),
   `sync` (git:sync, git:autoSync, writeAccess:get), `private-folders` (privateFolders:*; `guards.ts`),
-  `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `download-choices`
+  `company-setup` (git:inspectCompanyFolder, git:setupCompanyRemote), `broker` (brokerKeys:*,
+  the member's own API keys: `key-broker.md`), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`).
