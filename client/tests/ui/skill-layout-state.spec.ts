@@ -83,6 +83,19 @@ test.describe('open files and the left tab', () => {
   })
 })
 
+test('a left tab remembered for a panel not registered yet (an extension still loading) is kept until the member picks another tab', async ({ page }) => {
+  await openPreview(page, 'skill-layout', { seed: JSON.stringify({ 'editor:demo': editorState([GUIDE], GUIDE, 'tasks') }) })
+  await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
+  const savedTab = () => page.evaluate(() => JSON.parse(localStorage.getItem('editor:demo') ?? '{}').leftTab as string)
+  // Opening the company and the background check of open files rewrite the entry; the id stays.
+  await expect.poll(savedTab).toBe('tasks')
+  await restart(page)
+  await expect(page.getByRole('heading', { name: 'weekly-report' })).toBeVisible()
+  expect(await savedTab()).toBe('tasks')
+  await leftTab(page, '履歴').click()
+  await expect.poll(savedTab).toBe('history')
+})
+
 test.describe('the chosen department', () => {
   test('is selected again at the next start', async ({ page }) => {
     await openPreview(page, 'skill-layout')

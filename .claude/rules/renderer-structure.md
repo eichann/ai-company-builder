@@ -126,11 +126,14 @@ editor, review, search, history, backups).
 These are the owner's decisions for the skeleton work (splitting `src/app/AppShell.tsx`, formerly `SkillCentricLayout.tsx`;
 D7–D9, confirmed 2026-10-30).
 
-- **Panel registry.** The left panel's tabs (today `type LeftPanelTab = 'skills' | 'files' |
-  'search' | 'history'` and `VALID_LEFT_TABS` in `src/app/AppShell.tsx`) become a list of
-  registered panels, the four current ones included, so a later extension adds a tab without
-  special cases. A remembered tab id that is not registered falls back to the default tab. Same
-  idea as the agent registry (`client/shared/agents/registry.ts`).
+- **Panel registry (built, Phase 4-6).** The left panel's tabs are a list of registered panels,
+  today's four (スキル / ファイル / 検索 / 履歴) included: `src/features/workspace/leftPanels.ts`
+  (`LeftPanel`: id, title, icon, optional badge count and visibility, mount policy, `onOpen`,
+  `render`; `resolveLeftPanel`) drawn by `components/LeftPanelTabs.tsx`; `src/app/AppShell.tsx`
+  registers the four. A remembered id with no shown panel opens the first one, and the saved id is
+  kept (an extension's tab may register later; `skill-layout-state.spec.ts`). An extension's
+  entry will carry the text its manifest declares and render the app's isolated frame, never its
+  own React. Same idea as the agent registry (`client/shared/agents/registry.ts`).
 - **Split-tree layout (built, Phase 4-3).** Pane sizes are a tree of row / column splits, the
   chat pane one leaf: `src/features/workspace/layoutTree.ts` (tree, limits, saved shape),
   `hooks/useSplitLayout.ts` (per company in localStorage `layout:<company id>` =
@@ -147,4 +150,5 @@ D7–D9, confirmed 2026-10-30).
   the operations they are allowed, never `window.electronAPI`. Keep the data layer split into
   read / write / send-outside operations so permissions can be decided in one place.
 
-Do not add a fifth hard-coded left tab or another fixed width meanwhile: ask first.
+Add a left tab by registering a panel, and a pane by changing the layout tree; ask first before
+adding either for an extension (loading extensions is not built yet).
