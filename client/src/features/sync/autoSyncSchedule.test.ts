@@ -92,7 +92,6 @@ test('only failures the member must resolve stop automatic sync; network trouble
     assert.equal(needsMemberAfter({ success: false, errorType }), true, errorType)
   }
   assert.equal(needsMemberAfter({ success: false, secretDetected: true }), true)
-  assert.equal(needsMemberAfter({ success: false, error: '同期がキャンセルされました' }), true)
   for (const errorType of ['network', 'auth', 'locked', 'push_failed', 'unknown']) {
     assert.equal(needsMemberAfter({ success: false, errorType }), false, errorType)
   }
@@ -110,6 +109,24 @@ test('an automatic failure is shown once per kind until a sync succeeds; a manua
   assert.equal(afterSync(st, failure, { manual: true }).showFailure, true)
   st = afterSync(st, { success: true }, { manual: false }).state
   assert.equal(afterSync(st, failure, { manual: false }).showFailure, true, 'shown again after it was resolved')
+})
+
+test('the member cancelling a manual sync means "not now": automatic sync resumes at its next run (owner, 2026-10-30)', () => {
+  const open = at(30, 9)
+  const s = settings()
+  for (const error of ['同期がキャンセルされました', '同期を中止しました（「tool」は外部Gitリポジトリです）', '同期を中止しました。\n\n管理者だけが変更できます']) {
+    for (const errorType of [undefined, 'protected_config', 'write_denied']) {
+      const cancelled = { success: false, error, errorType }
+      let st = afterSync(state(), cancelled, { manual: true }).state
+      assert.equal(st.needsMember, false, `${errorType}: ${error}`)
+      st = afterSync(state({ needsMember: true }), cancelled, { manual: true }).state
+      assert.equal(st.needsMember, false, 'a cancel also lifts an earlier automatic stop')
+      st = recordRun(st, 'receive', 'ran', open)
+      assert.equal(runDueNow(s, st, open + 15 * MIN, open), 'receive', 'the next scheduled run happens')
+    }
+  }
+  const stopped = afterSync(state(), { success: false, errorType: 'needs_member', error: '自動で送る途中で…\n\n同期がキャンセルされました' }, { manual: false }).state
+  assert.equal(stopped.needsMember, true, 'an automatic send that stopped at a question still waits for the member')
 })
 
 test('a stop for the member lasts until a sync succeeds', () => {

@@ -101,16 +101,21 @@ const NEEDS_MEMBER_TYPES = new Set([
   'conflict', NEEDS_MEMBER_ERROR, 'protected_config', 'write_denied', 'personal_path', 'local_only_path', 'reserved_path',
 ])
 
+/** The member pressed キャンセル in a manual sync's question: "not now", not a stop. */
+function isMemberCancel(result: SyncOutcomeView): boolean {
+  return !result.success && /^同期を中止しました|^同期がキャンセルされました/.test(result.error ?? '')
+}
+
 /**
  * Whether a failed sync stopped at something only the member can resolve
- * (a question, a rejected file, a secret). Network, sign-in and lock
- * failures are not: the next automatic run simply tries again.
+ * (a question an automatic send would not answer, a rejected file, a
+ * secret). Network, sign-in and lock failures are not: the next automatic
+ * run simply tries again.
  */
 export function needsMemberAfter(result: SyncOutcomeView): boolean {
   if (result.success) return false
   if (result.secretDetected) return true
-  if (result.errorType && NEEDS_MEMBER_TYPES.has(result.errorType)) return true
-  return /^同期を中止しました|^同期がキャンセルされました/.test(result.error ?? '')
+  return !!result.errorType && NEEDS_MEMBER_TYPES.has(result.errorType)
 }
 
 function failureKind(result: SyncOutcomeView): string {
@@ -121,10 +126,14 @@ function failureKind(result: SyncOutcomeView): string {
  * The state after a sync (manual or automatic) and whether its failure
  * notice is shown. A success clears everything; a failure is shown once per
  * kind until a sync succeeds (an automatic run never repeats a notice the
- * member already saw, a manual press always shows its own result).
+ * member already saw, a manual press always shows its own result). A manual
+ * sync the member cancelled lifts an automatic stop: automatic sync resumes
+ * at its next scheduled run (a send still facing the question stops again,
+ * without repeating its notice).
  */
 export function afterSync(state: AutoSyncState, result: SyncOutcomeView, options: { manual: boolean }): { state: AutoSyncState; showFailure: boolean } {
   if (result.success) return { state: { ...state, needsMember: false, notified: [] }, showFailure: false }
+  if (options.manual && isMemberCancel(result)) return { state: { ...state, needsMember: false }, showFailure: true }
   const kind = failureKind(result)
   const seen = state.notified.includes(kind)
   return {

@@ -218,9 +218,12 @@ both only while the app is open:
   never catches up on slots before it was turned on (`enabledAt`); a skipped run retries after
   2 min; a send (and a manual sync) also counts as a receive / restarts 「送る」's clock.
 - Per company on this PC (`acb.autoSync.state:<companyId>`, `autoSyncState.ts`): last runs,
-  `needsMember` (set by any sync — manual or automatic — that stopped at a question, a rejected
-  file, a secret, a conflict stop or a cancel; cleared by the next successful sync; automatic
-  runs wait meanwhile) and the failure kinds already shown. A failed automatic send shows the
+  `needsMember` (set by any sync — manual or automatic — that stopped at a question an automatic
+  send will not answer, a rejected file, a secret or a conflict stop; cleared by the next
+  successful sync; automatic runs wait meanwhile). The member's own キャンセル in a manual sync
+  is "not now" (owner, 2026-10-30): it sets no stop and lifts one, so automatic sync resumes at
+  its next scheduled run (a send still facing the question stops there again, its notice not
+  repeated) and the failure kinds already shown. A failed automatic send shows the
   manual sync's notice once per kind until a sync succeeds; a successful one is silent unless sync
   set something aside (the same warning a manual sync shows). The sync button's tooltip shows
   「最後の自動同期: M/D HH:MM」 or that automatic sync waits for the button.
