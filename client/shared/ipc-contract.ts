@@ -45,9 +45,9 @@ export interface AuthUser {
   emailVerified: boolean
 }
 
+/** Sign-in / sign-up: whether it worked. The server's answer (it holds the session token) stays in main. */
 export interface AuthResult {
   success: boolean
-  data?: unknown
   error?: string
 }
 

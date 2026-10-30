@@ -106,7 +106,7 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
   assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null }) // no cookie: no request
   assert.equal(h.server.to('/api/me').length, 0)
   assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'wrong'), { success: false, error: 'Invalid email or password' })
-  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'right'), { success: true, data: { user } })
+  assert.deepEqual(await h.invoke('auth:signIn', 'me@example.com', 'right'), { success: true })
   const signIn = h.server.to('/api/auth/sign-in/email').at(-1)!
   assert.equal(signIn.headers.get('Origin'), 'app://')
   assert.ok(signIn.headers.get('X-ACB-Client-Version'), 'server requests carry the client identity')
@@ -141,6 +141,30 @@ test('session: sign-in keeps the cookie for every proxied call; sign-out drops i
   h.server.offline = false
   assert.deepEqual(await h.invoke('auth:getSession'), { success: false, user: null })
   assert.equal(h.server.to('/api/me').length, asked)
+})
+
+test('auth:signIn / auth:signUp never hand the session token (or anything of the answer) to the renderer', async () => {
+  // better-auth's sign-in/sign-up body carries the session token next to the user.
+  const FAKE_TOKEN = 'fake-session-token-Q7m2Xv9LpR4t'
+  const body = { redirect: false, token: FAKE_TOKEN, user: { id: 'u1', email: 'me@example.com', name: 'Me' } }
+  const cookie = { 'Set-Cookie': `better-auth.session_token=${FAKE_TOKEN}.sig; Path=/; HttpOnly` }
+  h.server.on('POST', '/api/auth/sign-in/email', { json: body, headers: cookie })
+  h.server.on('POST', '/api/auth/sign-up/email', { json: body, headers: cookie })
+  h.server.on('POST', '/api/auth/sign-out', { json: { success: true } })
+
+  const answers = [
+    await h.invoke('auth:signIn', 'me@example.com', 'right'),
+    await h.invoke('auth:signUp', 'new@example.com', 'pw', 'New'),
+  ]
+  for (const answer of answers) {
+    const wire = JSON.stringify(answer)
+    // Neither the token nor any 5-character piece of it is in the answer.
+    for (let i = 0; i + 5 <= FAKE_TOKEN.length; i++) assert.ok(!wire.includes(FAKE_TOKEN.slice(i, i + 5)), 'the session token reached the renderer')
+    assert.deepEqual(answer, { success: true })
+  }
+  // Main still holds the session: the next server call carries the cookie.
+  await h.invoke('auth:signOut')
+  assert.ok((h.server.to('/api/auth/sign-out').at(-1)!.headers.get('Cookie') ?? '').includes(FAKE_TOKEN))
 })
 
 test('chat history: saves answer with a receipt and broadcast to the window; the unload flush is synchronous', async () => {

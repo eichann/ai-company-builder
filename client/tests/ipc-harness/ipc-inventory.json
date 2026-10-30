@@ -1203,7 +1203,7 @@
     },
     "types": {
       "ApiKeyStatus": "export interface ApiKeyStatus { set: boolean last4?: string encryptionAvailable: boolean storedInPlainText?: boolean unreadable?: boolean }",
-      "AuthResult": "export interface AuthResult { success: boolean data?: unknown error?: string }",
+      "AuthResult": "export interface AuthResult { success: boolean error?: string }",
       "AuthUser": "export interface AuthUser { id: string email: string name: string | null image: string | null emailVerified: boolean }",
       "BackupInfo": "export interface BackupInfo { id: string timestamp: string reason: string files: string[] path: string }",
       "BackupListResult": "export interface BackupListResult { success: boolean backups: BackupInfo[] error?: string }",

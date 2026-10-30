@@ -1,5 +1,7 @@
 // Signing in to the ACB server and the server calls the renderer makes
-// directly. The session (cookies) stays in the main process (services/session.ts).
+// directly. The session (cookies, and the token in the sign-in / sign-up
+// answer) stays in the main process (services/session.ts): sign-in and sign-up
+// answer the renderer only { success, error? }.
 //   auth:signUp, auth:signIn, auth:signOut, auth:getSession,
 //   api:getCompanies, api:createCompany, api:getDepartments
 
@@ -71,7 +73,9 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
       if (!response.ok) {
         return { success: false, error: extractResponseMessageFromJson(data) || 'Sign up failed' }
       }
-      return { success: true, data }
+      // Nothing of the answer crosses: better-auth's body carries the session
+      // token, and the renderer learns who is signed in from auth:getSession.
+      return { success: true }
     } catch (error) {
       console.error('Sign up error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
@@ -101,7 +105,9 @@ export function registerAuthIpc(ipc: IpcRegistrar, { session, serverUrl, onSigne
       if (!response.ok) {
         return { success: false, error: extractResponseMessageFromJson(data) || 'Sign in failed' }
       }
-      return { success: true, data }
+      // Nothing of the answer crosses: better-auth's body carries the session
+      // token (`token`), which stays in main with the cookies.
+      return { success: true }
     } catch (error) {
       console.error('Sign in error:', error)
       return { success: false, error: error instanceof Error ? error.message : 'Unknown error' }
