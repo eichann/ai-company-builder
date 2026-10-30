@@ -74,6 +74,10 @@ one place an added agent brings its own controls; everything else asks the regis
   hidden. Folding only hides rows: pagination counts all rows, and 「続きを読み込む」 hides while
   終わったもの is folded. Tests: `src/features/chat/conversationGroups.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
+- Group headings are sticky within their section (owner, 2026-10-30): while a group's rows scroll,
+  its heading stays at the top of the list until the next group's heading takes over. The sticky
+  wrapper has the sidebar's opaque background so rows never show through. Test: the
+  `history=many` preview in `tests/ui/chat-panel.spec.ts`.
 - Empty conversations are deleted in two cases, by one rule (`isEmptyConversation`: never sent,
   no draft, not renamed, not pinned): closing one (`closeConversation` in `ChatSidebar.tsx`), and
   leaving one for another conversation (owner, 2026-10-30: a blank new one left behind is in the
