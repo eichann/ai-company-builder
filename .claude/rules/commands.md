@@ -66,11 +66,20 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button calls the same function directly |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 検索 left tab, cursor in its box | the shortcut |
+| `editor.save` `{ pane? }` ⌘S (editor) | local (writes this computer; sync shares it) | each editor (`features/editor/components/TabbedEditorPanel.tsx`, target = its `paneId`, today `editor`): the active tab's explicit save (`useFileSaving.ts`) | the shortcut |
+| `editor.togglePreview` `{ pane? }` ⌘⇧M (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
+| `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
 
 A chat pane keeps the request until its active tab can act (history read): the tab then starts a
 new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`
 `inputRequest`). Only the active tab of the named pane receives it; the panel root is the `chat`
 focus area (`commandArea('chat', paneId)`). UI test: `tests/ui/chat-panel.spec.ts` 「chat commands」.
+
+An editor's root is the `editor` focus area (`commandArea('editor', paneId)`, `tabIndex={-1}` so a
+click on the preview, which has nothing focusable, still focuses it). When a button pressed in
+it disappears (preview ⇄ source, closing a tab) the focus returns to the root, or ⌘S / ⌘F would
+stop working until the member clicks the editor again. Its shortcuts do nothing while the focus
+is elsewhere (the file tree, the chat). UI test: `tests/ui/editor-panel.spec.ts`.
 
 ## Handlers and shortcuts
 
@@ -83,15 +92,14 @@ focus area (`commandArea('chat', paneId)`). UI test: `tests/ui/chat-panel.spec.t
   first and ending with `app`, and runs at most one command per key press. A chat-area shortcut
   therefore reaches the focused chat pane only, never every pane. Do not add new `window` /
   `document` keydown listeners for app shortcuts; dialog-local Escape handlers stay where they are.
-- Still window-wide listeners (not commands yet; each fires for the one editor / active chat
-  tab there is today, and must become an area shortcut before a second editor or chat pane):
-  the editor's ⌘S save (`features/editor/hooks/useFileSaving.ts`, `window`), ⌘⇧M preview / edit
-  (`useMarkdownView.ts`, `document`) and ⌘F search in a Markdown preview (`usePreviewSearch.ts`,
-  `document`, capture); voice input's start / stop key (member-configurable,
-  `VoiceInputControl.tsx`, capture, with its own Escape and dialog checks). Dialog-local Escape
+- Still a window-wide listener (not a command yet; it fires for the active chat tab, and must
+  become a chat-area shortcut before a second chat pane): voice input's start / stop key
+  (member-configurable, `VoiceInputControl.tsx`, `window` capture, stops the event, with its own
+  Escape and dialog checks). Its default ⌘⇧M (Ctrl+Shift+M) is also `editor.togglePreview`'s key:
+  while the chat's voice input is active it takes the key first, even in the editor. Dialog-local Escape
   handlers (`ConfirmDialog`, `InputDialog`, `ContextMenu`, `DiffViewer`, `FileSearchModal`,
   `SyncPreviewDialog`, `SettingsPanel`) stay where they are.
-- UI tests: `tests/ui/skill-layout.spec.ts` 「shortcuts」 (⌘P, ⌘⇧F) and
-  `skill-layout-state.spec.ts` (⌘⇧C).
+- UI tests: `tests/ui/skill-layout.spec.ts` 「shortcuts」 (⌘P, ⌘⇧F),
+  `skill-layout-state.spec.ts` (⌘⇧C) and `editor-panel.spec.ts` (⌘S, ⌘⇧M, ⌘F, focus only).
 - `runCommand` logs a failure (`[commands] <id> failed: <code>`) and resolves to undefined; it
   never logs arguments (paths, what a member typed).

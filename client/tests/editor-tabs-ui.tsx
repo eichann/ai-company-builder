@@ -14,6 +14,7 @@ import '../src/index.css'
 import { TabbedEditorPanel } from '../src/features/editor/components/TabbedEditorPanel'
 import { tabDepartmentLabels } from '../src/features/editor/editorTabs'
 import { useAppStore } from '../src/stores/appStore'
+import { useKeybindings } from '../src/shared/commands/commands'
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -67,6 +68,8 @@ function externalDelete(p: string) {
 Object.assign(window, { __acbExternalEdit: externalEdit, __acbExternalDelete: externalDelete, __acbFiles: files, __acbWrites: writes, __acbPinned: pinned })
 
 export function Preview() {
+  // As AppShell does: shortcuts reach the focused area only.
+  useKeybindings()
   const [dept, setDept] = useState(params.get('dept') ?? 'sales')
   const [openFiles, setOpenFiles] = useState(() => Object.keys(files))
   const [active, setActive] = useState(`${ROOT}/コンテンツG/台本.md`)

@@ -46,6 +46,27 @@ export const COMMANDS = defineCommands([
     id: 'search.show', title: '検索を開く', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+f', area: 'app' },
   },
+  {
+    // Writes the active tab to this computer; asks first when the file changed on disk. Shared only by sync.
+    id: 'editor.save', title: 'ファイルを保存する', class: 'local',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+s', area: 'editor' },
+  },
+  {
+    // A Markdown file: rendered preview ⇄ source. The choice is remembered for all files.
+    id: 'editor.togglePreview', title: 'プレビューと編集を切り替える', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+shift+m', area: 'editor' },
+  },
+  {
+    // The search box of a Markdown preview (the source editor has its own ⌘F).
+    id: 'editor.find', title: '文書の中を検索する', class: 'view',
+    args: z.object({ pane: z.string().optional().describe('The editor pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'editor' },
+    keybinding: { key: 'mod+f', area: 'editor' },
+  },
 ])
 
 export type AppCommands = typeof COMMANDS
