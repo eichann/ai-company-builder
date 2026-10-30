@@ -3,10 +3,14 @@
 // destination which is not an exact host cannot be saved, that the two dials
 // (which departments' work, which people) reach the request as chosen, that
 // a generic service (K9) is saved only with https to one exact host and a
-// safe header, its keys going only there, and what the page says when the
-// server has no key-encryption key.
+// safe header, its keys going only there, that one switch per built-in service
+// allows own keys without typing a host, that the page says how a saved key's
+// check went (and that a refused key was not saved) without ever showing it, a
+// generic service's check path is a plain path, and what the page says when
+// the server has no key-encryption key.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
 import ApiKeysPage from '@/app/companies/[id]/api-keys/page'
@@ -203,6 +207,73 @@ describe('API キー', () => {
     await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
     await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
     expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ service: 'crm', destinations: { hosts: ['api.crm.example.com'] } })
+  })
+
+  it('one switch lets members use own keys for a built-in service: only { allowed } is sent, no host typed', async () => {
+    const on = services.map((s) => (s.service === 'gemini' ? { ...s, rule: 'company-first' as const, ownKeyHosts: ['generativelanguage.googleapis.com'] } : s))
+    const calls = stubApi(ownerCapabilities, {
+      [`PUT ${base}/broker/services/gemini/own-keys`]: () => ({ body: ok({ ...view, services: on }) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    const row = await screen.findByRole('listitem', { name: 'Google Gemini' })
+    // The detailed form (hosts typed by hand) stays closed for a service whose destination is known.
+    expect(within(row).queryByRole('textbox', { name: 'Google Geminiの自分の鍵の送り先' })).not.toBeInTheDocument()
+    await userEvent.click(within(row).getByRole('checkbox', { name: /メンバーが自分の鍵を使ってよい/ }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PUT')).toBe(true))
+    const put = calls.find((c) => c.method === 'PUT')!
+    expect([put.url, put.body]).toEqual([`${base}/broker/services/gemini/own-keys`, { allowed: true }])
+    const after = await screen.findByRole('listitem', { name: 'Google Gemini' })
+    expect(within(after).getByRole('checkbox', { name: /メンバーが自分の鍵を使ってよい/ })).toBeChecked()
+    expect(within(after).getByText('generativelanguage.googleapis.com')).toBeInTheDocument()
+    expect(within(after).getByText('決め方: 会社の鍵が優先、なければ自分の鍵')).toBeInTheDocument()
+  })
+
+  it('says how the one check of a saved key went, and a refused key is reported as not saved', async () => {
+    const answers = [
+      { body: ok({ ...view, keys: [stored], check: { service: 'gemini', result: 'valid' } }) },
+      { status: 400, body: { error: 'The service refused this key (one read-only check request); it was not saved', code: 'KEY_REJECTED' } },
+    ]
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/broker`]: { body: ok({ ...view, keys: [stored] }) },
+      [`PUT ${base}/broker/keys/k1/secret`]: () => answers.shift()!,
+    })
+    const success = vi.spyOn(toast, 'success')
+    const error = vi.spyOn(toast, 'error')
+    renderInCompany(<ApiKeysPage />)
+    const replace = async () => {
+      await userEvent.click(await screen.findByRole('button', { name: 'キーを差し替える' }))
+      const dialog = await screen.findByRole('dialog')
+      await userEvent.type(within(dialog).getByLabelText('新しいキー'), FAKE)
+      await userEvent.click(within(dialog).getByRole('button', { name: '差し替える' }))
+    }
+    await replace()
+    await waitFor(() => expect(success).toHaveBeenCalledWith('キーを差し替えました', { description: '鍵が有効なことを確かめました' }))
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument())
+    await replace()
+    await waitFor(() => expect(error).toHaveBeenCalledWith('保存できませんでした', { description: 'この鍵は使えませんでした（発行元の画面で確かめてください）。保存していません。' }))
+    // The dialog stays open so the member can paste another key; nothing shows the value.
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(JSON.stringify([...success.mock.calls, ...error.mock.calls])).not.toContain(FAKE)
+    expect(document.body.textContent).not.toContain(FAKE)
+  })
+
+  it('a generic service\'s check path must be a plain path (no query, no ..)', async () => {
+    const calls = stubApi(ownerCapabilities)
+    renderInCompany(<ApiKeysPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'サービスを登録' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.type(within(dialog).getByLabelText('サービス名（英字）'), 'crm')
+    await userEvent.type(within(dialog).getByLabelText('表示名'), '顧客管理')
+    await userEvent.clear(within(dialog).getByLabelText('送り先（ベース URL）'))
+    await userEvent.type(within(dialog).getByLabelText('送り先（ベース URL）'), 'https://api.crm.example.com/v2')
+    const check = within(dialog).getByLabelText('鍵を確かめる住所（なくてもよい）')
+    for (const bad of ['/me?x=1', '/../admin', 'me']) {
+      await userEvent.clear(check)
+      await userEvent.type(check, bad)
+      expect(within(dialog).getByRole('alert'), bad).toHaveTextContent('鍵を確かめる住所')
+      expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
+    }
+    expect(calls.some((c) => c.method === 'PUT')).toBe(false)
   })
 
   it('without a key-encryption key on the server: says so and offers no registration', async () => {
