@@ -135,8 +135,12 @@ disable and delete still work). Audience departments must be the company's, peop
   owners/admins): company keys and members' own keys (last 4, destinations, 使える仕事 (dial ①)
   and 使える人 (dial ②), caps,
   「非公開の内容を送ってよい」, status, 「今使える人」), register / edit settings / replace /
-  stop・resume / delete, the members' own-key switch, per-service 種類・決め方・自分の鍵の送り先,
-  the history. The value is a password field sent once in the POST (or the replace PUT); editing
+  stop・resume / delete, the members' own-key switch, per service the one switch
+  「メンバーが自分の鍵を使ってよい」 (services with a known destination; `setOwnKeys`, the hosts
+  shown, the detailed 種類・決め方・自分の鍵の送り先 behind 「詳しい設定」, open at once only for a
+  service without a known destination), a generic service's optional 「鍵を確かめる住所」, a toast
+  saying how a saved key's check went (`CHECK_RESULT_TEXT`; a refused key: 「…保存していません」),
+  the history (with each create / replace's check). The value is a password field sent once in the POST (or the replace PUT); editing
   never sends it. Without a KEK the page explains why and offers no registration
   (`BROKER_OFF_TEXT`). Words and draft parsing: `admin/src/lib/key-broker.ts`.
 
@@ -453,5 +457,6 @@ no part of the key even when the server quotes it; nothing logged), `client/src/
 (the page never promises a key the server would not use), `admin/tests/key-broker.test.tsx` (menu for admins only, the value is
 sent once and never shown, editing never sends it, a non-exact host cannot be saved, the
 off message; a generic service is saved only with https to one exact host and a safe header,
-and its keys go only there). Tests use
+and its keys go only there; the one own-key switch sends only `{ allowed }`; a saved key's check is
+said and a refused key reported unsaved, never showing the value; a check path must be plain). Tests use
 obviously fake values (`fake-test-key-NOT-REAL…`) and KEKs made in temp dirs.

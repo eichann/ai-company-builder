@@ -29,6 +29,8 @@ import {
 import {
   BROKER_OFF_HELP,
   BROKER_OFF_TEXT,
+  CHECK_RESULT_TEXT,
+  OWN_KEYS_SWITCH_HELP,
   CATEGORY_HELP,
   CATEGORY_LABELS,
   RULE_LABELS,
@@ -41,6 +43,7 @@ import {
   describeUsage,
   hostsOf,
   invalidHosts,
+  ownKeysOn,
   type Names,
 } from '@/lib/key-broker'
 import { useCompany } from '@/lib/company-context'
@@ -87,7 +90,10 @@ export default function ApiKeysPage() {
     try {
       const next = await fn()
       view.setData(() => next)
-      toast.success(label)
+      // A key just saved was checked once (read-only request to the service): say how it went.
+      if (next.check?.result === 'valid') toast.success(label, { description: CHECK_RESULT_TEXT.valid })
+      else if (next.check) toast.warning(label, { description: CHECK_RESULT_TEXT[next.check.result] })
+      else toast.success(label)
       setDialog(null)
       return true
     } catch (err) {
@@ -209,7 +215,7 @@ export default function ApiKeysPage() {
                 />
                 <span>
                   メンバーが自分の鍵を登録してよい
-                  <span className="block text-xs text-muted-foreground">登録できるのは、下の「サービスごとの決め方」で送り先を許可したサービスだけです。</span>
+                  <span className="block text-xs text-muted-foreground">登録できるのは、下の「サービスごとの決め方」で「メンバーが自分の鍵を使ってよい」をオンにしたサービスだけです。</span>
                 </span>
               </label>
               {ownKeys.length === 0 ? (
@@ -232,7 +238,12 @@ export default function ApiKeysPage() {
             onSave={(s, definition) => run('サービスを保存しました', () => keyBrokerApi.saveRelayService(companyId, s, definition))}
             onRemove={(s) => run('サービスを削除しました', () => keyBrokerApi.removeRelayService(companyId, s))}
           />
-          <ServicesCard view={data} busy={busy} onSave={(s, setting) => run('サービスの設定を保存しました', () => keyBrokerApi.setService(companyId, s, setting))} />
+          <ServicesCard
+            view={data}
+            busy={busy}
+            onSave={(s, setting) => run('サービスの設定を保存しました', () => keyBrokerApi.setService(companyId, s, setting))}
+            onSwitch={(s, allowed) => run(allowed ? 'メンバーが自分の鍵を使えるようにしました' : '会社の鍵だけを使うようにしました', () => keyBrokerApi.setOwnKeys(companyId, s, allowed))}
+          />
           <InternalHostsCard
             hosts={data.settings.internalHosts}
             busy={busy}
@@ -438,7 +449,9 @@ function ReplaceForm({ k, busy, onSubmit, onCancel }: { k: BrokerKeySummary; bus
   )
 }
 
-function ServicesCard({ view, busy, onSave }: { view: BrokerView; busy: boolean; onSave: (service: string, s: { category: BrokerServiceCategory; rule: BrokerKeyRule; ownKeyHosts: string[] }) => void }) {
+type ServiceSave = (service: string, s: { category: BrokerServiceCategory; rule: BrokerKeyRule; ownKeyHosts: string[] }) => void
+
+function ServicesCard({ view, busy, onSave, onSwitch }: { view: BrokerView; busy: boolean; onSave: ServiceSave; onSwitch: (service: string, allowed: boolean) => void }) {
   return (
     <Card>
       <CardHeader className="pb-4">
@@ -447,19 +460,65 @@ function ServicesCard({ view, busy, onSave }: { view: BrokerView; busy: boolean;
           サービスごとの決め方
         </CardTitle>
         <CardDescription>
-          スキルや AI はキーではなくサービス名で頼みます。どのキーを使うかをサービスごとに決めます。「自分の鍵の送り先」に書いたホストにだけ、メンバーは自分の鍵を登録できます。
+          スキルや AI はキーではなくサービス名で頼みます。メンバーに自分の鍵を使わせてよいサービスは、スイッチをオンにするだけです（送り先は自動で決まります）。種類や決め方を細かく変えるときは「詳しい設定」を開きます。
         </CardDescription>
       </CardHeader>
       <ul className="divide-y border-t">
         {view.services.map((s) => (
-          <ServiceRow key={`${s.service}:${s.updatedAt}`} s={s} busy={busy} onSave={onSave} />
+          <ServiceRow key={`${s.service}:${s.updatedAt}`} s={s} busy={busy} memberKeysAllowed={view.settings.memberKeysAllowed} onSave={onSave} onSwitch={onSwitch} />
         ))}
       </ul>
     </Card>
   )
 }
 
-function ServiceRow({ s, busy, onSave }: { s: BrokerServiceView; busy: boolean; onSave: (service: string, v: { category: BrokerServiceCategory; rule: BrokerKeyRule; ownKeyHosts: string[] }) => void }) {
+function ServiceRow({ s, busy, memberKeysAllowed, onSave, onSwitch }: {
+  s: BrokerServiceView
+  busy: boolean
+  memberKeysAllowed: boolean
+  onSave: ServiceSave
+  onSwitch: (service: string, allowed: boolean) => void
+}) {
+  // The destination is known for built-in services and registered ones: one switch is enough.
+  const known = s.defaultHosts.length > 0
+  const on = ownKeysOn(s)
+  const [details, setDetails] = useState(!known)
+  const detailsId = `service-details-${s.service}`
+  return (
+    <li className="space-y-2 px-5 py-3" aria-label={s.label}>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+        <p className="text-sm font-medium">{s.label}</p>
+        <p className="text-xs text-muted-foreground">
+          会社の鍵 {s.companyKeys}・自分の鍵 {s.userKeys}
+        </p>
+        <p className="text-xs text-muted-foreground">決め方: {RULE_LABELS[s.rule]}</p>
+      </div>
+      {known ? (
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" className="mt-1" checked={on} disabled={busy} onChange={(e) => onSwitch(s.service, e.target.checked)} />
+          <span>
+            メンバーが自分の鍵を使ってよい
+            <span className="block text-xs text-muted-foreground">{OWN_KEYS_SWITCH_HELP}</span>
+            {on && <span className="block text-xs text-muted-foreground">送り先: <span className="font-mono">{s.ownKeyHosts.join('、')}</span></span>}
+            {on && !memberKeysAllowed && (
+              <span className="block text-xs text-warning">いまは上の「メンバーが自分の鍵を登録してよい」がオフのため、登録できません。</span>
+            )}
+          </span>
+        </label>
+      ) : (
+        <p className="text-xs text-muted-foreground">このサービスは送り先が決まっていないため、メンバーに自分の鍵を使わせるときは「自分の鍵の送り先」にホスト名を書きます。</p>
+      )}
+      {known && (
+        <Button variant="ghost" size="sm" aria-expanded={details} aria-controls={detailsId} onClick={() => setDetails((v) => !v)}>
+          詳しい設定
+        </Button>
+      )}
+      {details && <ServiceDetails id={detailsId} s={s} busy={busy} onSave={onSave} />}
+    </li>
+  )
+}
+
+function ServiceDetails({ id, s, busy, onSave }: { id: string; s: BrokerServiceView; busy: boolean; onSave: ServiceSave }) {
   const [category, setCategory] = useState(s.category)
   const [rule, setRule] = useState(s.rule)
   const [hosts, setHosts] = useState(s.ownKeyHosts.join(', '))
@@ -467,13 +526,7 @@ function ServiceRow({ s, busy, onSave }: { s: BrokerServiceView; busy: boolean; 
   const bad = invalidHosts(hostText)
   const dirty = category !== s.category || rule !== s.rule || hostsOf(hostText).join() !== s.ownKeyHosts.join()
   return (
-    <li className="grid gap-2 px-5 py-3 md:grid-cols-[10rem_1fr_1fr_1fr_auto] md:items-center">
-      <div>
-        <p className="text-sm font-medium">{s.label}</p>
-        <p className="text-xs text-muted-foreground">
-          会社の鍵 {s.companyKeys}・自分の鍵 {s.userKeys}
-        </p>
-      </div>
+    <div id={id} className="grid gap-2 md:grid-cols-[1fr_1fr_1fr_auto] md:items-center">
       <select aria-label={`${s.label}の種類`} title={CATEGORY_HELP[category]} className="h-9 rounded-md border bg-transparent px-2 text-sm" value={category} onChange={(e) => setCategory(e.target.value as BrokerServiceCategory)}>
         {(Object.keys(CATEGORY_LABELS) as BrokerServiceCategory[]).map((c) => (
           <option key={c} value={c}>
@@ -492,7 +545,7 @@ function ServiceRow({ s, busy, onSave }: { s: BrokerServiceView; busy: boolean; 
       <Button size="sm" disabled={busy || !dirty || bad.length > 0} onClick={() => onSave(s.service, { category, rule, ownKeyHosts: hostsOf(hostText) })}>
         保存
       </Button>
-    </li>
+    </div>
   )
 }
 

@@ -6,15 +6,18 @@ import {
   normalizeBrokerHost,
   normalizeBrokerModel,
   normalizeBrokerPathPrefix,
+  normalizeRelayCheckPath,
   normalizeRelayFormat,
   normalizeRelayHeaderName,
   parseBrokerDisplayName,
   parseRelayBaseUrl,
   relayBaseUrl,
   isValidRelayServiceId,
+  serviceAllowsOwnKeys,
   upgradeBrokerAudience,
   type BrokerAudience,
   type BrokerCaps,
+  type BrokerKeyCheckResult,
   type BrokerKeyRule,
   type BrokerKeyStatus,
   type BrokerServiceCategory,
@@ -63,6 +66,22 @@ export const CAP_LABELS: Record<keyof BrokerCaps, string> = {
   tokensPerMemberPerDay: '1日のトークン数（1人あたり）',
 }
 export const CAP_KEYS = Object.keys(CAP_LABELS) as Array<keyof BrokerCaps>
+
+/**
+ * How the one check of a saved key went (a read-only request to the service).
+ * The words claim no more than that: valid now, refused, or not known.
+ */
+export const CHECK_RESULT_TEXT: Record<BrokerKeyCheckResult, string> = {
+  valid: '鍵が有効なことを確かめました',
+  rejected: 'この鍵は使えませんでした（発行元の画面で確かめてください）',
+  unreachable: '確かめられませんでした（通信できません）。鍵は保存しました',
+  unconfirmed: '確かめられませんでした（発行元から、はっきりした答えがありませんでした）。鍵は保存しました',
+  'not-checkable': 'この鍵は、実際に使うまで確かめられません。鍵は保存しました',
+}
+
+/** The one switch per service: what it does, for the admin (shown under it). */
+export const OWN_KEYS_SWITCH_HELP =
+  'オンにすると、メンバーが「設定 → 自分の鍵」から自分の鍵を登録できます。送り先はこのサービスの決まった宛先だけです。会社の鍵が使える仕事では会社の鍵を、ないときは自分の鍵を使います（会社優先）。オフにすると会社の鍵だけを使い、登録済みの自分の鍵は使われなくなります（消えません）。'
 
 /** Why API keys cannot be registered (the server has no usable key-encryption key). */
 export const BROKER_OFF_TEXT: Record<BrokerStatusReason, string> = {
@@ -131,6 +150,18 @@ export function describeUsage(u: { requests: number; tokens: number }, c: Broker
 
 const keyName = (k: { displayName: string; service: string }) => `「${k.displayName}」（${k.service}）`
 
+const CHECK_NOTE: Record<BrokerKeyCheckResult, string> = {
+  valid: '有効を確認',
+  rejected: '使えない鍵',
+  unreachable: '確認できず・通信できません',
+  unconfirmed: '確認できず',
+  'not-checkable': '確認の方法なし',
+}
+const checkNote = (check: BrokerKeyCheckResult | undefined) => (check ? `・${CHECK_NOTE[check]}` : '')
+
+/** The service's own-key switch is on (rule and destinations both allow own keys). */
+export const ownKeysOn = (s: { rule: BrokerKeyRule; ownKeyHosts: string[] }) => serviceAllowsOwnKeys(s)
+
 function fieldLines(name: string, before: Partial<BrokerKeySnapshot>, after: Partial<BrokerKeySnapshot>, names: Names): string[] {
   const lines: string[] = []
   if ('displayName' in after) lines.push(`${name}: 名前 ${before.displayName} → ${after.displayName}`)
@@ -146,9 +177,9 @@ function fieldLines(name: string, before: Partial<BrokerKeySnapshot>, after: Par
 export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[] {
   switch (c.action) {
     case 'create':
-      return [`${keyName(c.key)} を登録（…${c.key.last4}）`]
+      return [`${keyName(c.key)} を登録（…${c.key.last4}）${checkNote(c.check)}`]
     case 'replace':
-      return [`${keyName(c)} のキーを差し替え（…${c.last4Before} → …${c.last4After}）`]
+      return [`${keyName(c)} のキーを差し替え（…${c.last4Before} → …${c.last4After}）${checkNote(c.check)}`]
     case 'update':
       return fieldLines(keyName(c), c.before, c.after, names)
     case 'delete':
@@ -170,6 +201,7 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
       if (c.before.label !== c.after.label) lines.push(`${c.service}: 名前 ${c.before.label} → ${c.after.label}`)
       if (relayBaseUrl(c.before) !== relayBaseUrl(c.after)) lines.push(`${c.service}: 送り先 → ${relayBaseUrl(c.after)}`)
       if (c.before.header !== c.after.header || c.before.format !== c.after.format) lines.push(`${c.service}: 鍵の渡し方 → ${c.after.header}: ${c.after.format}`)
+      if ((c.before.checkPath ?? '') !== (c.after.checkPath ?? '')) lines.push(`${c.service}: 鍵を確かめる住所 → ${c.after.checkPath || 'なし'}`)
       return lines
     }
     case 'settings': {
@@ -190,6 +222,8 @@ export interface RelayDraft {
   baseUrl: string
   header: string
   format: string
+  /** Optional: the read-only path that checks a key when it is saved ('' = none). */
+  checkPath?: string
 }
 
 /**
@@ -209,6 +243,9 @@ export function relayDraftErrors(d: RelayDraft, opts: { existing: boolean }): st
     errors.push('鍵を入れるヘッダの名前に使えない書き方です（Host・Cookie・Content-…・X-Forwarded-… などは使えません）。')
   }
   if (d.format && !normalizeRelayFormat(d.format)) errors.push('値の形には {key} をちょうど1つ入れます（例: Bearer {key}）。半角の文字だけが使えます。')
+  if (d.checkPath?.trim() && !normalizeRelayCheckPath(d.checkPath.trim())) {
+    errors.push('鍵を確かめる住所は「/」で始まるパスだけを書きます（例: /me）。? 以降・%・..・空白は書けません。')
+  }
   return errors
 }
 

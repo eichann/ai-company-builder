@@ -92,6 +92,8 @@ export function RelayServicesCard({
                     <dd className="font-mono">
                       {s.relay!.header}: {s.relay!.format.replace(BROKER_KEY_SLOT, '（キー）')}
                     </dd>
+                    <dt>鍵の確かめ方</dt>
+                    <dd>{s.relay!.checkPath ? <span className="font-mono">GET {s.relay!.checkPath}</span> : '登録のときには確かめません'}</dd>
                     <dt>スクリプトでの名前</dt>
                     <dd className="font-mono">
                       {env.baseUrl}・{env.key}
@@ -186,6 +188,7 @@ export function RelayForm({
   const [header, setHeader] = useState(relay?.header ?? '')
   const [format, setFormat] = useState(relay?.format ?? BROKER_KEY_SLOT)
   const [category, setCategory] = useState<BrokerServiceCategory>(existing?.category ?? 'tool')
+  const [checkPath, setCheckPath] = useState(relay?.checkPath ?? '')
   const chosen = PRESETS.find((p) => p.id === preset)!
   const draft: RelayDraft = {
     service: service.trim(),
@@ -193,6 +196,7 @@ export function RelayForm({
     baseUrl: baseUrl === 'https://' ? '' : baseUrl,
     header: preset === 'custom' ? header : chosen.header,
     format: preset === 'custom' ? format : chosen.format,
+    checkPath,
   }
   const errors = relayDraftErrors(draft, { existing: !!existing })
   if (!existing && draft.service && taken.includes(draft.service)) errors.push('この名前のサービスはもうあります。別の名前にしてください。')
@@ -209,6 +213,8 @@ export function RelayForm({
           baseUrl: draft.baseUrl.trim(),
           header: draft.header.trim(),
           format: draft.format.trim(),
+          // Left out = none (the definition is replaced whole, so clearing the field removes it).
+          ...(checkPath.trim() ? { checkPath: checkPath.trim() } : {}),
           ...(existing ? {} : { category }),
         })
       }}
@@ -252,6 +258,13 @@ export function RelayForm({
           </div>
         )}
         <p className="text-xs text-muted-foreground">「{BROKER_KEY_SLOT}」のところに、ACB が預かったキーを入れて送ります。AI には見えません。</p>
+      </div>
+      <div className="grid gap-2">
+        <Label htmlFor={`${id}-check`}>鍵を確かめる住所（なくてもよい）</Label>
+        <Input id={`${id}-check`} className="font-mono" placeholder="例: /me" value={checkPath} onChange={(e) => setCheckPath(e.target.value)} />
+        <p className="text-xs text-muted-foreground">
+          鍵を登録したときに、この住所へ1回だけ読み取りの問い合わせ（GET）をして、使える鍵か確かめます。料金がかからず、何も変更しない住所を書いてください（説明書の「自分の情報を見る」などのもの）。書かないときは、実際に使うまで確かめられません。
+        </p>
       </div>
       {!existing && (
         <div className="grid gap-2">

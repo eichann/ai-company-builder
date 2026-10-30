@@ -52,6 +52,8 @@ const KNOWN_MESSAGES: Array<[RegExp, string]> = [
   [/host cannot change while keys exist|keys registered for this service go to other hosts/i, 'このサービスに鍵が登録されているため、送り先のホスト名は変えられません。先にそのサービスの鍵を削除してください。'],
   [/delete the keys registered for this service first/i, 'このサービスに鍵が登録されているため、削除できません。先にそのサービスの鍵を削除してください。'],
   [/this service's requests go to .* only/i, 'このサービスの送り先は、登録したときのホストだけです。ほかのホストは書けません。'],
+  [/the service refused this key/i, 'この鍵は使えませんでした（発行元の画面で確かめてください）。保存していません。'],
+  [/this service has no known destination/i, 'このサービスは送り先が決まっていないため、「詳しい設定」で自分の鍵の送り先を書いてください。'],
   [/invitation.*(expired|used|invalid|not found)/i, 'この招待リンクは無効か、有効期限が切れています。管理者に新しいリンクを依頼してください。'],
 ]
 
