@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from '
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
 import { microphoneSelection, deviceFailureMessage } from '../../lib/microphoneSelection'
 import { voiceAvailability, recheckView } from '../../lib/voiceAvailability'
+import { cancelRecording, onVoiceEvent, startRecording, stopRecording } from '../../features/voice/api'
 
 export interface VoiceEditor {
   focus?: () => void
@@ -48,14 +49,14 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   const cancel = useCallback(() => {
     const previous = operation.current
     operation.current = undefined
-    if (previous) void window.electronAPI.voiceInput.cancel(previous.id).catch(() => {})
+    if (previous) void cancelRecording(previous.id).catch(() => {})
     setPhase('idle')
     setLevel(0); setClipping(false)
     onBusy(false)
     setRawText('')
   }, [onBusy])
 
-  useEffect(() => window.electronAPI.voiceInput.onEvent(event => {
+  useEffect(() => onVoiceEvent(event => {
     const op = operation.current
     if (!op || op.id !== event.requestId || !current.current.active || op.scope !== current.current.scope) return
     if (event.type === 'level') {
@@ -86,7 +87,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     if (phaseRef.current === 'listening' && operation.current) {
       phaseRef.current = 'finalizing'
       setPhase('finalizing')
-      await window.electronAPI.voiceInput.stop(operation.current.id).catch(() => { cancel(); setError('録音を停止できませんでした') })
+      await stopRecording(operation.current.id).catch(() => { cancel(); setError('録音を停止できませんでした') })
       return
     }
     if (phaseRef.current !== 'idle' || disabled || !active || !caps?.available || deviceMissing || !devices?.length || !editor.current) return
@@ -94,7 +95,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     operation.current = { id, insert: editor.current.captureInsertion(), scope }
     phaseRef.current = 'preparing'
     setError(''); setRawText(''); setLevel(0); setClipping(false); setShowDevices(false); setPhase('preparing'); onBusy(true)
-    try { await window.electronAPI.voiceInput.start(id, selectedDevice || undefined) }
+    try { await startRecording(id, selectedDevice || undefined) }
     catch { if (operation.current?.id === id) { cancel(); setError('音声入力を開始できませんでした。別の録音が動作していないかご確認ください') } }
   }, [active, caps, disabled, editor, scope, onBusy, cancel, selectedDevice, devices, deviceMissing])
   useEffect(() => {

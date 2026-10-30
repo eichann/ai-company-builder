@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { Check, LockSimple, SpinnerGap } from '@phosphor-icons/react'
 import { Button, Callout, SubHeading } from './ui'
 import { DEFAULT_VOICE_INSTRUCTIONS, VOICE_FIXED_PROMPT, VOICE_INSTRUCTIONS_MAX_LENGTH } from '../../../shared/voice-prompt'
+import { getVoicePrompt, resetVoicePrompt, setVoicePrompt } from '../../features/voice/api'
 
 // Settings → 音声入力 → 整え方の指示. The fixed part is shown read-only; the
 // member edits only the instructions after it. Saved on this PC (userData),
@@ -22,7 +23,7 @@ export function VoicePromptSettings() {
 
   useEffect(() => {
     let cancelled = false
-    window.electronAPI.voiceInput.getPrompt()
+    getVoicePrompt()
       .then(settings => { if (!cancelled) { setSaved(settings.instructions); setDraft(settings.instructions) } })
       .catch(() => { if (!cancelled) { setSaved(DEFAULT_VOICE_INSTRUCTIONS); setDraft(DEFAULT_VOICE_INSTRUCTIONS); setError('保存済みの指示を読み込めませんでした。初期値を表示しています') } })
     return () => { cancelled = true }
@@ -49,10 +50,10 @@ export function VoicePromptSettings() {
       setBusy(false)
     }
   }
-  const save = () => run(() => window.electronAPI.voiceInput.setPrompt(draft))
+  const save = () => run(() => setVoicePrompt(draft))
   const reset = () => {
     if (!isDefaultDraft && !window.confirm('整え方の指示を初期値に戻しますか？\n編集した内容は消えます。')) return
-    void run(() => window.electronAPI.voiceInput.resetPrompt())
+    void run(() => resetVoicePrompt())
   }
 
   return (
