@@ -28,6 +28,7 @@ import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { useSparseCheckout } from '../../hooks/useSparseCheckout'
 import { notDownloadedUserMessage, pathKey } from '../../../shared/sparse-paths'
 import { NewFolderDialog } from './NewFolderDialog'
+import { createDirectory, createEmptyFile, deleteItem, getStats, moveFromExternal, moveItem, readDirectory, readDirectoryTree, renameItem, reservedPathRefusal, startDrag } from '../../features/files/api'
 import { usePrivateFolders } from '../../hooks/usePrivateFolders'
 import { useAppStore } from '../../stores/appStore'
 import { useAuthStore } from '../../stores/authStore'
@@ -74,8 +75,8 @@ const sortEntries = (entries: FileEntry[]): FileEntry[] =>
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
 
 const treeIO: FileTreeIO = {
-  readDirectory: dir => window.electronAPI.readDirectory(dir),
-  readDirectoryTree: (dir, depth) => window.electronAPI.readDirectoryTree(dir, depth) as Promise<RawDirEntry[]>,
+  readDirectory: dir => readDirectory(dir),
+  readDirectoryTree: (dir, depth) => readDirectoryTree(dir, depth) as Promise<RawDirEntry[]>,
 }
 
 // Every tree model (shown or not) learns about watcher events, so a
@@ -438,7 +439,7 @@ export function FileTreePanel({
    */
   const refuseReserved = useCallback(async (absTarget: string): Promise<boolean> => {
     let message: string | null = null
-    try { message = await window.electronAPI.reservedPathRefusal(absTarget) } catch { /* older preload / preview: allow */ }
+    try { message = await reservedPathRefusal(absTarget) } catch { /* older preload / preview: allow */ }
     if (!message) return false
     setDropWarning(message)
     setTimeout(() => setDropWarning(null), 6000)
@@ -449,14 +450,14 @@ export function FileTreePanel({
   const resolveUniquePath = useCallback(async (destDir: string, fileName: string): Promise<string> => {
     const destPath = `${destDir}/${fileName}`
     try {
-      await window.electronAPI.getStats(destPath)
+      await getStats(destPath)
       const dotIdx = fileName.lastIndexOf('.')
       const base = dotIdx > 0 ? fileName.substring(0, dotIdx) : fileName
       const ext = dotIdx > 0 ? fileName.substring(dotIdx) : ''
       for (let i = 1; i < 100; i++) {
         const candidate = `${destDir}/${base} (${i})${ext}`
         try {
-          await window.electronAPI.getStats(candidate)
+          await getStats(candidate)
         } catch {
           return candidate
         }
@@ -491,7 +492,7 @@ export function FileTreePanel({
       // Unique destination path
       const destPath = await resolveUniquePath(destDir, file.name)
 
-      const result = await window.electronAPI.moveFromExternal(file.path, destPath)
+      const result = await moveFromExternal(file.path, destPath)
       if (result.success) {
         moved++
       } else {
@@ -669,13 +670,13 @@ export function FileTreePanel({
 
     if (mode === 'newFile') {
       const newPath = `${parentPath}/${value}`
-      await window.electronAPI.writeFile(newPath, '')
+      await createEmptyFile(newPath)
     } else if (mode === 'newFolder') {
       const newPath = `${parentPath}/${value}`
-      await window.electronAPI.createDirectory(newPath)
+      await createDirectory(newPath)
     } else if (mode === 'rename') {
       const newPath = `${parentPath}/${value}`
-      await window.electronAPI.renameItem(targetPath, newPath)
+      await renameItem(targetPath, newPath)
     }
 
     // Show it at once (the watcher reports it too) and open the parent so the new item is visible.
@@ -687,7 +688,7 @@ export function FileTreePanel({
   /** 公開 (or inside a private folder) from 「新しいフォルダ…」: on disk, as before. */
   const createPlainFolder = useCallback(async (parentPath: string, name: string) => {
     if (refuseNotDownloaded(`${parentPath}/${name}`) || await refuseReserved(`${parentPath}/${name}`)) { setNewFolder(null); return }
-    await window.electronAPI.createDirectory(`${parentPath}/${name}`)
+    await createDirectory(`${parentPath}/${name}`)
     await showChangeIn(parentPath, true)
     setNewFolder(null)
   }, [showChangeIn, refuseNotDownloaded, refuseReserved])
@@ -705,7 +706,7 @@ export function FileTreePanel({
         const destPath = await resolveUniquePath(destDir, fileName)
         if (sourcePath === destPath) continue
         if (await refuseReserved(destPath)) break
-        await window.electronAPI.moveItem(sourcePath, destPath)
+        await moveItem(sourcePath, destPath)
       }
       setSelectedPaths(new Set())
       await Promise.all([destDir, ...sources.map(parentDir)].map(dir => model.invalidate(dir)))
@@ -727,7 +728,7 @@ export function FileTreePanel({
     const affectedParents = new Set<string>()
 
     for (const p of paths) {
-      await window.electronAPI.deleteItem(p)
+      await deleteItem(p)
       affectedParents.add(parentDir(p))
     }
 
@@ -898,7 +899,7 @@ export function FileTreePanel({
       // Alt/Option + drag: native drag to external apps (browser, Finder, Slack, etc.)
       if (e.altKey && !entry.isDirectory) {
         e.preventDefault()
-        window.electronAPI.startDrag(entry.path)
+        startDrag(entry.path)
         return
       }
       // Normal drag: internal tree move

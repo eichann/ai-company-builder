@@ -7,6 +7,7 @@
  */
 import { isPerfCutEnabled, perfMark } from './perfDiagnostics'
 import { fileVersions } from './fileVersions'
+import { listenToFileChanges } from '../shared/ipc/file-events'
 
 export interface FileChangeEvent { type: string; path: string }
 type Listener = (changes: FileChangeEvent[]) => void
@@ -34,12 +35,7 @@ export function dispatchFileChanges(changes: FileChangeEvent[]): void {
 
 function ensureIpcSubscription(): void {
   if (unsubscribeIpc || typeof window === 'undefined') return
-  const api = window.electronAPI as Partial<Window['electronAPI']> | undefined
-  if (api?.onFileChanges) {
-    unsubscribeIpc = api.onFileChanges(dispatchFileChanges)
-  } else if (api?.onFileChange) {
-    unsubscribeIpc = api.onFileChange(change => dispatchFileChanges([change]))
-  }
+  unsubscribeIpc = listenToFileChanges(dispatchFileChanges)
 }
 
 /** Receive every batch of file changes; returns the unsubscribe function. */

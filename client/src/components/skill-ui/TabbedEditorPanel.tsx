@@ -29,6 +29,7 @@ import { markReviewSeen } from '../../features/doc-review/model'
 import { useAuthStore } from '../../stores/authStore'
 import { useWriteAccess } from '../../hooks/useWriteAccess'
 import { ReadOnlyBadge } from './ReadOnlyBadge'
+import { backupBeforeOverwrite, createDirectory, readFile, readFileBinary, writeFile } from '../../features/editor/api'
 import { subscribeFileChanges } from '../../lib/fileEvents'
 import { useFileVersion } from '../../lib/fileVersions'
 import { normalizePathSeparators } from '../../utils/path'
@@ -114,7 +115,7 @@ function PdfPreview({ filePath }: { filePath: string }) {
     let blobUrl: string | null = null
     let cancelled = false
 
-    window.electronAPI.readFileBinary(filePath).then(buffer => {
+    readFileBinary(filePath).then(buffer => {
       if (cancelled) return
       if (buffer) {
         const blob = new Blob([buffer], { type: 'application/pdf' })
@@ -575,7 +576,7 @@ export function TabbedEditorPanel({
       // Clean tab → show the disk version; tab with edits → never overwrite
       // them: show the banner and pause autosave (decideOnDiskEvent).
       try {
-        const disk = await window.electronAPI.readFile(filePath)
+        const disk = await readFile(filePath)
         setFileContents(prev => {
           const cur = prev.get(filePath)
           if (!cur || cur.isLoading) return prev
@@ -645,7 +646,7 @@ export function TabbedEditorPanel({
     })
 
     try {
-      const fileContent = await window.electronAPI.readFile(filePath)
+      const fileContent = await readFile(filePath)
       setFileContents(prev => {
         const newMap = new Map(prev)
         newMap.set(filePath, {
@@ -739,7 +740,7 @@ export function TabbedEditorPanel({
     setIsSaving(true)
     setError(null)
     try {
-      const disk = await window.electronAPI.readFile(filePath)
+      const disk = await readFile(filePath)
       const decision = decideSave({ ...current, content }, disk)
       const markSaved = () => updateFile(filePath, f => ({ ...f, originalContent: content, missing: false, external: undefined, keepMine: false }))
 
@@ -760,7 +761,7 @@ export function TabbedEditorPanel({
         })
         if (!ok) return false
         if (rootPath) {
-          const backup = await window.electronAPI.backupBeforeOverwrite(rootPath, filePath)
+          const backup = await backupBeforeOverwrite(rootPath, filePath)
           if (!backup.success) {
             setError('外部の変更をバックアップできなかったため、保存を中止しました。')
             return false
@@ -774,10 +775,10 @@ export function TabbedEditorPanel({
       if (decision.action === 'write' && decision.recreate) {
         // The file (or its folder) was deleted: saving puts it back.
         const parent = filePath.substring(0, filePath.lastIndexOf('/'))
-        if (parent) await window.electronAPI.createDirectory(parent)
+        if (parent) await createDirectory(parent)
       }
 
-      const success = await window.electronAPI.writeFile(filePath, content)
+      const success = await writeFile(filePath, content)
       if (success) {
         markSaved()
         return true
@@ -834,7 +835,7 @@ export function TabbedEditorPanel({
       danger: true,
     })
     if (!ok) return
-    const disk = await window.electronAPI.readFile(filePath)
+    const disk = await readFile(filePath)
     if (disk === null) {
       setError('ファイルを読み込めませんでした（削除された可能性があります）')
       return

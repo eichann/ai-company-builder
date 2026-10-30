@@ -18,6 +18,9 @@ paths:
   - "client/src/features/history/**"
   - "client/src/features/search/**"
   - "client/src/shared/ipc/diffs.ts"
+  - "client/src/shared/ipc/file-events.ts"
+  - "client/src/features/files/**"
+  - "client/src/features/editor/**"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
@@ -49,8 +52,8 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   as `add`; a removed folder may arrive as `unlink`, so consumers treat `unlink` as "this path and
   everything under it". `.git` (any depth), `node_modules`, `.workspace`, `.backups` and
   `.DS_Store` are dropped. The `disableWatchers` perf switch skips the watcher.
-- Renderer: one subscription (`src/lib/fileEvents.ts` `subscribeFileChanges`); consumers filter
-  by path prefix.
+- Renderer: one subscription (`src/lib/fileEvents.ts` `subscribeFileChanges`, over
+  `src/shared/ipc/file-events.ts` `FileChangeReads`); consumers filter by path prefix.
 
 ## File tree (`src/lib/fileTreeModel.ts`, `components/skill-ui/FileTreePanel.tsx`)
 
@@ -63,6 +66,11 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   "folder exists" check is keyed per folder (`src/lib/folderExists.ts`); left tabs stay mounted
   once opened (history follows the department only while shown, since it runs `git log`).
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
+- IPC goes through `src/features/files/api.ts`: `FileTreeReads` (listings, stat),
+  `FileTreeWrites` (new file / folder, rename, move inside, delete), `FileImportWrites` (a Finder
+  drop: takes a file from anywhere on the computer), `ReservedNameOutbound` (the typed name goes to
+  the server's `paths/check`), `FileDragOutbound` (Alt-drag hands a file to another app), plus the
+  private-folder ports (`private-folders-client.md`).
 
 ## Previews never show a stale file
 
@@ -96,6 +104,8 @@ page in the browser).
   Overwriting first backs the disk version up (`editor:backupBeforeOverwrite` →
   `.backups/<ts>_editor_overwrite/`, or the private backups for a file in a private folder).
   Closing a tab whose save was cancelled asks before discarding.
+- The editor's IPC: `src/features/editor/api.ts`, `EditorReads` (text, PDF bytes) and
+  `EditorWrites` (save, recreate the folder, back up before overwriting); nothing leaves the computer.
 - Preview: `client/tests/editor-tabs-ui.html?view=external`.
 
 ## Document review (`src/features/doc-review/`, shown inside `TabbedEditorPanel`)
