@@ -2,6 +2,7 @@ import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { MagnifyingGlass, X, CircleNotch } from '@phosphor-icons/react'
 import { getFileIcon } from './FileIcons'
 import { CodeEditor } from './CodeEditor'
+import { readSearchHit, searchFileContents } from '../../features/search/api'
 
 interface GrepMatch {
   file: string
@@ -88,7 +89,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
     setSearchError(null)
     try {
       // Main caps it (20 per file, 500 in all) and stops the previous search.
-      const result = await window.electronAPI.gitGrep(rootPath, trimmed, departmentFolder)
+      const result = await searchFileContents(rootPath, trimmed, departmentFolder)
       if (seq !== searchSeq.current || result.cancelled) return
       setSearchedQuery(trimmed)
       if (result.success) {
@@ -153,7 +154,7 @@ export function SearchPanel({ rootPath, departmentFolder, inputRef }: SearchPane
 
     let cancelled = false
     setIsLoadingFile(true)
-    window.electronAPI.readFile(selected.filePath).then(result => {
+    readSearchHit(selected.filePath).then(result => {
       if (cancelled) return
       if (result !== null) {
         setLoadedFile({ path: selected.filePath, content: result })

@@ -15,6 +15,9 @@ paths:
   - "client/src/components/skill-ui/**"
   - "client/src/features/doc-review/**"
   - "client/src/features/skills/**"
+  - "client/src/features/history/**"
+  - "client/src/features/search/**"
+  - "client/src/shared/ipc/diffs.ts"
   - "client/shared/skills-refresh.ts"
   - "client/shared/editor-disk-state.ts"
   - "client/shared/local-file-url.ts"
@@ -159,3 +162,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
   test), `file-tree-model.test.ts`, `local-file-url.test.ts`, `line-diff.test.ts`; perf budgets in
   `client/tests/perf/` (`testing.md`). Preview `download-folders-ui.html?view=filetree` exposes
   `__acbAddFile(dirRel, name)` to simulate a file the AI writes.
+- The renderer reaches these through read-only ports: `src/features/search/api.ts`
+  (`CompanySearchReads`: the file list for Cmd+P, content search, a hit's text),
+  `src/features/history/api.ts` (`CommitHistoryReads`: log, a commit's files) and, for
+  `DiffViewer` (shown by the sync preview and the history), `src/shared/ipc/diffs.ts` (`DiffReads`).

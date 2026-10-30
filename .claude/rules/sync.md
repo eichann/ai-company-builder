@@ -12,6 +12,7 @@ paths:
   - "client/tests/protected-config.test.ts"
   - "client/tests/commit-message.test.ts"
   - "client/src/components/common/SyncPreviewDialog.tsx"
+  - "client/src/features/sync/**"
 ---
 
 # Client sync (`git:sync`)
@@ -162,6 +163,9 @@ the limit still get their line and stay tracked. Threshold: `SyncDeps.largeFileT
   `_outside_checkout`), never in the working tree, so no `.gitignore` edit can share them.
 - `backup:list` shows both places (private ids start with `private:`). Backups older than 30 days
   are pruned at the start of each sync.
+- The renderer reaches backups through `src/features/sync/api.ts`: `BackupReads` (list),
+  `BackupWrites` (put a file back) and `BackupOutbound` (open the folder in Finder / Explorer:
+  main hands it to another app, so it is a port of its own).
 
 ## Commit message (step 9)
 

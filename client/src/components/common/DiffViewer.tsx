@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { SpinnerGap, X } from '@phosphor-icons/react'
+import { getCommitFileDiff, getWorkingFileDiff } from '../../shared/ipc/diffs'
 
 // --- Types ---
 
@@ -191,8 +192,8 @@ export function DiffViewer(props: DiffViewerProps) {
     setError(null)
 
     const fetchDiff = props.mode === 'staged'
-      ? window.electronAPI.gitFileDiff(rootPath, filePath, props.fileStatus)
-      : window.electronAPI.gitCommitFileDiff(rootPath, props.commitHash, filePath)
+      ? getWorkingFileDiff(rootPath, filePath, props.fileStatus)
+      : getCommitFileDiff(rootPath, props.commitHash, filePath)
 
     fetchDiff
       .then(result => {

@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, FolderOpen, ArrowCounterClockwise, Clock, File, Warning } from '@phosphor-icons/react'
+import { listBackups, openBackupFolder, restoreBackupFile } from '../../features/sync/api'
 
 interface BackupInfo {
   id: string
@@ -29,7 +30,7 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
     setError(null)
 
     try {
-      const result = await window.electronAPI.backupList(rootPath)
+      const result = await listBackups(rootPath)
       if (result.success) {
         setBackups(result.backups)
       } else {
@@ -49,13 +50,13 @@ export function BackupHistorySlideOver({ isOpen, onClose, rootPath }: BackupHist
   }, [isOpen, loadBackups])
 
   const handleOpenFolder = async (backupPath: string) => {
-    await window.electronAPI.backupOpenFolder(backupPath)
+    await openBackupFolder(backupPath)
   }
 
   const handleRestoreFile = async (backupId: string, filePath: string) => {
     setRestoringFile(`${backupId}:${filePath}`)
     try {
-      const result = await window.electronAPI.backupRestore(rootPath, backupId, filePath)
+      const result = await restoreBackupFile(rootPath, backupId, filePath)
       if (result.success) {
         alert(`復元しました: ${filePath}`)
       } else {

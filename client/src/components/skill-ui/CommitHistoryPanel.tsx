@@ -10,6 +10,7 @@ import {
   CircleNotch,
 } from '@phosphor-icons/react'
 import { DiffModal } from '../common/DiffViewer'
+import { getCommitFiles, getCommitLog } from '../../features/history/api'
 
 interface Commit {
   hash: string
@@ -52,7 +53,7 @@ export function prefetchCommits(rootPath: string, departmentFolder: string) {
   const cached = commitCache.get(key)
   if (cached && Date.now() - cached.timestamp < CACHE_TTL) return // still fresh
   const pathFilter = departmentFolder ? `${departmentFolder}/` : ''
-  window.electronAPI.gitLog(rootPath, pathFilter, 50).then(result => {
+  getCommitLog(rootPath, pathFilter, 50).then(result => {
     if (result.success) {
       commitCache.set(key, { commits: result.commits, timestamp: Date.now() })
     }
@@ -143,7 +144,7 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
     if (showSpinner) setIsLoading(true)
     try {
       const pathFilter = departmentFolder ? `${departmentFolder}/` : ''
-      const result = await window.electronAPI.gitLog(rootPath, pathFilter, 50)
+      const result = await getCommitLog(rootPath, pathFilter, 50)
       if (result.success) {
         commitCache.set(cacheKey, { commits: result.commits, timestamp: Date.now() })
         // Not when the panel moved to another department meanwhile.
@@ -189,7 +190,7 @@ export function CommitHistoryPanel({ rootPath, departmentFolder }: CommitHistory
     if (!commitFiles.has(hash)) {
       setLoadingFiles(hash)
       try {
-        const result = await window.electronAPI.gitShowCommit(rootPath, hash, departmentFolder ? `${departmentFolder}/` : undefined)
+        const result = await getCommitFiles(rootPath, hash, departmentFolder ? `${departmentFolder}/` : undefined)
         if (result.success) {
           setCommitFiles(prev => new Map(prev).set(hash, result.files))
         }
