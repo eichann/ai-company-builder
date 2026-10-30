@@ -16,6 +16,7 @@ import {
   Moon,
   Plus,
   Robot,
+  Barricade,
   ShieldCheck,
   SignOut,
   SquaresFour,
@@ -69,6 +70,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'private-folders', label: '非公開フォルダ', icon: LockSimple, visible: (c) => c.isAdmin || c.isManager },
   { segment: 'security', label: 'セキュリティ', icon: LockKey, visible: (c) => c.isAdmin },
   { segment: 'agent-events', label: 'AI の操作の記録', icon: Robot, visible: (c) => c.isAdmin || c.canViewAgentEvents },
+  { segment: 'agent-sandbox', label: 'AI の囲い', icon: Barricade, visible: (c) => c.isAdmin },
   { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]
 

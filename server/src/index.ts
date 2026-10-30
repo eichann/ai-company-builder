@@ -22,6 +22,7 @@ import { permissionRulesRoute } from './routes/permission-rules'
 import { privateFoldersRoute } from './routes/private-folders'
 import { clientActivityMiddleware } from './lib/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
+import { agentSandboxRoute } from './routes/agent-sandbox'
 import { scheduleAgentEventRetention } from './lib/agent-event-retention'
 import { services } from './composition'
 
@@ -162,6 +163,7 @@ app.route('/api/companies/:companyId', permissionsRoute)
 app.route('/api/companies/:companyId', permissionRulesRoute)
 app.route('/api/companies/:companyId', privateFoldersRoute)
 app.route('/api/companies/:companyId', agentEventsRoute)
+app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)
 app.route('/api', invitationsRoute)
