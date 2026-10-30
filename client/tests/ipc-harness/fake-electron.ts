@@ -37,11 +37,15 @@ export class FakeWebContents extends EventEmitter {
     },
   }
   loaded: string | null = null
+  /** loadFile's options (the consultation window's `?window=chat`). */
+  loadOptions: unknown = undefined
+  windowOpenHandler: (() => unknown) | null = null
+  setWindowOpenHandler(handler: () => unknown): void { this.windowOpenHandler = handler }
   send(channel: string, ...args: unknown[]): void { this.sent.push({ channel, args }) }
   isDestroyed(): boolean { return this.destroyed }
   startDrag(item: unknown): void { this.drags.push(item) }
   loadURL(url: string): Promise<void> { this.loaded = url; return Promise.resolve() }
-  loadFile(file: string): Promise<void> { this.loaded = file; return Promise.resolve() }
+  loadFile(file: string, options?: unknown): Promise<void> { this.loaded = file; this.loadOptions = options; return Promise.resolve() }
   /** Messages sent on one channel since the last `clearSent()`. */
   sentOn(channel: string): unknown[][] { return this.sent.filter(m => m.channel === channel).map(m => m.args) }
   clearSent(): void { this.sent.length = 0 }
@@ -60,9 +64,26 @@ export class BrowserWindow extends EventEmitter {
   isMinimized(): boolean { return false }
   restore(): void {}
   show(): void {}
-  focus(): void {}
+  focus(): void { this.focused++ }
+  focused = 0
   loadURL(url: string): Promise<void> { return this.webContents.loadURL(url) }
-  loadFile(file: string): Promise<void> { return this.webContents.loadFile(file) }
+  loadFile(file: string, options?: unknown): Promise<void> { return this.webContents.loadFile(file, options) }
+  getNormalBounds() { return { x: 10, y: 20, width: 700, height: 800 } }
+  /** Like Electron: 'close' (cancellable), then, unless prevented, the window and its page go ('closed', 'destroyed'). */
+  close(): void {
+    if (this.destroyed) return
+    let prevented = false
+    this.emit('close', { preventDefault: () => { prevented = true } })
+    if (prevented) return
+    this.destroyed = true
+    this.webContents.destroyed = true
+    this.emit('closed')
+    this.webContents.emit('destroyed')
+  }
+}
+
+export const screen = {
+  getAllDisplays: () => [{ workArea: { x: 0, y: 0, width: 1920, height: 1080 } }],
 }
 
 /** Everything main.ts registered or did through Electron. */
@@ -73,6 +94,8 @@ export const fake = {
   privilegedSchemes: [] as unknown[],
   openDialogResults: [] as Array<{ canceled: boolean; filePaths: string[] }>,
   messageBoxes: [] as unknown[],
+  /** The buttons the next message boxes answer (default 0, the first button). */
+  messageBoxResponses: [] as number[],
   openedPaths: [] as string[],
   openedExternal: [] as string[],
   paths: {} as Record<string, string>,
@@ -118,7 +141,7 @@ export const app = {
 
 export const dialog = {
   showOpenDialog: async () => fake.openDialogResults.shift() ?? { canceled: true, filePaths: [] },
-  showMessageBox: async (...args: unknown[]) => { fake.messageBoxes.push(args); return { response: 0, checkboxChecked: false } },
+  showMessageBox: async (...args: unknown[]) => { fake.messageBoxes.push(args); return { response: fake.messageBoxResponses.shift() ?? 0, checkboxChecked: false } },
 }
 
 export const shell = {
@@ -191,5 +214,5 @@ export const ipcRenderer = {
 }
 
 export default {
-  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, systemPreferences, contextBridge, ipcRenderer,
+  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, systemPreferences, contextBridge, ipcRenderer, screen,
 }

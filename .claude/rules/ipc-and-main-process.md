@@ -37,7 +37,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   the member's own API keys: `key-broker.md`), `download-choices`
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
-  chat server gets; `system-prompt.ts`).
+  chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;
+  the windows themselves come from `electron-adapter.ts` `createChatWindowHost`).
 - `electron/services/` — shared state as explicit objects instead of module variables:
   `config-store.ts` (config.json, cached, written atomically), `api-key-store.ts` (the API key,
   encrypted through the shell's `SecretBox`; main decrypts it only where it is used), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
@@ -57,6 +58,18 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   agent boundaries (CLAUDE.md "App modules point one way too") and the renderer's (no feature →
   feature imports, `src/shared` ↛ `src/features` / `src/app`, `window.electronAPI` only in the
   data layer, no exceptions: `renderer-structure.md`).
+- **Windows.** Every app window — the main one and the consultation windows — gets the one
+  `appWebPreferences()` in `main.ts` (contextIsolation, sandbox, no Node, the one preload; CSP from
+  `index.html`); consultation windows also deny popups and navigation. Test:
+  `tests/ipc-chat-windows.test.ts`.
+- **Sender checks.** Handlers that look at who sent them accept exactly the windows they are for,
+  never "any window": `chatWindow:open` / `focus` / `list` / `closeAll` only the main window;
+  `chatWindow:getContext` / `reportStatus` only a registered consultation window, and only about
+  itself. Choice prompts and tool approvals go to the window that shows their conversation
+  (`webContentsForSession` in `main.ts`; the owner is that window's webContents, so only it may
+  answer, as before). Conversation events (`chatHistory:changed`, `handoff:changed`) go to every
+  window (`createBroadcastPort`). Tests: `tests/chat-windows.test.ts`,
+  `tests/ipc-chat-windows.test.ts`.
 - Keep `main.ts` importable without side effects beyond registering handlers (startup stays in
   `app.whenReady`), because the IPC harness loads it under plain Node.
 

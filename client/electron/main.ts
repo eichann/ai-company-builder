@@ -1,7 +1,7 @@
 import { AgentInteractions } from './agent-interactions'
 import { getCodexStatus } from './agents/codex'
 import { registerVoiceInput } from './voice-input'
-import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent } from 'electron'
+import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents, type WebPreferences } from 'electron'
 import path from 'path'
 import fs from 'fs'
 import { fileURLToPath } from 'url'
@@ -25,7 +25,8 @@ import { createApiKeyStore } from './services/api-key-store'
 import { createShellEnvironment } from './services/shell-env'
 import { configureAgentEnv } from './agents/agent-env'
 import { createClaudeCli } from './services/claude-cli'
-import { createMessageBoxHost, createWindowPort, desktopShell, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { createBroadcastPort, createChatWindowHost, createMessageBoxHost, createWindowPort, desktopShell, secretBox, registerLocalFileScheme, serveLocalFiles } from './electron-adapter'
+import { registerChatWindowsIpc } from './features/chat-windows/ipc'
 import { createSession } from './services/session'
 import { registerAuthIpc } from './features/auth/ipc'
 import { registerChatHistoryIpc } from './features/chat-history/ipc'
@@ -91,30 +92,53 @@ const claudeCli = createClaudeCli()
 // Skills (features/skills); their web-app tools are registered with the key broker's tokens below.
 const skills = registerSkillsIpc(ipc, { paths: allowedRoots })
 
-function createWindow() {
+/**
+ * The web preferences of every app window: the main one and the consultation
+ * windows (「別ウィンドウで開く」) share this one copy — isolated, sandboxed, no
+ * Node, the one preload; the page's CSP comes with index.html.
+ */
+function appWebPreferences(): WebPreferences {
   const disableElectronSpellcheck =
     process.env.ELECTRON_DISABLE_SPELLCHECK === '1' ||
     process.env.ELECTRON_DISABLE_SPELL_CHECKING === '1'
+  return {
+    preload: path.join(__dirname, 'preload.js'),
+    nodeIntegration: false,
+    contextIsolation: true,
+    sandbox: true,
+    // Reversible A/B test switch for input lag diagnosis.
+    spellcheck: !disableElectronSpellcheck,
+    // Required for the in-iframe Chromium PDF Viewer to render `blob:` PDFs in
+    // packaged builds. Without this, dev (HTTP origin) happens to work but the
+    // production file:// origin blocks the embedded PDF viewer.
+    plugins: true,
+  }
+}
 
+/** The app's page; `?window=chat` shows only one consultation (src/main.tsx). */
+function loadAppPage(win: BrowserWindow, query?: Record<string, string>) {
+  if (process.env.VITE_DEV_SERVER_URL) {
+    const url = new URL(process.env.VITE_DEV_SERVER_URL)
+    for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value)
+    void win.loadURL(url.toString())
+  } else {
+    void win.loadFile(path.join(__dirname, '../dist/index.html'), query ? { query } : undefined)
+  }
+}
+
+// Set once the consultation windows exist (below): they go with the main window.
+let closeChatWindowsWithMain = () => {}
+
+function createWindow() {
   mainWindow = new BrowserWindow({
     width: 1400,
     height: 900,
     minWidth: 1000,
     minHeight: 600,
     titleBarStyle: 'hiddenInset',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
-      nodeIntegration: false,
-      contextIsolation: true,
-      // Reversible A/B test switch for input lag diagnosis.
-      spellcheck: !disableElectronSpellcheck,
-      // Required for the in-iframe Chromium PDF Viewer to render `blob:` PDFs in
-      // packaged builds. Without this, dev (HTTP origin) happens to work but the
-      // production file:// origin blocks the embedded PDF viewer.
-      plugins: true,
-    },
+    webPreferences: appWebPreferences(),
   })
-
+  mainWindow.on('closed', () => closeChatWindowsWithMain())
   // Fully disable spell checker to prevent dictionary loading overhead (especially for Japanese IME)
   mainWindow.webContents.session.setSpellCheckerLanguages([])
 
@@ -131,13 +155,8 @@ function createWindow() {
     )
   }
 
-  if (process.env.VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
-    // DevTools disabled for performance testing - uncomment below line to enable
-    // mainWindow.webContents.openDevTools()
-  } else {
-    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
-  }
+  // DevTools disabled for performance testing: mainWindow.webContents.openDevTools() to enable.
+  loadAppPage(mainWindow)
 }
 
 // Chat server info (shared between app.whenReady and IPC handler)
@@ -166,16 +185,54 @@ app.on('activate', () => {
   }
 })
 
+// 「別ウィンドウで開く」: consultations in windows of their own (features/chat-windows).
+const chatWindowShell = createChatWindowHost({
+  webPreferences: appWebPreferences,
+  load: win => loadAppPage(win, { window: 'chat' }),
+  bounds: {
+    load: () => config.load().chatWindowBounds,
+    save: bounds => {
+      const current = config.load()
+      const { x, y, width, height } = bounds
+      current.chatWindowBounds = { x, y, width, height }
+      config.save(current)
+    },
+  },
+})
+// Quitting closes every window without asking (as for the main window's own running turns).
+app.on('before-quit', () => chatWindowShell.quitting())
+const chatWindows = registerChatWindowsIpc(ipc, {
+  host: chatWindowShell.host,
+  paths: allowedRoots,
+  isMainWindow: senderId => !!mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === senderId,
+  mainWindow: createWindowPort(() => mainWindow),
+})
+// Their status shows only in the main window's list, so they close with it.
+closeChatWindowsWithMain = () => chatWindows.closeAll()
+/** The window showing a consultation: its own window when it has one, else the main window. */
+function webContentsForSession(appSessionId?: string): WebContents | undefined {
+  const windowId = appSessionId ? chatWindows.windowForSession(appSessionId) : undefined
+  if (windowId !== undefined) return chatWindowShell.webContents(windowId)
+  return mainWindow?.webContents
+}
+function webContentsById(id: number): WebContents | undefined {
+  if (mainWindow && !mainWindow.isDestroyed() && mainWindow.webContents.id === id) return mainWindow.webContents
+  return chatWindowShell.webContents(id)
+}
+// Conversation events reach every window that may show a conversation.
+const conversationWindows = createBroadcastPort(() => [mainWindow, ...chatWindowShell.windows()])
+
 registerEnvIpc(ipc, { paths: allowedRoots })
 
 registerSettingsIpc(ipc, { config, apiKey, claudeCli, codexStatus: () => getCodexStatus(shellEnv.env()) })
 
+// A question belongs to the window that showed its conversation when it was asked (its owner).
 const agentInteractions = new AgentInteractions((owner, event, request) => {
-  const target = mainWindow?.webContents
-  if (target && !target.isDestroyed() && target.id === owner) target.send(`agent-interaction:${event}`, request)
+  const target = webContentsById(owner)
+  if (target && !target.isDestroyed()) target.send(`agent-interaction:${event}`, request)
 })
 // The send stays unguarded, as it always was: a destroyed window rejects the approval.
-const toolApprovals = createToolApprovals(request => mainWindow?.webContents.send('tool-approval-request', request))
+const toolApprovals = createToolApprovals(request => webContentsForSession(request.appSessionId)?.send('tool-approval-request', request))
 registerAgentInteractionsIpc(ipc, { interactions: agentInteractions, approvals: toolApprovals })
 // Local history stays in the existing per-device userData directory.
 const localHistoryStore = new ChatHistoryStore(path.join(app.getPath('userData'), 'chat-history'))
@@ -185,12 +242,12 @@ const handoffs = new HandoffService(localHistoryStore, handoffStore, async (prov
   fs.mkdirSync(cwd, { recursive: true })
   const input = { ...request, cwd, env: shellEnv.env() }
   return writeAgentHandoff(provider, input, { getCli: claudeCli.path })
-}, (companyId, sessionId) => appWindow.send('handoff:changed', { companyId, sessionId }))
+}, (companyId, sessionId) => conversationWindows.send('handoff:changed', { companyId, sessionId }))
 try { handoffStore.cleanupDeleted() } catch { console.warn('[handoff] Startup cleanup deferred: history unavailable') }
 app.on('before-quit', () => handoffs.dispose())
 // History writes are coalesced and asynchronous; whatever is still pending is written now.
 app.on('will-quit', () => localHistoryStore.flushSync())
-const chatHistory = registerChatHistoryIpc(ipc, { history: localHistoryStore, handoffs, window: appWindow })
+const chatHistory = registerChatHistoryIpc(ipc, { history: localHistoryStore, handoffs, window: conversationWindows })
 
 // Server API URL - read from config.json (set during first-launch setup) with env fallback
 function getServerApiUrl(): string {
@@ -245,6 +302,8 @@ registerAuthIpc(ipc, {
     brokerTokens.clear()
     companyFilesApi.clear()
     agentEventSender.signedOut()
+    // Another account must not find this one's consultations on screen.
+    chatWindows.closeAll()
   },
   onSignedIn: () => agentEventSender.sessionStarted(),
 })
@@ -350,7 +409,7 @@ app.whenReady().then(async () => {
       serverUrl: getServerApiUrl,
       brokerTokens,
       requestInteraction: (request, appSessionId, signal) => {
-        const owner = mainWindow?.webContents
+        const owner = webContentsForSession(appSessionId)
         if (!owner || owner.isDestroyed()) return Promise.resolve({ cancelled: true })
         const ownerId = owner.id
         const close = () => agentInteractions.closeOwner(ownerId)

@@ -16,9 +16,9 @@ const pages = fs.readdirSync(path.join(path.dirname(fileURLToPath(import.meta.ur
   .map(name => name.replace(/-ui\.html$/, ''))
   .sort()
 // Pages that read ?theme=dark.
-const themed = new Set(['chat-composer', 'chat-header', 'choice-prompt', 'doc-review', 'download-folders', 'editor-tabs', 'private-folders', 'voice-prompt'])
+const themed = new Set(['chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'doc-review', 'download-folders', 'editor-tabs', 'private-folders', 'voice-prompt'])
 // Pages whose light theme a spec of their own already opens.
-const specified = new Set(['chat-composer', 'chat-header', 'choice-prompt', 'doc-review', 'download-folders', 'editor-tabs', 'file-tree', 'private-folders', 'skill-layout', 'tool-rows'])
+const specified = new Set(['chat-composer', 'chat-header', 'chat-window', 'choice-prompt', 'doc-review', 'download-folders', 'editor-tabs', 'file-tree', 'private-folders', 'skill-layout', 'tool-rows'])
 
 for (const name of pages) {
   const themes = [...(specified.has(name) ? [] : ['light' as const]), ...(themed.has(name) ? ['dark' as const] : [])]

@@ -12,6 +12,7 @@ import { STEER_PART_TYPE, type SteerStatus } from '../shared/steer'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../shared/agent-interaction'
 import type { CodexStatus } from '../shared/agent'
 import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
+import type { ChatWindowsChange } from '../shared/chat-windows'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { commands, runCommand } from '../src/shared/commands/commands'
 
@@ -109,7 +110,18 @@ const PORT = 1
 const noop = () => {}
 const interactions = emitter<AgentInteractionRequest>()
 const interactionsClosed = emitter<AgentInteractionRequest>()
+// 「別ウィンドウで開く」: main's window registry, faked (opening reports the window like main does).
+const windowChanges = emitter<ChatWindowsChange>()
+const windowCalls = { opened: [] as string[], focused: [] as string[] }
 installElectronAPI({
+  openChatWindow: async (sessionId) => {
+    windowCalls.opened.push(sessionId)
+    windowChanges.emit({ windows: [{ companyId: 'preview-company', sessionId, status: { state: 'idle', line: '' } }] })
+    return { ok: true, focused: false }
+  },
+  focusChatWindow: async (sessionId) => { windowCalls.focused.push(sessionId); return true },
+  listChatWindows: async () => [],
+  onChatWindowsChanged: windowChanges.subscribe,
   getChatServerInfo: async () => ({ port: PORT, authToken: 'preview' }),
   getClaudeCodeStatus: async () => signedOut
     ? ({ available: false, authenticated: false, cliPath: null, version: null, error: 'Claude Code にログインしていません', checkedAt: now }) as never
@@ -212,6 +224,10 @@ const control = {
     interactions.emit({ id: `ask-${toolCallId}`, appSessionId: currentSessionId ?? '', kind: 'choices', agent: 'claude-code', toolCallId, questions })
   },
   answers: [] as Array<{ id: string; response: AgentInteractionResponse }>,
+  /** Consultations the chat asked main to open in / bring to the front of their own window. */
+  windows: windowCalls,
+  /** What main tells the main window about the other windows (statuses, one that closed). */
+  windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
   answered(id: string, response: AgentInteractionResponse) {

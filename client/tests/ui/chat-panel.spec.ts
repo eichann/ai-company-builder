@@ -19,6 +19,8 @@ type Control = {
   ask(toolCallId?: string): void
   answers: Array<{ id: string; response: unknown }>
   opened: string[]
+  windows: { opened: string[]; focused: string[] }
+  windowChanged(change: unknown): void
 }
 declare global { interface Window { __acbChat: Control } }
 
@@ -445,4 +447,55 @@ test('chat commands: a new consultation sends its message; inserted text waits i
   await page.waitForTimeout(300)
   await typed(page).toBe('来月の予算について')
   expect(await chatBodies()).toHaveLength(1)
+})
+
+// 「別ウィンドウで開く」: the main window's side (the window registry itself: tests/chat-windows.test.ts).
+test.describe('a consultation in its own window', () => {
+  const list = (page: Page) => page.getByRole('complementary', { name: 'AIへの相談' })
+  const row = (page: Page) => list(page).locator('[data-conversation-id="edit-history"]')
+  // The reply in the conversation (the list's row previews the same text).
+  const reply = (page: Page) => page.getByText('単価を10月版にしました。').and(page.locator('p:not(.truncate)'))
+  const status = (state: string, line: string, kind?: string) => ({ windows: [{ companyId: 'preview-company', sessionId: 'edit-history', status: { state, line, ...(kind ? { kind } : {}) } }] })
+
+  test('the row action moves it out of the main window; the list then marks it and brings that window to the front', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await expect(reply(page)).toBeVisible({ timeout: 15_000 })
+    await row(page).getByRole('button', { name: '別ウィンドウで開く' }).click()
+    await expect.poll(() => chat(page, c => c.windows.opened)).toEqual(['edit-history'])
+    // It left this window: a new consultation shows instead, never the same one twice.
+    await expect(reply(page)).toHaveCount(0)
+    await expect(row(page)).toContainText('別ウィンドウで表示中')
+    await expect(row(page).getByRole('button', { name: '別ウィンドウで開く' })).toHaveCount(0)
+    await row(page).getByRole('button', { name: /^見積書の相談/ }).click()
+    await expect.poll(() => chat(page, c => c.windows.focused)).toEqual(['edit-history'])
+    await expect(reply(page)).toHaveCount(0)
+  })
+
+  test('the other window\'s status drives the main list (AIが作業中, あなたの番), and a closed window returns it as an open consultation', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await expect(reply(page)).toBeVisible({ timeout: 15_000 })
+    await page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' }).click()
+    await expect(row(page)).toContainText('別ウィンドウで表示中')
+    await chat(page, c => c.windowChanged({ windows: [{ companyId: 'preview-company', sessionId: 'edit-history', status: { state: 'working', line: 'ファイルを読んでいます：営業部/見積書' } }] }))
+    await expect(list(page).getByRole('region', { name: 'AIが作業中' }).locator('[data-conversation-id="edit-history"]')).toContainText('ファイルを読んでいます：営業部/見積書')
+    await page.evaluate(change => window.__acbChat.windowChanged(change), status('needs-you', '出力形式を選んでください', 'question'))
+    await expect(list(page).getByRole('region', { name: 'あなたの番' }).locator('[data-conversation-id="edit-history"]')).toBeVisible()
+    await expect(list(page).getByText(/あなたの番\s*1/).first()).toBeVisible()
+    // The window closed: the consultation is back here, open, not shown in front.
+    await chat(page, c => c.windowChanged({ windows: [], closed: { companyId: 'preview-company', sessionId: 'edit-history' } }))
+    await expect(row(page)).toContainText('開いています')
+    await expect(row(page).getByRole('button', { name: '別ウィンドウで開く' })).toBeVisible()
+  })
+
+  test('while its AI works here, it cannot be moved (the turn would stop)', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+    await expect(reply(page)).toBeVisible({ timeout: 15_000 })
+    await send(page, '続けて')
+    await turnStarted(page)
+    await expect(page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' })).toBeDisabled()
+    await expect(row(page).getByRole('button', { name: '別ウィンドウで開く' })).toBeDisabled()
+    await chat(page, c => c.finish())
+    await expect(page.getByRole('banner').getByRole('button', { name: '別ウィンドウで開く' })).toBeEnabled()
+    expect(await chat(page, c => c.windows.opened)).toEqual([])
+  })
 })

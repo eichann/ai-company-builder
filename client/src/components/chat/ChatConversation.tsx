@@ -61,6 +61,10 @@ export interface ChatPanelChatProps {
   /** A chat command waiting for this tab (only the active tab gets one); consumed once acted on. */
   inputRequest?: ChatInputRequest | null
   onInputRequestConsumed?: () => void
+  /** 「別ウィンドウで開く」 for this conversation (the main window's chat). */
+  onOpenInWindow?: (sessionId: string) => void
+  /** Shown alone in a window of its own: no new-chat or list buttons (that window shows this one conversation). */
+  standalone?: boolean
 }
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
@@ -70,7 +74,7 @@ export type ChatInputRequest =
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const models = useAgentModelSelection(authMode, codexStatus)
@@ -308,10 +312,12 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
         models={models}
         modelLocked={modelLocked}
         onStop={stop}
-        onNewChat={onNewTab || (() => startNewChat())}
-        onToggleSidebar={onToggleSidebar}
+        onNewChat={standalone ? undefined : onNewTab || (() => startNewChat())}
+        onToggleSidebar={standalone ? undefined : onToggleSidebar}
         sidebarOpen={sidebarOpen}
         onShowSettings={onShowSettings}
+        onOpenInWindow={onOpenInWindow ? () => { if (currentSessionId) onOpenInWindow(currentSessionId) } : undefined}
+        openInWindowBlocked={running || !!pendingApproval || !!currentInteraction}
       />
       {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isActive} />}
 

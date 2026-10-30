@@ -33,6 +33,16 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'chat' },
   },
   {
+    // Shows the consultation in a window of its own (only the chat); one already
+    // shown in another window is brought to the front there.
+    id: 'chat.openInWindow', title: '別ウィンドウで開く', class: 'view',
+    args: z.object({
+      sessionId: z.string().min(1).describe('The consultation (conversation id)'),
+      pane: z.string().optional().describe('The chat pane that lists it; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
     id: 'layout.toggleChat', title: 'AIチャットの表示を切り替える', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
   },

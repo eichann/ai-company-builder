@@ -33,13 +33,29 @@ export function useChatTabs(companyId: string | undefined, newChatTitle: string)
     setActiveTabId(newTab.id)
   }, [newChatTitle])
 
-  const openSession = useCallback((sessionId: string) => {
+  /** `activate: false` adds it behind the shown one (a consultation back from its own window). */
+  const openSession = useCallback((sessionId: string, { activate = true }: { activate?: boolean } = {}) => {
     const existing = tabsRef.current.find(tab => tab.sessionId === sessionId)
-    if (existing) { setActiveTabId(existing.id); return }
+    if (existing) { if (activate) setActiveTabId(existing.id); return }
     const tab = newChatTab(newChatTitle, sessionId)
     tabsRef.current = [...tabsRef.current, tab]
     setTabs(tabsRef.current)
-    setActiveTabId(tab.id)
+    if (activate) setActiveTabId(tab.id)
+  }, [newChatTitle])
+
+  /**
+   * The consultation leaves this window (「別ウィンドウで開く」): its tab goes
+   * (unmounting saves it), the next one shows, or a new one when it was the last.
+   */
+  const detachSession = useCallback((sessionId: string) => {
+    const prev = tabsRef.current
+    const index = prev.findIndex(tab => tab.sessionId === sessionId)
+    if (index === -1) return
+    const next = prev.filter((_, i) => i !== index)
+    if (!next.length) next.push(newChatTab(newChatTitle))
+    tabsRef.current = next
+    setTabs(next)
+    setActiveTabId(current => next.some(tab => tab.id === current) ? current : next[Math.min(index, next.length - 1)].id)
   }, [newChatTitle])
 
   useEffect(() => {
@@ -127,5 +143,5 @@ export function useChatTabs(companyId: string | undefined, newChatTitle: string)
     safeWriteChatTabs(companyId, persistedChatTabs(tabs, activeTabId))
   }, [companyId, tabRestoredForId, tabs, activeTabId])
 
-  return { tabs, activeTabId, setActiveTabId, createNewTab, openSession, closeTab, tabCallbacks }
+  return { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks }
 }

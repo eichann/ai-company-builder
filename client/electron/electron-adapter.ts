@@ -3,10 +3,11 @@
 // voice-input.ts, the only code that imports Electron.
 
 import { pathToFileURL } from 'url'
-import { dialog, nativeImage, net, protocol, safeStorage, shell, type BrowserWindow, type WebContents } from 'electron'
+import { BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, shell, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
 import type { DesktopShell, WindowPort } from './features/ports'
+import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
 
@@ -60,6 +61,110 @@ export function createWindowPort(getWindow: () => BrowserWindow | null): WindowP
       const win = getWindow()
       if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, ...payload)
     },
+  }
+}
+
+/** Events to several windows at once (the main window and the consultation windows); dead ones are skipped. */
+export function createBroadcastPort(getWindows: () => Array<BrowserWindow | null | undefined>): WindowPort {
+  return {
+    send(channel, ...payload) {
+      for (const win of getWindows()) {
+        if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send(channel, ...payload)
+      }
+    },
+  }
+}
+
+export interface WindowBounds { x?: number; y?: number; width: number; height: number }
+
+/** Saved bounds only when they still lie on a connected display (a monitor may be gone); else only the size. */
+function usableBounds(saved: WindowBounds | undefined, fallback: WindowBounds): WindowBounds {
+  if (!saved || !(saved.width >= 420) || !(saved.height >= 480)) return fallback
+  const size = { width: Math.round(saved.width), height: Math.round(saved.height) }
+  if (typeof saved.x !== 'number' || typeof saved.y !== 'number') return size
+  const onScreen = screen.getAllDisplays().some(({ workArea: a }) =>
+    saved.x! < a.x + a.width - 80 && saved.x! + size.width > a.x + 80 && saved.y! >= a.y - 10 && saved.y! < a.y + a.height - 80)
+  return onScreen ? { ...size, x: Math.round(saved.x), y: Math.round(saved.y) } : size
+}
+
+/**
+ * Consultation windows (「別ウィンドウで開く」, features/chat-windows): the
+ * same page, preload and web preferences as the main window (`webPreferences`
+ * is the main window's, so the hardening is one copy), loaded with
+ * `?window=chat`; no other page, no popups. The last bounds are remembered.
+ */
+export function createChatWindowHost(options: {
+  webPreferences: () => WebPreferences
+  load: (win: BrowserWindow) => void
+  bounds: { load(): WindowBounds | undefined; save(bounds: WindowBounds): void }
+}) {
+  const windows = new Map<number, BrowserWindow>()
+  // Closes the app asks for (quitting, sign-out, the main window closed) do not ask the member.
+  let quitting = false
+  const forced = new Set<number>()
+  const host: ChatWindowHost = {
+    open({ title, confirmClose, onClosed }) {
+      const remembered = usableBounds(options.bounds.load(), { width: 760, height: 860 })
+      // Another window already sits where the last one was: step aside so both show.
+      const offset = windows.size * 28
+      const win = new BrowserWindow({
+        ...remembered,
+        ...(remembered.x !== undefined && remembered.y !== undefined ? { x: remembered.x + offset, y: remembered.y + offset } : {}),
+        minWidth: 420,
+        minHeight: 480,
+        title,
+        titleBarStyle: 'default',
+        show: false,
+        webPreferences: options.webPreferences(),
+      })
+      const id = win.webContents.id
+      windows.set(id, win)
+      win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }))
+      win.webContents.on('will-navigate', event => event.preventDefault())
+      win.once('ready-to-show', () => win.show())
+      let confirmed = false
+      win.on('close', event => {
+        try { options.bounds.save(win.getNormalBounds()) } catch { /* bounds are a convenience */ }
+        if (confirmed || quitting || forced.has(id)) return
+        const question = confirmClose()
+        if (!question) return
+        event.preventDefault()
+        void dialog.showMessageBox(win, {
+          type: 'warning', message: question.message, detail: question.detail,
+          buttons: ['閉じる', 'キャンセル'], defaultId: 1, cancelId: 1,
+        }).then(({ response }) => {
+          if (response !== 0 || win.isDestroyed()) return
+          confirmed = true
+          win.close()
+        })
+      })
+      win.on('closed', () => { windows.delete(id); forced.delete(id); onClosed() })
+      options.load(win)
+      return id
+    },
+    focus(windowId) {
+      const win = windows.get(windowId)
+      if (!win || win.isDestroyed()) return
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+    },
+    close(windowId) {
+      const win = windows.get(windowId)
+      if (!win || win.isDestroyed()) return
+      forced.add(windowId)
+      win.close()
+    },
+  }
+  return {
+    host,
+    /** The app is quitting: windows close without asking. */
+    quitting() { quitting = true },
+    webContents: (windowId: number): WebContents | undefined => {
+      const win = windows.get(windowId)
+      return win && !win.isDestroyed() ? win.webContents : undefined
+    },
+    windows: () => [...windows.values()],
   }
 }
 

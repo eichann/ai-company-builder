@@ -15,6 +15,7 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
+import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer } = require('electron')
@@ -248,6 +249,15 @@ const api: ElectronAPI = {
   // Chat server info (for useChat transport)
   getChatServerInfo: () => invoke('chat-server:getInfo'),
   onChatServerInfo: callback => subscribe('chat-server:info', callback),
+
+  // Consultations in windows of their own
+  openChatWindow: (sessionId: string, request: ChatWindowOpenRequest) => invoke('chatWindow:open', sessionId, request),
+  focusChatWindow: (sessionId: string) => invoke('chatWindow:focus', sessionId),
+  listChatWindows: () => invoke('chatWindow:list'),
+  closeChatWindows: () => invoke('chatWindow:closeAll'),
+  onChatWindowsChanged: callback => subscribe('chatWindow:changed', callback),
+  getChatWindowContext: () => invoke('chatWindow:getContext'),
+  reportChatWindowStatus: (status: ChatWindowStatus) => invoke('chatWindow:reportStatus', status),
 }
 
 // The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).

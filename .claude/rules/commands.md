@@ -63,6 +63,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `file.open` `{ path }` | view | `src/app/AppShell.tsx`: files tab, opens and keeps the tab (as Cmd+P's choice) | a review request's files (`ReviewRequestCard.tsx`; shown as links only while a handler exists, `useCommandAvailable`) |
 | `chat.newConsultation` `{ message?, pane? }` | outbound (the message starts the AI) | each chat pane (`ChatPanel.tsx`, target = its layout leaf id, today `chat`) | a skill's 実行 (`features/skills/hooks/useSkillsTab.ts`, message `/<skill folder> `) |
 | `chat.insertText` `{ text, pane? }` | local (replaces the composer's text, sends nothing) | each chat pane | none yet |
+| `chat.openInWindow` `{ sessionId, pane? }` | view (shows it in a window of its own; one shown elsewhere is focused) | each chat pane (`ChatPanel.tsx`, `useMoveToWindow`) | none yet; the row and header buttons call the same function directly (`chat-ui-and-history.md`) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button calls the same function directly |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
 | `search.show` ⌘⇧F (app) | view | `AppShell.tsx`: the 検索 left tab, cursor in its box | the shortcut |

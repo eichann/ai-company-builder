@@ -85,6 +85,8 @@ export interface MainHarness {
   logs: string[]
   /** ipcRenderer.invoke: the handler's result (a rejection if it throws). */
   invoke<T = unknown>(channel: string, ...args: unknown[]): Promise<T>
+  /** ipcRenderer.invoke from a given window's page (another window than the main one). */
+  invokeAs<T = unknown>(sender: FakeWebContents, channel: string, ...args: unknown[]): Promise<T>
   /** ipcRenderer.sendSync: event.returnValue. */
   sendSync<T = unknown>(channel: string, ...args: unknown[]): T
   /** ipcRenderer.send: runs the ipcMain.on listeners (they may throw). */
@@ -140,6 +142,11 @@ export async function loadMain(options: { config?: Record<string, unknown> } = {
       const handler = fake.handlers.get(channel)
       if (!handler) throw new Error(`No handler registered for '${channel}'`)
       return await handler(eventFor(), ...args) as T
+    },
+    async invokeAs<T>(sender: FakeWebContents, channel: string, ...args: unknown[]): Promise<T> {
+      const handler = fake.handlers.get(channel)
+      if (!handler) throw new Error(`No handler registered for '${channel}'`)
+      return await handler({ sender }, ...args) as T
     },
     sendSync<T>(channel: string, ...args: unknown[]): T {
       const event = eventFor()

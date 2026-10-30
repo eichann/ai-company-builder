@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { Sparkle, GearSix, CircleNotch, Plus, SidebarSimple, X, MarkdownLogo } from '@phosphor-icons/react'
+import { Sparkle, GearSix, CircleNotch, Plus, SidebarSimple, X, MarkdownLogo, ArrowSquareOut } from '@phosphor-icons/react'
 import type { AuthMode, CodexStatus } from '../../../shared/agent'
 import { agentShortLabel } from '../../../shared/agents/registry'
 import { hasRateLimits } from '../../../shared/rate-limits'
@@ -16,10 +16,15 @@ interface ChatHeaderProps {
   /** A turn is in flight: the model cannot change. */
   modelLocked: boolean
   onStop: () => void
-  onNewChat: () => void
-  onToggleSidebar: () => void
+  /** Absent in a consultation's own window (it shows that one conversation). */
+  onNewChat?: () => void
+  onToggleSidebar?: () => void
   sidebarOpen: boolean
   onShowSettings: () => void
+  /** 「別ウィンドウで開く」; absent where it does not apply (a new conversation, its own window). */
+  onOpenInWindow?: () => void
+  /** The AI works or waits for an answer: moving now would stop it. */
+  openInWindowBlocked?: boolean
 }
 
 /**
@@ -29,7 +34,7 @@ interface ChatHeaderProps {
  * settings. It owns its width observation, so a resize re-renders only the
  * header, not the conversation.
  */
-export function ChatHeader({ authMode, status, codexStatus, models, modelLocked, onStop, onNewChat, onToggleSidebar, sidebarOpen, onShowSettings }: ChatHeaderProps) {
+export function ChatHeader({ authMode, status, codexStatus, models, modelLocked, onStop, onNewChat, onToggleSidebar, sidebarOpen, onShowSettings, onOpenInWindow, openInWindowBlocked }: ChatHeaderProps) {
   const { t } = useTranslation()
   const { aiModel, setAIModel, aiEffort, setAIEffort, codexModel, selectedCodexEffort } = models
   const chatMarkdownRender = useAppStore((state) => state.chatMarkdownRender)
@@ -149,18 +154,34 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
           <MarkdownLogo size={16} weight={chatMarkdownRender ? 'fill' : 'regular'} />
         </button>
 
-        {/* New Chat/Tab Button */}
-        <button
-          onClick={onNewChat}
-          className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
-          title={t('chat.newChat')}
-        >
-          <Plus size={16} className="text-gray-500 dark:text-zinc-400" />
-        </button>
+        {onOpenInWindow && (
+          <button
+            onClick={onOpenInWindow}
+            disabled={openInWindowBlocked}
+            aria-label="別ウィンドウで開く"
+            title={openInWindowBlocked ? 'AIの作業が終わってから別ウィンドウで開けます' : '別ウィンドウで開く'}
+            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            <ArrowSquareOut size={16} className="text-gray-500 dark:text-zinc-400" />
+          </button>
+        )}
 
-        <button onClick={onToggleSidebar} aria-label="AIへの相談の一覧を開閉" aria-expanded={sidebarOpen} title="AIへの相談の一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
-          <SidebarSimple size={16} />
-        </button>
+        {/* New Chat/Tab Button */}
+        {onNewChat && (
+          <button
+            onClick={onNewChat}
+            className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors"
+            title={t('chat.newChat')}
+          >
+            <Plus size={16} className="text-gray-500 dark:text-zinc-400" />
+          </button>
+        )}
+
+        {onToggleSidebar && (
+          <button onClick={onToggleSidebar} aria-label="AIへの相談の一覧を開閉" aria-expanded={sidebarOpen} title="AIへの相談の一覧" className="w-8 h-8 flex-shrink-0 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 flex items-center justify-center">
+            <SidebarSimple size={16} />
+          </button>
+        )}
 
         {/* Settings Button */}
         <button
