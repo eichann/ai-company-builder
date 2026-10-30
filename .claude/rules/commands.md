@@ -85,8 +85,9 @@ focus area (`commandArea('chat', paneId)`). UI test: `tests/ui/chat-panel.spec.t
   `document` keydown listeners for app shortcuts; dialog-local Escape handlers stay where they are.
 - Still window-wide listeners (not commands yet; each fires for the one editor / active chat
   tab there is today, and must become an area shortcut before a second editor or chat pane):
-  the editor's ⌘S save (`features/editor/components/TabbedEditorPanel.tsx`, `window`), ⌘⇧M preview / edit and ⌘F search in
-  a Markdown preview (`document`, capture); voice input's start / stop key (member-configurable,
+  the editor's ⌘S save (`features/editor/hooks/useFileSaving.ts`, `window`), ⌘⇧M preview / edit
+  (`useMarkdownView.ts`, `document`) and ⌘F search in a Markdown preview (`usePreviewSearch.ts`,
+  `document`, capture); voice input's start / stop key (member-configurable,
   `VoiceInputControl.tsx`, capture, with its own Escape and dialog checks). Dialog-local Escape
   handlers (`ConfirmDialog`, `InputDialog`, `ContextMenu`, `DiffViewer`, `FileSearchModal`,
   `SyncPreviewDialog`, `SettingsPanel`) stay where they are.
