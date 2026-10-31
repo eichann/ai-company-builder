@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react'
-import { isPerfCutEnabled, perfMark } from '../../../lib/perfDiagnostics'
-import { subscribeFileChanges } from '../../../lib/fileEvents'
+import { isPerfCutEnabled, perfMark } from '../../../shared/lib/perfDiagnostics'
+import { subscribeFileChanges } from '../../../shared/lib/fileEvents'
 import { isReviewSidecarFile } from '../../doc-review/model'
 import { readDirectory, readDirectoryTree } from '../api'
 import {

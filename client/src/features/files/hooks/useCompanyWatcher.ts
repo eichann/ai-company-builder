@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { isPerfCutEnabled, perfMark } from '../../../lib/perfDiagnostics'
+import { isPerfCutEnabled, perfMark } from '../../../shared/lib/perfDiagnostics'
 import { unwatchCompany, watchCompany } from '../../../shared/ipc/file-events'
 
 /**

@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { matchesVoiceShortcut, voiceShortcut } from '../../../lib/voiceShortcut'
+import { matchesVoiceShortcut, voiceShortcut } from '../../voice/voiceShortcut'
 import { commands, runCommand } from '../../../shared/commands/commands'
 
 /**

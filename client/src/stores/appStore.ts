@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import i18n from '../i18n'
 import type { CompanyView } from '../types'
 import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
-import { MODEL_EFFORT_OPTIONS as EFFORTS_OF_MODEL, resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../lib/aiModels'
+import { MODEL_EFFORT_OPTIONS as EFFORTS_OF_MODEL, resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../shared/lib/aiModels'
 
 // Theme type
 export type Theme = 'light' | 'dark'
@@ -11,8 +11,8 @@ export type Theme = 'light' | 'dark'
 export type Language = 'en' | 'ja'
 
 // Models, effort levels and the defaults for members who have not chosen: lib/aiModels.ts.
-export type { AIModel, AIEffort } from '../lib/aiModels'
-export { MODEL_EFFORT_OPTIONS, MODEL_LABELS, CLAUDE_MODELS } from '../lib/aiModels'
+export type { AIModel, AIEffort } from '../shared/lib/aiModels'
+export { MODEL_EFFORT_OPTIONS, MODEL_LABELS, CLAUDE_MODELS } from '../shared/lib/aiModels'
 
 const readSaved = (key: string): string | null => {
   try { return typeof window !== 'undefined' ? localStorage.getItem(key) : null } catch { return null }

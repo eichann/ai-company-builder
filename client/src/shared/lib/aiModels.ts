@@ -3,7 +3,7 @@
 // models themselves live in the agent registry (shared/agents/registry.ts);
 // this is the renderer's view of the Claude Code entry.
 
-import { AGENTS, AGENT_EFFORTS, type AgentEffort, type ClaudeModelId } from '../../shared/agents/registry'
+import { AGENTS, AGENT_EFFORTS, type AgentEffort, type ClaudeModelId } from '../../../shared/agents/registry'
 
 export type AIModel = ClaudeModelId
 

@@ -1,6 +1,6 @@
 import { useId, useState } from 'react'
 import { Info } from '@phosphor-icons/react'
-import { AGENT_LOG_NOTICE_MORE, AGENT_LOG_NOTICE_TEXT, markAgentLogNoticeSeen, shouldShowAgentLogNotice } from '../../../lib/agentLogNotice'
+import { AGENT_LOG_NOTICE_MORE, AGENT_LOG_NOTICE_TEXT, markAgentLogNoticeSeen, shouldShowAgentLogNotice } from '../../../shared/lib/agentLogNotice'
 
 // One-time notice over the chat (per account on this PC): the AI action log
 // is sent to the company's administrators. Non-modal: the chat stays usable;

@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { computeLineDiff, type DiffLine } from '../src/lib/line-diff'
+import { computeLineDiff, type DiffLine } from './line-diff'
 
 /** The old full-table LCS (what MarkdownReview used): the reference for small inputs. */
 function naiveLcsLength(a: string[], b: string[]): number {

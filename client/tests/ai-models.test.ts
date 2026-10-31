@@ -1,6 +1,7 @@
+// Stays in client/tests/: it names model ids, which agent-registry.test.ts allows nowhere in src/.
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { DEFAULT_AI_EFFORT, DEFAULT_AI_MODEL, MODEL_EFFORT_OPTIONS, resolveSavedEffort, resolveSavedModel } from '../src/lib/aiModels'
+import { DEFAULT_AI_EFFORT, DEFAULT_AI_MODEL, MODEL_EFFORT_OPTIONS, resolveSavedEffort, resolveSavedModel } from '../src/shared/lib/aiModels'
 
 test('defaults: Opus 5.5 + medium for members who never chose; saved choices win', () => {
   assert.equal(DEFAULT_AI_MODEL, 'opus-5-5')

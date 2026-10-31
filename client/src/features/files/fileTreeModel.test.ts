@@ -7,7 +7,7 @@ import {
   type FileTreeIO,
   type RawDirEntry,
 } from './fileTreeModel'
-import { clearKnownFolders, folderExistsFor, rememberFolderExists } from '../../lib/folderExists'
+import { clearKnownFolders, folderExistsFor, rememberFolderExists } from '../../shared/lib/folderExists'
 
 const R = '/co/営業部'
 

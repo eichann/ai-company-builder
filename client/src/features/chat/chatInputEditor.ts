@@ -2,7 +2,7 @@ import { history, historyKeymap } from '@codemirror/commands'
 import { Compartment, EditorState, type Extension } from '@codemirror/state'
 import { EditorView, keymap, placeholder as codeMirrorPlaceholder } from '@codemirror/view'
 import { ghostSuggestion } from './ghostSuggestion'
-import { isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../lib/perfDiagnostics'
+import { isPerfDiagnosticsEnabled, perfMark, perfMeasure } from '../../shared/lib/perfDiagnostics'
 
 /** The parts of the composer's editor that change after it is made. */
 export interface ChatInputCompartments {

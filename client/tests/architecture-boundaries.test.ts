@@ -263,6 +263,11 @@ test('a renderer feature never imports another feature', () => {
 
 const sharedMayImport = (t: string) => !/^src\/(features|app)(\/|$)/.test(t)
 
+// The folders by kind were emptied into features/ and shared/ (refactor 5-6); new code goes there.
+test('the renderer has no folders by kind (components/, hooks/, lib/, utils/) again', () => {
+  assert.deepEqual(['components', 'hooks', 'lib', 'utils'].filter(name => existsSync(join(CLIENT, 'src', name))), [])
+})
+
 test('renderer src/shared never imports src/features or src/app', () => {
   const files = sourceFiles(join(CLIENT, 'src', 'shared'), { tests: true })
   assert.deepEqual(violations(files, sharedMayImport), [])

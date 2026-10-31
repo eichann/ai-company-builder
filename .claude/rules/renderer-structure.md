@@ -5,8 +5,8 @@ paths:
 
 # Renderer structure (`client/src`): where code goes
 
-The renderer is being moved, gradually, from folders by kind (`components/`, `hooks/`, `lib/`)
-to folders by feature. The goal is that an agent finds what to touch from the folder name alone
+The renderer was moved (2026-10, refactor phases 2–5) from folders by kind (`components/`,
+`hooks/`, `lib/`) to folders by feature. The goal is that an agent finds what to touch from the folder name alone
 and does not read hundreds of unrelated lines to change one thing. Area rules (what the code must
 do) stay in their own files — `files-and-editor.md`, `chat-ui-and-history.md`,
 `download-choices.md`, `private-folders-client.md`, … — this file says only where code lives.
@@ -40,17 +40,13 @@ folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do
 not call it `review`: in the app "review" already means 「確認をお願いする」 (`request_review`,
-`ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`), which belongs to `chat`.
+`ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`), which belongs to `chat`.
 
-## Legacy folders
+## No legacy folders
 
-`lib/` is legacy (`components/` and `src/hooks/` were emptied into `features/` and `shared/`,
-refactor 5-6).
-
-- New features and new modules of a feature go to `features/<name>/` (or `shared/`), never into a
-  legacy folder.
-- A small change to a legacy file stays in place. Move a legacy area when you are about to change
-  it substantially, in its own move-only PR first (below).
+`components/`, `hooks/`, `lib/` and `utils/` were emptied into `features/` and `shared/` and
+deleted (refactor 5-6). Do not create them again: new code goes to `features/<name>/` or
+`shared/` (`app/`, `stores/`, `i18n/`, `types/` as in the layout above).
 
 ## Principles
 
@@ -84,7 +80,7 @@ refactor 5-6).
 6. **One hook per `use*.ts` file, in its owner's `hooks/`.** A hook lives in the `hooks/` of
    the feature that uses it; only a hook two or more features use goes to `shared/hooks/` (the
    skeleton `app/` does not count as a feature). Do not gather all hooks in one folder, and do
-   not export a hook from a file named otherwise (`lib/fileVersions.ts` keeps the store,
+   not export a hook from a file named otherwise (`shared/lib/fileVersions.ts` keeps the store,
    `features/editor/hooks/useFileVersion.ts` the hook), so a hook is found by its file name.
    Exceptions, kept in the file of their mechanism: a store's selector hooks (`useAppStore`,
    `agentStatusStore.ts`, `consultationStatusStore.ts`) and the command registry's hooks

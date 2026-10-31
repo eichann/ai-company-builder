@@ -1,4 +1,4 @@
-import { voiceShortcut, formatVoiceShortcut } from '../../../lib/voiceShortcut'
+import { voiceShortcut, formatVoiceShortcut } from '../../voice/voiceShortcut'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { useCommandHandler } from '../../../shared/commands/commands'
 import { useEventListener } from '../../../shared/hooks/useEventListener'
@@ -6,8 +6,8 @@ import { useInterval } from '../../../shared/hooks/useInterval'
 import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { useVoiceShortcut } from '../hooks/useVoiceShortcut'
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
-import { microphoneSelection, deviceFailureMessage } from '../../../lib/microphoneSelection'
-import { voiceAvailability, recheckView } from '../../../lib/voiceAvailability'
+import { microphoneSelection, deviceFailureMessage } from '../../voice/microphoneSelection'
+import { voiceAvailability, recheckView } from '../../voice/voiceAvailability'
 import { cancelRecording, onVoiceEvent, startRecording, stopRecording } from '../../voice/api'
 
 export interface VoiceEditor {

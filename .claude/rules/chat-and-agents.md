@@ -22,7 +22,7 @@ paths:
   - "client/shared/prompt-suggestion.ts"
   - "client/shared/rate-limits.ts"
   - "client/shared/agent*.ts"
-  - "client/src/lib/aiModels.ts"
+  - "client/src/shared/lib/aiModels.ts"
   - "client/src/features/chat/components/ChoicePrompt.tsx"
   - "client/src/features/chat/components/RateLimitMeter.tsx"
   - "client/src/features/chat/promptSuggestion.ts"
@@ -176,7 +176,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - `agentProgressSummaries: true`: the running subagent row shows the latest
   `task_progress.summary` (`tool_use_id` = the Agent call). Codex has no subagent rows.
 - Defaults for members who never chose come from the registry (Opus 5.5 + effort medium;
-  `src/lib/aiModels.ts` is a view of the Claude Code entry); only an explicit choice is saved;
+  `src/shared/lib/aiModels.ts` is a view of the Claude Code entry); only an explicit choice is saved;
   Codex keeps its own default effort.
 - Settings sources are `['user', 'project']`; that is why shared agent config is protected at
   push (`push-check.md`).
@@ -222,7 +222,7 @@ Types and answer mapping: `client/shared/choice-prompt.ts`; glue: `agents/choice
 ## 「確認をお願いする」 (the AI hands its work to the member and stops)
 
 `client/shared/review-request.ts` (limits, paths, the record), `electron/review/tools.ts` (the
-tool), renderer `ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`.
+tool), renderer `ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`.
 
 - The app tool `request_review` on MCP server `acb_review` (`mcp__acb_review__request_review`):
   Claude Code gets it as an in-process SDK MCP server (in `allowedTools`, auto-allowed in
@@ -282,7 +282,7 @@ tool), renderer `ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`.
   The chat server logs only whether a suggestion came, never its text.
 - `agents/recovery.ts` lets the native model finish when its stream ends normally: the provider
   keeps reading after closing the stream, and aborting there killed the CLI before the suggestion.
-- Settings → 入力候補 「次の質問の候補を表示する」 (`src/lib/promptSuggestionSetting.ts`, on by
+- Settings → 入力候補 「次の質問の候補を表示する」 (`src/shared/lib/promptSuggestionSetting.ts`, on by
   default): off → requests send `promptSuggestions: false` and the CLI is not asked.
 - Shown as ghost text in the empty, idle input with no card/approval waiting. → or Tab (caret at
   the end) accepts; Enter stays a newline, ⌘+Enter sends; typing along keeps the rest; anything

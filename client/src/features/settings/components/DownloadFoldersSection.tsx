@@ -9,7 +9,7 @@ import { CaretRight, FolderSimple, FolderSimpleDashed, Lock, MagnifyingGlass, Sp
 import { useSparseCheckout } from '../../../shared/hooks/useSparseCheckout'
 import { findUncommittedChanges, getFolderSizes, onDownloadProgress } from '../api'
 import type { DepartmentConfig } from '../../../types'
-import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../../lib/download-selection'
+import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../../shared/lib/download-selection'
 import { normalizeExclusions, pathKey } from '../../../../shared/sparse-paths'
 import { Button, Callout, Card, IndeterminateBar, SectionHeader, TriCheckbox, UsageBar } from '../../../shared/ui/primitives'
 

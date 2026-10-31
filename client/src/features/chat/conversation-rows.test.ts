@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildConversationRows, paginateConversationRows } from '../src/lib/conversationRows'
-import type { ChatSessionSummary } from '../shared/chat-history'
+import { buildConversationRows, paginateConversationRows } from './conversationRows'
+import type { ChatSessionSummary } from '../../../shared/chat-history'
 const session = (id: string, extra: Partial<ChatSessionSummary> = {}): ChatSessionSummary => ({ id, companyId: 'company', title: id, messageCount: 0, preview: '', createdAt: '2026-01-01', updatedAt: '2026-01-01', ...extra })
 test('open conversations appear once, ahead of pinned and closed history', () => {
   const sessions = [session('open'), session('pinned', { pinned: true }), session('closed')]

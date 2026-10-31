@@ -4,7 +4,7 @@ import { CodeMirrorChatInput } from './CodeMirrorChatInput'
 import { LegacyTextareaChatInput } from './LegacyTextareaChatInput'
 import { ComposerAttachments } from './ComposerAttachments'
 import type { SlashCommandItem } from './SlashCommandDropdown'
-import { isPerfCutEnabled } from '../../../lib/perfDiagnostics'
+import { isPerfCutEnabled } from '../../../shared/lib/perfDiagnostics'
 import { useComposerAttachments } from '../hooks/useComposerAttachments'
 import type { ChatInputApi } from '../hooks/useChatDraft'
 

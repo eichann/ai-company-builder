@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef } from 'react'
-import { isChatInputRecentlyActive } from '../../../lib/chatInputActivity'
-import { subscribeFileChanges } from '../../../lib/fileEvents'
-import { perfMark } from '../../../lib/perfDiagnostics'
+import { isChatInputRecentlyActive } from '../../../shared/lib/chatInputActivity'
+import { subscribeFileChanges } from '../../../shared/lib/fileEvents'
+import { perfMark } from '../../../shared/lib/perfDiagnostics'
 import { scanAffected, skillsScopesAffected } from '../../../../shared/skills-refresh'
 
 const SKILLS_MAX_DEFER_COUNT = 4

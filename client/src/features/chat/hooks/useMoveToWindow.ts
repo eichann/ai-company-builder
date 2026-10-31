@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { flushSync } from 'react-dom'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../../../../shared/chat-windows'
-import type { ConsultationStatus } from '../../../lib/consultationStatus'
+import type { ConsultationStatus } from '../consultationStatus'
 import { focusChatWindow, getChatSession, openChatWindow } from '../api'
 import { canMoveToWindow, MOVE_WHILE_WORKING } from '../chatWindows'
 

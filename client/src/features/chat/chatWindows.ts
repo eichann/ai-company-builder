@@ -2,8 +2,8 @@
 // window shows is listed as open (with that window's status, so あなたの番 /
 // AIが作業中 / 新着 still count it), never as 終わったもの, and never mounted here.
 import { closeStopsTheAI, type ChatWindowStatus } from '../../../shared/chat-windows'
-import type { ConsultationStatus } from '../../lib/consultationStatus'
-import type { ConversationTab } from '../../lib/conversationRows'
+import type { ConsultationStatus } from './consultationStatus'
+import type { ConversationTab } from './conversationRows'
 
 const WINDOW_TAB = 'window:'
 

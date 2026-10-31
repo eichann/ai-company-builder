@@ -12,9 +12,9 @@ paths:
   - "client/electron/features/company-setup/**"
   - "client/src/features/settings/**"
   - "client/src/features/company/components/CompanySelector.tsx"
-  - "client/src/lib/download-selection.ts"
+  - "client/src/shared/lib/download-selection.ts"
   - "client/src/features/company/folderPlan.ts"
-  - "client/src/lib/restore-company.ts"
+  - "client/src/features/company/restore-company.ts"
   - "client/src/shared/hooks/useSparseCheckout.ts"
   - "client/src/shared/lib/exclusionChanges.ts"
   - "client/src/features/sync/hooks/useDepartmentDownload.ts"
@@ -61,7 +61,7 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
 - The setup screen shows bytes received (`setup:progress`, same pack-size watcher as
   `sparse:progress`); reopening a clone does not say 「初回」.
 - After login the remembered company (`localStorage lastCompany:<userId>`) opens directly:
-  `src/lib/restore-company.ts` registers its folder as an allowed root **before** `fs:exists`
+  `src/features/company/restore-company.ts` registers its folder as an allowed root **before** `fs:exists`
   (main answers only for registered roots; checking first always said "missing").
 
 ## Partial clone
@@ -122,7 +122,7 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   every blob). `git:folderSizes` (`sync/folder-sizes.ts`) falls back to local trees (names only,
   `offline: true`) and adds readable private folders (no size). `git:sparseSetExclusions`
   reports bytes arriving in `.git/objects/pack` as `sparse:progress`.
-- `client/src/features/settings/components/DownloadFoldersSection.tsx` (logic `src/lib/download-selection.ts`):
+- `client/src/features/settings/components/DownloadFoldersSection.tsx` (logic `src/shared/lib/download-selection.ts`):
   tri-state tree (one level per expand) with sizes; summary
   「6.5 GB をダウンロード済み（全体 10.4 GB）」 + bar + size after applying; search over loaded
   folders; sticky footer — changes are a draft until 適用 (取り消す drops it); applying asks

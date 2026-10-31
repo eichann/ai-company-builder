@@ -15,7 +15,7 @@
 // tests (tests/ui/skill-layout.spec.ts) act as the AI / a teammate and see
 // which calls the screen made.
 import { createRoot } from 'react-dom/client'
-import { markAgentLogNoticeSeen } from '../src/lib/agentLogNotice'
+import { markAgentLogNoticeSeen } from '../src/shared/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'

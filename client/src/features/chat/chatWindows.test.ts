@@ -2,8 +2,8 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { ChatSessionSummary } from '../../../shared/chat-history'
 import type { ChatWindowStatus } from '../../../shared/chat-windows'
-import { buildConversationRows } from '../../lib/conversationRows'
-import { groupConversationRows, type ConsultationStatus } from '../../lib/consultationStatus'
+import { buildConversationRows } from './conversationRows'
+import { groupConversationRows, type ConsultationStatus } from './consultationStatus'
 import { canMoveToWindow, statusOfTab, windowTabs } from './chatWindows'
 
 const summary = (id: string, title: string): ChatSessionSummary => ({

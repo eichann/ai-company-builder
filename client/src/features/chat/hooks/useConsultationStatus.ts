@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { UIMessage } from 'ai'
 import type { AgentInteraction } from '../../../../shared/agent-interaction'
-import { deriveConsultationStatus, runningSubagentId } from '../../../lib/consultationStatus'
+import { deriveConsultationStatus, runningSubagentId } from '../consultationStatus'
 import { useAgentProgress } from '../agentStatusStore'
 import { clearConsultationStatus, publishConsultationStatus } from '../consultationStatusStore'
 

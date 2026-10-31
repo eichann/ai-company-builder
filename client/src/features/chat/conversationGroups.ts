@@ -1,4 +1,4 @@
-import { CONVERSATION_GROUPS, type ConversationGroupKey } from '../../lib/consultationStatus'
+import { CONVERSATION_GROUPS, type ConversationGroupKey } from './consultationStatus'
 
 // Which groups of the 「AIへの相談」 list the member folded, remembered per company
 // in localStorage. A convenience only: anything unreadable means "all open".

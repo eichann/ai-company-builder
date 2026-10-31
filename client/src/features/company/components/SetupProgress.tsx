@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react'
 import { Check, CheckCircle, FolderOpen, GitBranch, SpinnerGap } from '@phosphor-icons/react'
-import { formatBytes } from '../../../lib/download-selection'
+import { formatBytes } from '../../../shared/lib/download-selection'
 import type { SetupKind, SetupStep } from '../model'
 
 /** The setup screen: a first download says it can take a while and shows the bytes received. */

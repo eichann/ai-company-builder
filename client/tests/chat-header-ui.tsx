@@ -1,5 +1,5 @@
 import { createRoot } from 'react-dom/client'
-import { markAgentLogNoticeSeen } from '../src/lib/agentLogNotice'
+import { markAgentLogNoticeSeen } from '../src/shared/lib/agentLogNotice'
 import '../src/i18n'
 import '../src/index.css'
 import { ChatPanel } from '../src/features/chat/components/ChatPanel'

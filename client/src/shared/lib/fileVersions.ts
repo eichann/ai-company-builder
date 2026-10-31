@@ -5,7 +5,7 @@
  * same name (the AI rewrites an image, or writes a temp file and renames it
  * over) is fetched again instead of served from Chromium's image cache.
  */
-import { normalizePathSeparators } from '../shared/lib/path'
+import { normalizePathSeparators } from './path'
 
 const keyOf = (p: string) => normalizePathSeparators(p).replace(/\/+$/, '')
 
