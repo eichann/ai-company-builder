@@ -34,8 +34,10 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 `src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
 per-agent model pickers, buttons; owns its width observer), `ChatMessageList.tsx`
-(`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`, CodeMirror
-/ legacy input, image previews), `ToolApprovalBanner.tsx`, `QueuedSendList.tsx`,
+(`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`: voice input,
+dropped files and images in `ComposerAttachments.tsx`, and the text input
+`CodeMirrorChatInput.tsx` — its editor setup in `chatInputEditor.ts` — or the debug
+`LegacyTextareaChatInput.tsx`), `ToolApprovalBanner.tsx`, `QueuedSendList.tsx`,
 `ChatAuthGate.tsx`, `ChatAuthSettings.tsx`. Per-agent UI (sign-in cards, model pickers) is the
 one place an added agent brings its own controls; everything else asks the registry (`agentCan`).
 
@@ -44,10 +46,18 @@ one place an added agent brings its own controls; everything else asks the regis
   `useAttachToLatestUserMessage`, `useChatHistory`, `useTitleGeneration`, `useAgentInteractions`
   + `useToolApprovals`, `useSteering` + `useQueuedSendFlush`, `usePromptSuggestion`,
   `useStreamingChat` + `useRateLimitsRefresh`, `useChatAutoScroll`, `useConsultationStatus`, `useAgentModelSelection`,
-  `useChatTabs`, `useAgentAuth`, `useChatServer`.
+  `useChatTabs`, `useAgentAuth`, `useChatServer`; the composer's `useComposerAttachments` and
+  `useSlashCommands`.
+- The composer's input fills `apiRef` (`ChatInputApi` in `useChatDraft.ts`, through
+  `useImperativeHandle`); the conversation writes drafts, voice text and `chat.insertText`
+  (`replaceText`) through it. The CodeMirror editor is made once and reads props through
+  `useLatestRef` (`src/shared/hooks/`); only editability, placeholder and suggestion are pushed in.
+  `useComposerAttachments` reports the attachment count when it changes (`onAttachmentsChange`,
+  read when the member leaves a tab). Tests: `tests/ui/chat-composer.spec.ts`.
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the active tab as
-  `inputRequest` (`commands.md`); there is no store field for chat input.
+  `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
+  chat input.
 - Order inside `ChatPanelChat` matters: `useConversation`, `useChatDraft`,
   `useChatRequestContext`, `useMessageAttachments`, `useChatTransport`, `usePromptSuggestion`
   and `useSteering` run before `useChat` (the transport and onFinish read their refs or report

@@ -287,15 +287,20 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
     requestChanges: () => chatInputApiRef.current?.focus(),
   }), [pendingReviewId, handleSend, chatInputApiRef])
 
-  // chat.newConsultation (e.g. a skill's 実行): a new conversation, then its message is sent. Waits for the history.
+  // chat.insertText: the text goes into the composer. chat.newConsultation (e.g. a skill's 実行):
+  // a new conversation, then its message is sent; waits for the history.
   useEffect(() => {
+    if (isActive && inputRequest?.kind === 'insertText') {
+      if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
+      return
+    }
     if (!isActive || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
     const message = inputRequest.message
     onInputRequestConsumed?.()
     startNewChat().then(started => {
       if (started && message) void handleSend(message)
     })
-  }, [inputRequest, isRestoringSession])
+  }, [inputRequest, isRestoringSession, isActive, chatInputApiRef])
 
   // Edit message handler: resend from the edited message onward (sendTurn),
   // keeping the edited message's file references.
@@ -398,8 +403,6 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
             hint={offeredSuggestion ? t('chat.suggestionHint') : t('chat.inputHint')}
             onCompositionStateChange={handleInputCompositionStateChange}
             onInputActivity={handleInputActivity}
-            pendingText={isActive && inputRequest?.kind === 'insertText' ? inputRequest.text : null}
-            onPendingTextConsumed={onInputRequestConsumed}
             slashCommands={slashCommands}
             apiRef={chatInputApiRef}
             suggestion={offeredSuggestion}

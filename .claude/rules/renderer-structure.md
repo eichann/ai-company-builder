@@ -133,7 +133,8 @@ owner-approved reduction, refactor stage 3); most belong elsewhere. Sort each on
   listeners, timers, observers, a third-party widget (CodeMirror), writing to an external store.
   Legitimate. Prefer the small shared hooks in `src/shared/hooks/` once they exist
   (`useIpcEvent`, `useEventListener`, `useInterval`, …) over a hand-written effect; a focus on
-  mount is `autoFocus`.
+  mount is `autoFocus`. These generic hooks live in `shared/hooks/` even before a second feature
+  uses them.
 - **B. Derived state** — a value computed from props / state and stored with `setState` in an
   effect: compute it during render (`useMemo` only when it is expensive).
 - **C. Chains that react to state to trigger an action** (save when the status turns ready,
@@ -145,7 +146,8 @@ owner-approved reduction, refactor stage 3); most belong elsewhere. Sort each on
   open) instead of clearing state in an effect.
 
 New effects only for category A, preferably through the shared hooks. Also avoid an effect that
-only copies the latest value into a ref (`xRef.current = x`). `architecture-boundaries.test.ts`
+only copies the latest value into a ref (`xRef.current = x`): use `useLatestRef`
+(`src/shared/hooks/useLatestRef.ts`); a parent's handle on a child is `useImperativeHandle`. `architecture-boundaries.test.ts`
 caps the `useEffect(` calls in `client/src` (tests excluded) at today's count
 (`MAX_USE_EFFECTS`): lower it when you remove effects, never raise it.
 
