@@ -6,6 +6,8 @@
  * company, and every statement is limited to the handle's company.
  */
 
+import type { LedgerEntry } from '../../shared/core/record-ledger'
+
 /** A repository the index reads: the company repository, or one private folder's (by scope id). */
 export type RecordRepoKey = 'company' | `scope:${string}`
 
@@ -109,6 +111,15 @@ export interface RecordRepository {
   replaceLinks(sourceId: string, links: RecordLinkRow[]): void
 
   states(ids: string[]): RecordStateRow[]
+  /**
+   * Write a record's server state if its version is still `expectedVersion`
+   * (0 = no state yet). false = someone changed it first (nothing written).
+   */
+  writeState(row: RecordStateRow, expectedVersion: number): boolean
+
+  /** The record's ledger, oldest first. */
+  ledger(recordId: string): LedgerEntry[]
+  appendLedger(entry: LedgerEntry): void
 
   /** Live records matching the filter, with only the access columns (bounded by `limit`). */
   candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[]

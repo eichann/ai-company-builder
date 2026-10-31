@@ -23,7 +23,7 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
-import { gitRecordFileSource } from './adapters/record-files'
+import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
@@ -55,6 +55,7 @@ import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
+import { createRecordEngine } from './services/record-engine'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -142,8 +143,18 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // The company map (light ontology 4-2): indexed from pushes, off per company by default.
   const recordIndexer = createRecordIndexer({ ...shared, recordFiles: gitRecordFileSource() })
 
+  const access = createAccessPolicy(repos.memberships)
+  // The state engine (4-3): the only writer of record_state / record_ledger.
+  const recordEngine = createRecordEngine({
+    ...shared,
+    files: gitRecordFileWriter(),
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+
   return {
-    access: createAccessPolicy(repos.memberships),
+    access,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),
@@ -186,6 +197,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
     records: createRecordService({ ...shared, indexer: recordIndexer }),
+    recordEngine,
     accounts: shared.accounts,
     repoStore,
   }

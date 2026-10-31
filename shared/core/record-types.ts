@@ -73,6 +73,11 @@ export interface ActionDef {
   approval: ApprovalTier
   /** Arguments; each names a server field of the same kind, which the action sets. */
   args: Record<string, FieldKind>
+  /**
+   * For a type implementing `request`: the person field or argument whose
+   * value becomes `next_actor` (whose turn it is next). A copy, not an expression.
+   */
+  handTo: string | null
 }
 
 export interface TypeDefinition {
@@ -85,6 +90,8 @@ export interface TypeDefinition {
   links: Record<string, LinkDef>
   states: string[]
   initial: string | null
+  /** States in which nothing is waiting for anyone (done, cancelled…): not anyone's turn. */
+  final: string[]
   actions: Record<string, ActionDef>
 }
 
@@ -126,7 +133,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
   if (!ONTOLOGY_NAME_RE.test(name)) err(`型の名前「${name}」は英小文字・数字・_ で書いてください`)
   if (!isYamlMap(raw)) return { ok: false, errors: ['定義は「項目名: 値」の形で書いてください'] }
-  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'actions', 'description'])
+  const known = new Set(['label', 'version', 'implements', 'storage', 'fields', 'links', 'states', 'initial', 'final', 'actions', 'description'])
   for (const k of Object.keys(raw)) if (!known.has(k)) err(`知らない項目「${k}」があります`)
 
   if (!isStr(raw.label)) err('label（画面に出す名前）を書いてください')
@@ -197,6 +204,11 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     else initial = raw.initial
   }
 
+  const finalRaw = list(raw.final)
+  const final: string[] = []
+  if (!finalRaw || !finalRaw.every(f => typeof f === 'string' && states.includes(f))) err('final は states の名前の並びで書いてください')
+  else final.push(...(finalRaw as string[]))
+
   const implementsRaw = list(raw.implements)
   const implementsList: string[] = []
   if (!implementsRaw) err('implements は共通の型の名前の並びで書いてください')
@@ -219,7 +231,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const [aname, a] of Object.entries(rawActions)) {
       if (!ONTOLOGY_NAME_RE.test(aname)) { err(`操作の名前「${aname}」は英小文字・数字・_ で書いてください`); continue }
       if (!isYamlMap(a)) { err(`操作「${aname}」は { label, from, to, who } の形で書いてください`); continue }
-      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args']
+      const allowed = ['label', 'from', 'to', 'who', 'notify', 'attach', 'note', 'history_line', 'decision', 'approval', 'args', 'hand_to']
       for (const k of Object.keys(a)) if (!allowed.includes(k)) err(`操作「${aname}」に知らない項目「${k}」があります（式・連鎖・自動実行は書けません）`)
       if (!isStr(a.label)) err(`操作「${aname}」に label を書いてください`)
       let from: string[] | null = null
@@ -260,6 +272,12 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       for (const flag of ['history_line', 'decision'] as const) {
         if (a[flag] !== undefined && typeof a[flag] !== 'boolean') err(`操作「${aname}」の ${flag} は true か false です`)
       }
+      let handTo: string | null = null
+      if (a.hand_to !== undefined && a.hand_to !== null) {
+        if (!implementsList.includes('request')) err(`操作「${aname}」の hand_to は共通の型 request を持つ型だけに書けます`)
+        else if (typeof a.hand_to !== 'string' || !(personFields.has(a.hand_to) || args[a.hand_to] === 'person')) err(`操作「${aname}」の hand_to は人の欄か人の引数の名前で書いてください`)
+        else handTo = a.hand_to
+      }
       if (to === null && Object.keys(args).length === 0) err(`操作「${aname}」は状態を変える（to）か欄を決める（args）かのどちらかが要ります`)
       actions[aname] = {
         label: isStr(a.label) ? a.label : aname,
@@ -273,6 +291,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         decision: a.decision === true,
         approval: approval as ApprovalTier,
         args,
+        handTo,
       }
     }
   }
@@ -291,6 +310,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       links,
       states,
       initial,
+      final,
       actions,
     },
   }
@@ -340,6 +360,19 @@ export function compareTypeDefinitions(prev: TypeDefinition, next: TypeDefinitio
   if (next.version < prev.version) versionProblem = `版の番号が下がっています（${prev.version} → ${next.version}）`
   else if (changed && next.version === prev.version) versionProblem = `定義を変えたときは version を上げてください（今は ${prev.version}）`
   return { changed, breaking, versionProblem }
+}
+
+/**
+ * A stored definition read back (JSON of an older build may lack keys added
+ * since: they get their defaults).
+ */
+export function storedTypeDefinition(json: string): TypeDefinition {
+  const d = JSON.parse(json) as TypeDefinition
+  return {
+    ...d,
+    final: d.final ?? [],
+    actions: Object.fromEntries(Object.entries(d.actions ?? {}).map(([n, a]) => [n, { ...a, handTo: a.handTo ?? null }])),
+  }
 }
 
 /** `.acb/types/<name>.md` → name; null for any other path (only direct children count). */

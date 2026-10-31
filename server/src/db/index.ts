@@ -480,6 +480,32 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (company_id, record_id)
     );
 
+    -- The ledger of the state engine (4-3): one row per change, never updated
+    -- or deleted; an undo is a new row (reverses_version). version = the
+    -- record's version after this change (1, 2, …), so "record X at version N"
+    -- is the fold of rows 1..N. changes: [{ field, before, after }] for the
+    -- state and every server field changed. actor_kind: human / ai / external.
+    CREATE TABLE IF NOT EXISTS record_ledger (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      action TEXT NOT NULL,
+      from_state TEXT,
+      to_state TEXT,
+      actor_id TEXT NOT NULL,
+      actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'ai', 'external')),
+      actor_source TEXT,
+      at TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      changes TEXT NOT NULL DEFAULT '[]',
+      attachments TEXT NOT NULL DEFAULT '[]',
+      decision TEXT,
+      is_decision INTEGER NOT NULL DEFAULT 0,
+      type_version INTEGER,
+      reverses_version INTEGER,
+      PRIMARY KEY (company_id, record_id, version)
+    );
+
     -- The last commit indexed per repository (repo: 'company' or a private
     -- folder's scope id), so a push is indexed from its diff.
     CREATE TABLE IF NOT EXISTS record_index_heads (
@@ -506,6 +532,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);
     CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
     CREATE INDEX IF NOT EXISTS idx_record_links_target ON record_links(company_id, target_id);
+    CREATE INDEX IF NOT EXISTS idx_record_ledger_company_at ON record_ledger(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);

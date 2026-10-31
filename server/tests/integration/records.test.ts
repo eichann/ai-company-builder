@@ -167,7 +167,7 @@ describe('the company map, end to end', () => {
     await services.records.refreshIndex(owner)
     expect(titles(await api('u-member', 'POST', '/query', {}))).toEqual(['A社', 'A社 提案'])
     const types = await api('u-member', 'GET', '/types')
-    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['customer', 'deal'])
+    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['customer', 'deal', 'interaction', 'task'])
     const detail = await api('u-member', 'GET', '/item/customer-cust0001')
     expect(detail.body.data?.links).toEqual([expect.objectContaining({ name: 'customer', direction: 'in', record: expect.objectContaining({ id: 'deal-deal0001' }) })])
   })
@@ -225,5 +225,41 @@ describe('the company map, end to end', () => {
     expect(list.map(t => t.definition.name)).toContain('customer')
     const problems = await api('u-owner', 'GET', '/problems')
     expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '.acb/types/customer.md', kind: 'type_file_removed' }))
+  })
+
+  it('a task through the engine: attached version checked against the repository, the milestone line committed through the push checker', async () => {
+    // A server-only task (0.6), then its file once it has content: the index adopts it.
+    const created = await api('u-owner', 'POST', '/item', { type: 'task', title: '提案書の見直し', fields: { assignee: 'u-member' } })
+    expect(created.status).toBe(201)
+    const id = (created.body.data?.record as { id: string }).id
+    resetToRemote()
+    write('営業部/タスク/見直し.md', `---\nid: ${id}\ntype: task\nlinks:\n  files: [営業部/商談/提案書.md]\n---\n# 提案書の見直し\n\n第2章を直す。\n`)
+    commit('task file')
+    expect(pushAs('owner').ok).toBe(true)
+    await services.records.refreshIndex(owner)
+    const tip = git(['-C', bare, 'rev-parse', 'main']).trim()
+
+    expect((await api('u-member', 'POST', `/item/${id}/actions/start`, { expectedVersion: 1 })).status).toBe(200)
+    const notPushed = await api('u-member', 'POST', `/item/${id}/actions/request_review`, {
+      expectedVersion: 2, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: 'f'.repeat(40) }],
+    })
+    expect(notPushed).toMatchObject({ status: 409, body: { code: 'ATTACHMENT_NOT_SYNCED' } })
+    const review = await api('u-member', 'POST', `/item/${id}/actions/request_review`, {
+      expectedVersion: 2, args: { reviewer: 'u-owner' }, attachments: [{ link: 'files', path: '営業部/商談/提案書.md', commit: tip }],
+    })
+    expect(review.status).toBe(200)
+    expect((await api('u-owner', 'GET', '/my-turn')).body.data?.records).toEqual([expect.objectContaining({ id, state: 'review' })])
+
+    expect((await api('u-owner', 'POST', `/item/${id}/actions/complete`, { expectedVersion: 3, note: '問題なし' })).status).toBe(200)
+    let text = ''
+    for (let i = 0; i < 200 && !text.includes('## 経緯'); i++) {
+      try { text = git(['-C', bare, 'show', `main:営業部/タスク/見直し.md`]) } catch { text = '' }
+      if (!text.includes('## 経緯')) await new Promise(r => setTimeout(r, 100))
+    }
+    expect(text).toMatch(/## 経緯\n\n- \d{4}-\d{2}-\d{2} 完了にする（u-owner）：問題なし\n/)
+    expect(git(['-C', bare, 'log', '-1', '--format=%an'])).toContain('AI Company Builder')
+    const history = await api('u-member', 'GET', `/item/${id}/history`)
+    expect((history.body.data?.entries as Array<{ action: string }>).map(e => e.action)).toEqual(['create', 'start', 'request_review', 'complete'])
+    expect((await api('u-member', 'GET', `/item/${id}/versions/2`)).body.data).toMatchObject({ version: 2, state: 'in_progress' })
   })
 })

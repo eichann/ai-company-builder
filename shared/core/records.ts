@@ -144,3 +144,29 @@ export function newRecordId(type: string, random: string): string {
   if (!RECORD_ID_RE.test(id)) throw new Error('newRecordId: needs a type name and at least 6 random letters or digits')
   return id
 }
+
+/** The heading of a record's history section (経緯). */
+export const HISTORY_HEADING = '## 経緯'
+
+/**
+ * The record's text with `line` added at the end of its 「## 経緯」 section
+ * (created at the end of the text when missing). The milestone line of an
+ * engine action (4-3 duty 5): the fact by the machine, a short note by a
+ * person or the AI.
+ */
+export function appendHistoryLine(text: string, line: string): string {
+  const clean = line.replace(/[\r\n]+/g, ' ').trim()
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const lines = text.split(/\r\n|\n/)
+  const start = lines.findIndex(l => /^##\s*経緯\s*$/.test(l.trim()))
+  if (start === -1) {
+    const body = text.replace(/(\r?\n)*$/, '')
+    return `${body}${eol}${eol}${HISTORY_HEADING}${eol}${eol}- ${clean}${eol}`
+  }
+  let end = lines.length
+  for (let i = start + 1; i < lines.length; i++) if (/^#{1,2}\s/.test(lines[i])) { end = i; break }
+  let insertAt = end
+  while (insertAt > start + 1 && lines[insertAt - 1].trim() === '') insertAt--
+  const added = insertAt === start + 1 ? ['', `- ${clean}`] : [`- ${clean}`]
+  return [...lines.slice(0, insertAt), ...added, ...lines.slice(insertAt)].join(eol)
+}

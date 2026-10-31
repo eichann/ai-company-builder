@@ -9,6 +9,17 @@
  *   GET  /records/types      any member    → { types: RecordTypeView[] }
  *   POST /records/query      any member    RecordQuery → RecordQueryResult
  *   GET  /records/item/:recordId  any member  → RecordDetail
+ *   GET  /records/my-turn    any member    → RecordQueryResult (「あなたの番」, 4-4)
+ *   POST /records/item       any member    CreateRecordRequest → 201 { record, entry } (server-only record)
+ *   POST /records/item/:recordId/actions/:action   ActionRequest → { record, entry }
+ *   POST /records/item/:recordId/undo              UndoRequest → { record, entry }
+ *   GET  /records/item/:recordId/history           → { entries: LedgerEntry[] }
+ *   GET  /records/item/:recordId/versions/:version → ReplayedState
+ *
+ * The state engine's refusals carry a `code`: VERSION_CONFLICT (409, with the
+ * current `version`), ACTION_NOT_ALLOWED_IN_STATE (409), NOT_ALLOWED (403),
+ * NOTE_REQUIRED / ARG_REQUIRED / BAD_VALUE / BAD_ATTACHMENT / BAD_MATERIAL
+ * (400), ATTACHMENT_NOT_SYNCED (409: push the file first), CHANGED_SINCE (409, undo).
  *
  * While the feature is off for the company, every route but the settings
  * answers 404 `RECORDS_DISABLED`. Answers, counts and link lists hold only
@@ -16,6 +27,7 @@
  * is exactly a record that does not exist.
  */
 import type { TypeDefinition } from '../core/record-types'
+import type { DecisionMaterial } from '../core/record-ledger'
 
 export interface RecordSettings {
   enabled: boolean
@@ -95,4 +107,44 @@ export interface RecordLinkView {
 export interface RecordDetail {
   record: RecordSummary
   links: RecordLinkView[]
+}
+
+/** Who acts: the member by hand (default) or the member's AI. */
+export interface RecordActor {
+  kind: 'human' | 'ai'
+  /** For an AI: which one (e.g. `claude`). */
+  source?: string
+}
+
+export interface CreateRecordRequest {
+  type: string
+  title: string
+  summary?: string
+  /** The folder whose readers may see it (none = everyone in the company); not inside a private folder. */
+  folder?: string
+  /** Server-field values (requested_by defaults to the creator for request types). */
+  fields?: Record<string, RecordFieldValue>
+  links?: Record<string, string | string[]>
+  actor?: RecordActor
+}
+
+export interface ActionRequest {
+  /** The record version the caller saw (optimistic concurrency). */
+  expectedVersion: number
+  note?: string
+  /** The action's arguments: each sets the server field of the same name. */
+  args?: Record<string, RecordFieldValue>
+  /** Files (of the action's `attach` links) handed over, at the commit that was pushed. */
+  attachments?: Array<{ link: string; path: string; commit: string }>
+  /** Only for actions marked `decision`: what the decision rests on (references, never copies). */
+  decision?: { materials?: DecisionMaterial[]; policyVersion?: string; precedents?: string[]; supersedes?: string }
+  actor?: RecordActor
+}
+
+export interface UndoRequest {
+  /** The ledger entry (record version) to reverse. */
+  version: number
+  expectedVersion: number
+  note?: string
+  actor?: RecordActor
 }

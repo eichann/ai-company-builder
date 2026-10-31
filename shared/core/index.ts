@@ -14,6 +14,8 @@
  *   yaml-lite.ts          the strict YAML subset of type definitions and record files
  *   record-types.ts       type definitions (.acb/types/<name>.md): parse, validate, compare versions
  *   records.ts            record files (id / type / links frontmatter): parse, title, summary, ids
+ *   record-ledger.ts      the state engine's ledger and replaying a record at a version
+ *   core-types.ts         the core types task and interaction
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -32,3 +34,5 @@ export * from './key-broker'
 export * from './yaml-lite'
 export * from './record-types'
 export * from './records'
+export * from './record-ledger'
+export * from './core-types'
