@@ -87,6 +87,8 @@ export const GUARD_REASON_LABELS: Record<GuardReason, string> = {
   'destination-not-allowed': 'API キーで許可していない宛先・モデル',
   'internal-address': '社内のアドレスへの送信',
   'over-cap': 'API キーの1日の上限',
+  'type-definition': '記録の型の定義（管理者だけ）',
+  'record-file': '記録のファイルの状態・id の書き換え',
 }
 
 /** The AI sandbox's mark on a call (「AI の囲い」). */

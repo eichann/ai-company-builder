@@ -245,6 +245,13 @@ tool), renderer `ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`.
   editor (the `file.open` command, registered by the main screen; `commands.md`). Tests: `client/tests/review-request.test.ts`,
   `tests/ui/chat-panel.spec.ts`.
 
+## The company map's tools (`acb_records`)
+
+`client/electron/records/` (`records.md` "Typed tools in the app"): generated from the type
+definitions each turn; Claude in-process (all in `allowedTools`), Codex loopback with look-ups
+only (registry `recordsMcp` / `recordActions`). They call the server with the turn's record
+token (never the session); the server records them as the AI's.
+
 ## Instructions while the AI works (steering)
 
 `client/shared/steer.ts`, `agents/steering.ts`, `chat-turns.ts`; renderer side `useSteering` /

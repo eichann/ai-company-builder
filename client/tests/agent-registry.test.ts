@@ -85,10 +85,12 @@ test('capabilities that depend on others are consistent', () => {
     const c = AGENTS[id].capabilities
     // Steering, suggestions, choice prompts, progress, MCP tools and hand-off
     // memos all ride on a native agent's own turn / session.
-    for (const key of ['steering', 'promptSuggestions', 'choicePrompts', 'subagentProgress', 'rateLimits', 'companyFilesMcp', 'references', 'handoff', 'webReader'] as const) {
+    for (const key of ['steering', 'promptSuggestions', 'choicePrompts', 'subagentProgress', 'rateLimits', 'companyFilesMcp', 'recordsMcp', 'references', 'handoff', 'webReader'] as const) {
       if (c[key]) assert.ok(c.ownsConversation, `${id}.${key} needs ownsConversation`)
     }
     if (c.privateReadGuard) assert.ok(c.ownsConversation, `${id}.privateReadGuard`)
+    // State-changing record tools ride on the read tools (one MCP server).
+    if (c.recordActions) assert.ok(c.recordsMcp, `${id}.recordActions needs recordsMcp`)
     if (c.commitMessageFallback || c.privateFolderCommitMessages) assert.ok(c.oneShotText, `${id}: commit messages need oneShotText`)
     const tasks = AGENTS[id].tasks
     if (c.oneShotText) assert.ok(tasks.commitMessage && tasks.voice, `${id}: one-shot models`)

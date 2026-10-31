@@ -1,6 +1,7 @@
 import type { ReferenceTools } from '../consultations/tools'
 import type { CompanyFileTools } from '../company-files/tools'
 import type { ReviewTools } from '../review/tools'
+import type { RecordTools } from '../records/tools'
 import type { WebResearchTools } from '../web-research/tools'
 import type { AgentInteraction, AgentInteractionResponse } from '../../shared/agent-interaction'
 import type { LanguageModel } from 'ai'
@@ -62,6 +63,8 @@ export interface AgentConnection {
     companyFiles?: CompanyFileTools
     /** 「確認をお願いする」: ask the member to review and stop (review/tools.ts). */
     review?: ReviewTools
+    /** The company map's typed tools for this turn (records/tools.ts), with the turn's record token. */
+    records?: RecordTools
     /**
      * 「Web で調べる」 (web-research/tools.ts). Given → the agent offers it as
      * `acb_web` / `web_research` and its own built-in web tools are off.

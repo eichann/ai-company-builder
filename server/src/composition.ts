@@ -56,6 +56,7 @@ import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/bro
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
 import { createRecordEngine } from './services/record-engine'
+import { createRecordAiTokenService } from './services/record-ai-tokens'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -198,6 +199,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyScopes: createCompanyScopeService(shared),
     records: createRecordService({ ...shared, indexer: recordIndexer }),
     recordEngine,
+    recordAiTokens: createRecordAiTokenService({
+      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,
+    }),
     accounts: shared.accounts,
     repoStore,
   }

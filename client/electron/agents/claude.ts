@@ -2,6 +2,7 @@ import { createSdkMcpServer, tool } from '@anthropic-ai/claude-agent-sdk'
 import { referenceSchemas, referenceDescriptions, type ReferenceToolName } from '../consultations/tools'
 import { COMPANY_FILES_SERVER, COMPANY_FILE_TOOL_NAMES, companyFileDescriptions, companyFileSchemas, companyFileToolId } from '../company-files/tools'
 import { REVIEW_SERVER, REVIEW_TOOL, REVIEW_TOOL_ID, reviewDescription, reviewSchema } from '../review/tools'
+import { RECORDS_SERVER, recordToolId } from '../records/tools'
 import { WEB_RESEARCH_SERVER, WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema } from '../web-research/tools'
 import { WEB_RESEARCH_TOOL_ID } from '../../shared/web-research'
 import { wrapLanguageModel } from 'ai'
@@ -150,7 +151,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
       const text = value?.data?.stderr || value?.message || ''
       return text.split('\n').some(line => line.trim() === `No conversation found with session ID: ${sessionId}`)
     },
-    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop }) {
+    createChatModel({ workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles, review, records, webResearch, writeGuard, privateReads, askUser, onEvent, steering, onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop }) {
       const claudePath = config.getClaudeCodeCliPath()
       const requestedMode = config.getPermissionMode()
       const cliLacksAuto = requestedMode === 'auto' && autoUnsupportedClis.has(claudePath)
@@ -388,18 +389,23 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // App-provided (not the company repository's .mcp.json, which is protected config).
         const companyFilesServer = companyFiles ? createSdkMcpServer({ name: COMPANY_FILES_SERVER, tools: COMPANY_FILE_TOOL_NAMES.map(name => tool(name, companyFileDescriptions[name], companyFileSchemas[name].shape, async args => ({ content: [{ type: 'text' as const, text: await companyFiles.execute(name, args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })) }) : undefined
         const reviewServer = review ? createSdkMcpServer({ name: REVIEW_SERVER, tools: [tool(REVIEW_TOOL, reviewDescription, reviewSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await review.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: false } })] }) : undefined
+        // The company map's typed tools (records/tools.ts): the server records them as the AI's.
+        const recordsServer = records ? createSdkMcpServer({ name: RECORDS_SERVER, tools: records.specs.map(s => tool(s.name, s.description, s.schema.shape, async args => ({ content: [{ type: 'text' as const, text: await records.execute(s.name, args) }] }), { annotations: { readOnlyHint: s.readOnly, destructiveHint: false, openWorldHint: false } })) }) : undefined
         // 「Web で調べる」: a separate reader reads the web (web-research/tools.ts).
         const webResearchServer = webResearch ? createSdkMcpServer({ name: WEB_RESEARCH_SERVER, tools: [tool(WEB_RESEARCH_TOOL, webResearchDescription, webResearchSchema.shape, async args => ({ content: [{ type: 'text' as const, text: await webResearch.execute(args) }] }), { annotations: { readOnlyHint: true, destructiveHint: false, openWorldHint: true } })] }) : undefined
         const mcpServers = {
           ...(referenceServer ? { acb_consultations: referenceServer } : {}),
           ...(companyFilesServer ? { [COMPANY_FILES_SERVER]: companyFilesServer } : {}),
           ...(reviewServer ? { [REVIEW_SERVER]: reviewServer } : {}),
+          ...(recordsServer ? { [RECORDS_SERVER]: recordsServer } : {}),
           ...(webResearchServer ? { [WEB_RESEARCH_SERVER]: webResearchServer } : {}),
         }
         const allowedTools = [
           ...(referenceServer ? Object.keys(referenceSchemas).map(name => `mcp__acb_consultations__${name}`) : []),
           ...(companyFilesServer ? COMPANY_FILE_TOOL_NAMES.map(companyFileToolId) : []),
           ...(reviewServer ? [REVIEW_TOOL_ID] : []),
+          // Never asked: the type's `who` and the server decide (records.md); an action needing prior approval is none of today's.
+          ...(records ? records.specs.map(s => recordToolId(s.name)) : []),
           ...(webResearchServer ? [WEB_RESEARCH_TOOL_ID] : []),
         ]
         const state = { missingSession: false, autoRejected: false, sandboxUnavailable: false }

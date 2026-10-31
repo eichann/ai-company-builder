@@ -62,6 +62,9 @@ export const GUARD_REASONS = [
   // The key broker's relay refused a call (K5): no key the member may use for this work, a
   // destination (path / model) the key does not allow, an internal address, a daily cap.
   'key-not-available', 'destination-not-allowed', 'internal-address', 'over-cap',
+  // The company map (records.md): a type definition (.acb/types/) the member may not change,
+  // and state / identity written into a record file instead of through the record tools.
+  'type-definition', 'record-file',
 ] as const
 export type GuardReason = typeof GUARD_REASONS[number]
 

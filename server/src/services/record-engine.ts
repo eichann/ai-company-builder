@@ -53,10 +53,14 @@ export interface RecordEngineDeps {
   notify: (companyId: string, userIds: string[]) => void
 }
 
-/** Who is acting: the member, by hand or through their AI (the app says which). */
+/**
+ * Who is acting, decided by the route from the credential (records.md "Who
+ * is acting"): the member's session → human; a record token → their AI. A
+ * body field saying otherwise is ignored.
+ */
 export interface ActorInput {
   kind: 'human' | 'ai'
-  /** For an AI: which one (e.g. `claude`). */
+  /** For an AI: which one (the agent the token was issued for). */
   source?: string
 }
 
@@ -97,15 +101,6 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     (w === 'admin' && FULL_ACCESS_ROLES.has(member.role)) ||
     (w === 'dept_manager' && managesPlace) ||
     values[w] === member.userId)
-}
-
-function parseActor(raw: unknown): ActorInput | string {
-  if (raw === undefined) return { kind: 'human' }
-  const a = raw as { kind?: unknown; source?: unknown }
-  if (typeof raw !== 'object' || raw === null) return 'actor must be an object'
-  if (a.kind !== 'human' && a.kind !== 'ai') return 'actor.kind is human or ai'
-  if (a.source !== undefined && (typeof a.source !== 'string' || !/^[a-z0-9_-]{1,40}$/.test(a.source))) return 'actor.source is a short name'
-  return { kind: a.kind, ...(typeof a.source === 'string' ? { source: a.source } : {}) }
 }
 
 function parseMaterials(raw: unknown): DecisionMaterial[] | string {
@@ -172,14 +167,12 @@ export function createRecordEngine(deps: RecordEngineDeps) {
      * A record that lives on the server (types with storage `server` or
      * `either`; a file-backed record is created by writing its file).
      */
-    create(member: Member, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
-      const actor = parseActor(b.actor)
-      if (typeof actor === 'string') return bad(actor)
       if (typeof b.type !== 'string') return bad('type is required')
       const def = currentTypes(records).get(b.type)?.definition
       if (!def) return bad('Unknown type', 'TYPE_UNKNOWN')
@@ -255,7 +248,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     },
 
     /** Run an action of the record's type. */
-    async act(member: Member, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>> {
+    async act(member: Member, actor: ActorInput, recordId: string, actionName: string, body: unknown): Promise<Outcome<{ record: RecordSummary; entry: LedgerEntry }>> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -268,8 +261,6 @@ export function createRecordEngine(deps: RecordEngineDeps) {
 
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
-      const actor = parseActor(b.actor)
-      if (typeof actor === 'string') return bad(actor)
       if (!Number.isInteger(b.expectedVersion) || (b.expectedVersion as number) < 0) return bad('expectedVersion: the version you saw', 'VERSION_REQUIRED')
       const note = b.note === undefined ? '' : b.note
       if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)
@@ -381,7 +372,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     },
 
     /** Reverse an earlier entry (a new entry; nothing is rewritten). Its actor or an owner/admin. */
-    undo(member: Member, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+    undo(member: Member, actor: ActorInput, recordId: string, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const { records, reader } = opened
@@ -389,8 +380,6 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null) return bad('The body must be an object')
-      const actor = parseActor(b.actor)
-      if (typeof actor === 'string') return bad(actor)
       if (!Number.isInteger(b.version) || !Number.isInteger(b.expectedVersion)) return bad('version and expectedVersion are required')
       const note = b.note === undefined ? '' : b.note
       if (typeof note !== 'string' || note.length > NOTE_MAX) return bad(`note: up to ${NOTE_MAX} characters`)

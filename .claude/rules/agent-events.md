@@ -96,6 +96,8 @@ events through it), the read shapes and the limits. The admin re-exports the rea
   API call (category `broker`, agent `script`, target kind `broker`; `key-broker.md` K5). Same
   table and readers; `parseAgentToolEvent` refuses these values from apps (`SERVER_ONLY_CATEGORIES`).
   Guard reasons `key-not-available`, `destination-not-allowed`, `internal-address`, `over-cap`.
+- Guard reasons `type-definition` and `record-file`: the chat write guard's company-map refusals
+  (`records.md`); an older server drops the unknown reason and keeps the event.
 
 ## Who reads what
 

@@ -145,6 +145,44 @@ export function newRecordId(type: string, random: string): string {
   return id
 }
 
+/** What a record file's frontmatter says about it: its id / type, and whether it holds other keys. */
+function recordHead(text: string): { id: unknown; type: unknown; extra: Record<string, string> } | 'unreadable' | null {
+  const fm = splitFrontmatter(text)
+  if (!fm) return null
+  const yaml = parseYamlLite(fm.yaml)
+  if (!yaml.ok) return /^(id|type)\s*:/m.test(fm.yaml) ? 'unreadable' : null
+  if (!isYamlMap(yaml.value) || yaml.value.type === undefined) return null
+  return {
+    id: yaml.value.id,
+    type: yaml.value.type,
+    extra: Object.fromEntries(Object.entries(yaml.value)
+      .filter(([k]) => !(RECORD_FILE_KEYS as readonly string[]).includes(k)).map(([k, v]) => [k, JSON.stringify(v)])),
+  }
+}
+
+/**
+ * Why an edit of a Markdown file must not be made by the AI (the chat write
+ * guard, records.md), or null:
+ * - `state`: the record's frontmatter would hold anything but id / type /
+ *   links — state, assignee, due… are changed with the record tools on the
+ *   server, never written into the file;
+ * - `identity`: an existing record's id or type would change or vanish (a
+ *   different record would take its place).
+ */
+export function recordFileEditProblem(before: string | null, after: string): 'state' | 'identity' | null {
+  const was = before === null ? null : recordHead(before)
+  const now = recordHead(after)
+  if (was && was !== 'unreadable') {
+    if (now === null || now === 'unreadable' || now.id !== was.id || now.type !== was.type) return 'identity'
+  }
+  // Keys other than id / type / links added or changed by this edit (ones already there are left alone).
+  if (now && now !== 'unreadable') {
+    const old = was && was !== 'unreadable' ? was.extra : {}
+    if (Object.entries(now.extra).some(([k, v]) => old[k] !== v)) return 'state'
+  }
+  return null
+}
+
 /** The heading of a record's history section (経緯). */
 export const HISTORY_HEADING = '## 経緯'
 

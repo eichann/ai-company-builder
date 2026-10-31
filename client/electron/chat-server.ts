@@ -1,4 +1,5 @@
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
+import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
@@ -46,6 +47,8 @@ export interface ChatServerConfig extends AgentHost {
    * and the system-prompt paragraph that tells the AI when to use them.
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
+  /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -295,6 +298,11 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
+    // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
+    const records = connection.ownsConversation && can.recordsMcp && companyId
+      ? await Promise.resolve(config.createRecordTools?.({ companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions }, c.req.raw.signal)).catch(() => null) ?? undefined
+      : undefined
+    if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
     const askUser = connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
@@ -336,7 +344,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -439,6 +447,8 @@ export async function startChatServer(config: ChatServerConfig) {
       running.signal.removeEventListener('abort', abortRelease)
       running.end()
       turn?.end(outcome)
+      // The turn's record token ends with it.
+      void records?.close()
       config.onChatActivity?.(activityToken, false)
     }
     function abortRelease() { release('failed') }

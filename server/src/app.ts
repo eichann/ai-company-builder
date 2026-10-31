@@ -21,6 +21,7 @@ import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { recordsRoute } from './routes/records'
+import { recordsAiRoute } from './routes/records-ai'
 import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
@@ -101,6 +102,7 @@ app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
+app.route('/api/records-ai', recordsAiRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)
 app.route('/api/git-http', gitHttpRoute)

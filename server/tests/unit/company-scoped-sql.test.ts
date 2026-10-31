@@ -73,6 +73,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   record_index_heads: ['adapters/sqlite/records.ts'],
   record_index_problems: ['adapters/sqlite/records.ts'],
   record_ledger: ['adapters/sqlite/records.ts'],
+  record_ai_tokens: ['adapters/sqlite/records.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
 const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository']

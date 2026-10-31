@@ -11,6 +11,12 @@ paths:
   - "server/src/services/record-index.ts"
   - "server/src/services/record-access.ts"
   - "server/src/services/record-engine.ts"
+  - "server/src/services/record-ai-tokens.ts"
+  - "server/src/routes/records-ai.ts"
+  - "client/electron/records/**"
+  - "client/shared/record-actions.ts"
+  - "client/tests/records-tools.test.ts"
+  - "server/tests/integration/record-tokens.test.ts"
   - "server/src/ports/records.ts"
   - "server/src/ports/record-files.ts"
   - "server/src/adapters/sqlite/records.ts"
@@ -27,8 +33,8 @@ The core foundation of the light ontology (owner design 「段4 本体の土台�
 types are defined in files, records are Markdown files (or server-only rows), and the server
 keeps the **company map** — an index of every record, its links and its server-sourced state —
 answering a fixed-shape query filtered by what the caller may read — and the **state engine**,
-the only writer of a record's server values, with its append-only ledger. Typed tools (4-6)
-build on this; they are not here yet.
+the only writer of a record's server values, with its append-only ledger — and the typed tools
+(4-6) the AI changes records with.
 
 ## Off per company
 
@@ -159,11 +165,11 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 
 - **Who**: a person field of the record whose value is the member, `admin` (owner/admin role),
   `dept_manager` (manages the department holding the record's path or folder), `anyone`. Roles do
-  not bypass `who`. The member's **AI** (`actor: { kind: 'ai' }`, sent by the app's tools) may act
-  only where `who` lists `ai`, and then only for a member who qualifies on their own (or any member
-  when `who` is `[ai]` alone) — so the AI cannot complete a task. `external` is not accepted from
-  the API (reserved for server-side integrations). The app is trusted to say `ai` for its AI
-  tools (4-6); an app that lied would only lose the AI restriction, never gain a person's right.
+  not bypass `who`. The member's **AI** may act only where `who` lists `ai`, and then only for a
+  member who qualifies on their own (or any member when `who` is `[ai]` alone) — so the AI cannot
+  complete a task. Whether it is the AI is decided by the credential (next section), never by the
+  request body (an `actor` field there is ignored). `external` is reserved for server-side
+  integrations.
 - **Concurrency**: every request carries `expectedVersion`; a stale one → 409 `VERSION_CONFLICT`
   「ほかの人が先に変えました…」 with the current version, nothing written (checked again inside
   the write: `writeState` is a compare-and-set on the version).
@@ -197,22 +203,78 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   summary, optional folder (not inside a private folder yet), server fields, links; the id is
   `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
 
+## Who is acting: the credential decides (owner requirement, 2026-10-31)
+
+"Human or AI" is never self-declared by the app:
+
+- The member's own screens call `/api/companies/:id/records/…` with the member's **session** →
+  actor kind `human`.
+- The member's AI calls `/api/records-ai/…` (`routes/records-ai.ts`) with a **record token**
+  (`Authorization: Bearer acb_rec_<company id>.<64 hex>`, `services/record-ai-tokens.ts`,
+  table `record_ai_tokens`, only its sha256 stored) → actor kind `ai`, source = the agent the
+  token was issued for. These routes never accept a session.
+- The app's main process gets the token per chat turn with the session (`POST
+  /me/record-tokens { conversationId, agent, scope }`, ≤ 50 live per member, 120 minutes) and
+  revokes it when the turn ends (`DELETE /me/record-tokens/:tokenId`, the member's own only). The
+  AI process never receives the session: Claude's record tools run in main (in-process MCP), Codex
+  reaches them through a loopback endpoint that main serves (`client/electron/records/`).
+- `scope`: `read` (look up) or `act` (also create / run actions). The app asks `act` only for
+  agents with registry `recordActions` (Claude Code; owner decision 0.3-3: Codex reads only), and
+  the server refuses an action with a read token (403 `READ_ONLY_TOKEN`).
+- The company id in the token only chooses which company's handle to look the digest up in:
+  another company's id finds nothing (no `UNSCOPED` lookup across companies). The holder must
+  still be a member; while the company's whole AI is stopped (`agent-stop.md`) every token gets
+  403 `ACB_STOPPED`.
+- No undo for the AI (people undo).
+- Tests: `server/tests/integration/record-tokens.test.ts` (a token call is recorded as ai and
+  cannot run an action without `ai` even when the body claims human; a session call is recorded
+  as human even when the body claims ai; read scope, forged company, revoked, removed member,
+  stop, session refused — each mutation-checked).
+
+## Typed tools in the app (4-6, `client/electron/records/`)
+
+- `api.ts`: the token per turn (above). `tools.ts`: MCP server `acb_records`, generated from the
+  company's type definitions at the start of each turn — look-ups (`records_my_turn`,
+  `records_query`, `records_get`, `records_history`, `records_types`) and, with an `act` token,
+  `records_create` and one tool per type × action (`task__request_review`: `id`,
+  `expectedVersion`, `note` — required where the type says —, the action's arguments). Wired like
+  the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
+  decide, nothing is asked), Codex as a loopback endpoint; registry `recordsMcp` /
+  `recordActions`. The system prompt says state lives on the server, never in files, and people
+  are named by id (`RECORDS_INSTRUCTIONS`). Category `app-tool` in the action log. Not in the
+  private-read guard's app list: after the conversation read a private folder, a record tool call
+  asks the member first (a note could carry private content to a shared record).
+- The chat write guard (`write-guard.ts`, `chat-write-guard.md`): `.acb/types/` for owners /
+  admins only (guard reason `type-definition`), and `decideRecordEdit` refuses a Write / Edit /
+  MultiEdit that adds or changes a frontmatter key other than id / type / links in a record file,
+  or changes / removes an existing record's id or type (`recordFileEditProblem`,
+  `shared/core/records.ts`; guard reason `record-file`). Bash writes are not inspected (the
+  server never reads state from files anyway).
+- Commands (E1, `commands.md`): `records.runAction` (class outbound) for the screens to come;
+  `client/shared/record-actions.ts` `recordActionChoices` lists the actions that can start from a
+  record's state. The push channel's `records` event has an optional listener in the app
+  (`onRecords`), not wired to anything yet.
+- Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);
+  pushing an action's attached files before calling it (0.18-1 — the tools send no
+  `attachments` yet); the app assigning ids to new record files and repairing duplicates.
+
 ## 「あなたの番」 (4-4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
 member, or with no `next_actor` and the member as `assignee`, not in a `final` state, readable by
 them. Types are not named: a new request type shows up without changing the list.
 
-## Not yet (later PRs of milestone 2)
+## Not yet
 
-Typed AI tools / commands and the client wiring (4-6) — including
-the chat write guard refusing `.acb/types/` for non-admins and record frontmatter edits (today
-only the push checker refuses the former) — the app's id assignment and duplicate repair,
-archiving finished tasks (0.6).
+The screens (milestone 5), the plugin-SDK / admin-API surfaces, attachments sent by the AI tools,
+the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 
 ## Tests
 
-`server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
+`server/tests/integration/record-tokens.test.ts` (the credential decides human / ai),
+`client/tests/records-tools.test.ts` (token not session on AI calls, revoked at turn end, tools
+from definitions, read scope / Codex without actions, schema refusals, write guard, action
+choices), `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
 members of that company), `server/tests/unit/record-types.test.ts` (YAML subset, definitions, versions, record files),
