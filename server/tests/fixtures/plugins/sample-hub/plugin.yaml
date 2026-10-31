@@ -59,6 +59,9 @@ operations:
     who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
+    content: { body: hs_note_body, at: hs_timestamp }
+    association_type: 214
+    correlation_property: acb_operation_id
 
 field_policy_defaults:
   next_step: auto
