@@ -19,7 +19,7 @@ import {
   type CompanyFolderFacts,
 } from '../electron/sync/company-folder'
 import { planFolderSetup, INSPECT_FAILED_MESSAGE } from '../src/features/company/folderPlan'
-import { checkRememberedCompany } from '../src/lib/restore-company'
+import { checkRememberedCompany } from '../src/features/company/restore-company'
 
 const COMPANY = 'https://acb.example.com/api/git-http/c0ffee-123.git'
 

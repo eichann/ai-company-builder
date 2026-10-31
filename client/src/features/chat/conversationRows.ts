@@ -1,5 +1,5 @@
-import type { ChatSessionSummary } from '../../shared/chat-history'
-import { normalizeSearchText } from '../../shared/chat-history-summary'
+import type { ChatSessionSummary } from '../../../shared/chat-history'
+import { normalizeSearchText } from '../../../shared/chat-history-summary'
 
 export interface ConversationTab { id: string; title: string; sessionId: string | null }
 

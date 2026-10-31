@@ -3,8 +3,8 @@ import { AppWindow, ArrowSquareOut, CaretDown, ChatCircleDots, CheckCircle, Circ
 import type { ChatSessionSummary } from '../../../../shared/chat-history'
 import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 
-import { paginateConversationRows, buildConversationRows, isEmptyConversation, type ConversationTab } from '../../../lib/conversationRows'
-import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../../../lib/consultationStatus'
+import { paginateConversationRows, buildConversationRows, isEmptyConversation, type ConversationTab } from '../conversationRows'
+import { groupConversationRows, type ConsultationStatus, type ConversationGroupKey } from '../consultationStatus'
 import { useConsultationStatuses } from '../consultationStatusStore'
 import { useCollapsedGroups } from '../hooks/useCollapsedGroups'
 import { canCollapse, shownCollapsedGroups } from '../conversationGroups'

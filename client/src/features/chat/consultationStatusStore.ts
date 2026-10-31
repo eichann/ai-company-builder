@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react'
-import { sameStatus, type ConsultationStatus } from '../../lib/consultationStatus'
+import { sameStatus, type ConsultationStatus } from './consultationStatus'
 
 // Each open tab's status for the 「AIへの相談」 list (lib/consultationStatus.ts),
 // keyed by tab id. A tab publishes only when its derived status changes, so a

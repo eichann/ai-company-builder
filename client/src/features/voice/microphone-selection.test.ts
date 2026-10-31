@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { VoiceDeviceList } from '../shared/voice-input'
+import type { VoiceDeviceList } from '../../../shared/voice-input'
 
 const storage = new Map<string,string>()
 let requests = 0
@@ -11,7 +11,7 @@ Object.assign(globalThis, {
 })
 
 test('microphone selection and device inventory are shared across chat subscriptions', async () => {
-  const { microphoneSelection: store } = await import('../src/lib/microphoneSelection')
+  const { microphoneSelection: store } = await import('./microphoneSelection')
   assert.equal(store.getSnapshot().configured,false)
   await Promise.all([store.refresh(),store.refresh()]); assert.equal(requests,1)
   store.select('')
@@ -31,7 +31,7 @@ test('microphone selection and device inventory are shared across chat subscript
 })
 
 test('a timed-out device list is reported as a timeout, not a generic failure, and keeps the last list', async () => {
-  const { microphoneSelection: store, deviceFailureMessage } = await import('../src/lib/microphoneSelection')
+  const { microphoneSelection: store, deviceFailureMessage } = await import('./microphoneSelection')
   let release!: (value: VoiceDeviceList) => void
   next = () => new Promise(resolve => { release = resolve })
   const run = store.refresh()

@@ -4,7 +4,7 @@ import { ChatWindowApp } from './app/ChatWindowApp'
 import { WindowCloseGuard } from './app/WindowCloseGuard'
 import './index.css'
 import './i18n' // Initialize i18n
-import { startPerfDiagnostics } from './lib/perfDiagnostics'
+import { startPerfDiagnostics } from './shared/lib/perfDiagnostics'
 
 startPerfDiagnostics()
 

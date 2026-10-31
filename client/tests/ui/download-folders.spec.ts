@@ -1,6 +1,6 @@
 // Settings → ダウンロードするフォルダ and the file tree's 未ダウンロード
 // placeholder (tests/download-folders-ui.tsx). Tri-state / toggle / size rules
-// are pinned by tests/download-selection.test.ts and sparse rules by
+// are pinned by src/shared/lib/download-selection.test.ts and sparse rules by
 // sparse-paths.test.ts; here: the tree's ARIA, the draft footer, apply with
 // progress, the uncommitted-changes confirmation, offline, and the placeholder;
 // and the APIキー page, which never shows a saved value.

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import type { VoiceCapabilities, VoiceDeviceList } from '../shared/voice-input'
+import type { VoiceCapabilities, VoiceDeviceList } from '../../../shared/voice-input'
 
 let probes = 0
 let listings = 0
@@ -15,7 +15,7 @@ Object.assign(globalThis, {
 })
 
 test('recheckView: when 「もう一度確認」 is offered', async () => {
-  const { recheckView } = await import('../src/lib/voiceAvailability')
+  const { recheckView } = await import('./voiceAvailability')
   const base = { checking: false, refreshing: false }
   const usb = [{ id: 'usb', name: 'USB', isDefault: true }]
   // Transient probe failure: offered. Permanent "not supported": not offered.
@@ -33,8 +33,8 @@ test('recheckView: when 「もう一度確認」 is offered', async () => {
 })
 
 test('load probes once; recheck re-runs both the probe and the device list', async () => {
-  const { voiceAvailability, recheckView } = await import('../src/lib/voiceAvailability')
-  const { microphoneSelection } = await import('../src/lib/microphoneSelection')
+  const { voiceAvailability, recheckView } = await import('./voiceAvailability')
+  const { microphoneSelection } = await import('./microphoneSelection')
   const view = () => recheckView({ ...voiceAvailability.getSnapshot(), ...microphoneSelection.getSnapshot() })
 
   // The probe answers before the slow device list: its result is visible

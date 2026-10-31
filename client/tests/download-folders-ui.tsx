@@ -13,7 +13,7 @@ import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
 import { SettingsPanel } from '../src/features/settings/components/SettingsPanel'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
-import { dispatchFileChanges } from '../src/lib/fileEvents'
+import { dispatchFileChanges } from '../src/shared/lib/fileEvents'
 
 const params = new URLSearchParams(location.search)
 const view = params.get('view') ?? 'settings'

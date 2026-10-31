@@ -1,6 +1,6 @@
-import type { VoiceCapabilities, VoiceDevice } from '../../shared/voice-input'
+import type { VoiceCapabilities, VoiceDevice } from '../../../shared/voice-input'
 import { microphoneSelection, type DeviceFailure } from './microphoneSelection'
-import { getVoiceCapabilities } from '../features/voice/api'
+import { getVoiceCapabilities } from './api'
 
 // Whether speech recognition can run on this Mac, shared by every chat input
 // (like microphoneSelection) so all of them show the same state and a retry in

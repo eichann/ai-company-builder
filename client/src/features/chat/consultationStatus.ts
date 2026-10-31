@@ -1,9 +1,9 @@
 import type { UIMessage } from 'ai'
-import type { AgentInteraction } from '../../shared/agent-interaction'
-import { getToolDisplayName, isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } from '../features/chat/toolRows'
+import type { AgentInteraction } from '../../../shared/agent-interaction'
+import { getToolDisplayName, isRunningState, SUBAGENT_TOOL_NAMES, toolRowOf } from './toolRows'
 import type { buildConversationRows } from './conversationRows'
 import { pendingReviewOf } from './reviewRequest'
-import { REVIEW_TOOL_ID } from '../../shared/review-request'
+import { REVIEW_TOOL_ID } from '../../../shared/review-request'
 
 /**
  * Whose turn a conversation is and what its AI is doing (the 「AIへの相談」

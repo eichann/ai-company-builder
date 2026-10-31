@@ -14,8 +14,8 @@ import { createCodexConnection, type CodexTransport } from '../electron/agents/c
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, companyRelativePath, readReviewRecord, readReviewRequest, type ReviewRecord } from '../shared/review-request'
 import { REVIEW_ACCEPTED, createReviewTools } from '../electron/review/tools'
-import { pendingReviewOf } from '../src/lib/reviewRequest'
-import { deriveConsultationStatus, toolActivity } from '../src/lib/consultationStatus'
+import { pendingReviewOf } from '../src/features/chat/reviewRequest'
+import { deriveConsultationStatus, toolActivity } from '../src/features/chat/consultationStatus'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 
 const ROOT = '/Users/demo/会社'

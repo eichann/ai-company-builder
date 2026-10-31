@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { matchesVoiceShortcut, validShortcut, shortcutFromEvent } from '../src/lib/voiceShortcut'
+import { matchesVoiceShortcut, validShortcut, shortcutFromEvent } from './voiceShortcut'
 
 test('voice shortcut requires exact modifiers and ignores key repeat and IME', () => {
   const e = { code: 'KeyM', metaKey: true, ctrlKey: false, altKey: false, shiftKey: true, isComposing: false, repeat: false } as KeyboardEvent

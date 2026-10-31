@@ -1,9 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { UIMessage } from 'ai'
-import { deriveConsultationStatus, groupConversationRows, runningSubagentId, shortPath, toolActivity, type ConsultationStatus } from '../src/lib/consultationStatus'
-import { buildConversationRows, isEmptyConversation } from '../src/lib/conversationRows'
-import type { ChatSessionSummary } from '../shared/chat-history'
+import { deriveConsultationStatus, groupConversationRows, runningSubagentId, shortPath, toolActivity, type ConsultationStatus } from './consultationStatus'
+import { buildConversationRows, isEmptyConversation } from './conversationRows'
+import type { ChatSessionSummary } from '../../../shared/chat-history'
 
 const ROOT = '/Users/demo/会社'
 const assistant = (parts: unknown[]): UIMessage => ({ id: 'a', role: 'assistant', parts: parts as UIMessage['parts'] })

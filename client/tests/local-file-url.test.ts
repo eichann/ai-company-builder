@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import path from 'node:path'
 import { localFilePathFromUrl, localFileUrl } from '../shared/local-file-url'
 import { localFileTarget } from '../electron/local-file-protocol'
-import { FileVersionStore } from '../src/lib/fileVersions'
+import { FileVersionStore } from '../src/shared/lib/fileVersions'
 
 const ROOT = path.resolve('/Users/me/Documents/AI Company Builder/abe-shoten')
 

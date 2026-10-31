@@ -39,7 +39,7 @@ is below, editable per company in the admin. Background: `docs/sandbox-web-broke
   owner to 「囲う」 for a week → read 「囲うと止まる操作」 and add needed hosts → a department's
   members to 「囲う」 for a week → the company mode 「囲う」. Keep 「囲いを開始できない PC では」 on
   「記録だけで続ける」 until every PC runs it; then 「AI を使えなくする」 if wanted.
-- Member notice: `SANDBOX_NOTICE_TEXT` (`client/src/lib/agentLogNotice.ts`), always in Settings
+- Member notice: `SANDBOX_NOTICE_TEXT` (`client/src/shared/lib/agentLogNotice.ts`), always in Settings
   under the action-log notice; refusals reach the member through the AI
   (`blockedHostMessage`, `BLOCKED_READ_MESSAGE`) and the start failures as plain sentences
   (`SANDBOX_MESSAGES`).

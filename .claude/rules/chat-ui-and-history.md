@@ -86,7 +86,7 @@ one place an added agent brings its own controls; everything else asks the regis
   `useStreamingChat`'s `handleTransientDataPart` (`agentStatusStore`), never stored in history.
 - The conversation list (`ChatSidebar.tsx`, 「AIへの相談」) shows each open tab's live status.
   `useConsultationStatus` (after the send function) derives it with the pure
-  `src/lib/consultationStatus.ts` — needs-you (pending approval or agent question, which wins over
+  `src/features/chat/consultationStatus.ts` — needs-you (pending approval or agent question, which wins over
   working; or, once the turn has ended, a 「確認をお願いします」 request in the latest reply — kind
   `review`, eye icon, see `chat-and-agents.md`), working (with a plain-Japanese line for the running tool or the subagent progress
   line; never the command text or message bodies), failed, unseen (a turn ended while the tab was
@@ -97,7 +97,7 @@ one place an added agent brings its own controls; everything else asks the regis
   「新着」 mark, and ones read and possibly continued) › 終わったもの (closed conversations only — closing ends one; a
   conversation closed with nothing sent and no draft is deleted, and such leftovers are not listed);
   a pinned conversation leaves ピン留め only for あなたの番. Tests:
-  `client/tests/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
+  `client/src/features/chat/consultation-status.test.ts`, `tests/ui/chat-panel.spec.ts`.
 - Each group heading except あなたの番 folds its rows (owner, 2026-10-30): a button with
   `aria-expanded` and a chevron, the count still shown. あなたの番 never folds, so what the AI waits
   for cannot be folded away; a folded group with an unread reply shows 新着 on its heading.

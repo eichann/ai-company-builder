@@ -1,5 +1,5 @@
 import type { ChatSessionSummary } from '../../../shared/chat-history'
-import { isEmptyConversation } from '../../lib/conversationRows'
+import { isEmptyConversation } from './conversationRows'
 
 /**
  * What a conversation's tab holds at the moment the member leaves it for

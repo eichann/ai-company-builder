@@ -6,10 +6,10 @@ paths:
   - "client/electron/features/git-history/**"
   - "client/electron/git-search.ts"
   - "client/electron/local-file-protocol.ts"
-  - "client/src/lib/fileEvents.ts"
-  - "client/src/lib/fileVersions.ts"
-  - "client/src/lib/folderExists.ts"
-  - "client/src/lib/line-diff.ts"
+  - "client/src/shared/lib/fileEvents.ts"
+  - "client/src/shared/lib/fileVersions.ts"
+  - "client/src/shared/lib/folderExists.ts"
+  - "client/src/features/doc-review/line-diff.ts"
   - "client/src/shared/ui/DiffViewer.tsx"
   - "client/src/app/AppShell.tsx"
   - "client/src/features/doc-review/**"
@@ -64,7 +64,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   as `add`; a removed folder may arrive as `unlink`, so consumers treat `unlink` as "this path and
   everything under it". `.git` (any depth), `node_modules`, `.workspace`, `.backups` and
   `.DS_Store` are dropped. The `disableWatchers` perf switch skips the watcher.
-- Renderer: one subscription (`src/lib/fileEvents.ts` `subscribeFileChanges`, over
+- Renderer: one subscription (`src/shared/lib/fileEvents.ts` `subscribeFileChanges`, over
   `src/shared/ipc/file-events.ts` `FileChangeReads`); consumers filter by path prefix.
 
 ## File tree (`src/features/files/`: `fileTreeModel.ts`, `components/FileTreePanel.tsx`)
@@ -82,7 +82,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
   allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`.
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
-  `download-choices.md`); the "folder exists" check is keyed per folder (`src/lib/folderExists.ts`,
+  `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted
   once opened (history follows the department only while shown, since it runs `git log`).
 - Not-downloaded folders and read-only badges: `download-choices.md`, `chat-write-guard.md`.
@@ -112,7 +112,7 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
 
 ## Previews never show a stale file
 
-`src/lib/fileVersions.ts` bumps a per-path counter on every event (read through
+`src/shared/lib/fileVersions.ts` bumps a per-path counter on every event (read through
 `features/editor/hooks/useFileVersion.ts`); images and PDFs load
 `local-file://<path>?v=<n>` (`client/shared/local-file-url.ts`). The protocol handler
 (`electron/local-file-protocol.ts`) drops the query, applies the allowed-roots check and answers
@@ -256,7 +256,7 @@ and by the AI: **do not change them by one character** (no renamed key, no reord
 - Folder history uses `git log -- :(literal)<folder>/` without `--follow` (simple-git's `file`
   option added it: 0.9 s instead of 0.02 s, same commits). `invalidateCommitCache()` also makes
   the visible history panel re-fetch.
-- The review diff (`src/lib/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
+- The review diff (`src/features/doc-review/line-diff.ts`) is Myers O((N+M)·D) in linear space with a work
   budget; past it the view says the diff is too large instead of building an O(m·n) table.
 - Tests: `client/tests/git-search.test.ts`, `company-watcher.test.ts` (incl. a live temp-folder
   test), `src/features/files/fileTreeModel.test.ts`, `local-file-url.test.ts`, `line-diff.test.ts`; perf budgets in

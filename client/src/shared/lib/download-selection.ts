@@ -7,7 +7,7 @@
  * downloaded; an excluded folder covers its whole subtree (no re-including
  * inside it, so its children are shown unchecked and disabled).
  */
-import { excludedFolderOf, exclusionsInside, normalizeExclusions, pathKey } from '../../shared/sparse-paths'
+import { excludedFolderOf, exclusionsInside, normalizeExclusions, pathKey } from '../../../shared/sparse-paths'
 
 /**
  * - `checked`: downloaded, nothing inside left out

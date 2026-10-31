@@ -1,5 +1,5 @@
 import type { UIMessage } from 'ai'
-import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../shared/review-request'
+import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
 
 /**
  * The 「確認をお願いします」 request a conversation waits on: the last one in

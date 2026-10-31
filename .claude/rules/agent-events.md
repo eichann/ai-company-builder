@@ -11,7 +11,7 @@ paths:
   - "server/tests/integration/agent-events.test.ts"
   - "client/electron/services/agent-event-sender.ts"
   - "client/tests/agent-event-sender.test.ts"
-  - "client/src/lib/agentLogNotice.ts"
+  - "client/src/shared/lib/agentLogNotice.ts"
   - "client/src/features/chat/components/AgentLogNotice.tsx"
   - "admin/src/app/companies/*/agent-events/**"
   - "admin/src/components/agent-events/**"
@@ -54,7 +54,7 @@ clock + fake fetch).
   server: retry in 5 min); 400 / 413 → batch halved, a single refused event dropped; 429 →
   `Retry-After`; network / 5xx / other → 10 s doubling to 5 min. Sign-out stops sending (queues
   kept). Logs counts and status codes only.
-- **Telling the member** (owner decision): `src/lib/agentLogNotice.ts` holds the sentence; the
+- **Telling the member** (owner decision): `src/shared/lib/agentLogNotice.ts` holds the sentence; the
   chat shows `AgentLogNotice` once per account on this PC (localStorage
   `acb.agentLogNoticeSeen:<userId>`; non-modal `role="dialog"`, OK focused, Esc closes), and
   the settings nav always shows the sentence (with the AI sandbox's `SANDBOX_NOTICE_TEXT` under it,

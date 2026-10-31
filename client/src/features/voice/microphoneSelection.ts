@@ -1,5 +1,5 @@
-import type { VoiceDevice, VoiceDeviceList } from '../../shared/voice-input'
-import { listMicrophones } from '../features/voice/api'
+import type { VoiceDevice, VoiceDeviceList } from '../../../shared/voice-input'
+import { listMicrophones } from './api'
 const KEY = 'acb.voice.microphone'
 function readSelection() { try { return localStorage.getItem(KEY) } catch { return null } }
 const savedSelection = readSelection()

@@ -7,8 +7,8 @@
  */
 import { isPerfCutEnabled, perfMark } from './perfDiagnostics'
 import { fileVersions } from './fileVersions'
-import { listenToFileChanges } from '../shared/ipc/file-events'
-import type { FileChangeEvent } from '../../shared/ipc-contract'
+import { listenToFileChanges } from '../ipc/file-events'
+import type { FileChangeEvent } from '../../../shared/ipc-contract'
 
 type Listener = (changes: FileChangeEvent[]) => void
 

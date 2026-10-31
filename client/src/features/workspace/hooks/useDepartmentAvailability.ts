@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { DepartmentConfig } from '../../../types'
-import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../../lib/folderExists'
+import { folderExistsFor, rememberFolderExists, type FolderCheck } from '../../../shared/lib/folderExists'
 import { departmentFolderExists } from '../api'
 
 interface SparseState {

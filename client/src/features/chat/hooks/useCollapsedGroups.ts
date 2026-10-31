@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import type { ConversationGroupKey } from '../../../lib/consultationStatus'
+import type { ConversationGroupKey } from '../consultationStatus'
 import { COLLAPSED_GROUPS_KEY_PREFIX, canCollapse, parseCollapsedGroups } from '../conversationGroups'
 
 function read(companyId: string): ReadonlySet<ConversationGroupKey> {

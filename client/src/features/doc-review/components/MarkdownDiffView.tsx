@@ -1,5 +1,5 @@
 import React, { useRef, useMemo, useImperativeHandle } from 'react'
-import { computeLineDiff } from '../../../lib/line-diff'
+import { computeLineDiff } from '../line-diff'
 
 export interface MarkdownDiffViewHandle {
   scrollToText: (text: string) => void

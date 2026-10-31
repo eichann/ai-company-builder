@@ -1,6 +1,6 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { diffSelection, downloadedBytes, folderCheckState, sameSelection, toggleFolder } from '../src/lib/download-selection'
+import { diffSelection, downloadedBytes, folderCheckState, sameSelection, toggleFolder } from './download-selection'
 
 test('tri-state: checked, partial (something inside left out), unchecked, inherited (inside a folder left out)', () => {
   const ex = ['コンテンツ/動画', '営業部']

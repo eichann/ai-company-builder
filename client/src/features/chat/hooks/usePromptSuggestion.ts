@@ -3,7 +3,7 @@ import type { AuthMode } from '../../../../shared/agent'
 import { normalizeSuggestion } from '../../../../shared/prompt-suggestion'
 import type { ChatServerClient } from '../chatServerClient'
 import { canOfferSuggestion, shouldRequestSuggestion } from '../promptSuggestion'
-import { promptSuggestionSetting } from '../../../lib/promptSuggestionSetting'
+import { promptSuggestionSetting } from '../../../shared/lib/promptSuggestionSetting'
 import type { ChatInputApi } from './useChatDraft'
 
 export interface PromptSuggestionOptions {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { readFile } from '../api'
 import { isBinaryFile } from '../fileKinds'
-import { subscribeFileChanges } from '../../../lib/fileEvents'
+import { subscribeFileChanges } from '../../../shared/lib/fileEvents'
 import { normalizePathSeparators } from '../../../shared/lib/path'
 import { publishUnsavedEdits } from '../../../shared/lib/unsavedEdits'
 import { applyDiskDecision, decideOnDiskEvent, isDirty, type EditorFileState } from '../../../../shared/editor-disk-state'
