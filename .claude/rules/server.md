@@ -50,8 +50,15 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
   session (public endpoints are listed there with their reason); the 403 checks live in
   `tests/integration/authorization.test.ts`. Do not add tests that search route source for the
   name of a check.
+- The permission matrix (`tests/integration/permission-matrix.test.ts`) walks every route of
+  `src/app.ts` and states the status code for owner, admin, member, department manager (inside
+  and outside their department), a signed-in outsider and a signed-out caller. A route missing
+  from the matrix fails it: a new endpoint gets its row(s) in the same PR. Requests are chosen
+  so an allowed caller passes the guard without changing state (invalid body → 400, missing
+  target → 404 after the role check); keep it that way when adding rows. A changed row is a
+  changed permission — say so in the PR.
 
-## Route map (mounted in `server/src/index.ts`)
+## Route map (mounted in `server/src/app.ts`; `index.ts` starts it)
 
 ```
 GET  /api/config                                  setup state (no auth)

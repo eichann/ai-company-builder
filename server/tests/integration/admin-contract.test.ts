@@ -204,7 +204,7 @@ beforeAll(async () => {
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
-  // The same mounts as src/index.ts.
+  // The same mounts as src/app.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
   app.route('/api/companies', companiesRoute)
