@@ -64,6 +64,7 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `chat.newConsultation` `{ message?, pane? }` | outbound (the message starts the AI) | each chat pane (`ChatPanel.tsx`, target = its layout leaf id, today `chat`) | a skill's 実行 (`features/skills/hooks/useSkillsTab.ts`, message `/<skill folder> `) |
 | `chat.insertText` `{ text, pane? }` | local (replaces the composer's text, sends nothing) | each chat pane | none yet |
 | `chat.openInWindow` `{ sessionId, pane? }` | view (shows it in a window of its own; one shown elsewhere is focused) | each chat pane (`ChatPanel.tsx`, `useMoveToWindow`) | none yet; the row and header buttons call the same function directly (`chat-ui-and-history.md`) |
+| `chat.toggleVoiceInput` `{ pane? }` | outbound (recording goes to transcription and the AI tidies it) | the shown tab's composer of each chat pane (`VoiceInputControl.tsx`) | the member's voice key (`features/chat/hooks/useVoiceShortcut.ts`, below) |
 | `settings.openOwnKey` `{ service? }` | view | `AppShell.tsx`: Settings → 「自分の鍵」, that service shown first (highlighted, its form open when the member may register; a new request remounts the panel) | the chat's 「<サービス> の鍵がありません」 card (`features/chat/components/BrokerKeyNeededCard.tsx`; a button only while a handler exists, `useCommandAvailable` — none in a consultation's own window) |
 | `layout.toggleChat` ⌘⇧C (app) | view | `AppShell.tsx` (hides / shows the chat pane); declines the key for 1.2 s after typing in the chat (`isChatInputRecentlyActive`), so the key stays with the input | the shortcut; the collapsed chat's button calls the same function directly |
 | `file.search` ⌘P (app) | view | `AppShell.tsx`: the 「ファイル名で検索」 dialog | the shortcut |
@@ -72,9 +73,9 @@ extension) become commands. Calls inside one feature stay direct function calls.
 | `editor.togglePreview` `{ pane? }` ⌘⇧V (editor) | view | each editor: Markdown preview ⇄ source; declines the key for other files | the shortcut; the editor / preview buttons call the same function |
 | `editor.find` `{ pane? }` ⌘F (editor) | view | the shown Markdown preview (`hooks/usePreviewSearch.ts`); declines the key while hidden, so the source editor's own ⌘F (CodeMirror) works | the shortcut |
 
-A chat pane keeps the request until its active tab can act (history read): the tab then starts a
+A chat pane keeps the request until its shown tab can act (history read): the tab then starts a
 new conversation and sends the message, or puts the text in the composer (`ChatConversation.tsx`
-`inputRequest`). Only the active tab of the named pane receives it; the panel root is the `chat`
+`inputRequest`). Only the shown tab of the named pane receives it; the panel root is the `chat`
 focus area (`commandArea('chat', paneId)`). UI test: `tests/ui/chat-panel.spec.ts` 「chat commands」.
 
 An editor's root is the `editor` focus area (`commandArea('editor', paneId)`, `tabIndex={-1}` so a
@@ -94,14 +95,16 @@ is elsewhere (the file tree, the chat). UI test: `tests/ui/editor-panel.spec.ts`
   first and ending with `app`, and runs at most one command per key press. A chat-area shortcut
   therefore reaches the focused chat pane only, never every pane. Do not add new `window` /
   `document` keydown listeners for app shortcuts; dialog-local Escape handlers stay where they are.
-- Still a window-wide listener (not a command yet; it fires for the active chat tab, and must
-  become a chat-area shortcut before a second chat pane): voice input's start / stop key
-  (member-configurable, `VoiceInputControl.tsx`, `window` capture, stops the event, with its own
-  Escape and dialog checks; default ⌘⇧M). `editor.togglePreview` moved to ⌘⇧V (owner, 2026-10-30;
+- The one window-wide app key: voice input's start / stop (member-configurable, default ⌘⇧M), so
+  not a catalog keybinding. `hooks/useVoiceShortcut.ts` holds one `window` capture listener per
+  page (however many composers), skips composition, repeats and open dialogs, and runs
+  `chat.toggleVoiceInput` for the chat pane used last — wherever the focus is, as before.
+  `editor.togglePreview` moved to ⌘⇧V (owner, 2026-10-30;
   VS Code's Markdown preview key) so the two no longer collide. Dialog-local Escape
   handlers (`ConfirmDialog`, `InputDialog`, `ContextMenu`, `DiffViewer`, `FileSearchModal`,
   `SyncPreviewDialog`, `SettingsPanel`) stay where they are.
 - UI tests: `tests/ui/skill-layout.spec.ts` 「shortcuts」 (⌘P, ⌘⇧F),
-  `skill-layout-state.spec.ts` (⌘⇧C) and `editor-panel.spec.ts` (⌘S, ⌘⇧V, ⌘F, focus only).
+  `skill-layout-state.spec.ts` (⌘⇧C), `editor-panel.spec.ts` (⌘S, ⌘⇧V, ⌘F, focus only) and
+  `voice-input.spec.ts` (the voice key, two panes).
 - `runCommand` logs a failure (`[commands] <id> failed: <code>`) and resolves to undefined; it
   never logs arguments (paths, what a member typed).

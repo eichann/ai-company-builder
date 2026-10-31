@@ -6,6 +6,8 @@ import { AUTOSAVE_INTERVAL_MS, greetingMessages, messageText, sameSaveInputs, se
 import type { ChatInputApi } from './useChatDraft'
 import type { Conversation } from './useConversation'
 import { flushChatSession, getChatSession, getChatSessionSummaries, onChatHistoryChanged, saveChatSession } from '../api'
+import { useInterval } from '../../../shared/hooks/useInterval'
+import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 
 export interface ChatHistoryOptions {
   conversation: Conversation
@@ -15,7 +17,7 @@ export interface ChatHistoryOptions {
   /** The greeting of a new conversation, and the title of one without a user message yet. */
   greeting: string
   newChatTitle: string
-  isActive: boolean
+  isShown: boolean
   messages: UIMessage[]
   setMessages: (messages: UIMessage[]) => void
   status: string
@@ -46,7 +48,7 @@ export interface ChatHistoryOptions {
  * through `conversation.saveRef`.
  */
 export function useChatHistory(o: ChatHistoryOptions) {
-  const { conversation, initialSessionId, companyId, isActive, messages, setMessages, status, stop, chatServer, draftRef, inputApiRef, messageImages, messageReferenceFiles, onTitleChange, onSessionIdChange } = o
+  const { conversation, initialSessionId, companyId, isShown, messages, setMessages, status, stop, chatServer, draftRef, inputApiRef, messageImages, messageReferenceFiles, onTitleChange, onSessionIdChange } = o
   const { appSessionIdRef, claudeSessionIdRef, agentSessionRef, setHistoryError, currentSessionId, setCurrentSessionId, timestampsRef, saveRef } = conversation
 
   const lastNotifiedTitleRef = useRef<string | null>(null)
@@ -124,17 +126,14 @@ export function useChatHistory(o: ChatHistoryOptions) {
 
   // Persist drafts immediately when leaving a conversation, including clearing an old draft.
   useEffect(() => {
-    if (!isActive) void saveRef.current(undefined, true)
-  }, [isActive, saveRef])
+    if (!isShown) void saveRef.current(undefined, true)
+  }, [isShown, saveRef])
 
   // Checkpoint during streaming too. A trailing debounce alone would never fire
   // while tokens keep arriving. Unload and leaving the tab flush synchronously,
   // so the interval only bounds what a crash can lose; typing in the input is
   // picked up by the next tick, not saved per keystroke.
-  useEffect(() => {
-    const interval = window.setInterval(() => { void saveRef.current() }, AUTOSAVE_INTERVAL_MS)
-    return () => window.clearInterval(interval)
-  }, [saveRef])
+  useInterval(() => { void saveRef.current() }, AUTOSAVE_INTERVAL_MS)
   useEffect(() => {
     if (status === 'ready' || status === 'error') void saveRef.current()
   }, [status, messages, saveRef])
@@ -142,23 +141,17 @@ export function useChatHistory(o: ChatHistoryOptions) {
   // Subscribe to cross-tab chat history changes so each tab keeps its sessions cache in sync.
   // Without this, an action in one tab (pin toggle, rename, delete, auto-save) would not
   // be reflected in another tab's history dropdown until that tab triggers its own reload.
-  useEffect(() => {
-    if (!companyId) return
-    const unsubscribe = onChatHistoryChanged((data) => {
-      if (data.companyId === companyId) {
-        if (data.deletedSessionId === appSessionIdRef.current) {
-          deletedRef.current = true
-          stop()
-        }
-        // Only a metadata change of this tab's own conversation (title from the
-        // sidebar or the AI) concerns it; saves come from the tab itself.
-        if (data.sessionId && (data.sessionId !== appSessionIdRef.current || data.kind !== 'patch')) return
-        void loadSessions().catch(() => {})
-      }
-    })
-    return unsubscribe
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- one subscription per company: `stop` and `loadSessions` are new on every render
-  }, [companyId])
+  useIpcEvent(onChatHistoryChanged, (data) => {
+    if (data.companyId !== companyId) return
+    if (data.deletedSessionId === appSessionIdRef.current) {
+      deletedRef.current = true
+      stop()
+    }
+    // Only a metadata change of this tab's own conversation (title from the
+    // sidebar or the AI) concerns it; saves come from the tab itself.
+    if (data.sessionId && (data.sessionId !== appSessionIdRef.current || data.kind !== 'patch')) return
+    void loadSessions().catch(() => {})
+  }, !!companyId)
 
   // Session functions
   async function loadSessions() {

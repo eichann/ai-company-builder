@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo, useRef } from 'react'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { DefaultChatTransport } from 'ai'
 import type { AuthMode } from '../../../../shared/agent'
 import type { ChatServerClient } from '../chatServerClient'
@@ -20,37 +21,17 @@ export interface ChatRequestContextValues {
  * when it builds a request. Refs because the transport is created once
  * (useChat keeps its first one); updating them re-renders nothing.
  *
- * Timing kept from the original panel: agent and company are current from
- * the render on; folder, department, model and effort follow after the
- * commit (effects), and the effects that send run after these.
+ * All are current from the render on, before any effect or handler of
+ * that commit sends.
  */
 export function useChatRequestContext(v: ChatRequestContextValues) {
-  const authModeRef = useRef(v.authMode)
-  authModeRef.current = v.authMode
-  const workingDirRef = useRef(v.workingDirectory)
-  const activeDepartmentRef = useRef(v.activeDepartment)
-  const modelIdRef = useRef<string | undefined>(v.modelId)
-  const effortRef = useRef<string>(v.effort)
-  const companyIdRef = useRef(v.companyId)
-  companyIdRef.current = v.companyId
-  const companyRootRef = useRef(v.companyRootPath)
-  companyRootRef.current = v.companyRootPath
-
-  useEffect(() => {
-    workingDirRef.current = v.workingDirectory
-  }, [v.workingDirectory])
-
-  useEffect(() => {
-    activeDepartmentRef.current = v.activeDepartment
-  }, [v.activeDepartment])
-
-  useEffect(() => {
-    modelIdRef.current = v.modelId
-  }, [v.modelId])
-
-  useEffect(() => {
-    effortRef.current = v.effort
-  }, [v.effort])
+  const authModeRef = useLatestRef(v.authMode)
+  const workingDirRef = useLatestRef(v.workingDirectory)
+  const activeDepartmentRef = useLatestRef(v.activeDepartment)
+  const modelIdRef = useLatestRef(v.modelId)
+  const effortRef = useLatestRef(v.effort)
+  const companyIdRef = useLatestRef(v.companyId)
+  const companyRootRef = useLatestRef(v.companyRootPath)
 
   return { authModeRef, workingDirRef, activeDepartmentRef, modelIdRef, effortRef, companyIdRef, companyRootRef }
 }

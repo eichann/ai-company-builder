@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useInterval } from '../../../shared/hooks/useInterval'
 import { Gauge } from '@phosphor-icons/react'
 import { meterView, type MeterLevel, type MeterWindowView, type RateLimitProvider } from '../../../../shared/rate-limits'
 import { useRateLimits } from '../agentStatusStore'
@@ -42,10 +43,7 @@ function percentText(percent: number | null) {
 /** Re-render once a minute so countdowns and expired windows stay current. */
 function useMinuteClock() {
   const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60_000)
-    return () => clearInterval(timer)
-  }, [])
+  useInterval(() => setNow(Date.now()), 60_000)
   return now
 }
 

@@ -38,13 +38,22 @@ import { QueuedSendList } from './QueuedSendList'
 // One chat tab: a conversation with the agent. A composition of hooks
 // (hooks/, one concern each, in the order useChat needs them) and
 // presentational parts (ChatHeader, MessageList, ChatInput, banners).
+// Over 300 lines on purpose: the hook order is one sequence (chat-ui-and-history.md), read in one place.
 
 const IMAGE_READ_FAILED = '添付した画像を読み込めなかったため、送信しませんでした。入力した文は残してあります。画像を添付し直してから、もう一度送信してください。'
 
 export interface ChatPanelChatProps {
   /** The tab this conversation is shown in (its status in the 「AIへの相談」 list). */
   tabId: string
-  isActive: boolean
+  /**
+   * The tab its pane shows (several panes may each show one): what scrolling,
+   * the save on leaving, 「新着」 and chat commands go by. Which pane takes
+   * the voice key is the chat pane the member used last (`paneId`, the
+   * command registry), not this flag.
+   */
+  isShown: boolean
+  /** The chat pane this tab is in (the layout leaf id; `chat` for the main one and a consultation's own window). */
+  paneId?: string
   departmentPath?: string
   activeDepartment?: { name: string; folder: string }
   chatServer: ChatServerClient
@@ -60,7 +69,7 @@ export interface ChatPanelChatProps {
   onSessionIdChange?: (sessionId: string | null) => void
   /** Closes this tab: the member left it for another conversation with nothing typed (useDiscardBlankOnLeave). */
   onLeftBlank?: () => void
-  /** A chat command waiting for this tab (only the active tab gets one); consumed once acted on. */
+  /** A chat command waiting for this tab (only the shown tab of the named pane gets one); consumed once acted on. */
   inputRequest?: ChatInputRequest | null
   onInputRequestConsumed?: () => void
   /** 「別ウィンドウで開く」 for this conversation (the main window's chat). */
@@ -76,7 +85,7 @@ export type ChatInputRequest =
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
 // title change or tab switch. Its props are stable (see CompanyChatPanel).
-export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone }: ChatPanelChatProps) {
+export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, departmentPath, activeDepartment, chatServer, authMode, codexStatus, slashCommands, onShowSettings, onTitleChange, onNewTab, onToggleSidebar, sidebarOpen, initialSessionId, onSessionIdChange, onLeftBlank, inputRequest, onInputRequestConsumed, onOpenInWindow, standalone, paneId = 'chat' }: ChatPanelChatProps) {
   const { t } = useTranslation()
   const currentCompany = useAppStore((state) => state.currentCompany)
   const models = useAgentModelSelection(authMode, codexStatus)
@@ -155,7 +164,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
     companyId: currentCompany?.id,
     greeting: t('chat.greeting', { company: currentCompany?.name || '' }),
     newChatTitle: t('chat.newChat'),
-    isActive,
+    isShown,
     messages,
     setMessages,
     status,
@@ -188,7 +197,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
   const unsentAttachmentsRef = useRef(0)
   const handleAttachmentsChange = useCallback((count: number) => { unsentAttachmentsRef.current = count }, [])
 
-  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isActive, isRestoringSession, messages, status })
+  const { messagesEndRef, messagesContainerRef, onCompositionStateChange: handleInputCompositionStateChange } = useChatAutoScroll({ isShown, isRestoringSession, messages, status })
 
   const handleInputActivity = useCallback(() => {
     markChatInputActivity()
@@ -262,11 +271,11 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
   const running = status === 'submitted' || status === 'streaming'
   const offeredSuggestion = !running && !currentInteraction && !pendingApproval ? suggestions.promptSuggestion : null
 
-  useConsultationStatus({ tabId, isActive, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
+  useConsultationStatus({ tabId, isShown, status, approval: pendingApproval, interaction: currentInteraction, messages, rootPath: currentCompany?.rootPath })
 
   // Left for another conversation with nothing typed: the tab closes and the empty conversation goes.
   useDiscardBlankOnLeave({
-    isActive,
+    isShown,
     companyId: currentCompany?.id,
     sessionId: currentSessionId,
     readLeft: () => ({
@@ -290,17 +299,17 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
   // chat.insertText: the text goes into the composer. chat.newConsultation (e.g. a skill's 実行):
   // a new conversation, then its message is sent; waits for the history.
   useEffect(() => {
-    if (isActive && inputRequest?.kind === 'insertText') {
+    if (isShown && inputRequest?.kind === 'insertText') {
       if (inputRequest.text && chatInputApiRef.current?.replaceText(inputRequest.text)) onInputRequestConsumed?.()
       return
     }
-    if (!isActive || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
+    if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
     const message = inputRequest.message
     onInputRequestConsumed?.()
     startNewChat().then(started => {
       if (started && message) void handleSend(message)
     })
-  }, [inputRequest, isRestoringSession, isActive, chatInputApiRef])
+  }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 
   // Edit message handler: resend from the edited message onward (sendTurn),
   // keeping the edited message's file references.
@@ -335,7 +344,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
         onOpenInWindow={onOpenInWindow ? () => { if (currentSessionId) onOpenInWindow(currentSessionId) } : undefined}
         openInWindowBlocked={running || !!pendingApproval || !!currentInteraction}
       />
-      {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isActive} />}
+      {currentCompany?.id && appSessionIdRef.current && <HandoffControl companyId={currentCompany.id} sessionId={appSessionIdRef.current} active={isShown} />}
 
 
       {historyError && (
@@ -395,7 +404,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isActive, depa
           <ChatInput
             initialDraft={draftInputRef.current}
             onDraftChange={handleDraftChange}
-            voiceActive={isActive}
+            voiceActive={isShown}
+            voicePane={paneId}
             voiceScope={appSessionIdRef.current ?? ''}
             onSend={handleSend}
             disabled={isRestoringSession || !historyReadyRef.current || deletedRef.current || models.agentUnavailable}

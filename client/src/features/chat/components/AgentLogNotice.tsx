@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react'
+import { useId, useState } from 'react'
 import { Info } from '@phosphor-icons/react'
 import { AGENT_LOG_NOTICE_MORE, AGENT_LOG_NOTICE_TEXT, markAgentLogNoticeSeen, shouldShowAgentLogNotice } from '../../../lib/agentLogNotice'
 
@@ -7,10 +7,8 @@ import { AGENT_LOG_NOTICE_MORE, AGENT_LOG_NOTICE_TEXT, markAgentLogNoticeSeen, s
 // OK (or Esc) dismisses it for good.
 export function AgentLogNotice({ userId }: { userId: string }) {
   const [open, setOpen] = useState(() => shouldShowAgentLogNotice(userId))
-  const okRef = useRef<HTMLButtonElement>(null)
   const titleId = useId()
   const bodyId = useId()
-  useEffect(() => { if (open) okRef.current?.focus() }, [open])
   if (!open) return null
   const close = () => { markAgentLogNoticeSeen(userId); setOpen(false) }
   return (
@@ -31,7 +29,7 @@ export function AgentLogNotice({ userId }: { userId: string }) {
           </p>
           <div className="mt-3 flex justify-end">
             <button
-              ref={okRef}
+              autoFocus
               type="button"
               onClick={close}
               className="h-8 rounded-lg bg-indigo-600 px-4 text-[13px] font-medium text-white hover:bg-indigo-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500/60 focus-visible:ring-offset-1 dark:bg-indigo-500 dark:hover:bg-indigo-400 dark:focus-visible:ring-offset-zinc-900"

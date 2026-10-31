@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState, type MutableRefObject } from 'react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../../shared/agent-interaction'
 import type { ToolApprovalRequest } from '../../../../shared/ipc-contract'
+import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { getAgentInteractions, onAgentInteraction, onAgentInteractionClosed, onToolApprovalRequest, respondAgentInteraction, respondToolApproval } from '../api'
 
 /**
@@ -62,25 +63,23 @@ export function useToolApprovals(appSessionIdRef: MutableRefObject<string | null
   const [pendingApprovals, setPendingApprovals] = useState<ToolApprovalRequest[]>([])
   const pendingApproval = pendingApprovals[0]
 
-  useEffect(() => {
-    const unsub = onToolApprovalRequest((data) => {
-      // Only accept approval requests for this tab's session
-      if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) {
-        return // Not for this tab
-      }
-      setPendingApprovals(queue => queue.some(p => p.toolUseId === data.toolUseId) ? queue : [...queue, data])
-    })
-    return unsub
-  }, [appSessionIdRef])
+  useIpcEvent(onToolApprovalRequest, (data) => {
+    // Only accept approval requests for this tab's session
+    if (data.appSessionId && data.appSessionId !== appSessionIdRef.current) return
+    setPendingApprovals(queue => queue.some(p => p.toolUseId === data.toolUseId) ? queue : [...queue, data])
+  })
 
   const respondToApproval = useCallback((toolUseId: string, approved: boolean) => {
     respondToolApproval(toolUseId, approved)
     setPendingApprovals(queue => queue.filter(p => p.toolUseId !== toolUseId))
   }, [])
 
-  useEffect(() => {
+  // A turn that ends drops its approvals (adjusted while rendering, not in an effect).
+  const [approvalsStatus, setApprovalsStatus] = useState(status)
+  if (status !== approvalsStatus) {
+    setApprovalsStatus(status)
     if (status === 'ready' || status === 'error') setPendingApprovals([])
-  }, [status])
+  }
 
   return { pendingApproval, respondToApproval }
 }

@@ -131,10 +131,13 @@ owner-approved reduction, refactor stage 3); most belong elsewhere. Sort each on
 
 - **A. Syncing with the outside world** — IPC event subscriptions, DOM / keyboard / mouse
   listeners, timers, observers, a third-party widget (CodeMirror), writing to an external store.
-  Legitimate. Prefer the small shared hooks in `src/shared/hooks/` once they exist
-  (`useIpcEvent`, `useEventListener`, `useInterval`, …) over a hand-written effect; a focus on
+  Legitimate. Prefer the small shared hooks in `src/shared/hooks/` over a hand-written effect:
+  `useIpcEvent(subscribe, handler, enabled?)` (a data-layer `on…` function), `useEventListener`
+  (window / document / an element, `capture`, `passive`, `enabled`), `useInterval(fn, ms | null)`,
+  `useIsNarrowerThan(px)` (a callback ref + ResizeObserver, no effect), `useLatestRef`; a focus on
   mount is `autoFocus`. These generic hooks live in `shared/hooks/` even before a second feature
-  uses them.
+  uses them. Comparing with the previous render (`useState` of the previous value, adjusted while
+  rendering) replaces an effect that only reacts to a prop change (`useConsultationStatus`).
 - **B. Derived state** — a value computed from props / state and stored with `setState` in an
   effect: compute it during render (`useMemo` only when it is expensive).
 - **C. Chains that react to state to trigger an action** (save when the status turns ready,
@@ -202,10 +205,11 @@ D7–D9, confirmed 2026-10-30).
   code; which pane is hidden is not saved) and `components/SplitView.tsx` on the in-house
   `ResizeHandle` (`react-resizable-panels` was prototyped and not taken: its collapse model
   differs from "drag 60 px past the max hides the chat", it stores percentages, and it released
-  weekly with API breaks across majors). Today the tree has the screen's look only; multiple chat
-  panes come later and need the chat's "one panel on screen" assumptions (`isActive`,
-  window-wide shortcuts) removed first (chat input from other features already names its pane:
-  the `chat.*` commands, `commands.md`). Changing the saved shape means a new
+  weekly with API breaks across majors). Today the tree has the screen's look only; the chat no
+  longer assumes one panel on screen (refactor 5-7, `chat-ui-and-history.md` 「Several chat
+  panes」): a tab is `isShown` in its pane, the voice key and `chat.*` commands go to the pane
+  used last, a consultation is open in one pane at most, tabs are remembered per pane. A second
+  chat leaf in the tree is what is left. Changing the saved shape means a new
   `version` and reading the old one (`layoutTree.test.ts`, `client/tests/ui/skill-layout-state.spec.ts`).
   A pane that takes the remaining space (and the left side while the chat is hidden) has
   `min-width` = its limit or 0, never the flex default `auto`: otherwise wide content (many tabs,

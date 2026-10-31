@@ -358,6 +358,23 @@ test.describe('a long restored conversation', () => {
     expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0)), 'the message on screen stays where it was').toBeLessThan(3)
   })
 
+  test('a streaming reply follows the bottom, but not while the member has scrolled up to read', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'long', turn: 'manual' })
+    await expect(userQuestions(page).last()).toHaveText(/^質問120: /, { timeout: 15_000 })
+    const fromBottom = () => list(page).evaluate(el => el.scrollHeight - el.scrollTop - el.clientHeight)
+    await send(page, '続きをお願いします')
+    await turnStarted(page)
+    await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '続きです。\n\n'.repeat(20)) })
+    await expect.poll(fromBottom).toBeLessThan(5)
+
+    await list(page).evaluate(el => { el.scrollTop = el.scrollTop - 800 })
+    await expect.poll(fromBottom).toBeGreaterThan(500)
+    await chat(page, c => c.text('t1', 'さらに続きます。\n\n'.repeat(20)))
+    await page.waitForTimeout(300)
+    expect(await fromBottom(), 'the reader stays where they scrolled to').toBeGreaterThan(500)
+    await chat(page, c => c.finish())
+  })
+
   test('both restored tabs are listed; switching keeps each tab\'s draft, keeps the other tab mounted and reopens at the latest message', async ({ page }) => {
     await openPreview(page, 'chat-header', { history: 'long' })
     const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })
@@ -521,4 +538,38 @@ test('an attached image that cannot be read stops the send and gives the typed t
   await expect(page.getByText('添付した画像を読み込めなかったため、送信しませんでした。入力した文は残してあります。画像を添付し直してから、もう一度送信してください。')).toBeVisible()
   await expect(input(page)).toHaveText('この画像の内容をまとめて')
   expect(await paths(page)).not.toContain('/api/chat')
+})
+
+// Groundwork for split chat panes (refactor 5-7): no "one chat on screen" assumption left.
+test.describe('two chat panes', () => {
+  type PaneName = '左の欄' | '右の欄'
+  const pane = (page: Page, name: PaneName) => page.getByRole('region', { name })
+  const paneInput = (page: Page, name: PaneName) => pane(page, name).locator('.cm-content[role="textbox"]').locator('visible=true')
+
+  test('a consultation open in one pane is shown there, never opened in the other as well', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'edit', panes: '2', turn: 'manual' })
+    const left = pane(page, '左の欄')
+    const right = pane(page, '右の欄')
+    await expect(left.getByText('見積書を作って', { exact: true })).toBeVisible({ timeout: 15_000 })
+    const rightList = right.getByRole('complementary', { name: 'AIへの相談' })
+    const rightOpen = rightList.getByRole('region', { name: '開いている相談' }).locator('[data-conversation-id]')
+    await expect(rightOpen).toHaveCount(1)
+
+    await rightList.getByRole('button', { name: /^見積書の相談/ }).click()
+    // (The narrow pane closes its list after the click.)
+    await page.waitForTimeout(500)
+    await expect(right.getByText('見積書を作って', { exact: true }), 'the right pane did not open it too').toHaveCount(0)
+    await expect(left.getByText('見積書を作って', { exact: true })).toBeVisible()
+  })
+
+  test('a chat command that names a pane reaches that pane\'s composer only', async ({ page }) => {
+    await openPreview(page, 'chat-header', { panes: '2', turn: 'manual' })
+    const run = (id: string, args: Record<string, unknown>) =>
+      page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
+    await expect(paneInput(page, '右の欄')).toBeVisible()
+    await expect(paneInput(page, '左の欄')).toBeVisible()
+    await run('chat.insertText', { text: '右の欄あて', pane: 'right' })
+    await expect(paneInput(page, '右の欄')).toHaveText('右の欄あて')
+    await expect(paneInput(page, '左の欄')).not.toHaveText('右の欄あて')
+  })
 })

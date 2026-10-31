@@ -352,7 +352,7 @@ test('an exported type name is defined in one place only (client/src, client/sha
  * so the count may only go down (lower this when one goes), and each says why:
  * `-- reason` on the directive, or a comment on the line above it.
  */
-const MAX_EXHAUSTIVE_DEPS_DISABLES = 9
+const MAX_EXHAUSTIVE_DEPS_DISABLES = 8
 
 const EXHAUSTIVE_DEPS_DISABLE = /eslint-disable(?:-next-line|-line)?\s+[^\n]*react-hooks\/exhaustive-deps/
 
@@ -387,7 +387,7 @@ test('exhaustive-deps is turned off no more often than today, and each time with
  * homes (renderer-structure.md "Effects"). The count may only go down: lower
  * this when you remove effects, never raise it.
  */
-const MAX_USE_EFFECTS = 157
+const MAX_USE_EFFECTS = 129
 
 /** `useEffect(` calls in one file's code (comments do not count). */
 function useEffectCalls(source: string): number {

@@ -42,14 +42,12 @@ export function useStreamingChat(transport: ChatTransport<UIMessage>, onFinish: 
     onData: handleTransientDataPart,
   })
 
-  const { messages } = chat
-  useEffect(() => {
-    const last = messages[messages.length - 1]
-    let length = 0
-    if (last?.role === 'assistant') for (const part of last.parts) if (part.type === 'text') length += part.text.length
-    const next = streamThrottleMs(length)
-    if (next !== streamThrottle) setStreamThrottle(next)
-  }, [messages, streamThrottle])
+  // The throttle follows the reply's length (adjusted while rendering; useChat takes it next render).
+  const last = chat.messages[chat.messages.length - 1]
+  let length = 0
+  if (last?.role === 'assistant') for (const part of last.parts) if (part.type === 'text') length += part.text.length
+  const nextThrottle = streamThrottleMs(length)
+  if (nextThrottle !== streamThrottle) setStreamThrottle(nextThrottle)
 
   return chat
 }

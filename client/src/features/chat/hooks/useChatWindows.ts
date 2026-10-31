@@ -2,12 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import type { ChatWindowInfo, ChatWindowStatus } from '../../../../shared/chat-windows'
 import { closeChatWindows, listChatWindows, onChatWindowsChanged } from '../api'
 
+let openPanels = 0
+
 /**
  * The main window's view of the consultations other windows show
  * (「別ウィンドウで開く」): their statuses for the list, keyed by conversation
  * id, and `onReturned` when one of this company's windows closes (its
  * consultation comes back here). The windows close when this company's
- * chat goes (company switch, sign-out, another account).
+ * chat goes (company switch, sign-out, another account): when its last pane goes.
  */
 export function useChatWindows(companyId: string, onReturned: (sessionId: string) => void): ReadonlyMap<string, ChatWindowStatus> {
   const [windows, setWindows] = useState<ReadonlyMap<string, ChatWindowStatus>>(() => new Map())
@@ -33,7 +35,11 @@ export function useChatWindows(companyId: string, onReturned: (sessionId: string
     return () => { alive = false; unsubscribe() }
   }, [companyId])
 
-  useEffect(() => () => { void closeChatWindows().catch(() => {}) }, [])
+  // The last chat pane going (company switch, sign-out) closes the windows; one pane of several does not.
+  useEffect(() => {
+    openPanels++
+    return () => { if (--openPanels === 0) void closeChatWindows().catch(() => {}) }
+  }, [])
 
   return windows
 }

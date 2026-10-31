@@ -43,6 +43,15 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'chat' },
   },
   {
+    // Starts or stops voice input in the pane's composer. Recording goes to
+    // transcription and the AI tidies the text, hence outbound. The key is the
+    // member's own choice (default ⌘⇧M), so it is caught by useVoiceShortcut,
+    // not declared as a keybinding here.
+    id: 'chat.toggleVoiceInput', title: '音声入力を開始・停止する', class: 'outbound',
+    args: z.object({ pane: z.string().optional().describe('The chat pane; the one used last when left out') }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
     // Settings → 「自分の鍵」, that service shown first (its form open when the member may register).
     id: 'settings.openOwnKey', title: '「自分の鍵」の設定を開く', class: 'view',
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),

@@ -1,3 +1,4 @@
+// Over 300 lines: MessageList, MessageItem and UserMessageBubble change together (the windowed list and its items).
 import { useState, useEffect, useLayoutEffect, useRef, memo } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { UIMessage } from 'ai'
@@ -302,10 +303,9 @@ export const MessageList = memo(function MessageList({
   // Only the latest messages are rendered (messageWindow.ts).
   const [anchorId, setAnchorId] = useState<string | null>(null)
   const start = windowStart(messages, anchorId)
-  useEffect(() => {
-    const id = messages[start]?.id ?? null
-    if (id !== anchorId) setAnchorId(id)
-  }, [messages, start, anchorId])
+  // Anchor the window on its first message's id (adjusted while rendering), so streaming appends.
+  const startId = messages[start]?.id ?? null
+  if (startId !== anchorId) setAnchorId(startId)
   // Keep what the member is reading in place when earlier messages are added above it.
   const scrollRestoreRef = useRef<{ height: number; top: number } | null>(null)
   useLayoutEffect(() => {

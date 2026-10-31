@@ -68,27 +68,21 @@ export type MessageAttachments = ReturnType<typeof useMessageAttachments>
 export function useAttachToLatestUserMessage(messages: UIMessage[], a: MessageAttachments): void {
   const { pendingImageDataUrlsRef, pendingDisplayFilePathsRef, messageImages, setMessageImages, messageReferenceFiles, setMessageReferenceFiles } = a
 
-  // Associate pending images with new user messages
+  // One effect for both: the pending copies wait for useChat to add the user message.
   useEffect(() => {
-    if (pendingImageDataUrlsRef.current.length === 0) return
+    if (pendingImageDataUrlsRef.current.length === 0 && pendingDisplayFilePathsRef.current.length === 0) return
     const userMsgs = messages.filter(m => m.role === 'user')
     const lastUserMsg = userMsgs[userMsgs.length - 1]
-    if (lastUserMsg && !messageImages.has(lastUserMsg.id)) {
+    if (!lastUserMsg) return
+    if (pendingImageDataUrlsRef.current.length > 0 && !messageImages.has(lastUserMsg.id)) {
       const urls = pendingImageDataUrlsRef.current
       pendingImageDataUrlsRef.current = []
       setMessageImages(prev => new Map(prev).set(lastUserMsg.id, urls))
     }
-  }, [messages, messageImages, pendingImageDataUrlsRef, setMessageImages])
-
-  // Associate pending reference files with new user messages
-  useEffect(() => {
-    if (pendingDisplayFilePathsRef.current.length === 0) return
-    const userMsgs = messages.filter(m => m.role === 'user')
-    const lastUserMsg = userMsgs[userMsgs.length - 1]
-    if (lastUserMsg && !messageReferenceFiles.has(lastUserMsg.id)) {
+    if (pendingDisplayFilePathsRef.current.length > 0 && !messageReferenceFiles.has(lastUserMsg.id)) {
       const paths = pendingDisplayFilePathsRef.current
       pendingDisplayFilePathsRef.current = []
       setMessageReferenceFiles(prev => new Map(prev).set(lastUserMsg.id, paths))
     }
-  }, [messages, messageReferenceFiles, pendingDisplayFilePathsRef, setMessageReferenceFiles])
+  }, [messages, messageImages, messageReferenceFiles, pendingImageDataUrlsRef, pendingDisplayFilePathsRef, setMessageImages, setMessageReferenceFiles])
 }

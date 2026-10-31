@@ -13,6 +13,8 @@ interface ChatInputProps {
   onDraftChange?: (text: string) => void
   voiceActive?: boolean
   voiceScope?: string
+  /** The chat pane: the voice key reaches the composer of the pane used last (`chat.toggleVoiceInput`). */
+  voicePane?: string
   onSend: (text: string, files?: File[], filePaths?: string[]) => void
   disabled: boolean
   placeholder: string
@@ -40,6 +42,7 @@ export const ChatInput = memo(function ChatInput({
   onDraftChange,
   voiceActive = false,
   voiceScope = '',
+  voicePane = 'chat',
   onSend,
   disabled,
   placeholder,
@@ -96,7 +99,7 @@ export const ChatInput = memo(function ChatInput({
           : 'border-transparent'
       }`}
     >
-      {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
+      {apiRef && <VoiceInputControl editor={apiRef} active={voiceActive} pane={voicePane} scope={voiceScope} disabled={disabled} onBusy={setVoiceBusy} />}
       {/* Drag overlay */}
       {attachments.isDragOver && (
         <div className="absolute inset-0 z-10 flex items-center justify-center rounded-xl bg-accent/10 border-2 border-dashed border-accent pointer-events-none">

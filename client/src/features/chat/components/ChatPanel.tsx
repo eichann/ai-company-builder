@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
 import { useTranslation } from 'react-i18next'
 import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
@@ -16,6 +17,8 @@ import { getChatSession } from '../api'
 import { useChatWindows } from '../hooks/useChatWindows'
 import { useMoveToWindow } from '../hooks/useMoveToWindow'
 import { consultationStatusOf } from '../consultationStatusStore'
+import { publishChatPane, showInOtherChatPane } from '../chatPanes'
+import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 
 // The chat panel: one company's conversations as tabs (all mounted, only the
@@ -42,22 +45,14 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const chatServer = useChatServer()
   const currentCompany = useAppStore((s) => s.currentCompany)
 
-  const panelRef = useRef<HTMLDivElement>(null)
+  const [panelRef, compact] = useIsNarrowerThan<HTMLDivElement>(680)
   const [sidebarOpen, setSidebarOpen] = useState(true)
-  const [compact, setCompact] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
 
   const auth = useAgentAuth()
   const { isReady, isChecking, authMode, codexStatus } = auth
-  useEffect(() => {
-    const panel = panelRef.current
-    if (!panel) return
-    const observer = new ResizeObserver(([entry]) => setCompact(entry.contentRect.width < 680))
-    observer.observe(panel)
-    return () => observer.disconnect()
-  }, [isChecking, isReady, chatServer])
 
-  const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id, t('chat.newChat'))
+  const { tabs, activeTabId, setActiveTabId, createNewTab, openSession, detachSession, closeTab, tabCallbacks } = useChatTabs(currentCompany?.id ?? '', paneId, t('chat.newChat'))
 
   // 「別ウィンドウで開く」: consultations other windows show, and moving one there.
   // One that comes back (its window closed) is listed here again as an open tab.
@@ -84,8 +79,11 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   // A consultation another window shows is brought to the front there, never opened here too.
   const openOrFocus = useCallback((sessionId: string) => {
     if (chatWindows.has(sessionId)) void moveToWindow(sessionId)
-    else openSession(sessionId)
-  }, [chatWindows, moveToWindow, openSession])
+    else if (!showInOtherChatPane(sessionId, paneId)) openSession(sessionId)
+  }, [chatWindows, moveToWindow, openSession, paneId])
+  // Which consultations this pane has open (chatPanes.ts): one is never open in two panes.
+  const showHere = useLatestRef(openSession)
+  useEffect(() => publishChatPane(paneId, tabs.flatMap(tab => tab.sessionId ? [tab.sessionId] : []), id => showHere.current(id)), [paneId, tabs, showHere])
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
@@ -165,7 +163,8 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
             <div className={showSettings && tab.id === activeTabId ? 'h-full invisible' : 'h-full'}>
               <ChatPanelChat
                 tabId={tab.id}
-                isActive={tab.id === activeTabId}
+                isShown={tab.id === activeTabId}
+                paneId={paneId}
                 departmentPath={departmentPath}
                 activeDepartment={stableDepartment}
                 chatServer={chatServer}

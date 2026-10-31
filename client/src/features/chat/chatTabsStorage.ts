@@ -1,6 +1,7 @@
-// The chat's open tabs, remembered per company in localStorage
-// (`chatTabs:<companyId>`): titles and conversation ids only. Tab ids are
-// ephemeral and generated again at every start.
+// The chat's open tabs, remembered per company and chat pane in localStorage
+// (`chatTabs:<companyId>` for the main pane `chat`, `chatTabs:<companyId>:<pane>`
+// for another): titles and conversation ids only. Tab ids are ephemeral and
+// generated again at every start.
 
 export interface ChatTab {
   id: string  // Ephemeral handle (random UUID), regenerated on each app start
@@ -9,6 +10,10 @@ export interface ChatTab {
 }
 
 export const CHAT_TABS_KEY_PREFIX = 'chatTabs:'
+
+/** What the tabs of one pane are stored under (the main pane keeps the key older versions wrote). */
+export const chatTabsStorageId = (companyId: string, paneId: string): string =>
+  paneId === 'chat' ? companyId : `${companyId}:${paneId}`
 
 export type PersistedChatTabs = {
   tabs: Array<{ title: string; sessionId: string | null }>

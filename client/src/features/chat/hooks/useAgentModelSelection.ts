@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
 import { agentCan } from '../../../../shared/agents/registry'
-import { useAppStore, MODEL_EFFORT_OPTIONS } from '../../../stores/appStore'
+import { useAppStore } from '../../../stores/appStore'
 
 const CODEX_MODEL_KEY = 'acb-codex-model'
 const CODEX_EFFORT_KEY = 'acb-codex-effort'
@@ -25,15 +25,7 @@ export function useAgentModelSelection(authMode: AuthMode, codexStatus: CodexSta
   const selectedModel = liveCatalog ? codexModel?.id : aiModel
   const selectedEffort = liveCatalog ? selectedCodexEffort : aiEffort
 
-  // Keep the selected effort valid for the current model. If the user switches to a
-  // model that doesn't support the current effort (e.g. xhigh on Opus 4.6), demote to
-  // 'high' (a level every model supports) instead of relying on silent CLI fallback.
-  useEffect(() => {
-    if (!MODEL_EFFORT_OPTIONS[aiModel].includes(aiEffort)) {
-      setAIEffort('high')
-    }
-  }, [aiModel, aiEffort, setAIEffort])
-
+  // The store keeps the effort valid for the model (appStore setAIModel).
   const chooseCodexModel = (id: string) => { setCodexModelId(id); localStorage.setItem(CODEX_MODEL_KEY, id) }
   const chooseCodexEffort = (effort: string) => { setCodexEffort(effort); localStorage.setItem(CODEX_EFFORT_KEY, effort) }
 

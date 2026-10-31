@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
 import { runCommand } from '../../../shared/commands/commands'
 import { onFileRequestedFromChatWindow } from '../api'
 
@@ -8,5 +8,5 @@ import { onFileRequestedFromChatWindow } from '../api'
  * front): the same `file.open` command a link in this window runs.
  */
 export function useFilesFromChatWindows(): void {
-  useEffect(() => onFileRequestedFromChatWindow(({ path }) => { void runCommand('file.open', { path }) }), [])
+  useIpcEvent(onFileRequestedFromChatWindow, ({ path }) => { void runCommand('file.open', { path }) })
 }

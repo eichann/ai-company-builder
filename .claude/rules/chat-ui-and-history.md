@@ -55,9 +55,25 @@ one place an added agent brings its own controls; everything else asks the regis
   `useComposerAttachments` reports the attachment count when it changes (`onAttachmentsChange`,
   read when the member leaves a tab). Tests: `tests/ui/chat-composer.spec.ts`.
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
-  and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the active tab as
+  and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
   chat input.
+- **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
+  assumes one chat on screen:
+  - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on
+    leaving a tab, 「新着」 (a turn that ends while not shown) and blank-tab discarding go by it;
+    two panes each show one tab.
+  - The input in use is the chat pane the member used last (the command registry's active
+    target, fed by focus): `chat.*` commands without `pane` and the voice key
+    (`chat.toggleVoiceInput`, caught once per page by `hooks/useVoiceShortcut.ts`) go there.
+    Esc and leaving the window cancel only a recording in progress.
+  - A consultation is open in one pane at most (`chatPanes.ts`; panes publish their open
+    consultations): opening one another pane has shows it there. Test: `chatPanes.test.ts`.
+  - Tabs are remembered per pane: `chatTabs:<company>` for `chat` (unchanged),
+    `chatTabs:<company>:<pane>` for another (`chatTabsStorageId`).
+  - The consultation windows close when the last chat pane goes (`useChatWindows`).
+  UI tests: `tests/ui/chat-panel.spec.ts` 「two chat panes」 (`chat-header-ui.html?panes=2`),
+  `tests/ui/voice-input.spec.ts` (`voice-input-ui.html?panes=2`).
 - Order inside `ChatPanelChat` matters: `useConversation`, `useChatDraft`,
   `useChatRequestContext`, `useMessageAttachments`, `useChatTransport`, `usePromptSuggestion`
   and `useSteering` run before `useChat` (the transport and onFinish read their refs or report
