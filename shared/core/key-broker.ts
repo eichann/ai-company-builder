@@ -478,6 +478,20 @@ export function clampBrokerTokenTtl(minutes: number): number {
  */
 export const BROKER_NO_KEY_PLACEHOLDER = 'acb_tok_none'
 
+/**
+ * Keys of a practice copy of a service (staging's fake HubSpot): made-up
+ * values with this prefix. While a service's connections go to its practice
+ * copy, only such keys may be registered for it, and nothing else is sent
+ * there (milestone 3 review §5.8: a real secret never reaches the fake).
+ */
+export const PRACTICE_KEY_PREFIX = 'pat-fake-'
+
+/** The value is a practice key (`Bearer ` / `Token token=` style wrappers allowed around it). */
+export function isPracticeSecret(value: string): boolean {
+  const v = value.trim().replace(/^(?:Bearer|Token(?:\s+token=)?)\s*/i, '').trim()
+  return v.startsWith(PRACTICE_KEY_PREFIX)
+}
+
 /** The shape of a token value (prefix + 64 hex characters). Anything else is refused before a lookup. */
 export function looksLikeBrokerToken(value: unknown): value is string {
   return typeof value === 'string' && /^acb_tok_[0-9a-f]{64}$/.test(value)

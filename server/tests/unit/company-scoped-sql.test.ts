@@ -74,9 +74,13 @@ const HANDLE_TABLES: Record<string, string[]> = {
   record_index_problems: ['adapters/sqlite/records.ts'],
   record_ledger: ['adapters/sqlite/records.ts'],
   record_ai_tokens: ['adapters/sqlite/records.ts'],
+  // Connector plugins (plugins.md).
+  plugin_installs: ['adapters/sqlite/plugins.ts'],
+  plugin_mappings: ['adapters/sqlite/plugins.ts'],
+  plugin_history: ['adapters/sqlite/plugins.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository']
+const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository']
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'

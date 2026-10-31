@@ -33,6 +33,12 @@ initDatabase()
   }
 }
 
+// The plugin shelf (PLUGINS_DIR): packages that do not pass the rules are not used (folder name + reason only).
+void services.pluginShelf.load().then(({ loaded, refused }) => {
+  console.log(`Plugin shelf: ${loaded.length > 0 ? loaded.join(', ') : 'no packages'}`)
+  for (const r of refused) console.warn(`Plugin shelf: not used — ${r.dir}: ${r.reason}`)
+}, () => console.warn('Plugin shelf: could not be read'))
+
 // Clean up expired sessions on startup (lib/auth.ts's one connection, kept open)
 
 // Ensure Better Auth tables exist (created here so a fresh install boots without

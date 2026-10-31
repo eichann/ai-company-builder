@@ -33,6 +33,8 @@ export type UpstreamFailure =
   | 'tls'
   | 'timeout'
   | 'aborted'
+  /** Staging: the request carried a key that is not a practice key, to the practice copy (not sent). */
+  | 'practice-real-secret'
 
 export interface UpstreamResponse {
   status: number

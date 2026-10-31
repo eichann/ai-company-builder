@@ -277,8 +277,11 @@ the sign-in.
   (`x-http-method-override`, `x-http-method`, `x-method-override`): 403 `ACB_READ_ONLY`
   「<サービス> は、ここからは読むだけです…」, nothing sent, recorded as guard-denied
   `destination-not-allowed`. Checked after the destination (the URL parser has resolved `..`
-  first). **P4 turns it on for `hubspot` when a company turns the HubSpot plugin on** (owner
-  0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
+  first). A service a connector plugin manages is stricter still and checked first (no writes at
+  all, declared searches only, reads only for those who may see the cards; the switch cannot be
+  turned off: `plugins.md` "The relay and a managed connection"). **Turned on for the plugin's
+  service when a company turns a plugin on** (P4,
+  `services/plugins.ts` `setEnabled`; owner 0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
   through the relay). Test: `tests/integration/broker-relay.test.ts` 「read-only switch」
   (mutation-checked: the guard, the method-override check, the POST allow-list).
 - **Practice HubSpot (staging only)**: `lib/config.ts` `practiceUpstreamsFrom` /
@@ -293,7 +296,10 @@ the sign-in.
   destinations and redirect rules are unchanged; every other host goes out as before. The
   startup log says `Key broker: 練習用の HubSpot につながっています — …`, the view's service
   carries `practice: true` and the admin page shows 「練習用の HubSpot につながっています」. The
-  production compose file passes neither variable (`deployment.md`). Test:
+  production compose file passes neither variable (`deployment.md`). **No real secret on the
+  practice copy** (review §5.8): while on, only practice keys (`pat-fake-…`) can be registered
+  for the redirected service (400 `REAL_KEY_ON_PRACTICE`, company and own keys), and the practice
+  way out refuses to send any other credential (`plugins.md` "Connections"). Test:
   `tests/integration/broker-practice-upstream.test.ts` (production, no / wrong marker, public
   URL, a target off this machine, with a path or a user → the real way out; on → check and relay
   reach the practice server, other services do not; each gate mutation-checked).

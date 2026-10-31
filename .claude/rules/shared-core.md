@@ -46,7 +46,7 @@ The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewA
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`records.ts`, `index.ts`).
+`records.ts`, `plugins.ts`, `index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)

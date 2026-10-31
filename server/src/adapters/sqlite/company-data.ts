@@ -5,6 +5,7 @@ import { sqlitePrivateFolderRepository } from '../private-folders'
 import { sqliteCompanyRowsExport } from './company-archive'
 import { sqliteDepartmentRepository } from './departments'
 import { sqliteInvitationRepository } from './invitations'
+import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
 
@@ -25,6 +26,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         privateFolders: sqlitePrivateFolderRepository(conn, companyId),
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
         records: sqliteRecordRepository(conn, companyId),
+        plugins: sqlitePluginRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)
