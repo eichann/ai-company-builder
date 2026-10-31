@@ -65,7 +65,7 @@ import type {
 } from '../../shared/types/key-broker'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { BrokerKeyChanges, BrokerKeyRepository, BrokerKeyRow, StoredBrokerService } from '../ports/key-broker'
 import type { MembershipRepository } from '../ports/memberships'
 import { requireFullAccess, type Member } from './access'
@@ -85,7 +85,7 @@ export interface KeyBrokerDeps {
   brokerKeys: BrokerKeyRepository
   brokerVault: BrokerVault
   memberships: MembershipRepository
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
@@ -134,7 +134,7 @@ function withCheck(view: BrokerView, service: string, check: BrokerKeyCheckResul
 }
 
 export function createKeyBrokerService(deps: KeyBrokerDeps) {
-  const { brokerKeys, brokerVault, memberships, departments, accounts, clock, ids } = deps
+  const { brokerKeys, brokerVault, memberships, companyData, accounts, clock, ids } = deps
   const checkKey: BrokerKeyChecker = deps.checkKey ?? (async () => null)
 
   /**
@@ -144,7 +144,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   function departmentIdOfFolder(companyId: string, folder: string | null): string | null {
     if (!folder) return null
     const key = pathKey(folder)
-    return departments.listByCompany(companyId).find(d => pathKey(d.folder) === key)?.id ?? null
+    return companyData.forCompany(companyId).departments.list().find(d => pathKey(d.folder) === key)?.id ?? null
   }
 
   function serviceSettings(companyId: string): Map<string, StoredBrokerService> {
@@ -248,7 +248,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       },
       services,
       keys,
-      departments: departments.listByCompany(companyId).map(d => ({ id: d.id, name: d.name, folder: d.folder })),
+      departments: companyData.forCompany(companyId).departments.list().map(d => ({ id: d.id, name: d.name, folder: d.folder })),
       history: history.map((h): BrokerChange | null => {
         const change = parseJson<BrokerChangeDetail | null>(h.change, null)
         return change ? { id: h.id, changedAt: h.changedAt, changedBy: h.changedBy, ...person(h.changedBy), keyId: h.keyId, change } : null
@@ -262,7 +262,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
 
   /** Departments must be the company's, people its members. */
   function checkAudience(companyId: string, audience: BrokerAudience): string | null {
-    const departmentIds = new Set(departments.listByCompany(companyId).map(d => d.id))
+    const departmentIds = new Set(companyData.forCompany(companyId).departments.list().map(d => d.id))
     if (audience.departmentIds.some(id => !departmentIds.has(id))) return 'audience.departmentIds: unknown department'
     const userIds = new Set(memberships.listByCompany(companyId).map(m => m.user_id))
     if ([...audience.addUserIds, ...audience.removeUserIds].some(id => !userIds.has(id))) return 'audience: unknown member'

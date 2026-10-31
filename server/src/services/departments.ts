@@ -10,7 +10,8 @@
  */
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
-import type { DepartmentChanges, DepartmentRepository, DepartmentRow } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
+import type { DepartmentChanges, DepartmentRow } from '../ports/departments'
 import type { MembershipRepository } from '../ports/memberships'
 import type { PrivateFolderRepository } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
@@ -37,7 +38,7 @@ export interface ManagerView {
 }
 
 export interface DepartmentServiceDeps {
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   memberships: MembershipRepository
   scopes: ScopeRepository
   privateFolders: PrivateFolderRepository
@@ -49,7 +50,7 @@ export interface DepartmentServiceDeps {
 }
 
 export function createDepartmentService(deps: DepartmentServiceDeps) {
-  const { departments, memberships, scopes, privateFolders, accounts, repoStore, transactions, clock, ids } = deps
+  const { companyData, memberships, scopes, privateFolders, accounts, repoStore, transactions, clock, ids } = deps
 
   // Private folders whose path is `folder` or inside it, compared NFC + A–Z
   // folded. Department endpoints are owner/admin only, who may see every
@@ -67,8 +68,11 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
   const privateInside = () =>
     refuse('conflict', 'This department contains private folders; make them public first', { code: 'PRIVATE_FOLDERS_INSIDE' })
 
-  function nextSortOrder(companyId: string): number {
-    return (departments.maxSortOrder(companyId) ?? -1) + 1
+  // The member's company: every department read or write below goes through it.
+  const departmentsOf = (member: Member) => companyData.forCompany(member.companyId).departments
+
+  function nextSortOrder(member: Member): number {
+    return (departmentsOf(member).maxSortOrder() ?? -1) + 1
   }
 
   function managers(departmentId: string): ManagerView[] {
@@ -84,13 +88,13 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
      */
     async list(member: Member): Promise<DepartmentRow[]> {
       const folders = new Set(await repoStore.listRootFolders(member.companyId))
-      return departments.listByCompany(member.companyId)
+      return departmentsOf(member).list()
         .filter(d => folders.has(d.folder))
         .sort((a, b) => a.sort_order - b.sort_order)
     },
 
     get(member: Member, departmentId: string): Outcome<DepartmentRow> {
-      const department = departments.findInCompany(departmentId, member.companyId)
+      const department = departmentsOf(member).find(departmentId)
       return department ? ok(department) : refuse('not-found', 'Department not found')
     },
 
@@ -116,22 +120,22 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
       const id = ids.newId()
       const timestamp = clock.now()
+      const departments = departmentsOf(member)
       departments.insert({
         id,
-        companyId,
         name: body.name.trim(),
         nameEn: body.nameEn || null,
         folder: body.folder.trim(),
         icon: body.icon || 'Folder',
         color: body.color || '#6366f1',
         description: body.description || null,
-        sortOrder: nextSortOrder(companyId),
+        sortOrder: nextSortOrder(member),
         createdAt: timestamp,
         createdBy: userId,
       })
       scopes.ensureDepartmentScope(companyId, id, body.folder.trim(), userId)
 
-      return ok(departments.findById(id)!)
+      return ok(departments.find(id)!)
     },
 
     /**
@@ -174,6 +178,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         isActive: body.isActive,
       }
 
+      const departments = departmentsOf(member)
       if (Object.values(changes).some(v => v !== undefined)) {
         const updatedAt = clock.now()
         transactions.run(() => {
@@ -187,7 +192,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         })
       }
 
-      return ok(departments.findById(existing.id)!)
+      return ok(departments.find(existing.id)!)
     },
 
     /**
@@ -200,7 +205,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       const counts = await repoStore.deleteDepartmentFolder(companyId, folder, `Delete department: ${existing.name} (${folder})`)
       transactions.run(() => {
         scopes.deleteDepartmentScopes(companyId, existing.id, folder)
-        departments.delete(existing.id)
+        departmentsOf(member).delete(existing.id)
       })
       return counts
     },
@@ -216,7 +221,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     },
 
     reorder(member: Member, items: Array<{ id: string; sortOrder: number }>): void {
-      departments.setSortOrders(member.companyId, items, clock.now())
+      departmentsOf(member).setSortOrders(items, clock.now())
     },
 
     /**
@@ -227,7 +232,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     async syncWithRepo(member: Member): Promise<{ added: number; removed: number }> {
       const { companyId, userId } = member
       const folders = await repoStore.listRootFolders(companyId)
-      const rows = departments.listAllByCompany(companyId)
+      const departments = departmentsOf(member)
+      const rows = departments.listUnordered()
 
       const rowFolders = new Set(rows.map(d => d.folder))
       const repoFolders = new Set(folders)
@@ -239,14 +245,13 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         if (!rowFolders.has(folder)) {
           departments.insert({
             id: ids.newId(),
-            companyId,
             name: folder,
             nameEn: null,
             folder,
             icon: 'Folder',
             color: '#6366f1',
             description: null,
-            sortOrder: nextSortOrder(companyId),
+            sortOrder: nextSortOrder(member),
             createdAt: timestamp,
             createdBy: userId,
           })
@@ -267,7 +272,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
 
     /** The department, when it belongs to the member's company. */
     exists(member: Member, departmentId: string): Outcome<void> {
-      return departments.existsInCompany(departmentId, member.companyId) ? ok(undefined) : refuse('not-found', 'Department not found')
+      return departmentsOf(member).exists(departmentId) ? ok(undefined) : refuse('not-found', 'Department not found')
     },
 
     managers,

@@ -10,7 +10,7 @@
  */
 import type { AccountDirectory } from '../ports/accounts'
 import type { ClientActivityRepository, OutdatedMember } from '../ports/client-activity'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
@@ -47,7 +47,7 @@ interface DepartmentFolder { id: string; folder: string }
 export interface PrivateFolderServiceDeps {
   privateFolders: PrivateFolderRepository
   scopes: ScopeRepository
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   memberships: MembershipRepository
   clientActivity: ClientActivityRepository
   accounts: AccountDirectory
@@ -56,10 +56,10 @@ export interface PrivateFolderServiceDeps {
 }
 
 export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
-  const { privateFolders, scopes, departments, memberships, clientActivity, accounts, repoStore, companyLock } = deps
+  const { privateFolders, scopes, companyData, memberships, clientActivity, accounts, repoStore, companyLock } = deps
 
   function departmentFolders(companyId: string): DepartmentFolder[] {
-    return departments.folders(companyId).map(d => ({ id: d.id, folder: d.folder.normalize('NFC') }))
+    return companyData.forCompany(companyId).departments.folders().map(d => ({ id: d.id, folder: d.folder.normalize('NFC') }))
   }
 
   /** The department whose folder contains `path` (deepest), or null. */

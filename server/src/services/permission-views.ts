@@ -6,7 +6,7 @@
  */
 import type { AccountDirectory } from '../ports/accounts'
 import type { ClientActivityRepository } from '../ports/client-activity'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { OrphanedScopeReader } from '../ports/orphaned-scopes'
 import type { PushRejectionRepository } from '../ports/push-rejections'
@@ -33,7 +33,7 @@ const ROLE_LABELS: Record<string, string> = {
 
 export interface PermissionViewDeps {
   memberships: MembershipRepository
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   scopes: ScopeRepository
   clientActivity: ClientActivityRepository
   pushRejections: PushRejectionRepository
@@ -42,14 +42,14 @@ export interface PermissionViewDeps {
 }
 
 export function createPermissionViewService(deps: PermissionViewDeps) {
-  const { memberships, departments, scopes, clientActivity, pushRejections, orphanedScopes, accounts } = deps
+  const { memberships, companyData, scopes, clientActivity, pushRejections, orphanedScopes, accounts } = deps
 
   return {
     /** The overview screen (an owner/admin acting). */
     async overview(member: Member) {
       const { companyId } = member
       const rows = memberships.listByCompany(companyId)
-      const departmentCount = departments.count(companyId)
+      const departmentCount = companyData.forCompany(companyId).departments.count()
       const activity = clientActivity.forCompany(companyId)
       const rejections = pushRejections.recent(companyId, 20)
       const orphaned = await orphanedScopes.find(companyId)
@@ -182,7 +182,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
       const folderOf = new Map(
         managed.length === 0
           ? []
-          : departments.folders(member.companyId).map(d => [d.id, d.folder.normalize('NFC')] as const),
+          : companyData.forCompany(member.companyId).departments.folders().map(d => [d.id, d.folder.normalize('NFC')] as const),
       )
       return {
         role: member.role,
@@ -204,7 +204,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
     managedFolders(companyId: string, userId: string): string[] {
       const managed = new Set(scopes.managedDepartmentIds(companyId, userId))
       if (managed.size === 0) return []
-      return departments.folders(companyId)
+      return companyData.forCompany(companyId).departments.folders()
         .filter(d => managed.has(d.id))
         .map(d => d.folder.normalize('NFC'))
     },

@@ -12,7 +12,7 @@ import { db } from './db'
 import { sqliteCompanyRepository } from './adapters/sqlite/companies'
 import { sqliteMembershipRepository } from './adapters/sqlite/memberships'
 import { sqliteInvitationRepository } from './adapters/sqlite/invitations'
-import { sqliteDepartmentRepository } from './adapters/sqlite/departments'
+import { sqliteCompanyData } from './adapters/sqlite/company-data'
 import { sqliteScopeRepository } from './adapters/sqlite/scopes'
 import { sqlitePrivateFolderRepository } from './adapters/private-folders'
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
@@ -95,7 +95,6 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companies: sqliteCompanyRepository(conn),
     memberships: sqliteMembershipRepository(conn),
     invitations: sqliteInvitationRepository(conn),
-    departments: sqliteDepartmentRepository(conn),
     scopes: sqliteScopeRepository(conn),
     privateFolders: sqlitePrivateFolderRepository(conn),
     clientActivity: sqliteClientActivityRepository(conn),
@@ -109,6 +108,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     orphanedScopes: gitOrphanedScopeReader(conn),
   }
   const shared = {
+    // Company handles (ports/company-data.ts): services only; routes never get one.
+    companyData: sqliteCompanyData(conn),
     accounts: betterAuthAccountDirectory(),
     transactions: sqliteTransactions(conn),
     clock: systemClock,
