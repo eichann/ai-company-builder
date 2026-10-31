@@ -135,6 +135,7 @@ let savedTemplateDir: string | undefined
 
 beforeAll(() => {
   initDatabase()
+  process.env.OPERATOR_USER_IDS = 'cs-owner' // creating companies is for server operators
   scratch = mkdtempSync(join(tmpdir(), 'acb-seed-'))
   // A developer's global init.templateDir (e.g. git-secrets) would install
   // client-side hooks into new repositories and slow every git call down
@@ -147,6 +148,7 @@ afterEach(() => {
 })
 
 afterAll(() => {
+  delete process.env.OPERATOR_USER_IDS
   if (savedTemplateDir === undefined) delete process.env.GIT_TEMPLATE_DIR
   else process.env.GIT_TEMPLATE_DIR = savedTemplateDir
   rmSync(scratch, { recursive: true, force: true })

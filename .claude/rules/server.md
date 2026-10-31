@@ -64,7 +64,8 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
   name of a check.
 - The permission matrix (`tests/integration/permission-matrix.test.ts`) walks every route of
   `src/app.ts` and states the status code for owner, admin, member, department manager (inside
-  and outside their department), a signed-in outsider and a signed-out caller. A route missing
+  and outside their department), a signed-in outsider and a signed-out caller; server
+  operators (`OPERATOR_USER_IDS`) only on rows that name them (`operators`). A route missing
   from the matrix fails it: a new endpoint gets its row(s) in the same PR. Requests are chosen
   so an allowed caller passes the guard without changing state (invalid body → 400, missing
   target → 404 after the role check); keep it that way when adding rows. A changed row is a
@@ -137,7 +138,18 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
 - Only owners grant owner/admin: `PUT /companies/:id/members/:userId/role`,
   `POST /companies/:id/members` with role owner/admin, and admin invitations are owner-only (an
   admin adding a second account of their own as owner could take the company over).
-  `POST …/members` requires the account to exist (404 otherwise).
+- Nobody is put into a company without agreeing (2026-10-31): people join by accepting an
+  invitation (existing accounts of other companies too). `POST …/members` adds only an account
+  that once accepted an invitation to this company (`invitations.used_by`, e.g. a removed member
+  coming back); any other id — unknown or existing — gets the same 403 `INVITATION_REQUIRED`, so
+  the answer never tells whether an account exists. `tests/integration/account-security.test.ts`.
+- Creating a company (`POST /api/companies`) follows `COMPANY_CREATION_POLICY`
+  (`services/company-creation-policy.ts`; `operator`, the default and only implemented mode;
+  `approved` / `self_serve` are named for later and refused at startup). Under `operator`: the
+  accounts in `OPERATOR_USER_IDS` (user ids, not emails: invitation sign-ups do not verify an
+  address), plus the first account of a fresh server while no company exists; anyone else 403
+  `COMPANY_CREATION_RESTRICTED` (Japanese `error`: released apps show it as is). Checked before
+  the body. `tests/integration/company-creation.test.ts`, `tests/unit/company-creation-policy.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
   (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
@@ -208,8 +220,8 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
   `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema in `server/src/db/index.ts`: `CREATE TABLE IF NOT EXISTS` at startup;
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
-  (`<DATA_DIR>/repos`), and the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
-  `key-broker.md`). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
+  `key-broker.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
   leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.

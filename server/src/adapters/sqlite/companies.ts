@@ -24,6 +24,10 @@ export function sqliteCompanyRepository(conn: Database.Database): CompanyReposit
       return !!conn.prepare('SELECT id FROM companies WHERE slug = ?').get(slug)
     },
 
+    anyExists() {
+      return !!conn.prepare('SELECT 1 FROM companies LIMIT 1').get()
+    },
+
     insert(company) {
       conn.prepare(`
         INSERT INTO companies (id, name, slug, owner_id, repo_path, created_at, updated_at)

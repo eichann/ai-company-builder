@@ -33,6 +33,8 @@ export interface InvitationRepository {
   listByCompany(companyId: string): InvitationWithCompany[]
   findByToken(token: string): InvitationWithCompany | undefined
   existsInCompany(invitationId: string, companyId: string): boolean
+  /** Whether `userId` once accepted an invitation to this company (the person agreed to join it). */
+  acceptedBy(companyId: string, userId: string): boolean
   insert(invitation: NewInvitation): void
   delete(invitationId: string): void
   /**

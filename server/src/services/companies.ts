@@ -6,18 +6,27 @@
  * Role rules (.claude/rules/server.md "Accounts and roles"): only owners grant owner/admin;
  * the last owner can never be demoted; removing a member — or promoting them
  * to owner/admin — deletes every rule naming them in the company.
+ *
+ * Who may create a company, and whom a company may add directly (2026-10-31):
+ * creating one is for the server's operators (OPERATOR_USER_IDS), except the
+ * very first company of a fresh server; adding an account directly is only
+ * for someone who once accepted an invitation to this company — everyone
+ * else joins by accepting an invitation, so nobody is put into a company
+ * without agreeing to it.
  */
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { ClientActivityRepository } from '../ports/client-activity'
 import type { CompanyRepository, CompanyRow } from '../ports/companies'
 import type { DepartmentRepository } from '../ports/departments'
+import type { InvitationRepository } from '../ports/invitations'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
 import type { ScopeRepository } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
 import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
+import type { CompanyCreationPolicy } from './company-creation-policy'
 import { ok, refuse, type Outcome } from './outcome'
 
 // Default departments for new companies
@@ -61,8 +70,25 @@ export interface MemberActivityView {
   supportsAgentEvents: boolean
 }
 
+/**
+ * The refusal of POST /api/companies for a signed-in non-operator. Japanese on
+ * purpose: released desktop apps show `error` as it is (the admin console
+ * shows it through the code).
+ */
+export const COMPANY_CREATION_FORBIDDEN = {
+  code: 'COMPANY_CREATION_RESTRICTED',
+  error: '新しい会社を作れるのは、このサーバーの運用担当者だけです。会社に参加するには、その会社の管理者から届いた招待リンクを開いてください。',
+} as const
+
+/** The refusal of POST /:id/members for an account that never accepted this company's invitation. */
+export const INVITATION_REQUIRED = {
+  code: 'INVITATION_REQUIRED',
+  error: 'This account has not accepted an invitation to this company. Send an invitation link instead.',
+} as const
+
 export interface CompanyServiceDeps {
   companies: CompanyRepository
+  invitations: InvitationRepository
   memberships: MembershipRepository
   departments: DepartmentRepository
   scopes: ScopeRepository
@@ -72,6 +98,10 @@ export interface CompanyServiceDeps {
   transactions: Transactions
   clock: Clock
   ids: IdGenerator
+  /** COMPANY_CREATION_POLICY (services/company-creation-policy.ts); only `operator` exists today. */
+  creationPolicy: CompanyCreationPolicy
+  /** A server operator (OPERATOR_USER_IDS, lib/config.ts): may create companies. */
+  isOperator: (userId: string) => boolean
 }
 
 // Slug from a name: lowercase ASCII words joined by '-'
@@ -83,7 +113,7 @@ function createSlug(name: string): string {
 }
 
 export function createCompanyService(deps: CompanyServiceDeps) {
-  const { companies, memberships, departments, scopes, clientActivity, accounts, repoStore, transactions, clock, ids } = deps
+  const { companies, invitations, memberships, departments, scopes, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
 
   // A unique slug. Japanese-only names produce an empty base slug, so fall
   // back to the company id; collisions get a numeric suffix instead of
@@ -132,7 +162,22 @@ export function createCompanyService(deps: CompanyServiceDeps) {
     },
 
     /**
-     * Create a company owned by `ownerId`. Each step after the rows is best
+     * May this signed-in account create a company? Under the `operator`
+     * policy (the default and only one so far): operators may; anyone else
+     * only while the server has no company at all — the first account of a
+     * fresh server (sign-up needs an invitation after it, and an invitation
+     * needs a company) sets up the first company, as the self-hosting guide
+     * says. Checked before the body (who → body → rules).
+     */
+    mayCreate(userId: string): Outcome<void> {
+      // `approved` / `self_serve` are not implemented: the server refuses to
+      // start with them, and if one ever got here it would allow nobody.
+      if (creationPolicy === 'operator' && (isOperator(userId) || !companies.anyExists())) return ok(undefined)
+      return refuse('forbidden', COMPANY_CREATION_FORBIDDEN.error, { code: COMPANY_CREATION_FORBIDDEN.code })
+    },
+
+    /**
+     * Create a company owned by `ownerId` (the route checks `mayCreate` first). Each step after the rows is best
      * effort, as it always was: a company without its repository, default
      * departments, scopes or seeded folders is still created (startup seeding
      * and the departments API repair the rest).
@@ -235,15 +280,18 @@ export function createCompanyService(deps: CompanyServiceDeps) {
      * Add an existing account (an owner/admin acting). Only owners may hand
      * out owner/admin (as with changeRole): an admin who could add an owner
      * could add a second account of their own as owner and take the company
-     * over. The account must exist — a membership for an unknown id would be
-     * claimed by whoever later signs up with that id.
+     * over. Only an account that once accepted an invitation to this company
+     * (typically a removed member coming back): anyone else — another
+     * company's people included — joins by accepting an invitation, never
+     * without agreeing. An unknown id and an account that never accepted get
+     * the same 403, so the answer does not tell whether an account exists.
      */
     addMember(actor: Member, userId: string, role: MemberRole): Outcome<{ id: string; userId: string; companyId: string; role: MemberRole; createdAt: string }> {
       if (role !== 'member' && !isOwner(actor.role)) {
         return refuse('forbidden', 'Only owners can add owners or admins')
       }
-      if (!accounts.byIds([userId]).has(userId)) {
-        return refuse('not-found', 'User not found')
+      if (!invitations.acceptedBy(actor.companyId, userId) || !accounts.byIds([userId]).has(userId)) {
+        return refuse('forbidden', INVITATION_REQUIRED.error, { code: INVITATION_REQUIRED.code })
       }
       if (memberships.roleOf(actor.companyId, userId) !== null) {
         return refuse('conflict', 'User is already a member')

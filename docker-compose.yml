@@ -34,6 +34,10 @@ services:
       - BROKER_KEY_CHECK=${BROKER_KEY_CHECK:-on}
       # Where the daily caps' day begins, minutes east of UTC (540 = Japan).
       - BROKER_DAY_UTC_OFFSET_MINUTES=${BROKER_DAY_UTC_OFFSET_MINUTES:-540}
+      # Who may create companies after the first one: the operators' user ids
+      # (comma-separated). Policy: operator (default; the only one so far).
+      - OPERATOR_USER_IDS=${OPERATOR_USER_IDS:-}
+      - COMPANY_CREATION_POLICY=${COMPANY_CREATION_POLICY:-operator}
     # The code is the image's (server/Dockerfile): no source mount, no watch.
     # Server changes need a rebuild (`docker compose up -d --build api`); for
     # hot reload run `pnpm dev:server` on the host instead (README "Develop").
