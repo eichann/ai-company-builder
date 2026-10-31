@@ -385,7 +385,7 @@ test('exhaustive-deps is turned off no more often than today, and each time with
  * homes (renderer-structure.md "Effects"). The count may only go down: lower
  * this when you remove effects, never raise it.
  */
-const MAX_USE_EFFECTS = 172
+const MAX_USE_EFFECTS = 171
 
 /** `useEffect(` calls in one file's code (comments do not count). */
 function useEffectCalls(source: string): number {
