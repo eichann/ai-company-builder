@@ -39,6 +39,7 @@ import {
   type BrokerRelayDefinition,
   type BrokerServiceInfo,
 } from '../../shared/core/key-broker'
+import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import type { AgentToolEvent, GuardReason, ToolDecision } from '../../shared/types/agent-events'
 import type { BrokerKeyRepository } from '../ports/key-broker'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
@@ -195,17 +196,6 @@ interface RelayTarget {
   label: string
   builtin: BrokerServiceInfo | null
   relay: BrokerRelayDefinition | null
-}
-
-/** The upstream path, checked: '/'-rooted, no `.` / `..` segments, no encoded '/' or '\', no control characters. */
-function checkPath(raw: string): { path: string; decoded: string } | null {
-  if (!raw.startsWith('/') || raw.includes('//') || raw.includes('\\') || /%(2f|5c|00)/i.test(raw)) return null
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000- \u007f]/.test(raw)) return null
-  let decoded: string
-  try { decoded = raw.split('/').map(decodeURIComponent).join('/') } catch { return null }
-  if (decoded.split('/').some(s => s === '.' || s === '..')) return null
-  return { path: raw, decoded }
 }
 
 /** The model a request names: Gemini in the path, OpenAI / Anthropic in the JSON body. */
@@ -404,7 +394,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       }
 
       // 2. Where it may go: the key's destinations (a generic service: its one host, always).
-      const path = checkPath(rawPath)
+      const path = checkUpstreamPath(rawPath)
       if (!path || path.path.includes(token)) return jsonError(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。', grant)
       const { pathPrefixes, models } = grant.destinations
       const hosts = relay ? grant.destinations.hosts.filter(h => h === relay.host) : grant.destinations.hosts

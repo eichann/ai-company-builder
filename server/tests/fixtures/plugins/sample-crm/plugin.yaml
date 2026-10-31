@@ -1,0 +1,60 @@
+# A fictional CRM shaped like HubSpot, for the public repository's tests
+# (owner decision §6-6: the real HubSpot package lives in acb-plugins).
+id: sample-crm
+label: 見本の CRM
+version: 0.1.0
+kind: official
+contract: 1
+service: sample-crm
+base_url: https://api.sample-crm.example
+scopes:
+  - crm.objects.deals.read
+  - crm.objects.deals.write
+operation_scopes:
+  add_note: [crm.objects.notes.write]
+types: [deal]
+
+objects:
+  deal:
+    record_type: deal
+    auto_properties: [stage_probability]
+    get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
+    search: { method: POST,  path: "/crm/objects/2026-03/deals/search" }
+    update: { method: PATCH, path: "/crm/objects/2026-03/deals/{id}" }
+    properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
+    stages_list:     { method: GET, path: "/crm/pipelines/2026-03/deals" }
+  note:
+    create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }
+
+operations:
+  refresh_deal:
+    label: 最新を取る
+    kind: read
+    object: deal
+    who: [anyone, ai]
+  update_deal:
+    label: 案件の欄を書き戻す
+    kind: update
+    object: deal
+    fields: mapped
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: restore_previous
+    note: optional
+  add_note:
+    label: 案件にメモを残す
+    kind: create
+    object: note
+    attach_to: deal
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: archive
+
+field_policy_defaults:
+  next_step: auto
+  stage: auto
+  confidence: auto
+  close_date: auto
+  amount: prior
+  closed: prior
