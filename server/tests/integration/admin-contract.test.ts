@@ -173,7 +173,7 @@ beforeAll(async () => {
       .run(`m-${id}`, id, CO, role, now, now)
   }
   authDb.close()
-  const { ensureCompanyScope } = await import('../../src/lib/permission-store')
+  const { ensureCompanyScope } = await import('../../src/adapters/sqlite/permission-store')
   ensureCompanyScope(db, CO)
 
   // Company repository with two departments' folders.

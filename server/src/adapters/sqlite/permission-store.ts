@@ -1,5 +1,6 @@
 /**
- * SQLite side of the permission model (see shared/core/permissions.ts for semantics).
+ * SQLite side of the permission model (see shared/core/permissions.ts for semantics),
+ * behind ScopeRepository (./scopes.ts).
  *
  * Tables (created in db/index.ts): scopes, scope_rules, department_managers,
  * push_rejections. Every function takes the connection explicitly so the
@@ -28,8 +29,8 @@ import {
   type ScopeRule,
   type ScopeWithRules,
   type SubjectType,
-} from '../../shared/core/permissions'
-import type { ScopeRecord } from '../ports/scopes'
+} from '../../../shared/core/permissions'
+import type { ScopeRecord } from '../../ports/scopes'
 
 type Conn = Database.Database
 

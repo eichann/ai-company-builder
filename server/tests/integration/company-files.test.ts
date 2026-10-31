@@ -37,7 +37,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companyFilesRoute } from '../../src/routes/company-files'
-import { ensureCompanyScope, listScopesWithRules } from '../../src/lib/permission-store'
+import { ensureCompanyScope, listScopesWithRules } from '../../src/adapters/sqlite/permission-store'
 import { privateRepoPath } from '../../src/lib/private-folders'
 import { createPrivateFolder } from '../../src/adapters/private-folders'
 import { buildView, parseRequestPath, searchFiles, withSearchSlot, CompanyFilesError } from '../../src/lib/company-files'

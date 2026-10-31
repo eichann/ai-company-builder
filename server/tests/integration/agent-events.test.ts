@@ -27,7 +27,7 @@ import { db, initDatabase } from '../../src/db'
 import { agentEventsRoute } from '../../src/routes/agent-events'
 import { permissionsRoute } from '../../src/routes/permissions'
 import { services } from '../../src/composition'
-import { replaceDepartmentManagers } from '../../src/lib/permission-store'
+import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 import type { AgentToolEvent } from '../../shared/types/agent-events'
 
 const app = new Hono()

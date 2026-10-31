@@ -156,7 +156,7 @@ beforeAll(async () => {
       .run(`m-${u}`, `u-${u}`, CO, ROLE[u], now, now)
   }
   authDb.close()
-  const { ensureCompanyScope, ensureDepartmentScope } = await import('../../src/lib/permission-store')
+  const { ensureCompanyScope, ensureDepartmentScope } = await import('../../src/adapters/sqlite/permission-store')
   ensureCompanyScope(db, CO)
   for (const [id, name, folder] of [['d-hr', '人事', '人事'], ['d-sales', '営業', 'sales']]) {
     db.prepare(`INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)

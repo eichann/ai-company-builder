@@ -29,7 +29,7 @@ import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { departmentsRoute } from '../../src/routes/departments'
-import { seedPermissionScopes, replaceDepartmentManagers } from '../../src/lib/permission-store'
+import { seedPermissionScopes, replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 

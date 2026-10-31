@@ -2,7 +2,7 @@
  * The permission editor (routes/permission-rules.ts): who may edit which
  * scope, what may be stored, the outdated-app guard, and the views the
  * editor shows. The rules are documented on the route module; this is where
- * they run. Storage: ScopeRepository (lib/permission-store.ts).
+ * they run. Storage: ScopeRepository (adapters/sqlite/permission-store.ts).
  */
 import type { AccountDirectory, AccountSummary } from '../ports/accounts'
 import type { ClientActivityRepository, OutdatedMember } from '../ports/client-activity'

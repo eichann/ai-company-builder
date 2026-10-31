@@ -41,7 +41,7 @@ import { permissionsRoute } from '../../src/routes/permissions'
 import { configureBareRepo } from '../../src/routes/git'
 import { gitHttpRoute } from '../../src/routes/git-http'
 import { services } from '../../src/composition'
-import { replaceDepartmentManagers } from '../../src/lib/permission-store'
+import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 import { parseHookRejections, sidebandMessages } from '../../src/lib/push-rejections'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })

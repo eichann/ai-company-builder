@@ -13,7 +13,7 @@ import type { PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet, Fold
 import { createScopeRepo, removeScopeRepo, SERVER_GIT_IDENTITY } from '../lib/git-server'
 import { gitAsync } from '../lib/git-exec'
 import { companyRepoPath } from '../lib/config'
-import { listScopesWithRules } from '../lib/permission-store'
+import { listScopesWithRules } from './sqlite/permission-store'
 import {
   closeScope,
   companyPushesRunning,

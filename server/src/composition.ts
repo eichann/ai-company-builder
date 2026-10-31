@@ -167,6 +167,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     pushRejections: createPushRejectionRecorder(repos),
     companyFiles: companyFileViews(repos.scopes),
     orphanedScopes: repos.orphanedScopes,
+    /** git-http's push snapshot and private-folder lookups (read; the company scope is ensured). */
+    scopes: repos.scopes,
     accounts: shared.accounts,
     repoStore,
   }

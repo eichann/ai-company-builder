@@ -14,7 +14,7 @@
  * - lib/ holds helpers and git / file-system infrastructure, not storage: it
  *   does not import the database (src/db, better-sqlite3), except the modules
  *   in LIB_WITH_DATABASE, each with its reason.
- * - routes/ run no SQL themselves (git-http.ts is the one exception).
+ * - routes/ run no SQL and do not touch the database connection.
  */
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'fs'
@@ -52,7 +52,6 @@ const PURE_LIB = new Set(['lib/client-version', 'lib/write-loss', 'lib/overview'
  */
 const LIB_WITH_DATABASE: Record<string, string> = {
   'lib/auth.ts': 'Better Auth owns auth.sqlite: its one connection (authDb) is built with Better Auth here, and every route\'s sign-in check (getUserFromRequest) lives next to it',
-  'lib/permission-store.ts': 'scopes and rules; moving to adapters/sqlite (next PRs)',
 }
 
 describe('server layering', () => {
@@ -80,7 +79,9 @@ describe('server layering', () => {
     for (const file of tsFiles(SRC)) {
       const rel = relative(SRC, file)
       // cli/: operator commands run on their own (e.g. generate-broker-kek.ts), each its own composition root.
-      if (rel === 'composition.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
+      // db/index.ts: the schema's startup seeding runs the scope store (adapters/sqlite/permission-store.ts)
+      // on the connection it is migrating, before any service exists.
+      if (rel === 'composition.ts' || rel === 'db/index.ts' || rel.startsWith('adapters/') || rel.startsWith('cli/')) continue
       for (const spec of importsOf(file)) {
         expect(target(file, spec), `${rel}: ${spec}`).not.toMatch(/^adapters\//)
       }
@@ -100,13 +101,9 @@ describe('server layering', () => {
       .toEqual(Object.keys(LIB_WITH_DATABASE).sort())
   })
 
-  /**
-   * Every route but git-http.ts: it builds the push checker's snapshot and
-   * serves private folders' repositories with the connection itself (owner's
-   * decision: an intentional exception, kept in one file).
-   */
-  const ROUTES_WITH_SQL = new Set(['git-http.ts'])
-  const ROUTES_WITHOUT_SQL = readdirSync(join(SRC, 'routes')).filter(f => f.endsWith('.ts') && !ROUTES_WITH_SQL.has(f))
+  // Every route, git-http.ts included: its push snapshot and private-folder
+  // lookups go through services (access, scopes) like everything else.
+  const ROUTES_WITHOUT_SQL = readdirSync(join(SRC, 'routes')).filter(f => f.endsWith('.ts'))
 
   for (const name of ROUTES_WITHOUT_SQL) {
     it(`routes/${name} runs no SQL and does not touch the database connection`, () => {
@@ -114,7 +111,7 @@ describe('server layering', () => {
       const source = readFileSync(file, 'utf8')
       expect(source).not.toMatch(/\.prepare\(|\.exec\(|\.transaction\(/)
       for (const spec of importsOf(file)) {
-        expect(target(file, spec), `${name}: ${spec}`).not.toMatch(/^db(\/|$)|^lib\/permission-store$|^better-sqlite3$/)
+        expect(target(file, spec), `${name}: ${spec}`).not.toMatch(/^db(\/|$)|^adapters\/|^better-sqlite3$/)
       }
     })
   }

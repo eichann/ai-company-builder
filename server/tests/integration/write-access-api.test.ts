@@ -28,7 +28,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { permissionsRoute } from '../../src/routes/permissions'
-import { replaceDepartmentManagers } from '../../src/lib/permission-store'
+import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 
 const app = new Hono()
 app.route('/api/companies/:companyId', permissionsRoute)

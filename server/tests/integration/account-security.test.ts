@@ -49,7 +49,7 @@ import { companiesRoute } from '../../src/routes/companies'
 import { gitRoute } from '../../src/routes/git'
 import { invitationsRoute } from '../../src/routes/invitations'
 import { services } from '../../src/composition'
-import { ensureCompanyScope, ensureFolderScope, upsertScopeRule } from '../../src/lib/permission-store'
+import { ensureCompanyScope, ensureFolderScope, upsertScopeRule } from '../../src/adapters/sqlite/permission-store'
 
 const CO = 'acct-co'
 const app = new Hono()

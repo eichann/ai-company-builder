@@ -126,7 +126,7 @@ beforeAll(async () => {
   member('u-member', CO)
   member('u-expired', CO)
   member('u-outsider', OTHER_CO)
-  const { ensureCompanyScope } = await import('../../src/lib/permission-store')
+  const { ensureCompanyScope } = await import('../../src/adapters/sqlite/permission-store')
   ensureCompanyScope(db, CO) // everyone: read + write — a member's push would be accepted
   ensureCompanyScope(db, OTHER_CO)
 
