@@ -204,8 +204,13 @@ GET  /api/config                                  setup state (no auth)
                                                                 (Google: google-connector.md)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
                               the state finds the company (google-connector.md)  oauth.ts
+                              GET|PUT /google/minutes-folder, POST /me/minutes/check,
+                              GET /me/minutes/item/:recordId/text,
+                              POST /me/minutes/item/:recordId/deal               minutes.ts
+                                                                (議事録の取り込み: minutes.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
+                              GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
                               GET /plugins/:pluginId/operations/:operationId — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts

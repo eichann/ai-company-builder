@@ -12,6 +12,11 @@
  *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
  *
+ *   GET  /minutes/:recordId/text          the minutes as outside text (tool minutes_read; G7, minutes.md):
+ *                                         the assignee or an attendee, read now from Google with
+ *                                         the member's own permission; never stored or logged
+ *   POST /minutes/:recordId/deal          (act) { dealId, expectedVersion? } — the assignee / an admin's AI
+ *
  *   GET  /plugins                         the running plugins' operations this AI may call (tools, P7)
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
  *        (refresh: read; update and log_meeting: act — Codex's read tokens cannot write)
@@ -33,7 +38,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals } = services
+const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals, minutes } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -77,6 +82,20 @@ recordsAiRoute.post('/decisions', async (c) => {
   if (h instanceof Response) return h
   const result = await decisions.record(h.member, aiActor(h), await jsonBody(c))
   return answer(c, result, result.ok && result.value.created ? 201 : 200)
+})
+
+recordsAiRoute.get('/minutes/:recordId/text', async (c) => {
+  const h = holderOf(c, 'read')
+  if (h instanceof Response) return h
+  c.header('Cache-Control', 'no-store')
+  return answer(c, await minutes.text(h.member, c.req.param('recordId')))
+})
+
+recordsAiRoute.post('/minutes/:recordId/deal', async (c) => {
+  const h = holderOf(c, 'act')
+  if (h instanceof Response) return h
+  const { kind, source, conversationId } = aiActor(h)
+  return answer(c, minutes.linkDeal(h.member, { kind, source, conversationId }, c.req.param('recordId'), await jsonBody(c)))
 })
 
 recordsAiRoute.post('/query', async (c) => {

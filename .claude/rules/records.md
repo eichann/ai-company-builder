@@ -210,9 +210,10 @@ external writer, composition.ts hands it to those services only (`serviceRecords
 actor, note? })` — service-owned types only; `path` for a file record the caller has already
 committed (company repository, not private), `folder` for a server record (not private);
 `check(companyId, input)` is the same validation without writing (ask it before committing a
-file). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, actor,
-note?, decisionReason?, notify? })` — the state only along `SERVICE_TRANSITIONS` (next to the
-types; `serviceTransitionAllowed`), `to: null` changes fields only. Both: values checked by kind,
+file). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, links?,
+actor, note?, decisionReason?, notify? })` — the state only along `SERVICE_TRANSITIONS` (next to
+the types; `serviceTransitionAllowed`), `to: null` changes fields only; `links` replaces the named
+links (ledger change `links.<name>`, ids before / after — the minutes' deal, `minutes.md`). Both: values checked by kind,
 every person field set must be able to read the record (`assignee-cannot-read`, never naming the
 place), state + ledger in one transaction with a compare-and-set (`stale`), the ledger actor is
 the one passed (human / ai / external), assignee / next actor / `notify` told (kind + version

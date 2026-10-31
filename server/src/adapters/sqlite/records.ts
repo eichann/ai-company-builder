@@ -57,6 +57,17 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         ON CONFLICT(company_id) DO UPDATE SET enabled = excluded.enabled, updated_at = excluded.updated_at, updated_by = excluded.updated_by
       `).run(companyId, enabled ? 1 : 0, at, by)
     },
+    minutesFolder() {
+      const r = conn.prepare('SELECT minutes_folder FROM record_settings WHERE company_id = ?').get(companyId) as { minutes_folder: string | null } | undefined
+      return r?.minutes_folder ?? null
+    },
+    setMinutesFolder(folder, by, at) {
+      // A new row keeps the feature off (enabled 0); an existing row keeps its switch.
+      conn.prepare(`
+        INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, minutes_folder) VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET minutes_folder = excluded.minutes_folder, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, at, by, folder)
+    },
 
     typeVersions() {
       return (conn.prepare('SELECT name, version, definition, source, commit_sha, created_at FROM record_types WHERE company_id = ? ORDER BY name, version')

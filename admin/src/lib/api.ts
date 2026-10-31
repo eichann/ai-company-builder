@@ -959,3 +959,16 @@ export const googleApi = {
   stopGrant: (companyId: string, userId: string) =>
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),
 }
+
+// The minutes folder (「つなぎ先」→「Google」, milestone 4 G7, minutes.md): the department folder
+// minutes records go to; never a private folder. Shape from shared/types/minutes.ts.
+export type { MinutesFolderSetting } from '../../../shared/types/minutes'
+
+import type { MinutesFolderSetting } from '../../../shared/types/minutes'
+
+export const minutesApi = {
+  folder: (companyId: string) => getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`),
+  /** `null`: no folder (nothing is read until one is chosen). */
+  setFolder: (companyId: string, folder: string | null) =>
+    getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`, { method: 'PUT', body: { folder } }),
+}
