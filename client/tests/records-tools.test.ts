@@ -23,7 +23,7 @@ import { decideRecordEdit } from '../electron/write-guard'
 import { AGENTS } from '../shared/agents/registry'
 import { recordActionChoices } from '../shared/record-actions'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
-import { RECORD_ACTION_AGENTS } from '../../shared/types/records'
+import { OLD_CONNECTION_LABEL, RECORD_ACTION_AGENTS } from '../../shared/types/records'
 import { AGENT_IDS } from '../shared/agents/registry'
 
 const TYPES = coreTypeDefinitions()
@@ -91,6 +91,16 @@ test('a tool refuses what its schema refuses before calling the server (a requir
   const out = JSON.parse(await tools!.execute('task__send_back', { id: 'task-abcdef12', expectedVersion: 3 }))
   assert.ok(out.error)
   assert.equal(seen.length, before)
+})
+
+test('records of an earlier connection: the AI can ask for them on purpose, and is told to leave them be and keep ids out of its replies', async () => {
+  const { api, seen } = fakeServer('read')
+  const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'codex', scope: 'read' }))!)
+  await tools!.execute('records_query', { type: 'deal', includeOldConnection: true })
+  const query = seen.find(s => s.url.endsWith('/api/records-ai/query'))!
+  assert.deepEqual(JSON.parse(query.body!), { type: 'deal', includeOldConnection: true })
+  assert.ok(tools!.instructions.includes(OLD_CONNECTION_LABEL))
+  assert.match(tools!.instructions, /内部の id.*聞かれない限り見せない/)
 })
 
 const ROOT = '/Users/me/会社'

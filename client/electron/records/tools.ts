@@ -25,6 +25,7 @@
 import { z, type ZodTypeAny } from 'zod'
 import type { FieldKind, TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
+import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
 import { aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
@@ -81,13 +82,14 @@ const LOOKUPS: RecordToolSpec[] = [
       linkedTo: z.object({ id, hops: z.union([z.literal(1), z.literal(2)]).optional() }).optional(),
       text: z.string().max(100).optional(), limit: z.number().int().min(1).max(200).optional(), offset: z.number().int().min(0).max(10000).optional(),
       countOnly: z.boolean().optional(),
+      includeOldConnection: z.boolean().optional().describe('前のつなぎ先から取り込んだ、いまは使われていない記録も含める（ふつうは付けない） / also records of an earlier connection, no longer used (normally leave out)'),
     }).strict(),
-    description: '会社の記録（タスク・顧客など）を決まった形で探す：型、状態、サーバーの欄の値、つながり（2段まで、例「A社につながる全部」）、件名と要約の文字。件数は countOnly。見られるものだけが返る。\nFind company records: by type, state, server-field values, links up to 2 hops ("everything linked to customer X"), text in title/summary. Only what the member may read is returned.',
+    description: '会社の記録（タスク・顧客など）を決まった形で探す：型、状態、サーバーの欄の値、つながり（2段まで、例「A社につながる全部」）、件名と要約の文字。件数は countOnly。見られるものだけが返る。前のつなぎ先から取り込んだ、いまは使われていない記録はふつう返らない（includeOldConnection で含めると fromOldConnection: true の印つき）。\nFind company records: by type, state, server-field values, links up to 2 hops ("everything linked to customer X"), text in title/summary. Only what the member may read is returned. Records imported through an earlier connection (no longer used) are left out unless includeOldConnection; they then carry fromOldConnection: true.',
     request: input => ({ method: 'POST', path: '/query', body: input }),
   },
   {
     name: 'records_get', readOnly: true, schema: z.object({ id }).strict(),
-    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it.',
+    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it.',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
   },
   {
@@ -210,7 +212,9 @@ function updateSpec(pluginId: string, system: string, op: PluginAiOperation, nam
   }
 }
 
-export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。状態・担当・期限はサーバーが持ち、記録のファイルには書きません（ファイルの先頭は id・type・links だけ）。状態を変えるときは必ずこの道具の操作を使い、ファイルを書き換えないでください。人や顧客の名前ではなく id を使ってください。`
+export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。状態・担当・期限はサーバーが持ち、記録のファイルには書きません（ファイルの先頭は id・type・links だけ）。状態を変えるときは必ずこの道具の操作を使い、ファイルを書き換えないでください。記録に書くときは、人や顧客を名前ではなく id で指してください。` +
+  `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
+  `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。`
 
 export interface RecordTools {
   specs: RecordToolSpec[]

@@ -132,6 +132,9 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   folder is (none = everyone). Answers, `total`, link lists and traversals all apply it, so an
   unreadable private record is identical to a nonexistent one (same 404 body). `total` counts up
   to `MAX_CANDIDATES` (20,000) rows.
+- Records imported through an earlier connection of an outside system are marked
+  (`fromOldConnection`, `notice`) and left out of the query unless `includeOldConnection: true`
+  and out of 「あなたの番」 (`plugins.md` "Connections").
 - Fixed shape only — no free SQL (0.23-1): type or interface, states, server-field equality (`{
   in: [...] }`), links up to 2 hops (traversal passes only through readable records), substring of
   title / summary. With `type`, field names must be server fields of it.
@@ -261,7 +264,10 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
   decide, nothing is asked), Codex as a loopback endpoint; registry `recordsMcp` /
   `recordActions`. The system prompt says state lives on the server, never in files, and people
-  are named by id (`RECORDS_INSTRUCTIONS`). Category `app-tool` in the action log. Not in the
+  are named by id in records, while replies to the member call a record by its title and
+  distinguishing details (担当, 金額, dates) and show internal ids (record ids, outside ids,
+  operation ids) only when asked — the tools keep the ids (`RECORDS_INSTRUCTIONS`).
+  Category `app-tool` in the action log. Not in the
   private-read guard's app list: after the conversation read a private folder, a record tool call
   asks the member first (a note could carry private content to a shared record).
 - The chat write guard (`write-guard.ts`, `chat-write-guard.md`): `.acb/types/` for owners /

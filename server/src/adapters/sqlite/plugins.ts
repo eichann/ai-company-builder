@@ -129,6 +129,13 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
       const r = conn.prepare(`SELECT ${LINK_COLUMNS} FROM plugin_external_links WHERE company_id = ? AND record_id = ?`).get(companyId, recordId) as LinkRow | undefined
       return r ? toLink(r) : null
     },
+    oldConnectionRecordIds() {
+      return (conn.prepare(`
+        SELECT DISTINCT l.record_id FROM plugin_external_links l WHERE l.company_id = ? AND NOT EXISTS (
+          SELECT 1 FROM plugin_external_links c JOIN plugin_installs i ON i.company_id = c.company_id AND i.plugin_id = c.plugin_id AND i.connection_id = c.connection_id
+          WHERE c.company_id = ? AND c.record_id = l.record_id)
+      `).all(companyId, companyId) as Array<{ record_id: string }>).map(r => r.record_id)
+    },
     saveLink(l) {
       conn.prepare(`
         INSERT INTO plugin_external_links (company_id, plugin_id, connection_id, account_id, object, external_id, record_id, external_updated_at, seen_at)

@@ -14,6 +14,7 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
+import { OLD_CONNECTION_LABEL } from '../../shared/types/records'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordAccessRow, RecordCandidateFilter, RecordRepository, RecordRow } from '../ports/records'
@@ -51,14 +52,15 @@ interface ParsedQuery {
   limit: number
   offset: number
   countOnly: boolean
+  includeOldConnection: boolean
 }
 
 function parseQuery(body: unknown): ParsedQuery | string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The query must be an object'
   const b = body as Record<string, unknown>
-  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'text', 'limit', 'offset', 'countOnly']
+  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
-  const q: ParsedQuery = { fields: [], limit: 50, offset: 0, countOnly: b.countOnly === true }
+  const q: ParsedQuery = { fields: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
     if (typeof b.type !== 'string' || !ONTOLOGY_NAME_RE.test(b.type)) return 'type must be a type name'
     q.type = b.type
@@ -98,6 +100,10 @@ function parseQuery(body: unknown): ParsedQuery | string {
     if (t.length > 100) return 'text: at most 100 characters'
     if (t !== '') q.text = t
   }
+  if (b.includeOldConnection !== undefined) {
+    if (typeof b.includeOldConnection !== 'boolean') return 'includeOldConnection must be true or false'
+    q.includeOldConnection = b.includeOldConnection
+  }
   if (b.limit !== undefined) {
     if (typeof b.limit !== 'number' || !Number.isInteger(b.limit) || b.limit < 1 || b.limit > 200) return 'limit is 1–200'
     q.limit = b.limit
@@ -109,7 +115,12 @@ function parseQuery(body: unknown): ParsedQuery | string {
   return q
 }
 
-export function recordSummaries(records: RecordRepository, rows: RecordRow[]): Map<string, RecordSummary> {
+/**
+ * `old`: records imported through an earlier connection of an outside system
+ * (`oldConnectionIds`), marked so that people and the AI can tell them from
+ * the ones in use.
+ */
+export function recordSummaries(records: RecordRepository, rows: RecordRow[], old?: ReadonlySet<string>): Map<string, RecordSummary> {
   const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s]))
   return new Map(rows.map(r => {
     const s = states.get(r.id)
@@ -118,6 +129,7 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[]): M
     return [r.id, {
       id: r.id, type: r.type, typeVersion: r.typeVersion, title: r.title, summary: r.summary, path: r.path,
       state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s && s.updatedAt > r.updatedAt ? s.updatedAt : r.updatedAt,
+      ...(old?.has(r.id) ? { fromOldConnection: true as const, notice: OLD_CONNECTION_LABEL } : {}),
     } satisfies RecordSummary]
   }))
 }
@@ -144,6 +156,8 @@ function neighbours(records: RecordRepository, reader: RecordReader, from: Recor
 
 export function createRecordService({ companyData, clock, indexer }: RecordServiceDeps) {
   const handleOf = (member: Member) => companyData.forCompany(member.companyId)
+  /** Records of an earlier connection of an outside system (plugins.md "Connections"). */
+  const oldConnectionIds = (member: Member): Set<string> => new Set(handleOf(member).plugins.oldConnectionRecordIds())
   const enabled = (member: Member) => handleOf(member).records.settings().enabled
 
   function settingsView(member: Member): RecordSettings {
@@ -246,10 +260,11 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
       }
       if (filter.types?.length === 0 || filter.ids?.length === 0) return ok({ total: 0, records: [] })
 
-      const visible = records.candidates(filter, MAX_CANDIDATES).filter(r => reader.record(r))
+      const old = oldConnectionIds(member)
+      const visible = records.candidates(filter, MAX_CANDIDATES).filter(r => reader.record(r) && (q.includeOldConnection || !old.has(r.id)))
       if (q.countOnly) return ok({ total: visible.length, records: [] })
       const page = visible.slice(q.offset, q.offset + q.limit)
-      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
+      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)), old)
       return ok({ total: visible.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
     },
 
@@ -272,7 +287,9 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
         types: names, fields: [{ name: 'assignee', values: [member.userId] }, { name: 'next_actor', values: [null] }],
       }, MAX_CANDIDATES)
       const seen = new Set<string>()
-      const visible = [...mine, ...assigned].filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r))
+      // A record of an earlier connection waits for nobody: it is no longer used.
+      const old = oldConnectionIds(member)
+      const visible = [...mine, ...assigned].filter(r => !seen.has(r.id) && (seen.add(r.id), true) && !old.has(r.id) && reader.record(r))
       const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s.state]))
       const waiting = visible.filter(r => !finalOf.get(r.type)?.has(states.get(r.id) ?? ''))
       const page = waiting.slice(0, 200)
@@ -301,7 +318,7 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
         const s = others.get(l.sourceId)
         if (s && linkAllowed(s, row) && reader.record(s)) { shown.set(s.id, s); links.push({ name: l.name, direction: 'in', id: s.id }) }
       }
-      const sums = recordSummaries(records, [row, ...shown.values()])
+      const sums = recordSummaries(records, [row, ...shown.values()], oldConnectionIds(member))
       return ok({
         record: sums.get(row.id)!,
         links: links.map((l): RecordLinkView => (l.id ? { name: l.name, direction: l.direction, record: sums.get(l.id)! } : { name: l.name, direction: l.direction, path: l.path! })),

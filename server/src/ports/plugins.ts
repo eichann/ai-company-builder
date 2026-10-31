@@ -180,6 +180,12 @@ export interface PluginRepository {
   link(connectionId: string, accountId: string, object: string, externalId: string): ExternalLinkRow | null
   /** The outside object a record stands for. */
   linkOfRecord(recordId: string): ExternalLinkRow | null
+  /**
+   * Records imported through a connection that is no longer the plugin's
+   * current one (「新しいつなぎ先として始める」 started another) and not
+   * linked through the current one: kept, never deleted, but no longer used.
+   */
+  oldConnectionRecordIds(): string[]
   saveLink(row: ExternalLinkRow): void
 
   /** Who may read the outside system through the relay, for this connection (none = closed). */
