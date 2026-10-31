@@ -24,14 +24,14 @@ import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths
 import type { ActionDef, FieldKind, TypeDefinition } from '../../shared/core/record-types'
 import {
   replayRecordState, type DecisionMaterial, type LedgerAttachment, type LedgerChange, type LedgerDecision, type LedgerEntry,
-  type LedgerValue, type ReplayedState,
+  type LedgerValue, type ReplayedState, type VersionOrigin,
 } from '../../shared/core/record-ledger'
 import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../shared/core/records'
 import type { RecordSummary } from '../../shared/types/records'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordFileRepo, RecordFileWriter } from '../ports/record-files'
-import type { RecordLinkRow, RecordRepository, RecordRow } from '../ports/records'
+import type { RecordAccessRow, RecordLinkRow, RecordRepository, RecordRow } from '../ports/records'
 import type { Transactions } from '../ports/transactions'
 import { logError } from '../lib/error-log'
 import type { Member } from './access'
@@ -49,6 +49,8 @@ export interface RecordEngineDeps {
   /** Department folders the member manages (`dept_manager` in `who`). */
   managedFolders: (companyId: string, userId: string) => string[]
   isMember: (companyId: string, userId: string) => boolean
+  /** The member's role in the company, or null (an assignee must be able to read the record). */
+  roleOf: (companyId: string, userId: string) => string | null
   /** Tell these members their 「あなたの番」 may have changed (push channel; kind + version only). */
   notify: (companyId: string, userIds: string[]) => void
 }
@@ -62,13 +64,45 @@ export interface ActorInput {
   kind: 'human' | 'ai'
   /** For an AI: which one (the agent the token was issued for). */
   source?: string
+  /**
+   * Provenance, recorded in the ledger and NEVER used to authorize anything:
+   * for a person, what their app reports (it can say anything); for the AI,
+   * the conversation of its token. `proposedBy: 'ai'` only for a person.
+   */
+  conversationId?: string | null
+  proposedBy?: 'ai' | null
 }
+
+// eslint-disable-next-line no-control-regex
+const CONTROL = /[\u0000-\u001f\u007f]/
+
+/**
+ * A person's self-reported provenance from a request body (`proposedBy:
+ * 'ai'` = they confirmed what their AI suggested; `conversationId`).
+ * Informational only: the client can report anything, so nothing may
+ * depend on it — it is shown in the history and nowhere decides.
+ */
+export function selfReportedProvenance(body: unknown): Pick<ActorInput, 'conversationId' | 'proposedBy'> {
+  const b = (typeof body === 'object' && body !== null ? body : {}) as Record<string, unknown>
+  const conversationId = typeof b.conversationId === 'string' && b.conversationId.length > 0 && b.conversationId.length <= 200 && !CONTROL.test(b.conversationId)
+    ? b.conversationId : null
+  return { proposedBy: b.proposedBy === 'ai' ? 'ai' : null, conversationId }
+}
+
+/** The ledger's provenance columns for this actor (AI: never proposed_by — its actor kind already says ai). */
+const provenance = (actor: ActorInput) => ({
+  proposedBy: actor.kind === 'human' && actor.proposedBy === 'ai' ? 'ai' as const : null,
+  conversationId: actor.conversationId ?? null,
+})
 
 const NOTE_MAX = 2000
 const TEXT_MAX = 500
 const LONG_TEXT_MAX = 5000
 
 const conflict = (error: string, code: string, extra: Record<string, unknown> = {}) => refuse('conflict', error, { code, ...extra })
+
+/** Says nothing about where the record is (a private folder's name never leaks). */
+export const ASSIGNEE_CANNOT_READ = 'この人はこの記録を見られないため、担当にできません。見られる人を選んでください。'
 const bad = (error: string, code = 'BAD_REQUEST') => refuse('bad-request', error, { code })
 
 /** A value for a field of `kind`, or an error text. */
@@ -137,6 +171,17 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     return { repo: { kind: 'company' }, path: row.path }
   }
 
+  /**
+   * May `userId` read a record at this place (their own read access: private
+   * folder, scope rules)? An assignee who cannot would be handed work they
+   * cannot see.
+   */
+  function canRead(companyId: string, userId: string, place: RecordAccessRow): boolean {
+    const role = deps.roleOf(companyId, userId)
+    if (role === null) return false
+    return recordReader({ companyId, userId, role }, companyData.forCompany(companyId).scopes.listWithRules()).record(place)
+  }
+
   function stateOf(records: RecordRepository, row: RecordRow, def: TypeDefinition) {
     const s = records.states([row.id])[0]
     let fields: Record<string, LedgerValue> = {}
@@ -200,6 +245,9 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v
       }
+      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder })) {
+        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
+      }
       if (def.implements.includes('request')) {
         fields.requested_by ??= member.userId
         fields.next_actor ??= fields.assignee ?? null
@@ -232,7 +280,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const entry: LedgerEntry = {
         recordId: id, version: 1, action: 'create', fromState: null, toState: def.initial, actorId: member.userId, actorKind: actor.kind,
         actorSource: actor.source ?? null, at, note: '', changes, attachments: [], decision: null, isDecision: false,
-        typeVersion: def.version, reversesVersion: null,
+        typeVersion: def.version, reversesVersion: null, ...provenance(actor),
       }
       transactions.run(() => {
         records.upsert({
@@ -290,6 +338,10 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         const v = checkValue(kind, rawArgs[name], def.fields[name]?.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         args[name] = v
+      }
+
+      if (typeof args.assignee === 'string' && !canRead(member.companyId, args.assignee, row)) {
+        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
       }
 
       // Attached files (0.18-1): the versions handed over, checked to exist.
@@ -352,7 +404,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const entry: LedgerEntry = {
         recordId: row.id, version: current.version + 1, action: actionName, fromState: current.state, toState: nextState,
         actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note, changes, attachments,
-        decision, isDecision: action.decision, typeVersion: row.typeVersion, reversesVersion: null,
+        decision, isDecision: action.decision, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
       }
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number
@@ -406,7 +458,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const entry: LedgerEntry = {
         recordId: row.id, version: latest + 1, action: 'undo', fromState: now.state, toState: nextState, actorId: member.userId,
         actorKind: actor.kind, actorSource: actor.source ?? null, at, note, changes, attachments: [], decision: null, isDecision: false,
-        typeVersion: row.typeVersion, reversesVersion: target.version,
+        typeVersion: row.typeVersion, reversesVersion: target.version, ...provenance(actor),
       }
       const written = transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(nextFields), version: entry.version, updatedAt: at }, latest)) return false
@@ -427,7 +479,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     },
 
     /** The record's server values as they were at `version` (§13.11). */
-    atVersion(member: Member, recordId: string, version: string): Outcome<ReplayedState> {
+    atVersion(member: Member, recordId: string, version: string): Outcome<ReplayedState & { origin: VersionOrigin }> {
       const opened = open(member)
       if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const row = RECORD_ID_RE.test(recordId) ? opened.records.byIds([recordId]).find(r => opened.reader.record(r)) : undefined
@@ -436,7 +488,12 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const ledger = opened.records.ledger(row.id)
       const latest = ledger.length > 0 ? ledger[ledger.length - 1].version : 0
       if (!Number.isInteger(n) || n < 1 || n > latest) return refuse('not-found', 'その版はありません', { code: 'VERSION_NOT_FOUND' })
-      return ok(replayRecordState(ledger, n))
+      const entry = ledger.find(e => e.version === n) as LedgerEntry
+      const origin: VersionOrigin = {
+        action: entry.action, actorId: entry.actorId, actorKind: entry.actorKind, at: entry.at,
+        proposedBy: entry.proposedBy, conversationId: entry.conversationId,
+      }
+      return ok({ ...replayRecordState(ledger, n), origin })
     },
   }
 }

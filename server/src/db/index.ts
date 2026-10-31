@@ -581,6 +581,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
 
   // Single-use invitation links (services/invitations.ts signUp).
   migrateInvitationClaims(conn)
+  migrateRecordLedgerProvenance(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
   // Before the seeding below: it deletes stale manager rows per company.
@@ -696,6 +697,18 @@ export function migrateRuleAndManagerCompanies(conn: Database.Database): {
 
 // Helper functions for common operations
 /** Add the invitation claim columns to an existing invitations table (idempotent). */
+/**
+ * Where a ledger entry came from (records.md "Provenance"), added after the
+ * ledger shipped: nullable, so an older build keeps inserting without them.
+ * proposed_by: 'ai' when a person confirmed what their AI suggested;
+ * conversation_id: the consultation it came from. Informational only.
+ */
+export function migrateRecordLedgerProvenance(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(record_ledger)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('proposed_by')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN proposed_by TEXT`)
+  if (!cols.has('conversation_id')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN conversation_id TEXT`)
+}
+
 export function migrateInvitationClaims(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(invitations)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('signup_claimed_at')) conn.exec(`ALTER TABLE invitations ADD COLUMN signup_claimed_at TEXT`)

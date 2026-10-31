@@ -136,6 +136,13 @@ export interface ActionRequest {
   args?: Record<string, RecordFieldValue>
   /** Files (of the action's `attach` links) handed over, at the commit that was pushed. */
   attachments?: Array<{ link: string; path: string; commit: string }>
+  /**
+   * Provenance, informational only (never authorizes; the server records what
+   * the app says): `ai` when the member confirms an action their AI suggested
+   * in a consultation, and that consultation's id. Ignored on the AI's routes.
+   */
+  proposedBy?: 'ai'
+  conversationId?: string
   /** Only for actions marked `decision`: what the decision rests on (references, never copies). */
   decision?: { materials?: DecisionMaterial[]; policyVersion?: string; precedents?: string[]; supersedes?: string }
   actor?: RecordActor

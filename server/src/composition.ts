@@ -151,6 +151,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     files: gitRecordFileWriter(),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
   })
 

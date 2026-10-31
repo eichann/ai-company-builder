@@ -67,12 +67,30 @@ export interface LedgerEntry {
   typeVersion: number | null
   /** For an undo: the version whose changes it reverses. */
   reversesVersion: number | null
+  /**
+   * Provenance, informational only — never used to decide anything (the
+   * member's app reports it; nothing checks it): `ai` when a person
+   * confirmed an action their AI suggested (actor kind stays `human`).
+   */
+  proposedBy: 'ai' | null
+  /** The consultation it came from: the AI's token's for AI actions, the app's word for a person's. */
+  conversationId: string | null
 }
 
 export interface ReplayedState {
   version: number
   state: string | null
   fields: Record<string, LedgerValue>
+}
+
+/** Who made a version, and where it came from (the entry that produced it; informational provenance included). */
+export interface VersionOrigin {
+  action: string
+  actorId: string
+  actorKind: ActorKind
+  at: string
+  proposedBy: 'ai' | null
+  conversationId: string | null
 }
 
 /**
