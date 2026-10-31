@@ -192,6 +192,23 @@ describe('the relay', () => {
     expect(received.length).toBe(before)
   })
 
+  it('a built-in key saved with another service\'s host (before the server refused it) is never used: nothing sent (staging: HubSpot key → Gemini\'s host)', async () => {
+    const row = db.prepare("SELECT id, destinations FROM broker_keys WHERE company_id = ? AND service = 'hubspot'").get(CO)
+    for (const hosts of [['generativelanguage.googleapis.com'], ['api.hubapi.com', 'generativelanguage.googleapis.com']]) {
+      db.prepare('UPDATE broker_keys SET destinations = ? WHERE id = ?').run(JSON.stringify({ hosts, pathPrefixes: [], models: [] }), row.id)
+      const token = tokenFor(['hubspot'])
+      const before = received.length
+      const r = await call('GET', '/hubspot/crm/v3/objects/deals', { headers: { authorization: `Bearer ${token}` } })
+      expect([r.status, r.json.error.code], JSON.stringify(hosts)).toEqual([403, 'ACB_DESTINATION_NOT_ALLOWED'])
+      expect(r.json.error.message).toContain('鍵の設定を直して')
+      expect(received.length).toBe(before)
+    }
+    db.prepare('UPDATE broker_keys SET destinations = ? WHERE id = ?').run(row.destinations, row.id)
+    const r = await call('GET', '/hubspot/crm/v3/objects/deals', { headers: { authorization: `Bearer ${tokenFor(['hubspot'])}` } })
+    expect(r.status).toBe(200)
+    expect(received.at(-1)!.host).toBe('api.hubapi.com')
+  })
+
   it('only the key\'s destinations: path prefixes, models, clean paths', async () => {
     const token = tokenFor(['openai'])
     const h = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }

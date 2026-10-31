@@ -106,7 +106,8 @@ up by the owner, 2026-10-30: right after the two dials).
   relay after it has validated a token — no route reaches it, and its result is never returned
   or logged. `vault.seal()` is the only way in.
 - Input rules are `shared/core/key-broker.ts`: service names `^[a-z0-9][a-z0-9_-]*$` (≤ 40),
-  built-in services (gemini, openai, anthropic, hubspot with their hosts), destination hosts are exact
+  built-in services (gemini, openai, anthropic, hubspot with their hosts; a built-in key may
+  name only its service's hosts, `builtinHostsOutside`), destination hosts are exact
   (no wildcard, IP, `localhost`, `.local`, `.internal`), path prefixes, model ids,
   `checkBrokerSecret` (printable ASCII, 8–4096, never an `acb_tok_` token; its errors never
   quote the value), the audience (`parseBrokerAudience`, `upgradeBrokerAudience`,
@@ -163,6 +164,24 @@ disable and delete still work). Audience departments must be the company's, peop
   service with keys only (no known host) → 400 `HOSTS_REQUIRED`: its hosts are typed in
   `PUT /broker/services/:service`. History action `service`, like the detailed form.
 
+- **A built-in service's key goes only to that service's hosts** (2026-11-01, after staging saved
+  a HubSpot key with Gemini's host through the admin form): `builtinHostsOutside` /
+  `builtinHostsMessage` (shared/core). `POST /broker/keys`, `PATCH /broker/keys/:keyId`
+  (destinations) and `PUT /broker/services/:service` (`ownKeyHosts`) refuse other hosts: 400
+  `{ code: 'HOSTS_NOT_FOR_SERVICE' }` 「HubSpot の鍵は api.hubapi.com にだけ送れます。…」 (hosts
+  only, never a key). A proxy in front of a provider is a generic service (K9), not a built-in
+  key with another host. A key saved before this rule is **never used by the relay** (403
+  `ACB_DESTINATION_NOT_ALLOWED` 「この <サービス> の鍵は送り先の設定が正しくないため使えません。…」,
+  nothing sent; the connector plugin already refuses it as `key-destination`); the admin page marks
+  its row (`misdirectedKeyText`) and 「設定を変更」 → 保存 rewrites its hosts to the service's.
+  In the key form the hosts of a built-in or generic service are read-only and derived from the
+  service the form names now — also a built-in name typed under 「その他」, the path that kept
+  Gemini's host (the form starts on the first service, Gemini, and only the list's change event
+  used to reset the hosts). Tests: `tests/integration/key-broker.test.ts` 「a built-in service's
+  key may name only that service's hosts」, `broker-relay.test.ts` 「a built-in key saved with
+  another service's host … is never used」, `admin/tests/key-broker.test.tsx` (その他 + hubspot,
+  list choice, the marked row and its edit) — each mutation-checked.
+
 ## Checking a key when it is saved (owner, 2026-10-31)
 
 `services/broker-key-check.ts`, called by `keyBroker.create` / `replaceSecret` and
@@ -173,7 +192,7 @@ in `internalHosts`, 10 s). Built-in: `BrokerServiceInfo.check` — Gemini `GET /
 OpenAI `GET /v1/models`, Anthropic `GET /v1/models` + `anthropic-version: 2023-06-01`, HubSpot
 `GET /crm/objects/2026-03/deals` (HubSpot's dated API; the design's v3 path is unsupported from
 2027-09) — on the built-in host, and only when the key's destinations include it (else `not-checkable`, nothing
-sent). Generic (K9): the definition's optional `checkPath` (a plain path, no query, put after
+sent — only a key saved before built-in keys were held to their hosts). Generic (K9): the definition's optional `checkPath` (a plain path, no query, put after
 `basePath`); none → `not-checkable`. Only the status is read (the body is drained and dropped).
 Result (`BrokerKeyCheckResult`): 2xx → `valid`; the service's `rejected` statuses (Gemini 400 /
 401 / 403 — its answer to an invalid key is 400 API_KEY_INVALID; OpenAI and Anthropic 401 only,
@@ -231,8 +250,9 @@ the sign-in.
    only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) / 503
    `ACB_BROKER_OFF`. Error bodies are
    `{ type: 'error', error: { type, code, status, message } }` (read by all three SDKs).
-2. **Destinations**: the host is the built-in host when the key allows it, else the key's first
-   host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
+2. **Destinations**: a built-in key naming any host outside its service's → 403
+   `ACB_DESTINATION_NOT_ALLOWED`, nothing sent (above); the host is the built-in host when the
+   key allows it, else the key's first host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
    characters or `.`/`..` segments (400 `ACB_BAD_PATH`); the URL parser has already resolved
    `%2e%2e`. Key path prefixes and models are enforced (403 `ACB_DESTINATION_NOT_ALLOWED`); the
    model comes from the path (`/models/<m>`, Gemini) or the JSON body's `model`.

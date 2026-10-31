@@ -3,6 +3,8 @@
  * Validation is shared/core/key-broker.ts, the server's own copy.
  */
 import {
+  builtinBrokerService,
+  builtinHostsOutside,
   normalizeBrokerHost,
   normalizeBrokerModel,
   normalizeBrokerPathPrefix,
@@ -52,6 +54,20 @@ export const RULE_LABELS: Record<BrokerKeyRule, string> = {
   'company-only': '会社の鍵だけ',
   'user-only': '自分の鍵だけ',
   'company-first': '会社の鍵が優先、なければ自分の鍵',
+}
+
+/**
+ * A built-in service's key saved with hosts that are not its service's (before
+ * the server refused that): the relay never uses it. The sentence that says so
+ * on its row, or null when the key is fine.
+ */
+export function misdirectedKeyText(k: { scope: string; service: string; destinations: { hosts: readonly string[] } }): string | null {
+  const builtin = builtinBrokerService(k.service)
+  if (!builtin || builtinHostsOutside(k.service, k.destinations.hosts).length === 0) return null
+  const fix = k.scope === 'company'
+    ? `「設定を変更」から保存し直すと、送り先が ${builtin.defaultHosts.join('、')} に直ります。`
+    : 'この鍵を削除して、メンバーに登録し直してもらってください。'
+  return `送り先が ${builtin.label} のものではないため、この鍵は使われていません。${fix}`
 }
 
 export const STATUS_LABELS: Record<BrokerKeyStatus, string> = {

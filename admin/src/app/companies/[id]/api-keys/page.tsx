@@ -43,6 +43,7 @@ import {
   describeUsage,
   hostsOf,
   invalidHosts,
+  misdirectedKeyText,
   ownKeysOn,
   type Names,
 } from '@/lib/key-broker'
@@ -350,6 +351,7 @@ function KeyRow({
 }) {
   const [showUsers, setShowUsers] = useState(false)
   const listId = `users-${k.id}`
+  const misdirected = misdirectedKeyText(k)
   return (
     <li className="space-y-1 py-3" aria-label={k.displayName}>
       <div className="flex flex-wrap items-center gap-2">
@@ -359,6 +361,12 @@ function KeyRow({
         <Badge variant={k.status === 'active' ? 'success' : 'warning'}>{STATUS_LABELS[k.status]}</Badge>
         {k.scope === 'user' && <span className="text-xs text-muted-foreground">{k.ownerName ?? 'メンバー'}の鍵</span>}
       </div>
+      {misdirected && (
+        <p role="alert" className="flex items-start gap-1.5 text-xs text-destructive">
+          <Warning size={14} className="mt-0.5 shrink-0" aria-hidden />
+          {misdirected}
+        </p>
+      )}
       <dl className="grid gap-x-4 text-xs text-muted-foreground sm:grid-cols-[auto_1fr]">
         <dt>送り先</dt>
         <dd className="font-mono">{k.destinations.hosts.join('、')}{k.destinations.pathPrefixes.length ? ` / ${k.destinations.pathPrefixes.join('、')}` : ''}</dd>

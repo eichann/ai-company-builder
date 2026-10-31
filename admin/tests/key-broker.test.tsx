@@ -31,6 +31,7 @@ const FAKE = 'fake-test-key-NOT-REAL-admin-0123456789'
 const services: BrokerView['services'] = [
   { service: 'gemini', label: 'Google Gemini', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['generativelanguage.googleapis.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
   { service: 'openai', label: 'OpenAI', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.openai.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
+  { service: 'hubspot', label: 'HubSpot', builtin: true, category: 'system', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 0, userKeys: 0, updatedAt: null, relay: null, readOnly: false, practice: false },
 ]
 
 const view: BrokerView = {
@@ -133,14 +134,68 @@ describe('API キー', () => {
     expect(body.audience).toEqual({ allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: ['u_member'] })
   })
 
+  it('a built-in service\'s key goes to that service\'s host, also when its name is typed under その他 (staging: a HubSpot key saved with Gemini\'s host)', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`POST ${base}/broker/keys`]: () => ({ body: ok(view) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'API キーを登録' }))
+    const dialog = await screen.findByRole('dialog')
+    // The form opens on the first service (Gemini); the name is then typed under その他.
+    await userEvent.selectOptions(within(dialog).getByLabelText('サービス'), 'その他（名前を入力）')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'サービス名' }), 'hubspot')
+    await userEvent.type(within(dialog).getByLabelText('名前'), '営業の HubSpot')
+    await userEvent.type(within(dialog).getByLabelText('キー'), FAKE)
+    const hosts = within(dialog).getByRole('textbox', { name: '送ってよいホスト' })
+    expect(hosts).toHaveValue('api.hubapi.com')
+    expect(hosts).toHaveAttribute('readonly')
+    await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ service: 'hubspot', destinations: { hosts: ['api.hubapi.com'] } })
+  })
+
+  it('chosen from the list, a built-in service\'s host is fixed (no field that could keep another service\'s host)', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`POST ${base}/broker/keys`]: () => ({ body: ok(view) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    await userEvent.click(await screen.findByRole('button', { name: 'API キーを登録' }))
+    const dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByLabelText('サービス'), 'HubSpot')
+    await userEvent.type(within(dialog).getByLabelText('名前'), 'H')
+    await userEvent.type(within(dialog).getByLabelText('キー'), FAKE)
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '送ってよいホスト' }), '\ngenerativelanguage.googleapis.com')
+    await userEvent.click(within(dialog).getByRole('button', { name: '登録' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'POST')).toBe(true))
+    expect(calls.find((c) => c.method === 'POST')!.body).toMatchObject({ service: 'hubspot', destinations: { hosts: ['api.hubapi.com'] } })
+  })
+
+  it('a saved built-in key whose hosts are not its service\'s is marked to fix, and editing it sends the service\'s host', async () => {
+    const wrong: BrokerKeySummary = { ...stored, id: 'k2', service: 'hubspot', displayName: '営業の HubSpot', destinations: { hosts: ['generativelanguage.googleapis.com'], pathPrefixes: [], models: [] } }
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/broker`]: { body: ok({ ...view, keys: [wrong] }) },
+      [`PATCH ${base}/broker/keys/k2`]: () => ({ body: ok({ ...view, keys: [wrong] }) }),
+    })
+    renderInCompany(<ApiKeysPage />)
+    expect(await screen.findByText(/送り先が HubSpot のものではないため、この鍵は使われていません/)).toBeInTheDocument()
+    await userEvent.click(await screen.findByRole('button', { name: '設定を変更' }))
+    const dialog = await screen.findByRole('dialog')
+    expect(within(dialog).getByRole('textbox', { name: '送ってよいホスト' })).toHaveValue('api.hubapi.com')
+    await userEvent.click(within(dialog).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'PATCH')).toBe(true))
+    expect(calls.find((c) => c.method === 'PATCH')!.body).toMatchObject({ destinations: { hosts: ['api.hubapi.com'] } })
+  })
+
   it('a destination that is not one exact host cannot be saved', async () => {
     const calls = stubApi(ownerCapabilities)
     renderInCompany(<ApiKeysPage />)
     await userEvent.click(await screen.findByRole('button', { name: 'API キーを登録' }))
     const dialog = await screen.findByRole('dialog')
+    await userEvent.selectOptions(within(dialog).getByLabelText('サービス'), 'その他（名前を入力）')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: 'サービス名' }), 'my-crm')
     await userEvent.type(within(dialog).getByLabelText('名前'), 'x')
     await userEvent.type(within(dialog).getByLabelText('キー'), FAKE)
-    await userEvent.type(within(dialog).getByRole('textbox', { name: '送ってよいホスト' }), '\n*.googleapis.com')
+    await userEvent.type(within(dialog).getByRole('textbox', { name: '送ってよいホスト' }), 'api.example.com\n*.googleapis.com')
     expect(within(dialog).getByRole('alert')).toHaveTextContent('*.googleapis.com')
     expect(within(dialog).getByRole('button', { name: '登録' })).toBeDisabled()
     expect(calls.some((c) => c.method === 'POST')).toBe(false)

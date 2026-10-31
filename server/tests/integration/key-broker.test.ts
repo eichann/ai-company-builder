@@ -212,6 +212,28 @@ describe('API keys (key broker admin)', () => {
     expect((await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys).toHaveLength(1)
   })
 
+  it('a built-in service\'s key may name only that service\'s hosts: on create, update and own-key hosts (staging: a HubSpot key saved with Gemini\'s host)', async () => {
+    const hubspot = gemini({ service: 'hubspot', displayName: '営業の HubSpot' })
+    for (const hosts of [['generativelanguage.googleapis.com'], ['api.hubapi.com', 'generativelanguage.googleapis.com'], ['evil.example.com']]) {
+      const r = await call('kb-owner', 'POST', `${BASE}/broker/keys`, { ...hubspot, destinations: { hosts } })
+      expect(r.status, JSON.stringify(hosts)).toBe(400)
+      expect(r.json).toEqual({ error: 'HubSpot の鍵は api.hubapi.com にだけ送れます。送り先を api.hubapi.com にしてください。', code: 'HOSTS_NOT_FOR_SERVICE' })
+    }
+    const id = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys[0].id
+    for (const hosts of [['api.hubapi.com'], ['generativelanguage.googleapis.com', 'api.openai.com']]) {
+      const r = await call('kb-owner', 'PATCH', `${BASE}/broker/keys/${id}`, { destinations: { hosts } })
+      expect(r.status, JSON.stringify(hosts)).toBe(400)
+      expect(r.json.code).toBe('HOSTS_NOT_FOR_SERVICE')
+    }
+    const own = await call('kb-owner', 'PUT', `${BASE}/broker/services/hubspot`, { category: 'system', rule: 'company-first', ownKeyHosts: ['generativelanguage.googleapis.com'] })
+    expect(own.status).toBe(400)
+    expect(own.json.code).toBe('HOSTS_NOT_FOR_SERVICE')
+    const view = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data
+    expect(view.keys).toHaveLength(1)
+    expect(view.keys[0].destinations.hosts).toEqual(['generativelanguage.googleapis.com'])
+    expect(view.services.find((x: Json) => x.service === 'hubspot').ownKeyHosts).toEqual([])
+  })
+
   it('replacing a key changes what the relay gets; the record shows last 4 before → after', async () => {
     const id = (await call('kb-owner', 'GET', `${BASE}/broker`)).json.data.keys[0].id
     const r = await call('kb-owner', 'PUT', `${BASE}/broker/keys/${id}/secret`, { secret: FAKE2 })
