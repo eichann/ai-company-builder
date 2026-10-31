@@ -1,0 +1,23 @@
+# A second, differently shaped package (owner decision §6-11): a help desk
+# whose tickets are only read, made for one company (§8-4). The mechanism
+# must not be fitted to the CRM's shape.
+id: sample-desk
+label: 見本のヘルプデスク
+version: 2.3.1
+kind: company
+contract: 1
+available_to: [company-desk-only]
+service: sample-desk
+base_url: https://desk.sample.example/api
+types: [ticket]
+objects:
+  ticket:
+    record_type: ticket
+    get:    { method: GET,  path: "/tickets/{id}" }
+    search: { method: POST, path: "/tickets/query" }
+operations:
+  refresh_ticket:
+    label: 最新を取る
+    kind: read
+    object: ticket
+    who: [anyone]

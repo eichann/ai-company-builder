@@ -1,0 +1,24 @@
+# The recommended mapping (a company starts from it).
+deal:
+  visible_to_folder: 営業
+  import:
+    pipelines: [default]
+    updated_within_days: 180
+    max: 500
+  fields:
+    title:      { from: dealname, write: false }
+    stage:      { from: dealstage, write: true, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
+    confidence: { from: kakudo, write: true, values: { high: a, medium: b, low: c } }
+    next_step:  { from: next_step, write: true }
+    close_date: { from: closedate, write: true }
+    amount:     { from: amount, write: true }
+    closed:     { from: is_closed_won, write: false }
+    assignee:   { from: owner_id, write: true, people: owners }
+  links:
+    customer:   { from_association: companies }
+people:
+  owners:
+    "75123001": member-a
+    "75123002": member-b
+policy:
+  close_date: prior
