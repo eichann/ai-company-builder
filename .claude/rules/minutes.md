@@ -8,6 +8,12 @@ paths:
   - "shared/core/minutes.ts"
   - "shared/core/instruction-like.ts"
   - "admin/src/app/companies/[[]id]/integrations/minutes-folder.tsx"
+  - "client/electron/features/minutes/**"
+  - "client/src/features/minutes/**"
+  - "client/shared/minutes-app.ts"
+  - "client/src/features/chat/components/MinutesDealChoiceCard.tsx"
+  - "client/tests/minutes-app.test.ts"
+  - "client/tests/ui/minutes.spec.ts"
 ---
 
 # Minutes intake (milestone 4 G7)
@@ -112,6 +118,47 @@ discovery and the text refuse from the next call: 403 `GOOGLE_STOPPED`, 409
 document), 503 `GOOGLE_UNAVAILABLE`. A switch turning off in the middle of a check stops it.
 Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record tokens (`agent-stop.md`).
 
+## The app (milestone 4 G9, 「商談のあと」)
+
+- **Checking** (`client/electron/features/minutes/checker.ts`, main; the session stays there):
+  the renderer names the company it works in (`minutes:watch`, from `useMinutesNotices` in
+  `AppShell`; the subscription's end sends `null`); main then checks at once, every 10 minutes
+  (`MINUTES_CHECK_INTERVAL_MS`) and on 「議事録を確かめる」 (`minutes:check`). Each check first asks
+  `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
+  asked or shown** (no error either). With it: `POST /me/minutes/check`, then each `stale` id is
+  put back with the type's `retry` at its current version, then the notices are read from
+  `GET /records/ai-turn` (type `minutes`, state `received`: id, title, `meeting_at`, version —
+  never text). Main sends `minutes:changed { companyId }` when they change; the renderer re-reads
+  `minutes:notices`.
+- **The records signal** (push channel, `agent-stop.md`): `wireAgentControl`'s `onRecords` →
+  `recordsSignal(companyId)`, which only re-reads the received minutes, for the company being
+  watched and only while the grant was seen. The signal's content is never used.
+- **The notice** (`client/src/features/minutes/components/MinutesNotices.tsx`, under the
+  department bar): 「議事録が届きました：<件名> <M/D>」 per received record, with 「読み取る」 and
+  「今は読まない」 (`minutes:skip` → the type's `skip` with the session). 「議事録を確かめる」 is an
+  icon button in the title bar (`MinutesCheckButton.tsx`), shown only while the grant allows minutes.
+- **「読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
+  `chat.newConsultation { message, title, minutesId }` (`commands.md`). The chat starts a new
+  consultation titled 「<件名> のあと（M/D）」 (kept, not generated), stores `minutesId` with the
+  conversation, and sends the app-composed first message as the member's (`minutesFirstMessage`,
+  `client/shared/minutes-app.ts`): read minutes `<id>` with `minutes_read`, mark start / finish /
+  fail, make tasks (attending member ids only), decisions (no names), the deal update (approval
+  fields become requests), the HubSpot meeting and the thank-you draft (recipients only from
+  `mail_recipients`), each with the quoted basis, never claiming a send or an approval. It holds
+  the record's id and title only — **the app never has the minutes text**. An agent without
+  record actions (registry `recordActions` false: Codex) gets 「議事録の読み取りは Claude Code の相談で
+  できます」 and nothing starts.
+- **「どの案件の議事録ですか？」** (`MinutesDealChoiceCard.tsx`): when `minutes_read` answers no
+  linked deal and 0 or ≥ 2 candidates, the record tool (main) puts the app's card into the reply
+  (data part `data-minutes-deal-choice`, `dealChoiceFor`; stored as `minutesDealChoices`) and tells
+  the AI not to write to the deal until the member chooses. Choosing calls `minutes:linkDeal` →
+  `POST /me/minutes/item/:id/deal { dealId }` with the session; nothing goes to HubSpot.
+- The consultation's other cards are the core-drawn ones (operation, approval, mail); they render
+  in the order the tools produced them, also after a restart (`cardOrder`, `chat-ui-and-history.md`).
+- Not yet: the consultation does not move to the minutes folder's department (the record's folder
+  is not in any member-facing answer), so the AI asks where to put decisions when the folder is not
+  the current one.
+
 ## Tests
 
 `server/tests/integration/minutes.test.ts` against the fake Google and the fake HubSpot (practice
@@ -121,5 +168,12 @@ for the assignee / attendees, another company's record = missing; no minutes tex
 log line or other answer; the folder refusal never naming the place; stale reading; Google
 stopped / not connected; records off; `meetingAttendees` — each mutation-checked.
 `client/tests/records-tools.test.ts` (the tool's output carries the header above and the footer
-below the text), `client/tests/web-research.test.ts` (the addressed-to-AI flag). Permission
+below the text), `client/tests/web-research.test.ts` (the addressed-to-AI flag).
+`client/tests/minutes-app.test.ts` (no minutes call without the grant — start, tick, signal; the
+check's session calls and stale `retry`; a records signal only re-asks, for the watched company;
+skip / deal link with the session; the first message names the id and carries no text; the deal
+choice card only for 0 / ≥ 2 candidates; cards restored in order), `client/tests/ui/minutes.spec.ts`
+(「読み取る」 starts the titled consultation with `minutesId`; the card links the chosen deal;
+Codex starts nothing), `client/tests/plugin-tools.test.ts` (「もう一度作る」 with the session, the
+server's warning before `confirm`). Permission
 matrix rows + `CROSS` for the session routes with a record id.

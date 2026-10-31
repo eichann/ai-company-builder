@@ -39,6 +39,9 @@ import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChat
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
 import { useAuthStore } from '../stores/authStore'
+import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
+import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
+import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -59,6 +62,8 @@ export function AppShell() {
   const rootPath = currentCompany?.rootPath
 
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
+  // 「議事録が届きました」: main checks while Google may read the member's minutes (features/minutes).
+  const minutes = useMinutesNotices(currentCompany?.id)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -272,6 +277,7 @@ export function AppShell() {
         onShowBackups={() => setShowBackupHistory(true)}
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
+        extra={minutes.available && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       <DepartmentBar
@@ -283,6 +289,7 @@ export function AppShell() {
         showNotDownloadedNote={isCompanyWide && sparseCheckout.enabled && !!unsyncedFolders && unsyncedFolders.size > 0}
         onOpenSettings={() => setShowSettings(true)}
       />
+      {minutes.available && currentCompany && <MinutesNotices companyId={currentCompany.id} notices={minutes.notices} />}
 
       {/* Main Content: the split tree (features/workspace/layoutTree.ts); the chat is one pane */}
       <SplitView

@@ -7,6 +7,7 @@ contract.events chatWindow:changed
 contract.events chatWindow:fileRequested
 contract.events fs:changes
 contract.events handoff:changed
+contract.events minutes:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
@@ -106,7 +107,13 @@ contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke minutes:check
+contract.invoke minutes:linkDeal
+contract.invoke minutes:notices
+contract.invoke minutes:skip
+contract.invoke minutes:watch
 contract.invoke pluginOperations:reconcile
+contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
@@ -228,6 +235,7 @@ contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<
 contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
 contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
+contract.type ElectronAPI.checkMinutes = checkMinutes: Invoke<'minutes:check'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
@@ -260,6 +268,7 @@ contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepart
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
 contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
+contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
@@ -282,6 +291,7 @@ contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<
 contract.type ElectronAPI.gitShowCommit = gitShowCommit: Invoke<'git:showCommit'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
+contract.type ElectronAPI.linkMinutesDeal = linkMinutesDeal: Invoke<'minutes:linkDeal'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
@@ -299,6 +309,7 @@ contract.type ElectronAPI.onFileChange = onFileChange: (callback: (data: FileCha
 contract.type ElectronAPI.onFileChanges = onFileChanges: Subscribe<'fs:changes'>
 contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
 contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
+contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minutes:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -313,6 +324,7 @@ contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, 
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
 contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
+contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
@@ -332,6 +344,7 @@ contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerU
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
 contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
+contract.type ElectronAPI.skipMinutes = skipMinutes: Invoke<'minutes:skip'>
 contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git:sparseGetExclusions'>
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
 contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
@@ -346,6 +359,7 @@ contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'
 contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:validateServerUrl'>
 contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
 contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
+contract.type ElectronAPI.watchMinutes = watchMinutes: Invoke<'minutes:watch'>
 contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
@@ -450,6 +464,7 @@ contract.type IpcEventChannels.'chatWindow:changed' = 'chatWindow:changed': [cha
 contract.type IpcEventChannels.'chatWindow:fileRequested' = 'chatWindow:fileRequested': [request: ChatWindowFileRequest]
 contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChangeEvent[]]
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
+contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
@@ -550,7 +565,13 @@ contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [comp
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:linkDeal' = 'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
+contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
+contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
@@ -739,7 +760,13 @@ main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle minutes:check @ features/minutes/ipc.ts (companyId)
+main.handle minutes:linkDeal @ features/minutes/ipc.ts (companyId, minutesId, dealId)
+main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
+main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
+main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
+main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
@@ -772,6 +799,7 @@ main.send chatWindow:changed @ features/chat-windows/ipc.ts
 main.send chatWindow:fileRequested @ features/chat-windows/ipc.ts
 main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
+main.send minutes:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
@@ -789,6 +817,8 @@ preload backupOpenFolder -> invoke backup:openFolder($0)
 preload backupOpenFolder : (backupPath: string) => Promise<SimpleResult>
 preload backupRestore -> invoke backup:restore($0, $1, $2)
 preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
+preload checkMinutes -> invoke minutes:check($0)
+preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
 preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
@@ -853,6 +883,8 @@ preload getGoogleStatus -> invoke google:status($0)
 preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
+preload getMinutesNotices -> invoke minutes:notices($0)
+preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
 preload getPermissionMode -> invoke config:getPermissionMode()
@@ -897,6 +929,8 @@ preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
+preload linkMinutesDeal -> invoke minutes:linkDeal($0, $1, $2)
+preload linkMinutesDeal : (companyId: string, minutesId: string, dealId: string) => Promise<MinutesActionResult>
 preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
@@ -931,6 +965,8 @@ preload onFileRequestedFromChatWindow -> on chatWindow:fileRequested(<fn>) ; rem
 preload onFileRequestedFromChatWindow : (callback: (request: ChatWindowFileRequest) => void) => () => void
 preload onHandoffChanged -> on handoff:changed(<fn>) ; removeListener handoff:changed(<fn>)
 preload onHandoffChanged : (callback: (scope: { companyId: string; sessionId: string; }) => void) => () => void
+preload onMinutesChanged -> on minutes:changed(<fn>) ; removeListener minutes:changed(<fn>)
+preload onMinutesChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)
@@ -959,6 +995,8 @@ preload readFileBinary -> invoke fs:readFileBinary($0)
 preload readFileBinary : (path: string) => Promise<ArrayBuffer | null>
 preload reconcilePluginOperation -> invoke pluginOperations:reconcile($0, $1, $2)
 preload reconcilePluginOperation : (companyId: string, pluginId: string, operationId: string) => Promise<PluginOperationResult>
+preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, $3, $4)
+preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
 preload renameItem -> invoke fs:rename($0, $1)
@@ -997,6 +1035,8 @@ preload signOut -> invoke auth:signOut()
 preload signOut : () => Promise<SimpleResult>
 preload signUp -> invoke auth:signUp($0, $1, $2)
 preload signUp : (email: string, password: string, name?: string | undefined) => Promise<AuthResult>
+preload skipMinutes -> invoke minutes:skip($0, $1)
+preload skipMinutes : (companyId: string, minutesId: string) => Promise<MinutesActionResult>
 preload sparseGetExclusions -> invoke git:sparseGetExclusions($0)
 preload sparseGetExclusions : (repoPath: string) => Promise<SparseExclusionsResult>
 preload sparseSetExclusions -> invoke git:sparseSetExclusions($0, $1)
@@ -1041,6 +1081,8 @@ preload voiceInput.stop -> invoke voice:stop($0)
 preload voiceInput.stop : (requestId: string) => Promise<void>
 preload watchCompany -> invoke fs:watch($0)
 preload watchCompany : (rootPath: string) => Promise<SimpleResult>
+preload watchMinutes -> invoke minutes:watch($0)
+preload watchMinutes : (companyId: string | null) => Promise<void>
 preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)

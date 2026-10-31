@@ -1,10 +1,11 @@
 import { memo, useState } from 'react'
 import { ArrowCounterClockwise, ArrowRight, CheckCircle, Question, Robot, Warning, XCircle } from '@phosphor-icons/react'
 import {
-  CREATE_UNDO_BUTTON_LABEL, CREATE_UNDO_NOTICE_FALLBACK, UNDO_BUTTON_LABEL, UNDO_NOTICE_FALLBACK, reconcileResultView, shownValue, undoResultView,
+  CREATE_UNDO_BUTTON_LABEL, CREATE_UNDO_NOTICE_FALLBACK, RECREATE_BUTTON_LABEL, RECREATE_NEEDS_CONFIRMATION, UNDO_BUTTON_LABEL, UNDO_NOTICE_FALLBACK,
+  reconcileResultView, recreateResultView, shownValue, undoResultView,
   type CardActionView, type PluginCardField, type PluginCardOutcome, type PluginOperationCard as Card,
 } from '../../../../shared/plugin-operations'
-import { reconcilePluginOperation, undoPluginOperation } from '../api'
+import { reconcilePluginOperation, recreatePluginOperation, undoPluginOperation } from '../api'
 
 const HEADINGS: Record<PluginCardOutcome, { text: (s: string) => string; tone: 'ok' | 'warn' | 'error' | 'plain' }> = {
   applied: { text: s => `${s} を更新しました`, tone: 'ok' },
@@ -61,6 +62,22 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
   const heading = created ? { text: CREATE_HEADINGS[card.outcome], tone: HEADINGS[card.outcome].tone } : HEADINGS[card.outcome]
   const canUndo = card.outcome === 'applied' && card.undoable && !!card.operationId && !action?.done
   const canReconcile = card.outcome === 'unknown' && !!card.operationId && !action?.done
+  // 「もう一度作る」: only after the server said reconciling found nothing; its warning is confirmed first.
+  const [warning, setWarning] = useState<string | null>(null)
+  const canRecreate = created && !!card.operationId && action?.recreatable === true && !action.done && warning === null
+
+  const recreate = async (confirm: boolean) => {
+    if (!card.operationId || busy) return
+    setBusy(true)
+    try {
+      const result = await recreatePluginOperation(card.companyId, card.pluginId, card.operationId, confirm, card.conversationId ?? undefined)
+      if (!confirm && !result.success && result.code === RECREATE_NEEDS_CONFIRMATION) { setWarning(result.error); return }
+      setWarning(null)
+      setAction(recreateResultView(card, result))
+    } finally {
+      setBusy(false)
+    }
+  }
 
   const run = async (kind: 'undo' | 'reconcile') => {
     if (!card.operationId || busy) return
@@ -103,7 +120,20 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
           {action.current.map(c => <li key={c.label}>いまの {c.label}：{shownValue(c.value)}</li>)}
         </ul>}
       </div>}
-      {(canUndo || canReconcile) && <div className="mt-2 flex flex-wrap items-center gap-2">
+      {warning !== null && <div role="alertdialog" aria-label={RECREATE_BUTTON_LABEL} className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS.warn}`}>
+        <p>{warning}</p>
+        <div className="mt-1.5 flex gap-2">
+          <button type="button" disabled={busy} onClick={() => void recreate(true)}
+            className="rounded-lg border border-amber-500/60 px-3 py-1 text-xs text-amber-800 hover:bg-amber-500/10 disabled:opacity-50 dark:text-amber-300">
+            {busy ? '作っています…' : '確かめたので作る'}
+          </button>
+          <button type="button" disabled={busy} onClick={() => setWarning(null)}
+            className="rounded-lg border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+            やめる
+          </button>
+        </div>
+      </div>}
+      {(canUndo || canReconcile || canRecreate) && <div className="mt-2 flex flex-wrap items-center gap-2">
         {canUndo && <button type="button" disabled={busy} onClick={() => void run('undo')}
           className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
           <ArrowCounterClockwise size={13} aria-hidden />{busy ? (created ? '取り消しています…' : '書き戻しています…') : card.undoLabel ?? (created ? CREATE_UNDO_BUTTON_LABEL : UNDO_BUTTON_LABEL)}
@@ -111,6 +141,10 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
         {canReconcile && <button type="button" disabled={busy} onClick={() => void run('reconcile')}
           className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
           {busy ? '確かめています…' : 'もう一度確かめる'}
+        </button>}
+        {canRecreate && <button type="button" disabled={busy} onClick={() => void recreate(false)}
+          className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
+          {RECREATE_BUTTON_LABEL}
         </button>}
       </div>}
     </div>

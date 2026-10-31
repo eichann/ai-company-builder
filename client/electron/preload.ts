@@ -133,6 +133,14 @@ const api: ElectronAPI = {
   approveApproval: (companyId: string, approvalId: string, hash: string, reason: string) => invoke('approvals:approve', companyId, approvalId, hash, reason),
   sendBackApproval: (companyId: string, approvalId: string, reason: string) => invoke('approvals:sendBack', companyId, approvalId, reason),
   withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
+  recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
+    invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
+  watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),
+  checkMinutes: (companyId: string) => invoke('minutes:check', companyId),
+  getMinutesNotices: (companyId: string) => invoke('minutes:notices', companyId),
+  skipMinutes: (companyId: string, minutesId: string) => invoke('minutes:skip', companyId, minutesId),
+  linkMinutesDeal: (companyId: string, minutesId: string, dealId: string) => invoke('minutes:linkDeal', companyId, minutesId, dealId),
+  onMinutesChanged: callback => subscribe('minutes:changed', callback),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

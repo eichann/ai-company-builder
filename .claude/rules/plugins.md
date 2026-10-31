@@ -607,7 +607,12 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   unknown → 「<HubSpot> に作れたか分かりません… HubSpot で確かめてください」 and 「もう一度確かめる」;
   `APPROVAL_REQUIRED` → `needsApproval`, 「作っていません。…」 (only from an older server; a current
   one answers `approval-requested`, which becomes the approval card instead of this one:
-  `approvals.md`). 「もう一度作る」 is a server route for now (no button yet).
+  `approvals.md`). 「もう一度作る」 (milestone 4 G9): once
+  「もう一度確かめる」 answers `recreatable` (HubSpot did not show it), the card offers the button;
+  pressing it sends IPC `pluginOperations:recreate` without `confirm`, shows the server's
+  `RECREATE_WARNING` (409 `RECREATE_NEEDS_CONFIRMATION`) with 「確かめたので作る」 / 「やめる」, and
+  only then sends `confirm: true` — the person's session, never the record token
+  (`client/tests/plugin-tools.test.ts`).
 - No jargon on the card (no 型 / プラグイン / オントロジー); the outside system is named by its
   label (HubSpot).
 

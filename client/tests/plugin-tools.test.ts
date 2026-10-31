@@ -12,6 +12,8 @@
  *   shows the current values; a refusal says nothing changed;
  * - 「変更前の値を書き戻す」 goes with the person's session (never a record
  *   token), with the consultation as provenance;
+ * - 「もう一度作る」 goes with the person's session, shows the server's warning
+ *   before sending `confirm`, and is offered only where reconcile said `recreatable`;
  * - an undo answer that is lost or refused never reads as done; the card
  *   survives a restart (stored with the message);
  * - creates (milestone 4): Claude gets `hubspot__log_meeting` /
@@ -24,7 +26,7 @@ import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { createPluginOperationsApi } from '../electron/features/plugin-operations/ipc'
-import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, shownValue, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, reconcileResultView, shownValue, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import type { PluginAiTools, PluginOperationRecordView } from '../../shared/types/plugins'
 
@@ -202,6 +204,31 @@ test('「変更前の値を書き戻す」 goes with the person\'s session, neve
   // Not an id the server could take as a path: refused before sending.
   assert.equal((await api.undo('co', 'hubspot', '../../x', 'conv-1')).success, false)
   assert.equal(seen.length, 1)
+})
+
+test('「もう一度作る」 goes with the person\'s session, never a record token; it first shows the server\'s warning, then sends confirm', async () => {
+  const seen: Seen[] = []
+  const WARNING = 'HubSpot で見つからなかったため、もう一度作ります。…'
+  const fetch = (async (url: string, init: RequestInit) => {
+    seen.push({ url, method: init.method ?? 'GET', headers: init.headers as Record<string, string>, body: init.body as string | undefined })
+    const body = JSON.parse(init.body as string) as { confirm?: boolean }
+    if (body.confirm !== true) return new Response(JSON.stringify({ error: WARNING, code: 'RECREATE_NEEDS_CONFIRMATION', warning: WARNING }), { status: 409 })
+    return new Response(JSON.stringify({ success: true, data: { operation: opView({ id: 'op-2', operation: 'log_meeting', kind: 'create' }), record: null } }), { status: 200 })
+  }) as unknown as typeof globalThis.fetch
+  const api = createPluginOperationsApi({ baseUrl: () => 'https://acb.example.jp', cookies: () => [SESSION], fetch, log: { warn: () => {} } })
+  const first = await api.recreate('co', 'hubspot', 'op-1', false, 'conv-1')
+  assert.deepEqual(first, { success: false, offline: false, code: 'RECREATE_NEEDS_CONFIRMATION', error: WARNING })
+  const second = await api.recreate('co', 'hubspot', 'op-1', true, 'conv-1')
+  assert.equal(second.success, true)
+  for (const call of seen) {
+    assert.equal(call.url, 'https://acb.example.jp/api/companies/co/plugins/hubspot/operations/op-1/recreate')
+    assert.equal(call.headers.Cookie, SESSION)
+    assert.ok(!('Authorization' in call.headers))
+  }
+  assert.deepEqual(seen.map(c => JSON.parse(c.body!)), [{ confirm: false, conversationId: 'conv-1' }, { confirm: true, conversationId: 'conv-1' }])
+  // The button appears only where the server said so (reconcile: recreatable).
+  assert.equal(reconcileResultView({ systemLabel: 'HubSpot', kind: 'create' }, { success: true, operation: meetingView({ state: 'sent-unknown', reason: 'not-found', recreatable: true }) }).recreatable, true)
+  assert.equal(reconcileResultView({ systemLabel: 'HubSpot', kind: 'create' }, { success: true, operation: meetingView({ state: 'sent-unknown', reason: 'too-early', recreatable: false }) }).recreatable, undefined)
 })
 
 test('an undo that is refused or whose answer is lost never reads as done', () => {

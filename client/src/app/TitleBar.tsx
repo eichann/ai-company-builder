@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, type ReactNode } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ClockCounterClockwise, CloudArrowUp, GearSix, Globe, House, ListChecks, Moon, SignOut, SpinnerGap, Sun } from '@phosphor-icons/react'
 import { useAppStore } from '../stores/appStore'
@@ -15,12 +15,14 @@ interface Props {
   onShowSettings: () => void
   /** Sign out (saves the open tabs first: AppShell). */
   onLogout: () => void
+  /** A feature's button next to sync (「議事録を確かめる」 while Google may read minutes). */
+  extra?: ReactNode
 }
 
 const ICON_BUTTON = 'p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-zinc-800 text-gray-500 dark:text-zinc-400 hover:text-gray-700 dark:hover:text-zinc-200 transition-colors'
 
 /** The window's title bar (draggable): the company, 変更を確認 / 同期, backups, language, theme, settings, sign-out. */
-export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', onPreview, onSync, onShowBackups, onShowSettings, onLogout }: Props) {
+export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle = 'サーバーと同期', onPreview, onSync, onShowBackups, onShowSettings, onLogout, extra }: Props) {
   const { t } = useTranslation()
   const hasCompany = useAppStore((s) => s.currentCompany) != null
   const theme = useAppStore((s) => s.theme)
@@ -66,6 +68,7 @@ export function TitleBar({ companyName, isLoadingPreview, isSyncing, syncTitle =
             <CloudArrowUp size={18} />
           )}
         </button>
+        {extra}
         <div className="w-px h-4 bg-gray-200 dark:bg-zinc-700" />
         <button
           onClick={onShowBackups}
