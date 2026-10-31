@@ -21,6 +21,8 @@ paths:
   - "server/tests/integration/plugin-import.test.ts"
   - "server/tests/helpers/fake-upstream.ts"
   - "server/tests/fakes/hubspot/**"
+  - "server/src/services/plugin-operations.ts"
+  - "server/tests/integration/plugin-operations.test.ts"
 ---
 
 # Connector plugins (milestone 3): declaration, mapping, field policies
@@ -309,12 +311,74 @@ plugin's switch:
   §5.1 — there is no read by outside id); only one imported through the current connection and
   account.
 
+## Typed operations (P6, `services/plugin-operations.ts`)
+
+```
+POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation   a person (session)
+POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation             their AI (record token)
+     update: { expectedVersion, fields: { <ACB field>: value }, note? }   read (refresh_deal): {}
+GET  …/plugins/:pluginId/operations/:operationId          (both; only for readers of the record)
+POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo        people only
+POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile   people only
+```
+
+- Checks, each refusing with nothing sent: records switch on; the record readable by the
+  member (else the same 404 as a missing record — the AI only acts on what its owner can see);
+  `active()` (operator stop, company switch, package, key, mapping, acknowledged auto fields);
+  the AI not stopped (also checked by the service, not only the token); the operation exists
+  (`create` — notes — refused in milestone 3: `OPERATION_NOT_AVAILABLE`, review §10 / owner §6-7);
+  the record imported through the current connection; `who` (`viewer` → can read; `ai` only
+  where listed and only for what the member may do: the engine's `mayAct`); **the AI's reason
+  for a decision operation** (`REASON_REQUIRED`; people may leave it out); every field `auto`
+  (a `prior` field → 409 `APPROVAL_REQUIRED`, an `off` one — `stage` always — 400
+  `FIELD_NOT_WRITABLE`; **one such field refuses the whole request**, review §6.3); values
+  translatable; `expectedVersion` current.
+- Then **serialised per outside object** (company × connection × object × id) inside this
+  server (review §5.5): the outside account is checked; the object is read again — a difference
+  is brought in (an `external` ledger entry) and the request refused as stale (409
+  `VERSION_CONFLICT` with the current values); `expectedVersion` checked again. **Limits**: a read
+  just before the write detects known differences; HubSpot's object update (2026-03) offers no
+  conditional update we can rely on, so a change made in HubSpot between that read and the PATCH
+  can still be overwritten. ACB reads the object back after writing and records any other
+  difference as an observed change. Two ACB servers would not share the serialisation.
+- **The operation record (`plugin_operations`, 操作の控え) is written before the send**: plugin
+  version, fingerprint, mapping version, connection, account, outside object and id, the ACB
+  fields asked, the raw outside values sent (`written`) and the **raw previous values**
+  (`previous`) — those three never change (trigger). States: `pending` → `applied` (2xx: the
+  ledger entry is written with the person / AI as actor, `receipt.kind: written`, the note and,
+  for a decision, the reason) / `failed` (429, 4xx, nothing sent — known not applied) /
+  `sent-unknown` (the answer was lost, or a 5xx) → read back once at once: the intended values
+  are there → **`observed`** (recorded as an observed change; **not ACB's confirmed success,
+  never undoable** — someone else may have written the same, review §5.6) — else it stays
+  `sent-unknown` (`not-observed`). **A write is never re-sent** (the connector never retries
+  writes). `POST …/reconcile` (the actor or an owner / admin) reads back again and works while
+  the plugin is stopped or off (`active({ collectingFacts: true })`: stops stop new writes, not
+  the collection of facts, §6.5).
+- **Before every send** (and after any wait in the connector): the plugin still runs on the same
+  connection, the records switch, the member's membership and right to act, the AI stop, and
+  every field still `auto` under the mapping in force (§6.5).
+- **「変更前の値を書き戻す」** (`UNDO_LABEL`; undo, people only — no AI route): only an `applied`
+  update not yet undone, by its actor (an AI's change: the member it acted for) or an owner /
+  admin, re-checked like a new write (stops, membership, `who`, policy), on the **same connection
+  and account** (else `ACCOUNT_CHANGED`), serialised, and only while HubSpot still holds exactly
+  what ACB wrote (else 409 `CHANGED_OUTSIDE` with the current values). It sends the stored raw
+  previous values to the stored properties — never re-read through the current mapping (§6.1) —
+  as a new operation (`operation: undo`, `undoOf`), and marks the original `undoneBy`. Every
+  answer carries `undoNotice` (`UNDO_NOTICE`): HubSpot workflows and notifications that followed
+  are not undone (§5.4). A value changed B → A → S → A in HubSpot looks unchanged to this check.
+- Notices: the engine's `records` signal (kind + version, no content) to the record's assignee.
+- Kill switches, each from the next call: the operator's stop file, the company's switch, the
+  key's stop / 「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the
+  mapping), the records switch.
+
 ## Not yet (later PRs of milestone 3)
 
-P6 typed operations, undo and the remaining stops (AI stop, field
-`off`, records switch); P7 the app's tools; P8 the admin page 「つなぎ先」 (it writes the mapping's
-YAML, also from its table form); P9 staging (compose wiring of `PLUGINS_DIR`). The real HubSpot
-package lives in the private `acb-plugins` repository (§6-6).
+P7 the app's tools (Claude writes, Codex reads; the `update_deal` tool's description tells the AI
+to draft the reason from the consultation and cite its basis); P8 the admin page 「つなぎ先」 (it
+writes the mapping's YAML, also from its table form, and asks for the auto acknowledgement); P9
+staging (compose wiring of `PLUGINS_DIR`); notes (`add_note`, a create: never re-sent, with a
+correlation check) after milestone 3. The real HubSpot package lives in the private
+`acb-plugins` repository (§6-6).
 
 ## Tests
 
@@ -331,7 +395,14 @@ header, read retries and caps, writes never re-sent, lost write = unknown, prech
 `server/tests/integration/plugin-import.test.ts` (against the fake HubSpot: no file / commit,
 external ledger with receipt, declared calls only, no key anywhere, visibility, refresh only when
 readable, one run per company, a stop between requests, another account and a new connection,
-the records switch, deleting the key), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
+the records switch, deleting the key), `server/tests/integration/plugin-operations.test.ts`
+(end to end against the fake HubSpot behind the practice redirect: the AI's update with its
+reason and the person's 「変更前の値を書き戻す」, the AI cannot undo, Codex reads only, prior / stage /
+mixed write nothing, who and read checks, a change in HubSpot before (brought in, refused) and
+after (not written back), raw previous values after a remapping, a policy changed while waiting,
+one PATCH for two simultaneous requests, a lost answer never re-sent and `observed` not undoable,
+a 5xx `sent-unknown` and reconcile while off, every stop on the next call, a new connection never
+undone through), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-crm`, a
 HubSpot-shaped fictional CRM; `sample-desk`, a read-only company package of another shape):

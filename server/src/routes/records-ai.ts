@@ -11,7 +11,12 @@
  *   POST /item                                  (act)
  *   POST /item/:recordId/actions/:action         (act)
  *
- * No undo for the AI: a person undoes (their app's screens).
+ *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
+ *        (refresh: read; update: act — Codex's read tokens cannot write)
+ *   GET  /plugins/:pluginId/operations/:operationId
+ *
+ * No undo for the AI, and nothing it can approve: a person undoes (their
+ * app's screens).
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -22,7 +27,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens } = services
+const { records, recordEngine, recordAiTokens, pluginOperations } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -80,4 +85,19 @@ recordsAiRoute.post('/item/:recordId/actions/:action', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
   return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+})
+
+// A plugin's typed operation: a read token may only run operations that read (refresh).
+recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', async (c) => {
+  const h = holderOf(c, 'read')
+  if (h instanceof Response) return h
+  if (h.scope !== 'act' && services.plugins.operationKind(h.member.companyId, c.req.param('pluginId'), c.req.param('operation')) !== 'read') {
+    return c.json({ error: 'この AI は読むことだけができます', code: 'READ_ONLY_TOKEN' }, 403)
+  }
+  return answer(c, await pluginOperations.run(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c)))
+})
+
+recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, await pluginOperations.get(h.member, c.req.param('pluginId'), c.req.param('operationId')))
 })

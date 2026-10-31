@@ -629,7 +629,45 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (company_id, plugin_id, field)
     );
 
+    -- 操作の控え (P6): one row per write a plugin's typed operation makes, written
+    -- BEFORE it is sent. state: pending → sent-unknown | failed | external-ok → applied,
+    -- or observed (the intended values were seen, but whether ACB's write made them is
+    -- not known: never undoable). Everything needed to undo is fixed at operation time:
+    -- the package version / fingerprint, mapping version, connection and account, the
+    -- outside properties written and their raw previous values (review §6.1).
+    CREATE TABLE IF NOT EXISTS plugin_operations (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      plugin_id TEXT NOT NULL,
+      operation TEXT NOT NULL,
+      plugin_version TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      mapping_version INTEGER NOT NULL,
+      connection_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      object TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      actor_id TEXT NOT NULL,
+      actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'ai')),
+      actor_source TEXT,
+      conversation_id TEXT,
+      state TEXT NOT NULL CHECK (state IN ('pending', 'sent-unknown', 'external-ok', 'applied', 'observed', 'failed')),
+      fields TEXT NOT NULL,
+      written TEXT NOT NULL,
+      previous TEXT NOT NULL,
+      reason TEXT,
+      undo_of TEXT,
+      undone_by TEXT,
+      record_version INTEGER,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, id),
+      FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_plugin_operations_record ON plugin_operations(company_id, record_id, created_at);
     CREATE INDEX IF NOT EXISTS idx_plugin_history_company ON plugin_history(company_id, plugin_id, at);
     CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);
     CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
@@ -820,6 +858,15 @@ export function migratePluginTables(conn: Database.Database): void {
     CREATE TRIGGER IF NOT EXISTS plugin_external_links_company_update BEFORE UPDATE OF company_id, record_id, connection_id, account_id ON plugin_external_links
     WHEN NEW.company_id IS NOT OLD.company_id OR NEW.record_id IS NOT OLD.record_id OR NEW.connection_id IS NOT OLD.connection_id OR NEW.account_id IS NOT OLD.account_id
     BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_operations_record_insert BEFORE INSERT ON plugin_operations
+    WHEN NOT EXISTS (SELECT 1 FROM records WHERE company_id = NEW.company_id AND id = NEW.record_id)
+    BEGIN SELECT RAISE(ABORT, 'plugin_operations needs a record of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_operations_company_update BEFORE UPDATE OF company_id, record_id, connection_id, account_id, written, previous ON plugin_operations
+    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.record_id IS NOT OLD.record_id OR NEW.connection_id IS NOT OLD.connection_id
+      OR NEW.account_id IS NOT OLD.account_id OR NEW.written IS NOT OLD.written OR NEW.previous IS NOT OLD.previous
+    BEGIN SELECT RAISE(ABORT, 'an operation record keeps its company, record, connection and values'); END;
 
     CREATE TRIGGER IF NOT EXISTS plugin_history_company_update BEFORE UPDATE OF company_id ON plugin_history
     WHEN NEW.company_id IS NOT OLD.company_id
