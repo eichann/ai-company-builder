@@ -37,8 +37,13 @@ export interface InvitationRepository {
   delete(invitationId: string): void
   /**
    * Mark the invitation used by `userId` (compare-and-set). False when it was
-   * used meanwhile, or claimed by a sign-up of another account
-   * (lib/invitation-signup.ts).
+   * used meanwhile, or claimed by a sign-up of another account.
    */
   consume(invitationId: string, userId: string): boolean
+  /** Claim an unused, unexpired, unclaimed invitation for a sign-up (atomic). Its id, or null. */
+  claimForSignup(token: string): string | null
+  /** Undo a claim whose sign-up did not succeed (an accepted invitation stays as it is). */
+  releaseSignupClaim(invitationId: string): void
+  /** The account the claiming sign-up created. */
+  recordSignupUser(invitationId: string, userId: string): void
 }

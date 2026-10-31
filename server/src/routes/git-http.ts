@@ -4,10 +4,9 @@ import { existsSync } from 'fs'
 import { join } from 'path'
 import { type AuthUser } from '../lib/auth'
 import { db } from '../db'
-import { clientIdentityFromHeaders, receivePackSucceeded, recordClientActivity } from '../lib/client-activity'
+import { clientIdentityFromHeaders, receivePackSucceeded } from '../lib/client-activity'
 import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
-import { observeRejectedPush } from '../lib/push-rejections'
 import { scheduleOrphanedScopeCheck } from '../lib/orphaned-scopes'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
 import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
@@ -466,7 +465,7 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
 }
 
 // Record which build the user ran (header or unknown) and, via the returned
-// observer, a completed fetch / an accepted push. See lib/client-activity.ts.
+// observer, a completed fetch / an accepted push. See services/client-activity.ts.
 function trackActivity(
   c: { req: { header: (name: string) => string | undefined } },
   userId: string,
@@ -474,11 +473,11 @@ function trackActivity(
   op: 'other' | 'fetch' | 'push',
 ): CgiObserver | undefined {
   const { version, platform } = clientIdentityFromHeaders((n) => c.req.header(n))
-  recordClientActivity({ userId, companyId, kind: 'seen', version, platform })
+  services.clientActivity.record({ userId, companyId, kind: 'seen', version, platform })
   if (op === 'fetch') {
     return {
       onClose: (code) => {
-        if (code === 0) recordClientActivity({ userId, companyId, kind: 'fetch', version, platform })
+        if (code === 0) services.clientActivity.record({ userId, companyId, kind: 'fetch', version, platform })
       },
     }
   }
@@ -487,14 +486,14 @@ function trackActivity(
       captureBody: true,
       onClose: (code, body) => {
         if (code === 0 && body && receivePackSucceeded(body)) {
-          recordClientActivity({ userId, companyId, kind: 'push', version, platform })
+          services.clientActivity.record({ userId, companyId, kind: 'push', version, platform })
           // A push may have renamed or removed a folder that has rules.
           // Deferred (setImmediate) and asynchronous: never delays the push.
           scheduleOrphanedScopeCheck(companyId)
         } else {
           // Rejected (or unproven): record any pre-receive hook sections it
-          // printed. Deferred and non-throwing — see lib/push-rejections.ts.
-          observeRejectedPush(companyId, userId, body)
+          // printed. Deferred and non-throwing — see services/push-rejections.ts.
+          services.pushRejections.observe(companyId, userId, body)
         }
       },
     }

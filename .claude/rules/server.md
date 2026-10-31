@@ -26,8 +26,16 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
   shared/core types), services only ports / services / shared / pure lib, only the composition
-  root imports adapters, and routes run no SQL and do not import `db` (all routes except
-  `git-http.ts`, which still hands its connection to lib for the push snapshot and scope pushes).
+  root imports adapters, routes run no SQL and do not import `db` (every route except
+  `git-http.ts`, an intentional exception: it hands its connection to lib for the push snapshot
+  and scope pushes), and `lib/` does not import the database except the modules listed in
+  `LIB_WITH_DATABASE` with their reason (`lib/auth.ts`: Better Auth's own connection; the rest
+  are moving behind ports). Storage goes in `adapters/sqlite/*` behind a port; a module that
+  only computes stays in `lib/` (`lib/push-rejections.ts` parses, `lib/client-activity.ts`
+  reads headers and receive-pack results).
+- Client activity (`client_activity`): `services/client-activity.ts` records it (throttled,
+  never throws) from `routes/client-activity-middleware.ts` (API) and git-http, and holds the
+  active-members build check; table in `adapters/sqlite/client-activity.ts`.
 - Repository ports are synchronous on purpose (better-sqlite3): a check followed by a write in
   one handler cannot interleave with another request. Keep check-then-write sequences inside one
   synchronous stretch or a `transactions.run(...)`. A move to Postgres would turn these
@@ -130,7 +138,7 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
   inheriting.
-- Invitations are single-use (`lib/invitation-signup.ts`): a sign-up with `X-Invitation-Token`
+- Invitations are single-use (`services/invitations.ts` `signUp`): a sign-up with `X-Invitation-Token`
   claims the invitation atomically (`signup_claimed_at`, released if the sign-up fails) and
   records the account (`signup_user_id`); a second sign-up with the link is refused; accepting is
   a compare-and-set on `used_by` and, for a claimed link, only by that account.

@@ -22,11 +22,10 @@
  * paths. Every `[UPPER_CASE]` marker line is recorded, so a check added to the
  * hook later is recorded without a server change.
  *
- * Recording runs after the response has been handed back (setImmediate) and
- * never throws: it must not break or delay the push it observes.
+ * This module only parses (pure). Recording runs after the response has been
+ * handed back (setImmediate) and never throws: services/push-rejections.ts,
+ * storing through PushRejectionRepository (adapters/sqlite/push-rejections.ts).
  */
-import { db, generateId, now } from '../db'
-import type { PushRejectionQuery, PushRejectionRow } from '../ports/push-rejections'
 
 export const MAX_PATHS_PER_REJECTION = 50
 export const MAX_PATH_LENGTH = 512
@@ -96,74 +95,4 @@ export function parseHookRejections(output: string): HookRejection[] {
     }
   }
   return result
-}
-
-/** Insert one row per rejection section. Returns the number of rows written; never throws. */
-export function recordPushRejections(companyId: string, userId: string, rejections: HookRejection[]): number {
-  if (rejections.length === 0) return 0
-  try {
-    const ts = now()
-    const insert = db.prepare(`
-      INSERT INTO push_rejections (id, company_id, user_id, marker, paths, created_at) VALUES (?, ?, ?, ?, ?, ?)
-    `)
-    db.transaction(() => {
-      for (const r of rejections) insert.run(generateId(), companyId, userId, r.marker, JSON.stringify(r.paths), ts)
-    })()
-    return rejections.length
-  } catch (err) {
-    console.error('[push-rejections] Failed to record rejection:', err)
-    return 0
-  }
-}
-
-/**
- * Called with a finished receive-pack's captured response. Defers parsing and
- * the write past the current tick so the push response is never held up.
- */
-export function observeRejectedPush(companyId: string, userId: string, body: Buffer | null): void {
-  if (!body) return
-  setImmediate(() => {
-    try {
-      recordPushRejections(companyId, userId, parseHookRejections(sidebandMessages(body)))
-    } catch (err) {
-      console.error('[push-rejections] Failed to parse rejection:', err)
-    }
-  })
-}
-
-export type { PushRejectionRow, PushRejectionQuery }
-
-export function listRecentPushRejections(companyId: string, limit = 20): PushRejectionRow[] {
-  return queryPushRejections(companyId, { limit }).rows
-}
-
-/** Every marker the company has rejections for, sorted (the admin panel's filter). */
-export function listRejectionMarkers(companyId: string): string[] {
-  return (db.prepare(`SELECT DISTINCT marker FROM push_rejections WHERE company_id = ? ORDER BY marker`)
-    .all(companyId) as Array<{ marker: string }>).map(r => r.marker)
-}
-
-/** Newest first, optionally filtered by member and/or marker; `total` counts every match. */
-export function queryPushRejections(companyId: string, q: PushRejectionQuery = {}): { rows: PushRejectionRow[]; total: number } {
-  const where = ['company_id = ?']
-  const params: unknown[] = [companyId]
-  if (q.userId) { where.push('user_id = ?'); params.push(q.userId) }
-  if (q.marker) { where.push('marker = ?'); params.push(q.marker) }
-  const total = (db.prepare(`SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}`).get(...params) as { n: number }).n
-  const rows = db.prepare(`
-    SELECT id, user_id, marker, paths, created_at FROM push_rejections
-    WHERE ${where.join(' AND ')} ORDER BY created_at DESC, rowid DESC LIMIT ? OFFSET ?
-  `).all(...params, q.limit ?? 20, q.offset ?? 0) as Array<{ id: string; user_id: string; marker: string; paths: string; created_at: string }>
-  return { rows: rows.map(toPushRejectionRow), total }
-}
-
-function toPushRejectionRow(r: { id: string; user_id: string; marker: string; paths: string; created_at: string }): PushRejectionRow {
-  let paths: string[] = []
-  try {
-    const parsed: unknown = JSON.parse(r.paths)
-    if (Array.isArray(parsed)) paths = parsed.filter((p): p is string => typeof p === 'string')
-  } catch {
-    // Malformed row: show the rejection without paths.
-  }
-  return { id: r.id, userId: r.user_id, marker: r.marker, paths, createdAt: r.created_at }
 }

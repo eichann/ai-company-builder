@@ -1,7 +1,6 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../lib/permission-store'
-import { migrateInvitationClaims } from '../lib/invitation-signup'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 
 // Ensure data directory exists
@@ -443,7 +442,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_departments_company_folder ON departments(company_id, folder);
   `)
 
-  // Single-use invitation links (lib/invitation-signup.ts).
+  // Single-use invitation links (services/invitations.ts signUp).
   migrateInvitationClaims(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
@@ -473,6 +472,13 @@ function migrateBrokerSettings(conn: Database.Database): void {
 }
 
 // Helper functions for common operations
+/** Add the invitation claim columns to an existing invitations table (idempotent). */
+export function migrateInvitationClaims(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(invitations)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('signup_claimed_at')) conn.exec(`ALTER TABLE invitations ADD COLUMN signup_claimed_at TEXT`)
+  if (!cols.has('signup_user_id')) conn.exec(`ALTER TABLE invitations ADD COLUMN signup_user_id TEXT`)
+}
+
 export function generateId(): string {
   return crypto.randomUUID()
 }

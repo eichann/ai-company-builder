@@ -6,6 +6,7 @@ paths:
   - "server/src/routes/git-http.ts"
   - "server/src/routes/git.ts"
   - "server/src/lib/push-rejections.ts"
+  - "server/src/services/push-rejections.ts"
   - "server/src/lib/git-exec.ts"
   - "server/tests/fixtures/**"
   - "server/tests/integration/*-hook.test.ts"
@@ -58,7 +59,9 @@ forever — the "permanently unable to sync" shape).
 - Markers (`report.ts`): `[SECRET_DETECTED]`, `[PROTECTED_CONFIG]`, `[WRITE_DENIED]`,
   `[PERSONAL_PATH]`, `[LOCAL_ONLY_PATH]`, `[RESERVED_PATH]`, `[WINPATH_DETECTED]`,
   `[GITLINK_DETECTED]`, `[HOOK_ERROR]`. Client recovery for each: `sync.md` "Push results".
-- Rejections are recorded in `push_rejections` from the response (`lib/push-rejections.ts`).
+- Rejections are recorded in `push_rejections` from the response: parsed by
+  `lib/push-rejections.ts` (pure), recorded off the request by `services/push-rejections.ts`
+  (`observe`, never throws) through `PushRejectionRepository`.
 
 ## Who is pushing, and the snapshot
 

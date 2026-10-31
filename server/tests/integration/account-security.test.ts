@@ -48,7 +48,7 @@ import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { gitRoute } from '../../src/routes/git'
 import { invitationsRoute } from '../../src/routes/invitations'
-import { signUpWithInvitation } from '../../src/lib/invitation-signup'
+import { services } from '../../src/composition'
 import { ensureCompanyScope, ensureFolderScope, upsertScopeRule } from '../../src/lib/permission-store'
 
 const CO = 'acct-co'
@@ -190,15 +190,15 @@ describe('invitations', () => {
     const token: string = created.body.data.token
 
     // A failed sign-up (e.g. password too short) does not use the link up.
-    const failed = await signUpWithInvitation(db, token, async () => new Response('{"message":"bad"}', { status: 400 }))
+    const failed = await services.invitations.signUp(token, async () => new Response('{"message":"bad"}', { status: 400 }))
     expect(failed?.status).toBe(400)
 
-    const first = await signUpWithInvitation(db, token, async () =>
+    const first = await services.invitations.signUp(token, async () =>
       new Response(JSON.stringify({ token: 's', user: { id: 'u-invitee' } }), { status: 200, headers: { 'Content-Type': 'application/json' } }))
     expect(first?.status).toBe(200)
     // a second sign-up with the same link is refused (null → the gate answers 403)
     let called = false
-    expect(await signUpWithInvitation(db, token, async () => { called = true; return new Response('{}') })).toBeNull()
+    expect(await services.invitations.signUp(token, async () => { called = true; return new Response('{}') })).toBeNull()
     expect(called).toBe(false)
 
     addUser('u-invitee')
@@ -218,6 +218,6 @@ describe('invitations', () => {
     addUser('u-existing-2')
     expect((await as('u-existing-1', 'POST', `/api/invitations/${token}/accept`)).status).toBe(200)
     expect((await as('u-existing-2', 'POST', `/api/invitations/${token}/accept`)).status).toBe(410)
-    expect(await signUpWithInvitation(db, token, async () => new Response('{}'))).toBeNull()
+    expect(await services.invitations.signUp(token, async () => new Response('{}'))).toBeNull()
   })
 })

@@ -40,15 +40,14 @@ import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { configureBareRepo, gitRoute } from '../../src/routes/git'
 import { gitHttpRoute } from '../../src/routes/git-http'
-import { clientActivityMiddleware } from '../../src/lib/client-activity-middleware'
-import {
-  activeMembersBuildCheck,
-  areActiveMembersOnBuild,
-  receivePackSucceeded,
-  recordClientActivity,
-  resetClientActivityThrottle,
-  type ClientActivityRow,
-} from '../../src/lib/client-activity'
+import { clientActivityMiddleware } from '../../src/routes/client-activity-middleware'
+import { receivePackSucceeded } from '../../src/lib/client-activity'
+import type { ClientActivityRow } from '../../src/ports/client-activity'
+import { services } from '../../src/composition'
+
+const { activeMembersBuildCheck, areActiveMembersOnBuild } = services.clientActivity
+const recordClientActivity = services.clientActivity.record
+const resetClientActivityThrottle = services.clientActivity.resetThrottleForTests
 import { compareClientVersions, parseClientVersion } from '../../src/lib/client-version'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
