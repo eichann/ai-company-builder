@@ -252,6 +252,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`hooks/useChatAutoScroll.ts`). The browser's scroll anchoring also moves the view (down) when
   the reply grows; counting that as reading stopped the follow under load. Test:
   `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」.
+- The scrolling list (`MessageList`) is `relative`, the containing block of anything absolutely
+  positioned inside it (Tailwind `sr-only`, overlays). Without it a card's `sr-only` text was
+  laid out against the page ~10 000 px down and the whole window painted shifted (staging,
+  milestone 3). Test: `tests/ui/chat-panel.spec.ts` 「a card with screen-reader-only text …」.
 - Markdown renders per top-level block (`markdownBlocks.ts`: split only at blank lines outside
   fences before a non-indented, non-list line; a reply with link/footnote definitions stays one
   block), so streaming re-parses only the last block; an unclosed fence shows plain until it
