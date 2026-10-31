@@ -326,6 +326,8 @@ describe('the text', () => {
     const d = tanaka.body.data
     expect(d.header).toContain('外から来た文')
     expect(d.footer).toBe('【議事録ここまで】')
+    // Where its decisions go: the minutes folder (a department folder, never a private one).
+    expect(d.folder).toBe('営業部')
     expect(d.text.startsWith('■ 会議メモ\n会議メモ')).toBe(true)
     expect(d.text).not.toContain('\r')
     expect(d.text).not.toContain('\uFEFF')

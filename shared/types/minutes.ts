@@ -47,6 +47,8 @@ export interface MinutesText {
   /** The documents' versions as read now (`notes:7,transcript:7`). */
   docVersion: string
   meeting: { title: string; at: string | null }
+  /** The department folder the minutes record lives in (the company's minutes folder): where its decisions go. */
+  folder: string | null
   /** Company members who attended (ids and display names). */
   attendees: Array<{ memberId: string; displayName: string }>
   /** How many people from outside attended (names and addresses are not given). */
