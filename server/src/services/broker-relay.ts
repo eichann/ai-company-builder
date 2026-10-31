@@ -509,10 +509,13 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const headers: Record<string, string> = {}
       for (const [name, value] of req.headers) {
         if (DROP_REQUEST.has(name) || name.startsWith('x-forwarded-') || name.startsWith('x-acb-')) continue
+        // A strict API (HubSpot) gets only the headers it expects, as the connector plugin sends them.
+        if (builtin?.requestHeaders && !builtin.requestHeaders.forward.includes(name)) continue
         // Our token never goes upstream, in whatever header it came.
         if (name === relay?.header || value.includes(token)) continue
         headers[name] = headers[name] ? `${headers[name]}, ${value}` : value
       }
+      Object.assign(headers, builtin?.requestHeaders?.set ?? {})
       headers['accept-encoding'] = 'identity'
       if (relay) headers[relay.header] = relayCredentialValue(relay.format, secret)
       else if (builtin?.credential === 'authorization') headers.authorization = `Bearer ${secret}`

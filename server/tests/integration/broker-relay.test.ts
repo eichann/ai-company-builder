@@ -302,6 +302,33 @@ describe('the relay', () => {
     expect([sent.host, sent.path, sent.headers.authorization]).toEqual(['api.hubapi.com', '/crm/objects/2026-03/deals/123?properties=dealname', `Bearer ${FAKE_HUBSPOT}`])
   })
 
+  it('HubSpot is strict: a call from Node\'s fetch (sec-fetch-mode, accept-language: *, …) reaches it as the connector plugin\'s call (staging: 400 「Invalid request」 from the real HubSpot)', async () => {
+    // Like the real HubSpot: any header beyond what the connector plugin sends → 400 text/plain 「Invalid request」.
+    const EXPECTED = new Set(['authorization', 'accept', 'accept-encoding', 'content-type', 'content-length'])
+    reply = (req) => {
+      const extra = Object.keys(req.headers).filter(h => !EXPECTED.has(h))
+      if (extra.length > 0 || req.headers.accept !== 'application/json') return { status: 400, headers: [['content-type', 'text/plain']], body: 'Invalid request' }
+      return { status: 200, body: '{"results":[]}' }
+    }
+    // What Node's fetch (the staging scripts, a Node SDK) sends besides the token.
+    const nodeFetch = { accept: '*/*', 'accept-language': '*', 'sec-fetch-mode': 'cors', 'user-agent': 'node', 'accept-encoding': 'gzip, deflate', origin: 'http://localhost:3100', 'x-request-id': 'abc' }
+    const token = tokenFor(['hubspot'])
+    const get = await call('GET', '/hubspot/crm/objects/2026-03/deals/123?properties=dealname', { headers: { ...nodeFetch, authorization: `Bearer ${token}` } })
+    expect([get.status, get.text]).toEqual([200, '{"results":[]}'])
+    expect(received.at(-1)!.path).toBe('/crm/objects/2026-03/deals/123?properties=dealname')
+    const body = JSON.stringify({ limit: 10, properties: ['dealname'] })
+    const search = await call('POST', '/hubspot/crm/objects/2026-09/deals/search', {
+      headers: { ...nodeFetch, authorization: `Bearer ${token}`, 'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)) }, body,
+    })
+    expect(search.status).toBe(200)
+    expect(received.at(-1)!.headers).toEqual({
+      accept: 'application/json', 'accept-encoding': 'identity', authorization: `Bearer ${FAKE_HUBSPOT}`,
+      'content-type': 'application/json', 'content-length': String(Buffer.byteLength(body)),
+    })
+    expect(received.at(-1)!.bodyText).toBe(body)
+    reply = () => ({ status: 200, body: '{"ok":true}' })
+  })
+
   it('read-only switch: a write never reaches HubSpot; reads and search still do', async () => {
     const token = tokenFor(['hubspot'])
     const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
