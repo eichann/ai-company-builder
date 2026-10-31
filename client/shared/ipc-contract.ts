@@ -35,6 +35,7 @@ import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFo
 import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
+import type { ApprovalResult } from './approvals'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -459,6 +460,12 @@ export interface IpcInvokeChannels {
   /** 「変更前の値を書き戻す」 (a person's action; the consultation is informational provenance). */
   'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
   'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
+  // The chat's approval card (承認のお願い): read and act with the member's session (no AI route approves).
+  'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「承認」: the reason and the hash of the content the card shows. */
+  'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
+  'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
+  'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -730,6 +737,11 @@ export interface ElectronAPI {
   // The chat card of an outside system's write: the person's own actions (never the AI's).
   undoPluginOperation: Invoke<'pluginOperations:undo'>
   reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
+  // The chat's approval card: the person's own acts (never the AI's).
+  getApproval: Invoke<'approvals:get'>
+  approveApproval: Invoke<'approvals:approve'>
+  sendBackApproval: Invoke<'approvals:sendBack'>
+  withdrawApproval: Invoke<'approvals:withdraw'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

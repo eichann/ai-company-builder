@@ -215,6 +215,9 @@ GET  /api/config                                  setup state (no auth)
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts
+/api/companies/:companyId     GET /approvals, GET /approvals/:approvalId,
+                              POST /approvals/:approvalId/approve | send-back | withdraw
+                              (session only; approvals.md)                    approvals.ts
 /api                          GET|POST /companies/:companyId/invitations,
                               DELETE …/invitations/:id, GET /invitations/:token,
                               POST /invitations/:token/accept                 invitations.ts

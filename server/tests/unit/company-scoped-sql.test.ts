@@ -87,9 +87,11 @@ const HANDLE_TABLES: Record<string, string[]> = {
   connector_grants: ['adapters/sqlite/connectors.ts'],
   oauth_pending: ['adapters/sqlite/connectors.ts'],
   connector_history: ['adapters/sqlite/connectors.ts'],
+  // Fixed content of approvals and outbound mail (approvals.md).
+  fixed_payloads: ['adapters/sqlite/fixed-payloads.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository']
+const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteFixedPayloadRepository']
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'

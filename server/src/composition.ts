@@ -69,6 +69,8 @@ import { createExternalRecordWriter, createServiceRecordWriter } from './service
 import { createDecisionService } from './services/decisions'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
+import { createApprovalService } from './services/approvals'
+import { createFixedPayloads } from './services/fixed-payloads'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
 
@@ -256,6 +258,24 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     aiStopped: companyId => agentStops.companyStopped(companyId),
   })
 
+  // Approval requests with fixed content (milestone 4 G6, approvals.md): the service writer and the
+  // operations' approval seam are handed to it only; its routes take a session (no AI route approves).
+  const fixedPayloads = createFixedPayloads(shared)
+  const approvals = createApprovalService({
+    ...shared,
+    writer: serviceRecords,
+    fixed: fixedPayloads,
+    operations: pluginOperations,
+    decisions,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    admins: companyId => repos.memberships.listByCompany(companyId).filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.user_id),
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    plugin: async (companyId, pluginId) => {
+      const r = await plugins.active(companyId, pluginId, { collectingFacts: true })
+      return r.ok ? r.plugin : null
+    },
+  })
+
   // 「HubSpot に聞いて確かめる」 (P8): the outside property list, read through the connector.
   const pluginMappingCheck = createPluginMappingCheckService({
     ...shared, plugins, connector: pluginConnector,
@@ -312,6 +332,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     pluginImport,
     pluginOperations,
     pluginMappingCheck,
+    approvals,
+    fixedPayloads,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),

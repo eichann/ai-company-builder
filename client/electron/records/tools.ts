@@ -28,6 +28,8 @@ import type { FieldKind, TypeDefinition } from '../../../shared/core/record-type
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
 import { CREATE_CONTENT_LABELS, aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
+import { approvalSummaryForAi, type ApprovalCardRef } from '../../shared/approvals'
+import type { ApprovalRequested, ApprovalView } from '../../../shared/types/approvals'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 
@@ -42,6 +44,8 @@ export interface RecordToolSpec {
   description: string
   schema: z.ZodObject<Record<string, ZodTypeAny>>
   readOnly: boolean
+  /** Shows an approval request: the answer becomes the app's approval card in the reply. */
+  approvalCard?: boolean
   /** A connector's update or create: its outcome becomes a card in the reply. */
   card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>>; kind?: 'update' | 'create' }
   /** The server call for a validated input. */
@@ -131,6 +135,12 @@ const DECISION_TOOL: RecordToolSpec = {
   request: input => ({ method: 'POST', path: '/decisions', body: input }),
 }
 
+/** Where an approval request's basis comes from: the minutes record and the quoted sentence (shown on the card; not authority). */
+const BASIS = z.object({
+  minutesId: recordRef('minutes').optional().describe('根拠の議事録の id / the minutes it rests on'),
+  quote: z.string().min(1).max(2000).optional().describe('議事録の中の根拠の文（そのまま引用） / the sentence quoted as is'),
+}).strict()
+
 /** The state-changing tools for these types (one per action, and creating server-only records). */
 export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
@@ -215,9 +225,9 @@ export function pluginToolSpecs(tools: PluginAiTools, writes: boolean): RecordTo
 
 /** What every create tool says (milestone 4): never re-sent; approval is a person's. */
 const CREATE_RULES_JA = '作る操作は送り直さない：結果が「分からない（unknown）」でも、同じものをもう一度作らない（二重になる）。メンバーに確かめてもらう。' +
-  '「承認が要る（APPROVAL_REQUIRED）」と返ったら、人が承認するまで何も作られていない。そう伝え、言い換えて作り直そうとしない。'
+  '承認が要るものは「承認のお願い」になり、人が承認するまで何も作られない（あなたは承認できない）。そう伝え、言い換えて作り直そうとしない。'
 const CREATE_RULES_EN = ' A create is never re-sent: when the outcome is `unknown`, do NOT call the tool again (it could make a duplicate); ask the member to check.' +
-  ' `APPROVAL_REQUIRED` means a person must approve it first: nothing was made; say so and do not try to work around it. Never claim it was created unless the outcome is `applied`.'
+  ' Needing approval, it becomes an approval request (`approval-requested`): nothing is made until a person approves it (you cannot); say so and do not try to work around it. Never claim it was created unless the outcome is `applied`.'
 
 /** A create attached to a record (log_meeting): its content slots, in ACB words. */
 function attachedCreateSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: (id: unknown) => string): RecordToolSpec {
@@ -230,14 +240,15 @@ function attachedCreateSpec(pluginId: string, system: string, op: PluginAiOperat
   shape.note = op.decision
     ? z.string().trim().min(1).max(2000).describe('相談のどの発言からそう判断したか / the reason, citing the message it rests on')
     : z.string().max(2000).optional()
-  const policy = op.policy === 'auto' ? 'すぐ作る（自動）' : '承認が要る（いまは断られる）'
+  const policy = op.policy === 'auto' ? 'すぐ作る（自動）' : '承認が要る（承認のお願いになる）'
+  if (op.policy !== 'auto') shape.basis = BASIS.optional()
   return {
     name, readOnly: false,
     card: { pluginId, systemLabel: system, labels: CREATE_CONTENT_LABELS, valueLabels: {}, kind: 'create' },
     schema: z.object(shape).strict(),
     description: `「${op.label}」：この案件に ${system} の記録を1件作る（${policy}）。${CREATE_RULES_JA}結果は相談の中にカードとして出る。
 ` +
-      `${name}: create one item on this record in ${system} (${op.policy === 'auto' ? 'runs at once' : 'needs approval: refused for now'}).${CREATE_RULES_EN}`,
+      `${name}: create one item on this record in ${system} (${op.policy === 'auto' ? 'runs at once' : 'needs approval: becomes an approval request'}).${CREATE_RULES_EN}`,
     request: input => ({
       method: 'POST', path: path(input.id),
       body: Object.fromEntries(Object.entries(input).filter(([k, v]) => k !== 'id' && v !== undefined)),
@@ -259,13 +270,17 @@ function createRecordSpec(pluginId: string, system: string, op: PluginAiOperatio
       title: z.string().trim().min(1).max(200).describe('件名 / the title'),
       fields: z.object(fieldShape).strict().optional().describe('最初に入れる欄（ACB の言葉） / initial fields, ACB values'),
       note: z.string().max(2000).optional().describe('なぜ作るか（相談の発言を示す） / why, citing the consultation'),
+      basis: BASIS.optional(),
     }).strict(),
-    description: `「${op.label}」：${system} に新しく作る。必ず人の承認が要る（いまは承認を頼めないため断られる）。作る前に、似たものがすでに無いか records_query で探し、メンバーに確かめる。${CREATE_RULES_JA}
+    description: `「${op.label}」：${system} に新しく作る。必ず人の承認が要る（承認のお願いになり、承認されるまで作られない）。作る前に、似たものがすでに無いか records_query で探し、メンバーに確かめる。${CREATE_RULES_JA}
 ` +
-      `${name}: create a new one in ${system}. Always needs a person's approval (refused for now). First look for similar existing records with records_query and ask the member.${CREATE_RULES_EN}`,
+      `${name}: create a new one in ${system}. Always needs a person's approval (it becomes an approval request; nothing is made until approved). First look for similar existing records with records_query and ask the member.${CREATE_RULES_EN}`,
     request: input => ({
       method: 'POST', path: path(),
-      body: { title: input.title, fields: Object.fromEntries(Object.entries((input.fields ?? {}) as Record<string, unknown>).filter(([, v]) => v !== undefined)), ...(input.note !== undefined ? { note: input.note } : {}) },
+      body: {
+        title: input.title, fields: Object.fromEntries(Object.entries((input.fields ?? {}) as Record<string, unknown>).filter(([, v]) => v !== undefined)),
+        ...(input.note !== undefined ? { note: input.note } : {}), ...(input.basis !== undefined ? { basis: input.basis } : {}),
+      },
     }),
   }
 }
@@ -274,7 +289,7 @@ function updateSpec(pluginId: string, system: string, op: PluginAiOperation, nam
   const fieldShape: Record<string, ZodTypeAny> = {}
   for (const f of op.fields) {
     const shown = f.options && f.optionLabels ? `（${f.options.map(o => `${o}＝${f.optionLabels?.[o] ?? o}`).join('・')}。メンバーには表示名で言う / say the label to the member）` : ''
-    const desc = `${f.label}${shown}${f.policy === 'prior' ? '（承認が要る欄：いまは書けず、断られる / needs approval: refused for now）' : ''}`
+    const desc = `${f.label}${shown}${f.policy === 'prior' ? '（承認が要る欄：承認のお願いになる / needs approval: becomes an approval request）' : ''}`
     fieldShape[f.name] = kindSchema(f.kind as FieldKind, f.options).optional().describe(desc)
   }
   const auto = op.fields.filter(f => f.policy === 'auto').map(f => f.label)
@@ -293,22 +308,48 @@ function updateSpec(pluginId: string, system: string, op: PluginAiOperation, nam
       expectedVersion: z.number().int().min(0).describe('records_get で見た version / the version you read'),
       fields: z.object(fieldShape).strict().describe('変える欄だけ（1つ以上） / only the fields to change (at least one)'),
       note: reason,
+      basis: BASIS.optional(),
     }).strict(),
     description: `「${op.label}」：${system} の案件の欄を書き換える（ACB の言葉で渡す。${system} の項目名への読み替えは ACB が行う）。` +
-      `すぐ書ける欄：${auto.join('、') || 'なし'}。${prior.length ? `承認が要る欄（いまは断られる）：${prior.join('、')}。` : ''}` +
-      `承認が要る欄が1つでも入ると、全部を断られる。` +
+      `すぐ書ける欄：${auto.join('、') || 'なし'}。${prior.length ? `承認が要る欄：${prior.join('、')}。` : ''}` +
+      `承認が要る欄が1つでも入ると、全体が「承認のお願い」になり（何も書かない）、承認する人に届く。根拠が議事録なら basis に議事録の id と引用を入れる。あなた（AI）は承認できない。` +
       (op.decision ? '理由（note）は必須：相談の中のメンバーの発言から下書きし、根拠になった発言を示す。' : '') +
       `結果は相談の中にカードとして出る。結果が「更新した（applied）」でないときは、成功したと言わない。届いたか分からない（unknown）ときは送り直さず、メンバーに確かめてもらう。\n` +
       `${name}: write fields of this deal to ${system} (ACB values; the mapping translates). Auto: ${op.fields.filter(f => f.policy === 'auto').map(f => f.name).join(', ') || 'none'}.` +
-      `${prior.length ? ` Needs approval (refused now): ${op.fields.filter(f => f.policy === 'prior').map(f => f.name).join(', ')}.` : ''}` +
+      `${prior.length ? ` Needs approval: ${op.fields.filter(f => f.policy === 'prior').map(f => f.name).join(', ')} — the whole request becomes an approval request (nothing written); you cannot approve it.` : ''}` +
       (op.decision ? ' `note` is required: draft the reason from the consultation and cite the message it rests on.' : '') +
       ' Never claim success unless the outcome is `applied`; when it is `unknown`, do not resend — ask the member to check.',
     request: input => ({
       method: 'POST', path: path(input.id),
-      body: { expectedVersion: input.expectedVersion, fields: Object.fromEntries(Object.entries(input.fields as Record<string, unknown>).filter(([, v]) => v !== undefined)), ...(input.note !== undefined ? { note: input.note } : {}) },
+      body: {
+        expectedVersion: input.expectedVersion, fields: Object.fromEntries(Object.entries(input.fields as Record<string, unknown>).filter(([, v]) => v !== undefined)),
+        ...(input.note !== undefined ? { note: input.note } : {}), ...(input.basis !== undefined ? { basis: input.basis } : {}),
+      },
     }),
   }
 }
+
+const approvalId = z.string().regex(/^approval-[0-9a-z]{6,32}$/)
+
+/** 「承認待ちを見せて」: list and show approval requests (read only — approving is the person's own act on the card). */
+const APPROVAL_LOOKUPS: RecordToolSpec[] = [
+  {
+    name: 'approvals_list', readOnly: true,
+    schema: z.object({
+      scope: z.enum(['to-me', 'mine']).optional().describe('to-me：自分が承認する分（既定） / mine：自分が頼んだ分'),
+      state: z.enum(['pending', 'any']).optional().describe('pending：待っている分だけ（既定） / any：決まった分も'),
+    }).strict(),
+    description: '承認のお願いの一覧（見られる分だけ）。「承認待ちを見せて」と言われたら使い、1件ずつ approvals_show でカードを出す。あなた（AI）は承認も差し戻しもできない：メンバーがカードで押す。\n' +
+      'List approval requests the member may see (to approve, or asked by them). Then show each with approvals_show; you cannot approve or send back — the member does it on the card.',
+    request: input => ({ method: 'GET', path: `/approvals?scope=${enc(String(input.scope ?? 'to-me'))}&state=${enc(String(input.state ?? 'pending'))}` }),
+  },
+  {
+    name: 'approvals_show', readOnly: true, schema: z.object({ id: approvalId }).strict(),
+    description: '承認のお願いを1件、相談の中にカードとして出す（中身・前例・材料・承認のボタンはアプリが描く）。\nShow one approval request as a card in the chat (the app draws it, with the approve button for the member).',
+    approvalCard: true,
+    request: input => ({ method: 'GET', path: `/approvals/${enc(String(input.id))}` }),
+  },
+]
 
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。状態・担当・期限はサーバーが持ち、記録のファイルには書きません（ファイルの先頭は id・type・links だけ）。状態を変えるときは必ずこの道具の操作を使い、ファイルを書き換えないでください。記録に書くときは、人や顧客を名前ではなく id で指してください。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
@@ -332,6 +373,8 @@ export interface RecordToolsOptions {
   conversationId?: string | null
   /** A connector's update finished (any outcome): its card for the reply. */
   onOperationCard?: (card: PluginOperationCard) => void
+  /** An approval request was made (an update needing approval) or shown (approvals_show): the app's card for the reply. */
+  onApprovalCard?: (card: ApprovalCardRef) => void
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -352,7 +395,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     const answer = await access.call('GET', '/plugins', undefined, signal) as PluginAiTools | undefined
     if (answer && Array.isArray(answer.plugins)) plugins = answer
   } catch { /* no plugin tools this turn */ }
-  const specs = [...LOOKUPS, ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act')]
+  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act')]
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
@@ -367,6 +410,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (!parsed.success) return JSON.stringify({ error: '入力が正しくありません。', issues: parsed.error.issues.slice(0, 5).map(i => `${i.path.join('.')}: ${i.message}`) })
       const req = spec.request(parsed.data)
       if (spec.card) return runUpdate(spec.card, parsed.data, req)
+      if (spec.approvalCard) return showApproval(req)
       try {
         const out = JSON.stringify(await access.call(req.method, req.path, req.body, signal))
         return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
@@ -392,7 +436,14 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     }
     let result: PluginOperationCard
     try {
-      result = cardFromAnswer(ctx, await access.call(req.method, req.path, req.body, signal) as Parameters<typeof cardFromAnswer>[1])
+      const answer = await access.call(req.method, req.path, req.body, signal)
+      // Needing approval: the request was made; the card is the app's approval card, not an operation's.
+      if ((answer as Partial<ApprovalRequested> | undefined)?.outcome === 'approval-requested') {
+        const requested = answer as ApprovalRequested
+        approvalCard(requested.approval.id, 'requested')
+        return JSON.stringify(approvalSummaryForAi(requested.approval, requested.existing === true))
+      }
+      result = cardFromAnswer(ctx, answer as Parameters<typeof cardFromAnswer>[1])
     } catch (error) {
       // Not a refusal the server gave (the turn stopped mid-request…): whether it arrived is not known.
       result = error instanceof RecordsApiError ? cardFromRefusal(ctx, error.code, error.message, error.details) : cardFromRefusal(ctx, 'OFFLINE', undefined)
@@ -403,6 +454,29 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     }
     if (options.companyId) options.onOperationCard?.(result)
     return JSON.stringify(aiSummaryOf(result))
+  }
+
+  function approvalCard(approvalId: string, origin: ApprovalCardRef['origin']) {
+    if (!options.companyId) return
+    options.onApprovalCard?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, approvalId, origin, at: now().toISOString() })
+  }
+
+  /** approvals_show: the server says the member may see it; the card itself reads it with the member's session. */
+  async function showApproval(req: ReturnType<RecordToolSpec['request']>): Promise<string> {
+    try {
+      const answer = await access.call(req.method, req.path, req.body, signal) as { approval?: ApprovalView }
+      if (!answer?.approval) return JSON.stringify({ error: '承認のお願いが見つかりません。' })
+      approvalCard(answer.approval.id, 'shown')
+      const v = answer.approval
+      return JSON.stringify({
+        shown: true, state: v.state, recordTitle: v.recordTitle, viewerMayApprove: v.viewerMayApprove,
+        changes: v.changes.map(c => ({ label: c.label, beforeShown: c.beforeShown, afterShown: c.afterShown, changePercent: c.changePercent })),
+        instruction: 'The card is in the chat. Only the member can approve or send it back, on the card; never say it was approved unless the card says so.',
+      })
+    } catch (error) {
+      if (error instanceof RecordsApiError) return JSON.stringify({ error: error.message, code: error.code })
+      throw error
+    }
   }
 }
 

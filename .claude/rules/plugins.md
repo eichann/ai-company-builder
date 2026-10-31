@@ -128,7 +128,7 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
 ## Field policies (0.21)
 
 - `auto` (write at once, undoable), `prior` (a person approves first — milestone 3 refuses and
-  writes nothing; milestone 4 turns it into an approval request), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
+  writes nothing; milestone 4 makes an approval request instead: `approvals.md`), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
 - **`stage` is written only after an approval** (`PRIOR_ONLY_FIELDS`; milestone 3 never wrote it,
@@ -396,7 +396,10 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   (a `prior` field — `stage` at best, milestone 4 — → 409 `APPROVAL_REQUIRED`, an `off` one → 400
   `FIELD_NOT_WRITABLE`; **one such field refuses the whole request**, review §6.3); values
   translatable; `expectedVersion` current. A create: its policy `auto` (`prior` → 409
-  `APPROVAL_REQUIRED`, `off` → 400 `OPERATION_OFF`), below.
+  `APPROVAL_REQUIRED`, `off` → 400 `OPERATION_OFF`), below. **Over HTTP an `APPROVAL_REQUIRED`
+  is never the answer**: the routes call `approvals.runOrRequest` / `createOrRequest`, which make
+  the approval request instead → 202 `{ outcome: 'approval-requested', approval, existing }`
+  (`approvals.md`); the service's own refusal stays for the approvals service to recognise.
 - Then **serialised per outside object** (company × connection × object × id) inside this
   server (review §5.5): the outside account is checked; the object is read again — a difference
   is brought in (an `external` ledger entry) and the request refused as stale (409
@@ -447,13 +450,14 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   the body's ACB words go to the declared `content` slots (`at` sent as epoch ms), associated to
   the deal's outside id with `association_type`. Its policy is `effectiveOperationPolicy` (the
   company's mapping `log_meeting: auto` with the acknowledgement, design §9 q17); `prior` → 409
-  `APPROVAL_REQUIRED` for now (the approvals service turns it into a request). A created meeting
+  `APPROVAL_REQUIRED` from the service, which the routes turn into an approval request (202). A created meeting
   gets **no record**: the deal's ledger gets an entry without field changes
   (`entryWithoutChanges` on the engine's external entry, records.md), whose receipt names the
   meeting (`object: meeting`, its id, the operation). **`create_deal`** (a create of a record,
   its own route): `{ title, fields }` — title through the mapping's `title.from`, fields through
   `acbToExternal` (only `write: true` fields). **Never `auto`** (declaration, mapping, and
-  `createPolicy` here): a direct request is always 409 `APPROVAL_REQUIRED`, after every other
+  `createPolicy` here): a direct request is always `APPROVAL_REQUIRED` (over HTTP: an approval
+  request, 202), after every other
   check (who = may read the mapping's `visible_to_folder` + `who`); it is written only through
   `executeApproved`. The created deal becomes a record through the engine's external entry
   (server only, no file, folder `visible_to_folder`, linked in `plugin_external_links` like an
@@ -518,7 +522,9 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   reason is the approver's, `receipt.approvedBy`. Never re-sent on a lost answer (as above).
   A remapping after approval makes the request stale (the mapping version is part of the fixed
   content), so "raw, not re-translated" is tested by the payload's own raw value.
-- Approving itself (who may, the hash, once only) is the approvals service's (G6).
+- Approving itself (who may, the hash, once only) is the approvals service's (G6, `approvals.md`).
+- `similarDeals(member, pluginId, title)`: shown on a create-of-a-record approval card (only
+  records the viewer may read).
 
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
 
@@ -571,11 +577,12 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
   `hubspot__log_meeting`, `hubspot__create_deal`), generated each turn like the type tools,
   called with the turn's record token. The app drops writes for a read token too
   (`client/tests/plugin-tools.test.ts`). The create tools say a create is **never re-sent** (an
-  `unknown` outcome: do not call again — a duplicate) and that `APPROVAL_REQUIRED` means a person
-  must approve (nothing made); `create_deal`'s tells the AI to look for similar records first.
+  `unknown` outcome: do not call again — a duplicate) and that needing approval makes an approval
+  request (`approval-requested`: nothing made until a person approves; the AI cannot); `create_deal`'s tells the AI to look for similar records first.
 - The update tool's `note` is required for a `decision` operation; its description tells the AI to
-  draft the reason from the consultation and cite the message it rests on, that one approval
-  field refuses the whole request, and **never to claim success unless the outcome is
+  draft the reason from the consultation and cite the message it rests on (optional `basis {
+  minutesId, quote }` for the approval card), that one approval field makes the whole request an
+  approval request, and **never to claim success unless the outcome is
   `applied`** (an `unknown` result is not re-sent; the member checks).
 - The outcome becomes a card in the reply (`client/shared/plugin-operations.ts`, data part
   `data-plugin-operation`, stored with the message as `pluginOperations`;
@@ -598,8 +605,9 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 - A create's card (`kind: 'create'`): what was made — title, time (the member's clock), outcome;
   never the body — 「<HubSpot> に作りました」 with 「作ったものを取り消す」 (the server's `undoLabel`);
   unknown → 「<HubSpot> に作れたか分かりません… HubSpot で確かめてください」 and 「もう一度確かめる」;
-  `APPROVAL_REQUIRED` → `needsApproval`, 「作っていません。…」. 「もう一度作る」 is a server route
-  for now (no button yet).
+  `APPROVAL_REQUIRED` → `needsApproval`, 「作っていません。…」 (only from an older server; a current
+  one answers `approval-requested`, which becomes the approval card instead of this one:
+  `approvals.md`). 「もう一度作る」 is a server route for now (no button yet).
 - No jargon on the card (no 型 / プラグイン / オントロジー); the outside system is named by its
   label (HubSpot).
 

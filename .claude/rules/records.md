@@ -174,7 +174,9 @@ Milestone 4 adds four (no customer or person names in any of them; people by id)
 - `approval` (承認のお願い, server, implements `request` → the approver's 「あなたの番」):
   `approver_rule` [self, dept_manager, admin], `operation`, `payload_hash`, `payload_version`,
   `reason`, `result_operation_id`; links `about` (target `deal`), `minutes`. pending → approved /
-  sent_back / stale / withdrawn / failed. **No actions.**
+  sent_back / stale / withdrawn / failed; sent_back → withdrawn (version 2: `sent_back` is not
+  final, so a sent-back request is the requester's turn again). **No actions.** Its service:
+  `approvals.md`.
 - `outbound_message` (送るメール, server): `requested_by` / `assignee` (the author), `subject`,
   `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email]; links
   `about`, `minutes`. draft → sent / unknown / discarded; unknown → sent or back to draft

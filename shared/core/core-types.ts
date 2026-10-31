@@ -116,7 +116,7 @@ actions:
 `,
   approval: `---
 label: 承認のお願い
-version: 1
+version: 2
 implements: [request]
 storage: server
 fields:
@@ -136,7 +136,7 @@ links:
   minutes:             { label: 議事録, target: minutes, cardinality: one, inverse: approvals }
 states: [pending, approved, sent_back, stale, withdrawn, failed]
 initial: pending
-final: [approved, sent_back, stale, withdrawn, failed]
+final: [approved, stale, withdrawn, failed]
 ---
 # 承認のお願い
 
@@ -227,7 +227,8 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['pending'], to: 'approved' },
     { from: ['pending'], to: 'sent_back' },
     { from: ['pending'], to: 'stale' },
-    { from: ['pending'], to: 'withdrawn' },
+    // Sent back: the request is the requester's turn again until they withdraw it (or ask anew).
+    { from: ['pending', 'sent_back'], to: 'withdrawn' },
     // Approved but the operation failed: the approval stays used (one use only).
     { from: ['pending', 'approved'], to: 'failed' },
   ],

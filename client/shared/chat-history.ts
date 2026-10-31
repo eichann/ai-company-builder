@@ -3,6 +3,7 @@ import type { ChoicePromptRecord } from './choice-prompt'
 import type { SteerRecord } from './steer'
 import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
+import type { ApprovalCardRef } from './approvals'
 export interface ChatSession {
   id: string
   companyId: string
@@ -24,6 +25,8 @@ export interface ChatSession {
     reviewRequests?: ReviewRecord[]
     /** Outside systems' writes (HubSpot) in this reply, with 「変更前の値を書き戻す」 (plugin-operations.ts); shown after its text. */
     pluginOperations?: PluginOperationCard[]
+    /** Approval requests made or shown in this reply (approvals.ts): a reference; the card reads the request from the server. */
+    approvals?: ApprovalCardRef[]
   }>
   createdAt: string
   updatedAt: string

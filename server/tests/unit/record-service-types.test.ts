@@ -174,8 +174,8 @@ describe('service-owned types', () => {
     // A company's own approval.md (higher version, additive) that adds an action anyone, or the AI, could run.
     const core = coreTypeDefinitions().find(d => d.name === 'approval')!
     source.forCompany('a').records.insertTypeVersion({
-      name: 'approval', version: 2, source: 'file', commitSha: null, createdAt: TS,
-      definition: canonicalTypeJson({ ...core, version: 2, actions: { approve: { label: '承認', from: ['pending'], to: 'approved', who: ['anyone', 'ai'], notify: [], attach: [], note: 'none', historyLine: false, decision: false, approval: 'none', args: {}, handTo: null } } }),
+      name: 'approval', version: 3, source: 'file', commitSha: null, createdAt: TS,
+      definition: canonicalTypeJson({ ...core, version: 3, actions: { approve: { label: '承認', from: ['pending'], to: 'approved', who: ['anyone', 'ai'], notify: [], attach: [], note: 'none', historyLine: false, decision: false, approval: 'none', args: {}, handTo: null } } }),
     })
     for (const actor of [HUMAN, AI]) {
       const r = await engine.act(m('u-bob'), actor, a.id, 'approve', { expectedVersion: 1 })

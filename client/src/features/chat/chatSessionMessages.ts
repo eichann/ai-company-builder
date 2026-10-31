@@ -4,6 +4,7 @@ import type { ChatSession } from '../../../shared/chat-history'
 import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
+import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
@@ -23,7 +24,13 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const steerInstructions: StoredSteer[] = []
   const reviewRequests: ReviewRecord[] = []
   const pluginOperations: PluginOperationCard[] = []
+  const approvals: ApprovalCardRef[] = []
   for (const part of msg.parts) {
+    if (part.type === APPROVAL_PART_TYPE) {
+      const ref = readApprovalCardRef((part as { data?: unknown }).data)
+      if (ref && !approvals.some(a => a.id === ref.id)) approvals.push(ref)
+      continue
+    }
     if (part.type === PLUGIN_OPERATION_PART_TYPE) {
       const card = readPluginOperationCard((part as { data?: unknown }).data)
       if (card && !pluginOperations.some(c => c.id === card.id)) pluginOperations.push(card)
@@ -66,6 +73,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(steerInstructions.length ? { steerInstructions } : {}),
     ...(reviewRequests.length ? { reviewRequests } : {}),
     ...(pluginOperations.length ? { pluginOperations } : {}),
+    ...(approvals.length ? { approvals } : {}),
   }
 }
 
@@ -102,6 +110,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   for (const stored of msg.pluginOperations || []) {
     const card = readPluginOperationCard(stored)
     if (card) parts.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card })
+  }
+  for (const stored of msg.approvals || []) {
+    const ref = readApprovalCardRef(stored)
+    if (ref) parts.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
   }
   for (const review of msg.reviewRequests || []) {
     const record = readReviewRecord(review)
