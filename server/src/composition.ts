@@ -28,7 +28,8 @@ import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from '.
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, operatorUserIds } from './lib/config'
+import { practiceUpstream } from './adapters/upstream-practice'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PRACTICE_UPSTREAMS, operatorUserIds, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -91,6 +92,8 @@ export interface ServiceOptions {
   upstream?: UpstreamClient
   /** Check keys once when they are saved (default: BROKER_KEY_CHECK). */
   keyCheck?: boolean
+  /** Staging's practice upstreams (default: PRACTICE_UPSTREAMS from the environment, lib/config.ts). */
+  practiceUpstreams?: PracticeUpstreams
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -119,11 +122,15 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
-  const upstream = options.upstream ?? httpsUpstream()
+  // Staging only: HubSpot's connections may go to the fake HubSpot (never in production: lib/config.ts).
+  const practice = options.practiceUpstreams ?? PRACTICE_UPSTREAMS
+  const practiceList = practice.state === 'on' ? practice.upstreams : []
+  const upstream = practiceUpstream(options.upstream ?? httpsUpstream(), practiceList)
   // The key check needs the company's generic services and exceptions (keyBroker); keyBroker asks it before saving.
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
+    practiceServices: practiceList.map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })

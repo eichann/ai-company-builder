@@ -63,7 +63,7 @@ export interface BrokerChangeRow {
   changedBy: string
   /** The key concerned, when the change is about one. */
   keyId: string | null
-  /** create | replace | update | delete | service | relay-service | settings */
+  /** create | replace | update | delete | service | relay-service | read-only | settings */
   action: string
   /** JSON of the change, never containing a secret. */
   change: string
@@ -79,6 +79,8 @@ export interface StoredBrokerService {
   ownKeyHosts: string
   /** JSON of BrokerRelayDefinition for a generic service the company registered (K9); null otherwise. */
   relay: string | null
+  /** The relay forwards only reads for this service (`brokerRelayReadOnlyAllows`). */
+  readOnly: boolean
   updatedAt: string
   updatedBy: string
 }

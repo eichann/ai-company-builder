@@ -30,6 +30,7 @@ vi.mock('../../src/lib/auth', () => ({
 const FAKE_GEMINI = 'fake-test-key-NOT-REAL-relay-gemini-0123456789'
 const FAKE_OPENAI = 'fake-test-key-NOT-REAL-relay-openai-9876543210'
 const FAKE_ANTHROPIC = 'fake-test-key-NOT-REAL-relay-anthropic-55555'
+const FAKE_HUBSPOT = 'pat-fake-test-key-NOT-REAL-relay-hubspot-4242'
 const CO = 'rl-co'
 const ts = () => new Date().toISOString()
 
@@ -118,6 +119,7 @@ beforeAll(async () => {
     ['gemini', FAKE_GEMINI, {}],
     ['openai', FAKE_OPENAI, { destinations: { hosts: ['api.openai.com'], pathPrefixes: ['/v1/chat/', '/v1/models'], models: ['gpt-5-mini'] } }],
     ['anthropic', FAKE_ANTHROPIC, {}],
+    ['hubspot', FAKE_HUBSPOT, {}],
   ] as const) {
     const r = await services.keyBroker.create(owner, { service, displayName: service, secret, audience: everyone, ...extra })
     expect(r.ok).toBe(true)
@@ -274,9 +276,58 @@ describe('the relay', () => {
     expect([r.status, r.json.error.code]).toEqual([401, 'ACB_TOKEN_INVALID'])
   })
 
+  it('HubSpot: the real key goes only as Authorization: Bearer to api.hubapi.com', async () => {
+    const token = tokenFor(['hubspot'])
+    reply = () => ({ status: 200, body: '{"results":[]}' })
+    const r = await call('GET', '/hubspot/crm/objects/2026-03/deals/123?properties=dealname', { headers: { authorization: `Bearer ${token}` } })
+    expect(r.status).toBe(200)
+    const sent = received.at(-1)!
+    expect([sent.host, sent.path, sent.headers.authorization]).toEqual(['api.hubapi.com', '/crm/objects/2026-03/deals/123?properties=dealname', `Bearer ${FAKE_HUBSPOT}`])
+  })
+
+  it('read-only switch: a write never reaches HubSpot; reads and search still do', async () => {
+    const token = tokenFor(['hubspot'])
+    const auth = { authorization: `Bearer ${token}`, 'content-type': 'application/json' }
+    reply = () => ({ status: 200, body: '{"id":"123"}' })
+    expect(services.keyBroker.setReadOnly(member, 'hubspot', { readOnly: true }).ok).toBe(false) // members cannot
+    expect(services.keyBroker.setReadOnly(owner, 'hubspot', { readOnly: true }).ok).toBe(true)
+    try {
+      const before = received.length
+      for (const [method, path, headers] of [
+        ['PATCH', '/hubspot/crm/v3/objects/deals/123', auth],
+        ['PATCH', '/hubspot/crm/objects/2026-03/deals/123', auth],
+        ['DELETE', '/hubspot/crm/v3/objects/deals/123', auth],
+        ['POST', '/hubspot/crm/v3/objects/deals', auth],
+        ['POST', '/hubspot/crm/v3/objects/deals/search/../123', auth],
+        ['POST', '/hubspot/crm/v3/objects/deals/searchx', auth],
+        ['GET', '/hubspot/crm/v3/objects/deals/123', { ...auth, 'x-http-method-override': 'PATCH' }],
+      ] as const) {
+        const r = await call(method, path, { headers: { ...headers }, ...(method === 'GET' ? {} : { body: '{"properties":{"amount":"1"}}' }) })
+        expect([method, path, r.status, r.json.error.code]).toEqual([method, path, 403, 'ACB_READ_ONLY'])
+      }
+      expect(received.length).toBe(before)
+
+      for (const [method, path] of [
+        ['GET', '/hubspot/crm/v3/objects/deals/123'],
+        ['POST', '/hubspot/crm/v3/objects/deals/search'],
+        ['POST', '/hubspot/crm/objects/2026-09/deals/search'],
+      ] as const) {
+        const r = await call(method, path, { headers: auth, ...(method === 'POST' ? { body: '{"limit":1}' } : {}) })
+        expect([method, path, r.status]).toEqual([method, path, 200])
+      }
+      expect(received.length).toBe(before + 3)
+    } finally {
+      expect(services.keyBroker.setReadOnly(owner, 'hubspot', { readOnly: false }).ok).toBe(true)
+    }
+    // Off again: a write passes (the switch, not the service, refused it).
+    const w = await call('PATCH', '/hubspot/crm/v3/objects/deals/123', { headers: auth, body: '{"properties":{}}' })
+    expect(w.status).toBe(200)
+    expect(received.at(-1)!.method).toBe('PATCH')
+  })
+
   it('no key value in any answer, log line or table; no token in any log line', async () => {
     expect(seen.length).toBeGreaterThan(20)
-    const keys = [FAKE_GEMINI, FAKE_OPENAI, FAKE_ANTHROPIC, 'NOT-REAL-relay']
+    const keys = [FAKE_GEMINI, FAKE_OPENAI, FAKE_ANTHROPIC, FAKE_HUBSPOT, 'NOT-REAL-relay']
     expect(seen.filter(t => keys.some(k => t.includes(k)))).toEqual([])
     expect(logs.filter(t => keys.some(k => t.includes(k)) || /acb_tok_[0-9a-f]{64}/.test(t))).toEqual([])
     const tables = (db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map(t => t.name)

@@ -30,6 +30,7 @@ import {
   BROKER_NO_KEY_PLACEHOLDER,
   brokerNoKeyMessage,
   BROKER_TOKEN_PREFIX,
+  brokerRelayReadOnlyAllows,
   builtinBrokerService,
   isValidBrokerServiceName,
   looksLikeBrokerToken,
@@ -105,7 +106,7 @@ interface CallMeta {
 export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
-  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP'
+  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
@@ -113,6 +114,7 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_STOPPED: { decision: 'stopped' },
   ACB_BAD_PATH: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_DESTINATION_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_READ_ONLY: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_REDIRECT_REFUSED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
   ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
@@ -125,6 +127,8 @@ const DROP_REQUEST = new Set([
   ...CREDENTIAL_HEADERS, 'host', 'connection', 'keep-alive', 'proxy-authorization', 'proxy-connection', 'te', 'trailer',
   'transfer-encoding', 'upgrade', 'cookie', 'forwarded', 'via', 'x-real-ip', 'accept-encoding', 'origin', 'referer',
 ])
+/** Headers some APIs read as the real method (refused while a service is read-only). */
+const METHOD_OVERRIDE_HEADERS = new Set(['x-http-method-override', 'x-http-method', 'x-method-override'])
 /** Never answered (hop-by-hop, cookies of the provider). */
 const DROP_RESPONSE = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'set-cookie', 'alt-svc'])
 /** JSON bodies are read (model check, K5 record) up to this size; larger JSON is refused. */
@@ -405,6 +409,13 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       meta.path = path.decoded
       if (pathPrefixes.length > 0 && !pathPrefixes.some(p => path.decoded.startsWith(p))) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵では、この宛先（パス）は使えません。', grant)
+      }
+      // 2a. The company keeps this service read-only (HubSpot once its plugin is on: writes go only through
+      // the plugin's typed operations, which never pass here): only reads are forwarded.
+      // A method-override header would let a "GET" write on some APIs: refused while read-only.
+      if (keyBroker.relayReadOnly(grant.companyId, req.service)
+        && (!brokerRelayReadOnlyAllows(builtin, req.method, path.decoded) || req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n)))) {
+        return jsonError(403, 'ACB_READ_ONLY', `${target.label} は、ここからは読むだけです（書き換えは ACB の決まった操作から行います）。`, grant)
       }
 
       // 3. The body: JSON is read (model check, the record), anything else streams, both bounded.

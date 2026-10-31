@@ -93,6 +93,8 @@ export interface KeyBrokerDeps {
   brokerDay?: () => string
   /** The one check of a key being saved (default: none). */
   checkKey?: BrokerKeyChecker
+  /** Services this server sends to a practice copy (staging only, `lib/config.ts`); default none. */
+  practiceServices?: readonly string[]
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -230,6 +232,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         ...setting,
         defaultHosts: builtin ? [...builtin.defaultHosts] : relay ? [relay.host] : [],
         relay,
+        readOnly: stored.get(service)?.readOnly ?? false,
+        practice: deps.practiceServices?.includes(service) ?? false,
         companyKeys: rows.filter(r => r.service === service && r.scope === 'company').length,
         userKeys: rows.filter(r => r.service === service && r.scope === 'user').length,
         updatedAt: stored.get(service)?.updatedAt ?? null,
@@ -281,7 +285,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const at = clock.now()
     brokerKeys.saveService(member.companyId, {
       service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
-      relay: stored?.relay ?? null, updatedAt: at, updatedBy: member.userId,
+      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, updatedAt: at, updatedBy: member.userId,
     }, changeRow(member, at, null, { action: 'service', service, before, after }))
   }
 
@@ -515,6 +519,36 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     },
 
     /**
+     * PUT …/broker/services/:service/read-only { readOnly } — the relay
+     * forwards only reads for the service (GET / HEAD and the built-in
+     * service's read-only POSTs, `brokerRelayReadOnlyAllows`). Milestone 3:
+     * turned on for HubSpot when its plugin is on (P4), so writes go only
+     * through the plugin's typed operations. History action `read-only`.
+     */
+    setReadOnly(member: Member, service: string, body: unknown): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isValidBrokerServiceName(service)) return refuse('bad-request', 'service must be a lower-case ASCII name (a-z, 0-9, -, _)')
+      if (!isObject(body) || typeof body.readOnly !== 'boolean') return refuse('bad-request', 'readOnly must be true or false')
+      const stored = serviceSettings(member.companyId).get(service)
+      if (!builtinBrokerService(service) && !relayOf(stored)) return refuse('not-found', 'Unknown service')
+      const before = stored?.readOnly ?? false
+      if (before === body.readOnly) return ok(view(member.companyId))
+      const setting = serviceSettingOf(stored, service)
+      const at = clock.now()
+      brokerKeys.saveService(member.companyId, {
+        service, category: setting.category, rule: setting.rule, ownKeyHosts: JSON.stringify(setting.ownKeyHosts),
+        relay: stored?.relay ?? null, readOnly: body.readOnly, updatedAt: at, updatedBy: member.userId,
+      }, changeRow(member, at, null, { action: 'read-only', service, before, after: body.readOnly }))
+      return ok(view(member.companyId))
+    },
+
+    /** The relay forwards only reads for this service (the company's switch). */
+    relayReadOnly(companyId: string, service: string): boolean {
+      return serviceSettings(companyId).get(service)?.readOnly ?? false
+    },
+
+    /**
      * PUT …/broker/relay-services/:service { label, baseUrl, header, format?, category? } —
      * register or change a generic service (K9). Its host cannot change while
      * keys exist for it (they were registered for the old host): 409
@@ -553,6 +587,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         // Own keys may go only to the service's host.
         ownKeyHosts: JSON.stringify((setting?.ownKeyHosts ?? []).filter(h => h === after.host)),
         relay: JSON.stringify(after),
+        readOnly: stored?.readOnly ?? false,
         updatedAt: at,
         updatedBy: member.userId,
       }, changeRow(member, at, null, { action: 'relay-service', service, before, after }))

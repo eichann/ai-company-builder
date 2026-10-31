@@ -64,9 +64,16 @@ export interface BrokerServiceInfo {
    * once when a key is registered or replaced): GET this path on the first
    * default host, with these extra headers, no body. `rejected` lists the
    * answers that mean "this key does not work" (the key is then not saved);
-   * any other non-2xx answer is "could not tell".
+   * any other non-2xx answer is "could not tell", except `limited`: answers
+   * that mean "the key works but lacks a permission" (saved, said so).
    */
-  check: { path: string; headers: Readonly<Record<string, string>>; rejected: readonly number[] }
+  check: { path: string; headers: Readonly<Record<string, string>>; rejected: readonly number[]; limited?: readonly number[] }
+  /**
+   * POST paths that only read (a CRM's search), allowed while the company keeps
+   * the service's relay read-only (`brokerRelayReadOnlyAllows`). Matched
+   * against the decoded path the client sent.
+   */
+  readOnlyPosts?: readonly RegExp[]
 }
 
 export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
@@ -87,10 +94,31 @@ export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
     service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key',
     check: { path: '/v1/models', headers: { 'anthropic-version': '2023-06-01' }, rejected: [401] },
   },
+  // HubSpot (milestone 3): a service key (`pat-…`) as `Authorization: Bearer`. The check reads deals
+  // (the dated API, current version 2026-03; the v3 paths are unsupported from 2027-09): 401 = invalid,
+  // 403 = valid but missing scopes (a key made without crm.objects.deals.read). Search is a POST that
+  // only reads, both as v3 and dated paths.
+  {
+    service: 'hubspot', label: 'HubSpot', category: 'system', defaultHosts: ['api.hubapi.com'], credential: 'authorization',
+    check: { path: '/crm/objects/2026-03/deals', headers: {}, rejected: [401], limited: [403] },
+    readOnlyPosts: [/^\/crm\/v3\/objects\/[a-z0-9_-]+\/search$/, /^\/crm\/objects\/\d{4}-\d{2}\/[a-z0-9_-]+\/search$/],
+  },
 ]
 
 export function builtinBrokerService(service: string): BrokerServiceInfo | undefined {
   return BUILTIN_BROKER_SERVICES.find(s => s.service === service)
+}
+
+/**
+ * While a company keeps a service's relay read-only (milestone 3: on for
+ * HubSpot once its plugin is on — writes go only through the plugin's typed
+ * operations), only GET / HEAD pass, plus the POST paths the built-in service
+ * names as read-only (search). `path` is the decoded path the client sent.
+ */
+export function brokerRelayReadOnlyAllows(service: BrokerServiceInfo | null, method: string, path: string): boolean {
+  const m = method.toUpperCase()
+  if (m === 'GET' || m === 'HEAD') return true
+  return m === 'POST' && !!service?.readOnlyPosts?.some(re => re.test(path))
 }
 
 export const BROKER_LIMITS = {
@@ -392,15 +420,17 @@ export function ownKeysSwitchSetting(
  * - `rejected`: the service said the key does not work (it is not saved);
  * - `unreachable`: the server could not reach the service (saved);
  * - `unconfirmed`: an answer that tells neither (rate limit, a restricted key; saved);
+ * - `limited`: the service knows the key but it lacks a permission the check needs (saved);
  * - `not-checkable`: no check request is known for the service (saved).
  */
-export type BrokerKeyCheckResult = 'valid' | 'rejected' | 'unreachable' | 'unconfirmed' | 'not-checkable'
-export const BROKER_KEY_CHECK_RESULTS: readonly BrokerKeyCheckResult[] = ['valid', 'rejected', 'unreachable', 'unconfirmed', 'not-checkable']
+export type BrokerKeyCheckResult = 'valid' | 'rejected' | 'unreachable' | 'unconfirmed' | 'limited' | 'not-checkable'
+export const BROKER_KEY_CHECK_RESULTS: readonly BrokerKeyCheckResult[] = ['valid', 'rejected', 'unreachable', 'unconfirmed', 'limited', 'not-checkable']
 
 /** What a check answer means. */
-export function brokerKeyCheckOutcome(status: number, rejected: readonly number[]): BrokerKeyCheckResult {
+export function brokerKeyCheckOutcome(status: number, rejected: readonly number[], limited: readonly number[] = []): BrokerKeyCheckResult {
   if (status >= 200 && status < 300) return 'valid'
   if (rejected.includes(status)) return 'rejected'
+  if (limited.includes(status)) return 'limited'
   return 'unconfirmed'
 }
 

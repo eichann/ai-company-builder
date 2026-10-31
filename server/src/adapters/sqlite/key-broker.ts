@@ -120,17 +120,18 @@ export function sqliteKeyBrokerRepository(conn: Database.Database): BrokerKeyRep
     },
 
     services(companyId) {
-      return (conn.prepare('SELECT service, category, rule, own_key_hosts, relay, updated_at, updated_by FROM broker_services WHERE company_id = ? ORDER BY service')
-        .all(companyId) as Array<{ service: string; category: string; rule: string; own_key_hosts: string; relay: string | null; updated_at: string; updated_by: string }>)
-        .map((r): StoredBrokerService => ({ service: r.service, category: r.category, rule: r.rule, ownKeyHosts: r.own_key_hosts, relay: r.relay, updatedAt: r.updated_at, updatedBy: r.updated_by }))
+      return (conn.prepare('SELECT service, category, rule, own_key_hosts, relay, read_only, updated_at, updated_by FROM broker_services WHERE company_id = ? ORDER BY service')
+        .all(companyId) as Array<{ service: string; category: string; rule: string; own_key_hosts: string; relay: string | null; read_only: number; updated_at: string; updated_by: string }>)
+        .map((r): StoredBrokerService => ({ service: r.service, category: r.category, rule: r.rule, ownKeyHosts: r.own_key_hosts, relay: r.relay, readOnly: r.read_only === 1, updatedAt: r.updated_at, updatedBy: r.updated_by }))
     },
     saveService(companyId, s, change) {
       conn.transaction(() => {
         conn.prepare(`
-          INSERT INTO broker_services (company_id, service, category, rule, own_key_hosts, relay, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO broker_services (company_id, service, category, rule, own_key_hosts, relay, read_only, updated_at, updated_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(company_id, service) DO UPDATE SET category = excluded.category, rule = excluded.rule,
-            own_key_hosts = excluded.own_key_hosts, relay = excluded.relay, updated_at = excluded.updated_at, updated_by = excluded.updated_by
-        `).run(companyId, s.service, s.category, s.rule, s.ownKeyHosts, s.relay, s.updatedAt, s.updatedBy)
+            own_key_hosts = excluded.own_key_hosts, relay = excluded.relay, read_only = excluded.read_only,
+            updated_at = excluded.updated_at, updated_by = excluded.updated_by
+        `).run(companyId, s.service, s.category, s.rule, s.ownKeyHosts, s.relay, s.readOnly ? 1 : 0, s.updatedAt, s.updatedBy)
         addHistory(companyId, change)
       })()
     },

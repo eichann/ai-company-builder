@@ -162,6 +162,13 @@ export default function ApiKeysPage() {
             </div>
           )}
 
+          {data.services.filter((s) => s.practice).map((s) => (
+            <div key={s.service} role="status" className="flex gap-3 rounded-xl border border-warning/30 bg-warning/10 px-4 py-3 text-sm">
+              <Warning size={18} className="mt-0.5 shrink-0 text-warning" />
+              <p className="font-medium">練習用の {s.label} につながっています（このサーバーは検証用です。本物の {s.label} には届きません）</p>
+            </div>
+          ))}
+
           {data.keys.some((k) => k.status === 'active') && (
             <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-destructive/30 px-4 py-3 text-sm">
               <span>

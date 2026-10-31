@@ -70,6 +70,16 @@ export interface BrokerServiceView {
    * how the key travels. null for built-in services and names with keys only.
    */
   relay: BrokerRelayDefinition | null
+  /**
+   * The relay forwards only reads (GET / HEAD and the service's read-only POSTs
+   * such as a CRM search) — `PUT …/broker/services/:service/read-only`.
+   */
+  readOnly: boolean
+  /**
+   * This server sends the service to a practice copy (staging only: 「練習用の
+   * HubSpot につながっています」), never in production.
+   */
+  practice: boolean
   companyKeys: number
   userKeys: number
   /** null while the defaults apply. */
@@ -110,6 +120,11 @@ export interface BrokerOwnKeysSwitch {
   allowed: boolean
 }
 
+/** PUT …/broker/services/:service/read-only — the relay forwards only reads for the service. */
+export interface BrokerReadOnlySwitch {
+  readOnly: boolean
+}
+
 /** How the one check of a just-saved key went (never anything of the key itself). */
 export interface BrokerKeyCheck {
   service: string
@@ -123,6 +138,7 @@ export type BrokerChangeDetail =
   | { action: 'delete'; key: BrokerKeySnapshot }
   | { action: 'service'; service: string; before: BrokerServiceSetting | null; after: BrokerServiceSetting }
   | { action: 'relay-service'; service: string; before: BrokerRelayDefinition | null; after: BrokerRelayDefinition | null }
+  | { action: 'read-only'; service: string; before: boolean; after: boolean }
   | { action: 'settings'; before: { memberKeysAllowed: boolean; internalHosts?: string[] }; after: { memberKeysAllowed: boolean; internalHosts?: string[] } }
 
 export interface BrokerChange {

@@ -76,6 +76,7 @@ export const CHECK_RESULT_TEXT: Record<BrokerKeyCheckResult, string> = {
   rejected: 'この鍵は使えませんでした（発行元の画面で確かめてください）',
   unreachable: '確かめられませんでした（通信できません）。鍵は保存しました',
   unconfirmed: '確かめられませんでした（発行元から、はっきりした答えがありませんでした）。鍵は保存しました',
+  limited: '鍵は使えますが、権限が足りないかもしれません（発行元の画面で、鍵の権限を確かめてください）。鍵は保存しました',
   'not-checkable': 'この鍵は、実際に使うまで確かめられません。鍵は保存しました',
 }
 
@@ -155,6 +156,7 @@ const CHECK_NOTE: Record<BrokerKeyCheckResult, string> = {
   rejected: '使えない鍵',
   unreachable: '確認できず・通信できません',
   unconfirmed: '確認できず',
+  limited: '権限が足りないかも',
   'not-checkable': '確認の方法なし',
 }
 const checkNote = (check: BrokerKeyCheckResult | undefined) => (check ? `・${CHECK_NOTE[check]}` : '')
@@ -204,6 +206,8 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
       if ((c.before.checkPath ?? '') !== (c.after.checkPath ?? '')) lines.push(`${c.service}: 鍵を確かめる住所 → ${c.after.checkPath || 'なし'}`)
       return lines
     }
+    case 'read-only':
+      return [`${c.service}: 中継 → ${c.after ? '読むだけ' : '読み書き'}`]
     case 'settings': {
       const lines: string[] = []
       if (c.before.memberKeysAllowed !== c.after.memberKeysAllowed) {

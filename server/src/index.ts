@@ -6,6 +6,7 @@ import { initDatabase } from './db'
 import { configureAllBareRepos } from './routes/git'
 import { scheduleAgentEventRetention } from './lib/agent-event-retention'
 import { services } from './composition'
+import { PRACTICE_UPSTREAMS } from './lib/config'
 import { app } from './app'
 
 // Initialize database
@@ -22,6 +23,14 @@ initDatabase()
 {
   const broker = services.brokerVault.status()
   console.log(broker.enabled ? `Key broker: on (key-encryption key ${broker.kekId})` : `Key broker: off — ${broker.detail}`)
+  // Staging only (lib/config.ts): say loudly where HubSpot goes, or why the setting was not used.
+  if (PRACTICE_UPSTREAMS.state === 'on') {
+    for (const u of PRACTICE_UPSTREAMS.upstreams) {
+      console.warn(`Key broker: 練習用の HubSpot につながっています — ${u.service} (${u.host}) → ${u.target.protocol}//${u.target.hostname}:${u.target.port}`)
+    }
+  } else if (PRACTICE_UPSTREAMS.state === 'ignored') {
+    console.warn(`Key broker: practice upstream setting ignored — ${PRACTICE_UPSTREAMS.reason}`)
+  }
 }
 
 // Clean up expired sessions on startup (lib/auth.ts's one connection, kept open)
