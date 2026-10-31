@@ -70,6 +70,7 @@ const detail: PluginDetail = {
     { operation: 'update_deal', object: 'deal', field: 'next_step', policy: 'auto' },
     { operation: 'update_deal', object: 'deal', field: 'amount', policy: 'prior' },
   ],
+  labels: { deal: { label: '案件', fields: { title: '件名', stage: '段階', confidence: '確度', next_step: '次のアクション', amount: '金額' } } },
   mappingErrors: [],
   autoAcknowledgements: [],
   history: [{ action: 'install', at: '2026-10-31T00:00:00.000Z', by: 'u_owner', change: {} }],
@@ -167,6 +168,9 @@ describe('つなぎ先', () => {
     expect(await screen.findByText('受注・失注につながるため、自動にはできません')).toBeInTheDocument()
     const stage = screen.getByRole('combobox', { name: 'stage の書き戻し' })
     expect([...stage.querySelectorAll('option')].map((o) => o.textContent)).not.toContain('自動で書き戻す')
+    // Each field by its Japanese name, the identifier only as small print beside it.
+    const confidence = screen.getByRole('combobox', { name: 'confidence の書き戻し' }).closest('tr')!
+    expect(confidence.querySelector('td')!.textContent).toBe('案件・確度deal.confidence')
     const text = document.body.textContent ?? ''
     for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
   })

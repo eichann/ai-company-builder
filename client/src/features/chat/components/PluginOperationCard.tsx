@@ -69,9 +69,9 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
         {card.fields.map(f => <li key={f.field} className="flex flex-wrap items-center gap-1.5 text-xs text-gray-800 dark:text-zinc-200">
           <span className="text-gray-500 dark:text-zinc-400">{f.label}</span>
           {f.before !== undefined
-            ? <><span>{shownValue(f.before)}</span><ArrowRight size={11} aria-hidden /><span className="sr-only">から</span><span className="font-medium">{shownValue(f.after)}</span></>
-            : <span>{card.outcome === 'unchanged' ? '' : '変えようとした値：'}<span className="font-medium">{shownValue(f.after)}</span></span>}
-          {f.current !== undefined && <span className="text-amber-700 dark:text-amber-400">（いまの値：{shownValue(f.current)}）</span>}
+            ? <><span>{shownValue(f.before, f.valueLabels)}</span><ArrowRight size={11} aria-hidden /><span className="sr-only">から</span><span className="font-medium">{shownValue(f.after, f.valueLabels)}</span></>
+            : <span>{card.outcome === 'unchanged' ? '' : '変えようとした値：'}<span className="font-medium">{shownValue(f.after, f.valueLabels)}</span></span>}
+          {f.current !== undefined && <span className="text-amber-700 dark:text-amber-400">（いまの値：{shownValue(f.current, f.valueLabels)}）</span>}
         </li>)}
       </ul>}
       <p className="mt-2 text-xs text-gray-700 dark:text-zinc-300">{card.message}</p>

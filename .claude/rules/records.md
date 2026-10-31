@@ -53,7 +53,8 @@ engine the day it is turned on.
   `shared/core/yaml-lite.ts`: no anchors, aliases, tags, block scalars, merge keys, duplicate
   keys or prototype keys — every reader (server, push checker, app) gets the same meaning.
 - A definition can say only what the engine does (案 B, ontology §17.7): `fields` (kind,
-  `source: file | server`), `links` (target type or `file`, cardinality, inverse label),
+  `source: file | server`; a choice may add `option_labels: { <option>: <shown as> }` — display
+  only, values stay the options), `links` (target type or `file`, cardinality, inverse label),
   `states`, `initial`, `actions` (from / to / who / notify / attach / note / history_line /
   decision / approval / args), `implements` (interfaces, `INTERFACES`: `request` needs
   `requested_by`, `assignee`, `next_actor`, `waiting_on`, `due` on the server), `storage`

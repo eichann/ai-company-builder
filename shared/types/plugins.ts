@@ -92,6 +92,8 @@ export interface PluginDetail {
   mappingVersions: Array<{ version: number; createdAt: string; createdBy: string }>
   /** What each written field does now (auto / prior / off), from the mapping in force. */
   policies: PluginFieldPolicyView[]
+  /** Per mapped object: its record type's name and each field's (from the installed package's types; empty before install). */
+  labels: Record<string, { label: string; fields: Record<string, string> }>
   /** Why the mapping in force does not pass, when it does not (Japanese sentences). */
   mappingErrors: string[]
   /** Who confirmed, per automatically written field and its outside property, that no HubSpot workflow is triggered by it. */
@@ -169,6 +171,8 @@ export interface PluginOperationRecordView {
   fields: Record<string, PluginFieldValue>
   /** For an applied write: each field's value before → after, from its ledger entry. */
   changes: Array<{ field: string; before: PluginFieldValue; after: PluginFieldValue }> | null
+  /** How the values of these fields are shown (a choice's `option_labels`): field → value → label. */
+  valueLabels: Record<string, Record<string, string>>
   /** Who asked: a person or their AI (the credential decided). */
   actorKind: 'human' | 'ai'
   /** Why it is in its state (`rate-limited`, `not-observed`, `observed-actor-unknown`, …); not the AI's note. */
@@ -190,6 +194,8 @@ export interface PluginAiField {
   kind: string
   /** A choice field's options (ACB words). */
   options?: string[]
+  /** How the options are shown to people (value → label), when the type says. */
+  optionLabels?: Record<string, string>
   /** `auto` writes at once; `prior` is refused in milestone 3 (a person approves first). `off` fields are not listed. */
   policy: 'auto' | 'prior'
 }

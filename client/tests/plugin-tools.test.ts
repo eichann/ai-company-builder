@@ -20,7 +20,7 @@ import assert from 'node:assert/strict'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
 import { createPluginOperationsApi } from '../electron/features/plugin-operations/ipc'
-import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, shownValue, undoResultView, type PluginOperationCard } from '../shared/plugin-operations'
 import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 import type { PluginAiTools, PluginOperationRecordView } from '../../shared/types/plugins'
 
@@ -43,7 +43,7 @@ const PLUGINS: PluginAiTools = {
 const opView = (over: Partial<PluginOperationRecordView> = {}): PluginOperationRecordView => ({
   id: 'op-1', operation: 'update_deal', recordId: 'deal-8f3a2c01', recordTitle: '研修導入', state: 'applied',
   fields: { confidence: 'A', next_step: '11/7 デモ' },
-  changes: [{ field: 'confidence', before: 'B', after: 'A' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }],
+  changes: [{ field: 'confidence', before: 'B', after: 'A' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }], valueLabels: {},
   actorKind: 'ai', reason: null, undoable: true, undoLabel: '変更前の値を書き戻す', undoNotice: 'x', undoOf: null, undoneBy: null, recordVersion: 8, createdAt: 't',
   ...over,
 })
@@ -123,6 +123,21 @@ test('applied: the card shows each field before → after, marked as the AI\'s, 
   assert.equal(cards[0].operationId, 'op-1')
   assert.equal(cards[0].reason, ask.note)
   assert.equal(cards[0].conversationId, 'conv-1')
+})
+
+test('a choice is shown by its label (A（高）, not a) on the card and to the AI, which keeps the raw value and the record\'s title', async () => {
+  const answer = opView({
+    fields: { confidence: 'a' }, changes: [{ field: 'confidence', before: 'b', after: 'a' }],
+    valueLabels: { confidence: { a: 'A（高）', b: 'B（中）', c: 'C（低）' } },
+  })
+  const { tools, cards } = await turn('act', () => ({ status: 200, body: { success: true, data: { operation: answer, record: { id: 'deal-8f3a2c01', version: 8 } } } }))
+  const told = JSON.parse(await tools.execute('hubspot__update_deal', { ...ask, fields: { confidence: 'A' } }))
+  const f = cards[0].fields[0]
+  assert.equal(`${shownValue(f.before, f.valueLabels)} → ${shownValue(f.after, f.valueLabels)}`, 'B（中） → A（高）')
+  assert.deepEqual(told.fields[0], { field: 'confidence', label: '確度', before: 'b', beforeShown: 'B（中）', after: 'a', afterShown: 'A（高）' })
+  assert.equal(told.recordTitle, '研修導入')
+  // Stored with the reply and read back after a restart, the labels stay.
+  assert.deepEqual(readPluginOperationCard(JSON.parse(JSON.stringify(cards[0])))!.fields[0].valueLabels, { a: 'A（高）', b: 'B（中）', c: 'C（低）' })
 })
 
 test('a lost answer is unknown — never a success — on the card and to the AI', async () => {

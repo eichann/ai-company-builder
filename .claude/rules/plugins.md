@@ -455,7 +455,8 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
 - Owner/admin only (menu `integrations`; others see the lock and load nothing). Per package:
   version and company key (the key by its name and last 4 from `GET /broker`; never a value),
   on / off (off with a confirmation; the server's `problem` in plain words), the mapping as a
-  table (ACB field, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
+  table (ACB field by its Japanese name from the package's types — `PluginDetail.labels` — with
+  the identifier in small print, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
   `stage` is shown as not writable) or as YAML for advanced use, versions with 「この版に戻す」,
   「HubSpot に聞いて確かめる」 on the text being edited, import with its report (and
   「新しいつなぎ先として始める」 after `ACCOUNT_CHANGED`), the history.
@@ -489,7 +490,10 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
   (ACB's checks; nothing changed), `not-sent` (HubSpot refused or could not be read), `conflict`
   (changed first; the values there now), `unknown` (answer lost, a 5xx, the app could not reach
   the server — never "updated"), `observed` (HubSpot shows it, not confirmed as ACB's; no undo).
-  The AI is told the same (`aiSummaryOf`).
+  The AI is told the same (`aiSummaryOf`). A choice is shown by its type's `option_labels`
+  (「A（高）」, not `a`): the server sends them with the AI's fields (`optionLabels`) and with every
+  operation answer (`valueLabels`); the card shows them and the AI gets `…Shown` values next to
+  the raw ones (plus the record's title).
 - 「変更前の値を書き戻す」 on an applied card: the person's own action through IPC
   `pluginOperations:undo` (`client/electron/features/plugin-operations/ipc.ts`) with the
   member's **session**, never the record token, and the consultation as `conversationId`. The

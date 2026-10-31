@@ -38,6 +38,8 @@ export interface PluginCardField {
   after: PluginFieldValue
   /** For a conflict: the value there now. */
   current?: PluginFieldValue
+  /** How this field's values are shown (a choice's labels from the type, e.g. a → A（高）). */
+  valueLabels?: Record<string, string>
 }
 
 export interface PluginOperationCard {
@@ -118,6 +120,8 @@ export interface CardContext {
   recordId: string
   /** ACB field name → its label. */
   labels: Record<string, string>
+  /** ACB field name → value → how it is shown (choices; the server's answer may add more). */
+  valueLabels?: Record<string, Record<string, string>>
   asked: Record<string, PluginFieldValue>
   reason: string | null
   byAi: boolean
@@ -126,18 +130,24 @@ export interface CardContext {
 
 const label = (ctx: Pick<CardContext, 'labels'>, field: string) => ctx.labels[field] ?? field
 
+/** A card field with its label and, for a choice, how its values are shown. */
+function cardField(ctx: Pick<CardContext, 'labels' | 'valueLabels'>, field: string, values: Omit<PluginCardField, 'field' | 'label' | 'valueLabels'>, server?: Record<string, Record<string, string>>): PluginCardField {
+  const shown = server?.[field] ?? ctx.valueLabels?.[field]
+  return { field, label: label(ctx, field), ...values, ...(shown && Object.keys(shown).length > 0 ? { valueLabels: { ...shown } } : {}) }
+}
+
 /** The card for a successful answer of the server (`{ operation, record }`). */
 export function cardFromAnswer(ctx: CardContext, answer: { operation: PluginOperationRecordView | null; record?: { id: string } }): PluginOperationCard {
   const op = answer.operation
   const base = { id: ctx.id, companyId: ctx.companyId, conversationId: ctx.conversationId, pluginId: ctx.pluginId, systemLabel: ctx.systemLabel, recordId: ctx.recordId, reason: ctx.reason, byAi: ctx.byAi, at: ctx.at }
   if (!op) {
     return { ...base, recordTitle: null, outcome: 'unchanged', message: outcomeMessage('unchanged', ctx.systemLabel), operationId: null, undoable: false,
-      fields: Object.entries(ctx.asked).map(([field, after]) => ({ field, label: label(ctx, field), after })) }
+      fields: Object.entries(ctx.asked).map(([field, after]) => cardField(ctx, field, { after })) }
   }
   const outcome = stateOutcome(op.state)
   const fields: PluginCardField[] = op.changes
-    ? op.changes.map(c => ({ field: c.field, label: label(ctx, c.field), before: c.before, after: c.after }))
-    : Object.entries(op.fields).map(([field, after]) => ({ field, label: label(ctx, field), after }))
+    ? op.changes.map(c => cardField(ctx, c.field, { before: c.before, after: c.after }, op.valueLabels))
+    : Object.entries(op.fields).map(([field, after]) => cardField(ctx, field, { after }, op.valueLabels))
   return { ...base, recordTitle: op.recordTitle, outcome, message: outcomeMessage(outcome, ctx.systemLabel, op.state), operationId: op.id, undoable: op.undoable, fields }
 }
 
@@ -151,7 +161,7 @@ export function cardFromRefusal(ctx: CardContext, code: string, error: string | 
   return {
     id: ctx.id, companyId: ctx.companyId, conversationId: ctx.conversationId, pluginId: ctx.pluginId, systemLabel: ctx.systemLabel, recordId: ctx.recordId,
     recordTitle: operation?.recordTitle ?? null, outcome, message, operationId: operation?.id ?? null, reason: ctx.reason, byAi: ctx.byAi, undoable: false, at: ctx.at,
-    fields: Object.entries(ctx.asked).map(([field, after]) => ({ field, label: label(ctx, field), after, ...(field in current ? { current: current[field] } : {}) })),
+    fields: Object.entries(ctx.asked).map(([field, after]) => cardField(ctx, field, { after, ...(field in current ? { current: current[field] } : {}) }, operation?.valueLabels)),
   }
 }
 
@@ -169,7 +179,17 @@ export function aiSummaryOf(card: PluginOperationCard): Record<string, unknown> 
     unknown: 'Result UNKNOWN: it may or may not have been written. Do NOT say it succeeded and do NOT send it again; tell the member to check.',
     observed: 'The outside system shows these values, but ACB cannot confirm it wrote them. Do NOT say it succeeded.',
   }
-  return { outcome: card.outcome, message: card.message, instruction: told[card.outcome], operationId: card.operationId, fields: card.fields }
+  // Values as the member sees them on the card (「A（高）」, not `a`); the raw value stays for the next call.
+  const fields = card.fields.map(f => ({
+    field: f.field, label: f.label,
+    ...(f.before !== undefined ? { before: f.before, beforeShown: shownValue(f.before, f.valueLabels) } : {}),
+    after: f.after, afterShown: shownValue(f.after, f.valueLabels),
+    ...(f.current !== undefined ? { current: f.current, currentShown: shownValue(f.current, f.valueLabels) } : {}),
+  }))
+  return {
+    outcome: card.outcome, message: card.message, instruction: `${told[card.outcome]} Say the values as shown (…Shown) and call the record by its title; keep ids out of the reply unless asked.`,
+    recordTitle: card.recordTitle, operationId: card.operationId, fields,
+  }
 }
 
 const OUTCOMES = new Set<PluginCardOutcome>(['applied', 'unchanged', 'refused', 'not-sent', 'conflict', 'unknown', 'observed'])
@@ -189,7 +209,13 @@ export function readPluginOperationCard(data: unknown): PluginOperationCard | un
     if (!str(x.field, 60) || !str(x.label, 100) || !isValue(x.after)) return undefined
     if (x.before !== undefined && !isValue(x.before)) return undefined
     if (x.current !== undefined && !isValue(x.current)) return undefined
-    fields.push({ field: x.field, label: x.label, after: x.after, ...(x.before !== undefined ? { before: x.before as PluginFieldValue } : {}), ...(x.current !== undefined ? { current: x.current as PluginFieldValue } : {}) })
+    const shown = x.valueLabels && typeof x.valueLabels === 'object' && !Array.isArray(x.valueLabels)
+      ? Object.entries(x.valueLabels as Record<string, unknown>).filter((e): e is [string, string] => str(e[1], 100)).slice(0, 50)
+      : []
+    fields.push({
+      field: x.field, label: x.label, after: x.after, ...(x.before !== undefined ? { before: x.before as PluginFieldValue } : {}), ...(x.current !== undefined ? { current: x.current as PluginFieldValue } : {}),
+      ...(shown.length > 0 ? { valueLabels: Object.fromEntries(shown) } : {}),
+    })
   }
   return {
     id: d.id, companyId: d.companyId, conversationId: typeof d.conversationId === 'string' ? d.conversationId : null, pluginId: d.pluginId, systemLabel: d.systemLabel,
@@ -220,6 +246,7 @@ export interface CardActionView {
 export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | 'fields'>, result: PluginOperationResult): CardActionView {
   const sys = card.systemLabel
   const labelOf = (field: string) => card.fields.find(f => f.field === field)?.label ?? field
+  const shownOf = (field: string, value: PluginFieldValue) => shownValue(value, card.fields.find(f => f.field === field)?.valueLabels)
   if (result.success) {
     const op = result.operation
     if (op.state === 'applied') return { done: true, tone: 'ok', message: `変更前の値を ${sys} に書き戻しました。` }
@@ -231,7 +258,7 @@ export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | '
   switch (result.code) {
     case 'CHANGED_OUTSIDE': return {
       done: true, tone: 'warn', message: `${sys} 側でそのあとに変わっているため、書き戻していません。`,
-      current: Object.entries(result.current ?? {}).map(([field, value]) => ({ label: labelOf(field), value })),
+      current: Object.entries(result.current ?? {}).map(([field, value]) => ({ label: labelOf(field), value: shownOf(field, value) })),
     }
     case 'NOT_UNDOABLE': return { done: true, tone: 'warn', message: result.error }
     default: return { done: false, tone: 'error', message: result.error }
@@ -245,9 +272,10 @@ export function reconcileResultView(card: Pick<PluginOperationCard, 'systemLabel
   return { done: outcome !== 'unknown', tone: outcome === 'observed' ? 'warn' : outcome === 'unknown' ? 'warn' : 'ok', message: outcomeMessage(outcome, card.systemLabel, result.operation.state) }
 }
 
-/** A field value as the card shows it. */
-export function shownValue(v: PluginFieldValue | undefined): string {
+/** A field value as the card shows it: a choice by its label when the type gives one. */
+export function shownValue(v: PluginFieldValue | undefined, valueLabels?: Record<string, string>): string {
   if (v === undefined || v === null || v === '') return '（空）'
   if (typeof v === 'boolean') return v ? 'はい' : 'いいえ'
+  if (typeof v === 'string' && valueLabels && Object.prototype.hasOwnProperty.call(valueLabels, v)) return valueLabels[v]
   return String(v)
 }

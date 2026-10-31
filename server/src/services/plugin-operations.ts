@@ -44,6 +44,7 @@ import type { PluginConnector } from './plugin-connector'
 import type { PluginImportService } from './plugin-import'
 import type { ActivePlugin, PluginService } from './plugins'
 import { recordReader } from './record-access'
+import { currentTypes } from './record-index'
 import { mayAct, type ExternalRecordWriter } from './record-engine'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from './records'
 
@@ -132,10 +133,19 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     const handle = companyData.forCompany(companyId)
     // The ledger entry of an applied write says exactly what changed (before → after).
     const entry = o.state === 'applied' && o.recordVersion !== null ? handle.records.ledger(o.recordId).find(e => e.version === o.recordVersion) : undefined
+    const row = handle.records.byIds([o.recordId])[0]
+    const fields = JSON.parse(o.fields) as Record<string, AcbValue>
+    const changes = entry ? entry.changes.map(c => ({ field: c.field, before: c.before as AcbValue, after: c.after as AcbValue })) : null
+    // How a choice's values are shown (the type's option_labels): a card and the AI say 「A（高）」, not `a`.
+    const def = row ? currentTypes(handle.records).get(row.type)?.definition : undefined
+    const valueLabels: Record<string, Record<string, string>> = {}
+    for (const f of new Set([...Object.keys(fields), ...(changes ?? []).map(c => c.field)])) {
+      const labels = def?.fields[f]?.optionLabels
+      if (labels) valueLabels[f] = { ...labels }
+    }
     return {
-      id: o.id, operation: o.operation, recordId: o.recordId, recordTitle: handle.records.byIds([o.recordId])[0]?.title ?? null,
-      state: o.state, fields: JSON.parse(o.fields) as Record<string, AcbValue>,
-      changes: entry ? entry.changes.map(c => ({ field: c.field, before: c.before as AcbValue, after: c.after as AcbValue })) : null,
+      id: o.id, operation: o.operation, recordId: o.recordId, recordTitle: row?.title ?? null,
+      state: o.state, fields, changes, valueLabels,
       actorKind: o.actorKind === 'ai' ? 'ai' : 'human', reason: o.reason,
       undoable: o.operation !== 'undo' && o.state === 'applied' && o.undoneBy === null, undoLabel: UNDO_LABEL, undoNotice: UNDO_NOTICE,
       undoOf: o.undoOf, undoneBy: o.undoneBy, recordVersion: o.recordVersion, createdAt: o.createdAt,
