@@ -144,8 +144,8 @@ describe('removing a member / changing a role leaves no rules behind', () => {
     // a private folder naming them as editor
     const scopeId = `scope-private-${userId}`
     db.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, ?, 'folder', ?, ?)`).run(scopeId, CO, `秘密-${userId}`, `repo-${userId}`, ts())
-    db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'everyone', NULL, 0, 0, ?)`).run(`r-e-${userId}`, scopeId, ts())
-    db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'user', ?, 1, 1, ?)`).run(`r-u-${userId}`, scopeId, userId, ts())
+    db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('acct-co', ?, ?, 'everyone', NULL, 0, 0, ?)`).run(`r-e-${userId}`, scopeId, ts())
+    db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('acct-co', ?, ?, 'user', ?, 1, 1, ?)`).run(`r-u-${userId}`, scopeId, userId, ts())
   }
 
   it('removal deletes every rule naming them, so re-adding restores nothing', async () => {

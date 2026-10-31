@@ -15,8 +15,7 @@
  *
  * Tables without a company (the companies registry, memberships, the unused
  * ssh_keys) are the control plane and listed in CONTROL_PLANE_TABLES. Every
- * other table must have a company_id column (TABLES_WITHOUT_COMPANY_ID lists
- * the two still missing it).
+ * other table must have a company_id column.
  *
  * A table behind the handle (HANDLE_TABLES) is written only by its handle
  * modules, and the handle repositories are built only by the handle source
@@ -37,18 +36,15 @@ const CONTROL_PLANE_TABLES: Record<string, string> = {
 /** Better Auth's tables in auth.sqlite: accounts and sessions, shared by every company by design. */
 const AUTH_TABLES = new Set(['user', 'session', 'account', 'verification'])
 
-const TABLES_WITHOUT_COMPANY_ID: Record<string, string> = {
-  scope_rules: 'company only through scope_id → scopes; company_id is added in a later PR',
-  department_managers: 'company only through department_id → departments; company_id is added in a later PR',
-}
 
 /** Tables behind the company handle → the modules that write them (each statement limited to its company). */
 const HANDLE_TABLES: Record<string, string[]> = {
   departments: ['adapters/sqlite/departments.ts'],
   invitations: ['adapters/sqlite/invitations.ts'],
   scopes: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
-  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
-  department_managers: ['adapters/sqlite/permission-store.ts'],
+  // db/index.ts: the company_id backfill of rows from before the column (MIGRATION below).
+  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts', 'db/index.ts'],
+  department_managers: ['adapters/sqlite/permission-store.ts', 'db/index.ts'],
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
@@ -58,6 +54,7 @@ const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationReposit
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'
+const MIGRATION = 'startup migration (migrateRuleAndManagerCompanies): only rows without company_id, i.e. from before the column — gives each the company of its parent, or removes it when the parent is gone (it belongs to no company)'
 const BY_TOKEN = 'the company is not known before the token: this lookup is what finds it (control plane)'
 
 /** file → statements without a company condition (normalized whitespace; each occurrence listed). */
@@ -77,8 +74,11 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['SELECT * FROM broker_tokens WHERE token_hash = ?', BY_TOKEN],
     ['DELETE FROM broker_tokens WHERE expires_at < ?', 'server-wide cleanup of expired tokens (no row is read); to become per company'],
   ],
-  'adapters/sqlite/permission-store.ts': [
-    ['DELETE FROM department_managers WHERE department_id NOT IN (SELECT id FROM departments)', 'startup repair: manager rows whose department is gone belong to no company (department_managers gets company_id in a later PR)'],
+  'db/index.ts': [
+    ['DELETE FROM scope_rules WHERE company_id IS NULL AND scope_id NOT IN (SELECT id FROM scopes)', MIGRATION],
+    ['UPDATE scope_rules SET company_id = (SELECT s.company_id FROM scopes s WHERE s.id = scope_rules.scope_id) WHERE company_id IS NULL', MIGRATION],
+    ['DELETE FROM department_managers WHERE company_id IS NULL AND department_id NOT IN (SELECT id FROM departments)', MIGRATION],
+    ['UPDATE department_managers SET company_id = (SELECT d.company_id FROM departments d WHERE d.id = department_managers.department_id) WHERE company_id IS NULL', MIGRATION],
   ],
   'adapters/sqlite/push-rejections.ts': [
     ["SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}", BUILT_WHERE],
@@ -145,10 +145,10 @@ describe('company-scoped SQL (案 A)', () => {
     expect(allStatements.reduce((n, f) => n + f.sql.length, 0)).toBeGreaterThan(100)
   })
 
-  it('every table but the control plane has a company_id column (except the listed ones, still to come)', () => {
+  it('every table but the control plane has a company_id column', () => {
     for (const t of Object.keys(CONTROL_PLANE_TABLES)) expect(tables.has(t), `control-plane table ${t} is not in the schema`).toBe(true)
     const missing = [...companyTables].filter(t => !tables.get(t)!.has('company_id')).sort()
-    expect(missing).toEqual(Object.keys(TABLES_WITHOUT_COMPANY_ID).sort())
+    expect(missing).toEqual([])
   })
 
   it('statements name only known tables', () => {

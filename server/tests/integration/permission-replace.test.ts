@@ -122,7 +122,7 @@ beforeEach(() => {
   const root = db.prepare(`SELECT id FROM scopes WHERE company_id = ? AND path = ''`).get(CO) as { id: string }
   db.prepare(`DELETE FROM scope_rules WHERE scope_id IN (SELECT id FROM scopes WHERE company_id = ?)`).run(CO)
   db.prepare(`DELETE FROM scopes WHERE company_id = ? AND kind = 'folder'`).run(CO)
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'everyone', NULL, 1, 1, ?)`)
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('rp-co', ?, ?, 'everyone', NULL, 1, 1, ?)`)
     .run(`root-${Math.random()}`, root.id, ts())
 })
 

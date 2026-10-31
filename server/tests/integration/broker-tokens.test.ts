@@ -97,7 +97,7 @@ beforeAll(async () => {
   store.ensureDepartmentScope(db, CO, 'bt-d-sales', '営業部')
   const scope = db.prepare('SELECT id FROM scopes WHERE company_id = ? AND path = ?').get(CO, '営業部').id
   for (const u of ['bt-sales', 'bt-leaver']) {
-    db.prepare('INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)').run(`r-${u}`, scope, 'user', u, ts())
+    db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('bt-co', ?, ?, ?, ?, 1, 1, ?)`).run(`r-${u}`, scope, 'user', u, ts())
   }
 
   const { Hono } = await import('hono')

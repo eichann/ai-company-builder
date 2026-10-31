@@ -296,7 +296,7 @@ async function seed(): Promise<World> {
   const dept = (folder: string) => (db.prepare('SELECT id FROM departments WHERE company_id = ? AND folder = ?').get(co, folder) as { id: string }).id
   const sales = dept('営業部')
   const accounting = dept('経理部')
-  db.prepare('INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)').run(sales, USER.manager, new Date().toISOString())
+  db.prepare(`INSERT INTO department_managers (company_id, department_id, user_id, created_at) VALUES ('${co}', ?, ?, ?)`).run(sales, USER.manager, new Date().toISOString())
 
   const call = async (role: Role, method: string, path: string, body?: unknown) => {
     const headers: Record<string, string> = { ...headersFor(role), 'Content-Type': 'application/json' }

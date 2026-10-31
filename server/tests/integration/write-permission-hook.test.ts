@@ -102,7 +102,7 @@ function freshClone(): string {
 
 function addRule(scopeId: string, subjectType: 'everyone' | 'role' | 'user', subjectId: string | null, canRead: boolean, canWrite: boolean): string {
   const id = `rule-${Math.random().toString(36).slice(2)}`
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)`)
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('writeperm', ?, ?, ?, ?, ?, ?, ?)`)
     .run(id, scopeId, subjectType, subjectId, canRead ? 1 : 0, canWrite ? 1 : 0, new Date().toISOString())
   return id
 }
@@ -143,7 +143,7 @@ beforeAll(async () => {
     .run('d-sales', companyId, '営業', 'sales', now, now)
   ensureDepartmentScope(db, companyId, 'd-sales', 'sales')
   salesScopeId = (db.prepare(`SELECT id FROM scopes WHERE company_id = ? AND path = 'sales'`).get(companyId) as { id: string }).id
-  db.prepare(`INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)`).run('d-sales', 'u-manager', now)
+  db.prepare(`INSERT INTO department_managers (company_id, department_id, user_id, created_at) VALUES ('writeperm', ?, ?, ?)`).run('d-sales', 'u-manager', now)
 
   bare = join(process.env.REPOS_DIR!, `${companyId}.git`)
   git(['init', '-q', '--bare', '--initial-branch=main', bare])

@@ -62,7 +62,7 @@ beforeEach(() => {
   // A private folder inside 営業部 that only `member` may read.
   conn.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('r1', ?, 's-secret', ?)`).run(CO, ts)
   conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('s-secret', ?, '営業部/秘密', 'folder', 'r1', ?)`).run(CO, ts)
-  conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ru1', 's-secret', 'everyone', NULL, 0, 0, ?), ('ru2', 's-secret', 'user', 'member', 1, 1, ?)`).run(ts, ts)
+  conn.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('co', 'ru1', 's-secret', 'everyone', NULL, 0, 0, ?), ('co', 'ru2', 's-secret', 'user', 'member', 1, 1, ?)`).run(ts, ts)
 
   service = createAgentEventService({
     agentEvents: sqliteAgentEventRepository(conn),
