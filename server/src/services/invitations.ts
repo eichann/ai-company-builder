@@ -1,6 +1,20 @@
 /**
- * Invitation links: created by owners/admins, single-use (the sign-up side is
- * lib/invitation-signup.ts), accepted by a signed-in account.
+ * Invitation links: created by owners/admins, single-use, accepted by a
+ * signed-in account.
+ *
+ * After the first account exists, sign-up (POST /api/auth/sign-up/email) is
+ * allowed only with a valid invitation token in X-Invitation-Token, and the
+ * invitee then accepts it (POST /api/invitations/:token/accept) to join.
+ * Before 2026-10-22 the sign-up only *checked* the token, so one link let
+ * anyone who saw it create any number of accounts until someone accepted it.
+ *
+ * Now the sign-up CLAIMS the invitation atomically (signup_claimed_at) before
+ * the account is created — a second sign-up with the same token is refused —
+ * and records the new account (signup_user_id). If the sign-up fails, the
+ * claim is released. Accepting is a compare-and-set on used_by, and a
+ * claimed invitation can only be accepted by the account that claimed it
+ * (an existing member accepting a link they were sent never signs up, so
+ * unclaimed invitations stay acceptable by any signed-in user, once).
  */
 import type { AccountDirectory, AccountSummary } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
@@ -98,6 +112,35 @@ export function createInvitationService(deps: InvitationServiceDeps) {
 
     /** The public check behind the invitation page. */
     check: usable,
+
+    /**
+     * Run a sign-up that carries an invitation token: claim → sign up → record
+     * the account (or release the claim when the sign-up did not succeed).
+     * Returns null when the token cannot be claimed (the caller answers 403).
+     */
+    async signUp(token: string, signUp: () => Promise<Response>): Promise<Response | null> {
+      const id = invitations.claimForSignup(token)
+      if (!id) return null
+      let res: Response
+      try {
+        res = await signUp()
+      } catch (err) {
+        invitations.releaseSignupClaim(id)
+        throw err
+      }
+      if (!res.ok) {
+        invitations.releaseSignupClaim(id)
+        return res
+      }
+      try {
+        const body = await res.clone().json() as { user?: { id?: unknown } } | null
+        if (typeof body?.user?.id === 'string') invitations.recordSignupUser(id, body.user.id)
+      } catch {
+        // Not JSON: the claim stays (the link cannot sign anyone else up); any
+        // signed-in user may still accept it once.
+      }
+      return res
+    },
 
     /**
      * Join with the link. Using the invitation is a compare-and-set (once,

@@ -25,20 +25,13 @@
  * Writes are throttled per (kind, user, company) to one per THROTTLE_MS unless
  * the reported build/platform changed, so a sync storm costs at most a few
  * SQLite writes per member per minute.
+ *
+ * This module holds the pure parts (headers, the receive-pack result); the
+ * recording, the throttle and the build check are services/client-activity.ts,
+ * the table is adapters/sqlite/client-activity.ts.
  */
-import { db, now } from '../db'
-import { compareClientVersions, parseClientVersion, type ParsedClientVersion } from './client-version'
-import type { ClientActivityRow, OutdatedMember } from '../ports/client-activity'
-
 export const CLIENT_VERSION_HEADER = 'X-ACB-Client-Version'
 export const CLIENT_PLATFORM_HEADER = 'X-ACB-Client-Platform'
-
-export const THROTTLE_MS = 60_000
-
-/** seen: any identified request; fetch: upload-pack completed; push: push accepted. */
-export type ActivityKind = 'seen' | 'fetch' | 'push'
-
-export type { ClientActivityRow }
 
 /**
  * Header values are client-controlled: keep them short and printable. Returns
@@ -55,166 +48,6 @@ export function clientIdentityFromHeaders(header: (name: string) => string | und
     version: sanitizeClientHeader(header(CLIENT_VERSION_HEADER), 128),
     platform: sanitizeClientHeader(header(CLIENT_PLATFORM_HEADER), 64),
   }
-}
-
-const lastWrites = new Map<string, { at: number; version: string | null; platform: string | null }>()
-
-/** Test hook: forget throttle state. */
-export function resetClientActivityThrottle(): void {
-  lastWrites.clear()
-}
-
-/**
- * Record activity. Returns true when a row was written, false when throttled.
- * Never throws: tracking must not break the request it observes.
- */
-export function recordClientActivity(input: {
-  userId: string
-  companyId: string
-  kind: ActivityKind
-  version: string | null
-  platform: string | null
-  nowMs?: number
-}): boolean {
-  const { userId, companyId, kind, version, platform } = input
-  const nowMs = input.nowMs ?? Date.now()
-  const key = `${kind}\u0000${userId}\u0000${companyId}`
-  const prev = lastWrites.get(key)
-  if (prev && nowMs - prev.at < THROTTLE_MS && prev.version === version && prev.platform === platform) {
-    return false
-  }
-  try {
-    const at = input.nowMs !== undefined ? new Date(nowMs).toISOString() : now()
-    db.prepare(`
-      INSERT INTO client_activity (
-        user_id, company_id, client_version, client_platform,
-        last_seen_at, last_fetch_at, last_push_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(user_id, company_id) DO UPDATE SET
-        client_version = excluded.client_version,
-        client_platform = excluded.client_platform,
-        last_seen_at = excluded.last_seen_at,
-        last_fetch_at = COALESCE(excluded.last_fetch_at, client_activity.last_fetch_at),
-        last_push_at = COALESCE(excluded.last_push_at, client_activity.last_push_at),
-        updated_at = excluded.updated_at
-    `).run(
-      userId, companyId, version, platform,
-      at,
-      kind === 'fetch' ? at : null,
-      kind === 'push' ? at : null,
-      at,
-    )
-    lastWrites.set(key, { at: nowMs, version, platform })
-    return true
-  } catch (err) {
-    console.error('[client-activity] Failed to record activity:', err)
-    return false
-  }
-}
-
-export function getClientActivityForCompany(companyId: string): Map<string, ClientActivityRow> {
-  const rows = db.prepare('SELECT * FROM client_activity WHERE company_id = ?').all(companyId) as ClientActivityRow[]
-  return new Map(rows.map(r => [r.user_id, r]))
-}
-
-export type { OutdatedMember }
-
-function latest(...values: Array<string | null>): string | null {
-  let best: string | null = null
-  for (const v of values) if (v && (!best || v > best)) best = v
-  return best
-}
-
-export interface MemberBuildStatus {
-  userId: string
-  role: string
-  clientVersion: string | null
-  clientPlatform: string | null
-  /** Most recent of last_seen_at / last_fetch_at / last_push_at. */
-  lastActiveAt: string | null
-}
-
-export interface ActiveMembersBuildCheck {
-  /** True when no active member is outdated or on an unknown build. */
-  ok: boolean
-  minimum: string
-  /** Members active at or after this instant count as active. */
-  activeSince: string
-  /** Active, on a parseable build older than `minimum`. */
-  outdated: MemberBuildStatus[]
-  /** Active, but the build is unknown (no header, or unparseable). Blocks. */
-  unknown: MemberBuildStatus[]
-  /** Active and on `minimum` or newer. */
-  current: MemberBuildStatus[]
-  /**
-   * Members with no activity within the window (including never recorded).
-   * They do NOT block: someone who has not synced for N days is treated as
-   * inactive. Note that right after this table was introduced every member is
-   * "never recorded"; a caller gating a dangerous operation should not rely on
-   * this check until tracking has run for at least `activeWithinDays`.
-   */
-  inactive: MemberBuildStatus[]
-}
-
-/**
- * Are all active members of `companyId` on build `minimum` or newer?
- *
- * "Active" = any recorded activity (API, fetch or push) within the last
- * `activeWithinDays` days. Only current members count (removed members' rows
- * are ignored). Builds compare per compareClientVersions in client-version.ts
- * (semver first, commit date as tiebreak). Fails closed: an active member whose
- * build is unknown makes `ok` false.
- *
- * Limitation: rows are keyed by user + company, so a member with two devices is
- * represented by whichever device was heard from last.
- */
-export function activeMembersBuildCheck(
-  companyId: string,
-  minimum: string,
-  options: { activeWithinDays?: number; now?: Date } = {},
-): ActiveMembersBuildCheck {
-  const min: ParsedClientVersion | null = parseClientVersion(minimum)
-  if (!min) throw new Error(`Invalid minimum client version: ${minimum}`)
-  const days = options.activeWithinDays ?? 14
-  const nowDate = options.now ?? new Date()
-  const activeSince = new Date(nowDate.getTime() - days * 24 * 60 * 60 * 1000).toISOString()
-
-  const members = db.prepare('SELECT user_id, role FROM memberships WHERE company_id = ?')
-    .all(companyId) as Array<{ user_id: string; role: string }>
-  const activity = getClientActivityForCompany(companyId)
-
-  const result: ActiveMembersBuildCheck = {
-    ok: true, minimum, activeSince, outdated: [], unknown: [], current: [], inactive: [],
-  }
-  for (const m of members) {
-    const row = activity.get(m.user_id)
-    const status: MemberBuildStatus = {
-      userId: m.user_id,
-      role: m.role,
-      clientVersion: row?.client_version ?? null,
-      clientPlatform: row?.client_platform ?? null,
-      lastActiveAt: row ? latest(row.last_seen_at, row.last_fetch_at, row.last_push_at) : null,
-    }
-    if (!status.lastActiveAt || status.lastActiveAt < activeSince) {
-      result.inactive.push(status)
-      continue
-    }
-    const parsed = parseClientVersion(status.clientVersion)
-    if (!parsed) result.unknown.push(status)
-    else if (compareClientVersions(parsed, min) < 0) result.outdated.push(status)
-    else result.current.push(status)
-  }
-  result.ok = result.outdated.length === 0 && result.unknown.length === 0
-  return result
-}
-
-/** Boolean shorthand for activeMembersBuildCheck(...).ok. */
-export function areActiveMembersOnBuild(
-  companyId: string,
-  minimum: string,
-  options: { activeWithinDays?: number; now?: Date } = {},
-): boolean {
-  return activeMembersBuildCheck(companyId, minimum, options).ok
 }
 
 // ----------------------------------------------------------------------------

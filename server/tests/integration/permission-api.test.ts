@@ -40,7 +40,7 @@ import { departmentsRoute } from '../../src/routes/departments'
 import { permissionsRoute } from '../../src/routes/permissions'
 import { configureBareRepo } from '../../src/routes/git'
 import { gitHttpRoute } from '../../src/routes/git-http'
-import { resetClientActivityThrottle } from '../../src/lib/client-activity'
+import { services } from '../../src/composition'
 import { replaceDepartmentManagers } from '../../src/lib/permission-store'
 import { parseHookRejections, sidebandMessages } from '../../src/lib/push-rejections'
 
@@ -421,7 +421,7 @@ describe('git-http records rejected pushes', () => {
     rmSync(workDir, { recursive: true, force: true })
   })
 
-  beforeEach(() => resetClientActivityThrottle())
+  beforeEach(() => services.clientActivity.resetThrottleForTests())
 
   it('records nothing for an accepted push', async () => {
     writeFile('README.md', 'hi\n')

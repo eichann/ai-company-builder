@@ -26,8 +26,16 @@ export interface OutdatedMember {
   lastSeenAt: string | null
 }
 
-/** Which app build each member last used, and when they last synced (lib/client-activity.ts). */
+/** seen: any identified request; fetch: upload-pack completed; push: push accepted. */
+export type ActivityKind = 'seen' | 'fetch' | 'push'
+
+/** Which app build each member last used, and when they last synced (services/client-activity.ts). */
 export interface ClientActivityRepository {
   /** The company's rows, by user id. */
   forCompany(companyId: string): Map<string, ClientActivityRow>
+  /**
+   * Upsert the member's row: build, platform and last_seen_at = `at`, plus
+   * last_fetch_at / last_push_at for those kinds (other columns kept).
+   */
+  record(input: { userId: string; companyId: string; kind: ActivityKind; version: string | null; platform: string | null; at: string }): void
 }

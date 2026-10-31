@@ -7,8 +7,6 @@ import { Hono } from 'hono'
 import { cors } from 'hono/cors'
 import { logger } from 'hono/logger'
 import { auth, authDb } from './lib/auth'
-import { db } from './db'
-import { signUpWithInvitation } from './lib/invitation-signup'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
 import { departmentsRoute } from './routes/departments'
@@ -20,13 +18,14 @@ import { invitationsRoute } from './routes/invitations'
 import { permissionsRoute } from './routes/permissions'
 import { permissionRulesRoute } from './routes/permission-rules'
 import { privateFoldersRoute } from './routes/private-folders'
-import { clientActivityMiddleware } from './lib/client-activity-middleware'
+import { clientActivityMiddleware } from './routes/client-activity-middleware'
 import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
 import { redactBrokerQuery } from './lib/log-redaction'
+import { services } from './composition'
 
 export const app = new Hono()
 
@@ -73,10 +72,10 @@ app.on(['GET', 'POST'], '/api/auth/**', async (c) => {
 
     if (result.count > 0) {
       // Allow signup only with valid invitation token
-      // (single-use: the sign-up claims it — lib/invitation-signup.ts)
+      // (single-use: the sign-up claims it — services/invitations.ts)
       const invitationToken = c.req.header('X-Invitation-Token')
       if (invitationToken) {
-        const res = await signUpWithInvitation(db, invitationToken, () => auth.handler(c.req.raw))
+        const res = await services.invitations.signUp(invitationToken, () => auth.handler(c.req.raw))
         if (res) return res
       }
       return c.json({ error: 'Signup is disabled. Please use an invitation link.' }, 403)

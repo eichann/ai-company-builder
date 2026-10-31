@@ -1,6 +1,5 @@
 import type Database from 'better-sqlite3'
 import type { InvitationRepository, InvitationWithCompany } from '../../ports/invitations'
-import { consumeInvitation } from '../../lib/invitation-signup'
 
 export function sqliteInvitationRepository(conn: Database.Database): InvitationRepository {
   return {
@@ -40,11 +39,33 @@ export function sqliteInvitationRepository(conn: Database.Database): InvitationR
       conn.prepare('DELETE FROM invitations WHERE id = ?').run(invitationId)
     },
 
-    // The sign-up side of single-use links lives in lib/invitation-signup.ts
-    // (it runs before an account exists, from src/index.ts); the
-    // compare-and-set is shared with it.
+    // Single-use links (services/invitations.ts): a sign-up claims the link
+    // before the account exists; accepting is a compare-and-set that a link
+    // claimed by another account's sign-up refuses.
     consume(invitationId, userId) {
-      return consumeInvitation(conn, invitationId, userId)
+      const now = new Date()
+      return conn.prepare(`
+        UPDATE invitations SET used_by = ?, used_at = ?
+        WHERE id = ? AND used_by IS NULL AND (signup_user_id IS NULL OR signup_user_id = ?)
+      `).run(userId, now.toISOString(), invitationId, userId).changes === 1
+    },
+
+    claimForSignup(token) {
+      const now = new Date()
+      const row = conn.prepare(`
+        UPDATE invitations SET signup_claimed_at = ?
+        WHERE token = ? AND used_by IS NULL AND signup_claimed_at IS NULL AND expires_at > ?
+        RETURNING id
+      `).get(now.toISOString(), token, now.toISOString()) as { id: string } | undefined
+      return row?.id ?? null
+    },
+
+    releaseSignupClaim(invitationId) {
+      conn.prepare(`UPDATE invitations SET signup_claimed_at = NULL, signup_user_id = NULL WHERE id = ? AND used_by IS NULL`).run(invitationId)
+    },
+
+    recordSignupUser(invitationId, userId) {
+      conn.prepare(`UPDATE invitations SET signup_user_id = ? WHERE id = ?`).run(userId, invitationId)
     },
   }
 }

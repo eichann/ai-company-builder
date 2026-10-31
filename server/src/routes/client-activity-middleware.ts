@@ -1,7 +1,7 @@
 import type { MiddlewareHandler } from 'hono'
-import { db } from '../db'
-import { getUserFromRequest } from './auth'
-import { CLIENT_VERSION_HEADER, clientIdentityFromHeaders, recordClientActivity } from './client-activity'
+import { getUserFromRequest } from '../lib/auth'
+import { CLIENT_VERSION_HEADER, clientIdentityFromHeaders } from '../lib/client-activity'
+import { services } from '../composition'
 
 // API paths that carry a company context.
 const COMPANY_PATHS = [
@@ -11,7 +11,7 @@ const COMPANY_PATHS = [
 
 export function companyIdFromApiPath(path: string): string | null {
   for (const re of COMPANY_PATHS) {
-    const m = re.exec(path)
+    const m = path.match(re)
     if (m) {
       try {
         return decodeURIComponent(m[1])
@@ -38,10 +38,9 @@ export const clientActivityMiddleware: MiddlewareHandler = async (c, next) => {
     if (!companyId) return
     const user = await getUserFromRequest(c.req.raw)
     if (!user) return
-    const member = db.prepare('SELECT 1 FROM memberships WHERE user_id = ? AND company_id = ?').get(user.id, companyId)
-    if (!member) return
+    if (!services.access.memberOf(companyId, user.id)) return
     const { version, platform } = clientIdentityFromHeaders((n) => c.req.header(n))
-    recordClientActivity({ userId: user.id, companyId, kind: 'seen', version, platform })
+    services.clientActivity.record({ userId: user.id, companyId, kind: 'seen', version, platform })
   } catch (err) {
     console.error('[client-activity] middleware failed:', err)
   }

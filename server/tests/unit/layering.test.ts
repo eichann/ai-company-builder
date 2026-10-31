@@ -11,7 +11,10 @@
  *   an adapter.
  * - adapters/ are imported only by the composition root, operator commands
  *   in cli/ (each its own root) and tests.
- * - routes/ that have moved to services run no SQL themselves.
+ * - lib/ holds helpers and git / file-system infrastructure, not storage: it
+ *   does not import the database (src/db, better-sqlite3), except the modules
+ *   in LIB_WITH_DATABASE, each with its reason.
+ * - routes/ run no SQL themselves (git-http.ts is the one exception).
  */
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'fs'
@@ -41,7 +44,19 @@ function target(file: string, spec: string): string {
 }
 
 /** Pure lib modules a service may use (no I/O, no database). */
-const PURE_LIB = new Set(['lib/client-version', 'lib/write-loss', 'lib/overview'])
+const PURE_LIB = new Set(['lib/client-version', 'lib/write-loss', 'lib/overview', 'lib/push-rejections'])
+
+/**
+ * lib/ modules that still reach the database, with the reason. A module
+ * leaves this list when its storage moves behind a port (adapters/sqlite).
+ */
+const LIB_WITH_DATABASE: Record<string, string> = {
+  'lib/auth.ts': 'Better Auth owns auth.sqlite: its one connection (authDb) is built with Better Auth here, and every route\'s sign-in check (getUserFromRequest) lives next to it',
+  'lib/permission-store.ts': 'scopes and rules; moving to adapters/sqlite (next PRs)',
+  'lib/private-folders.ts': 'private folder rows next to their scope repositories; moving to adapters (next PRs)',
+  'lib/company-files.ts': 'reads the scopes to build a member\'s view; moving to adapters (next PRs)',
+  'lib/orphaned-scopes.ts': 'reads the scopes against the shared branch; moving to adapters (next PRs)',
+}
 
 describe('server layering', () => {
   it('ports import only other ports and shared/core types', () => {
@@ -75,8 +90,26 @@ describe('server layering', () => {
     }
   })
 
-  // Grows with each route moved onto services.
-  const ROUTES_WITHOUT_SQL = ['companies.ts', 'departments.ts', 'git.ts', 'invitations.ts', 'permission-rules.ts', 'permissions.ts', 'private-folders.ts', 'company-files.ts', 'folder-sizes.ts', 'agent-events.ts', 'key-broker.ts']
+  it('lib/ does not import the database (except the listed modules)', () => {
+    const seen: string[] = []
+    for (const file of tsFiles(join(SRC, 'lib'))) {
+      const rel = relative(SRC, file)
+      const touchesDb = importsOf(file).some(spec => /^db(\/|$)|^better-sqlite3$/.test(target(file, spec)))
+      if (!touchesDb) continue
+      seen.push(rel)
+      expect(LIB_WITH_DATABASE, `${rel} imports the database: put its storage behind a port (adapters/sqlite)`).toHaveProperty([rel])
+    }
+    expect(seen.sort(), 'a listed module no longer imports the database: remove it from LIB_WITH_DATABASE')
+      .toEqual(Object.keys(LIB_WITH_DATABASE).sort())
+  })
+
+  /**
+   * Every route but git-http.ts: it builds the push checker's snapshot and
+   * serves private folders' repositories with the connection itself (owner's
+   * decision: an intentional exception, kept in one file).
+   */
+  const ROUTES_WITH_SQL = new Set(['git-http.ts'])
+  const ROUTES_WITHOUT_SQL = readdirSync(join(SRC, 'routes')).filter(f => f.endsWith('.ts') && !ROUTES_WITH_SQL.has(f))
 
   for (const name of ROUTES_WITHOUT_SQL) {
     it(`routes/${name} runs no SQL and does not touch the database connection`, () => {

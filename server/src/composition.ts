@@ -36,6 +36,8 @@ import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
 import { createInvitationService } from './services/invitations'
+import { createClientActivityService } from './services/client-activity'
+import { createPushRejectionRecorder } from './services/push-rejections'
 import { createDepartmentService } from './services/departments'
 import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
@@ -84,8 +86,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     departments: sqliteDepartmentRepository(conn),
     scopes: sqliteScopeRepository(conn),
     privateFolders: sqlitePrivateFolderRepository(conn),
-    clientActivity: sqliteClientActivityRepository(),
-    pushRejections: sqlitePushRejectionRepository(),
+    clientActivity: sqliteClientActivityRepository(conn),
+    pushRejections: sqlitePushRejectionRepository(conn),
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     agentSandbox: sqliteAgentSandboxRepository(conn),
@@ -161,6 +163,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       companyStopped: agentStops.companyStopped,
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
+    clientActivity: createClientActivityService({ ...repos, ...shared }),
+    pushRejections: createPushRejectionRecorder(repos),
     companyFiles: companyFileViews(conn),
     accounts: shared.accounts,
     repoStore,
