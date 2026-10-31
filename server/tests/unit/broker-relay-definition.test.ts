@@ -18,8 +18,8 @@ import {
 
 describe('generic relay service ids', () => {
   it('lower-case words joined by single hyphens; never a built-in; no "_" (one ACB_<ID>_* name per service)', () => {
-    for (const ok of ['hubspot', 'case-master', 'crm2', 'a1']) expect(isValidRelayServiceId(ok), ok).toBe(true)
-    for (const bad of ['gemini', 'openai', 'anthropic', 'case_master', 'Case', '1crm', '-crm', 'crm-', 'a--b', 'x', 'a'.repeat(33), 'crm.v2', 'クラウド', '']) {
+    for (const ok of ['kintone', 'case-master', 'crm2', 'a1']) expect(isValidRelayServiceId(ok), ok).toBe(true)
+    for (const bad of ['gemini', 'openai', 'anthropic', 'hubspot', 'case_master', 'Case', '1crm', '-crm', 'crm-', 'a--b', 'x', 'a'.repeat(33), 'crm.v2', 'クラウド', '']) {
       expect(isValidRelayServiceId(bad), bad).toBe(false)
     }
   })
