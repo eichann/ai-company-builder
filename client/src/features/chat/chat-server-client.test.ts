@@ -88,7 +88,7 @@ test('rate limits: GET ?provider=<agent>; the body is returned as parsed (no sta
 test('generate title: POST the transcript, agent and model; an error status is null', async () => {
   const answers: Array<() => Response> = [() => json({ title: ' 見積書 ' }), () => json({ error: 'Generation failed' }, 500)]
   const { calls, client } = fakeServer(() => answers.shift()!())
-  const request = { messages: [{ role: 'user' as const, content: '見積書' }, { role: 'assistant' as const, content: 'はい' }], authMode: 'claude-code' as const, modelId: 'opus-5-5' }
+  const request = { messages: [{ role: 'user' as const, content: '見積書' }, { role: 'assistant' as const, content: 'はい' }], authMode: 'claude-code' as const, modelId: 'model-a' }
   assert.deepEqual(await client.generateTitle(request), { title: ' 見積書 ' })
   assert.equal(await client.generateTitle(request), null)
   assert.deepEqual(calls[0], { url: 'http://127.0.0.1:3301/api/generate-title', method: 'POST', headers: JSON_AUTH, body: request })
