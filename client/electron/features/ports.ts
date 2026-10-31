@@ -35,3 +35,11 @@ export interface DesktopShell {
   /** Start a native drag of a (validated) file out of the window that sent the request. */
   startDrag(sender: IpcSender, file: string): void
 }
+
+/** The app quitting, in the order the hooks were added. */
+export interface AppLifecycle {
+  /** Before the windows close: stop background work. */
+  beforeQuit(fn: () => void): void
+  /** The last moment: write what is still pending, synchronously. */
+  willQuit(fn: () => void): void
+}

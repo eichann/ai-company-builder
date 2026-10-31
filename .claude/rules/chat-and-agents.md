@@ -337,7 +337,7 @@ the server: `agent-events.md` ("Sending from the app").
 - Limits: a call Claude's auto-mode classifier refuses without the PermissionDenied hook ends as
   `unfinished` (decision `policy-default`); Codex's sandbox decisions are not visible beyond the
   item status; titles, one-shots and hand-off are not logged.
-- Recorder `electron/services/agent-events.ts` (created in `main.ts`, injected into
+- Recorder `electron/services/agent-events.ts` (created in `features/agent-control/wire.ts`, injected into
   `features/chat/server-config.ts`): a bounded ring (500) and one `[agent-events]` console line
   per event; its sink `services/agent-event-sender.ts` sends to the server (`agent-events.md`).
 - **Turn abort handles** (`chat-turns.ts` `track` / `abort(filter, reason)` / `abortAll`, returned

@@ -86,7 +86,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 
 ## The app (main process)
 
-- `services/agent-push-channel.ts` (created in `main.ts`): one SSE connection per watched
+- `services/agent-push-channel.ts` (created in `features/agent-control/wire.ts`): one SSE connection per watched
   company (≤ 5; a company is watched from its first chat turn), opened by main with `fetch`,
   the session in the Cookie header, `X-ACB-Agent-Stop: 1`, `redirect: 'error'`. Its **only
   effect** is `refresh(companyId, version)` → main refetches `/me/agent-policy` unless that

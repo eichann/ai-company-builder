@@ -26,7 +26,7 @@ The app records one event per tool call (`chat-and-agents.md`, "AI action log"),
 
 ## Sending from the app (`client/electron/services/agent-event-sender.ts`)
 
-The recorder's sink, created in `main.ts` (tests `client/tests/agent-event-sender.test.ts`, fake
+The recorder's sink, created in `features/agent-control/wire.ts` (tests `client/tests/agent-event-sender.test.ts`, fake
 clock + fake fetch).
 
 - **Whose events**: `services/session.ts` `userId()` is the account /api/me confirmed for the

@@ -1,4 +1,4 @@
-// The sync button (electron/sync/git-sync.ts, built in main.ts with the
+// The sync button (electron/sync/git-sync.ts, built in ./wire.ts with the
 // app's git, dialogs and server API), automatic sync while the app is open
 // (electron/sync/auto-sync.ts), and the per-folder write access sync
 // refreshes (閲覧のみ badges, the chat write guard).

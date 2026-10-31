@@ -8,7 +8,9 @@
 // status and asks only to open a file of its own company folder in the main
 // window's editor. Nothing else is accepted from either.
 
+import fs from 'fs'
 import path from 'path'
+import { notDownloadedFolderFor } from '../../sync/not-downloaded'
 import {
   CLOSE_WHILE_WORKING_DETAIL, CLOSE_WHILE_WORKING_MESSAGE, OPEN_FILE_NO_MAIN, OPEN_FILE_NOT_FOUND, OPEN_FILE_OUTSIDE,
   closeStopsTheAI, openFileNotDownloaded, parseOpenRequest, parseWindowStatus, validSessionId,
@@ -44,13 +46,19 @@ export interface ChatWindowsDeps {
   mainWindow: WindowPort
   /** Brings the main window to the front; false when there is none. */
   focusMainWindow: () => boolean
-  /** What `chatWindow:openFile` asks of the disk (sync/not-downloaded.ts and a stat in main.ts). */
+  /** What `chatWindow:openFile` asks of the disk (`diskFiles` in the app). */
   files: {
     /** The folder (company-relative) left out on this computer that holds the path, or null. */
     notDownloadedFolder(absPath: string): string | null
     isFile(absPath: string): boolean
   }
   log?: Pick<Console, 'warn'>
+}
+
+/** `files` on this computer's disk. */
+export const diskFiles: ChatWindowsDeps['files'] = {
+  notDownloadedFolder: notDownloadedFolderFor,
+  isFile: filePath => { try { return fs.statSync(filePath).isFile() } catch { return false } },
 }
 
 const MAX_FILE_PATH = 4096
