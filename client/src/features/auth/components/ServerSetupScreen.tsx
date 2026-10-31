@@ -7,7 +7,7 @@ import {
   CheckCircle,
   Buildings,
 } from '@phosphor-icons/react'
-import { setServerUrl, validateServerUrl } from '../../features/auth/api'
+import { setServerUrl, validateServerUrl } from '../api'
 
 interface Props {
   onComplete: () => void

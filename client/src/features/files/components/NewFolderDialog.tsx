@@ -9,7 +9,7 @@
 // Only people create private folders, here: the chat has no tool for it.
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Check, Globe, LockSimple, MagnifyingGlass, Plus, SpinnerGap, X } from '@phosphor-icons/react'
-import { Button, Callout } from '../../../components/settings/ui'
+import { Button, Callout } from '../../../shared/ui/primitives'
 import {
   NOT_ALLOWED_REASON,
   OFFLINE_REASON,

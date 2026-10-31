@@ -19,8 +19,8 @@ import {
 } from '@phosphor-icons/react'
 import { memo } from 'react'
 import { useTranslation } from 'react-i18next'
-import type { DepartmentConfig } from '../../types'
-import { COMPANY_TAB_ID } from '../../shared/lib/departments'
+import type { DepartmentConfig } from '../../../types'
+import { COMPANY_TAB_ID } from '../../../shared/lib/departments'
 
 
 // Icon mapping - must match Admin UI's ICON_OPTIONS

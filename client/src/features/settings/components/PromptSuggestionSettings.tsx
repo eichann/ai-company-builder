@@ -1,6 +1,6 @@
 import { useId, useState, useSyncExternalStore } from 'react'
-import { SubHeading } from './ui'
-import { promptSuggestionSetting } from '../../lib/promptSuggestionSetting'
+import { SubHeading } from '../../../shared/ui/primitives'
+import { promptSuggestionSetting } from '../../../lib/promptSuggestionSetting'
 
 // Settings → 入力候補: whether the chat offers the next instruction as ghost
 // text after each reply (Claude Code makes it: one extra short request per

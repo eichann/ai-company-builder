@@ -11,7 +11,7 @@ paths:
   - "client/tests/sync-*.test.ts"
   - "client/tests/protected-config.test.ts"
   - "client/tests/commit-message.test.ts"
-  - "client/src/components/common/SyncPreviewDialog.tsx"
+  - "client/src/features/sync/components/SyncPreviewDialog.tsx"
   - "client/src/features/sync/**"
   - "client/shared/auto-sync.ts"
   - "client/electron/services/sync-activity.ts"
@@ -19,7 +19,7 @@ paths:
   - "client/src/shared/lib/unsavedEdits.ts"
   - "client/src/features/settings/components/AutoSyncSettings.tsx"
   - "client/electron/features/backups/**"
-  - "client/src/components/skill-ui/BackupHistorySlideOver.tsx"
+  - "client/src/features/sync/components/BackupHistorySlideOver.tsx"
   - "client/tests/keep-work-ui.*"
 ---
 

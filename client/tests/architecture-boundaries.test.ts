@@ -230,6 +230,8 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
     'a Markdown preview tab shows the review banners, side panel, comment popover and snapshot diff, driven by the open file and the editor\'s scroll and selection',
   'files -> doc-review':
     'the tree hides review sidecars and marks documents with reviews (pure model.ts only: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
+  'settings -> voice':
+    'the settings panel shows the voice input\'s own settings (its key and its prompt), owned by the voice feature',
   'chat -> voice':
     'the composer\'s microphone button (VoiceInputControl) records and transcribes into the chat input through the voice ports (features/voice/api.ts only)',
 }

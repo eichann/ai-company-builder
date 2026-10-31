@@ -10,7 +10,7 @@ paths:
   - "client/src/lib/fileVersions.ts"
   - "client/src/lib/folderExists.ts"
   - "client/src/lib/line-diff.ts"
-  - "client/src/components/skill-ui/**"
+  - "client/src/shared/ui/DiffViewer.tsx"
   - "client/src/app/AppShell.tsx"
   - "client/src/features/doc-review/**"
   - "client/src/features/skills/**"

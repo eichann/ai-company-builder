@@ -1,7 +1,7 @@
 // On the old 「APIキー（このPC）」 and 「環境変数（.env）」 pages: says these are for older
 // app versions and special cases, and offers to move a built-in service's key from
 // this computer's .env to the server as one's own key. Only the last 4 are shown.
-import { Button, Callout, Card, SubHeading } from '../../../components/settings/ui'
+import { Button, Callout, Card, SubHeading } from '../../../shared/ui/primitives'
 import { useEnvKeyMove } from '../hooks/useEnvKeyMove'
 import { envKeysToMove } from '../own-keys'
 

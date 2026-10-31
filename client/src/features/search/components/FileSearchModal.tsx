@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { MagnifyingGlass, X } from '@phosphor-icons/react'
-import { getFileIcon } from '../../shared/ui/fileIcon'
-import { listCompanyFiles } from '../../features/search/api'
+import { getFileIcon } from '../../../shared/ui/fileIcon'
+import { listCompanyFiles } from '../api'
 
 interface FileSearchModalProps {
   isOpen: boolean

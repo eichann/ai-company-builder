@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { SpinnerGap, X } from '@phosphor-icons/react'
-import { getCommitFileDiff, getWorkingFileDiff } from '../../shared/ipc/diffs'
+import { getCommitFileDiff, getWorkingFileDiff } from '../ipc/diffs'
 
 // --- Types ---
 

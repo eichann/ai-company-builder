@@ -9,8 +9,8 @@ import {
   Trash,
   CircleNotch,
 } from '@phosphor-icons/react'
-import { DiffModal } from '../common/DiffViewer'
-import { getCommitFiles, getCommitLog } from '../../features/history/api'
+import { DiffModal } from '../../../shared/ui/DiffViewer'
+import { getCommitFiles, getCommitLog } from '../api'
 
 interface Commit {
   hash: string

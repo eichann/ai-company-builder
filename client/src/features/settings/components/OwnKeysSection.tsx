@@ -3,7 +3,7 @@
 // password field, sent once and never shown again — only its last 4.
 import { useEffect, useRef, useState } from 'react'
 import { SpinnerGap } from '@phosphor-icons/react'
-import { Button, Callout, Card, SectionHeader } from '../../../components/settings/ui'
+import { Button, Callout, Card, SectionHeader } from '../../../shared/ui/primitives'
 import type { MyBrokerService } from '../../../../shared/broker-keys'
 import { useOwnKeys } from '../hooks/useOwnKeys'
 import { ownKeyRow, type OwnKeyTone } from '../own-keys'

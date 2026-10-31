@@ -44,16 +44,13 @@ not call it `review`: in the app "review" already means 「確認をお願いす
 
 ## Legacy folders
 
-`components/` (all of it: `skill-ui/`, `common/`, `settings/`, `auth/`), `lib/` and
-`utils/` are legacy (`src/hooks/` was emptied into `shared/hooks/` and the features' `hooks/`). `skill-ui/` in particular holds far more than skills (file tree,
-editor, review, search, history, backups).
+`lib/` is legacy (`components/` and `src/hooks/` were emptied into `features/` and `shared/`,
+refactor 5-6).
 
 - New features and new modules of a feature go to `features/<name>/` (or `shared/`), never into a
   legacy folder.
 - A small change to a legacy file stays in place. Move a legacy area when you are about to change
   it substantially, in its own move-only PR first (below).
-- Do not add to the barrels `components/skill-ui/index.ts` and `components/settings/index.ts`;
-  they go away when their files move.
 
 ## Principles
 

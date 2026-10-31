@@ -148,7 +148,7 @@ test('skill folder names: one rule, used by the wizard and the copy dialog', () 
   }
   assert.equal(suggestSkillName('営業', 'new-skill'), 'new-skill')
   assert.equal(sanitizeSkillNameInput('My Skill_2!'), 'myskill_2')
-  for (const rel of ['client/src/components/skill-ui/NewSkillWizard.tsx', 'client/src/components/skill-ui/CopySkillModal.tsx']) {
+  for (const rel of ['client/src/features/skills/components/NewSkillWizard.tsx', 'client/src/features/skills/components/CopySkillModal.tsx']) {
     assertUsesCoreNames(rel, ['isValidSkillName', 'sanitizeSkillNameInput', 'suggestSkillName'])
   }
 })
