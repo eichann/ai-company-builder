@@ -49,25 +49,9 @@ export interface PluginImportDeps {
   roleOf: (companyId: string, userId: string) => string | null
 }
 
-export interface ImportObjectReport {
-  seen: number
-  created: number
-  updated: number
-  unchanged: number
-  /** The mapping's `max` stopped the run before the outside system's last result. */
-  truncated: boolean
-  /** Field names (never values) the mapping could not translate, with counts. */
-  problems: Record<string, number>
-}
-
-export interface ImportReport {
-  status: 'complete' | 'truncated' | 'stopped' | 'failed' | 'timed-out'
-  /** Why it stopped or failed (a fixed word), else null. */
-  reason: string | null
-  objects: Record<string, ImportObjectReport>
-  startedAt: string
-  finishedAt: string
-}
+// The report's shape is part of the API contract (the admin page shows it).
+import type { ImportObjectReport, ImportReport } from '../../shared/types/plugins'
+export type { ImportObjectReport, ImportReport }
 
 const isObj = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 

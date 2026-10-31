@@ -64,6 +64,7 @@ import { createPluginService } from './services/plugins'
 import { createPluginConnector } from './services/plugin-connector'
 import { createPluginImportService } from './services/plugin-import'
 import { createPluginOperationService } from './services/plugin-operations'
+import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter } from './services/record-engine'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 
@@ -229,12 +230,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     aiStopped: companyId => agentStops.companyStopped(companyId),
   })
 
+  // 「HubSpot に聞いて確かめる」 (P8): the outside property list, read through the connector.
+  const pluginMappingCheck = createPluginMappingCheckService({
+    ...shared, plugins, connector: pluginConnector,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+  })
+
   return {
     access,
     pluginShelf,
     plugins,
     pluginImport,
     pluginOperations,
+    pluginMappingCheck,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),

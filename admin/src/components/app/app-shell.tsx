@@ -17,6 +17,7 @@ import {
   LockSimple,
   Moon,
   Plus,
+  PlugsConnected,
   Robot,
   Barricade,
   ShieldCheck,
@@ -77,6 +78,7 @@ export const NAV_ITEMS: NavItem[] = [
   { segment: 'agent-sandbox', label: 'AI の囲い', icon: Barricade, visible: (c) => c.isAdmin },
   { segment: 'agent-stop', label: 'AI の緊急停止', icon: HandPalm, visible: (c) => c.isAdmin },
   { segment: 'api-keys', label: 'API キー', icon: Key, visible: (c) => c.isAdmin },
+  { segment: 'integrations', label: 'つなぎ先', icon: PlugsConnected, visible: (c) => c.isAdmin },
   { segment: 'settings', label: '会社の設定', icon: Gear, visible: (c) => c.isAdmin },
 ]
 

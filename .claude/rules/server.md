@@ -192,7 +192,7 @@ GET  /api/config                                  setup state (no auth)
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
-                              PUT …/mapping, POST …/mapping/restore, POST …/import,
+                              PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
                               POST …/records/:recordId/operations/:operation,
                               GET …/operations/:operationId (+ POST /undo, /reconcile)  plugins.ts

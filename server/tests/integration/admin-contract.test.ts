@@ -19,7 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -77,6 +77,8 @@ const TYPES: Record<string, string> = {
   AgentStops: 'AgentStopView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
+  Plugins: '{ plugins: PluginListItem[] }',
+  Plugin: 'PluginDetail',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -99,6 +101,17 @@ const TYPES: Record<string, string> = {
 const KNOWN_MISMATCHES: Array<{ id: string; describe: string; error: RegExp }> = []
 
 const CO = 'acco'
+/** A mapping for the sample-hub fixture: one field written automatically. */
+const CONTRACT_MAPPING = `
+deal:
+  visible_to_folder: 営業部
+  fields:
+    title:     { from: dealname, write: false }
+    next_step: { from: hs_next_step, write: true }
+    amount:    { from: amount, write: true }
+policy:
+  next_step: auto
+`
 const base = `/api/companies/${CO}`
 const USERS = { owner: 'ac-owner', admin: 'ac-admin', member: 'ac-member', newbie: 'ac-newbie' } as const
 
@@ -152,6 +165,10 @@ beforeAll(async () => {
   const kekDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-kek-'))
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'), { mode: 0o600 })
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
+  // The plugin shelf (「つなぎ先」): one HubSpot-shaped package, also before the composition root loads.
+  const shelfDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-shelf-'))
+  cpSync(join(__dirname, '../fixtures/plugins/sample-hub'), join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  process.env.PLUGINS_DIR = shelfDir
   shapes = loadTypeShapes(
     `import type * as A from ${JSON.stringify(ADMIN_API.replace(/\.ts$/, ''))}\n`
     + `type Role = A.Role\n`
@@ -204,6 +221,8 @@ beforeAll(async () => {
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
+  const { pluginsRoute } = await import('../../src/routes/plugins')
+  await (await import('../../src/composition')).services.pluginShelf.load()
   // The same mounts as src/app.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
@@ -216,6 +235,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
+  app.route('/api/companies/:companyId', pluginsRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -346,6 +366,15 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/stop-all`)
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
+  })
+
+  it('つなぎ先 (connector plugins)', async () => {
+    await expectShape('Plugins', USERS.owner, 'GET', `${base}/plugins`)
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub`, { version: '0.1.0', keyId: null })
+    await expectShape('Plugin', USERS.owner, 'GET', `${base}/plugins/sample-hub`)
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
+    await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-hub/mapping/restore`, { version: 1 })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
   })
 
   it('invitations', async () => {
@@ -494,6 +523,22 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT member_keys_allowed FROM broker_settings WHERE company_id = ?', CO).member_keys_allowed).toBe(1)
     await A.keyBrokerApi.remove(CO, id)
     expect(row('SELECT id FROM broker_keys WHERE id = ?', id)).toBeUndefined()
+  })
+
+  it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {
+    await A.pluginsApi.install(CO, 'sample-hub', '0.1.0', null)
+    expect(row('SELECT version, key_id FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub')).toEqual({ version: '0.1.0', key_id: null })
+    const text = CONTRACT_MAPPING.replace('amount:    { from: amount, write: true }', 'amount:    { from: amount, write: false }')
+    const saved = await A.pluginsApi.saveMapping(CO, 'sample-hub', text, ['next_step'])
+    expect(row('SELECT text FROM plugin_mappings WHERE company_id = ? AND plugin_id = ? AND version = ?', CO, 'sample-hub', saved.mapping!.version).text).toBe(text)
+    expect(row('SELECT acknowledged_by FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? AND field = ?', CO, 'sample-hub', 'next_step').acknowledged_by).toBe(USERS.owner)
+    const restored = await A.pluginsApi.restoreMapping(CO, 'sample-hub', saved.mapping!.version - 1)
+    expect(restored.mapping!.version).toBe(saved.mapping!.version + 1)
+    // 「HubSpot に聞いて確かめる」 and the import reach their routes (no key chosen: refused before anything is sent).
+    await expect(A.pluginsApi.checkMapping(CO, 'sample-hub', text)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY', body: { problem: 'no-key' } })
+    await expect(A.pluginsApi.import(CO, 'sample-hub')).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_ACTIVE' })
+    await expect(A.pluginsApi.setEnabled(CO, 'sample-hub', true)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY' })
+    expect(row('SELECT enabled FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub').enabled).toBe(0)
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

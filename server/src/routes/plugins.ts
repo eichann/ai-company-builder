@@ -11,6 +11,7 @@
  *   PUT  /plugins/:pluginId/enabled            { enabled } on / off
  *   PUT  /plugins/:pluginId/mapping            { text } a new mapping version
  *   POST /plugins/:pluginId/mapping/restore    { version } an earlier mapping as the next version
+ *   POST /plugins/:pluginId/mapping/check      { text? } 「HubSpot に聞いて確かめる」: the mapping against the outside property list
  *   POST /plugins/:pluginId/import             bring the outside objects into the company map (one run per company)
  *   POST /plugins/:pluginId/connection/renew   the outside account changed on purpose: a new connection
  *
@@ -30,7 +31,7 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
-const { access, plugins, pluginImport, pluginOperations } = services
+const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
 
@@ -88,6 +89,12 @@ pluginsRoute.post('/plugins/:pluginId/mapping/restore', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, await plugins.restoreMapping(member, c.req.param('pluginId'), await jsonBody(c)))
+})
+
+pluginsRoute.post('/plugins/:pluginId/mapping/check', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await pluginMappingCheck.check(member, c.req.param('pluginId'), await jsonBody(c)))
 })
 
 pluginsRoute.post('/plugins/:pluginId/import', async (c) => {

@@ -301,6 +301,7 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/plugins/:pluginId/enabled', w => ({ path: `${C(w)}/plugins/no-such-plugin/enabled`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/plugins/:pluginId/mapping', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/restore`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/check`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/import', w => ({ path: `${C(w)}/plugins/no-such-plugin/import`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal`, body: {} }), [404, 404, 404, 404, 404, 401],
     'any member: the record (it does not exist), the operation\'s who and the field policies decide'),
@@ -381,6 +382,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
