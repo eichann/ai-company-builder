@@ -3,7 +3,7 @@
  * rules): who may create / manage them, viewers and editors, the version
  * gate for the company's first one, and the views for the admin panel and
  * the desktop app. Storage, scope repositories and the race protections:
- * PrivateFolderRepository (lib/private-folders.ts).
+ * PrivateFolderRepository (adapters/private-folders.ts).
  *
  * Names never reach members who may not read a folder: anything that is not
  * theirs to see answers exactly as if nothing were there.
