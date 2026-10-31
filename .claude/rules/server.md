@@ -96,7 +96,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `plugins` (connector plugins' installs, mapping versions, history, `adapters/sqlite/plugins.ts`,
   `plugins.md`; triggers keep a mapping under its own company's install and an install's key a
   company key of the same company) and `connectors` (the Google connection: OAuth client,
-  members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`).
+  members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`)
+  and `outbound` (mail drafts, their recipients per version, typed addresses, send attempts,
+  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -202,6 +204,10 @@ GET  /api/config                                  setup state (no auth)
                               DELETE /google/grants/:userId,
                               GET|DELETE /me/google, POST /me/google/connect    google.ts
                                                                 (Google: google-connector.md)
+                              POST /outbound-recipients, POST /outbound,
+                              GET|PUT /outbound/:messageId, GET|POST …/recipients,
+                              POST …/send, POST …/resolve, POST …/discard  outbound-mail.ts
+                                                                (送るメール: outbound-mail.md)
 /api/oauth                    GET /google/callback — public: Google sends the browser back;
                               the state finds the company (google-connector.md)  oauth.ts
                               GET|PUT /google/minutes-folder, POST /me/minutes/check,
@@ -212,7 +218,9 @@ GET  /api/config                                  setup state (no auth)
                               POST /item, POST /item/:recordId/actions/:action,
                               GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,
-                              GET /plugins/:pluginId/operations/:operationId — the AI's
+                              GET /plugins/:pluginId/operations/:operationId,
+                              POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId
+                              (drafts only: no send) — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts
                                                                 (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay

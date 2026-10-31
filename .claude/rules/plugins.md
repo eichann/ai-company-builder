@@ -345,6 +345,14 @@ plugin's switch:
   switch), the same connection, the records switch, and the caller's membership / role (review
   §6.5). A refusal sends nothing.
 
+- **A deal's contacts for outbound mail** (milestone 4 G8, `outbound-mail.md`):
+  `pluginImport.dealContacts(member, dealRecordId)` reads, fresh, the deal's `get` with
+  `associations=contacts` and each contact's `get` (properties `email`, `firstname`, `lastname` —
+  HubSpot's wire format) through the declared object `contact` (a `get` only, no record type: people
+  are never imported). Only for a deal the member may read, imported through the current connection,
+  by a member in the connection's read scope (`plugins.readAllowed`); the account is checked first;
+  nothing is stored. A package without a `contact` object offers no HubSpot recipients.
+
 ## Import (P5, `services/plugin-import.ts`)
 
 - `POST /plugins/:pluginId/import` (owner/admin; 404 for a plugin the company has not

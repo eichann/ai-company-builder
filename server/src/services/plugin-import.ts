@@ -36,6 +36,10 @@ import { PLUGIN_NOT_FOUND, PLUGINS_FORBIDDEN } from './plugins'
 
 export const IMPORT_TIME_LIMIT_MS = 5 * 60_000
 const PAGE = 100
+/** The declaration's object for a deal's people, and HubSpot's association name for them (outbound mail). */
+export const CONTACT_OBJECT = 'contact'
+const CONTACT_ASSOCIATION = 'contacts'
+const MAX_CONTACTS = 20
 /** The outside system's last-modified property (HubSpot's; part of the connector's wire format). */
 const MODIFIED = 'hs_lastmodifieddate'
 
@@ -329,6 +333,48 @@ export function createPluginImportService(deps: PluginImportDeps) {
       if (!applied) return refuse('conflict', '記録に反映できませんでした', { code: 'NOT_APPLIED' })
       const version = handle.records.states([recordId])[0]?.version ?? 0
       return ok({ recordId, version, changed: applied.changed, accountId: account.accountId, external: { object: link.object, externalId: link.externalId, properties: item.properties } })
+    },
+
+    /**
+     * The contacts of a deal the member may read (outbound mail's verified
+     * recipients, outbound-mail.md): read fresh from the outside system on every
+     * call — the deal with its `contacts` association, then each contact's
+     * `get` (HubSpot's wire format: `email`, `firstname`, `lastname`). Only for
+     * a record the member may read, imported through the current connection,
+     * by a member in the connection's read scope, and only when the package
+     * declares a `contact` object with `get`. Nothing is stored.
+     */
+    async dealContacts(member: Member, recordId: string): Promise<{ ok: true; contacts: Array<{ externalId: string; email: string | null; name: string | null }> } | { ok: false; reason: string }> {
+      const handle = companyData.forCompany(member.companyId)
+      const row = RECORD_ID_RE.test(recordId) ? handle.records.byIds([recordId])[0] : undefined
+      const readable = row && row.removedAt === null && recordReader(member, handle.scopes.listWithRules()).record(row)
+      if (!readable) return { ok: false, reason: 'not-found' }
+      const link = handle.plugins.linkOfRecord(recordId)
+      if (!link) return { ok: false, reason: 'not-linked' }
+      const active = await plugins.active(member.companyId, link.pluginId)
+      if (!active.ok) return { ok: false, reason: active.problem }
+      const plugin = active.plugin
+      if (link.connectionId !== plugin.connectionId) return { ok: false, reason: 'not-linked' }
+      if (!plugins.readAllowed(member.companyId, member.userId, link.pluginId)) return { ok: false, reason: 'read-not-allowed' }
+      if (!plugin.manifest.objects[CONTACT_OBJECT]?.endpoints.get) return { ok: false, reason: 'contacts-not-declared' }
+      const check = precheckFor(member.companyId, link.pluginId, plugin.connectionId, { userId: member.userId, needsFullAccess: false })
+      const account = await verifyAccount(member.companyId, plugin, check)
+      if (!account.ok) return { ok: false, reason: account.reason }
+      if (account.accountId !== link.accountId) return { ok: false, reason: 'account-changed' }
+      const deal = await connector.call(member.companyId, plugin, { endpoint: 'get', object: link.object, id: link.externalId, query: { properties: 'hs_object_id', associations: CONTACT_ASSOCIATION } }, check)
+      const item = deal.ok ? objectOf(deal.body) : null
+      if (!item) return { ok: false, reason: deal.ok ? 'unreadable-answer' : deal.reason }
+      const contacts: Array<{ externalId: string; email: string | null; name: string | null }> = []
+      for (const externalId of (item.associations[CONTACT_ASSOCIATION] ?? []).slice(0, MAX_CONTACTS)) {
+        const r = await connector.call(member.companyId, plugin, { endpoint: 'get', object: CONTACT_OBJECT, id: externalId, query: { properties: ['email', 'firstname', 'lastname'] } }, check)
+        const c = r.ok ? objectOf(r.body) : null
+        if (!c) return { ok: false, reason: r.ok ? 'unreadable-answer' : r.reason }
+        const p = c.properties as Record<string, unknown>
+        const text = (v: unknown) => (typeof v === 'string' && v.trim() !== '' ? v.trim() : null)
+        const name = [text(p.lastname), text(p.firstname)].filter(Boolean).join(' ')
+        contacts.push({ externalId, email: text(p.email), name: name === '' ? null : name })
+      }
+      return { ok: true, contacts }
     },
 
     /** POST /plugins/:pluginId/connection/renew — owner/admin: the outside account changed on purpose; a new connection. */

@@ -46,6 +46,7 @@ import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import type { StoppableTurns } from './services/agent-stop'
@@ -224,6 +225,8 @@ registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, she
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
 registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).
+registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })

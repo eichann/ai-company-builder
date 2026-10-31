@@ -63,7 +63,7 @@ ACB に最初からある「依頼」の形。状態・担当・期限はサー�
 `,
   interaction: `---
 label: やりとり
-version: 1
+version: 2
 storage: server
 fields:
   occurred_at:  { label: いつ, kind: datetime, source: server }
@@ -74,6 +74,7 @@ fields:
 links:
   customer:     { label: 顧客, target: customer, cardinality: one, inverse: interactions }
   tasks:        { label: 関係するタスク, target: task, cardinality: many }
+  deal:         { label: 案件, target: deal, cardinality: one, inverse: interactions }
 states: [received, handled]
 initial: received
 final: [handled]
@@ -209,6 +210,14 @@ export const SERVICE_OWNED_TYPES: readonly string[] = ['minutes', 'approval', 'o
  * outside).
  */
 export const SERVICE_STATE_TYPES: readonly string[] = ['approval', 'outbound_message']
+
+/**
+ * Types the service writer may also create, besides the service-owned ones:
+ * receipts of what a service did outside (a sent mail becomes an `interaction`
+ * on its deal, design §1-6 step 19). They stay creatable by the generic
+ * routes too.
+ */
+export const SERVICE_RECEIPT_TYPES: readonly string[] = ['interaction']
 
 /**
  * The state changes the service writer (server/src/services/record-engine.ts

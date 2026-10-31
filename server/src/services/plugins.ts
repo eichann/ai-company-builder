@@ -447,6 +447,17 @@ export function createPluginService(deps: PluginServiceDeps) {
       return { searchPaths, mayRead, connectionIds }
     },
 
+    /**
+     * May this member read the plugin's connection (its read scope, plugins.md
+     * "The relay and a managed connection")? Outbound mail reads a deal's
+     * contacts only for members the relay would let read them too.
+     */
+    readAllowed(companyId: string, userId: string, pluginId: string): boolean {
+      const install = companyData.forCompany(companyId).plugins.install(pluginId)
+      const role = deps.roleOf(companyId, userId)
+      return install !== null && role !== null && inReadScope(companyId, userId, role, install)
+    },
+
     /** The kind of an operation of the company's installed version (read / update / create), or null. */
     operationKind(companyId: string, pluginId: string, operation: string): string | null {
       const install = typeof pluginId === 'string' ? companyData.forCompany(companyId).plugins.install(pluginId) : null

@@ -109,6 +109,8 @@ interface World {
     googleGrant: string
     /** An approval request of the other company. */
     approval: string
+    /** A mail draft of the other company's member (outbound-mail.md). */
+    outboundMail: string
   }
 }
 
@@ -335,6 +337,23 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
 
+  // Outbound mail (outbound-mail.md): any member drafts; a draft is its author's only (404 for
+  // everyone else, like a missing one). Sending, typed addresses, resolve and discard: the
+  // session routes only — the AI's routes have none of them.
+  r('POST /api/companies/:companyId/outbound-recipients', w => ({ path: `${C(w)}/outbound-recipients`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('POST /api/companies/:companyId/outbound', w => ({ path: `${C(w)}/outbound`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/outbound/:messageId', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001` }), [404, 404, 404, 404, 404, 401]),
+  r('PUT /api/companies/:companyId/outbound/:messageId', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/outbound/:messageId/recipients', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/recipients` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/recipients', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/recipients`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/send', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/send`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/resolve', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/resolve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/discard', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/discard`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/outbound-recipients', () => ({ path: '/api/records-ai/outbound-recipients', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/outbound', () => ({ path: '/api/records-ai/outbound', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('PUT /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+
   // The Google connection (google-connector.md): the client and members' grants are owner/admin;
   // a member's own permission is any member's; Google's return to the server is public.
   r('GET /api/companies/:companyId/google', w => ({ path: `${C(w)}/google` }), [200, 200, 403, 403, 404, 401]),
@@ -437,6 +456,13 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/approvals/:approvalId/approve', (w, id) => ({ path: `${C(w)}/approvals/${id}/approve`, body: { hash: `sha256:${'0'.repeat(64)}`, reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
   x('POST /api/companies/:companyId/approvals/:approvalId/send-back', (w, id) => ({ path: `${C(w)}/approvals/${id}/send-back`, body: { reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
   x('POST /api/companies/:companyId/approvals/:approvalId/withdraw', (w, id) => ({ path: `${C(w)}/approvals/${id}/withdraw`, body: {} }), w => w.other.approval, 'approval-nosuch001'),
+  x('GET /api/companies/:companyId/outbound/:messageId', (w, id) => ({ path: `${C(w)}/outbound/${id}` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('PUT /api/companies/:companyId/outbound/:messageId', (w, id) => ({ path: `${C(w)}/outbound/${id}`, body: { expectedVersion: 1, body: '乗っ取り' } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('GET /api/companies/:companyId/outbound/:messageId/recipients', (w, id) => ({ path: `${C(w)}/outbound/${id}/recipients` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/recipients', (w, id) => ({ path: `${C(w)}/outbound/${id}/recipients`, body: { email: 'spy@attacker.example' } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/send', (w, id) => ({ path: `${C(w)}/outbound/${id}/send`, body: { hash: `sha256:${'0'.repeat(64)}` } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/resolve', (w, id) => ({ path: `${C(w)}/outbound/${id}/resolve`, body: { sent: true } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/discard', (w, id) => ({ path: `${C(w)}/outbound/${id}/discard`, body: {} }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
@@ -459,6 +485,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'PUT /api/companies/:companyId/broker/relay-services/:service': 'a service name this company defines for itself (creates its own row)',
   'PUT /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
   'DELETE /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
+  'GET /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
+  'PUT /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
   'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
@@ -628,6 +656,14 @@ async function seed(): Promise<World> {
   db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason, created_at, updated_at)
     VALUES (?, ?, 'google', 'g-other-1', 'other@example.com', '[]', NULL, 'stopped', 'admin', ?, ?)`).run(other, otherMember, expires, expires)
 
+  // A mail draft of the other company's member (rows as services/outbound-mail.ts writes them).
+  db.prepare("INSERT INTO records (company_id, id, type, path, title, created_at, updated_at) VALUES (?, 'outbound_message-other00000001', 'outbound_message', NULL, '他社のメール', ?, ?)")
+    .run(other, expires, expires)
+  db.prepare("INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, 'outbound_message-other00000001', 'draft', ?, 1, ?)")
+    .run(other, JSON.stringify({ requested_by: otherMember, assignee: otherMember, payload_version: 1, payload_hash: `sha256:${'0'.repeat(64)}` }), expires)
+  db.prepare("INSERT INTO outbound_mails (company_id, message_id, author_id, from_email, minutes_id, deal_id, created_at) VALUES (?, 'outbound_message-other00000001', ?, 'other@example.com', NULL, 'deal-other001', ?)")
+    .run(other, otherMember, expires)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -655,6 +691,7 @@ async function seed(): Promise<World> {
       operation: 'op-other-1',
       googleGrant: otherMember,
       approval: 'approval-other001',
+      outboundMail: 'outbound_message-other00000001',
     },
   }
 }

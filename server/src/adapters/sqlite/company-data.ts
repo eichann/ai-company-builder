@@ -7,6 +7,7 @@ import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
 import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteInvitationRepository } from './invitations'
+import { sqliteOutboundMailRepository } from './outbound-mail'
 import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
@@ -30,6 +31,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
         connectors: sqliteConnectorRepository(conn, companyId),
+        outbound: sqliteOutboundMailRepository(conn, companyId),
         fixedPayloads: sqliteFixedPayloadRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }

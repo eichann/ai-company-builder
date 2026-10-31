@@ -33,6 +33,7 @@ import type { ApprovalRequested, ApprovalView } from '../../../shared/types/appr
 import type { MinutesText } from '../../../shared/types/minutes'
 import { MINUTES_SUMMARY_MAX } from '../../../shared/core/minutes'
 import { dealChoiceFor, type MinutesDealChoiceCard } from '../../shared/minutes-app'
+import { aiMailSummary, readMailDraft, type MailDraftCard } from '../../shared/outbound-mail'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 
@@ -49,10 +50,12 @@ export interface RecordToolSpec {
   readOnly: boolean
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
   approvalCard?: boolean
+  /** A mail draft made or changed: the draft becomes a card in the reply (outbound-mail.md). */
+  mailCard?: boolean
   /** A connector's update or create: its outcome becomes a card in the reply. */
   card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>>; kind?: 'update' | 'create' }
   /** The server call for a validated input. */
-  request(input: Record<string, unknown>): { method: 'GET' | 'POST'; path: string; body?: unknown }
+  request(input: Record<string, unknown>): { method: 'GET' | 'POST' | 'PUT'; path: string; body?: unknown }
   /** The tool's text from the server's answer (default: the answer as JSON, cut at MAX_OUTPUT). */
   format?(answer: unknown): string
   /** Reading minutes: when no deal is linked and not exactly one candidate, the app's 「どの案件の議事録ですか？」 card. */
@@ -187,6 +190,48 @@ const BASIS = z.object({
   minutesId: recordRef('minutes').optional().describe('根拠の議事録の id / the minutes it rests on'),
   quote: z.string().min(1).max(2000).optional().describe('議事録の中の根拠の文（そのまま引用） / the sentence quoted as is'),
 }).strict()
+const mailRef = z.string().regex(/^r[0-9a-f]{24}$/)
+
+/**
+ * Outbound mail (milestone 4 G8, outbound-mail.md): the AI looks up the verified recipients and
+ * drafts with their refs only — it never writes an address, and there is no tool that sends.
+ */
+export const MAIL_LOOKUP_TOOL: RecordToolSpec = {
+  name: 'mail_recipients', readOnly: true,
+  schema: z.object({ minutesId: recordRef('minutes').optional(), dealId: recordRef('deal').optional() }).strict(),
+  description: 'お礼メールなどの宛先の候補（確かめた宛先）：その会議のカレンダーの社外の参加者、案件の HubSpot の連絡先、ACB のメンバー（CC 用）。それぞれ ref と出どころつき。宛先はこの ref でしか指定できない（アドレスを書いても使われない）。\n' +
+    'Verified recipients for a mail about a minutes / deal: the meeting\'s outside attendees, the deal\'s HubSpot contacts, members (for CC), each with a `ref` and its source. Drafts take these refs only — an address you write is never used.',
+  request: input => ({ method: 'POST', path: '/outbound-recipients', body: input }),
+}
+
+export const MAIL_ACTION_TOOLS: RecordToolSpec[] = [
+  {
+    name: 'mail_draft_create', readOnly: false, mailCard: true,
+    schema: z.object({
+      minutesId: recordRef('minutes').optional(), dealId: recordRef('deal').optional(),
+      toRefs: z.array(mailRef).min(1).max(20).describe('mail_recipients の ref / refs from mail_recipients'),
+      ccRefs: z.array(mailRef).max(20).optional(),
+      subject: z.string().min(1).max(200), body: z.string().min(1).max(20000).describe('テキストだけ（添付なし） / plain text only, no attachments'),
+    }).strict(),
+    description: 'メールの下書きを作る（送らない）。相談の中にカードとして出て、送るのはメンバー本人が画面で「確かめて送る」を押したときだけ。AI は送れないので、「送りました」とは決して言わない。\n' +
+      'Create a mail draft (NOT sent). It appears as a card; only the member sends it from the card. Never say it was sent.',
+    request: input => ({ method: 'POST', path: '/outbound', body: input }),
+  },
+  {
+    name: 'mail_draft_update', readOnly: false, mailCard: true,
+    schema: z.object({
+      id: z.string().regex(/^outbound_message-[0-9a-z]{6,32}$/),
+      expectedVersion: z.number().int().min(1).describe('下書きの version / the draft\'s version'),
+      toRefs: z.array(mailRef).min(1).max(20).optional(), ccRefs: z.array(mailRef).max(20).optional(),
+      subject: z.string().min(1).max(200).optional(), body: z.string().min(1).max(20000).optional(),
+    }).strict(),
+    description: 'メールの下書きを直す（新しい版になる。送らない）。変える欄だけ渡す。\nChange a mail draft (a new version; NOT sent). Pass only what changes.',
+    request: input => {
+      const { id, ...rest } = input
+      return { method: 'PUT', path: `/outbound/${enc(String(id))}`, body: rest }
+    },
+  },
+]
 
 /** The state-changing tools for these types (one per action, and creating server-only records). */
 export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
@@ -401,7 +446,8 @@ const APPROVAL_LOOKUPS: RecordToolSpec[] = [
 
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。状態・担当・期限はサーバーが持ち、記録のファイルには書きません（ファイルの先頭は id・type・links だけ）。状態を変えるときは必ずこの道具の操作を使い、ファイルを書き換えないでください。記録に書くときは、人や顧客を名前ではなく id で指してください。` +
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
-  `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。`
+  `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
+  `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。`
 
 export interface RecordTools {
   specs: RecordToolSpec[]
@@ -425,6 +471,8 @@ export interface RecordToolsOptions {
   onApprovalCard?: (card: ApprovalCardRef) => void
   /** Minutes read with no deal linked and not exactly one candidate: the member chooses on this card. */
   onDealChoice?: (card: MinutesDealChoiceCard) => void
+  /** A mail draft was made or changed: its card for the reply. */
+  onMailDraft?: (card: MailDraftCard) => void
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -445,7 +493,9 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     const answer = await access.call('GET', '/plugins', undefined, signal) as PluginAiTools | undefined
     if (answer && Array.isArray(answer.plugins)) plugins = answer
   } catch { /* no plugin tools this turn */ }
-  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'minutes') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act')]
+  // Mail tools exist where outbound_message does; drafting needs an act token (Codex reads only).
+  const mail = types.some(t => t.name === 'outbound_message') ? [MAIL_LOOKUP_TOOL, ...(access.scope === 'act' ? MAIL_ACTION_TOOLS : [])] : []
+  const specs = [...LOOKUPS, ...(types.some(t => t.name === 'minutes') ? [MINUTES_READ_TOOL] : []), ...(types.some(t => t.name === 'approval') ? APPROVAL_LOOKUPS : []), ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act'), ...mail]
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
@@ -463,6 +513,12 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.approvalCard) return showApproval(req)
       try {
         const answer = await access.call(req.method, req.path, req.body, signal)
+        if (spec.mailCard) {
+          const draft = readMailDraft((answer as { draft?: unknown } | undefined)?.draft)
+          if (!draft) return JSON.stringify({ error: 'サーバーの答えを読めませんでした。' })
+          if (options.companyId) options.onMailDraft?.({ id: newId(), companyId: options.companyId, conversationId: options.conversationId ?? null, draft, byAi: true, at: now().toISOString() })
+          return JSON.stringify(aiMailSummary(draft))
+        }
         const choice = spec.dealChoice && options.companyId && answer && typeof answer === 'object'
           ? dealChoiceFor(answer as Parameters<typeof dealChoiceFor>[0], { id: newId(), companyId: options.companyId }) : null
         if (choice) options.onDealChoice?.(choice)

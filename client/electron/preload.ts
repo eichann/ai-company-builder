@@ -15,6 +15,7 @@ import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
+import type { MailDraftEdit } from '../shared/outbound-mail'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
@@ -141,6 +142,13 @@ const api: ElectronAPI = {
   skipMinutes: (companyId: string, minutesId: string) => invoke('minutes:skip', companyId, minutesId),
   linkMinutesDeal: (companyId: string, minutesId: string, dealId: string) => invoke('minutes:linkDeal', companyId, minutesId, dealId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),
+  getOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:get', companyId, messageId),
+  getOutboundMailRecipients: (companyId: string, messageId: string) => invoke('outboundMail:recipients', companyId, messageId),
+  updateOutboundMail: (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string) => invoke('outboundMail:update', companyId, messageId, edit, conversationId),
+  addOutboundMailRecipient: (companyId: string, messageId: string, email: string, name?: string) => invoke('outboundMail:addRecipient', companyId, messageId, email, name),
+  sendOutboundMail: (companyId: string, messageId: string, hash: string) => invoke('outboundMail:send', companyId, messageId, hash),
+  resolveOutboundMail: (companyId: string, messageId: string, sent: boolean) => invoke('outboundMail:resolve', companyId, messageId, sent),
+  discardOutboundMail: (companyId: string, messageId: string) => invoke('outboundMail:discard', companyId, messageId),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

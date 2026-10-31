@@ -25,6 +25,13 @@
  *   GET  /plugins/:pluginId/operations/:operationId
  *   GET  /approvals   GET /approvals/:approvalId   approval requests, read only (approvals.md)
  *
+ *   POST /outbound-recipients             verified mail recipients of a minutes / deal (read; tool mail_recipients)
+ *   POST /outbound                        a mail draft (act; mail_draft_create)
+ *   GET  /outbound/:messageId             the member's own draft (read)
+ *   PUT  /outbound/:messageId             a new version of it (act; mail_draft_update)
+ *   There is deliberately no send, resolve, discard or typed address here
+ *   (outbound-mail.md): sending reaches outside and is a person's, with their session.
+ *
  * No undo, no 「もう一度作る」 and nothing it can approve, send back or withdraw for
  * the AI: a person does those (their app's screens; routes/approvals.ts, session
  * only). A create is never re-sent.
@@ -38,7 +45,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals, minutes } = services
+const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals, minutes, outboundMail } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -166,4 +173,25 @@ recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
 recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
   const h = holderOf(c, 'read')
   return h instanceof Response ? h : answer(c, await pluginOperations.get(h.member, c.req.param('pluginId'), c.req.param('operationId')))
+})
+
+// Outbound mail: the AI drafts (refs from mail_recipients only); it can never send.
+recordsAiRoute.post('/outbound-recipients', async (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, await outboundMail.recipients(h.member, await jsonBody(c)))
+})
+
+recordsAiRoute.post('/outbound', async (c) => {
+  const h = holderOf(c, 'act')
+  return h instanceof Response ? h : answer(c, await outboundMail.create(h.member, aiActor(h), await jsonBody(c)), 201)
+})
+
+recordsAiRoute.get('/outbound/:messageId', (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, outboundMail.get(h.member, c.req.param('messageId')))
+})
+
+recordsAiRoute.put('/outbound/:messageId', async (c) => {
+  const h = holderOf(c, 'act')
+  return h instanceof Response ? h : answer(c, await outboundMail.update(h.member, aiActor(h), c.req.param('messageId'), await jsonBody(c)))
 })
