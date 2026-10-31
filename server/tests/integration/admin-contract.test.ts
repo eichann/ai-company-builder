@@ -78,6 +78,7 @@ const TYPES: Record<string, string> = {
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
+  MinutesFolder: 'MinutesFolderSetting',
   Plugins: '{ plugins: PluginListItem[] }',
   Plugin: 'PluginDetail',
   Invitations: 'Invitation[]',
@@ -239,6 +240,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
   app.route('/api/companies/:companyId', googleRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -382,6 +384,10 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     const view = await expectShape('Google', USERS.owner, 'DELETE', `${base}/google/grants/${USERS.member}`)
     expect(view.grants.map((g: Loose) => g.userId)).toEqual([USERS.member])
     expect(JSON.stringify(view)).not.toContain('GOCSPX-NOT-REAL-contract-0000')
+    await expectShape('MinutesFolder', USERS.owner, 'GET', `${base}/google/minutes-folder`)
+    const chosen = await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: '営業部' })
+    expect(chosen.folder).toBe('営業部')
+    await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: null })
   })
 
   it('つなぎ先 (connector plugins)', async () => {

@@ -35,7 +35,8 @@ an M2 stop, logging the reader's own fetches separately, rewriting company skill
   blocks, tags, common entities, zero-width / bidi / Unicode tag characters / other controls
   except `\n` `\t`, NFC, blank-line runs, 6000 chars + 「（長いため省略しました）」),
   `findInstructionLikeText` (conservative English + Japanese phrase list → flag labels; a flag,
-  never a filter), source extraction, `formatWebResearchResult` (fixed header, then the
+  never a filter; one copy in `shared/core/instruction-like.ts`, re-exported here, also used
+  for meeting minutes — `minutes.md`; it flags a line addressed to an AI, 「AI へ：…」), source extraction, `formatWebResearchResult` (fixed header, then the
   app-counted line `countedLine` — 「【調べた量（アプリが数えたもの）】読んだページ：N件／未読の関連リンク：M件（調べ方：ふつう|じっくり）」,
   N = distinct pages the reader actually fetched (Claude WebFetch calls, Codex opened pages —
   never URLs it only cites), with 「⚠ 検索結果だけの要約です。…もう一度呼んでください。」 when N = 0 —, ⚠ line when

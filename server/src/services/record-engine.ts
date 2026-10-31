@@ -703,6 +703,11 @@ export interface ServiceTransitionInput {
   /** The new state; null = the state stays (fields only). */
   to: string | null
   fields?: Record<string, LedgerValue>
+  /**
+   * Links to replace: link name → record ids ([] removes). Kept in the ledger
+   * as `links.<name>` before / after (the minutes' deal, chosen by a person).
+   */
+  links?: Record<string, string[]>
   actor: ServiceActor
   note?: string
   /** Keep the entry as a decision with this reason (approving, sending back). */
@@ -882,6 +887,23 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         const before = now[field] ?? null
         if (before !== after) changes.push({ field, before, after })
       }
+      const currentLinks = records.linksFrom([row.id])
+      const newLinks: RecordLinkRow[] = []
+      for (const [name, targets] of Object.entries(input.links ?? {})) {
+        const l = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
+        if (!l || l.target === 'file') return fail('bad-value', `${name} is not a record link of ${def.name}`)
+        if (l.cardinality === 'one' && targets.length > 1) return fail('bad-value', `${name}: one record`)
+        for (const t of targets) {
+          if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
+          newLinks.push({ sourceId: row.id, name, position: 0, targetId: t, targetPath: null })
+        }
+        const before = currentLinks.filter(x => x.name === name).map(x => x.targetId).join(',') || null
+        const after = targets.join(',') || null
+        if (before !== after) changes.push({ field: `links.${name}`, before, after })
+      }
+      const replacedLinks = input.links
+        ? [...currentLinks.filter(x => !(x.name in (input.links as Record<string, string[]>))), ...newLinks].map((x, i) => ({ ...x, position: i }))
+        : null
       const at = deps.clock.now()
       const isDecision = input.decisionReason !== undefined
       const entry: LedgerEntry = {
@@ -893,6 +915,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       }
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false
+        if (replacedLinks) records.replaceLinks(row.id, replacedLinks)
         records.appendLedger(entry)
         return true
       })

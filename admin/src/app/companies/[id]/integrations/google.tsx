@@ -24,6 +24,8 @@ import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import { useQuery } from '@/lib/use-query'
 
+import { MinutesFolderSection } from './minutes-folder'
+
 /** What each permission lets ACB do, in the members' words. */
 export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
@@ -200,6 +202,8 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
         )}
         <p className="text-xs text-muted-foreground">「API キー」の「すべての鍵を止める」でも、全員の Google の許可が止まります。</p>
       </section>
+
+      <MinutesFolderSection companyId={companyId} />
 
       <ConfirmDialog
         open={stopping !== null}

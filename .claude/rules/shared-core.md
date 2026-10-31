@@ -43,6 +43,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
 | `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
 | `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
+| `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
 

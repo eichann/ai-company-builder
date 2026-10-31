@@ -67,6 +67,8 @@ import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createDecisionService } from './services/decisions'
+import { createGoogleMeetings } from './services/google-meetings'
+import { createMinutesService } from './services/minutes'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
 import { createApprovalService } from './services/approvals'
@@ -323,10 +325,28 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     operatorStopped: () => pluginShelf.isStopped('google', ''),
   })
 
+  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
+  // with the member's own permission; makes `minutes` records through the service writer.
+  const minutes = createMinutesService({
+    ...shared,
+    writer: serviceRecords,
+    meetings: createGoogleMeetings((companyId, userId, req) => googleClient.request(companyId, userId, req)),
+    tokenDigest: sha256TokenDigest,
+    members: companyId => {
+      const rows = repos.memberships.listByCompany(companyId)
+      const accounts = shared.accounts.byIds(rows.map(m => m.user_id))
+      return rows.flatMap(m => {
+        const a = accounts.get(m.user_id)
+        return a ? [{ userId: m.user_id, email: a.email, name: a.name ?? '', role: m.role }] : []
+      })
+    },
+  })
+
   return {
     access,
     googleClient,
     googleConnector,
+    minutes,
     pluginShelf,
     plugins,
     pluginImport,

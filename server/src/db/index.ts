@@ -1162,6 +1162,9 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   if (!cols.has('conversation_id')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN conversation_id TEXT`)
   // 「外の受領書」 of a connector plugin's entry (JSON of shared/core ExternalReceipt), null otherwise.
   if (!cols.has('receipt')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN receipt TEXT`)
+  // The company's minutes folder (milestone 4, minutes.md): additive, null = not chosen.
+  const settings = new Set((conn.prepare(`PRAGMA table_info(record_settings)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!settings.has('minutes_folder')) conn.exec(`ALTER TABLE record_settings ADD COLUMN minutes_folder TEXT`)
 }
 
 export function migrateInvitationClaims(conn: Database.Database): void {

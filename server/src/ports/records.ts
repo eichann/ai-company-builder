@@ -105,6 +105,9 @@ export interface RecordAiTokenRow {
 export interface RecordRepository {
   settings(): RecordSettingsRow
   setEnabled(enabled: boolean, by: string, at: string): void
+  /** The company's minutes folder (milestone 4, minutes.md): a department folder, or null when not chosen. */
+  minutesFolder(): string | null
+  setMinutesFolder(folder: string | null, by: string, at: string): void
 
   /** Every stored version of every type, oldest first per name. */
   typeVersions(): RecordTypeRow[]
