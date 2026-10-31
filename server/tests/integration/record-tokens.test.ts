@@ -51,12 +51,12 @@ async function call(opts: { user?: string | null; token?: string; method: string
 const session = (user: string, method: string, path: string, body?: unknown) => call({ user, method, path: `/api/companies/${CO}${path}`, body })
 const ai = (token: string, method: string, path: string, body?: unknown) => call({ token, method, path: `/api/records-ai${path}`, body })
 
-async function tokenFor(user: string, scope: 'read' | 'act', company = CO): Promise<{ token: string; tokenId: string }> {
+async function tokenFor(user: string, scope: 'read' | 'act', company = CO, agent = 'claude-code'): Promise<{ token: string; tokenId: string; scope: string }> {
   currentUser.id = user
   const res = await app.request(`/api/companies/${company}/me/record-tokens`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: 'conv-1', agent: 'claude', scope }),
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ conversationId: 'conv-1', agent, scope }),
   })
-  const body = await res.json() as { data: { token: string; tokenId: string } }
+  const body = await res.json() as { data: { token: string; tokenId: string; scope: string } }
   if (res.status !== 201) throw new Error(JSON.stringify(body))
   return body.data
 }
@@ -87,7 +87,7 @@ describe('who is acting comes from the credential', () => {
     const { token } = await tokenFor('u-bob', 'act')
     const r = await ai(token, 'POST', `/item/${taskId}/actions/start`, { expectedVersion: 1, actor: { kind: 'human' } })
     expect(r.status).toBe(200)
-    expect((await ledger('u-bob')).at(-1)).toMatchObject({ action: 'start', actorKind: 'ai', actorSource: 'claude' })
+    expect((await ledger('u-bob')).at(-1)).toMatchObject({ action: 'start', actorKind: 'ai', actorSource: 'claude-code' })
   })
 
   it('a record-token call cannot run an action whose `who` excludes ai, whatever the body claims', async () => {
@@ -111,6 +111,16 @@ describe('what a record token can reach', () => {
     expect((await ai(token, 'GET', '/my-turn')).status).toBe(200)
     expect((await ai(token, 'GET', `/item/${taskId}`)).status).toBe(200)
     expect(await ai(token, 'POST', `/item/${taskId}/actions/reopen`, { expectedVersion: 3 })).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
+  })
+
+  it('Codex (any agent not allowed to act) gets a read token even when the app asks for act', async () => {
+    for (const agent of ['codex', 'api-key', 'something-else']) {
+      const issued = await tokenFor('u-bob', 'act', CO, agent)
+      expect(issued.scope).toBe('read')
+      expect(await ai(issued.token, 'POST', `/item/${taskId}/actions/reopen`, { expectedVersion: 3 })).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
+      expect((await ai(issued.token, 'GET', '/my-turn')).status).toBe(200)
+    }
+    expect((await tokenFor('u-bob', 'act', CO, 'claude-code')).scope).toBe('act')
   })
 
   it('only its own company: another company’s id in the token, or its record ids, find nothing', async () => {
