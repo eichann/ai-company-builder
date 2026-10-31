@@ -92,7 +92,7 @@ describe('server layering', () => {
     }
   })
 
-  // Test-only code (the fake HubSpot in tests/fakes/, fixtures, helpers) is not in the production
+  // Test-only code (the fake HubSpot and Google in tests/fakes/, fixtures, helpers) is not in the production
   // image (server/Dockerfile copies src/ and shared/ only): src importing it would break the image
   // or, worse, ship a fake upstream.
   it('nothing in src/ imports from tests/', () => {

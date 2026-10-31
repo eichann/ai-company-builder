@@ -21,6 +21,7 @@ paths:
   - "server/tests/integration/plugin-import.test.ts"
   - "server/tests/helpers/fake-upstream.ts"
   - "server/tests/fakes/hubspot/**"
+  - "server/tests/fakes/google/**"
   - "server/src/services/plugin-operations.ts"
   - "server/src/services/plugin-mapping-check.ts"
   - "server/tests/integration/plugin-mapping-check.test.ts"

@@ -23,10 +23,19 @@ export interface SeedDeal {
   companyIds: string[]
 }
 
+export interface SeedContact {
+  id: string
+  properties: Record<string, string>
+  /** Deals the contact is associated with (deal → contact, type 3). */
+  dealIds: string[]
+}
+
 export interface Seed {
   owners: SeedOwner[]
   companies: SeedCompany[]
   deals: SeedDeal[]
+  /** Optional so hand-made seeds of milestone 3 tests stay valid. */
+  contacts?: SeedContact[]
 }
 
 export const SEED_OWNER_IDS = ['75123001', '75123002', '75123003'] as const
@@ -38,7 +47,8 @@ export function defaultSeed(): Seed {
     { id: '75123003', email: 'sales-three@example.com', firstName: '次郎', lastName: '架空', userId: 9100003 },
   ]
   const companies: SeedCompany[] = [
-    { id: '2000000001', properties: { name: '株式会社サンプル', domain: 'sample.example.com' } },
+    // 株式会社サンプル's people are on the fake Google's sales meeting (tests/fakes/google/seed.ts).
+    { id: '2000000001', properties: { name: '株式会社サンプル', domain: 'a-corp.example' } },
     { id: '2000000002', properties: { name: '見本商事株式会社', domain: 'mihon-shoji.example.com' } },
     { id: '2000000003', properties: { name: '架空ラーニング株式会社', domain: 'kakuu-learning.example.com' } },
     { id: '2000000004', properties: { name: '例示製作所', domain: 'reiji.example.com' } },
@@ -70,5 +80,11 @@ export function defaultSeed(): Seed {
     deal(9, 'リーダー研修（例示製作所）', 'closedlost', '700000', '2026-09-30T00:00:00.000Z', '75123003', 'low', '', ['2000000004']),
     deal(10, 'プロンプト研修（架空ラーニング株式会社）', 'presentationscheduled', '600000', '2026-12-10T00:00:00.000Z', '75123001', 'medium', '提案書の修正', ['2000000003']),
   ]
-  return { owners, companies, deals }
+  // The customer's people on deal 1 (the fake Google's sales meeting): the
+  // "checked recipients" of the thank-you mail come from here.
+  const contacts: SeedContact[] = [
+    { id: '5000000001', properties: { email: 'suzuki@a-corp.example', firstname: '一郎', lastname: '鈴木', company: '株式会社サンプル' }, dealIds: ['1000000001'] },
+    { id: '5000000002', properties: { email: 'yamaguchi@a-corp.example', firstname: '花子', lastname: '山口', company: '株式会社サンプル' }, dealIds: ['1000000001'] },
+  ]
+  return { owners, companies, deals, contacts }
 }
