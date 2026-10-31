@@ -5,9 +5,10 @@ name: CI
 # the nightly schedule and a manual run run every job with the full soak.
 on:
   pull_request:
-    branches: [main]
+    # next/** are integration branches (e.g. next/sales-meeting): their PRs get the same checks.
+    branches: [main, 'next/**']
   push:
-    branches: [main]
+    branches: [main, 'next/**']
   schedule:
     # Nightly full run (18:17 UTC = 03:17 JST), off the hour to avoid the
     # scheduler's top-of-hour backlog.
