@@ -2,6 +2,7 @@ import type Database from 'better-sqlite3'
 import type { CompanyData, CompanyDataSource } from '../../ports/company-data'
 import { gitOrphanedScopeReader } from '../orphaned-scopes'
 import { sqlitePrivateFolderRepository } from '../private-folders'
+import { sqliteCompanyRowsExport } from './company-archive'
 import { sqliteDepartmentRepository } from './departments'
 import { sqliteInvitationRepository } from './invitations'
 import { sqliteScopeRepository } from './scopes'
@@ -22,6 +23,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         scopes: sqliteScopeRepository(conn, companyId),
         privateFolders: sqlitePrivateFolderRepository(conn, companyId),
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
+        archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)
     },
