@@ -54,9 +54,14 @@ deleted (refactor 5-6). Do not create them again: new code goes to `features/<na
    tests sit in one feature folder. Split by "changes together", not by line count.
 2. **Dependencies point one way: `app → features → shared`.** A feature never imports another
    feature; `app/` composes them (pass data and callbacks through props). `shared/` never
-   imports `features/` or `app/`. An unavoidable cross-feature import is listed, with its reason,
-   in `client/tests/architecture-boundaries.test.ts`, like the agent-id exceptions there.
-   `stores/`, `i18n/` and `types/` may be imported from anywhere.
+   imports `features/` or `app/`. `stores/`, `i18n/` and `types/` may be imported from anywhere.
+   An unavoidable cross-feature import is registered **per imported file**, with its reason, in
+   `FEATURE_IMPORT_EXCEPTIONS` (`client/tests/architecture-boundaries.test.ts`,
+   `'files -> doc-review/model.ts'`): any other file of that feature still fails. What another
+   feature may see: in principle only its pure functions and types (`model.ts`), and components
+   registered with a reason; using its `hooks/` or `api.ts` needs a reason why it cannot be
+   avoided. A PR that adds an entry says why `app/` cannot compose the two through props or a
+   slot. Still no barrels: the registered files are a feature's public surface.
 3. **No barrel files.** No `index.ts` that re-exports a folder: import the file you need. The
    boundary test, not a public index, guards a feature's edges (barrels also defeat tree shaking).
 4. **IPC goes through a data layer.** Components, hooks, stores and `App.tsx` do not call
@@ -85,6 +90,22 @@ deleted (refactor 5-6). Do not create them again: new code goes to `features/<na
    Exceptions, kept in the file of their mechanism: a store's selector hooks (`useAppStore`,
    `agentStatusStore.ts`, `consultationStatusStore.ts`) and the command registry's hooks
    (`useCommandHandler`, `useCommandAvailable`, `useKeybindings` in `shared/commands/commands.ts`).
+
+   **When to extract a hook into its own file** (owner, 2026-10-31; "one hook per file" applies
+   to the hooks you extract). Extract only when one of these holds:
+   1. two or more components or features use it;
+   2. it holds exactly one connection to the outside — an IPC subscription, an event listener, a
+      timer, a data load — with its clean-up (`useIpcEvent`, `useEventListener`, `useInterval`
+      are the good kind);
+   3. it has rules worth testing on their own — but first consider a pure function in `model.ts`.
+
+   Otherwise keep the state and handlers in the component that uses them, where they change
+   together with the screen; if that file passes ~300 lines, one line at its top says why it is
+   not split. Do not create hooks that only wrap one `useState`, or lifecycle-named hooks
+   (`useMount`, `useUpdateEffect`). Naming check: you can say "this hook does X" in one phrase;
+   if the description needs "and" / "or" (「と」「や」), rethink the split. Why: extracting to cut
+   line counts does not cut reading — single-use hooks spread over many files cost people and the
+   AI more. Code already split stays as it is; this applies to new code.
 7. **About 300 lines per file.** A new or split file over ~300 lines states in one or two lines
    at its top why it stays whole. Do not split finer than that: hopping between tiny files costs
    more reading than it saves.
@@ -92,6 +113,20 @@ deleted (refactor 5-6). Do not create them again: new code goes to `features/<na
    in comments. Long background belongs in the internal `docs/architecture/` notes; rules that
    must hold belong in `.claude/rules/`.
 9. **Nest at most 3–4 levels** (`features/<name>/components/X.tsx` is the deepest normal case).
+
+## What goes in `src/shared/`
+
+Two kinds; a new file says on its first line which one it is:
+
+1. **Generic** — knows no ACB vocabulary (department, skill, chat, review, sync, …): buttons and
+   dialogs, path operations, `useInterval`. No reason line needed.
+2. **ACB foundation** — uses ACB vocabulary and two or more features use it (`useWriteAccess`,
+   `departments.ts`). Its first line names the features that use it and why it cannot live in
+   its owner feature.
+
+When unsure, keep it in the owner feature and register the import exception: moving it to
+`shared/` later is easier than moving it back. Existing files are reviewed when touched. If the
+foundation files become hard to tell from the generic ones, consider `shared/domain/`.
 
 ## Where types go
 
