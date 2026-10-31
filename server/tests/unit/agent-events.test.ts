@@ -12,7 +12,7 @@ import { initDatabase } from '../../src/db'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from '../../src/adapters/sqlite/agent-events'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
 import { sqliteScopeRepository } from '../../src/adapters/sqlite/scopes'
-import { sqliteDepartmentRepository } from '../../src/adapters/sqlite/departments'
+import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 import { createAgentEventService, parseListQuery, type AgentEventService } from '../../src/services/agent-events'
 import type { Member } from '../../src/services/access'
@@ -70,7 +70,7 @@ beforeEach(() => {
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     memberships: sqliteMembershipRepository(conn),
     scopes: sqliteScopeRepository(conn),
-    departments: sqliteDepartmentRepository(conn),
+    companyData: sqliteCompanyData(conn),
     accounts: { byIds: ids => new Map(ids.map(id => [id, { email: `${id}@example.com`, name: `Name ${id}` }])), bySessionToken: () => null },
     clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs },
     ids: { newId: () => `id-${++seq}`, newToken: () => 'token' },

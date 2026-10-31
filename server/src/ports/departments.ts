@@ -19,9 +19,9 @@ export type DepartmentRow = {
   created_by: string | null
 }
 
+/** A new row; its company is the handle's. */
 export interface NewDepartment {
   id: string
-  companyId: string
   name: string
   nameEn: string | null
   folder: string
@@ -44,24 +44,28 @@ export interface DepartmentChanges {
   isActive?: boolean
 }
 
+/**
+ * One company's departments, from its handle (`CompanyData`, ports/company-data.ts).
+ * Every method is limited to that company: another company's department id
+ * is not found, and updating or deleting it changes nothing.
+ */
 export interface DepartmentRepository {
   /** A top-level, active department (parent_id NULL, is_active 1). */
   insert(department: NewDepartment): void
-  /** The company's departments by sort_order. */
-  listByCompany(companyId: string): DepartmentRow[]
-  /** The company's departments, in no particular order. */
-  listAllByCompany(companyId: string): DepartmentRow[]
-  findById(departmentId: string): DepartmentRow | undefined
-  findInCompany(departmentId: string, companyId: string): DepartmentRow | undefined
-  existsInCompany(departmentId: string, companyId: string): boolean
-  /** The highest sort_order in the company, or null without departments. */
-  maxSortOrder(companyId: string): number | null
+  /** The departments by sort_order. */
+  list(): DepartmentRow[]
+  /** The departments, in no particular order. */
+  listUnordered(): DepartmentRow[]
+  find(departmentId: string): DepartmentRow | undefined
+  exists(departmentId: string): boolean
+  /** The highest sort_order, or null without departments. */
+  maxSortOrder(): number | null
   /** Set the given columns and updated_at. Nothing happens when `changes` sets none. */
   update(departmentId: string, changes: DepartmentChanges, updatedAt: string): void
-  /** One statement per item; items of other companies are ignored. Not atomic (it never was). */
-  setSortOrders(companyId: string, items: Array<{ id: string; sortOrder: number }>, updatedAt: string): void
+  /** One statement per item; ids of other companies are ignored. Not atomic (it never was). */
+  setSortOrders(items: Array<{ id: string; sortOrder: number }>, updatedAt: string): void
   delete(departmentId: string): void
-  count(companyId: string): number
+  count(): number
   /** Every department's id and folder (as stored), in no particular order. */
-  folders(companyId: string): Array<{ id: string; folder: string }>
+  folders(): Array<{ id: string; folder: string }>
 }

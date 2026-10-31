@@ -26,7 +26,7 @@ import type {
   NewAgentEvent,
 } from '../ports/agent-events'
 import type { Clock, IdGenerator } from '../ports/clock'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
 import type { ScopeRepository } from '../ports/scopes'
 import { foldAsciiCase, pathKey } from '../../shared/core/paths'
@@ -96,7 +96,7 @@ export interface AgentEventDeps {
   agentEventSettings: AgentEventSettingsRepository
   memberships: MembershipRepository
   scopes: ScopeRepository
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   accounts: AccountDirectory
   clock: Clock
   ids: IdGenerator
@@ -200,7 +200,7 @@ type Reader =
   | { all: false; rootKeys: string[]; canRead: (path: string) => boolean }
 
 export function createAgentEventService(deps: AgentEventDeps) {
-  const { agentEvents: events, agentEventSettings, memberships, scopes, departments, accounts, clock, ids } = deps
+  const { agentEvents: events, agentEventSettings, memberships, scopes, companyData, accounts, clock, ids } = deps
   const yieldNow = deps.yieldNow ?? (() => Promise.resolve())
   const budget = new Map<string, { windowStart: number; used: number }>()
 
@@ -241,7 +241,7 @@ export function createAgentEventService(deps: AgentEventDeps) {
   function managedDepartments(companyId: string, userId: string) {
     const managed = new Set(scopes.managedDepartmentIds(companyId, userId))
     if (managed.size === 0) return []
-    return departments.listByCompany(companyId).filter(d => managed.has(d.id))
+    return companyData.forCompany(companyId).departments.list().filter(d => managed.has(d.id))
   }
 
   function readerOf(member: Member): Outcome<Reader> {
@@ -617,7 +617,7 @@ export function createAgentEventService(deps: AgentEventDeps) {
       }
       const mode: AgentEventViewerMode = rawMode ? (rawMode as AgentEventViewerMode) : settingsOf(member.companyId).viewers
       const rows = memberships.listByCompany(member.companyId)
-      const departmentRows = mode === 'admins-and-managers' ? departments.listByCompany(member.companyId) : []
+      const departmentRows = mode === 'admins-and-managers' ? companyData.forCompany(member.companyId).departments.list() : []
       const found: Array<Omit<AgentEventViewer, 'name' | 'email'>> = []
       for (const m of rows) {
         if (hasFullAccess(m.role)) { found.push({ userId: m.user_id, role: m.role, scope: 'all', departments: [] }); continue }

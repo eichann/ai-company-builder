@@ -18,7 +18,7 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { ClientActivityRepository } from '../ports/client-activity'
 import type { CompanyRepository, CompanyRow } from '../ports/companies'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { InvitationRepository } from '../ports/invitations'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
@@ -91,7 +91,7 @@ export interface CompanyServiceDeps {
   companies: CompanyRepository
   invitations: InvitationRepository
   memberships: MembershipRepository
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   scopes: ScopeRepository
   clientActivity: ClientActivityRepository
   accounts: AccountDirectory
@@ -114,7 +114,7 @@ function createSlug(name: string): string {
 }
 
 export function createCompanyService(deps: CompanyServiceDeps) {
-  const { companies, invitations, memberships, departments, scopes, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
+  const { companies, invitations, memberships, companyData, scopes, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
 
   // A unique slug: the requested slug (admin API) or the name, sanitized, plus
   // a suffix from the new company's own id — always, whether or not the base
@@ -138,10 +138,11 @@ export function createCompanyService(deps: CompanyServiceDeps) {
 
   function initializeDefaultDepartments(companyId: string, userId: string): void {
     const timestamp = clock.now()
+    // The company this service has just created.
+    const departments = companyData.forCompany(companyId).departments
     DEFAULT_DEPARTMENTS.forEach((dept, index) => {
       departments.insert({
         id: ids.newId(),
-        companyId,
         name: dept.name,
         nameEn: dept.nameEn,
         folder: dept.folder,

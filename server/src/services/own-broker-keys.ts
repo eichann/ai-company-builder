@@ -25,7 +25,7 @@ import {
 } from '../../shared/core/key-broker'
 import type { BrokerChangeDetail, BrokerKeySnapshot, MyBrokerKeys, MyBrokerService, OwnKeyBlocked } from '../../shared/types/key-broker'
 import type { Clock, IdGenerator } from '../ports/clock'
-import type { DepartmentRepository } from '../ports/departments'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { BrokerKeyRepository, BrokerKeyRow } from '../ports/key-broker'
 import type { Member } from './access'
 import type { BrokerVault } from './broker-vault'
@@ -36,7 +36,7 @@ export interface OwnBrokerKeyDeps {
   brokerKeys: BrokerKeyRepository
   brokerVault: BrokerVault
   keyBroker: KeyBrokerService
-  departments: DepartmentRepository
+  companyData: CompanyDataSource
   clock: Clock
   ids: IdGenerator
 }
@@ -69,7 +69,7 @@ function snapshot(row: BrokerKeyRow): BrokerKeySnapshot {
 }
 
 export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
-  const { brokerKeys, brokerVault, keyBroker, departments, clock, ids } = deps
+  const { brokerKeys, brokerVault, keyBroker, companyData, clock, ids } = deps
 
   /** May the member register an own key for the service now? */
   function ownKeyAllowance(companyId: string, service: string): MyBrokerService['ownKey'] {
@@ -85,7 +85,7 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
 
   function view(member: Member): MyBrokerKeys {
     const rows = brokerKeys.list(member.companyId)
-    const departmentNames = new Map(departments.listByCompany(member.companyId).map(d => [d.id, d.name]))
+    const departmentNames = new Map(companyData.forCompany(member.companyId).departments.list().map(d => [d.id, d.name]))
     const names = [...new Set([
       ...BUILTIN_BROKER_SERVICES.map(s => s.service),
       ...keyBroker.knownServices(member.companyId),
