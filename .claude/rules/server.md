@@ -355,13 +355,38 @@ no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
   CRM calls the HubSpot plugin makes in HubSpot's documented shapes (v3 and dated
   `/crm/<api>/<YYYY-MM>/…` paths; deals get / list / search / update, deal properties and
   pipelines, companies, owners, notes with the 214 note → deal association, account details
-  with a `portalId` per fake — another fake is another account), `pat-fake-…` keys
+  with a `portalId` per fake — another fake is another account; milestone 4: deals create /
+  archive, meetings create / get / search / archive with the 212 meeting → deal association,
+  contacts and deal → contact associations, the unique-value custom property
+  `acb_operation_id` on deals and meetings — a duplicate is 409 `CONFLICT`, `?idProperty=`
+  finds it at once while search misses new objects for `searchIndexDelayMs` —, and the
+  meeting scopes as a setting, `meetingScopes`, because HubSpot does not document them),
+  `pat-fake-…` keys
   with per-key scopes (403 `MISSING_SCOPES`), read-only values (400), rate limits (429) and
   faults (delay, 500, a write applied whose answer never arrives, a change made "in HubSpot").
   Tests pass `createFakeHubSpot().app` in; staging runs `pnpm fake:hubspot` (127.0.0.1:4010,
   `/__fake/*` control routes, refuses `NODE_ENV=production`). Never in the image (the Dockerfile
   copies `src/` and `shared/` only) and never imported from `src/` (`layering.test.ts`). Test:
   `tests/unit/fake-hubspot.test.ts`.
+- **Fake Google** (`tests/fakes/google/`, milestone 4 G2): the same kind of app for the Google
+  connector — OAuth 2.0 (`/o/oauth2/v2/auth` with a chosen "signed-in" account, deny, or
+  withheld scopes; `state` and an S256 PKCE challenge required; `/token` for code + verifier
+  and refresh; `/revoke`; `/oauth2/v3/userinfo`), Calendar v3 events, Meet v2 conference
+  records / smartNotes / transcripts (`docsDestination`), Drive v3 file metadata
+  (`version`, `modifiedTime`) and text export (BOM + CRLF, 10 MB → 403
+  `exportSizeLimitExceeded`; with only `drive.meet.readonly` a file Meet did not create is 404),
+  and Gmail `messages.send` (stored decoded in `fake.sent`; a From that is not the token's account
+  is refused). Google's paths on one origin, so a practice redirect maps Google's hosts by path
+  (the table is in `fake-google.ts`). Practice values: secrets `fake-google-secret-…`, tokens
+  `ya29.fake-…` / `1//fake-…`; scopes enforced per token (403 `PERMISSION_DENIED`). Faults:
+  delay, 500 / 429, a send stored whose answer never arrives, revoked access (`invalid_grant`),
+  oldest refresh token dropped past the per-account limit, an event or a minutes document
+  changed. Seed (`seed.ts`, `GOOGLE_SEED`): `sato@div.example` with a sales meeting
+  (`suzuki@` / `yamaguchi@a-corp.example`, the fake HubSpot's deal 1000000001 contacts), an
+  internal-only meeting and a follow-up whose notes hold an instruction-like line. Staging runs
+  `pnpm fake:google` (127.0.0.1:4011, `/__fake/*`, refuses `NODE_ENV=production`). Same rules
+  as the fake HubSpot (not in the image, not imported from `src/`). Test:
+  `tests/unit/fake-google.test.ts`.
 
 - Who reaches a company repository over git HTTP (members with a live session; others 401 /
   403 / 404 on info/refs, upload-pack and receive-pack, repository unchanged; only the two smart

@@ -7,7 +7,7 @@
 import { afterEach, describe, expect, it } from 'vitest'
 import { serve, type ServerType } from '@hono/node-server'
 import type { AddressInfo } from 'net'
-import { createFakeHubSpot, HUBSPOT_SCOPES, NOTE_TO_DEAL, PLUGIN_BASE_SCOPES, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
+import { createFakeHubSpot, HUBSPOT_SCOPES, MEETING_TO_DEAL, NOTE_TO_DEAL, OPERATION_ID_PROPERTY, PLUGIN_BASE_SCOPES, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 
 const KEY = 'pat-fake-na1-test-0001'
 const DEAL = '1000000001'
@@ -223,5 +223,85 @@ describe('fake HubSpot: writes, notes and faults', () => {
       fake.close()
       await pending
     })
+  })
+})
+
+describe('fake HubSpot: creating with a matching mark (milestone 4)', () => {
+  const meetingBody = (op: string) => ({
+    properties: { hs_timestamp: '2026-11-05T05:00:00Z', hs_meeting_title: '研修導入のご相談', hs_meeting_body: '金額 150万円で合意', hs_meeting_outcome: 'COMPLETED', [OPERATION_ID_PROPERTY]: op },
+    associations: [{ to: { id: DEAL }, types: [{ associationCategory: 'HUBSPOT_DEFINED', associationTypeId: MEETING_TO_DEAL }] }],
+  })
+
+  it('a meeting is created on the deal; the same acb_operation_id again is 409 CONFLICT; get by idProperty finds it at once while search lags', async () => {
+    let t = 1_800_000_000_000
+    make({ now: () => t, searchIndexDelayMs: 5000 })
+    const res = await call('/crm/objects/2026-03/meetings', { method: 'POST', body: meetingBody('op-1') })
+    expect(res.status).toBe(201)
+    const { id } = await res.json() as { id: string }
+    expect(fake.meeting(id)).toMatchObject({ dealIds: [DEAL], properties: { hs_meeting_outcome: 'COMPLETED' } })
+
+    const again = await call('/crm/objects/2026-03/meetings', { method: 'POST', body: meetingBody('op-1') })
+    expect(again.status).toBe(409)
+    expect(await again.json()).toMatchObject({ status: 'error', category: 'CONFLICT' })
+    expect(fake.withOperationId('op-1')).toHaveLength(1)
+
+    const byMark = await call(`/crm/objects/2026-03/meetings/op-1?idProperty=${OPERATION_ID_PROPERTY}`)
+    expect(byMark.status).toBe(200)
+    expect((await byMark.json() as { id: string }).id).toBe(id)
+    // A property that is not unique cannot be used as idProperty.
+    expect((await call('/crm/objects/2026-03/meetings/x?idProperty=hs_meeting_title')).status).toBe(400)
+
+    const search = async () => (await (await call('/crm/objects/2026-03/meetings/search', { method: 'POST', body: { filterGroups: [{ filters: [{ propertyName: OPERATION_ID_PROPERTY, operator: 'EQ', value: 'op-1' }] }] } })).json() as { total: number }).total
+    expect(await search()).toBe(0)
+    t += 5000
+    expect(await search()).toBe(1)
+
+    // Archived: gone from get, and its mark is free again.
+    expect((await call(`/crm/objects/2026-03/meetings/${id}`, { method: 'DELETE' })).status).toBe(204)
+    expect((await call(`/crm/objects/2026-03/meetings/op-1?idProperty=${OPERATION_ID_PROPERTY}`)).status).toBe(404)
+  })
+
+  it('a deal is created with the mark; the deal properties list says the mark is unique', async () => {
+    make()
+    const body = { properties: { dealname: '新規（株式会社サンプル）', dealstage: 'appointmentscheduled', amount: '1500000', [OPERATION_ID_PROPERTY]: 'op-d' } }
+    const res = await call('/crm/objects/2026-03/deals', { method: 'POST', body })
+    expect(res.status).toBe(201)
+    const { id } = await res.json() as { id: string }
+    expect(fake.deal(id)!.properties).toMatchObject({ pipeline: 'default', amount: '1500000' })
+    expect((await call('/crm/objects/2026-03/deals', { method: 'POST', body })).status).toBe(409)
+    const got = await call(`/crm/objects/2026-03/deals/op-d?idProperty=${OPERATION_ID_PROPERTY}`)
+    expect((await got.json() as { id: string }).id).toBe(id)
+    const { results } = await (await call('/crm/properties/2026-03/deals')).json() as { results: { name: string; hasUniqueValue: boolean }[] }
+    expect(results.find(p => p.name === OPERATION_ID_PROPERTY)!.hasUniqueValue).toBe(true)
+  })
+
+  it('the deal\'s contacts (the mail\'s checked recipients) need the contacts read scope', async () => {
+    make({}, [...PLUGIN_BASE_SCOPES, HUBSPOT_SCOPES.contactsRead])
+    const deal = await (await call(`/crm/objects/2026-03/deals/${DEAL}?associations=contacts`)).json() as { associations: { contacts: { results: { id: string; type: string }[] } } }
+    expect(deal.associations.contacts.results).toEqual([{ id: '5000000001', type: 'deal_to_contact' }, { id: '5000000002', type: 'deal_to_contact' }])
+    const contact = await (await call('/crm/objects/2026-03/contacts/5000000001')).json() as { properties: Record<string, string> }
+    expect(contact.properties).toMatchObject({ email: 'suzuki@a-corp.example', firstname: '一郎', lastname: '鈴木' })
+    fake.setScopes(KEY, PLUGIN_BASE_SCOPES)
+    expect((await call('/crm/objects/2026-03/contacts/5000000001')).status).toBe(403)
+  })
+
+  it('the scope creating a meeting needs is a setting (unverified in HubSpot\'s docs)', async () => {
+    make({ meetingScopes: { write: [HUBSPOT_SCOPES.contactsWrite] } }, PLUGIN_BASE_SCOPES)
+    const res = await call('/crm/objects/2026-03/meetings', { method: 'POST', body: meetingBody('op-s') })
+    expect(res.status).toBe(403)
+    expect(await res.json()).toMatchObject({ errors: [{ context: { requiredGranularScopes: [HUBSPOT_SCOPES.contactsWrite] } }] })
+    expect(fake.withOperationId('op-s')).toEqual([])
+  })
+
+  it('a meeting created whose answer never arrives is there, findable by its mark', async () => {
+    make()
+    fake.faults.dropAnswerAfterWrite(1)
+    let answered = false
+    const pending = Promise.resolve(call('/crm/objects/2026-03/meetings', { method: 'POST', body: meetingBody('op-lost') })).then(r => { answered = true; return r })
+    await new Promise(r => setTimeout(r, 50))
+    expect(answered).toBe(false)
+    expect((await call(`/crm/objects/2026-03/meetings/op-lost?idProperty=${OPERATION_ID_PROPERTY}`)).status).toBe(200)
+    fake.close()
+    await pending
   })
 })

@@ -14,11 +14,22 @@
  * (`/crm/objects/2026-03/deals/{id}`, `/crm/properties/2026-03/deals`,
  * `/crm/pipelines/2026-03/deals`) reach the same handler.
  *
- * Only what the plugin uses: deals (list, get, search, update), deal
- * properties and pipelines, companies (get) and deal → company associations,
- * owners (list), notes (create with an association, get, archive), and the
+ * Only what the plugin uses: deals (list, get, search, update, create,
+ * archive), deal properties and pipelines, companies (get) and deal → company
+ * / contact associations, contacts (get), owners (list), notes (create with
+ * an association, get, archive), meetings (create with the 212 meeting → deal
+ * association, get, search, archive — milestone 4's `log_meeting`), and the
  * account details (`/account-info/v3/details` or a dated version: the portal
  * id, which tells the fake and the real HubSpot — or two accounts — apart).
+ *
+ * The matching mark (milestone 4 design §3-6, §4-4): deals and meetings have a
+ * custom unique-value property `acb_operation_id`. A second live object with
+ * the same value is a 409 CONFLICT; `GET …/{value}?idProperty=acb_operation_id`
+ * finds one at once, while search does not see a new object until the
+ * indexing delay (`searchIndexDelayMs`; HubSpot: new objects may take a few
+ * moments to appear in search) has passed. Which scope creating a meeting
+ * needs is not documented (design §5-4, unverified): `meetingScopes` sets it,
+ * default the deals scopes as anken-sync assumes.
  *
  * Keys: `Authorization: Bearer pat-fake-…` only, each with its own scopes; a
  * missing scope answers HubSpot's 403 MISSING_SCOPES. Rate limits (100 per
@@ -51,6 +62,14 @@ export const ALL_FAKE_SCOPES = Object.values(HUBSPOT_SCOPES)
 /** HubSpot's association type ids (associations v4 guide): note → deal 214, note → company 190. */
 export const NOTE_TO_DEAL = 214
 export const NOTE_TO_COMPANY = 190
+/** Meeting → deal 212, meeting → contact 200; deal → company 5, deal → contact 3. */
+export const MEETING_TO_DEAL = 212
+export const MEETING_TO_CONTACT = 200
+export const DEAL_TO_COMPANY = 5
+export const DEAL_TO_CONTACT = 3
+
+/** The custom unique-value property ACB writes on what it creates (the owner makes it in HubSpot). */
+export const OPERATION_ID_PROPERTY = 'acb_operation_id'
 
 export interface RateLimitOptions {
   /** Requests per key per 10 seconds (HubSpot Free / Starter: 100). */
@@ -69,6 +88,10 @@ export interface FakeHubSpotOptions {
   controlRoutes?: boolean
   /** The account's portal id (`GET /account-info/…/details`); another fake = another account. Default 90000001. */
   portalId?: number
+  /** A created deal or meeting is missing from search for this long (HubSpot's indexing delay). Default 0. */
+  searchIndexDelayMs?: number
+  /** Scopes (any one of) for reading and for creating / archiving meetings. Default: the deals read / write scopes. */
+  meetingScopes?: { read?: string[]; write?: string[] }
 }
 
 interface StoredObject {
@@ -77,10 +100,13 @@ interface StoredObject {
   createdAt: number
   updatedAt: number
   archived: boolean
+  /** From this time on, search finds it. */
+  indexedAt: number
 }
 
 interface Deal extends StoredObject {
   companyIds: string[]
+  contactIds: string[]
   /** hs_deal_stage_probability was written by hand: the stage no longer sets it (as in HubSpot). */
   probabilityOverridden: boolean
 }
@@ -88,6 +114,11 @@ interface Deal extends StoredObject {
 interface Note extends StoredObject {
   dealIds: string[]
   companyIds: string[]
+}
+
+interface Meeting extends StoredObject {
+  dealIds: string[]
+  contactIds: string[]
 }
 
 export interface FakeRequestLog {
@@ -107,6 +138,11 @@ export interface FakeHubSpot {
   /** The current properties of a deal (null when unknown); for tests' assertions. */
   deal(id: string): { properties: Record<string, string | null>; updatedAt: string; archived: boolean } | null
   note(id: string): { properties: Record<string, string | null>; archived: boolean; dealIds: string[] } | null
+  meeting(id: string): { properties: Record<string, string | null>; archived: boolean; dealIds: string[]; contactIds: string[] } | null
+  /** Every object (archived ones too) carrying this `acb_operation_id`: "was it created, and how often?". */
+  withOperationId(value: string): { type: 'deals' | 'meetings'; id: string; archived: boolean }[]
+  /** Changes the indexing delay for objects created from now on. */
+  setSearchIndexDelay(ms: number): void
   /** Someone in HubSpot changes a deal (the design's §2-4 case): bumps hs_lastmodifieddate. */
   changeDealOutside(id: string, properties: Record<string, string>): void
   faults: FakeFaults
@@ -144,6 +180,8 @@ interface PropertyDef {
   calculated: boolean
   readOnlyValue: boolean
   hubspotDefined: boolean
+  /** "Unique value" custom property (hasUniqueValue): one object per value, usable as idProperty. */
+  unique?: boolean
 }
 
 const STAGES = [
@@ -175,6 +213,8 @@ const DEAL_PROPERTIES: PropertyDef[] = [
   { name: 'hs_object_id', label: 'Record ID', type: 'number', fieldType: 'number', groupName: 'dealinformation', description: 'The unique ID for this record. Set automatically by HubSpot.', calculated: false, readOnlyValue: true, hubspotDefined: true },
   // div's custom property 「受注確度」 (design §1-5).
   { name: 'juchu_kakudo', label: '受注確度', type: 'enumeration', fieldType: 'select', groupName: 'dealinformation', description: '', options: [{ label: '高', value: 'high' }, { label: '中', value: 'medium' }, { label: '低', value: 'low' }], calculated: false, readOnlyValue: false, hubspotDefined: false },
+  // ACB's matching mark (milestone 4 design §3-6), made by the owner with "unique value" on.
+  { name: OPERATION_ID_PROPERTY, label: 'ACB 操作番号', type: 'string', fieldType: 'text', groupName: 'dealinformation', description: '', calculated: false, readOnlyValue: false, hubspotDefined: false, unique: true },
 ]
 const DEAL_PROPERTY = new Map(DEAL_PROPERTIES.map(p => [p.name, p]))
 /** What GET returns without `properties` (HubSpot's default set for deals). */
@@ -182,6 +222,11 @@ const DEAL_DEFAULT_PROPERTIES = ['amount', 'closedate', 'createdate', 'dealname'
 const DEAL_ALWAYS = ['createdate', 'hs_lastmodifieddate', 'hs_object_id']
 const COMPANY_DEFAULT_PROPERTIES = ['createdate', 'domain', 'hs_lastmodifieddate', 'hs_object_id', 'name']
 const NOTE_PROPERTIES = new Set(['hs_timestamp', 'hs_note_body', 'hubspot_owner_id'])
+/** Meeting properties (meetings guide) plus the custom matching mark. */
+const MEETING_PROPERTIES = new Set(['hs_timestamp', 'hs_meeting_title', 'hs_meeting_body', 'hs_internal_meeting_notes', 'hs_meeting_external_url', 'hs_meeting_location', 'hs_meeting_start_time', 'hs_meeting_end_time', 'hs_meeting_outcome', 'hubspot_owner_id', OPERATION_ID_PROPERTY])
+const MEETING_OUTCOMES = ['SCHEDULED', 'COMPLETED', 'RESCHEDULED', 'NO_SHOW', 'CANCELED']
+const MEETING_DEFAULT_PROPERTIES = ['hs_createdate', 'hs_lastmodifieddate', 'hs_object_id']
+const CONTACT_DEFAULT_PROPERTIES = ['createdate', 'email', 'firstname', 'hs_object_id', 'lastmodifieddate', 'lastname']
 
 /** Search limits (search guide): 200 per page, 10,000 results per query, 5 groups × 6 filters. */
 const SEARCH_MAX_LIMIT = 200
@@ -229,6 +274,11 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     : { perTenSeconds: 100, searchPerSecond: 5, ...(options.rateLimits === true ? {} : options.rateLimits) }
   const seed = options.seed ?? defaultSeed()
   const portalId = options.portalId ?? 90000001
+  let searchIndexDelayMs = options.searchIndexDelayMs ?? 0
+  const meetingScopes = {
+    read: options.meetingScopes?.read ?? [HUBSPOT_SCOPES.dealsRead],
+    write: options.meetingScopes?.write ?? [HUBSPOT_SCOPES.dealsWrite],
+  }
   const keys = new Map<string, Set<string>>()
   const requests: FakeRequestLog[] = []
 
@@ -241,16 +291,24 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
   const companies = new Map<string, StoredObject>()
   const deals = new Map<string, Deal>()
   const notes = new Map<string, Note>()
+  const meetings = new Map<string, Meeting>()
+  const contacts = new Map<string, StoredObject>()
   let nextNoteId = 3000000001
+  let nextMeetingId = 4000000001
+  let nextDealId = 1000001001
 
   const created = stamp()
   for (const c of seed.companies) {
-    companies.set(c.id, { id: c.id, properties: { ...c.properties, hs_object_id: c.id, createdate: iso(created), hs_lastmodifieddate: iso(created) }, createdAt: created, updatedAt: created, archived: false })
+    companies.set(c.id, { id: c.id, properties: { ...c.properties, hs_object_id: c.id, createdate: iso(created), hs_lastmodifieddate: iso(created) }, createdAt: created, updatedAt: created, archived: false, indexedAt: created })
   }
   for (const d of seed.deals) {
-    const deal: Deal = { id: d.id, properties: { ...d.properties, hs_object_id: d.id, createdate: iso(created), hs_lastmodifieddate: iso(created) }, createdAt: created, updatedAt: created, archived: false, companyIds: [...d.companyIds], probabilityOverridden: false }
+    const deal: Deal = { id: d.id, properties: { ...d.properties, hs_object_id: d.id, createdate: iso(created), hs_lastmodifieddate: iso(created) }, createdAt: created, updatedAt: created, archived: false, indexedAt: created, companyIds: [...d.companyIds], contactIds: [], probabilityOverridden: false }
     applyStage(deal)
     deals.set(d.id, deal)
+  }
+  for (const ct of seed.contacts ?? []) {
+    contacts.set(ct.id, { id: ct.id, properties: { ...ct.properties, hs_object_id: ct.id, createdate: iso(created), lastmodifieddate: iso(created) }, createdAt: created, updatedAt: created, archived: false, indexedAt: created })
+    for (const dealId of ct.dealIds) deals.get(dealId)?.contactIds.push(ct.id)
   }
 
   function applyStage(deal: Deal) {
@@ -312,7 +370,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     for (const n of names) {
       // Unknown names are left out (as HubSpot does); known ones without a value are null.
       if (n in obj.properties) properties[n] = obj.properties[n] ?? null
-      else if (DEAL_PROPERTY.has(n) || NOTE_PROPERTIES.has(n) || defaults.includes(n)) properties[n] = null
+      else if (DEAL_PROPERTY.has(n) || NOTE_PROPERTIES.has(n) || MEETING_PROPERTIES.has(n) || defaults.includes(n)) properties[n] = null
     }
     return { id: obj.id, properties, createdAt: iso(obj.createdAt), updatedAt: iso(obj.updatedAt), archived: obj.archived }
   }
@@ -374,6 +432,11 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
         if (err instanceof HubSpotError) return c.json(err.body, err.status as 400)
         throw err
       }
+      return c.json({ ok: true })
+    })
+    app.post('/__fake/settings', async c => {
+      const body = await c.req.json().catch(() => ({})) as { searchIndexDelayMs?: number }
+      if (typeof body.searchIndexDelayMs === 'number') searchIndexDelayMs = body.searchIndexDelayMs
       return c.json({ ok: true })
     })
     app.post('/__fake/faults', async c => {
@@ -467,10 +530,22 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     if (api === 'account-info' && objectType === 'details' && method === 'GET' && !id) return { anyOf: [], run: accountDetails }
     if (api === 'objects' && objectType === 'deals') {
       if (method === 'GET' && !id) return { anyOf: dealsRead, run: listDeals }
-      if (method === 'POST' && id === 'search' && !extra) return { anyOf: dealsRead, run: searchDeals }
+      if (method === 'POST' && !id) return { anyOf: [HUBSPOT_SCOPES.dealsWrite], run: createDeal }
+      if (method === 'POST' && id === 'search' && !extra) return { anyOf: dealsRead, run: c => searchObjects(c, [...deals.values()], dealOut) }
       if (method === 'GET' && id && !extra) return { anyOf: dealsRead, run: c => getDeal(c, id) }
       if (method === 'PATCH' && id && !extra) return { anyOf: [HUBSPOT_SCOPES.dealsWrite], run: c => updateDeal(c, id) }
+      if (method === 'DELETE' && id && !extra) return { anyOf: [HUBSPOT_SCOPES.dealsWrite], run: () => archive(deals, id) }
       return null
+    }
+    if (api === 'objects' && objectType === 'meetings') {
+      if (method === 'POST' && !id) return { anyOf: meetingScopes.write, run: createMeeting }
+      if (method === 'POST' && id === 'search' && !extra) return { anyOf: meetingScopes.read, run: c => searchObjects(c, [...meetings.values()], meetingOut) }
+      if (method === 'GET' && id && !extra) return { anyOf: meetingScopes.read, run: c => getMeeting(c, id) }
+      if (method === 'DELETE' && id && !extra) return { anyOf: meetingScopes.write, run: () => archive(meetings, id) }
+      return null
+    }
+    if (api === 'objects' && objectType === 'contacts' && method === 'GET' && id && !extra) {
+      return { anyOf: [HUBSPOT_SCOPES.contactsRead], run: c => getContact(c, id) }
     }
     if (api === 'objects' && objectType === 'companies' && method === 'GET' && id && !extra) {
       return { anyOf: [HUBSPOT_SCOPES.companiesRead], run: c => getCompany(c, id) }
@@ -489,14 +564,146 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     return null
   }
 
+  /**
+   * `{id}` is the record id, or with `idProperty` the value of a unique-value
+   * property (found at once, unlike search). A property that is not unique
+   * is a 400, as in HubSpot.
+   */
+  function byIdOrUnique<T extends StoredObject>(c: Context, map: Map<string, T>, id: string): T {
+    const idProperty = c.req.query('idProperty')
+    if (idProperty === undefined || idProperty === 'hs_object_id') {
+      const o = map.get(id)
+      if (!o || o.archived) throw notFound()
+      return o
+    }
+    if (idProperty !== OPERATION_ID_PROPERTY) throw badRequest(`Property ${idProperty} is not a unique identifier property.`)
+    const o = [...map.values()].find(x => !x.archived && x.properties[OPERATION_ID_PROPERTY] === id)
+    if (!o) throw notFound()
+    return o
+  }
+
   function getDeal(c: Context, id: string): Result {
-    const d = liveDeal(id)
+    const d = byIdOrUnique(c, deals, id)
     const out: Record<string, unknown> = dealOut(d, listParam(c, 'properties'))
     const assoc = listParam(c, 'associations')
+    const associations: Record<string, unknown> = {}
     if (assoc?.includes('companies') || assoc?.includes('company')) {
-      out.associations = { companies: { results: d.companyIds.map(cid => ({ id: cid, type: 'deal_to_company' })) } }
+      associations.companies = { results: d.companyIds.map(cid => ({ id: cid, type: 'deal_to_company' })) }
+    }
+    // HubSpot leaves out an association type with no results.
+    if ((assoc?.includes('contacts') || assoc?.includes('contact')) && d.contactIds.length > 0) {
+      associations.contacts = { results: d.contactIds.map(cid => ({ id: cid, type: 'deal_to_contact' })) }
+    }
+    if (Object.keys(associations).length > 0) out.associations = associations
+    return { status: 200, body: out }
+  }
+
+  function getContact(c: Context, id: string): Result {
+    const ct = contacts.get(id)
+    if (!ct || ct.archived) throw notFound()
+    return { status: 200, body: pick(ct, listParam(c, 'properties'), CONTACT_DEFAULT_PROPERTIES, ['createdate', 'lastmodifieddate', 'hs_object_id']) }
+  }
+
+  /** A second live object of the same type with the same unique value: 409, nothing created. */
+  function assertUnique(map: Map<string, StoredObject>, value: string | null | undefined) {
+    if (!value) return
+    const other = [...map.values()].find(o => !o.archived && o.properties[OPERATION_ID_PROPERTY] === value)
+    if (other) {
+      throw new HubSpotError(409, errorBody('CONFLICT', `A record with the unique value ${value} for property ${OPERATION_ID_PROPERTY} already exists. Existing ID: ${other.id}`, { context: { id: [other.id] } }))
+    }
+  }
+
+  type AssociationInput = { to?: { id?: unknown }; types?: { associationCategory?: string; associationTypeId?: number }[] }
+  function associationsOf(input: AssociationInput[] | undefined): { toId: string; typeId: number }[] {
+    const out: { toId: string; typeId: number }[] = []
+    for (const a of input ?? []) {
+      const toId = String(a.to?.id ?? '')
+      for (const t of a.types ?? []) {
+        if (t.associationCategory !== 'HUBSPOT_DEFINED') throw badRequest(`Unsupported association category: ${String(t.associationCategory)}`)
+        out.push({ toId, typeId: Number(t.associationTypeId) })
+      }
+    }
+    return out
+  }
+
+  async function createDeal(c: Context): Promise<Result> {
+    const body = await c.req.json().catch(() => null) as { properties?: unknown; associations?: AssociationInput[] } | null
+    if (!body || body.properties === undefined) throw badRequest('Invalid input JSON: properties is required')
+    const values = validateDealProperties(null, body.properties)
+    for (const required of ['dealname', 'dealstage']) {
+      if (!values[required]) throw propertyValuesInvalid([{ isValid: false, message: `${required} is required`, error: 'REQUIRED_PROPERTY', name: required }])
+    }
+    const companyIds: string[] = []
+    const contactIds: string[] = []
+    for (const { toId, typeId } of associationsOf(body.associations)) {
+      if (typeId === DEAL_TO_COMPANY && companies.has(toId)) companyIds.push(toId)
+      else if (typeId === DEAL_TO_CONTACT && contacts.has(toId)) contactIds.push(toId)
+      else throw badRequest(`Invalid association type id ${typeId} or target ${toId} for deal`)
+    }
+    assertUnique(deals, values[OPERATION_ID_PROPERTY])
+    const id = String(nextDealId++)
+    const t = stamp()
+    const deal: Deal = {
+      id, properties: { pipeline: 'default', ...values, hs_object_id: id, createdate: iso(t), hs_lastmodifieddate: iso(t) },
+      createdAt: t, updatedAt: t, archived: false, indexedAt: now() + searchIndexDelayMs, companyIds, contactIds,
+      probabilityOverridden: 'hs_deal_stage_probability' in values,
+    }
+    applyStage(deal)
+    deals.set(id, deal)
+    return { status: 201, body: dealOut(deal, [...new Set([...DEAL_DEFAULT_PROPERTIES, ...Object.keys(values)])]) }
+  }
+
+  const meetingOut = (m: StoredObject, requested: string[] | null) => pick(m, requested, MEETING_DEFAULT_PROPERTIES, ['hs_object_id'])
+
+  async function createMeeting(c: Context): Promise<Result> {
+    const body = await c.req.json().catch(() => null) as { properties?: Record<string, unknown>; associations?: AssociationInput[] } | null
+    if (!body || typeof body.properties !== 'object' || body.properties === null) throw badRequest('Invalid input JSON: properties is required')
+    const problems: PropertyProblem[] = []
+    const props: Record<string, string | null> = {}
+    for (const [k, v] of Object.entries(body.properties)) {
+      if (!MEETING_PROPERTIES.has(k)) problems.push({ isValid: false, message: `Property "${k}" does not exist`, error: 'PROPERTY_DOESNT_EXIST', name: k })
+      else if (k === 'hs_meeting_outcome' && v !== null && !MEETING_OUTCOMES.includes(String(v))) problems.push({ isValid: false, message: `${String(v)} was not one of the allowed options: [${MEETING_OUTCOMES.join(', ')}]`, error: 'INVALID_OPTION', name: k })
+      else props[k] = v === null ? null : String(v)
+    }
+    if (!props.hs_timestamp) problems.push({ isValid: false, message: 'hs_timestamp is required', error: 'REQUIRED_PROPERTY', name: 'hs_timestamp' })
+    if (problems.length > 0) throw propertyValuesInvalid(problems)
+    const dealIds: string[] = []
+    const contactIds: string[] = []
+    for (const { toId, typeId } of associationsOf(body.associations)) {
+      if (typeId === MEETING_TO_DEAL) {
+        if (!deals.get(toId) || deals.get(toId)!.archived) throw badRequest(`No deal with id ${toId}`)
+        dealIds.push(toId)
+      } else if (typeId === MEETING_TO_CONTACT && contacts.has(toId)) {
+        contactIds.push(toId)
+      } else {
+        throw badRequest(`Invalid association type id ${typeId} for meeting`)
+      }
+    }
+    assertUnique(meetings, props[OPERATION_ID_PROPERTY])
+    const id = String(nextMeetingId++)
+    const t = stamp()
+    const meeting: Meeting = { id, properties: { ...props, hs_object_id: id, hs_createdate: iso(t), hs_lastmodifieddate: iso(t) }, createdAt: t, updatedAt: t, archived: false, indexedAt: now() + searchIndexDelayMs, dealIds, contactIds }
+    meetings.set(id, meeting)
+    return { status: 201, body: meetingOut(meeting, Object.keys(meeting.properties)) }
+  }
+
+  function getMeeting(c: Context, id: string): Result {
+    const m = byIdOrUnique(c, meetings, id)
+    const out: Record<string, unknown> = meetingOut(m, listParam(c, 'properties'))
+    const assoc = listParam(c, 'associations')
+    if ((assoc?.includes('deals') || assoc?.includes('deal')) && m.dealIds.length > 0) {
+      out.associations = { deals: { results: m.dealIds.map(did => ({ id: did, type: 'meeting_event_to_deal' })) } }
     }
     return { status: 200, body: out }
+  }
+
+  /** DELETE = archive (recycling bin): gone from GET and search; its unique value is free again. */
+  function archive(map: Map<string, StoredObject>, id: string): Result {
+    const o = map.get(id)
+    if (!o || o.archived) throw notFound()
+    o.archived = true
+    o.updatedAt = stamp()
+    return { status: 204 }
   }
 
   function page<T>(items: T[], limitRaw: unknown, afterRaw: unknown, max: number) {
@@ -516,7 +723,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     return { status: 200, body: { results: slice.map(d => dealOut(d, props)), ...(nextAfter ? { paging: { next: { after: nextAfter, link: `?after=${nextAfter}` } } } : {}) } }
   }
 
-  async function searchDeals(c: Context): Promise<Result> {
+  async function searchObjects<T extends StoredObject>(c: Context, all: T[], out: (o: T, props: string[] | null) => unknown): Promise<Result> {
     const body = await c.req.json().catch(() => null) as Record<string, unknown> | null
     if (!body || typeof body !== 'object') throw badRequest('Invalid input JSON on line 1')
     const groups = (body.filterGroups ?? []) as { filters?: { propertyName?: string; operator?: string; value?: unknown; values?: unknown[] }[] }[]
@@ -531,7 +738,9 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     }
     const after = body.after === undefined ? 0 : Number(body.after)
     if (Number.isInteger(after) && after >= SEARCH_MAX_RESULTS) throw badRequest(`Paging beyond ${SEARCH_MAX_RESULTS} results is not supported.`)
-    let matched = [...deals.values()].filter(d => !d.archived)
+    // A new object is not searchable until it is indexed (HubSpot's delay).
+    const t = now()
+    let matched = all.filter(d => !d.archived && d.indexedAt <= t)
     if (groups.length > 0) matched = matched.filter(d => groups.some(g => (g.filters ?? []).every(f => matches(d, f))))
     const sorts = (body.sorts ?? []) as ({ propertyName: string; direction?: string } | string)[]
     const sort = sorts[0]
@@ -545,7 +754,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     const capped = matched.slice(0, SEARCH_MAX_RESULTS)
     const { slice, nextAfter } = page(capped, body.limit, body.after, SEARCH_MAX_LIMIT)
     const props = Array.isArray(body.properties) ? (body.properties as string[]) : null
-    return { status: 200, body: { total: matched.length, results: slice.map(d => dealOut(d, props)), ...(nextAfter ? { paging: { next: { after: nextAfter } } } : {}) } }
+    return { status: 200, body: { total: matched.length, results: slice.map(d => out(d, props)), ...(nextAfter ? { paging: { next: { after: nextAfter } } } : {}) } }
   }
 
   function comparable(v: string | null): number | string | null {
@@ -562,7 +771,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     return x < y ? -1 : 1
   }
 
-  function matches(d: Deal, f: { propertyName?: string; operator?: string; value?: unknown; values?: unknown[] }): boolean {
+  function matches(d: StoredObject, f: { propertyName?: string; operator?: string; value?: unknown; values?: unknown[] }): boolean {
     const actual = d.properties[f.propertyName!] ?? null
     const op = f.operator!
     if (op === 'HAS_PROPERTY') return actual !== null && actual !== ''
@@ -625,7 +834,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       displayOrder: -1,
       calculated: p.calculated,
       externalOptions: p.name === 'hubspot_owner_id',
-      hasUniqueValue: false,
+      hasUniqueValue: p.unique === true,
       hidden: false,
       hubspotDefined: p.hubspotDefined,
       modificationMetadata: { archivable: !p.hubspotDefined, readOnlyDefinition: p.hubspotDefined, readOnlyValue: p.readOnlyValue },
@@ -713,7 +922,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     }
     const id = String(nextNoteId++)
     const t = stamp()
-    const note: Note = { id, properties: { ...props, hs_object_id: id, hs_createdate: iso(t), hs_lastmodifieddate: iso(t) }, createdAt: t, updatedAt: t, archived: false, dealIds, companyIds }
+    const note: Note = { id, properties: { ...props, hs_object_id: id, hs_createdate: iso(t), hs_lastmodifieddate: iso(t) }, createdAt: t, updatedAt: t, archived: false, indexedAt: t, dealIds, companyIds }
     notes.set(id, note)
     return { status: 201, body: pick(note, Object.keys(note.properties), [], []) }
   }
@@ -753,6 +962,18 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       const n = notes.get(id)
       return n ? { properties: { ...n.properties }, archived: n.archived, dealIds: [...n.dealIds] } : null
     },
+    meeting(id) {
+      const m = meetings.get(id)
+      return m ? { properties: { ...m.properties }, archived: m.archived, dealIds: [...m.dealIds], contactIds: [...m.contactIds] } : null
+    },
+    withOperationId(value) {
+      const found: { type: 'deals' | 'meetings'; id: string; archived: boolean }[] = []
+      for (const [type, map] of [['deals', deals], ['meetings', meetings]] as const) {
+        for (const o of map.values()) if (o.properties[OPERATION_ID_PROPERTY] === value) found.push({ type, id: o.id, archived: o.archived })
+      }
+      return found
+    },
+    setSearchIndexDelay(ms) { searchIndexDelayMs = ms },
     changeDealOutside,
     faults,
     requests,
