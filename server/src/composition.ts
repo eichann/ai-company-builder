@@ -29,7 +29,8 @@ import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
 import { practiceUpstream } from './adapters/upstream-practice'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PRACTICE_UPSTREAMS, operatorUserIds, type PracticeUpstreams } from './lib/config'
+import { diskPluginShelf } from './adapters/plugin-shelf'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -58,6 +59,8 @@ import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
 import { createRecordEngine } from './services/record-engine'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
+import { createPluginShelf } from './services/plugin-shelf'
+import { createPluginService } from './services/plugins'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -87,6 +90,16 @@ function companyCreationPolicyFromEnv(): CompanyCreationPolicy {
   return parsed.policy
 }
 
+/** A broker key row's destination hosts (JSON of BrokerDestinations); none when unreadable. */
+function keyHosts(destinations: string): string[] {
+  try {
+    const hosts = (JSON.parse(destinations) as { hosts?: unknown }).hosts
+    return Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export interface ServiceOptions {
   /** The relay's way out (tests: a fake upstream). */
   upstream?: UpstreamClient
@@ -94,6 +107,8 @@ export interface ServiceOptions {
   keyCheck?: boolean
   /** Staging's practice upstreams (default: PRACTICE_UPSTREAMS from the environment, lib/config.ts). */
   practiceUpstreams?: PracticeUpstreams
+  /** The plugin shelf's folder (default: PLUGINS_DIR). */
+  pluginsDir?: string | null
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -162,8 +177,23 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
   })
 
+  // Connector plugins (milestone 3): the shelf is shared and read only; installs are behind the company handle.
+  const pluginShelf = createPluginShelf(diskPluginShelf(options.pluginsDir !== undefined ? options.pluginsDir : PLUGINS_DIR))
+  const plugins = createPluginService({
+    ...shared,
+    shelf: pluginShelf,
+    companyKey: (companyId, keyId) => {
+      const row = repos.brokerKeys.find(companyId, keyId)
+      return row ? { scope: row.scope, service: row.service, status: row.status, hosts: keyHosts(row.destinations) } : null
+    },
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
+  })
+
   return {
     access,
+    pluginShelf,
+    plugins,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),

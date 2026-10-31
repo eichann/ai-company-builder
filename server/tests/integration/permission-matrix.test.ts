@@ -102,6 +102,8 @@ interface World {
     invitation: string
     record: string
     recordToken: string
+    /** A plugin package available only to the other company, installed there. */
+    plugin: string
   }
 }
 
@@ -290,6 +292,14 @@ const MATRIX: Row[] = [
   r('POST /api/git-http/:company/scopes/:repo/git-receive-pack', w => ({ path: `/api/git-http/${w.co}/scopes/${w.privateScope}.git/git-receive-pack` }), [415, 415, 404, 403, 404, 401]),
   r('GET /api/git-http/:company/scopes/:repo/HEAD', w => ({ path: `/api/git-http/${w.co}/scopes/${w.privateScope}.git/HEAD` }), [200, 200, 404, 200, 404, 401]),
 
+  // Connector plugins (plugins.md): owners and admins; an unknown plugin is 404 after the role check.
+  r('GET /api/companies/:companyId/plugins', w => ({ path: `${C(w)}/plugins` }), [200, 200, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/plugins/:pluginId', w => ({ path: `${C(w)}/plugins/no-such-plugin` }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId', w => ({ path: `${C(w)}/plugins/no-such-plugin`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/enabled', w => ({ path: `${C(w)}/plugins/no-such-plugin/enabled`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/mapping', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/restore`, body: {} }), [404, 404, 403, 403, 404, 401]),
+
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
   r('POST /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations`, body: { role: 'nobody' } }), [400, 400, 403, 403, 403, 401]),
@@ -348,6 +358,13 @@ const CROSS: CrossRow[] = [
 
   x('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/record-tokens/${id}` }), w => w.other.recordToken),
 
+  // A package listed only for the other company (available_to) is a plugin that does not exist here.
+  x('GET /api/companies/:companyId/plugins/:pluginId', (w, id) => ({ path: `${C(w)}/plugins/${id}` }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId', (w, id) => ({ path: `${C(w)}/plugins/${id}`, body: { version: '0.1.0', keyId: null } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/enabled', (w, id) => ({ path: `${C(w)}/plugins/${id}/enabled`, body: { enabled: true } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/mapping', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping`, body: { text: 'deal: {}' } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
+
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
 
@@ -387,6 +404,9 @@ function objectParams(path: string): string[] {
 let app: any
 let world: World
 let kekDir: string
+// The plugin shelf, read when the composition is first imported (in seed()).
+const shelfDir = mkdtempSync(join(tmpdir(), 'acb-matrix-shelf-'))
+process.env.PLUGINS_DIR = shelfDir
 
 function headersFor(role: Role): Record<string, string> {
   if (role === 'signedOut') return {}
@@ -508,6 +528,15 @@ async function seed(): Promise<World> {
   db.prepare("INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at) VALUES ('rt-other-1', ?, ?, 'hash-other', 'act', 'claude', 'conv', ?, ?)")
     .run(other, otherMember, expires, expires)
 
+  // The shelf: a package only the other company may use, installed there (with its mapping).
+  const { cpSync, readFileSync: readText } = await import('fs')
+  cpSync(join(__dirname, '../fixtures/plugins/sample-crm'), join(shelfDir, 'other-crm@0.1.0'), { recursive: true })
+  const manifest = join(shelfDir, 'other-crm@0.1.0/plugin.yaml')
+  writeFileSync(manifest, readText(manifest, 'utf8').replace('id: sample-crm', 'id: other-crm') + `\navailable_to: [${other}]\n`)
+  await services.pluginShelf.load()
+  const installed = await services.plugins.install({ companyId: other, userId: USER.outsider, role: 'owner' }, 'other-crm', { version: '0.1.0', keyId: null })
+  if (!installed.ok) throw new Error(`plugin: ${JSON.stringify(installed)}`)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -531,6 +560,7 @@ async function seed(): Promise<World> {
       invitation: otherInv.id,
       record: 'deal-other001',
       recordToken: 'rt-other-1',
+      plugin: 'other-crm',
     },
   }
 }
@@ -574,6 +604,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   rmSync(kekDir, { recursive: true, force: true })
+  rmSync(shelfDir, { recursive: true, force: true })
   delete process.env.BROKER_KEK_FILE
 })
 

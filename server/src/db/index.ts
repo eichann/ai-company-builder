@@ -546,7 +546,48 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (company_id, repo, path, kind)
     );
 
+    -- Connector plugins (milestone 3, .claude/rules/plugins.md): which package
+    -- of the shelf a company uses, its mapping versions and their history.
+    -- Behind the company handle (ports/plugins.ts); triggers in
+    -- migratePluginTables keep every row in its company.
+    CREATE TABLE IF NOT EXISTS plugin_installs (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      version TEXT NOT NULL,
+      fingerprint TEXT NOT NULL,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      key_id TEXT REFERENCES broker_keys(id),
+      mapping_version INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id)
+    );
+
+    -- The company's mapping (読み替え表), every version kept (restorable).
+    CREATE TABLE IF NOT EXISTS plugin_mappings (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      created_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, version),
+      FOREIGN KEY (company_id, plugin_id) REFERENCES plugin_installs(company_id, plugin_id)
+    );
+
+    -- Installed, version / key changed, turned on / off, mapping saved or restored.
+    CREATE TABLE IF NOT EXISTS plugin_history (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      at TEXT NOT NULL,
+      by_user TEXT NOT NULL,
+      change TEXT NOT NULL
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_plugin_history_company ON plugin_history(company_id, plugin_id, at);
     CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);
     CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
     CREATE INDEX IF NOT EXISTS idx_record_links_target ON record_links(company_id, target_id);
@@ -584,6 +625,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordLedgerProvenance(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
+  migratePluginTables(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
 
@@ -695,6 +737,41 @@ export function migrateRuleAndManagerCompanies(conn: Database.Database): {
     }
     return done
   })()
+}
+
+/**
+ * Triggers that keep the plugin tables inside their company (案 A, like
+ * scope_rules / department_managers): a mapping only under its own company's
+ * install, an install's key only a company key of the same company (a plugin
+ * operation of company A can never use B's key), and no row ever moves to
+ * another company. Idempotent.
+ */
+export function migratePluginTables(conn: Database.Database): void {
+  conn.exec(`
+    CREATE TRIGGER IF NOT EXISTS plugin_installs_key_insert BEFORE INSERT ON plugin_installs
+    WHEN NEW.key_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM broker_keys WHERE id = NEW.key_id AND company_id = NEW.company_id AND scope = 'company')
+    BEGIN SELECT RAISE(ABORT, 'plugin_installs.key_id must be a company key of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_installs_key_update BEFORE UPDATE OF key_id ON plugin_installs
+    WHEN NEW.key_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM broker_keys WHERE id = NEW.key_id AND company_id = NEW.company_id AND scope = 'company')
+    BEGIN SELECT RAISE(ABORT, 'plugin_installs.key_id must be a company key of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_installs_company_update BEFORE UPDATE OF company_id ON plugin_installs
+    WHEN NEW.company_id IS NOT OLD.company_id
+    BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_mappings_company_insert BEFORE INSERT ON plugin_mappings
+    WHEN NOT EXISTS (SELECT 1 FROM plugin_installs WHERE company_id = NEW.company_id AND plugin_id = NEW.plugin_id)
+    BEGIN SELECT RAISE(ABORT, 'plugin_mappings needs the install of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_mappings_company_update BEFORE UPDATE OF company_id, plugin_id ON plugin_mappings
+    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.plugin_id IS NOT OLD.plugin_id
+    BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_history_company_update BEFORE UPDATE OF company_id ON plugin_history
+    WHEN NEW.company_id IS NOT OLD.company_id
+    BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+  `)
 }
 
 // Helper functions for common operations

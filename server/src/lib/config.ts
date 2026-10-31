@@ -33,6 +33,16 @@ export const AUTH_DB_PATH = join(DATA_DIR, 'auth.sqlite')
  */
 export const BROKER_KEK_FILE = process.env.BROKER_KEK_FILE?.trim() || null
 
+/**
+ * The plugin shelf (「プラグインの棚」, milestone 3, `.claude/rules/plugins.md`):
+ * a folder of connector plugin packages, one `<id>@<version>/` folder each,
+ * put there by the operator (div). Read at startup. Unset → an empty shelf.
+ * Outside DATA_DIR (it is the server's software, not a company's data). A
+ * file `stopped` in it lists packages stopped for every company (one `id` or
+ * `id@version` per line), read on every plugin call.
+ */
+export const PLUGINS_DIR = process.env.PLUGINS_DIR?.trim() || null
+
 /** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
 export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
 

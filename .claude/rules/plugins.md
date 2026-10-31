@@ -4,6 +4,15 @@ paths:
   - "shared/core/upstream-path.ts"
   - "server/tests/unit/plugins.test.ts"
   - "server/tests/fixtures/plugins/**"
+  - "shared/types/plugins.ts"
+  - "server/src/ports/plugins.ts"
+  - "server/src/adapters/plugin-shelf.ts"
+  - "server/src/adapters/sqlite/plugins.ts"
+  - "server/src/services/plugin-shelf.ts"
+  - "server/src/services/plugins.ts"
+  - "server/src/routes/plugins.ts"
+  - "server/tests/unit/plugin-shelf.test.ts"
+  - "server/tests/integration/plugins.test.ts"
 ---
 
 # Connector plugins (milestone 3): declaration, mapping, field policies
@@ -59,8 +68,9 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
 4. **Company-specific packages are div's (FDE) work**: companies never upload declarations.
    `kind: company` needs `available_to: [<company id>, …]` (unique, 1–200); `kind: official` may
    have it. Absent = every company may use the package (`pluginAvailableTo`).
-   **P4 requirement**: the shelf filters with `pluginAvailableTo` — a company not listed neither
-   sees the package in any answer nor can enable it (test both in P4).
+   The shelf filters with `pluginAvailableTo` (P4, below): a company not listed neither sees the
+   package in any answer nor can install or enable it (`tests/integration/plugins.test.ts`,
+   `tests/unit/plugin-shelf.test.ts`, permission matrix `CROSS`).
 
 ## Field policies (0.21)
 
@@ -94,15 +104,82 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   Writing refuses as a whole when any field is not written back or a value has no translation;
   reading leaves untranslatable values out and reports the field name only, never the value.
 
+## The shelf (P4, `adapters/plugin-shelf.ts`, `services/plugin-shelf.ts`)
+
+- `PLUGINS_DIR` (`lib/config.ts`; outside `DATA_DIR`; unset = empty shelf), put there by the
+  operator (div): one folder per package named `<id>@<version>` of its declaration, holding
+  exactly `plugin.yaml`, optional `mapping.yaml`, `types/<name>.md`. Read at startup
+  (`index.ts` logs what was loaded and, per refused folder, its name and the rule's sentence —
+  never a file's content). **Not used**: any other file or folder (a program has no place), a
+  symbolic link, a file over 256 KB, a folder name that does not match, anything
+  `validatePluginPackage` refuses. Never read from a company repository; never synced.
+- **Fingerprint**: sha256 over every file's path and content. The company's install records the
+  fingerprint of the version an owner/admin chose; a package changed under the same version is
+  not used for that company (`package-changed`) until they choose it again.
+- **`available_to`** (§8-4): a package listed for other companies does not exist for this one —
+  not in `GET /plugins`, and `GET|PUT /plugins/:id…` answer the same 404 `PLUGIN_NOT_FOUND` as an
+  id that exists nowhere (permission matrix `CROSS` rows with a package only the other company
+  may use).
+- **Server-wide stop** (the operator, kill switch 1): `<PLUGINS_DIR>/stopped`, one `id` or
+  `id@version` per line (`#` comments, `*` = every package), read on every plugin call; a file
+  that exists but cannot be read stops everything (fails closed).
+
+## A company's install, mapping and history (P4, `services/plugins.ts`)
+
+Owner/admin only (others 403, non-members 404); routes (`routes/plugins.ts`, contract
+`shared/types/plugins.ts`) under `/api/companies/:companyId`:
+
+```
+GET  /plugins                            the shelf as this company sees it + its installs (problem per install)
+GET  /plugins/:pluginId                  install, mapping in force, versions, effective field policies, mapping errors, history (50)
+PUT  /plugins/:pluginId                  { version, keyId } install (first time: the package's mapping.yaml = version 1) or change
+PUT  /plugins/:pluginId/enabled          { enabled } on / off
+PUT  /plugins/:pluginId/mapping          { text } a new mapping version (YAML; field policies are its `policy`)
+POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved again as the next one
+```
+
+- Tables (company handle `plugins`, `adapters/sqlite/plugins.ts`): `plugin_installs` (version,
+  fingerprint, enabled, `key_id`, mapping version in force), `plugin_mappings` (every version's
+  YAML), `plugin_history` (install / change / enable / disable / mapping / restore; JSON without
+  any secret). Triggers (`db/index.ts` `migratePluginTables`): `key_id` must be a **company key
+  of the same company** (another company's key or a member's own key throws), a mapping only
+  under its own company's install, no row moves to another company
+  (`tests/unit/company-data.test.ts`).
+- The key: a company key (`scope: company`) of the declaration's `service`, chosen by id; its
+  value is never read here. Another company's key, a member's own key or a key of another
+  service → 400 `KEY_NOT_USABLE`.
+- Server checks of a mapping (on save and on every `active()`): `people` name members of this
+  company; `visible_to_folder` is not a private folder nor inside one. → 400 `MAPPING_INVALID`
+  with `errors` (Japanese sentences).
+- **Turning on** needs everything `active()` checks (else 409 `PLUGIN_NOT_READY` + `problem`);
+  it also turns the relay's **read-only switch on** for the plugin's service (owner 0.21: writes
+  go only through the plugin's typed operations; recorded in the key broker's history as the
+  admin's change; turning the plugin off leaves the switch as it is). A change of version or key
+  on a plugin that is on must keep it running (409 `PLUGIN_WOULD_STOP`, nothing changed).
+- **`active(companyId, pluginId)`** — for the connector (P5) and the typed operations (P6),
+  re-decided on every call, so each kill switch acts from the next call: the operator's stop →
+  `stopped`; the company's switch → `off`; installed version not on the shelf for this company
+  → `not-on-shelf`; changed package → `package-changed`; key deleted / not a company key of the
+  service → `no-key`; key stopped (「鍵を止める」, 「すべての鍵を止める」) → `key-stopped`; the key's
+  hosts do not include the declaration's host → `key-destination`; mapping missing or no longer
+  passing → `mapping-invalid`.
+
 ## Not yet (later PRs of milestone 3)
 
-P4 the shelf (`PLUGINS_DIR`, fingerprints, `available_to` filtering) and per-company install /
-mapping versions / history (company handle); P5 the connector and import; P6 typed operations,
-undo and stops; P7 the app's tools; P8 the admin page 「つなぎ先」. The real HubSpot package lives
-in the private `acb-plugins` repository (§6-6).
+P5 the connector and import; P6 typed operations, undo and the remaining stops (AI stop, field
+`off`, records switch); P7 the app's tools; P8 the admin page 「つなぎ先」 (it writes the mapping's
+YAML, also from its table form); P9 staging (compose wiring of `PLUGINS_DIR`). The real HubSpot
+package lives in the private `acb-plugins` repository (§6-6).
 
 ## Tests
 
+`server/tests/unit/plugin-shelf.test.ts` (packages that are not data or do not pass are refused
+naming only the folder; fingerprint; `available_to`; the stop list read per call, fail closed),
+`server/tests/integration/plugins.test.ts` (another company's package = 404 and nothing written;
+owner/admin only; keys of another company / service refused; members only, no private folder;
+versions and restore; read-only relay on; no key value anywhere; every kill switch on the next
+call), `tests/unit/company-data.test.ts` (handle isolation and the triggers), permission matrix
+rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-crm`, a
 HubSpot-shaped fictional CRM; `sample-desk`, a read-only company package of another shape):
 unknown / program / destination / key / approval keys, contract, one https destination, unsafe

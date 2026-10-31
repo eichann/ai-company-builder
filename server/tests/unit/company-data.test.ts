@@ -168,3 +168,44 @@ describe('company handle: private folders', () => {
     expect(conn.prepare(`SELECT id FROM scope_rules WHERE scope_id = 's-b'`).all()).toEqual([{ id: 'ru-b' }])
   })
 })
+
+describe('company handle: connector plugins', () => {
+  const brokerKey = (companyId: string, id: string, scope = 'company') => conn.prepare(`
+    INSERT INTO broker_keys (id, company_id, scope, owner_user_id, service, display_name, last4, cipher_scheme, ciphertext, nonce, tag,
+      wrapped_key, kek_id, destinations, audience, caps, allow_private_content, status, created_at, created_by, updated_at, updated_by, secret_updated_at)
+    VALUES (?, ?, ?, ?, 'hubspot', 'k', 'abcd', 's', x'00', x'00', x'00', x'00', 'local:0', '{}', '{}', '{}', 0, 'active', ?, 'u', ?, 'u', ?)
+  `).run(id, companyId, scope, scope === 'user' ? 'u' : null, TS, TS, TS)
+  const install = (keyId: string | null) => ({
+    pluginId: 'sample-crm', version: '0.1.0', fingerprint: 'f', enabled: true, keyId, mappingVersion: 0, updatedAt: TS, updatedBy: 'u',
+  })
+  const h = (id: string) => ({ id, pluginId: 'sample-crm', action: 'install', at: TS, by: 'u', change: '{}' })
+
+  it('reads and writes only its own company’s installs, mappings and history', () => {
+    brokerKey('b', 'key-b')
+    const b = source.forCompany('b').plugins
+    b.saveInstall(install('key-b'), h('h-b'))
+    b.addMapping({ pluginId: 'sample-crm', version: 1, text: 'deal: {}', createdAt: TS, createdBy: 'u' }, h('h-b2'))
+    const a = source.forCompany('a').plugins
+    expect(a.install('sample-crm')).toBeNull()
+    expect(a.installs()).toEqual([])
+    expect(a.mapping('sample-crm', 1)).toBeNull()
+    expect(a.mappingVersions('sample-crm')).toEqual([])
+    expect(a.history('sample-crm', 50)).toEqual([])
+    // A mapping under another company's install is refused (insert trigger), and B's install is untouched.
+    expect(() => a.addMapping({ pluginId: 'sample-crm', version: 2, text: 'x', createdAt: TS, createdBy: 'u' }, h('h-a'))).toThrow(/install of the same company/)
+    expect(b.install('sample-crm')).toMatchObject({ mappingVersion: 1, keyId: 'key-b' })
+  })
+
+  it('an install can use only a company key of its own company', () => {
+    brokerKey('b', 'key-b')
+    brokerKey('a', 'own-a', 'user')
+    const a = source.forCompany('a').plugins
+    expect(() => a.saveInstall(install('key-b'), h('h1'))).toThrow(/company key of the same company/)
+    expect(() => a.saveInstall(install('own-a'), h('h2'))).toThrow(/company key of the same company/)
+    brokerKey('a', 'key-a')
+    a.saveInstall(install('key-a'), h('h3'))
+    expect(() => a.saveInstall(install('key-b'), h('h4'))).toThrow(/company key of the same company/)
+    expect(a.install('sample-crm')?.keyId).toBe('key-a')
+    expect(() => conn.prepare(`UPDATE plugin_installs SET company_id = 'b' WHERE company_id = 'a'`).run()).toThrow(/never move/)
+  })
+})

@@ -1,0 +1,336 @@
+/**
+ * A company's connector plugins (milestone 3 P4, `.claude/rules/plugins.md`):
+ * which package of the shelf it uses (version, fingerprint), the company key
+ * the connector sends, on / off, the mapping (読み替え表, versioned, field
+ * policies included) and the history. Owners and admins only; a department
+ * manager or member gets 403, a non-member 404 (the route).
+ *
+ * `active()` is what the connector (P5) and the typed operations (P6) ask
+ * before every call: it re-decides every kill switch each time (the
+ * operator's stop, the company's switch, the package's fingerprint, the key
+ * and its status, the mapping), so each takes effect from the next call.
+ *
+ * Every company row is reached through the company handle; the shelf is
+ * shared and read only, filtered by `available_to` for the asking company.
+ */
+import { findPrivateScope } from '../../shared/core/permissions'
+import {
+  effectiveFieldPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
+} from '../../shared/core/plugins'
+import type { TypeDefinition } from '../../shared/core/record-types'
+import type { PluginDetail, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
+import type { Clock, IdGenerator } from '../ports/clock'
+import type { CompanyDataSource } from '../ports/company-data'
+import type { PluginHistoryRow, PluginInstallRow } from '../ports/plugins'
+import { requireFullAccess, type Member } from './access'
+import { ok, refuse, type Outcome } from './outcome'
+import type { PluginShelf, ShelfPackage } from './plugin-shelf'
+
+export const PLUGINS_FORBIDDEN = 'つなぎ先のプラグインを設定できるのは、オーナーと管理者だけです'
+export const PLUGIN_NOT_FOUND = { error: 'このプラグインはありません', code: 'PLUGIN_NOT_FOUND' } as const
+
+/** What the connector needs to know about a key (never its value). */
+export interface PluginKeyInfo {
+  scope: string
+  service: string
+  status: string
+  hosts: string[]
+}
+
+export interface PluginServiceDeps {
+  companyData: CompanyDataSource
+  clock: Clock
+  ids: IdGenerator
+  shelf: PluginShelf
+  /** The company's broker key `keyId`, or null (another company's key id finds nothing). */
+  companyKey: (companyId: string, keyId: string) => PluginKeyInfo | null
+  isMember: (companyId: string, userId: string) => boolean
+  /**
+   * Turn the relay's read-only switch on for the service (owner 0.21: once the
+   * plugin is on, writes to it go only through the plugin's typed operations).
+   * Recorded in the key broker's history as this member's change.
+   */
+  relayReadOnly: (member: Member, service: string) => void
+}
+
+/** A company's plugin ready to run (everything `active()` checked). */
+export interface ActivePlugin {
+  pluginId: string
+  version: string
+  manifest: PluginManifest
+  types: Record<string, TypeDefinition>
+  mapping: PluginMapping
+  mappingVersion: number
+  keyId: string
+}
+
+const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+const MAPPING_MAX = 128 * 1024
+
+function packageView(p: ShelfPackage, stopped: boolean): PluginPackageView {
+  const m = p.pkg.manifest
+  return {
+    id: m.id, label: m.label, version: m.version, kind: m.kind, description: m.description, service: m.service, host: m.baseUrl.host,
+    scopes: m.scopes, operationScopes: m.operationScopes, types: m.types, fingerprint: p.fingerprint, stopped,
+    operations: Object.entries(m.operations).map(([name, op]) => ({ name, label: op.label, kind: op.kind, reaches: op.reaches, undo: op.undo })),
+  }
+}
+
+export function createPluginService(deps: PluginServiceDeps) {
+  const { companyData, clock, shelf } = deps
+
+  const history = (pluginId: string, action: string, by: string, at: string, change: Record<string, unknown>): PluginHistoryRow =>
+    ({ id: deps.ids.newId(), pluginId, action, at, by, change: JSON.stringify(change) })
+
+  /**
+   * The checks only the server can make (beyond the package's own rules):
+   * people tables name this company's members, and records are never placed
+   * in a private folder (their reads assume a public place, records.md).
+   */
+  function serverMappingProblems(companyId: string, mapping: PluginMapping): string[] {
+    const problems: string[] = []
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    for (const [name, o] of Object.entries(mapping.objects)) {
+      if (o.visibleToFolder !== null && findPrivateScope(scopes, o.visibleToFolder)) {
+        problems.push(`「${name}」の visible_to_folder に、非公開のフォルダ（またはその中）は選べません`)
+      }
+    }
+    for (const [table, rows] of Object.entries(mapping.people)) {
+      for (const [ext, member] of Object.entries(rows)) {
+        if (!deps.isMember(companyId, member)) problems.push(`people の「${table}」の「${ext}」: ${member} はこの会社のメンバーではありません`)
+      }
+    }
+    return problems
+  }
+
+  function parseForCompany(companyId: string, pkg: PluginPackage, text: string): { ok: true; mapping: PluginMapping } | { ok: false; errors: string[] } {
+    const parsed = parsePluginMapping(text, pkg)
+    if (!parsed.ok) return parsed
+    const problems = serverMappingProblems(companyId, parsed.value)
+    return problems.length > 0 ? { ok: false, errors: problems } : { ok: true, mapping: parsed.value }
+  }
+
+  /** The key problem for this package, or null when the connector may use it. */
+  function keyProblem(companyId: string, manifest: PluginManifest, keyId: string | null): PluginProblem | null {
+    if (keyId === null) return 'no-key'
+    const key = deps.companyKey(companyId, keyId)
+    if (!key || key.scope !== 'company' || key.service !== manifest.service) return 'no-key'
+    if (key.status !== 'active') return 'key-stopped'
+    if (!key.hosts.includes(manifest.baseUrl.host)) return 'key-destination'
+    return null
+  }
+
+  type Evaluated = { problem: PluginProblem; active: null } | { problem: null; active: ActivePlugin }
+
+  /** Every kill switch and missing piece, in a fixed order (the operator's stop first). */
+  async function evaluate(companyId: string, install: PluginInstallRow): Promise<Evaluated> {
+    const found = shelf.find(companyId, install.pluginId, install.version)
+    if (await shelf.isStopped(install.pluginId, install.version)) return { problem: 'stopped', active: null }
+    if (!install.enabled) return { problem: 'off', active: null }
+    if (!found) return { problem: 'not-on-shelf', active: null }
+    if (found.fingerprint !== install.fingerprint) return { problem: 'package-changed', active: null }
+    const kp = keyProblem(companyId, found.pkg.manifest, install.keyId)
+    if (kp) return { problem: kp, active: null }
+    const row = install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
+    const parsed = row ? parseForCompany(companyId, found.pkg, row.text) : null
+    if (!parsed?.ok) return { problem: 'mapping-invalid', active: null }
+    return {
+      problem: null,
+      active: {
+        pluginId: install.pluginId, version: install.version, manifest: found.pkg.manifest, types: found.pkg.types,
+        mapping: parsed.mapping, mappingVersion: install.mappingVersion, keyId: install.keyId as string,
+      },
+    }
+  }
+
+  async function listItem(companyId: string, pluginId: string, install: PluginInstallRow | null): Promise<PluginListItem> {
+    const versions: PluginPackageView[] = []
+    for (const p of shelf.packagesFor(companyId).filter(p => p.pkg.manifest.id === pluginId)) {
+      versions.push(packageView(p, await shelf.isStopped(pluginId, p.pkg.manifest.version)))
+    }
+    let installView: PluginInstallView | null = null
+    if (install) {
+      const evaluated = await evaluate(companyId, install)
+      installView = {
+        version: install.version, enabled: install.enabled, keyId: install.keyId, mappingVersion: install.mappingVersion,
+        updatedAt: install.updatedAt, updatedBy: install.updatedBy, problem: evaluated.problem,
+      }
+    }
+    return { id: pluginId, versions, install: installView }
+  }
+
+  /** The install, or the package this company may see; else the same 404 as an id that exists nowhere. */
+  function known(companyId: string, pluginId: string): boolean {
+    if (typeof pluginId !== 'string' || pluginId.length > 40) return false
+    return companyData.forCompany(companyId).plugins.install(pluginId) !== null
+      || shelf.packagesFor(companyId).some(p => p.pkg.manifest.id === pluginId)
+  }
+
+  async function detail(companyId: string, pluginId: string): Promise<PluginDetail> {
+    const repo = companyData.forCompany(companyId).plugins
+    const install = repo.install(pluginId)
+    const plugin = await listItem(companyId, pluginId, install)
+    const mappingRow = install && install.mappingVersion > 0 ? repo.mapping(pluginId, install.mappingVersion) : null
+    const found = install ? shelf.find(companyId, pluginId, install.version) : null
+    let policies: PluginFieldPolicyView[] = []
+    let mappingErrors: string[] = []
+    if (found && mappingRow) {
+      const parsed = parseForCompany(companyId, found.pkg, mappingRow.text)
+      if (!parsed.ok) mappingErrors = parsed.errors
+      else {
+        const m = found.pkg.manifest
+        policies = Object.entries(m.operations).filter(([, op]) => op.kind === 'update').flatMap(([name, op]) =>
+          Object.entries(parsed.mapping.objects[op.object]?.fields ?? {}).filter(([, f]) => f.write)
+            .map(([field]) => ({ operation: name, object: op.object, field, policy: effectiveFieldPolicy(m, parsed.mapping, name, field) })))
+      }
+    }
+    return {
+      plugin,
+      mapping: mappingRow ? { version: mappingRow.version, text: mappingRow.text, createdAt: mappingRow.createdAt, createdBy: mappingRow.createdBy } : null,
+      mappingVersions: repo.mappingVersions(pluginId).map(v => ({ version: v.version, createdAt: v.createdAt, createdBy: v.createdBy })),
+      policies,
+      mappingErrors,
+      history: repo.history(pluginId, 50).map(h => ({ action: h.action, at: h.at, by: h.by, change: JSON.parse(h.change) as unknown })),
+    }
+  }
+
+  const notFound = () => refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
+
+  return {
+    /** GET /plugins — the shelf as this company sees it (available_to applied) and its installs. */
+    async list(member: Member): Promise<Outcome<{ plugins: PluginListItem[] }>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      const installs = new Map(companyData.forCompany(member.companyId).plugins.installs().map(i => [i.pluginId, i]))
+      const ids = [...new Set([...shelf.packagesFor(member.companyId).map(p => p.pkg.manifest.id), ...installs.keys()])].sort()
+      const plugins: PluginListItem[] = []
+      for (const id of ids) plugins.push(await listItem(member.companyId, id, installs.get(id) ?? null))
+      return ok({ plugins })
+    },
+
+    /** GET /plugins/:pluginId */
+    async get(member: Member, pluginId: string): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      return ok(await detail(member.companyId, pluginId))
+    },
+
+    /**
+     * PUT /plugins/:pluginId { version, keyId } — install (first time: the
+     * package's recommended mapping becomes version 1), or choose another
+     * version or key. Records the package's fingerprint. A plugin that is on
+     * must still run afterwards (else 409, nothing changed).
+     */
+    async install(member: Member, pluginId: string, body: unknown): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      if (!isObject(body) || typeof body.version !== 'string' || !(body.keyId === null || typeof body.keyId === 'string')) {
+        return refuse('bad-request', 'Body: { version: string, keyId: string | null }')
+      }
+      const found = shelf.find(member.companyId, pluginId, body.version)
+      if (!found) return refuse('bad-request', 'この版は棚にありません', { code: 'VERSION_NOT_ON_SHELF' })
+      const keyId = body.keyId as string | null
+      if (keyId !== null && keyProblem(member.companyId, found.pkg.manifest, keyId) === 'no-key') {
+        return refuse('bad-request', `${found.pkg.manifest.service} の会社の鍵を選んでください（「API キー」で登録した鍵）`, { code: 'KEY_NOT_USABLE' })
+      }
+      const repo = companyData.forCompany(member.companyId).plugins
+      const before = repo.install(pluginId)
+      const at = clock.now()
+      const row: PluginInstallRow = {
+        pluginId, version: body.version, fingerprint: found.fingerprint, enabled: before?.enabled ?? false, keyId,
+        mappingVersion: before?.mappingVersion ?? 0, updatedAt: at, updatedBy: member.userId,
+      }
+      if (row.enabled) {
+        const evaluated = await evaluate(member.companyId, row)
+        if (evaluated.problem) return refuse('conflict', 'この設定ではプラグインが動かないため、変えていません（先にオフにするか、読み替え表を直してください）', { code: 'PLUGIN_WOULD_STOP', problem: evaluated.problem })
+      }
+      const change = before
+        ? { version: { before: before.version, after: row.version }, keyId: { before: before.keyId, after: keyId }, fingerprint: row.fingerprint }
+        : { version: row.version, keyId, fingerprint: row.fingerprint }
+      repo.saveInstall(row, history(pluginId, before ? 'change' : 'install', member.userId, at, change))
+      if (!before && found.recommendedMapping !== null) {
+        // Start from the package's recommended mapping (checked against this company when it is turned on).
+        repo.addMapping({ pluginId, version: 1, text: found.recommendedMapping, createdAt: at, createdBy: member.userId },
+          history(pluginId, 'mapping', member.userId, at, { version: 1, from: 'recommended' }))
+      }
+      return ok(await detail(member.companyId, pluginId))
+    },
+
+    /**
+     * PUT /plugins/:pluginId/enabled { enabled } — on only when everything
+     * needed is there (`evaluate`); turning it on also makes the relay
+     * read-only for the plugin's service. Off: always (a kill switch).
+     */
+    async setEnabled(member: Member, pluginId: string, body: unknown): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      if (!isObject(body) || typeof body.enabled !== 'boolean') return refuse('bad-request', 'Body: { enabled: boolean }')
+      const repo = companyData.forCompany(member.companyId).plugins
+      const install = repo.install(pluginId)
+      if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
+      if (install.enabled === body.enabled) return ok(await detail(member.companyId, pluginId))
+      const at = clock.now()
+      const row = { ...install, enabled: body.enabled, updatedAt: at, updatedBy: member.userId }
+      if (body.enabled) {
+        const evaluated = await evaluate(member.companyId, row)
+        if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+        repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version, mappingVersion: row.mappingVersion }))
+        deps.relayReadOnly(member, evaluated.active.manifest.service)
+      } else {
+        repo.saveInstall(row, history(pluginId, 'disable', member.userId, at, {}))
+      }
+      return ok(await detail(member.companyId, pluginId))
+    },
+
+    /** PUT /plugins/:pluginId/mapping { text } — a new mapping version (checked in full; field policies are its `policy`). */
+    async saveMapping(member: Member, pluginId: string, body: unknown): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      if (!isObject(body) || typeof body.text !== 'string' || body.text.length > MAPPING_MAX) return refuse('bad-request', 'Body: { text: string } (up to 128 KB)')
+      return saveVersion(member, pluginId, body.text, 'mapping', {})
+    },
+
+    /** POST /plugins/:pluginId/mapping/restore { version } — an earlier version becomes the next one (checked again). */
+    async restoreMapping(member: Member, pluginId: string, body: unknown): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      if (!isObject(body) || !Number.isInteger(body.version) || (body.version as number) < 1) return refuse('bad-request', 'Body: { version: integer ≥ 1 }')
+      const row = companyData.forCompany(member.companyId).plugins.mapping(pluginId, body.version as number)
+      if (!row) return refuse('not-found', 'この版の読み替え表はありません', { code: 'MAPPING_VERSION_NOT_FOUND' })
+      return saveVersion(member, pluginId, row.text, 'restore', { from: row.version })
+    },
+
+    /**
+     * For the connector and the typed operations (P5 / P6): the company's
+     * plugin if it may run now, else why not. Re-decided on every call.
+     */
+    async active(companyId: string, pluginId: string): Promise<{ ok: true; plugin: ActivePlugin } | { ok: false; problem: PluginProblem }> {
+      const install = companyData.forCompany(companyId).plugins.install(pluginId)
+      if (!install) return { ok: false, problem: 'off' }
+      const evaluated = await evaluate(companyId, install)
+      return evaluated.problem ? { ok: false, problem: evaluated.problem } : { ok: true, plugin: evaluated.active }
+    },
+  }
+
+  async function saveVersion(member: Member, pluginId: string, text: string, action: string, extra: Record<string, unknown>): Promise<Outcome<PluginDetail>> {
+    const repo = companyData.forCompany(member.companyId).plugins
+    const install = repo.install(pluginId)
+    if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
+    const found = shelf.find(member.companyId, pluginId, install.version)
+    if (!found) return refuse('conflict', '入れた版が棚にありません。版を選び直してください', { code: 'VERSION_NOT_ON_SHELF' })
+    const parsed = parseForCompany(member.companyId, found.pkg, text)
+    if (!parsed.ok) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: parsed.errors })
+    const version = (repo.mappingVersions(pluginId)[0]?.version ?? 0) + 1
+    const at = clock.now()
+    repo.addMapping({ pluginId, version, text, createdAt: at, createdBy: member.userId },
+      history(pluginId, action, member.userId, at, { version, ...extra }))
+    return ok(await detail(member.companyId, pluginId))
+  }
+}
+
+export type PluginService = ReturnType<typeof createPluginService>

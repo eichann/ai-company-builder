@@ -277,8 +277,8 @@ the sign-in.
   (`x-http-method-override`, `x-http-method`, `x-method-override`): 403 `ACB_READ_ONLY`
   「<サービス> は、ここからは読むだけです…」, nothing sent, recorded as guard-denied
   `destination-not-allowed`. Checked after the destination (the URL parser has resolved `..`
-  first). **P4 turns it on for `hubspot` when a company turns the HubSpot plugin on** (owner
-  0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
+  first). **Turned on for the plugin's service when a company turns a plugin on** (P4,
+  `services/plugins.ts` `setEnabled`; owner 0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
   through the relay). Test: `tests/integration/broker-relay.test.ts` 「read-only switch」
   (mutation-checked: the guard, the method-override check, the POST allow-list).
 - **Practice HubSpot (staging only)**: `lib/config.ts` `practiceUpstreamsFrom` /

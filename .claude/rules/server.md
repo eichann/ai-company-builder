@@ -92,7 +92,10 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `invitations`, `scopes` (permission scopes, rules, department managers:
   `adapters/sqlite/scopes.ts` over `permission-store.ts`), `privateFolders`
   (`adapters/private-folders.ts`), `orphanedScopes` (`adapters/orphaned-scopes.ts`) and `records`
-  (the company map of the light ontology, `adapters/sqlite/records.ts`, `records.md`).
+  (the company map of the light ontology, `adapters/sqlite/records.ts`, `records.md`) and
+  `plugins` (connector plugins' installs, mapping versions, history, `adapters/sqlite/plugins.ts`,
+  `plugins.md`; triggers keep a mapping under its own company's install and an install's key a
+  company key of the same company).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -188,6 +191,9 @@ GET  /api/config                                  setup state (no auth)
                               POST /records/item/:recordId/actions/:action,
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
+                              GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
+                              PUT …/mapping, POST …/mapping/restore               plugins.ts
+                                                                (つなぎ先のプラグイン: plugins.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts
@@ -329,7 +335,7 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
-  `key-broker.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
   leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.
