@@ -98,6 +98,18 @@ export interface PluginDetail {
   autoAcknowledgements: Array<{ field: string; property: string; by: string; at: string }>
   /** Latest first (50). `change` is JSON without any secret. */
   history: Array<{ action: string; at: string; by: string; change: unknown }>
+  /** Who may read the outside system through the relay, for the current connection (empty = nobody; required to turn on). */
+  readScope: PluginReadScopeView
+}
+
+/**
+ * A connection's relay read scope (owner, 2026-10-31): departments (members who
+ * can read the department's folder) and members, by id. No filtering by record
+ * inside it; writes never go through the relay.
+ */
+export interface PluginReadScopeView {
+  departmentIds: string[]
+  userIds: string[]
 }
 
 /** One object's part of an import run (`POST …/import`, P5). */

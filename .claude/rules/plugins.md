@@ -193,7 +193,8 @@ Owner/admin only (others 403, non-members 404); routes (`routes/plugins.ts`, con
 GET  /plugins                            the shelf as this company sees it + its installs (problem per install)
 GET  /plugins/:pluginId                  install, mapping in force, versions, effective field policies, mapping errors, history (50)
 PUT  /plugins/:pluginId                  { version, keyId } install (first time: the package's mapping.yaml = version 1) or change
-PUT  /plugins/:pluginId/enabled          { enabled } on / off
+PUT  /plugins/:pluginId/enabled          { enabled } on / off (needs a read scope)
+PUT  /plugins/:pluginId/read-scope       { departmentIds, userIds } who may read it through the relay (below)
 PUT  /plugins/:pluginId/mapping          { text } a new mapping version (YAML; field policies are its `policy`)
 POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved again as the next one
 POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確かめる」 (P8, below)
@@ -215,7 +216,9 @@ POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確か
 - **Turning on** needs everything `active()` checks (else 409 `PLUGIN_NOT_READY` + `problem`);
   it also turns the relay's **read-only switch on** for the plugin's service (owner 0.21: writes
   go only through the plugin's typed operations; recorded in the key broker's history as the
-  admin's change; turning the plugin off leaves the switch as it is). A change of version or key
+  admin's change; turning the plugin off leaves the switch as it is). It also needs a **read
+  scope** (below; else 409 `READ_SCOPE_REQUIRED`, so a forgotten setting never opens the relay to
+  everyone). A change of version or key
   on a plugin that is on must keep it running (409 `PLUGIN_WOULD_STOP`, nothing changed).
 - **`active(companyId, pluginId)`** — for the connector (P5) and the typed operations (P6),
   re-decided on every call, so each kill switch acts from the next call: the operator's stop →
@@ -237,11 +240,23 @@ plugin's switch:
   `ACB_MANAGED_BY_PLUGIN`. Turning the plugin off does not bring writes back; the key broker's
   read-only switch cannot be turned off (409 `MANAGED_BY_PLUGIN`). Writes go only through the
   plugin's typed operations (P6), which never pass the relay.
-- **Reads only for those who may see every card**: the member must be able to read the place of
-  every mapped object (`visible_to_folder`; an invalid mapping → owners / admins only), else 403
-  `ACB_READ_NOT_ALLOWED`. The relay cannot apply record permissions to each outside answer, and
-  it reaches more than the cards (contacts, other deals): this rule only stops people who
-  cannot see the cards; whom the relay serves beyond that is an owner decision (open).
+- **Reads only for the connection's read scope** (owner decision 2026-10-31, design §9
+  「中継で HubSpot を読める人」; replaces P4's "only those who may see every card"): an owner /
+  admin chooses, per connection, departments and / or members (`PUT /plugins/:id/read-scope
+  { departmentIds, userIds }`, the admin page's 「<HubSpot> を読める人」). A member named, or who
+  can read the folder of a named department (`recordReader` on the department's folder, so owners
+  / admins count for a department but not by role alone), and their AI (any broker token of
+  theirs) read everything the relay already allows (deals, companies, owners, contacts,
+  meetings…); everyone else and their AI → 403 `ACB_READ_NOT_ALLOWED`. **No filtering by deal
+  inside the scope** (owner: 「案件ごとに分けなくて良い」). **Empty = nobody**: turning on needs a
+  scope, and it cannot be emptied while on (409 `READ_SCOPE_REQUIRED`; turn off first). Only this
+  company's departments and members (400 `READ_SCOPE_INVALID`; table `plugin_read_scopes` behind
+  the company handle, triggers: subjects of the same company, no row moves). A new connection
+  (`connection/renew`) carries the scope over. History `read-scope` (ids only). Every managed relay
+  call is logged in the AI action log with the member, `connection` and the path as a pattern
+  (`relayPathPattern`: outside ids → `{id}`) — never a body or the key. Tests:
+  `tests/integration/plugins.test.ts` 「who may read HubSpot through the relay」 (each guard
+  mutation-checked), permission matrix row + `CROSS`, `company-scoped-sql.test.ts`.
 - Companies whose plugin was never on keep the relay as before. **Inventory (2026-10-31)**:
   div's `法人ソリューション/.claude/skills/anken-sync` reads (owners, pipelines, deal search /
   get, v3 paths) **and writes** (creates deals, PATCHes deals, creates meetings) through the

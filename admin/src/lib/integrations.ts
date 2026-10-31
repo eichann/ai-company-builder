@@ -60,6 +60,7 @@ export const HISTORY_LABELS: Record<string, string> = {
   account: '相手のアカウントと結びついた',
   connection: '新しいつなぎ先として始めた',
   import: '取り込んだ',
+  'read-scope': '読める人を変えた',
 }
 
 /**
@@ -73,6 +74,8 @@ export function integrationRefusal(code: string | undefined, body: Record<string
     case 'PLUGIN_NOT_ACTIVE': return `いまは動いていません：${problem && PROBLEM_TEXT[problem] ? PROBLEM_TEXT[problem] : '設定が足りません'}`
     case 'PLUGIN_WOULD_STOP': return 'この設定にすると止まってしまうため、変えていません（先にオフにするか、読み替え表を直してください）'
     case 'NOT_INSTALLED': return '先に版と鍵を選んで保存してください'
+    case 'READ_SCOPE_REQUIRED': return '先に「読める人」（部署かメンバー）を選んで保存してください。誰も選ばないままではオンにできず、オンの間は空にできません'
+    case 'READ_SCOPE_INVALID': return 'この会社にない部署か、メンバーではない人が含まれています'
     case 'KEY_NOT_USABLE': return 'この鍵は使えません（「API キー」で登録した、このサービスの会社の鍵を選んでください）'
     case 'VERSION_NOT_ON_SHELF': return 'この版はもう使えません。版を選び直してください'
     case 'SERVICE_CHANGED': return 'この版は別のサービスにつなぐため、選べません'

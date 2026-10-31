@@ -103,11 +103,14 @@ export type ToolTarget =
   /**
    * One call through the key broker's relay (server-recorded): the service, the destination
    * host and path (no query), the model, the provider's status, sizes and tokens — never a body,
-   * a header or a key. `source`: the company's key or the member's own.
+   * a header or a key. `source`: the company's key or the member's own. For a service a
+   * connector plugin manages: `connection` (the plugin's connection id) and the path as a
+   * pattern (outside ids replaced by `{id}`).
    */
   | {
     kind: 'broker'; service: string; host?: string; path?: string; model?: string; status?: number
     bytesIn?: number; bytesOut?: number; tokensIn?: number; tokensOut?: number; source?: 'company' | 'user'
+    connection?: string
   }
   | { kind: 'none' }
 
@@ -277,8 +280,9 @@ export function parseToolTarget(raw: unknown): ToolTarget | null {
       const n = (x: unknown) => count(x, Number.MAX_SAFE_INTEGER)
       const status = count(v.status, 999)
       const source = v.source === 'company' || v.source === 'user' ? v.source : undefined
+      const connection = text(v.connection, 100, NAME_RE)
       return {
-        kind: 'broker', service,
+        kind: 'broker', service, ...(connection ? { connection } : {}),
         ...(host ? { host } : {}), ...(path ? { path } : {}), ...(model ? { model } : {}),
         ...(status !== undefined ? { status } : {}),
         ...(n(v.bytesIn) !== undefined ? { bytesIn: n(v.bytesIn) } : {}),

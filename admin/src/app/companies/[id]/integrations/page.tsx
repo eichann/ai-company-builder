@@ -21,12 +21,16 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ReadScopeSection } from './read-scope'
 import {
   ApiError,
   companiesApi,
+  departmentsApi,
   keyBrokerApi,
   pluginsApi,
   type BrokerView,
+  type Department,
+  type Member,
   type ImportReport,
   type PluginDetail,
   type PluginListItem,
@@ -61,6 +65,7 @@ export default function IntegrationsPage() {
   const list = useQuery(isAdmin ? `plugins:${companyId}` : null, () => pluginsApi.list(companyId))
   const broker = useQuery(isAdmin ? `broker:${companyId}` : null, () => keyBrokerApi.get(companyId))
   const members = useQuery(isAdmin ? `members:${companyId}` : null, () => companiesApi.getMembers(companyId))
+  const departments = useQuery(isAdmin ? `departments:${companyId}` : null, () => departmentsApi.list(companyId))
   const [open, setOpen] = useState<string | null>(null)
 
   if (role !== null && !isAdmin) {
@@ -97,7 +102,8 @@ export default function IntegrationsPage() {
         <div className="space-y-4 pb-4">
           {items.map((item) =>
             open === item.id || items.length === 1 ? (
-              <IntegrationDetail key={item.id} item={item} broker={broker.data ?? null} nameOf={nameOf} onChanged={list.reload} />
+              <IntegrationDetail key={item.id} item={item} broker={broker.data ?? null} nameOf={nameOf} onChanged={list.reload}
+                departments={departments.data ?? []} members={members.data ?? []} />
             ) : (
               <IntegrationSummary key={item.id} item={item} onOpen={() => setOpen(item.id)} />
             )
@@ -140,11 +146,13 @@ function IntegrationSummary({ item, onOpen }: { item: PluginListItem; onOpen: ()
 type Change = (acknowledgeAuto: string[]) => Promise<PluginDetail>
 type AckRequest = { fields: string[]; acknowledgement: string; label: string; change: Change }
 
-function IntegrationDetail({ item, broker, nameOf, onChanged }: {
+function IntegrationDetail({ item, broker, nameOf, onChanged, departments, members }: {
   item: PluginListItem
   broker: BrokerView | null
   nameOf: (id: string) => string
   onChanged: () => void
+  departments: Department[]
+  members: Member[]
 }) {
   const { companyId } = useCompany()
   const detail = useQuery(`plugin:${companyId}:${item.id}`, () => pluginsApi.get(companyId, item.id))
@@ -262,6 +270,19 @@ function IntegrationDetail({ item, broker, nameOf, onChanged }: {
             <p className="text-xs text-muted-foreground">この送り先の会社の鍵がまだありません。「API キー」で登録してください（鍵の中身はここには表示されません）。</p>
           )}
         </section>
+
+        {install && d && (
+          <ReadScopeSection
+            key={`${install.connectionId}:${JSON.stringify(d.readScope)}`}
+            system={labelOf(current)}
+            scope={d.readScope}
+            departments={departments}
+            members={members}
+            enabled={install.enabled}
+            busy={busy}
+            onSave={(scope) => run('読める人を保存しました', () => pluginsApi.setReadScope(companyId, item.id, scope))}
+          />
+        )}
 
         {/* On / off */}
         {install && (

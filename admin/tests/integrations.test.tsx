@@ -4,10 +4,13 @@
 // back unchanged (stage never offered for writing, comments aside), that an
 // automatic field is saved only after the workflow acknowledgement is ticked
 // and then sent as `acknowledgeAuto`, that 「HubSpot に聞いて確かめる」 sends
-// the text being edited and shows what does not match, and that the page
-// speaks without jargon.
+// the text being edited and shows what does not match, that who may read the
+// outside system through the relay is chosen by department / member and an
+// empty choice is said plainly (the server refuses turning on), and that the
+// page speaks without jargon.
 import { screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
+import { toast } from 'sonner'
 import { describe, expect, it, vi } from 'vitest'
 
 import IntegrationsPage from '@/app/companies/[id]/integrations/page'
@@ -70,6 +73,7 @@ const detail: PluginDetail = {
   mappingErrors: [],
   autoAcknowledgements: [],
   history: [{ action: 'install', at: '2026-10-31T00:00:00.000Z', by: 'u_owner', change: {} }],
+  readScope: { departmentIds: [], userIds: [] },
 }
 
 const SECRET = 'pat-fake-NOT-REAL-admin-integrations-9876'
@@ -219,5 +223,29 @@ describe('つなぎ先', () => {
     renderInCompany(<IntegrationsPage />)
     await userEvent.click(await screen.findByRole('button', { name: 'HubSpot に聞いて確かめる' }))
     expect(await screen.findByText(/HubSpot に聞けませんでした：鍵が受け付けられませんでした/)).toBeInTheDocument()
+  })
+
+  it('who may read HubSpot: nobody until chosen (said plainly); departments and members are sent by id', async () => {
+    const saves: Call[] = []
+    stubApi(ownerCapabilities, {
+      [`PUT ${base}/plugins/hubspot/read-scope`]: (call) => {
+        saves.push(call)
+        return { body: ok({ ...detail, readScope: call.body }) }
+      },
+      [`PUT ${base}/plugins/hubspot/enabled`]: { status: 409, body: { error: 'x', code: 'READ_SCOPE_REQUIRED' } },
+    })
+    renderInCompany(<IntegrationsPage />)
+    const section = await screen.findByRole('region', { name: 'HubSpot を読める人' })
+    expect(within(section).getByText('まだ誰も選ばれていません（いまは誰も読めません）。')).toBeInTheDocument()
+    // Turning on without a choice: the server's refusal in plain words.
+    const error = vi.spyOn(toast, 'error')
+    await userEvent.click(screen.getByRole('button', { name: 'オンにする' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('保存できませんでした', { description: expect.stringMatching(/先に「読める人」（部署かメンバー）を選んで保存してください/) }))
+
+    await userEvent.click(within(section).getByRole('checkbox', { name: '営業部' }))
+    await userEvent.click(within(section).getByRole('checkbox', { name: '田中 太郎' }))
+    await userEvent.click(within(section).getByRole('button', { name: '読める人を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ departmentIds: ['d_sales'], userIds: ['u_member'] })
   })
 })

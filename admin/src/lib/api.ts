@@ -900,10 +900,11 @@ export type {
   PluginOperationView,
   PluginPackageView,
   PluginProblem,
+  PluginReadScopeView,
 } from '../../../shared/types/plugins'
 export type { FieldPolicy } from '../../../shared/core/plugins'
 
-import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck } from '../../../shared/types/plugins'
+import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView } from '../../../shared/types/plugins'
 
 const pluginPath = (companyId: string, pluginId: string) => `/api/companies/${enc(companyId)}/plugins/${enc(pluginId)}`
 
@@ -915,6 +916,9 @@ export const pluginsApi = {
     getData<PluginDetail>(pluginPath(companyId, pluginId), { method: 'PUT', body: { version, keyId } }),
   setEnabled: (companyId: string, pluginId: string, enabled: boolean) =>
     getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/enabled`, { method: 'PUT', body: { enabled } }),
+  /** Who may read the outside system through the relay (departments / members; empty = nobody). */
+  setReadScope: (companyId: string, pluginId: string, scope: PluginReadScopeView) =>
+    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/read-scope`, { method: 'PUT', body: scope }),
   /** A new mapping version; `acknowledgeAuto` = the fields the admin confirmed trigger no HubSpot workflow. */
   saveMapping: (companyId: string, pluginId: string, text: string, acknowledgeAuto: string[] = []) =>
     getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/mapping`, { method: 'PUT', body: { text, acknowledgeAuto } }),

@@ -76,8 +76,15 @@ export interface BrokerRelayDeps {
 export interface ManagedRelayPolicy {
   /** The declared search paths (POSTs that only read), exact. */
   searchPaths: string[]
-  /** The member may read every place the plugin's records are visible in. */
+  /** The member is in the read scope of every connection that manages the service (an empty scope: nobody). */
   mayRead: boolean
+  /** The plugins' connections (logged with each call). */
+  connectionIds: string[]
+}
+
+/** A path as a pattern for the log: outside ids (digits, long hex / uuid-like segments) become `{id}`. */
+export function relayPathPattern(path: string): string {
+  return path.split('/').map(seg => /^\d+$/.test(seg) || /^[0-9a-f-]{16,}$/i.test(seg) || /@/.test(seg) ? '{id}' : seg).join('/')
 }
 
 export interface RelayRequest {
@@ -109,6 +116,8 @@ interface CallMeta {
   grant?: BrokerGrant
   host?: string
   path?: string
+  /** A plugin-managed service: its connection(s), for the log. */
+  connection?: string
   model?: string
   bytesIn: number
   /** The request reached the provider (counted for the caps). */
@@ -317,6 +326,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
               kind: 'broker', service: req.service,
               ...(meta.host ? { host: meta.host } : {}),
               ...(meta.path ? { path: meta.path.slice(0, 200) } : {}),
+              ...(meta.connection ? { connection: meta.connection.slice(0, 100) } : {}),
               ...(meta.model ? { model: meta.model.slice(0, 100) } : {}),
               status: answer.status, bytesIn: meta.bytesIn, bytesOut,
               ...(tokensIn !== undefined ? { tokensIn } : {}),
@@ -427,15 +437,19 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵では、この宛先（パス）は使えません。', grant)
       }
       // 2a. A connection managed by a connector plugin (once turned on, for good): writes go only through
-      // the plugin's typed operations; reads only by members who may see every card it brings, and
-      // searches only on the declared paths. Checked on every call, so an old token or consultation
-      // cannot write either, and turning the plugin off does not bring writes back.
+      // the plugin's typed operations; reads only by members in the connection's read scope (an
+      // admin's list of departments / members; empty = nobody), and searches only on the declared
+      // paths. Checked on every call, so an old token or consultation cannot write either, and
+      // turning the plugin off does not bring writes back. Logged with the connection and the path
+      // as a pattern (never a body or the key).
       const managed = deps.managedConnection?.(grant.companyId, grant.userId, req.service) ?? null
       if (managed) {
+        meta.path = relayPathPattern(path.decoded)
+        meta.connection = managed.connectionIds[0]
         const reads = (req.method === 'GET' || req.method === 'HEAD' || (req.method === 'POST' && managed.searchPaths.includes(path.decoded)))
           && !req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n))
         if (!reads) return jsonError(403, 'ACB_MANAGED_BY_PLUGIN', `${target.label} の書き換えは、ACB のプラグインの決まった操作からだけ行えます（ここからは読むだけです）。`, grant)
-        if (!managed.mayRead) return jsonError(403, 'ACB_READ_NOT_ALLOWED', `${target.label} の内容は、ACB で案件を見られる人だけがここから読めます。`, grant)
+        if (!managed.mayRead) return jsonError(403, 'ACB_READ_NOT_ALLOWED', `${target.label} は、管理者が決めた「中継で読める人」だけがここから読めます。`, grant)
       }
       // 2b. The company keeps this service read-only (HubSpot once its plugin is on: writes go only through
       // the plugin's typed operations, which never pass here): only reads are forwarded.
