@@ -188,6 +188,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - The embedded chat server's HTTP contract is `client/shared/chat-server-api.ts`
   (`CHAT_SERVER_PATHS` + request/response types); `electron/chat-server.ts` parses and answers
   with it.
+- It listens on `127.0.0.1`, the first port of 3300–3399 that binds: binding is the check (a
+  probe-then-listen let a parallel process take the port in between, and requests reached that
+  one). Tests pass `listenPort: 0` (any free port) so parallel runs never share one.
 - The renderer talks to it only through `src/features/chat/chatServerClient.ts`
   (`useChatServer()` returns one client per address, memoised by port + token). Build
   `http://127.0.0.1:<port>` URLs and the bearer header only there: add a method and its test in
@@ -243,6 +246,11 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   Messages older than the latest 20 use `content-visibility: auto`; hidden tabs use
   `content-visibility: hidden`; `ChatPanelChat` (`ChatConversation.tsx`), `MessageList`,
   `MessageItem` and `ChatInput` are memoised with stable props.
+- While a reply streams, the list follows the bottom unless the member scrolled up to read:
+  only a move up that leaves the view more than 120 px from the bottom stops following
+  (`hooks/useChatAutoScroll.ts`). The browser's scroll anchoring also moves the view (down) when
+  the reply grows; counting that as reading stopped the follow under load. Test:
+  `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」.
 - Markdown renders per top-level block (`markdownBlocks.ts`: split only at blank lines outside
   fences before a non-indented, non-list line; a reply with link/footnote definitions stays one
   block), so streaming re-parses only the last block; an unclosed fence shows plain until it

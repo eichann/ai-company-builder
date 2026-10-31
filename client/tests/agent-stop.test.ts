@@ -372,7 +372,7 @@ test('the chat server refuses a new turn while the AI is stopped, before any age
   let started = 0
   const server = await startChatServer({
     getAuthMode: () => 'api-key', getApiKey: () => { started++; return 'k' }, buildSystemPrompt: () => '', getShellEnv: () => ({}),
-    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude',
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
     prepareAgentStop: async () => ({ refused: '管理者が AI の利用を一時停止しています。再開されるまでお待ちください。', toolStopped: () => 'all' }),
   })
   try {
@@ -401,7 +401,7 @@ test('titles: no AI is asked while the AI is stopped (the renderer keeps its own
   let allowed = false
   const server = await startChatServer({
     getAuthMode: () => 'api-key', getApiKey: () => { asked++; return undefined }, buildSystemPrompt: () => '', getShellEnv: () => ({}),
-    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude',
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
     oneShotAiAllowed: () => allowed,
   })
   const title = () => fetch(`http://127.0.0.1:${server.port}/api/generate-title`, {
