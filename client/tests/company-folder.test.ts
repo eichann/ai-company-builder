@@ -18,7 +18,7 @@ import {
   UNRELATED_REPO_MESSAGE,
   type CompanyFolderFacts,
 } from '../electron/sync/company-folder'
-import { planFolderSetup, INSPECT_FAILED_MESSAGE } from '../src/lib/company-folder-plan'
+import { planFolderSetup, INSPECT_FAILED_MESSAGE } from '../src/features/company/folderPlan'
 import { checkRememberedCompany } from '../src/lib/restore-company'
 
 const COMPANY = 'https://acb.example.com/api/git-http/c0ffee-123.git'

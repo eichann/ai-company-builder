@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react'
-import { useAppStore } from '../../stores/appStore'
-import { useAuthStore } from '../../stores/authStore'
-import type { CompanyView, DepartmentFolder } from '../../types'
-import { planFolderSetup, type FolderSetupPlan } from '../../lib/company-folder-plan'
-import { formatBytes } from '../../lib/download-selection'
-import { getDepartments } from '../../shared/ipc/departments'
+import { useAppStore } from '../../../stores/appStore'
+import { useAuthStore } from '../../../stores/authStore'
+import type { CompanyView, DepartmentFolder } from '../../../types'
+import { planFolderSetup, type FolderSetupPlan } from '../folderPlan'
+import { formatBytes } from '../../../lib/download-selection'
+import { getDepartments } from '../../../shared/ipc/departments'
 import {
   chooseFolder,
   companyPathExists,
@@ -15,7 +15,7 @@ import {
   onSetupProgress,
   readCompanyFolder,
   setUpCompanyFolder,
-} from '../../features/company/api'
+} from '../api'
 import {
   Buildings,
   Plus,
@@ -160,7 +160,7 @@ export function CompanySelector() {
     await prepareSetup(`${localPath}/${selectedCompany.name}`, 'openExisting')
   }
 
-  // Both paths: ask main what the folder is (lib/company-folder-plan.ts).
+  // Both paths: ask main what the folder is (folderPlan.ts).
   // A folder with nothing downloaded yet asks which departments to download
   // first; an existing clone of this company opens as before; a folder that
   // cannot be used is refused before anything in it changes.

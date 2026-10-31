@@ -11,7 +11,7 @@
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
-import { CompanySelector } from '../src/components/auth/CompanySelector'
+import { CompanySelector } from '../src/features/company/components/CompanySelector'
 import { useAppStore } from '../src/stores/appStore'
 import { useAuthStore } from '../src/stores/authStore'
 import type { CompanyInfo, DepartmentInfo, DirectoryEntry } from '../shared/ipc-contract'

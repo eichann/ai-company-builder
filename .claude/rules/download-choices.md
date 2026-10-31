@@ -12,9 +12,9 @@ paths:
   - "client/electron/features/company-setup/**"
   - "client/src/components/settings/**"
   - "client/src/features/settings/**"
-  - "client/src/components/auth/CompanySelector.tsx"
+  - "client/src/features/company/components/CompanySelector.tsx"
   - "client/src/lib/download-selection.ts"
-  - "client/src/lib/company-folder-plan.ts"
+  - "client/src/features/company/folderPlan.ts"
   - "client/src/lib/restore-company.ts"
   - "client/src/shared/hooks/useSparseCheckout.ts"
   - "client/src/shared/lib/exclusionChanges.ts"
@@ -47,7 +47,7 @@ Background and the rejected cone-mode design: `docs/architecture/download-choice
   converted to partial clones.
 - Both selector paths (「既存のフォルダを開く」 = the folder, 「新しく作成」 = `<folder>/<company>`)
   first ask `git:inspectCompanyFolder` (`sync/company-folder.ts`, read-only; renderer
-  `src/lib/company-folder-plan.ts`):
+  `src/features/company/folderPlan.ts`):
   - empty folder (OS files such as `.DS_Store` ignored), or this company's origin with nothing
     checked out → picker + partial setup;
   - a clone of this company with commits → opens as before;
