@@ -5,11 +5,13 @@
  * - plugin_installs.key_id becomes ON DELETE SET NULL, so deleting the key a
  *   plugin uses is never blocked (better-sqlite3 enforces foreign keys) and
  *   the plugin is left without a key.
+ * - plugin_operations (milestone 4 creates): record_id / external_id may be
+ *   null until known (set once), plus replaced_by / approved_by.
  * Running them again changes nothing.
  */
 import { describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
-import { initDatabase, migratePluginInstallKeyReference, migratePluginTables, migrateRecordTypeSources } from '../../src/db'
+import { initDatabase, migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, migrateRecordTypeSources } from '../../src/db'
 
 const BEFORE = `
   CREATE TABLE companies (id TEXT PRIMARY KEY, name TEXT NOT NULL, slug TEXT NOT NULL UNIQUE, owner_id TEXT NOT NULL, repo_path TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -81,5 +83,47 @@ describe('plugin_installs key reference migration', () => {
     expect(conn.prepare('SELECT COUNT(*) AS n FROM plugin_mappings').get()).toEqual({ n: 1 })
     // The triggers are back: a key that is not the company's is still refused.
     expect(() => conn.prepare("UPDATE plugin_installs SET key_id = 'nope' WHERE plugin_id = 'p'").run()).toThrow(/same company/)
+  })
+})
+
+describe('plugin_operations for creates (milestone 4)', () => {
+  const COLS = `company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object, external_id, record_id,
+    actor_id, actor_kind, state, fields, written, previous, created_at, updated_at`
+  const op = (conn: Database.Database, id: string, record: string | null, externalId: string | null) =>
+    conn.prepare(`INSERT INTO plugin_operations (${COLS}) VALUES ('a', ?, 'p', 'log_meeting', '0.1.0', 'f', 1, 'c', '9', 'meeting', ?, ?, 'u', 'human', 'pending', '{}', '{}', '{}', 'x', 'x')`)
+      .run(id, externalId, record)
+
+  it('an old table is rebuilt with its rows; a create may name its record and outside object once, never another company\'s record', () => {
+    const conn = new Database(':memory:')
+    initDatabase(conn)
+    // The shape of milestone 3: record_id and external_id NOT NULL, no replaced_by / approved_by.
+    conn.transaction(() => {
+      conn.pragma('defer_foreign_keys = ON')
+      const sql = (conn.prepare("SELECT sql FROM sqlite_master WHERE name = 'plugin_operations'").get() as { sql: string }).sql
+      conn.exec('DROP TABLE plugin_operations')
+      conn.exec(sql.replace('external_id TEXT,', 'external_id TEXT NOT NULL,').replace('record_id TEXT,', 'record_id TEXT NOT NULL,')
+        .replace(/replaced_by TEXT,\s*approved_by TEXT,/, ''))
+    })()
+    migratePluginTables(conn)
+    for (const id of ['a', 'b']) conn.prepare("INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, 'u', 'x', 'x')").run(id, id, id)
+    for (const [co, id] of [['a', 'deal-a'], ['a', 'deal-a2'], ['b', 'deal-b']]) {
+      conn.prepare("INSERT INTO records (company_id, id, type, created_at, updated_at) VALUES (?, ?, 'deal', 'x', 'x')").run(co, id)
+    }
+    op(conn, 'old-1', 'deal-a', '1')
+    expect(() => op(conn, 'old-2', null, null)).toThrow(/NOT NULL/)
+
+    migratePluginOperationCreates(conn)
+    migratePluginTables(conn)
+    migratePluginOperationCreates(conn)
+    expect(conn.prepare("SELECT record_id, external_id, replaced_by, approved_by FROM plugin_operations WHERE id = 'old-1'").get())
+      .toEqual({ record_id: 'deal-a', external_id: '1', replaced_by: null, approved_by: null })
+    // A create of a record: no record, no outside id yet.
+    op(conn, 'new-1', null, null)
+    expect(() => conn.prepare("UPDATE plugin_operations SET record_id = 'deal-b' WHERE id = 'new-1'").run()).toThrow(/keeps its company/)
+    conn.prepare("UPDATE plugin_operations SET record_id = 'deal-a2', external_id = '77' WHERE id = 'new-1'").run()
+    expect(() => conn.prepare("UPDATE plugin_operations SET record_id = 'deal-a' WHERE id = 'new-1'").run()).toThrow(/keeps its company/)
+    expect(() => conn.prepare("UPDATE plugin_operations SET external_id = '78' WHERE id = 'new-1'").run()).toThrow(/keeps its company/)
+    // Another company's record is refused on insert too.
+    expect(() => op(conn, 'new-2', 'deal-b', null)).toThrow(/same company/)
   })
 })

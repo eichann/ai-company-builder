@@ -316,6 +316,10 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/plugins', () => ({ path: '/api/records-ai/plugins' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/create/create_deal`, body: {} }), [409, 409, 409, 409, 404, 401],
+    'any member: the plugin (not running here), the operation\'s who and its policy decide; never auto (milestone 4)'),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/recreate`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/plugins/:pluginId/create/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/create/create_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
@@ -389,6 +393,8 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}` }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/undo`, body: {} }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', (w, id) => ({ path: `${C(w)}/plugins/${id}/create/create_deal`, body: { title: '乗っ取り', fields: {} } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
@@ -418,6 +424,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
   'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
+  'POST /api/records-ai/plugins/:pluginId/create/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
 }
 

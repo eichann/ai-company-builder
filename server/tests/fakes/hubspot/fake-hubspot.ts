@@ -731,7 +731,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     for (const g of groups) {
       if (!Array.isArray(g.filters) || g.filters.length > SEARCH_MAX_FILTERS) throw badRequest(`There can be no more than ${SEARCH_MAX_FILTERS} filters in a filterGroup`)
       for (const f of g.filters) {
-        if (!f.propertyName || !['EQ', 'NEQ', 'GT', 'GTE', 'LT', 'LTE', 'IN', 'NOT_IN', 'HAS_PROPERTY', 'NOT_HAS_PROPERTY'].includes(f.operator ?? '')) {
+        if (!f.propertyName || !['EQ', 'NEQ', 'GT', 'GTE', 'LT', 'LTE', 'IN', 'NOT_IN', 'HAS_PROPERTY', 'NOT_HAS_PROPERTY', 'CONTAINS_TOKEN', 'NOT_CONTAINS_TOKEN'].includes(f.operator ?? '')) {
           throw badRequest(`Invalid filter: ${JSON.stringify(f)}`)
         }
       }
@@ -782,7 +782,13 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       return op === 'IN' ? has : !has
     }
     const want = f.value === undefined || f.value === null ? null : String(f.value)
-    if (op === 'EQ') return (actual ?? '').toLowerCase() === (want ?? '').toLowerCase()
+    // A word of the value (`*` = any characters), case-insensitive — what ACB's "similar deals" search uses.
+    if (op === 'CONTAINS_TOKEN' || op === 'NOT_CONTAINS_TOKEN') {
+      const pattern = new RegExp(`^${(want ?? '').toLowerCase().split('*').map(p => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`, 's')
+      const has = actual !== null && (pattern.test(actual.toLowerCase()) || actual.toLowerCase().split(/\s+/).some(t => pattern.test(t)))
+      return op === 'CONTAINS_TOKEN' ? has : !has
+    }
+    if (op === 'EQ')return (actual ?? '').toLowerCase() === (want ?? '').toLowerCase()
     if (op === 'NEQ') return (actual ?? '').toLowerCase() !== (want ?? '').toLowerCase()
     if (actual === null || want === null) return false
     const cmp = compareValues(actual, want)

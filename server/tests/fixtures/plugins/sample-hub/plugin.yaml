@@ -17,6 +17,7 @@ scopes:
   - crm.objects.owners.read
 operation_scopes:
   add_note: [crm.objects.contacts.read, crm.objects.contacts.write]
+  log_meeting: [crm.objects.deals.write]
 types: [deal, customer]
 
 objects:
@@ -26,11 +27,19 @@ objects:
     get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
     search: { method: POST,  path: "/crm/objects/2026-09/deals/search" }
     update: { method: PATCH, path: "/crm/objects/2026-03/deals/{id}" }
+    create: { method: POST,  path: "/crm/objects/2026-03/deals" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/deals/{id}" }
     properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
     stages_list:     { method: GET, path: "/crm/pipelines/2026-09/deals" }
   company:
     record_type: customer
     get: { method: GET, path: "/crm/objects/2026-03/companies/{id}" }
+  # Meetings: no get on purpose — a lost create is looked up by search (60 s after the send),
+  # the path for an object whose unique-value property cannot be read directly (design §4-4).
+  meeting:
+    create:  { method: POST,   path: "/crm/objects/2026-03/meetings" }
+    search:  { method: POST,   path: "/crm/objects/2026-03/meetings/search" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/meetings/{id}" }
   note:
     create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
     archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }
@@ -62,10 +71,35 @@ operations:
     content: { body: hs_note_body, at: hs_timestamp }
     association_type: 214
     correlation_property: acb_operation_id
+    policy: prior
+  # Milestone 4 (design §3-6): a meeting on the deal. Approval by default here; the company
+  # chooses `log_meeting: auto` in its mapping, with the acknowledgement.
+  log_meeting:
+    label: 商談の記録を残す
+    kind: create
+    object: meeting
+    attach_to: deal
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: archive
+    policy: prior
+    content: { title: hs_meeting_title, body: hs_meeting_body, at: hs_timestamp, outcome: hs_meeting_outcome }
+    association_type: 212
+    correlation_property: acb_operation_id
+  # A new deal: never automatic (a person approves; design §6-3).
+  create_deal:
+    label: 取引を新しく作る
+    kind: create
+    object: deal
+    fields: mapped
+    who: [viewer, ai]
+    reaches: internal
+    undo: archive
+    correlation_property: acb_operation_id
 
 field_policy_defaults:
   next_step: auto
-  stage: off
+  stage: prior
   confidence: auto
   close_date: auto
   amount: prior

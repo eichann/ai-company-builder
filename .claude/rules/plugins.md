@@ -153,6 +153,10 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   and outside property with who and when (`plugin_policy_acks`, history `acknowledge`); a field
   moved to another property needs a new one. A plugin whose automatic field lacks one does not
   run (`auto-not-acknowledged`; e.g. the package's recommended defaults right after install).
+  **A create that would run automatically** (milestone 4: `log_meeting: auto`) needs the same,
+  named by the operation (`acknowledgeAuto: [log_meeting]`), stored with the "property"
+  `create:<object>` (`AUTO_CREATE_PREFIX`): the admin confirms no HubSpot workflow starts when such
+  an object is created.
   Reading HubSpot's workflows to check this automatically would need more key scopes — an option
   for later, not taken now.
 - **An operation reaching people outside the company is never `auto`**: refused in the
@@ -371,22 +375,27 @@ plugin's switch:
 POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation   a person (session)
 POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation             their AI (record token)
      update: { expectedVersion, fields: { <ACB field>: value }, note? }   read (refresh_deal): {}
+     create on the record (log_meeting): { title, body?, at (ISO with offset), outcome?, note? }
+POST /api/companies/:companyId/plugins/:pluginId/create/:operation   a create of a record (create_deal) { title, fields, note? }
+POST /api/records-ai/plugins/:pluginId/create/:operation             the same for their AI (act token)
 GET  …/plugins/:pluginId/operations/:operationId          (both; only for readers of the record)
 POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo        people only
 POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile   people only
+POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate    people only 「もう一度作る」
 ```
 
 - Checks, each refusing with nothing sent: records switch on; the record readable by the
   member (else the same 404 as a missing record — the AI only acts on what its owner can see);
   `active()` (operator stop, company switch, package, key, mapping, acknowledged auto fields);
   the AI not stopped (also checked by the service, not only the token); the operation exists
-  (`create` — notes — refused in milestone 3: `OPERATION_NOT_AVAILABLE`, review §10 / owner §6-7);
+  (a create of a record on the record route → 400 `OPERATION_CREATES_RECORD`);
   the record imported through the current connection; `who` (`viewer` → can read; `ai` only
   where listed and only for what the member may do: the engine's `mayAct`); **the AI's reason
   for a decision operation** (`REASON_REQUIRED`; people may leave it out); every field `auto`
-  (a `prior` field → 409 `APPROVAL_REQUIRED`, an `off` one — `stage` always — 400
+  (a `prior` field — `stage` at best, milestone 4 — → 409 `APPROVAL_REQUIRED`, an `off` one → 400
   `FIELD_NOT_WRITABLE`; **one such field refuses the whole request**, review §6.3); values
-  translatable; `expectedVersion` current.
+  translatable; `expectedVersion` current. A create: its policy `auto` (`prior` → 409
+  `APPROVAL_REQUIRED`, `off` → 400 `OPERATION_OFF`), below.
 - Then **serialised per outside object** (company × connection × object × id) inside this
   server (review §5.5): the outside account is checked; the object is read again — a difference
   is brought in (an `external` ledger entry) and the request refused as stale (409
@@ -431,6 +440,85 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
   key's stop / 「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the
   mapping), the records switch.
 
+## Creates (milestone 4 G5, `services/plugin-operations.ts`; design §3-6, §4-4, §6-3)
+
+- Two kinds (declaration: "Creates" above). **`log_meeting`** (attached to a deal, record route):
+  the body's ACB words go to the declared `content` slots (`at` sent as epoch ms), associated to
+  the deal's outside id with `association_type`. Its policy is `effectiveOperationPolicy` (the
+  company's mapping `log_meeting: auto` with the acknowledgement, design §9 q17); `prior` → 409
+  `APPROVAL_REQUIRED` for now (the approvals service turns it into a request). A created meeting
+  gets **no record**: the deal's ledger gets an entry without field changes
+  (`entryWithoutChanges` on the engine's external entry, records.md), whose receipt names the
+  meeting (`object: meeting`, its id, the operation). **`create_deal`** (a create of a record,
+  its own route): `{ title, fields }` — title through the mapping's `title.from`, fields through
+  `acbToExternal` (only `write: true` fields). **Never `auto`** (declaration, mapping, and
+  `createPolicy` here): a direct request is always 409 `APPROVAL_REQUIRED`, after every other
+  check (who = may read the mapping's `visible_to_folder` + `who`); it is written only through
+  `executeApproved`. The created deal becomes a record through the engine's external entry
+  (server only, no file, folder `visible_to_folder`, linked in `plugin_external_links` like an
+  import), its first ledger entry the requester's.
+- **The correlation value**: the operation record (操作の控え) is written before the send with the
+  outside properties to send, including `correlation_property` = **the operation's own id**
+  (`acb_operation_id`, a unique-value property the owner makes in HubSpot). `external_id` is null
+  until the answer (or a lookup) gives it; `record_id` is null for `create_deal` until the record
+  exists (both set once — triggers, `migratePluginOperationCreates`).
+- **Never re-sent.** Answer lost / 5xx / unreadable → `sent-unknown`, then looked up at once
+  (`reconcileCreate`): the object's `get` with `idProperty=<correlation property>` (a unique
+  value is found directly); a 400 there (not a unique identifier for that object) or no `get` →
+  the declared `search` filtered by the value, **only `CREATE_SEARCH_DELAY_MS` (60 s) after the
+  send** (HubSpot's search does not see a new object at once; before: reason `too-early`, nothing
+  asked). Found → **ours** (the value proves it, unlike an update's `observed`): `applied`, reason
+  `found-by-correlation`, settled like a confirmed create (record / ledger entry) and undoable.
+  Not found → stays `sent-unknown`, reason `not-found` — never "does not exist". `POST
+  …/reconcile` does the same while the plugin is stopped or off (collecting facts). The sample
+  package's meetings have no `get` on purpose (the search path).
+- **「もう一度作る」** (`recreate`, people only — the actor or an owner / admin): only for a create in
+  `sent-unknown` / `not-found` not yet replaced, with `{ confirm: true }` after
+  `RECREATE_WARNING` (409 `RECREATE_NEEDS_CONFIRMATION`); it looks once more, then runs the same
+  input as a **new** operation (new correlation value) with every check of a direct run (a create
+  needing approval stays 409); the old one gets `replaced_by`. The AI has no such route.
+- **「作ったものを取り消す」** (`CREATE_UNDO_LABEL`; undo of a create, people only): an archive
+  (`DELETE`, HubSpot's recycling bin) of the object an `applied` create made — its id came in the
+  answer to ACB's own create or was found by ACB's correlation value — by the actor or an owner /
+  admin, re-checked like a new write (stops, membership, `who`, the create not `off`), same
+  connection and account, as a new operation (`undo`, `undoOf`); the record's ledger notes it.
+  `CREATE_UNDO_NOTICE`: what HubSpot did after the create is not undone. An archive whose answer
+  was lost: reconcile reads the object (`observed` when gone, who removed it not known).
+- **Similar deals** (`similarDeals(member, pluginId, title)`, design §6-3; for the approval card,
+  no route yet): the declared `search` on the create-of-a-record's object, the title's words as
+  `CONTAINS_TOKEN` filters (OR, ≤ 3 words) on the title property; only records already imported
+  through the current connection **that the member may read** come back (an outside hit without
+  such a record is dropped); someone who cannot read the folder gets 403 with nothing asked.
+
+## The approval seam (milestone 4 G5; the approvals service builds on it)
+
+`services/plugin-operations.ts` exports, for `services/approvals.ts` (G6) only — no route here:
+
+- `prepareApproval(member, actor, pluginId, recordId | null, operation, input) → Outcome<{ payload:
+  PluginApprovalPayload; approver: ApproverRule; folder }>`: every check of a direct run (record
+  readable, `active()`, AI stop, `who`, the AI's reason, values translatable, version current,
+  account) except the policy gate, which must say `prior` (`APPROVAL_NOT_NEEDED` when every field
+  is `auto`; an `off` field is still 400). Reads the outside object now (update: `rawBefore` per
+  property; a change seen is brought in and refused as stale) and builds the fixed payload
+  (`shared/core/approvals.ts`; plugin version / fingerprint, mapping version, connection, account,
+  record version, raw before / after, or the create's raw properties without the correlation
+  value), approver = `approverFor`, folder = the record's (or `visible_to_folder`). Sends and
+  writes nothing.
+- `executeApproved(approver, requestedFor { userId, actorKind, conversationId, source? }, payload,
+  reason) → Outcome<PluginOperationRecordView>`: a reason (`approvalReasonProblem`); the requester
+  still a member (`REQUESTER_NOT_MEMBER`), the AI not stopped; the plugin running on the payload's
+  package version, fingerprint, **mapping version** and **connection** / account (else 409
+  `APPROVAL_STALE`); record readable and linked to the same outside object; `who` for the
+  requester; the policy not `off` (`FIELD_NOT_WRITABLE` / `OPERATION_OFF`); for an update, the
+  outside raw values **still equal `rawBefore`** (else 409 `CHANGED_OUTSIDE` with the current
+  values, nothing sent), for an attached create the record's version unchanged. Then the
+  operation record (`approved_by`) and the send of **exactly the payload's raw values** (never
+  re-translated through the mapping); ledger actor = the requester (human or AI), a decision whose
+  reason is the approver's, `receipt.approvedBy`. Never re-sent on a lost answer (as above).
+  A remapping after approval makes the request stale (the mapping version is part of the fixed
+  content), so "raw, not re-translated" is tested by the payload's own raw value.
+- Approving itself (who may, the hash, once only) is the approvals service's (G6).
+
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
 
 - `POST /plugins/:pluginId/mapping/check { text? }` (owner/admin; 404 for a plugin not installed):
@@ -474,12 +562,16 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
 ## The app (P7): the AI's tools and the chat card
 
 - `GET /api/records-ai/plugins` (record token; `plugins.aiTools`): the running plugins'
-  operations the member's AI may call — `who` lists `ai`, no `create`, and with a `read` token
-  (Codex) no update; an update lists the fields it may write now (`auto` / `prior`; `off` and
-  `stage` never). `client/electron/records/tools.ts` `pluginToolSpecs` turns each into a tool on
-  the `acb_records` server (`hubspot__update_deal`, `hubspot__refresh_deal`), generated each turn
-  like the type tools, called with the turn's record token. The app drops writes for a read
-  token too (`client/tests/plugin-tools.test.ts`).
+  operations the member's AI may call — `who` lists `ai`, and with a `read` token (Codex) no
+  update or create; an update lists the fields it may write now (`auto` / `prior`; `off` never);
+  a create (milestone 4) its policy now (`off` left out), its content slots or — creating a record
+  — its fields. `client/electron/records/tools.ts` `pluginToolSpecs` turns each into a tool on
+  the `acb_records` server (`hubspot__update_deal`, `hubspot__refresh_deal`,
+  `hubspot__log_meeting`, `hubspot__create_deal`), generated each turn like the type tools,
+  called with the turn's record token. The app drops writes for a read token too
+  (`client/tests/plugin-tools.test.ts`). The create tools say a create is **never re-sent** (an
+  `unknown` outcome: do not call again — a duplicate) and that `APPROVAL_REQUIRED` means a person
+  must approve (nothing made); `create_deal`'s tells the AI to look for similar records first.
 - The update tool's `note` is required for a `decision` operation; its description tells the AI to
   draft the reason from the consultation and cite the message it rests on, that one approval
   field refuses the whole request, and **never to claim success unless the outcome is
@@ -502,15 +594,21 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
   offers 「もう一度確かめる」 (`pluginOperations:reconcile`). The card does not re-read the
   operation on its own: after a restart the server answers the button (`NOT_UNDOABLE` when it was
   already written back).
+- A create's card (`kind: 'create'`): what was made — title, time (the member's clock), outcome;
+  never the body — 「<HubSpot> に作りました」 with 「作ったものを取り消す」 (the server's `undoLabel`);
+  unknown → 「<HubSpot> に作れたか分かりません… HubSpot で確かめてください」 and 「もう一度確かめる」;
+  `APPROVAL_REQUIRED` → `needsApproval`, 「作っていません。…」. 「もう一度作る」 is a server route
+  for now (no button yet).
 - No jargon on the card (no 型 / プラグイン / オントロジー); the outside system is named by its
   label (HubSpot).
 
 ## Not yet (later PRs of milestone 3)
 
 P9
-staging (compose wiring of `PLUGINS_DIR`); notes (`add_note`, a create: never re-sent, with a
-correlation check) after milestone 3. The real HubSpot package lives in the private
-`acb-plugins` repository (§6-6).
+staging (compose wiring of `PLUGINS_DIR`). Milestone 4: approval requests and their card (G6, on
+the seam above), the 「もう一度作る」 button and similar deals on a screen. `add_note` runs like
+`log_meeting` (an attached create) but div does not use it. The real HubSpot package lives in the
+private `acb-plugins` repository (§6-6).
 
 ## Tests
 
@@ -534,7 +632,13 @@ mixed write nothing, who and read checks, a change in HubSpot before (brought in
 after (not written back), raw previous values after a remapping, a policy changed while waiting,
 one PATCH for two simultaneous requests, a lost answer never re-sent and `observed` not undoable,
 a 5xx `sent-unknown` and reconcile while off, every stop on the next call, a new connection never
-undone through), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
+undone through; milestone 4: log_meeting `prior` by default, `auto` only acknowledged, the AI's
+meeting on the deal with the correlation value and its archive, a lost create never re-sent and not
+searched before 60 s then found by its value, not found stays unknown also while off, 「もう一度作る」
+only after that and confirmed, create_deal never without approval (route, AI, read token, forged
+policy), similar deals only readable, prepareApproval / executeApproved for create_deal and stage
+(changed outside, mapping version, connection, field off, raw values sent, requester as actor), no
+key in operation records or ledger), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-crm`, a
 HubSpot-shaped fictional CRM; `sample-desk`, a read-only company package of another shape):

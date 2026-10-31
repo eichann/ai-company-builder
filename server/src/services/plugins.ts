@@ -15,7 +15,7 @@
  */
 import { findPrivateScope } from '../../shared/core/permissions'
 import {
-  effectiveFieldPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
+  effectiveFieldPolicy, effectiveOperationPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
 } from '../../shared/core/plugins'
 import type { TypeDefinition } from '../../shared/core/record-types'
 import type { PluginAiField, PluginAiOperation, PluginAiTools, PluginDetail, PluginReadScopeView, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
@@ -30,6 +30,9 @@ import { recordReader } from './record-access'
 export const PLUGINS_FORBIDDEN = 'つなぎ先のプラグインを設定できるのは、オーナーと管理者だけです'
 /** What an owner / admin confirms before a field writes automatically (owner, 2026-10-31). */
 export const AUTO_ACKNOWLEDGEMENT = 'この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました'
+
+/** The acknowledged "property" of an automatic create operation: `create:<object>`. */
+export const AUTO_CREATE_PREFIX = 'create:'
 
 export const PLUGIN_NOT_FOUND = { error: 'このプラグインはありません', code: 'PLUGIN_NOT_FOUND' } as const
 
@@ -134,10 +137,17 @@ export function createPluginService(deps: PluginServiceDeps) {
     return null
   }
 
-  /** Fields that would write automatically, with the outside property each writes. */
+  /**
+   * Fields that would write automatically, with the outside property each
+   * writes — and create operations that would run automatically (milestone 4:
+   * `log_meeting: auto`), named by the operation, their "property" being
+   * `create:<object>` (the admin confirms no HubSpot workflow starts when such
+   * an object is created).
+   */
   function autoFields(manifest: PluginManifest, mapping: PluginMapping): Array<{ field: string; property: string }> {
     const out = new Map<string, string>()
     for (const [name, op] of Object.entries(manifest.operations)) {
+      if (op.kind === 'create' && effectiveOperationPolicy(manifest, name, mapping) === 'auto') out.set(name, `${AUTO_CREATE_PREFIX}${op.object}`)
       if (op.kind !== 'update') continue
       for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
         if (effectiveFieldPolicy(manifest, mapping, name, field) === 'auto') out.set(field, rule.from)
@@ -490,10 +500,12 @@ export function createPluginService(deps: PluginServiceDeps) {
 
     /**
      * GET /api/records-ai/plugins (P7) — the running plugins' operations the
-     * member's AI may call: only operations whose `who` lists `ai`, no
-     * `create` (not in milestone 3), and with a `read` token (Codex) no write
-     * at all. An update lists the fields it may write now (`off` left out).
-     * Any member: what they may do on a record is decided per call (P6).
+     * member's AI may call: only operations whose `who` lists `ai`, and with a
+     * `read` token (Codex) no write at all. An update lists the fields it may
+     * write now (`off` left out); a create (milestone 4) its policy now (an
+     * `off` create is left out) and its content slots, or — creating a record
+     * — the fields it may fill. Any member: what they may do on a record is
+     * decided per call (P6).
      */
     async aiTools(member: Member, scope: 'read' | 'act'): Promise<Outcome<PluginAiTools>> {
       const out: PluginAiTools['plugins'] = []
@@ -503,8 +515,28 @@ export function createPluginService(deps: PluginServiceDeps) {
         const { manifest, mapping, types } = evaluated.active
         const operations: PluginAiOperation[] = []
         for (const [name, op] of Object.entries(manifest.operations)) {
-          if (!op.who.includes('ai') || op.kind === 'create') continue
-          if (op.kind === 'update' && scope !== 'act') continue
+          if (!op.who.includes('ai')) continue
+          if (op.kind !== 'read' && scope !== 'act') continue
+          if (op.kind === 'create') {
+            const policy = effectiveOperationPolicy(manifest, name, mapping)
+            if (policy !== 'auto' && policy !== 'prior') continue
+            const recordType = manifest.objects[op.attachTo ?? op.object]?.recordType
+            const def = recordType ? types[recordType] : undefined
+            if (!recordType || !def) continue
+            const fields: PluginAiField[] = []
+            if (op.createsRecord) {
+              for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
+                const f = def.fields[field]
+                if (!rule.write || !f) continue
+                fields.push({ name: field, label: f.label, kind: f.kind, ...(f.options ? { options: [...f.options] } : {}), ...(f.optionLabels ? { optionLabels: { ...f.optionLabels } } : {}), policy: 'prior' })
+              }
+            }
+            operations.push({
+              name, label: op.label, kind: 'create', recordType, decision: op.decision, fields,
+              policy: op.createsRecord ? 'prior' : policy, content: Object.keys(op.content), createsRecord: op.createsRecord,
+            })
+            continue
+          }
           const recordType = manifest.objects[op.object]?.recordType
           const def = recordType ? types[recordType] : undefined
           if (!recordType || !def) continue

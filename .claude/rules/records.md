@@ -360,7 +360,13 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `expectedVersion`. Column `receipt` (additive,
   `migrateRecordLedgerProvenance`; `ExternalReceipt` in `shared/core/record-ledger.ts`): plugin,
   version, fingerprint, mapping version, connection, outside account, object, outside id, the
-  outside last-modified time, operation id, `kind` observed / written.
+  outside last-modified time, operation id, `kind` observed / written, and (milestone 4) the
+  person who approved it (`approvedBy`; the actor stays the requester, the entry a decision with
+  the approver's reason).
+- Milestone 4 creates (`plugins.md` "Creates"): a deal created outside becomes a record through
+  this entry (`recordId: null`, the requester as actor, a decision when approved); a meeting
+  logged on a deal adds an entry **without field changes** (`entryWithoutChanges`) to the deal's
+  ledger, its receipt naming the meeting — the version goes up, nothing else changes.
 - Types a package brings are stored with source `plugin` (`record_types.source`; a table made
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
