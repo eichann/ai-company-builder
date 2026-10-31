@@ -64,7 +64,7 @@ describe('the connector', () => {
       { endpoint: 'get' as const, object: 'deal', id: '1/2' },
       { endpoint: 'update' as const, object: 'company', id: '1' },
       { endpoint: 'search' as const, object: 'note' },
-      { endpoint: 'get' as const, object: 'contact', id: '1' },
+      { endpoint: 'get' as const, object: 'ticket', id: '1' },
     ]) {
       expect(await connector.call('co', plugin, bad, go)).toEqual({ ok: false, kind: 'not-sent', reason: 'undeclared-call' })
     }

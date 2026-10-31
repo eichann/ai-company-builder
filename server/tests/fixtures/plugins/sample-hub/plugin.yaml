@@ -15,6 +15,7 @@ scopes:
   - crm.objects.deals.write
   - crm.objects.companies.read
   - crm.objects.owners.read
+  - crm.objects.contacts.read
 operation_scopes:
   add_note: [crm.objects.contacts.read, crm.objects.contacts.write]
   log_meeting: [crm.objects.deals.write]
@@ -40,6 +41,10 @@ objects:
     create:  { method: POST,   path: "/crm/objects/2026-03/meetings" }
     search:  { method: POST,   path: "/crm/objects/2026-03/meetings/search" }
     archive: { method: DELETE, path: "/crm/objects/2026-03/meetings/{id}" }
+  # The deal's contacts as mail recipients (outbound-mail.md): read only, no
+  # record type (people are never imported as records).
+  contact:
+    get: { method: GET, path: "/crm/objects/2026-03/contacts/{id}" }
   note:
     create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
     archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }

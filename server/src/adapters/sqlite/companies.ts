@@ -27,6 +27,9 @@ export function sqliteCompanyRepository(conn: Database.Database): CompanyReposit
     anyExists() {
       return !!conn.prepare('SELECT 1 FROM companies LIMIT 1').get()
     },
+    allIds() {
+      return (conn.prepare('SELECT id FROM companies ORDER BY id').all() as Array<{ id: string }>).map(r => r.id)
+    },
 
     insert(company) {
       conn.prepare(`

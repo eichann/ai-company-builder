@@ -26,6 +26,8 @@ import { STEER_PART_TYPE, readSteerRecord } from '../../../../shared/steer'
 import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, readReviewRecord } from '../../../../shared/review-request'
 import { ReviewRequestCard } from './ReviewRequestCard'
 import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
+import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
+import { MailDraftCard } from './MailDraftCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
 import { ApprovalCard } from './ApprovalCard'
@@ -339,6 +341,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
           const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
           return card ? <MinutesDealChoiceCard key={item.key} card={card} /> : null
+        }
+        if (part.type === MAIL_DRAFT_PART_TYPE) {
+          const card = readMailDraftCard((part as { data?: unknown }).data)
+          return card ? <MailDraftCard key={item.key} card={card} /> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

@@ -69,12 +69,13 @@ import { createExternalRecordWriter, createServiceRecordWriter } from './service
 import { createDecisionService } from './services/decisions'
 import { createGoogleMeetings } from './services/google-meetings'
 import { createMinutesService } from './services/minutes'
+import { createOutboundMailService } from './services/outbound-mail'
+import { createFixedPayloads } from './services/fixed-payloads'
 import { createGoogleClient } from './services/google-client'
 import { createGoogleConnector } from './services/google-connector'
 import { createApprovalService } from './services/approvals'
-import { createFixedPayloads } from './services/fixed-payloads'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
-import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -342,8 +343,38 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
 
+  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
+  // permission; the AI drafts only (records-ai routes have no send).
+  const outboundMail = createOutboundMailService({
+    ...shared,
+    writer: serviceRecords,
+    payloads: fixedPayloads,
+    digest: text => sha256TokenDigest.digest(text),
+    members: companyId => {
+      const ids = repos.memberships.listByCompany(companyId).map(m => m.user_id)
+      const accounts = shared.accounts.byIds(ids)
+      return ids.flatMap(userId => {
+        const a = accounts.get(userId)
+        return a?.email ? [{ userId, email: a.email, name: a.name }] : []
+      })
+    },
+    // The meeting's attendees, re-read from Google now (minutes.md); unreadable → null (nothing offered).
+    meetingAttendees: async (companyId, userId, minutesId) => {
+      const role = access.memberOf(companyId, userId)?.role
+      if (!role) return null
+      const r = await minutes.meetingAttendees(companyId, userId, role, minutesId)
+      return r.ok ? r.value : null
+    },
+    dealContacts: (member, dealId) => pluginImport.dealContacts(member, dealId),
+    gmailSend: (companyId, userId, raw) => googleClient.request(companyId, userId, {
+      api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
+    }),
+    companyIds: () => repos.companies.allIds(),
+  })
+
   return {
     access,
+    outboundMail,
     googleClient,
     googleConnector,
     minutes,

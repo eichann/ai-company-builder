@@ -231,7 +231,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
   `data-plugin-operation` parts; `plugins.md` "The app"), `minutesDealChoices`
-  (「どの案件の議事録ですか？」, `minutes.md` "The app"). The app's cards come back after the text in
+  (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
+  `outbound-mail.md`). The app's cards come back after the text in
   the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
   more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
   `minutesId` (and its title, not generated).

@@ -112,6 +112,13 @@ contract.invoke minutes:linkDeal
 contract.invoke minutes:notices
 contract.invoke minutes:skip
 contract.invoke minutes:watch
+contract.invoke outboundMail:addRecipient
+contract.invoke outboundMail:discard
+contract.invoke outboundMail:get
+contract.invoke outboundMail:recipients
+contract.invoke outboundMail:resolve
+contract.invoke outboundMail:send
+contract.invoke outboundMail:update
 contract.invoke pluginOperations:reconcile
 contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
@@ -229,6 +236,7 @@ contract.type EditorBackupResult.error = error?: string
 contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
 contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
 contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
@@ -247,6 +255,7 @@ contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'pri
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
@@ -270,6 +279,8 @@ contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:stat
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
+contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMail:get'>
+contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
 contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
@@ -329,6 +340,7 @@ contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
 contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
+contract.type ElectronAPI.resolveOutboundMail = resolveOutboundMail: Invoke<'outboundMail:resolve'>
 contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
 contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
 contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
@@ -336,6 +348,7 @@ contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKey
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
 contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
+contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundMail:send'>
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
@@ -356,6 +369,7 @@ contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'plu
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
 contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
+contract.type ElectronAPI.updateOutboundMail = updateOutboundMail: Invoke<'outboundMail:update'>
 contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:validateServerUrl'>
 contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
 contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
@@ -570,6 +584,13 @@ contract.type IpcInvokeChannels.'minutes:linkDeal' = 'minutes:linkDeal': { args:
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
+contract.type IpcInvokeChannels.'outboundMail:addRecipient' = 'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:discard' = 'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:get' = 'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:recipients' = 'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:resolve' = 'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:send' = 'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
@@ -765,6 +786,13 @@ main.handle minutes:linkDeal @ features/minutes/ipc.ts (companyId, minutesId, de
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
+main.handle outboundMail:addRecipient @ features/outbound-mail/ipc.ts (companyId, messageId, email, name)
+main.handle outboundMail:discard @ features/outbound-mail/ipc.ts (companyId, messageId)
+main.handle outboundMail:get @ features/outbound-mail/ipc.ts (companyId, messageId)
+main.handle outboundMail:recipients @ features/outbound-mail/ipc.ts (companyId, messageId)
+main.handle outboundMail:resolve @ features/outbound-mail/ipc.ts (companyId, messageId, sent)
+main.handle outboundMail:send @ features/outbound-mail/ipc.ts (companyId, messageId, hash)
+main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, messageId, edit, conversationId)
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
@@ -805,6 +833,8 @@ main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
+preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
+preload addOutboundMailRecipient : (companyId: string, messageId: string, email: string, name?: string | undefined) => Promise<OutboundMailResult>
 preload answerCloseRequest -> invoke app:closeResponse($0)
 preload answerCloseRequest : (answer: "ack" | "close" | "stay") => Promise<void>
 preload approveApproval -> invoke approvals:approve($0, $1, $2, $3)
@@ -841,6 +871,8 @@ preload deleteItem -> invoke fs:delete($0)
 preload deleteItem : (path: string) => Promise<SimpleResult>
 preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
 preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
+preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
+preload discardOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload disconnectGoogle -> invoke google:disconnect($0)
 preload disconnectGoogle : (companyId: string) => Promise<GoogleStatusResult>
 preload exists -> invoke fs:exists($0)
@@ -887,6 +919,10 @@ preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
+preload getOutboundMail -> invoke outboundMail:get($0, $1)
+preload getOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
+preload getOutboundMailRecipients -> invoke outboundMail:recipients($0, $1)
+preload getOutboundMailRecipients : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload getPermissionMode -> invoke config:getPermissionMode()
 preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
 preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
@@ -1005,6 +1041,8 @@ preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
 preload reportChatWindowStatus : (status: ChatWindowStatus) => Promise<boolean>
 preload reservedPathRefusal -> invoke privateFolders:reservedPathRefusal($0)
 preload reservedPathRefusal : (targetPath: string) => Promise<string | null>
+preload resolveOutboundMail -> invoke outboundMail:resolve($0, $1, $2)
+preload resolveOutboundMail : (companyId: string, messageId: string, sent: boolean) => Promise<OutboundMailResult>
 preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
 preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
 preload respondToolApproval -> invoke tool-approval-response($0, $1)
@@ -1019,6 +1057,8 @@ preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
 preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
 preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
+preload sendOutboundMail -> invoke outboundMail:send($0, $1, $2)
+preload sendOutboundMail : (companyId: string, messageId: string, hash: string) => Promise<OutboundMailResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)
@@ -1059,6 +1099,8 @@ preload updateEnv -> invoke env:update($0, $1)
 preload updateEnv : (rootPath: string, changes: Record<string, string | null>) => Promise<SimpleResult>
 preload updateHandoff -> invoke handoff:update($0, $1)
 preload updateHandoff : (company: string, id: string) => Promise<void>
+preload updateOutboundMail -> invoke outboundMail:update($0, $1, $2, $3)
+preload updateOutboundMail : (companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string | undefined) => Promise<OutboundMailResult>
 preload validateServerUrl -> invoke config:validateServerUrl($0)
 preload validateServerUrl : (url: string) => Promise<ServerUrlValidation>
 preload voiceInput.cancel -> invoke voice:cancel($0)
@@ -1087,3 +1129,4 @@ preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>
+unmatched.preloadApiUnusedByRenderer getOutboundMail

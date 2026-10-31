@@ -30,7 +30,7 @@ export interface RecordsApiDeps {
 /** One turn's access for the AI: calls with the token, never the session. */
 export interface RecordTurnAccess {
   scope: 'read' | 'act'
-  call(method: 'GET' | 'POST', path: string, body?: unknown, signal?: AbortSignal): Promise<unknown>
+  call(method: 'GET' | 'POST' | 'PUT', path: string, body?: unknown, signal?: AbortSignal): Promise<unknown>
   /** Revoke the token (the turn ended). */
   close(): Promise<void>
 }

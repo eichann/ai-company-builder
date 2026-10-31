@@ -154,8 +154,8 @@ file, then the index adopts the file with the same id, 0.6-1; states todo / in_p
 files, notify the reviewer, hand to them), send_back (note required, decision), assign (note
 required, undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer
 only — not AI; attach, history line, decision), cancel (note required, history line), reopen) and
-`interaction` (やりとり: server only, no body — summary, channel, counterpart id, pointer to the
-original; used from stage 8). Stored per company with source `core` by every index run
+`interaction` (やりとり: server only, no body — summary, channel, counterpart, pointer to the
+original; version 2 adds a `deal` link; outbound mail records one per sent mail, `outbound-mail.md`). Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
 own `.acb/types/task.md` (higher version, additive only). Definitions may also say `final`
 (states where nobody's turn is waiting) and, per action, `hand_to` (the person field or argument
@@ -195,6 +195,8 @@ exist in a company; the parser and the engine accept a link to a type that is no
 `minutes`, `approval`, `outbound_message`, `decision` are made only by the server's own services:
 the generic create (`POST /records/item`, the AI's `records_create`) answers 400
 `TYPE_CREATED_BY_SERVICE`, and the app's `records_create` tool never offers them. Of those,
+`SERVICE_RECEIPT_TYPES` (`interaction`) the service writer may also create — a receipt of what a
+service did outside (a sent mail), still creatable through the generic routes. Of those,
 `SERVICE_STATE_TYPES` (`approval`, `outbound_message`) change state only through their service
 (approving checks the content hash and runs the operation; sending reaches outside): the generic
 action and undo routes answer 403 `STATE_CHANGED_BY_SERVICE` even if a company's own definition

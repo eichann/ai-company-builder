@@ -22,6 +22,7 @@ import { agentEventsRoute } from './routes/agent-events'
 import { agentSandboxRoute } from './routes/agent-sandbox'
 import { recordsRoute } from './routes/records'
 import { recordsAiRoute } from './routes/records-ai'
+import { outboundMailRoute } from './routes/outbound-mail'
 import { pluginsRoute } from './routes/plugins'
 import { approvalsRoute } from './routes/approvals'
 import { agentStopsRoute } from './routes/agent-stops'
@@ -107,6 +108,7 @@ app.route('/api/companies/:companyId', agentSandboxRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
+app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)
 app.route('/api/companies/:companyId', minutesRoute)

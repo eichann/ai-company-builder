@@ -5,6 +5,7 @@ import { authDb } from './lib/auth'
 import { initDatabase } from './db'
 import { configureAllBareRepos } from './routes/git'
 import { scheduleAgentEventRetention } from './lib/agent-event-retention'
+import { scheduleMailBodyRetention } from './lib/mail-body-retention'
 import { services } from './composition'
 import { PRACTICE_UPSTREAMS } from './lib/config'
 import { app } from './app'
@@ -116,3 +117,5 @@ console.log(`Server is running on http://localhost:${port}`)
 // The AI action log: delete events past each company's retention (shortly
 // after start, then daily).
 scheduleAgentEventRetention(() => services.agentEvents.prune())
+// Outbound mail's bodies, 30 days after sent / discarded (outbound-mail.md): one run per server, per company handle.
+scheduleMailBodyRetention(() => services.outboundMail.cleanupBodies())

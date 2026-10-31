@@ -5,6 +5,7 @@ import type { ReviewRecord } from './review-request'
 import type { PluginOperationCard } from './plugin-operations'
 import type { ApprovalCardRef } from './approvals'
 import type { MinutesDealChoiceCard } from './minutes-app'
+import type { MailDraftCard } from './outbound-mail'
 export interface ChatSession {
   id: string
   companyId: string
@@ -32,6 +33,8 @@ export interface ChatSession {
     minutesDealChoices?: MinutesDealChoiceCard[]
     /** The app's cards in the order the tools produced them (part ids), when a reply has two or more. */
     cardOrder?: string[]
+    /** Mail drafts the AI made in this reply, drawn by the app with 「確かめて送る」 (outbound-mail.ts); shown after its text. */
+    mailDrafts?: MailDraftCard[]
   }>
   createdAt: string
   updatedAt: string

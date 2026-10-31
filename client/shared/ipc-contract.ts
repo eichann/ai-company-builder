@@ -37,6 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -479,6 +480,14 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
+  'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+  'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+  'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
+  'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+  'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
+  'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -765,6 +774,13 @@ export interface ElectronAPI {
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
+  getOutboundMail: Invoke<'outboundMail:get'>
+  getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
+  updateOutboundMail: Invoke<'outboundMail:update'>
+  addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
+  sendOutboundMail: Invoke<'outboundMail:send'>
+  resolveOutboundMail: Invoke<'outboundMail:resolve'>
+  discardOutboundMail: Invoke<'outboundMail:discard'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

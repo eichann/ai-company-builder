@@ -34,7 +34,7 @@ data/     SQLite databases and repositories at runtime (gitignored)
 Area rules (load automatically when you touch matching files):
 sync, sync-guards, sync-testing, download-choices, push-check, private-folders,
 private-folders-client, chat-and-agents, chat-ui-and-history, chat-write-guard, company-files, approvals,
-web-research, agent-sandbox, plugins, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
+web-research, agent-sandbox, plugins, outbound-mail, agent-events, agent-stop, ipc-and-main-process, files-and-editor, renderer-structure,
 commands, server, records, google-connector, minutes,
 shared-core, testing, deployment
 (all in `.claude/rules/`). If you change an area without having opened its files yet, read the

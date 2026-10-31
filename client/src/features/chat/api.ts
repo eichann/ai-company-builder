@@ -272,6 +272,18 @@ export function linkMinutesDeal(companyId: string, minutesId: string, dealId: st
   return writes.linkMinutesDeal(companyId, minutesId, dealId)
 }
 
+/**
+ * The mail card's own actions (outbound-mail.md): the person edits, sends (with the hash of the
+ * version shown), settles an unknown send or discards — through main, with their session. Sending
+ * reaches outside the company; 「メールを送る許可」 opens Google's page in the member's browser.
+ */
+export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle'>
+
+/** The port the mail card uses (preview pages pass their own). */
+export function mailOutbound(): MailOutbound {
+  return window.electronAPI
+}
+
 /** Asking the company server which services the member may use and their own keys (last 4 only): the chat's "no key" card. */
 export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
 

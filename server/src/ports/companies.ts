@@ -28,6 +28,8 @@ export interface CompanyRepository {
   isSlugTaken(slug: string): boolean
   /** Whether the server holds any company at all (the first one may be created by its first account). */
   anyExists(): boolean
+  /** Every company's id (server-wide jobs that then open each company's handle: retention). */
+  allIds(): string[]
   insert(company: NewCompany): void
   rename(companyId: string, name: string, updatedAt: string): void
 }

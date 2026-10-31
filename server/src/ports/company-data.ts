@@ -28,6 +28,7 @@ import type { DepartmentRepository } from './departments'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { InvitationRepository } from './invitations'
 import type { OrphanedScopeReader } from './orphaned-scopes'
+import type { OutboundMailRepository } from './outbound-mail'
 import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
 import type { RecordRepository } from './records'
@@ -49,6 +50,8 @@ export interface CompanyData {
   readonly plugins: PluginRepository
   /** The Google connection: the OAuth client, members' grants, pending starts (ports/connectors.ts). */
   readonly connectors: ConnectorRepository
+  /** Outbound mail: drafts, their recipients per version, typed addresses, send attempts (ports/outbound-mail.ts). */
+  readonly outbound: OutboundMailRepository
   /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */
   readonly fixedPayloads: FixedPayloadRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
