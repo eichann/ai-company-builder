@@ -7,6 +7,7 @@
  * builds SQL from values and never hits the bound-parameter limit.
  */
 import type Database from 'better-sqlite3'
+import type { LedgerEntry } from '../../../shared/core/record-ledger'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
@@ -23,6 +24,17 @@ const toRecord = (r: Row): RecordRow => ({
 })
 type LinkRow = { source_id: string; name: string; position: number; target_id: string | null; target_path: string | null }
 const toLink = (r: LinkRow): RecordLinkRow => ({ sourceId: r.source_id, name: r.name, position: r.position, targetId: r.target_id, targetPath: r.target_path })
+
+type LedgerRow = {
+  record_id: string; version: number; action: string; from_state: string | null; to_state: string | null; actor_id: string
+  actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
+  decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
+}
+const toLedger = (r: LedgerRow): LedgerEntry => ({
+  recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
+  actorKind: r.actor_kind, actorSource: r.actor_source, at: r.at, note: r.note, changes: JSON.parse(r.changes), attachments: JSON.parse(r.attachments),
+  decision: r.decision ? JSON.parse(r.decision) : null, isDecision: r.is_decision === 1, typeVersion: r.type_version, reversesVersion: r.reverses_version,
+})
 
 /** A LIKE pattern matching `text` anywhere, with %, _ and \ taken literally. */
 function likeAnywhere(text: string): string {
@@ -100,6 +112,30 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       return (conn.prepare('SELECT record_id, state, fields, version, updated_at FROM record_state WHERE company_id = ? AND record_id IN (SELECT value FROM json_each(?))')
         .all(companyId, JSON.stringify(ids)) as Array<{ record_id: string; state: string | null; fields: string; version: number; updated_at: string }>)
         .map((r): RecordStateRow => ({ recordId: r.record_id, state: r.state, fields: r.fields, version: r.version, updatedAt: r.updated_at }))
+    },
+
+    writeState(row, expectedVersion) {
+      if (expectedVersion === 0) {
+        const r = conn.prepare('INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(company_id, record_id) DO NOTHING')
+          .run(companyId, row.recordId, row.state, row.fields, row.version, row.updatedAt)
+        return r.changes === 1
+      }
+      const r = conn.prepare('UPDATE record_state SET state = ?, fields = ?, version = ?, updated_at = ? WHERE company_id = ? AND record_id = ? AND version = ?')
+        .run(row.state, row.fields, row.version, row.updatedAt, companyId, row.recordId, expectedVersion)
+      return r.changes === 1
+    },
+
+    ledger(recordId) {
+      return (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
+          decision, is_decision, type_version, reverses_version FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+        .all(companyId, recordId) as LedgerRow[]).map(toLedger)
+    },
+    appendLedger(e: LedgerEntry) {
+      conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
+          changes, attachments, decision, is_decision, type_version, reverses_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
+          JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
+          e.typeVersion, e.reversesVersion)
     },
 
     candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[] {

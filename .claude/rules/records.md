@@ -3,11 +3,14 @@ paths:
   - "shared/core/yaml-lite.ts"
   - "shared/core/record-types.ts"
   - "shared/core/records.ts"
+  - "shared/core/record-ledger.ts"
+  - "shared/core/core-types.ts"
   - "shared/types/records.ts"
   - "server/src/routes/records.ts"
   - "server/src/services/records.ts"
   - "server/src/services/record-index.ts"
   - "server/src/services/record-access.ts"
+  - "server/src/services/record-engine.ts"
   - "server/src/ports/records.ts"
   - "server/src/ports/record-files.ts"
   - "server/src/adapters/sqlite/records.ts"
@@ -15,15 +18,17 @@ paths:
   - "server/src/lib/record-files.ts"
   - "server/tests/unit/record-*.test.ts"
   - "server/tests/integration/records.test.ts"
+  - "server/tests/unit/push-channel.test.ts"
 ---
 
-# Records: type definitions and the company map (light ontology, stage 4-1 / 4-2)
+# Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
 
 The core foundation of the light ontology (owner design 「段4 本体の土台」, decisions 0.18–0.23):
 types are defined in files, records are Markdown files (or server-only rows), and the server
 keeps the **company map** — an index of every record, its links and its server-sourced state —
-answering a fixed-shape query filtered by what the caller may read. The state engine (4-3),
-interfaces (4-4), core types (4-5) and typed tools (4-6) build on this; they are not here yet.
+answering a fixed-shape query filtered by what the caller may read — and the **state engine**,
+the only writer of a record's server values, with its append-only ledger. Typed tools (4-6)
+build on this; they are not here yet.
 
 ## Off per company
 
@@ -130,18 +135,90 @@ GET     /records/item/:recordId    any member: the record + its readable links (
   static `/records/settings` etc. made Hono fall back from RegExpRouter to TrieRouter, under which
   `/api/auth/**` stopped matching (the permission matrix's auth rows caught it).
 
+## Core types (4-5, `shared/core/core-types.ts`)
+
+`task` (タスク: implements `request`; storage `either` — server-only until it has content worth a
+file, then the index adopts the file with the same id, 0.6-1; states todo / in_progress / review
+/ waiting / done / cancelled, final done / cancelled; actions start, request_review (attach
+files, notify the reviewer, hand to them), send_back (note required, decision), assign (note
+required, undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer
+only — not AI; attach, history line, decision), cancel (note required, history line), reopen) and
+`interaction` (やりとり: server only, no body — summary, channel, counterpart id, pointer to the
+original; used from stage 8). Stored per company with source `core` by every index run
+(`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
+own `.acb/types/task.md` (higher version, additive only). Definitions may also say `final`
+(states where nobody's turn is waiting) and, per action, `hand_to` (the person field or argument
+copied into `next_actor`; only for types implementing `request`).
+
+## The state engine (4-3, `services/record-engine.ts`)
+
+Exactly five duties (ontology §17.7): (1) the action's `from` states, (2) its `who`, (3) state and
+ledger written in one transaction, (4) tell whom it names, (5) a milestone line. Nothing else:
+arguments are copied into the server fields of the same name, `hand_to` copies one person into
+`next_actor`; no expressions, cascades, timers or outside sends.
+
+- **Who**: a person field of the record whose value is the member, `admin` (owner/admin role),
+  `dept_manager` (manages the department holding the record's path or folder), `anyone`. Roles do
+  not bypass `who`. The member's **AI** (`actor: { kind: 'ai' }`, sent by the app's tools) may act
+  only where `who` lists `ai`, and then only for a member who qualifies on their own (or any member
+  when `who` is `[ai]` alone) — so the AI cannot complete a task. `external` is not accepted from
+  the API (reserved for server-side integrations). The app is trusted to say `ai` for its AI
+  tools (4-6); an app that lied would only lose the AI restriction, never gain a person's right.
+- **Concurrency**: every request carries `expectedVersion`; a stale one → 409 `VERSION_CONFLICT`
+  「ほかの人が先に変えました…」 with the current version, nothing written (checked again inside
+  the write: `writeState` is a compare-and-set on the version).
+- **Ledger** (`record_ledger`, `shared/core/record-ledger.ts`; never updated or deleted): record,
+  version (the record's version after it), action, from → to, actor id + kind (human / ai /
+  external) + source, at, note (required where the action says `note: required`), before/after of
+  the state and **every server field changed**, attached file versions (`attachments`: link, path,
+  commit — checked to exist in the repository at that commit, else 409 `ATTACHMENT_NOT_SYNCED`:
+  the app pushes the linked files first, 0.18-1), decision fields when the action is a decision
+  (`reason` = the note, `materials` as references — a file at a commit or a record at a version
+  it has had, both readable by the actor —, `policyVersion`, `precedents`, `supersedes`; §13.2 案
+  Y, only the container for now), the type version.
+- **Undo** (`POST …/undo { version, expectedVersion }`): a new `undo` entry with the reversed
+  changes (`reversesVersion`); refused when a later entry changed the same values
+  (`CHANGED_SINCE`), for `create` / `undo` entries, and for anyone but the entry's actor or an
+  owner/admin.
+- **Replay** (§13.11): `replayRecordState(entries, n)` folds entries 1..n; it throws on a gap or a
+  version that does not exist rather than describe another version. `GET …/versions/:version`.
+- **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
+  the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
+  value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
+  event itself (0.18-1, SSE rule). Today's app ignores `records` events (only `policy` refetches
+  the policy); the records view that listens comes with 4-6.
+- **Milestone line** (duty 5, `history_line: true`, file records only): appended to the file's
+  「## 経緯」 section (created at the end when missing) as the server's own commit
+  (`lib/bare-commit.ts` `commitFileEdit`: trees along the path rewritten, pushed to itself under the
+  company lock, so the push checker runs; redone on a new tip). Line: `<date> <action label>（<member
+  id>[・AI 経由]）：<note>` — ids, never names (13.10). After the state is written and outside it:
+  a failure is logged, the state stands.
+- Server-only records (`POST /records/item`, types with storage `server` / `either`): title,
+  summary, optional folder (not inside a private folder yet), server fields, links; the id is
+  `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
+
+## 「あなたの番」 (4-4)
+
+`GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
+member, or with no `next_actor` and the member as `assignee`, not in a `final` state, readable by
+them. Types are not named: a new request type shows up without changing the list.
+
 ## Not yet (later PRs of milestone 2)
 
-The state engine and ledger (4-3), the `request` interface's "your turn" (4-4), core types
-`task` / `interaction` (4-5), typed AI tools / commands and the client wiring (4-6) — including
+Typed AI tools / commands and the client wiring (4-6) — including
 the chat write guard refusing `.acb/types/` for non-admins and record frontmatter edits (today
 only the push checker refuses the former) — the app's id assignment and duplicate repair,
 archiving finished tasks (0.6).
 
 ## Tests
 
-`server/tests/unit/record-types.test.ts` (YAML subset, definitions, versions, record files),
+`server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
+concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
+cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
+members of that company), `server/tests/unit/record-types.test.ts` (YAML subset, definitions, versions, record files),
 `server/tests/unit/record-index.test.ts` (hijack, moves, private ↔ public, type versions, read
 filtering incl. counts and links, cross-company), `server/tests/integration/records.test.ts`
-(switch, full index, a member's push over git-http indexed, `.acb/types/` push rules),
+(switch, full index, a member's push over git-http indexed, `.acb/types/` push rules, a task
+through the engine over HTTP with a real attached commit and the history line committed through
+the push checker),
 permission matrix rows + `CROSS`.

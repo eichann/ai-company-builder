@@ -183,7 +183,10 @@ GET  /api/config                                  setup state (no auth)
                                                                 (「API キー」: key-broker.md)
                               GET|PUT /records/settings, GET /records/problems,
                               POST /records/reindex, GET /records/types,
-                              POST /records/query, GET /records/item/:recordId records.ts
+                              POST /records/query, GET /records/item/:recordId,
+                              GET /records/my-turn, POST /records/item,
+                              POST /records/item/:recordId/actions/:action,
+                              POST …/undo, GET …/history, GET …/versions/:version   records.ts
                                                                 (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts

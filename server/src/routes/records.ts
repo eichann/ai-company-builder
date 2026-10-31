@@ -9,6 +9,12 @@
  *   GET     /records/types        any member: type definitions in force
  *   POST    /records/query        any member: the fixed-shape query
  *   GET     /records/item/:recordId  any member: one record and its links
+ *   GET     /records/my-turn      any member: 「あなたの番」 across types implementing request
+ *   POST    /records/item         any member: a server-only record (state engine, 4-3)
+ *   POST    /records/item/:recordId/actions/:action   run an action of the record's type
+ *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
+ *   GET     /records/item/:recordId/history           the ledger
+ *   GET     /records/item/:recordId/versions/:version the server values at that version
  *
  * Non-members get 404 like every company route.
  */
@@ -21,7 +27,7 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 
 export const recordsRoute = new Hono()
-const { access, records } = services
+const { access, records, recordEngine } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -82,4 +88,42 @@ recordsRoute.get('/records/item/:recordId', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, records.get(member, c.req.param('recordId')))
+})
+
+recordsRoute.get('/records/my-turn', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, records.myTurn(member))
+})
+
+recordsRoute.post('/records/item', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const result = recordEngine.create(member, await jsonBody(c))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value }, 201)
+})
+
+recordsRoute.post('/records/item/:recordId/actions/:action', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await recordEngine.act(member, c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+})
+
+recordsRoute.post('/records/item/:recordId/undo', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, recordEngine.undo(member, c.req.param('recordId'), await jsonBody(c)))
+})
+
+recordsRoute.get('/records/item/:recordId/history', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, recordEngine.history(member, c.req.param('recordId')))
+})
+
+recordsRoute.get('/records/item/:recordId/versions/:version', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, recordEngine.atVersion(member, c.req.param('recordId'), c.req.param('version')))
 })

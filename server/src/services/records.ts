@@ -109,7 +109,7 @@ function parseQuery(body: unknown): ParsedQuery | string {
   return q
 }
 
-function summaries(records: RecordRepository, rows: RecordRow[]): Map<string, RecordSummary> {
+export function recordSummaries(records: RecordRepository, rows: RecordRow[]): Map<string, RecordSummary> {
   const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s]))
   return new Map(rows.map(r => {
     const s = states.get(r.id)
@@ -249,8 +249,35 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
       const visible = records.candidates(filter, MAX_CANDIDATES).filter(r => reader.record(r))
       if (q.countOnly) return ok({ total: visible.length, records: [] })
       const page = visible.slice(q.offset, q.offset + q.limit)
-      const byId = summaries(records, records.byIds(page.map(r => r.id)))
+      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
       return ok({ total: visible.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
+    },
+
+    /**
+     * 「あなたの番」 (4-4): records of every type implementing `request` that
+     * wait for the member — `next_actor` is them, or nobody is next and they
+     * are the `assignee` — in a state that is not final. The type does not
+     * matter: a new kind of request appears here without changing this.
+     */
+    myTurn(member: Member): Outcome<RecordQueryResult> {
+      const records = handleOf(member).records
+      if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
+      if (types.length === 0) return ok({ total: 0, records: [] })
+      const names = types.map(([n]) => n)
+      const finalOf = new Map(types.map(([n, t]) => [n, new Set(t.definition.final)]))
+      const reader = recordReader(member, handleOf(member).scopes.listWithRules())
+      const mine = records.candidates({ types: names, fields: [{ name: 'next_actor', values: [member.userId] }] }, MAX_CANDIDATES)
+      const assigned = records.candidates({
+        types: names, fields: [{ name: 'assignee', values: [member.userId] }, { name: 'next_actor', values: [null] }],
+      }, MAX_CANDIDATES)
+      const seen = new Set<string>()
+      const visible = [...mine, ...assigned].filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r))
+      const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s.state]))
+      const waiting = visible.filter(r => !finalOf.get(r.type)?.has(states.get(r.id) ?? ''))
+      const page = waiting.slice(0, 200)
+      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
+      return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
     },
 
     get(member: Member, recordId: string): Outcome<RecordDetail> {
@@ -274,7 +301,7 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
         const s = others.get(l.sourceId)
         if (s && linkAllowed(s, row) && reader.record(s)) { shown.set(s.id, s); links.push({ name: l.name, direction: 'in', id: s.id }) }
       }
-      const sums = summaries(records, [row, ...shown.values()])
+      const sums = recordSummaries(records, [row, ...shown.values()])
       return ok({
         record: sums.get(row.id)!,
         links: links.map((l): RecordLinkView => (l.id ? { name: l.name, direction: l.direction, record: sums.get(l.id)! } : { name: l.name, direction: l.direction, path: l.path! })),

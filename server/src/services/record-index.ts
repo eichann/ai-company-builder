@@ -22,9 +22,10 @@
  * Removed files mark their record removed; its server state is kept (it is
  * not rebuildable), and the same file coming back revives it.
  */
+import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
 import {
-  canonicalTypeJson, compareTypeDefinitions, parseTypeFile, typeNameOfPath, type TypeDefinition,
+  canonicalTypeJson, compareTypeDefinitions, parseTypeFile, storedTypeDefinition, typeNameOfPath, type TypeDefinition,
 } from '../../shared/core/record-types'
 import { fileLinkPath, parseRecordFile, RECORD_ID_RE, type ParsedRecordFile } from '../../shared/core/records'
 import type { ScopeWithRules } from '../../shared/core/permissions'
@@ -47,10 +48,24 @@ export function currentTypes(records: RecordRepository): Map<string, CurrentType
   for (const row of records.typeVersions()) {
     const prev = out.get(row.name)
     if (!prev || row.version > prev.version) {
-      out.set(row.name, { version: row.version, definition: JSON.parse(row.definition) as TypeDefinition, source: row.source })
+      out.set(row.name, { version: row.version, definition: storedTypeDefinition(row.definition), source: row.source })
     }
   }
   return out
+}
+
+/**
+ * Store the core types (task, interaction; shared/core/core-types.ts) for a
+ * company, source `core`, unless a version at least as new is stored (a
+ * company's own `.acb/types/task.md` may extend one with a higher version).
+ */
+export function ensureCoreTypes(records: RecordRepository, at: string): void {
+  const stored = new Map<string, number>()
+  for (const row of records.typeVersions()) stored.set(row.name, Math.max(stored.get(row.name) ?? 0, row.version))
+  for (const def of coreTypeDefinitions()) {
+    if ((stored.get(def.name) ?? 0) >= def.version) continue
+    records.insertTypeVersion({ name: def.name, version: def.version, definition: canonicalTypeJson(def), source: 'core', commitSha: null, createdAt: at })
+  }
 }
 
 export interface ApplyInput {
@@ -216,6 +231,7 @@ export function createRecordIndexer({ companyData, transactions, clock, recordFi
   async function indexCompany(companyId: string): Promise<void> {
     const handle = companyData.forCompany(companyId)
     if (!handle.records.settings().enabled) return
+    transactions.run(() => ensureCoreTypes(handle.records, clock.now()))
     const scopes = handle.scopes.listWithRules()
     const repos: Array<{ key: RecordRepoKey; scopeId: string | null; prefix: string; repo: Parameters<RecordFileSource['read']>[1] }> = [
       { key: 'company', scopeId: null, prefix: '', repo: { kind: 'company' } },

@@ -233,6 +233,12 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/records/types', w => ({ path: `${C(w)}/records/types` }), MEMBERS),
   r('POST /api/companies/:companyId/records/query', w => ({ path: `${C(w)}/records/query`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/records/my-turn', w => ({ path: `${C(w)}/records/my-turn` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/item', w => ({ path: `${C(w)}/records/item`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/actions/:action', w => ({ path: `${C(w)}/records/item/deal-nosuch01/actions/start`, body: { expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/undo', w => ({ path: `${C(w)}/records/item/deal-nosuch01/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/records/item/:recordId/history', w => ({ path: `${C(w)}/records/item/deal-nosuch01/history` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/records/item/:recordId/versions/:version', w => ({ path: `${C(w)}/records/item/deal-nosuch01/versions/1` }), [404, 404, 404, 404, 404, 401]),
 
   // Key broker (「API キー」)
   r('GET /api/companies/:companyId/broker', w => ({ path: `${C(w)}/broker` }), [200, 200, 403, 403, 404, 401]),
@@ -323,6 +329,10 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/me/broker-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/broker-tokens/${id}` }), w => w.other.token),
 
   x('GET /api/companies/:companyId/records/item/:recordId', (w, id) => ({ path: `${C(w)}/records/item/${id}` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/actions/:action', (w, id) => ({ path: `${C(w)}/records/item/${id}/actions/start`, body: { expectedVersion: 0 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/undo', (w, id) => ({ path: `${C(w)}/records/item/${id}/undo`, body: { version: 1, expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/records/item/:recordId/history', (w, id) => ({ path: `${C(w)}/records/item/${id}/history` }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]

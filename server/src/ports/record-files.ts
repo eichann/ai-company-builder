@@ -20,6 +20,17 @@ export interface RecordRepoRead {
   changes: RecordFileChange[]
 }
 
+/** The state engine's milestone line (4-3 duty 5), written as the server's own commit. */
+export interface RecordFileWriter {
+  /**
+   * Append `line` to the 「経緯」 section of the file at `path` (inside `repo`)
+   * on the shared branch, through the push checker. false: the file is gone.
+   */
+  appendHistoryLine(companyId: string, repo: RecordFileRepo, path: string, line: string): Promise<boolean>
+  /** Whether `commit` exists in `repo` and holds a file at `path` (an attached version). */
+  fileAtCommit(companyId: string, repo: RecordFileRepo, path: string, commit: string): Promise<boolean>
+}
+
 export interface RecordFileSource {
   /** Changes since `since` (a commit indexed before), or every candidate when null / unknown. */
   read(companyId: string, repo: RecordFileRepo, since: string | null): Promise<RecordRepoRead>
