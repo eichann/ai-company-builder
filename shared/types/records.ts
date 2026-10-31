@@ -7,7 +7,7 @@
  *   GET  /records/problems   owner/admin   → { problems: RecordIndexProblem[] }
  *   POST /records/reindex    owner/admin   { full: true } → { scheduled: true }   (index rebuilt from the files)
  *   GET  /records/types      any member    → { types: RecordTypeView[] }
- *   POST /records/query      any member    RecordQuery → RecordQueryResult
+ *   POST /records/query      any member    RecordQuery → RecordQueryResult (records of an old connection only with includeOldConnection)
  *   GET  /records/item/:recordId  any member  → RecordDetail
  *   GET  /records/my-turn    any member    → RecordQueryResult (「あなたの番」, 4-4)
  *   POST /records/item       any member    CreateRecordRequest → 201 { record, entry } (server-only record)
@@ -71,7 +71,15 @@ export interface RecordQuery {
   offset?: number
   /** Only `total`. */
   countOnly?: boolean
+  /**
+   * Also records imported through an earlier connection of an outside system
+   * (`fromOldConnection`); left out by default (and never in 「あなたの番」).
+   */
+  includeOldConnection?: boolean
 }
+
+/** What a record imported through an earlier connection is called on screen and for the AI. */
+export const OLD_CONNECTION_LABEL = '前のつなぎ先から取り込んだもの（いまは使われていません）'
 
 export interface RecordSummary {
   id: string
@@ -87,6 +95,15 @@ export interface RecordSummary {
   /** Changes made through the state engine (0 = none yet). */
   version: number
   updatedAt: string
+  /**
+   * Imported through an earlier connection of an outside system (an owner /
+   * admin started a new one with 「新しいつなぎ先として始める」): kept as it
+   * was, but no longer brought up to date and no operation runs on it.
+   * Absent for every other record.
+   */
+  fromOldConnection?: true
+  /** With `fromOldConnection`: `OLD_CONNECTION_LABEL`, to show as is. */
+  notice?: string
 }
 
 export interface RecordQueryResult {

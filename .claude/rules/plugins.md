@@ -276,6 +276,16 @@ plugin's switch:
   Rotating the key keeps the connection. Outside ids are keyed by company + connection + account
   + object + external id (`plugin_external_links`), so the fake and the real HubSpot, or two
   accounts, never mix (their records are separate). Undo never writes to another account (P6).
+- **Records of an earlier connection** (owner, 2026-11-01, after staging showed one deal three
+  times): kept as they are — never deleted, ledger untouched — but marked in every answer
+  (`fromOldConnection: true`, `notice` = `OLD_CONNECTION_LABEL`
+  「前のつなぎ先から取り込んだもの（いまは使われていません）」), left out of `POST /records/query`
+  unless `includeOldConnection: true`, never in 「あなたの番」, and nothing runs on them: every
+  operation, `refresh_deal` included, is 409 `NOT_LINKED` with nothing asked outside. Old = no
+  link of the record is on its plugin's current connection (`oldConnectionRecordIds`). The AI's
+  tools say so (`records_query` / `records_get` descriptions, `RECORDS_INSTRUCTIONS`). Test:
+  `tests/integration/plugin-import.test.ts` 「records of the earlier connection…」 (each filter
+  and the company condition mutation-checked).
 - **A real secret never reaches the fake**: while a service goes to its practice copy
   (`ACB_FAKE_HUBSPOT_URL`, staging), registering a company key, replacing one or saving an own
   key whose value is not a practice key (`pat-fake-…`, `PRACTICE_KEY_PREFIX`) is refused (400

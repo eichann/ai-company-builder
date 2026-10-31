@@ -251,6 +251,56 @@ describe('runs, stops and connections', () => {
     old.close()
   })
 
+  it('records of the earlier connection are kept but marked, left out of the default query and 「あなたの番」, and nothing runs on them', async () => {
+    const oldConnection = db.prepare("SELECT connection_id FROM plugin_external_links WHERE company_id = ? AND account_id = '90000001' LIMIT 1").get(CO).connection_id as string
+    const oldIds = db.prepare('SELECT record_id FROM plugin_external_links WHERE company_id = ? AND connection_id = ?').all(CO, oldConnection).map((r: Json) => r.record_id as string)
+    const allDeals = deals().length
+    const ledger = db.prepare('SELECT COUNT(*) AS n FROM record_ledger WHERE company_id = ?').get(CO).n
+
+    // The default query: only the current connection's deals, none marked.
+    const current = services.records.query(member, { type: 'deal', limit: 200 }).value
+    expect(current.total).toBe(10)
+    expect(current.records.some((r: Json) => oldIds.includes(r.id) || r.fromOldConnection)).toBe(false)
+    // Asked for: the old ones too, marked with the plain-Japanese label.
+    const all = services.records.query(member, { type: 'deal', limit: 200, includeOldConnection: true }).value
+    expect(all.total).toBe(20)
+    const marked = all.records.filter((r: Json) => r.fromOldConnection)
+    expect(marked.map((r: Json) => r.id).sort()).toEqual(oldIds.filter(id => id.startsWith('deal-')).sort())
+    expect(marked[0].notice).toBe('前のつなぎ先から取り込んだもの（いまは使われていません）')
+    expect(services.records.get(member, oldIds[0]).value.record).toMatchObject({ fromOldConnection: true })
+    expect(services.records.get(member, recordOf('1000000001')).value.record.fromOldConnection).toBeUndefined()
+
+    // Nothing runs on them, and nothing is asked outside: not even a refresh.
+    const n = way.sent.length
+    const oldDeal = marked[0].id
+    expect(await services.pluginOperations.run(member, { kind: 'ai', source: 'claude-code' }, 'sample-hub', oldDeal, 'refresh_deal', {})).toMatchObject({ ok: false, body: { code: 'NOT_LINKED' } })
+    expect(await services.pluginOperations.run(member, { kind: 'human' }, 'sample-hub', oldDeal, 'refresh_deal', {})).toMatchObject({ ok: false, body: { code: 'NOT_LINKED' } })
+    expect(way.sent.length).toBe(n)
+
+    // 「あなたの番」 leaves out a request of the old connection.
+    await services.records.refreshIndex(owner)
+    const task = services.recordEngine.create(member, { kind: 'human' }, { type: 'task', title: 'old connection task', fields: { assignee: 'im-member' } })
+    expect(task.ok).toBe(true)
+    const taskId = task.value.record.id as string
+    expect(services.records.myTurn(member).value.records.map((r: Json) => r.id)).toContain(taskId)
+    db.prepare('INSERT INTO plugin_external_links (company_id, plugin_id, connection_id, account_id, object, external_id, record_id, external_updated_at, seen_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?)')
+      .run(CO, 'sample-hub', oldConnection, '90000001', 'deal', '1999999999', taskId, ts())
+    expect(services.records.myTurn(member).value.records.map((r: Json) => r.id)).not.toContain(taskId)
+
+    // Kept, not deleted: every record and ledger entry is still there (the task's create added one).
+    expect(deals().length).toBe(allDeals)
+    expect(db.prepare('SELECT COUNT(*) AS n FROM record_ledger WHERE company_id = ?').get(CO).n).toBe(ledger + 1)
+
+    // Another company is not affected: a record with the same id there is neither hidden nor marked.
+    const other = (await services.companies.create('im-other-owner', 'Other', 'import-other')).id as string
+    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(other, ts(), 'im-other-owner')
+    db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, ?, 'deal', 'other company', ?, ?)").run(other, oldDeal, ts(), ts())
+    const otherOwner = { companyId: other, userId: 'im-other-owner', role: 'owner' }
+    const seen = services.records.query(otherOwner, { type: 'deal' }).value
+    expect(seen.records.map((r: Json) => [r.id, r.fromOldConnection])).toEqual([[oldDeal, undefined]])
+    expect(services.records.query(member, { includeOldConnection: true, text: 'other company' }).value.total).toBe(0)
+  })
+
   it('the records switch off: no import', async () => {
     db.prepare('UPDATE record_settings SET enabled = 0 WHERE company_id = ?').run(CO)
     expect(await services.pluginImport.run(owner, 'sample-hub')).toMatchObject({ ok: false, body: { code: 'RECORDS_DISABLED' } })
