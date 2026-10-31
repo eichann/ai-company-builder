@@ -21,6 +21,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { GoogleSection } from './google'
 import { ReadScopeSection } from './read-scope'
 import {
   ApiError,
@@ -108,6 +109,11 @@ export default function IntegrationsPage() {
               <IntegrationSummary key={item.id} item={item} onOpen={() => setOpen(item.id)} />
             )
           )}
+        </div>
+      )}
+      {isAdmin && (
+        <div className="pb-6">
+          <GoogleSection companyId={companyId} nameOf={nameOf} />
         </div>
       )}
     </>

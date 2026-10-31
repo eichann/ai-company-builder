@@ -95,7 +95,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   (the company map of the light ontology, `adapters/sqlite/records.ts`, `records.md`) and
   `plugins` (connector plugins' installs, mapping versions, history, `adapters/sqlite/plugins.ts`,
   `plugins.md`; triggers keep a mapping under its own company's install and an install's key a
-  company key of the same company).
+  company key of the same company) and `connectors` (the Google connection: OAuth client,
+  members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -197,6 +198,12 @@ GET  /api/config                                  setup state (no auth)
                               POST …/records/:recordId/operations/:operation,
                               GET …/operations/:operationId (+ POST /undo, /reconcile)  plugins.ts
                                                                 (つなぎ先のプラグイン: plugins.md)
+                              GET /google, PUT /google/client, PUT /google/enabled,
+                              DELETE /google/grants/:userId,
+                              GET|DELETE /me/google, POST /me/google/connect    google.ts
+                                                                (Google: google-connector.md)
+/api/oauth                    GET /google/callback — public: Google sends the browser back;
+                              the state finds the company (google-connector.md)  oauth.ts
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
                               POST /plugins/:pluginId/records/:recordId/operations/:operation,

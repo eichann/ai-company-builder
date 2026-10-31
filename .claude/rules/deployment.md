@@ -58,7 +58,9 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   `BROKER_KEY_CHECK` (on; `off` for a server without internet access, and in the server tests)
   checks a key once when it is saved.
   Staging only: `ACB_ALLOW_FAKE_UPSTREAMS=1` + `ACB_FAKE_HUBSPOT_URL` (loopback, `localhost` or
-  `host.docker.internal`, port only) send the broker's HubSpot requests to the practice HubSpot;
+  `host.docker.internal`, port only) send the broker's HubSpot requests to the practice HubSpot,
+  and `ACB_FAKE_GOOGLE_URL` every Google request to the practice Google — per service, each
+  variable redirects only its own (`google-connector.md`);
   passed through by `docker-compose.yml` only — **never add them to the production compose
   file**. The server ignores them under `NODE_ENV=production` or a non-local `PUBLIC_URL`
   (`lib/config.ts` `practiceUpstreamsFrom`, `key-broker.md`).

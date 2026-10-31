@@ -33,6 +33,18 @@ export function brokerSecretContext(companyId: string, keyId: string): SecretCon
   return { purpose: 'acb-broker-key', companyId, keyId }
 }
 
+/** A connector secret's binding: what it is, whose company, which row. */
+export interface ConnectorSecretContext {
+  purpose: 'acb-google-client' | 'acb-google-grant' | 'acb-oauth-pending'
+  companyId: string
+  /** The row: `google-client`, the grant id, the state hash. */
+  id: string
+}
+
+function connectorSecretContext(c: ConnectorSecretContext): SecretContext {
+  return { purpose: c.purpose, companyId: c.companyId, keyId: c.id }
+}
+
 export function createBrokerVault(deps: BrokerVaultDeps) {
   const { brokerKeys, brokerCipher } = deps
 
@@ -63,6 +75,20 @@ export function createBrokerVault(deps: BrokerVaultDeps) {
       const sealed = brokerKeys.sealed(companyId, keyId)
       if (!sealed) return null
       return cipher().open(sealed, brokerSecretContext(companyId, keyId))
+    },
+
+    /**
+     * Connector secrets (google-connector.md): the Google client secret, a
+     * member's refresh token, a pending PKCE verifier — sealed under their own
+     * purpose and bound to the company and the row, like a key.
+     */
+    async sealConnector(context: ConnectorSecretContext, secret: string): Promise<SealedSecret> {
+      return cipher().seal(secret, connectorSecretContext(context))
+    },
+
+    /** Opens a connector secret (the Google client only); never return or log the result. */
+    async openConnector(context: ConnectorSecretContext, sealed: SealedSecret): Promise<string> {
+      return cipher().open(sealed, connectorSecretContext(context))
     },
 
     /**

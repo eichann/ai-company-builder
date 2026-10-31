@@ -23,10 +23,13 @@ initDatabase()
 {
   const broker = services.brokerVault.status()
   console.log(broker.enabled ? `Key broker: on (key-encryption key ${broker.kekId})` : `Key broker: off — ${broker.detail}`)
-  // Staging only (lib/config.ts): say loudly where HubSpot goes, or why the setting was not used.
+  // Staging only (lib/config.ts): say loudly where HubSpot / Google go, or why the setting was not used.
   if (PRACTICE_UPSTREAMS.state === 'on') {
-    for (const u of PRACTICE_UPSTREAMS.upstreams) {
-      console.warn(`Key broker: 練習用の HubSpot につながっています — ${u.service} (${u.host}) → ${u.target.protocol}//${u.target.hostname}:${u.target.port}`)
+    for (const service of new Set(PRACTICE_UPSTREAMS.upstreams.map(u => u.service))) {
+      const list = PRACTICE_UPSTREAMS.upstreams.filter(u => u.service === service)
+      const t = list[0].target
+      const label = service === 'google' ? 'Google' : 'HubSpot'
+      console.warn(`Key broker: 練習用の ${label} につながっています — ${service} (${list.map(u => u.host).join(', ')}) → ${t.protocol}//${t.hostname}:${t.port}`)
     }
   } else if (PRACTICE_UPSTREAMS.state === 'ignored') {
     console.warn(`Key broker: practice upstream setting ignored — ${PRACTICE_UPSTREAMS.reason}`)

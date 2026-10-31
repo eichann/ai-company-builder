@@ -15,6 +15,7 @@
  * Nothing uses it any more; a leftover one can be deleted.
  */
 import { join } from 'path'
+import { GOOGLE_HOSTS } from '../../shared/core/google'
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
@@ -91,18 +92,22 @@ export function companyRepoPath(companyId: string): string {
 }
 
 /**
- * Practice upstreams (milestone 3, staging only): the key broker's HubSpot
- * requests (relay and key check) go to a practice copy instead of
- * api.hubapi.com — the fake HubSpot (`pnpm fake:hubspot`). Server-wide, never
- * per company: a company able to change where a service goes could make the
- * server send its key to another company's or an internal address.
+ * Practice upstreams (staging only): requests for a service go to a practice
+ * copy on this machine instead of the real one — per service, each switched
+ * on by its own variable, so one practice service never redirects another:
+ *   ACB_FAKE_HUBSPOT_URL  the key broker's HubSpot (relay, key check, connector) → `pnpm fake:hubspot`
+ *   ACB_FAKE_GOOGLE_URL   every Google host of the Google connection → `pnpm fake:google`
+ *                         (google-connector.md; the browser's sign-in page too)
+ * Server-wide, never per company: a company able to change where a service
+ * goes could make the server send its key to another company's or an
+ * internal address.
  *
  * Effective only when ALL hold, so one stray variable cannot switch it on in
  * production:
  *   ACB_ALLOW_FAKE_UPSTREAMS=1   the explicit staging marker
  *   NODE_ENV is not `production`
  *   PUBLIC_URL (default http://localhost:3001) is on this machine (localhost / loopback)
- *   ACB_FAKE_HUBSPOT_URL         http(s)://<127.0.0.1 | [::1] | localhost | host.docker.internal>[:port], nothing more
+ *   each URL: http(s)://<127.0.0.1 | [::1] | localhost | host.docker.internal>[:port], nothing more
  * Anything set but not effective is reported (`ignored`) and changes nothing.
  * The production compose file passes none of these variables.
  */
@@ -121,9 +126,15 @@ export type PracticeUpstreams =
 const PRACTICE_TARGET_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost', 'host.docker.internal'])
 const LOCAL_PUBLIC_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost'])
 
+/** Each practice variable → the service it redirects and the real hosts it covers. */
+const PRACTICE_VARIABLES: Array<{ variable: string; service: string; hosts: readonly string[] }> = [
+  { variable: 'ACB_FAKE_HUBSPOT_URL', service: 'hubspot', hosts: ['api.hubapi.com'] },
+  { variable: 'ACB_FAKE_GOOGLE_URL', service: 'google', hosts: GOOGLE_HOSTS },
+]
+
 export function practiceUpstreamsFrom(env: Readonly<Record<string, string | undefined>>): PracticeUpstreams {
-  const hubspot = env.ACB_FAKE_HUBSPOT_URL?.trim()
-  if (!hubspot) return { state: 'off' }
+  const set = PRACTICE_VARIABLES.filter(v => env[v.variable]?.trim())
+  if (set.length === 0) return { state: 'off' }
   if (env.ACB_ALLOW_FAKE_UPSTREAMS?.trim() !== '1') return { state: 'ignored', reason: 'ACB_ALLOW_FAKE_UPSTREAMS=1 is not set' }
   if (env.NODE_ENV?.trim().toLowerCase() === 'production') return { state: 'ignored', reason: 'NODE_ENV is production' }
   let publicHost: string
@@ -133,22 +144,32 @@ export function practiceUpstreamsFrom(env: Readonly<Record<string, string | unde
     return { state: 'ignored', reason: 'PUBLIC_URL is not a URL' }
   }
   if (!LOCAL_PUBLIC_HOSTS.has(publicHost)) return { state: 'ignored', reason: 'PUBLIC_URL is not on this machine' }
-  let url: URL
-  try {
-    url = new URL(hubspot)
-  } catch {
-    return { state: 'ignored', reason: 'ACB_FAKE_HUBSPOT_URL is not a URL' }
+  const upstreams: PracticeUpstream[] = []
+  for (const v of set) {
+    let url: URL
+    try {
+      url = new URL(env[v.variable]!.trim())
+    } catch {
+      return { state: 'ignored', reason: `${v.variable} is not a URL` }
+    }
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !PRACTICE_TARGET_HOSTS.has(url.hostname.toLowerCase())
+      || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+      return { state: 'ignored', reason: `${v.variable} must be http(s)://127.0.0.1, localhost or host.docker.internal with a port only` }
+    }
+    const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
+    const target = { protocol: url.protocol as 'http:' | 'https:', hostname: url.hostname.toLowerCase(), port }
+    for (const host of v.hosts) upstreams.push({ service: v.service, host, target: { ...target } })
   }
-  if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !PRACTICE_TARGET_HOSTS.has(url.hostname.toLowerCase())
-    || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
-    return { state: 'ignored', reason: 'ACB_FAKE_HUBSPOT_URL must be http(s)://127.0.0.1, localhost or host.docker.internal with a port only' }
-  }
-  const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
-  return {
-    state: 'on',
-    upstreams: [{ service: 'hubspot', host: 'api.hubapi.com', target: { protocol: url.protocol, hostname: url.hostname.toLowerCase(), port } }],
-  }
+  return { state: 'on', upstreams }
 }
 
 /** This server's practice upstreams (read once at startup; `src/index.ts` logs the state). */
 export const PRACTICE_UPSTREAMS = practiceUpstreamsFrom(process.env)
+
+/**
+ * The address browsers reach this server at (Google's redirect URI is built
+ * from it). Read per call; default http://localhost:3001, no trailing slash.
+ */
+export function publicUrl(): string {
+  return (process.env.PUBLIC_URL?.trim() || 'http://localhost:3001').replace(/\/+$/, '')
+}

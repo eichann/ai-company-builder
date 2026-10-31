@@ -77,6 +77,7 @@ const TYPES: Record<string, string> = {
   AgentStops: 'AgentStopView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
+  Google: 'GoogleAdminView',
   Plugins: '{ plugins: PluginListItem[] }',
   Plugin: 'PluginDetail',
   Invitations: 'Invitation[]',
@@ -222,6 +223,7 @@ beforeAll(async () => {
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   const { pluginsRoute } = await import('../../src/routes/plugins')
+  const { googleRoute } = await import('../../src/routes/google')
   await (await import('../../src/composition')).services.pluginShelf.load()
   // The same mounts as src/app.ts.
   app = new Hono()
@@ -236,6 +238,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
+  app.route('/api/companies/:companyId', googleRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -366,6 +369,19 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/stop-all`)
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
+  })
+
+  it('つなぎ先 → Google', async () => {
+    await expectShape('Google', USERS.owner, 'GET', `${base}/google`)
+    await expectShape('Google', USERS.owner, 'PUT', `${base}/google/client`, { clientId: '123456789012-contract.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-contract-0000', domain: 'example.com' })
+    await expectShape('Google', USERS.owner, 'PUT', `${base}/google/enabled`, { enabled: false })
+    // A member's permission as the callback stores it (the admin stops it).
+    const { db } = await import('../../src/db')
+    db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)
+      VALUES (?, ?, 'google', 'g-contract', 'm@example.com', '[]', NULL, 'revoked', ?, ?)`).run(CO, USERS.member, new Date().toISOString(), new Date().toISOString())
+    const view = await expectShape('Google', USERS.owner, 'DELETE', `${base}/google/grants/${USERS.member}`)
+    expect(view.grants.map((g: Loose) => g.userId)).toEqual([USERS.member])
+    expect(JSON.stringify(view)).not.toContain('GOCSPX-NOT-REAL-contract-0000')
   })
 
   it('つなぎ先 (connector plugins)', async () => {
@@ -524,6 +540,18 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT member_keys_allowed FROM broker_settings WHERE company_id = ?', CO).member_keys_allowed).toBe(1)
     await A.keyBrokerApi.remove(CO, id)
     expect(row('SELECT id FROM broker_keys WHERE id = ?', id)).toBeUndefined()
+  })
+
+  it('つなぎ先 → Google: the client, the domain and the switch reach the server as chosen; an empty secret keeps the stored one', async () => {
+    await A.googleApi.saveClient(CO, { clientId: '123456789012-builder.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-builder-4444', domain: 'Example.CO.JP' })
+    expect(row('SELECT client_id, secret_last4, domain FROM google_oauth_clients WHERE company_id = ?', CO))
+      .toEqual({ client_id: '123456789012-builder.apps.googleusercontent.com', secret_last4: '4444', domain: 'example.co.jp' })
+    await A.googleApi.saveClient(CO, { clientId: '123456789012-builder.apps.googleusercontent.com', domain: 'example.co.jp' })
+    expect(row('SELECT secret_last4 FROM google_oauth_clients WHERE company_id = ?', CO).secret_last4).toBe('4444')
+    await A.googleApi.setEnabled(CO, false)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.googleApi.setEnabled(CO, true)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
   })
 
   it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {

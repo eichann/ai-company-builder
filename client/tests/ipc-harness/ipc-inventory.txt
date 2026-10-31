@@ -96,6 +96,9 @@ contract.invoke git:sparseGetExclusions
 contract.invoke git:sparseSetExclusions
 contract.invoke git:sparseUncommittedChanges
 contract.invoke git:sync
+contract.invoke google:connect
+contract.invoke google:disconnect
+contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
@@ -222,6 +225,7 @@ contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:op
 contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
+contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
@@ -230,6 +234,7 @@ contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'pri
 contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
 contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
@@ -247,6 +252,7 @@ contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'
 contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
 contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
 contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
+contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:status'>
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
 contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
@@ -526,6 +532,9 @@ contract.type IpcInvokeChannels.'git:sparseGetExclusions' = 'git:sparseGetExclus
 contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
 contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
 contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
+contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
+contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
@@ -708,6 +717,9 @@ main.handle git:sparseGetExclusions @ features/download-choices/ipc.ts (repoPath
 main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath: string, excluded: string[])
 main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
 main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string, commitMessage: string)
+main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
+main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
+main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
@@ -763,6 +775,8 @@ preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
+preload connectGoogle -> invoke google:connect($0, $1)
+preload connectGoogle : (companyId: string, features: ("minutes" | "mail")[]) => Promise<GoogleConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload createCompany -> invoke api:createCompany($0)
@@ -779,6 +793,8 @@ preload deleteItem -> invoke fs:delete($0)
 preload deleteItem : (path: string) => Promise<SimpleResult>
 preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
 preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
+preload disconnectGoogle -> invoke google:disconnect($0)
+preload disconnectGoogle : (companyId: string) => Promise<GoogleStatusResult>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
@@ -813,6 +829,8 @@ preload getDepartments -> invoke api:getDepartments($0)
 preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
 preload getEnvStatus -> invoke env:status($0)
 preload getEnvStatus : (rootPath: string) => Promise<EnvStatusResult>
+preload getGoogleStatus -> invoke google:status($0)
+preload getGoogleStatus : (companyId: string) => Promise<GoogleStatusResult>
 preload getHandoff -> invoke handoff:get($0, $1)
 preload getHandoff : (company: string, id: string) => Promise<HandoffView>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)

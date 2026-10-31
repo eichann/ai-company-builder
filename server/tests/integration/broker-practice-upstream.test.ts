@@ -164,4 +164,42 @@ describe('the practice HubSpot (staging only)', () => {
     const prod = await servicesFor({ ...staging(), NODE_ENV: 'production' })
     expect((await prod.keyBroker.create(owner, { service: 'hubspot', displayName: `R-${randomBytes(3).toString('hex')}`, secret: REAL, audience: everyone })).ok).toBe(true)
   })
+
+  it('per service: the practice Google alone leaves HubSpot real (a real HubSpot key saves, and goes out the real way)', async () => {
+    // Staging for milestone 4: only ACB_FAKE_GOOGLE_URL, while the HubSpot test account is real.
+    const googleOnly = { ACB_ALLOW_FAKE_UPSTREAMS: '1', NODE_ENV: 'development', PUBLIC_URL: 'http://localhost:13001', ACB_FAKE_GOOGLE_URL: practiceUrl }
+    const parsed = practiceUpstreamsFrom(googleOnly)
+    if (parsed.state !== 'on') throw new Error(`practice: ${JSON.stringify(parsed)}`)
+    expect(new Set(parsed.upstreams.map(u => u.service))).toEqual(new Set(['google']))
+    expect(parsed.upstreams.map(u => u.host)).not.toContain('api.hubapi.com')
+
+    const REAL = 'pat-na1-NOT-REAL-but-not-a-practice-key-4567'
+    const services = await servicesFor(googleOnly)
+    const [p, o] = [atPractice.length, outbound.length]
+    const made = await services.keyBroker.create(owner, { service: 'hubspot', displayName: `G-${randomBytes(3).toString('hex')}`, secret: REAL, audience: everyone })
+    expect(made.ok).toBe(true)
+    // The key's check went to the real way out, not to the practice copy.
+    expect(atPractice.length - p).toBe(0)
+    expect(outbound.slice(o).map(r => r.host)).toEqual(['api.hubapi.com'])
+    const view = services.keyBroker.get(owner)
+    if (!view.ok) throw new Error('view refused')
+    expect(view.value.services.filter(s => s.practice)).toEqual([])
+    // The relay too: HubSpot through the real way out.
+    const token = services.brokerTokens.issue(owner, { conversationId: 'c-pu-g', services: ['hubspot'] }).value!.token as string
+    const { Hono } = await import('hono')
+    const { brokerRelayRoutes } = await import('../../src/routes/broker-relay')
+    const app = new Hono().route('/api/broker', brokerRelayRoutes(services.brokerRelay))
+    const before = outbound.length
+    const res = await app.request('http://acb.test/api/broker/hubspot/crm/v3/objects/deals/search', {
+      method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: '{"limit":1}',
+    })
+    expect(res.status).toBe(200)
+    expect(outbound.slice(before).map(r => r.host)).toEqual(['api.hubapi.com'])
+    expect(atPractice.length - p).toBe(0)
+
+    // And the other way round: the practice HubSpot alone never redirects Google.
+    const hubspotOnly = practiceUpstreamsFrom(staging())
+    if (hubspotOnly.state !== 'on') throw new Error('practice off')
+    expect(hubspotOnly.upstreams.map(u => u.service)).toEqual(['hubspot'])
+  })
 })

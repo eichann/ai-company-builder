@@ -3,6 +3,7 @@ import type { CompanyData, CompanyDataSource } from '../../ports/company-data'
 import { gitOrphanedScopeReader } from '../orphaned-scopes'
 import { sqlitePrivateFolderRepository } from '../private-folders'
 import { sqliteCompanyRowsExport } from './company-archive'
+import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
 import { sqliteInvitationRepository } from './invitations'
 import { sqlitePluginRepository } from './plugins'
@@ -27,6 +28,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
+        connectors: sqliteConnectorRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)

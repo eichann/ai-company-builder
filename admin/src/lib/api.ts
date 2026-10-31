@@ -933,3 +933,29 @@ export const pluginsApi = {
   renewConnection: (companyId: string, pluginId: string) =>
     getData<{ connectionId: string }>(`${pluginPath(companyId, pluginId)}/connection/renew`, { method: 'POST', body: {} }),
 }
+
+// The Google connection (「つなぎ先」→「Google」, milestone 4 G3): shapes from shared/types/google.ts.
+// The client secret is sent once in `saveClient` and never answered (last 4 only).
+export type {
+  GoogleAdminView,
+  GoogleChange,
+  GoogleChangeAction,
+  GoogleClientSave,
+  GoogleFeature,
+  GoogleGrantStatus,
+  GoogleGrantSummary,
+} from '../../../shared/types/google'
+
+import type { GoogleAdminView, GoogleClientSave } from '../../../shared/types/google'
+
+export const googleApi = {
+  get: (companyId: string) => getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google`),
+  /** `clientSecret` only when the admin typed one (left out = keep the stored one). */
+  saveClient: (companyId: string, save: GoogleClientSave) =>
+    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/client`, { method: 'PUT', body: save }),
+  setEnabled: (companyId: string, enabled: boolean) =>
+    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/enabled`, { method: 'PUT', body: { enabled } }),
+  /** 「止める」: stops a member's permission (revoked at Google too). */
+  stopGrant: (companyId: string, userId: string) =>
+    getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),
+}

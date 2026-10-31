@@ -1,7 +1,7 @@
 /**
- * Staging only (milestone 3): requests the relay or the key check sends to a
- * redirected host (`api.hubapi.com`) connect to the practice copy instead
- * (the fake HubSpot on this machine, `lib/config.ts` `practiceUpstreamsFrom`,
+ * Staging only (milestones 3, 4): requests sent to a redirected host
+ * (`api.hubapi.com`; Google's hosts) connect to the practice copy instead
+ * (the fake HubSpot / fake Google on this machine, `lib/config.ts` `practiceUpstreamsFrom`,
  * which decides whether this applies at all — never in production). Every
  * other host goes to the real way out unchanged. The request keeps naming the
  * real host, so the relay's destination rules and redirect rewriting are the
@@ -15,6 +15,7 @@ import { request as httpRequest, type IncomingMessage } from 'http'
 import { request as httpsRequest } from 'https'
 import type { PracticeUpstream } from '../lib/config'
 import { isPracticeSecret } from '../../shared/core/key-broker'
+import { isPracticeGoogleSecret } from '../../shared/core/google'
 import type { UpstreamClient } from '../ports/upstream'
 
 /** Headers that carry a key (the built-in services' and the usual ones). */
@@ -22,14 +23,17 @@ const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key']
 
 export function practiceUpstream(real: UpstreamClient, upstreams: readonly PracticeUpstream[]): UpstreamClient {
   if (upstreams.length === 0) return real
-  const byHost = new Map(upstreams.map(u => [u.host, u.target]))
+  const byHost = new Map(upstreams.map(u => [u.host, u]))
   return {
     async send(req) {
-      const target = byHost.get(req.host)
-      if (!target) return real.send(req)
-      // A real secret never goes to the practice copy (review §5.8): only practice keys pass.
+      const upstream = byHost.get(req.host)
+      if (!upstream) return real.send(req)
+      const target = upstream.target
+      // A real secret never goes to the practice copy (review §5.8): only practice keys pass,
+      // each service's own kind (HubSpot `pat-fake-…`, Google `ya29.fake-…`).
       // (Registration refuses them too; this holds even for a key saved before the redirect was on.)
-      if (CREDENTIAL_HEADERS.some(h => req.headers[h] !== undefined && !isPracticeSecret(req.headers[h]))) {
+      const practiceValue = upstream.service === 'google' ? isPracticeGoogleSecret : isPracticeSecret
+      if (CREDENTIAL_HEADERS.some(h => req.headers[h] !== undefined && !practiceValue(req.headers[h]))) {
         return { ok: false, reason: 'practice-real-secret' }
       }
       return new Promise(resolve => {

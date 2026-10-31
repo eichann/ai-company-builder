@@ -33,6 +33,7 @@ import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
 import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
+import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
 
 // ---------------------------------------------------------------------------
@@ -448,6 +449,12 @@ export interface IpcInvokeChannels {
   'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
   /** Moves a built-in service's key from the company folder's .env to the server (removed locally only after the server kept it). */
   'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
+  // The Google connection (「Google で許可」): the app holds no token; the sign-in URL stays in main.
+  'google:status': { args: [companyId: string]; result: GoogleStatusResult }
+  /** Opens Google's sign-in page in the system browser (the URL never comes back). */
+  'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
+  /** 「許可をやめる」 (revoked at Google too). */
+  'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
   // The chat card of an outside system's write (HubSpot): the person's own actions, with their session.
   /** 「変更前の値を書き戻す」 (a person's action; the consultation is informational provenance). */
   'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
@@ -716,6 +723,10 @@ export interface ElectronAPI {
   saveOwnBrokerKey: Invoke<'brokerKeys:save'>
   deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
   moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
+  // The Google connection (設定 → Google): the member's view only, never a token or the sign-in URL.
+  getGoogleStatus: Invoke<'google:status'>
+  connectGoogle: Invoke<'google:connect'>
+  disconnectGoogle: Invoke<'google:disconnect'>
   // The chat card of an outside system's write: the person's own actions (never the AI's).
   undoPluginOperation: Invoke<'pluginOperations:undo'>
   reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>

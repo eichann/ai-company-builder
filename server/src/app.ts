@@ -26,6 +26,8 @@ import { pluginsRoute } from './routes/plugins'
 import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
+import { googleRoute } from './routes/google'
+import { oauthRoute } from './routes/oauth'
 import { requestLog } from './lib/request-log'
 import { services } from './composition'
 
@@ -104,6 +106,9 @@ app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
+app.route('/api/companies/:companyId', googleRoute)
+// Google sends the browser back here (public: the state finds the company; google-connector.md).
+app.route('/api/oauth', oauthRoute)
 app.route('/api/records-ai', recordsAiRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)

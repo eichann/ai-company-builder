@@ -30,7 +30,7 @@ import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
 import { practiceUpstream } from './adapters/upstream-practice'
 import { diskPluginShelf } from './adapters/plugin-shelf'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, type PracticeUpstreams } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -67,7 +67,10 @@ import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createDecisionService } from './services/decisions'
+import { createGoogleClient } from './services/google-client'
+import { createGoogleConnector } from './services/google-connector'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -152,10 +155,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
-    practiceServices: practiceList.map(u => u.service),
+    // Only the key broker's services (the Google connection checks its own practice values).
+    practiceServices: practiceList.filter(u => u.service !== 'google').map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
     // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
     managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
+    // 「すべての鍵を止める」 stops members' Google permissions too (bound below).
+    onStopAll: (companyId, by) => { void googleConnector.stopAll(companyId, by) },
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -256,8 +262,51 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
   })
 
+  // The Google connection (milestone 4 G3, google-connector.md): google-client.ts is the one
+  // place that talks to Google; on staging every Google host may go to the fake Google.
+  const practiceGoogle = practiceList.find(u => u.service === 'google' && u.host === GOOGLE_AUTHORIZE_HOST)
+  const googleClient = createGoogleClient({
+    companyData: shared.companyData,
+    brokerVault,
+    upstream,
+    clock: shared.clock,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+    record: (companyId, userId, e) => {
+      try {
+        agentEvents.recordServerEvent(companyId, userId, {
+          agent: 'script',
+          tool: `google:${e.operation.slice(0, 60)}`,
+          category: 'broker',
+          target: { kind: 'broker', service: 'google', host: e.host, path: e.operation.slice(0, 200), ...(e.status !== null ? { status: e.status } : {}) },
+          decision: 'auto-allowed',
+          outcome: e.ok ? 'ok' : 'error',
+        })
+      } catch {
+        console.warn('[google] a call could not be recorded')
+      }
+    },
+    practiceGoogle: practiceGoogle !== undefined,
+    authorizeOrigin: practiceGoogle
+      ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
+      : `https://${GOOGLE_AUTHORIZE_HOST}`,
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  })
+  const googleConnector = createGoogleConnector({
+    ...shared,
+    brokerVault,
+    google: googleClient,
+    tokenDigest: sha256TokenDigest,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
+    practiceGoogle: practiceGoogle !== undefined,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+  })
+
   return {
     access,
+    googleClient,
+    googleConnector,
     pluginShelf,
     plugins,
     pluginImport,
