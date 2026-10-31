@@ -41,11 +41,17 @@ export function useChatAutoScroll({ isShown, isRestoringSession, messages, statu
   }, [isShown, isRestoringSession])
 
   // Attach after the message list actually mounts, not while the spinner is shown.
+  // Only a move up stops following: the browser's own scroll anchoring moves the
+  // view down a little when a reply grows, and that is not the member reading.
+  const lastScrollTopRef = useRef(0)
   const container = useCallback(() => messagesContainerRef.current, [])
   useEventListener(container, 'scroll', () => {
     const element = messagesContainerRef.current
     if (!element) return
-    shouldAutoScrollRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120
+    const top = element.scrollTop
+    if (element.scrollHeight - top - element.clientHeight < 120) shouldAutoScrollRef.current = true
+    else if (top < lastScrollTopRef.current) shouldAutoScrollRef.current = false
+    lastScrollTopRef.current = top
   }, { passive: true, enabled: isShown && !isRestoringSession })
 
   // Auto-scroll when messages change

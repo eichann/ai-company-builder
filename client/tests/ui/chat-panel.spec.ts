@@ -354,7 +354,13 @@ test.describe('a long restored conversation', () => {
     await more.click()
     await expect(page.getByRole('button', { name: '以前のメッセージを表示（残り140件）' })).toBeVisible()
     await expect(userQuestions(page)).toHaveCount(50)
-    const after = await anchor.boundingBox()
+    // The added page lays out over the next frames too: compare once the anchor has stopped moving.
+    let after = await anchor.boundingBox()
+    await expect.poll(async () => {
+      const previous = after
+      after = await anchor.boundingBox()
+      return previous?.y === after?.y
+    }, { intervals: [100] }).toBe(true)
     expect(Math.abs((after?.y ?? 0) - (before?.y ?? 0)), 'the message on screen stays where it was').toBeLessThan(3)
   })
 
@@ -369,8 +375,13 @@ test.describe('a long restored conversation', () => {
 
     await list(page).evaluate(el => { el.scrollTop = el.scrollTop - 800 })
     await expect.poll(fromBottom).toBeGreaterThan(500)
+    const longer = await list(page).evaluate(el => el.scrollHeight)
     await chat(page, c => c.text('t1', 'さらに続きます。\n\n'.repeat(20)))
-    await page.waitForTimeout(300)
+    // Wait for the added text to be laid out, then check the reader was not pulled down.
+    await expect.poll(() => list(page).evaluate(el => el.scrollHeight)).toBeGreaterThan(longer)
+    await expect(page.getByText('さらに続きます。').last()).toBeAttached()
+    // Two frames: React's effects for that render (where a wrong scroll would happen) have run.
+    await list(page).evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))))
     expect(await fromBottom(), 'the reader stays where they scrolled to').toBeGreaterThan(500)
     await chat(page, c => c.finish())
   })
@@ -554,10 +565,13 @@ test.describe('two chat panes', () => {
     const rightList = right.getByRole('complementary', { name: 'AIへの相談' })
     const rightOpen = rightList.getByRole('region', { name: '開いている相談' }).locator('[data-conversation-id]')
     await expect(rightOpen).toHaveCount(1)
+    const rightGreeting = right.getByText(/AIアシスタントです/).locator('visible=true')
+    await expect(rightGreeting).toBeVisible()
 
     await rightList.getByRole('button', { name: /^見積書の相談/ }).click()
-    // (The narrow pane closes its list after the click.)
-    await page.waitForTimeout(500)
+    // The click was handled once the narrow pane has closed its list.
+    await expect(rightList).toBeHidden()
+    await expect(rightGreeting, 'the right pane still shows its own conversation').toBeVisible()
     await expect(right.getByText('見積書を作って', { exact: true }), 'the right pane did not open it too').toHaveCount(0)
     await expect(left.getByText('見積書を作って', { exact: true })).toBeVisible()
   })

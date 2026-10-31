@@ -38,6 +38,8 @@ import crypto from 'crypto'
 import net from 'net'
 
 export interface ChatServerConfig extends AgentHost {
+  /** Where to listen; 0 = any free port (tests running in parallel). Default: the first free port of 3300–3399. */
+  listenPort?: number
   createReferences?: (company: string, id: string, signal: AbortSignal) => ReferenceTools
   /**
    * Read-only company files for this turn (company-files/tools.ts): the tools
@@ -143,18 +145,19 @@ export function createAskUser(
   }
 }
 
-async function findAvailablePort(start: number, end: number): Promise<number> {
+/**
+ * Listens on the first port of the range that binds. Binding is the check:
+ * probing a port and listening on it afterwards let another process (a
+ * second test run) take it in between, and requests then reached that one.
+ */
+async function listenOnFreePort(fetch: (request: Request) => Response | Promise<Response>, start: number, end: number) {
   for (let port = start; port < end; port++) {
-    const available = await new Promise<boolean>((resolve) => {
-      const server = net.createServer()
+    const server = serve({ fetch, port, hostname: '127.0.0.1' })
+    const bound = await new Promise<boolean>(resolve => {
+      server.once('listening', () => resolve(true))
       server.once('error', () => resolve(false))
-      server.once('listening', () => {
-        server.close()
-        resolve(true)
-      })
-      server.listen(port, '127.0.0.1')
     })
-    if (available) return port
+    if (bound) return { server, port: (server.address() as net.AddressInfo).port }
   }
   throw new Error('No available port found in range ' + start + '-' + end)
 }
@@ -579,14 +582,10 @@ ${transcript}
     return c.json({ rateLimits: snapshot ?? null } satisfies RateLimitsResponse)
   })
 
-  // Find port in 3300-3400 range (distinct from tool ports 3100-3200)
-  const port = await findAvailablePort(3300, 3400)
-
-  const server = serve({
-    fetch: app.fetch,
-    port,
-    hostname: '127.0.0.1',
-  })
+  // A port in 3300-3400 (distinct from tool ports 3100-3200), or the one asked for.
+  const { server, port } = config.listenPort === undefined
+    ? await listenOnFreePort(app.fetch, 3300, 3400)
+    : await listenOnFreePort(app.fetch, config.listenPort, config.listenPort + 1)
 
   console.log(`[chat-server] Started on http://127.0.0.1:${port}`)
 
