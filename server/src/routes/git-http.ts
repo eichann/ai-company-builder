@@ -8,6 +8,7 @@ import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
 import { canReadPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
+import { noteRequestUser } from '../lib/request-log'
 import {
   beginCompanyPush,
   beginScopePush,
@@ -37,7 +38,9 @@ function authenticateGitRequest(c: { req: { raw: Request; header: (name: string)
 
     // The session's user, looked up directly in auth.sqlite (Better Auth signs
     // cookies, so auth.api.getSession cannot take a raw token from Basic Auth)
-    return services.accounts.bySessionToken(token)
+    const user = services.accounts.bySessionToken(token)
+    if (user) noteRequestUser(c.req.raw, user.id) // the request log prints the id (lib/request-log.ts)
+    return user
   }
 
   return null

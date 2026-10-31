@@ -150,6 +150,11 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   address), plus the first account of a fresh server while no company exists; anyone else 403
   `COMPANY_CREATION_RESTRICTED` (Japanese `error`: released apps show it as is). Checked before
   the body. `tests/integration/company-creation.test.ts`, `tests/unit/company-creation-policy.test.ts`.
+- Company slugs are unique across the server, so a new one never depends on whether another
+  company has a slug (2026-10-31; before, `abe` taken → `abe-2` told the creator so): always the
+  sanitized requested slug or name (or `company`) + `-` + the first 8 characters of the new
+  company's own id (the whole id in the unlikely case those collide). Existing slugs are never
+  changed; nothing routes by slug. `tests/integration/company-slug.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
   (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
@@ -205,6 +210,22 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
   process group, hook included, and fails the change (a seeding failure still creates the
   company).
+
+## Request log
+
+stdout is shared by every company on the server, so the request log (`lib/request-log.ts`,
+mounted first in `app.ts`; it replaced `hono/logger`, which printed URLs with their query) holds
+only what troubleshooting needs: `[http] <request id> <METHOD> <route pattern> <status> <ms>ms`
+plus `company=` / `user=` (opaque ids, never names or emails) and route parameters listed in
+`OPAQUE_PARAMS` whose value looks like an id. Never the URL, a query string, a file path, folder
+or private-folder name, search term or token (an invitation `:token` is not printed). The request
+id is returned in `X-Request-Id` (also on responses a handler built itself, e.g. git-http) so
+support can find a member's request. The user id is noted by whoever authenticated the request
+(`getUserFromRequest`, git-http's token check: `noteRequestUser`). Detailed per-company history
+belongs in the per-company, access-controlled records (`agent_events`, `broker_history`,
+`push_rejections`…), not in this log. Test: `tests/integration/request-log.test.ts` (captures
+every console output while sending paths, search terms, a relay `?key=` token and an invitation
+token).
 
 ## Async only
 

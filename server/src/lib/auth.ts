@@ -2,6 +2,7 @@ import { betterAuth } from 'better-auth'
 import Database from 'better-sqlite3'
 import fs from 'fs'
 import { AUTH_DB_PATH, DATA_DIR } from './config'
+import { noteRequestUser } from './request-log'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -82,6 +83,7 @@ export async function getUserFromRequest(request: Request): Promise<AuthUser | n
     headers: request.headers,
   })
   if (!session?.user) return null
+  noteRequestUser(request, session.user.id) // the request log prints the id (lib/request-log.ts)
 
   return {
     id: session.user.id,

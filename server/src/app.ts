@@ -5,7 +5,6 @@
  */
 import { Hono } from 'hono'
 import { cors } from 'hono/cors'
-import { logger } from 'hono/logger'
 import { auth, authDb } from './lib/auth'
 import { meRoute } from './routes/me'
 import { companiesRoute } from './routes/companies'
@@ -24,14 +23,16 @@ import { agentSandboxRoute } from './routes/agent-sandbox'
 import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
-import { redactBrokerQuery } from './lib/log-redaction'
+import { requestLog } from './lib/request-log'
 import { services } from './composition'
 
 export const app = new Hono()
 
 // Middleware
-// The relay accepts a token in ?key= (Gemini's form): request lines never show a query there.
-app.use('*', logger((line, ...rest) => console.log(redactBrokerQuery(line), ...rest)))
+// One line per request: method, route pattern, status, duration, request id
+// (X-Request-Id), company and user ids — never the URL, its query or a path
+// a member sent (lib/request-log.ts).
+app.use('*', requestLog())
 app.use('*', cors({
   origin: [
     'http://localhost:5173',

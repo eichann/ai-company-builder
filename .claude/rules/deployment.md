@@ -54,7 +54,8 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   `BROKER_KEY_CHECK` (on; `off` for a server without internet access, and in the server tests)
   checks a key once when it is saved.
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
-  never prints a query on `/api/broker/` (a token may be in `?key=`: `lib/log-redaction.ts`).
+  never prints a URL or query (`lib/request-log.ts`, `server.md` "Request log"), so no relay
+  token in `?key=` either.
 - `OPERATOR_USER_IDS` (comma-separated user ids; a signed-in operator sees theirs at
   `/api/me`) and `COMPANY_CREATION_POLICY` (`operator`) decide who creates companies after the
   first one (`server.md` "Accounts and roles"); passed through by both compose files.

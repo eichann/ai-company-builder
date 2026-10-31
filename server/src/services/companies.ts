@@ -115,21 +115,24 @@ function createSlug(name: string): string {
 export function createCompanyService(deps: CompanyServiceDeps) {
   const { companies, invitations, memberships, departments, scopes, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
 
-  // A unique slug. Japanese-only names produce an empty base slug, so fall
-  // back to the company id; collisions get a numeric suffix instead of
-  // rejecting creation (the client has no slug input to fix it). An
-  // explicitly requested slug (admin panel) is sanitized and honored.
+  // A unique slug: the requested slug (admin API) or the name, sanitized, plus
+  // a suffix from the new company's own id — always, whether or not the base
+  // is in use. Slugs are unique across the server, and the old rule (`abe`,
+  // else `abe-2`, `abe-3`…) told the creator that another company already had
+  // `abe` (2026-10-31). Now the answer depends only on the request and the
+  // new id. Japanese-only names give an empty base: `company-<id>`, as before.
+  // Existing slugs are never changed; nothing routes by slug.
   function buildUniqueSlug(name: string, requestedSlug: unknown, companyId: string): string {
+    const trim = (s: string) => s.slice(0, 60).replace(/-+$/, '')
     const base =
-      (typeof requestedSlug === 'string' && createSlug(requestedSlug)) ||
-      createSlug(name) ||
-      `company-${companyId.slice(0, 8)}`
-
-    let slug = base
-    for (let n = 2; ; n++) {
-      if (!companies.isSlugTaken(slug)) return slug
-      slug = `${base}-${n}`
-    }
+      (typeof requestedSlug === 'string' && trim(createSlug(requestedSlug))) ||
+      trim(createSlug(name)) ||
+      'company'
+    const own = companyId.toLowerCase().replace(/[^a-z0-9]/g, '')
+    const short = `${base}-${own.slice(0, 8)}`
+    // Another company with the same base and the same first 8 id characters:
+    // the whole id is unique, and still says nothing about the other company.
+    return companies.isSlugTaken(short) ? `${base}-${own}` : short
   }
 
   function initializeDefaultDepartments(companyId: string, userId: string): void {

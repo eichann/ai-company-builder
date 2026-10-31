@@ -26,7 +26,7 @@ paths:
   - "server/src/ports/upstream.ts"
   - "server/src/adapters/upstream-https.ts"
   - "server/src/lib/net-ranges.ts"
-  - "server/src/lib/log-redaction.ts"
+  - "server/src/lib/request-log.ts"
   - "server/tests/integration/broker-relay*.test.ts"
   - "server/tests/integration/broker-records.test.ts"
   - "server/tests/unit/net-ranges.test.ts"
@@ -343,8 +343,8 @@ who uses it).
   and the answer's tokens are added when it ends (so a call already running may pass a token
   cap once). Kept 40 days. The admin page shows 「今日の利用」 per key (`usageToday`, 「今日の上限
   に達しました」 at a total cap). No money caps in stage 1 (owner): providers' budget alerts.
-- Logs: never a header, body, key or token; the request log hides `/api/broker/` queries
-  (`lib/log-redaction.ts`).
+- Logs: never a header, body, key or token; the request log prints no URL or query at all, so
+  no `?key=` token (`lib/request-log.ts`, `tests/integration/request-log.test.ts`).
 
 ## The app (K6): tokens into the AI's and tools' environment
 
@@ -474,7 +474,7 @@ who decided, stop-all → `stopped` on the next call and resume, member and toke
 local provider with its own certificate: internal address refused before connecting and allowed
 by the exception, one internal answer among several refuses, one DNS lookup, TLS checked against
 the name, the whole route end to end — SSRF guard mutation-checked), `tests/unit/net-ranges.test.ts`
-(every internal form refused, public ones pass; the request log hides relay queries),
+(every internal form refused, public ones pass),
 `tests/unit/broker-relay-definition.test.ts` (K9 ids, base URLs, header names and formats that
 would open the relay are refused), `tests/integration/broker-relay-generic.test.ts` (K9: owner/admin
 only, the host fixed for every key, base path, the key only in the configured header and format,
