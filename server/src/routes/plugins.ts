@@ -22,7 +22,10 @@
  *   (conversationId / proposedBy: informational provenance the app reports, never authorizing — records.md)
  *   GET  /plugins/:pluginId/operations/:operationId                   an operation record (its record's readers)
  *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only) { conversationId?, proposedBy? }
- *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost
+ *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost (a create: look it up by its correlation value)
+ * Creates (milestone 4): log_meeting goes through the record route above ({ title, body?, at, outcome?, note? } on the deal);
+ *   POST /plugins/:pluginId/create/:operation                         a create of a record (create_deal) { title, fields, note? } — never auto: 409 APPROVAL_REQUIRED
+ *   POST /plugins/:pluginId/operations/:operationId/recreate          「もう一度作る」 after reconcile found nothing (people only) { confirm: true }
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -123,6 +126,19 @@ pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', 
   if (member instanceof Response) return member
   const body = await jsonBody(c)
   return answer(c, await pluginOperations.run(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
+})
+
+pluginsRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const body = await jsonBody(c)
+  return answer(c, await pluginOperations.createRecord(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('operation'), body))
+})
+
+pluginsRoute.post('/plugins/:pluginId/operations/:operationId/recreate', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await pluginOperations.recreate(member, c.req.param('pluginId'), c.req.param('operationId'), await jsonBody(c)))
 })
 
 pluginsRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {

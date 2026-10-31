@@ -89,6 +89,10 @@ deal:
 people:
   owners:
     "75123001": ${people}
+# The package's creates run automatically by default; here they wait for approval (no acknowledgement needed).
+policy:
+  add_note: prior
+  log_meeting: prior
 `
 
 beforeAll(async () => {

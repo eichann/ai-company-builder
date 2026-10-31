@@ -48,7 +48,7 @@ deal:
     pipelines: [default]
   fields:
     title:      { from: dealname, write: false }
-    stage:      { from: dealstage, write: false, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
+    stage:      { from: dealstage, write: true, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
     confidence: { from: juchu_kakudo, write: true, values: { high: a, medium: b, low: c } }
     next_step:  { from: hs_next_step, write: true }
     amount:     { from: amount, write: true }
@@ -155,13 +155,17 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(hub).toMatchObject({ id: 'sample-hub', label: expect.any(String) })
     const update = hub.operations.find((o: Json) => o.name === 'update_deal')
     expect(update).toMatchObject({ kind: 'update', recordType: 'deal', decision: true })
-    // Written fields with their policy; stage (never written) and fields the mapping does not write are not offered.
-    expect(update.fields.map((f: Json) => [f.name, f.policy]).sort()).toEqual([['amount', 'prior'], ['confidence', 'auto'], ['next_step', 'auto']])
+    // Written fields with their policy (stage only with approval); fields the mapping does not write are not offered.
+    expect(update.fields.map((f: Json) => [f.name, f.policy]).sort()).toEqual([['amount', 'prior'], ['confidence', 'auto'], ['next_step', 'auto'], ['stage', 'prior']])
     expect(update.fields.find((f: Json) => f.name === 'confidence').options).toEqual(expect.arrayContaining(['a', 'b', 'c']))
     // How the options are shown (the type's option_labels), so the AI says 「A（高）」 rather than `a`.
     expect(update.fields.find((f: Json) => f.name === 'confidence').optionLabels).toEqual({ a: 'A（高）', b: 'B（中）', c: 'C（低）' })
-    // No create (notes are not in milestone 3).
-    expect(hub.operations.map((o: Json) => o.name).sort()).toEqual(['refresh_deal', 'update_deal'])
+    // Creates (milestone 4) with their policy: a meeting on the deal, a new deal (always approved).
+    expect(hub.operations.map((o: Json) => o.name).sort()).toEqual(['add_note', 'create_deal', 'log_meeting', 'refresh_deal', 'update_deal'])
+    expect(hub.operations.find((o: Json) => o.name === 'log_meeting')).toMatchObject({ kind: 'create', recordType: 'deal', policy: 'prior', content: ['title', 'body', 'at', 'outcome'] })
+    const create = hub.operations.find((o: Json) => o.name === 'create_deal')
+    expect(create).toMatchObject({ kind: 'create', recordType: 'deal', policy: 'prior', createsRecord: true })
+    expect(create.fields.map((f: Json) => f.name).sort()).toEqual(['amount', 'confidence', 'next_step', 'stage'])
 
     const codex = await call({ user: 'op-member', method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'c', agent: 'codex', scope: 'act' } })
     const read = await call({ token: codex.body.data.token, method: 'GET', path: '/api/records-ai/plugins' })
@@ -237,8 +241,11 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     const n = patches()
     const mixed = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { next_step: '見積の再提出', amount: 2600000 }))
     expect(mixed).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['amount'] } })
+    // Stage: written only after an approval (milestone 4), never directly.
     const stage = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' }))
-    expect(stage).toMatchObject({ status: 400, body: { code: 'FIELD_NOT_WRITABLE', fields: ['stage'] } })
+    expect(stage).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
+    const off = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { assignee: 'op-member' }))
+    expect(off).toMatchObject({ status: 400, body: { code: 'FIELD_NOT_WRITABLE', fields: ['assignee'] } })
     expect(patches()).toBe(n)
     expect(fake.deal('1000000003')!.properties.hs_next_step).toBe('見積の最終確認')
   })
@@ -399,6 +406,284 @@ describe('every stop acts on the next call', () => {
 
     expect(patches()).toBe(n)
     expect((await attempt()).body.data.operation.state).toBe('applied')
+  })
+})
+
+describe('creates (milestone 4): log_meeting on a deal', () => {
+  const meetingPosts = () => fake.requests.filter(r => r.method === 'POST' && /\/meetings$/.test(r.path)).length
+  const meetingSearches = () => fake.requests.filter(r => r.method === 'POST' && /\/meetings\/search$/.test(r.path)).length
+  const meeting = (title: string) => ({ title, body: '先方は前向き。次回デモ。', at: '2026-11-05T15:00:00+09:00', outcome: 'COMPLETED' })
+  const autoMeetings = `${MAPPING}policy:\n  log_meeting: auto\n`
+  /** The company chose automatic meetings and confirmed no HubSpot workflow starts on them (each test stands alone). */
+  const useAutoMeetings = async () => {
+    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: autoMeetings, acknowledgeAuto: [...ACK, 'log_meeting'] })).ok).toBe(true)
+  }
+  /** Pretend the create was sent long enough ago for search to see it (HubSpot's indexing delay). */
+  const age = (operationId: string) => db.prepare('UPDATE plugin_operations SET created_at = ? WHERE company_id = ? AND id = ?')
+    .run(new Date(Date.now() - 2 * 60_000).toISOString(), CO, operationId)
+
+  it('approval by default: 409 APPROVAL_REQUIRED and nothing sent', async () => {
+    const id = recordOf('1000000001')
+    const n = meetingPosts()
+    const r = await ai(await tokenFor('op-member'), 'POST', `/records/${id}/operations/log_meeting`, meeting('初回商談'))
+    expect(r).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(meetingPosts()).toBe(n)
+  })
+
+  it('auto needs the acknowledgement: refused on save, and a mapping that has none stops the plugin', async () => {
+    const save = await services.plugins.saveMapping(owner, 'sample-hub', { text: autoMeetings, acknowledgeAuto: ACK })
+    expect(save).toMatchObject({ ok: false, body: { code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['log_meeting'] } })
+    // A mapping version stored without one (e.g. restored by hand): the plugin does not run, nothing is sent.
+    const version = (db.prepare('SELECT MAX(version) AS v FROM plugin_mappings WHERE company_id = ?').get(CO) as Json).v + 1
+    db.prepare('INSERT INTO plugin_mappings (company_id, plugin_id, version, text, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?)').run(CO, 'sample-hub', version, autoMeetings, ts(), 'op-owner')
+    const before = (db.prepare('SELECT mapping_version FROM plugin_installs WHERE company_id = ?').get(CO) as Json).mapping_version
+    db.prepare('UPDATE plugin_installs SET mapping_version = ? WHERE company_id = ?').run(version, CO)
+    const id = recordOf('1000000001')
+    const n = meetingPosts()
+    const r = await person('op-member', 'POST', `/records/${id}/operations/log_meeting`, meeting('確かめていない'))
+    expect(r).toMatchObject({ status: 409, body: { code: 'PLUGIN_NOT_ACTIVE', problem: 'auto-not-acknowledged' } })
+    expect(meetingPosts()).toBe(n)
+    db.prepare('UPDATE plugin_installs SET mapping_version = ? WHERE company_id = ?').run(before, CO)
+  })
+
+  it('auto (acknowledged): the AI logs a meeting — one object with ACB\'s correlation value, on the deal; a person archives it', async () => {
+    await useAutoMeetings()
+    const id = recordOf('1000000001')
+    const token = await tokenFor('op-member')
+    const other = await ai(token, 'POST', `/records/${id}/operations/log_meeting`, meeting('別の記録'))
+    const r = await ai(token, 'POST', `/records/${id}/operations/log_meeting`, meeting('初回商談'))
+    expect(r.status).toBe(200)
+    const op = r.body.data.operation
+    expect(op).toMatchObject({ kind: 'create', state: 'applied', undoable: true, undoLabel: '作ったものを取り消す', actorKind: 'ai', recordId: id,
+      fields: { title: '初回商談', at: '2026-11-05T06:00:00.000Z', outcome: 'COMPLETED' } })
+    const made = fake.withOperationId(op.id)
+    expect(made).toEqual([{ type: 'meetings', id: expect.any(String), archived: false }])
+    expect(fake.meeting(made[0].id)).toMatchObject({ dealIds: ['1000000001'], properties: { hs_meeting_title: '初回商談', hs_timestamp: String(Date.parse('2026-11-05T15:00:00+09:00')), acb_operation_id: op.id } })
+    // The deal's ledger notes it (no field changes), with the receipt naming the meeting.
+    const entry = services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1)
+    expect(entry).toMatchObject({ action: 'sample-hub.log_meeting', actorKind: 'ai', changes: [], receipt: { kind: 'written', object: 'meeting', externalId: made[0].id, operationId: op.id } })
+    // The AI cannot archive it; its owner can — only that meeting.
+    expect((await ai(token, 'POST', `/operations/${op.id}/undo`)).status).toBe(404)
+    const back = await person('op-member', 'POST', `/operations/${op.id}/undo`)
+    expect(back.body.data.operation).toMatchObject({ kind: 'undo', state: 'applied', undoOf: op.id })
+    expect(fake.meeting(made[0].id)!.archived).toBe(true)
+    expect(fake.meeting(fake.withOperationId(other.body.data.operation.id)[0].id)!.archived).toBe(false)
+    expect(await person('op-member', 'POST', `/operations/${op.id}/undo`)).toMatchObject({ status: 409, body: { code: 'NOT_UNDOABLE' } })
+  })
+
+  it('a lost answer is never re-sent: one object, unknown; no search before 60 s; after, found by its correlation value', async () => {
+    await useAutoMeetings()
+    const id = recordOf('1000000001')
+    const posts = meetingPosts()
+    const searches = meetingSearches()
+    fake.faults.dropAnswerAfterWrite(1)
+    const r = await person('op-member', 'POST', `/records/${id}/operations/log_meeting`, meeting('答えが届かない'))
+    expect(r.status).toBe(200)
+    const op = r.body.data.operation
+    expect(op).toMatchObject({ state: 'sent-unknown', reason: 'too-early', undoable: false, recreatable: false })
+    expect(meetingPosts()).toBe(posts + 1)
+    expect(fake.withOperationId(op.id)).toHaveLength(1)
+    // Not yet: no search (HubSpot's search may not see it), still unknown; not undoable.
+    expect((await person('op-member', 'POST', `/operations/${op.id}/reconcile`)).body.data.operation).toMatchObject({ state: 'sent-unknown', reason: 'too-early' })
+    expect(meetingSearches()).toBe(searches)
+    expect(await person('op-member', 'POST', `/operations/${op.id}/undo`)).toMatchObject({ status: 409, body: { code: 'NOT_UNDOABLE' } })
+    age(op.id)
+    const found = await person('op-member', 'POST', `/operations/${op.id}/reconcile`)
+    expect(found.body.data.operation).toMatchObject({ state: 'applied', reason: 'found-by-correlation', undoable: true })
+    expect(meetingSearches()).toBe(searches + 1)
+    expect(meetingPosts()).toBe(posts + 1)
+    expect(fake.withOperationId(op.id)).toHaveLength(1)
+  })
+
+  it('not found stays unknown (also while the plugin is off); 「もう一度作る」 only after that, with a warning, as a new operation', async () => {
+    await useAutoMeetings()
+    const id = recordOf('1000000001')
+    fake.faults.failNextWrite(1, 503)
+    const r = await person('op-member', 'POST', `/records/${id}/operations/log_meeting`, meeting('作れたか分からない'))
+    const op = r.body.data.operation
+    expect(op).toMatchObject({ state: 'sent-unknown', recreatable: false })
+    expect(await person('op-member', 'POST', `/operations/${op.id}/recreate`, { confirm: true })).toMatchObject({ status: 409, body: { code: 'NOT_RECREATABLE' } })
+    age(op.id)
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: false })).ok).toBe(true)
+    const looked = await person('op-member', 'POST', `/operations/${op.id}/reconcile`)
+    expect(looked).toMatchObject({ status: 200, body: { data: { operation: { state: 'sent-unknown', reason: 'not-found', recreatable: true } } } })
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
+    const posts = meetingPosts()
+    expect(await person('op-member', 'POST', `/operations/${op.id}/recreate`, {})).toMatchObject({ status: 409, body: { code: 'RECREATE_NEEDS_CONFIRMATION', warning: expect.stringContaining('二つになる') } })
+    expect(meetingPosts()).toBe(posts)
+    // Another member (not its actor, not an admin) may not.
+    expect((await person('op-other', 'POST', `/operations/${op.id}/recreate`, { confirm: true })).status).toBe(403)
+    const again = await person('op-member', 'POST', `/operations/${op.id}/recreate`, { confirm: true })
+    expect(again.body.data.operation).toMatchObject({ kind: 'create', state: 'applied', actorKind: 'human' })
+    expect(again.body.data.operation.id).not.toBe(op.id)
+    expect(fake.withOperationId(op.id)).toHaveLength(0)
+    expect(fake.withOperationId(again.body.data.operation.id)).toHaveLength(1)
+    expect((await person('op-member', 'GET', `/operations/${op.id}`)).body.data.operation).toMatchObject({ replacedBy: again.body.data.operation.id, recreatable: false })
+    expect(await person('op-member', 'POST', `/operations/${op.id}/recreate`, { confirm: true })).toMatchObject({ status: 409, body: { code: 'NOT_RECREATABLE' } })
+    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+  })
+})
+
+describe('creates (milestone 4): create_deal only through an approval', () => {
+  const dealPosts = () => fake.requests.filter(r => r.method === 'POST' && /\/deals$/.test(r.path)).length
+  const NEW_DEAL = { title: 'AI 研修（例示製作所）', fields: { stage: 'proposal', amount: 1200000 } }
+
+  it('never runs without approval: the person\'s route, the AI\'s, a read token, a forged policy', async () => {
+    const n = dealPosts()
+    expect(await person('op-member', 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(await ai(await tokenFor('op-member'), 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    const codex = await call({ user: 'op-member', method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'c', agent: 'codex', scope: 'act' } })
+    expect(await ai(codex.body.data.token, 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
+    // Someone who cannot read where the deal would go.
+    expect((await person('op-reader', 'POST', '/create/create_deal', NEW_DEAL)).status).toBe(403)
+    // A declaration and mapping that say auto (forged past the parser) still do not send.
+    const real = services.plugins.active.bind(services.plugins)
+    const spy = vi.spyOn(services.plugins, 'active').mockImplementation(async (...args: Json[]) => {
+      const r = await (real as Json)(...args)
+      if (!r.ok) return r
+      const operations = { ...r.plugin.manifest.operations, create_deal: { ...r.plugin.manifest.operations.create_deal, policy: 'auto' } }
+      return { ok: true, plugin: { ...r.plugin, manifest: { ...r.plugin.manifest, operations }, mapping: { ...r.plugin.mapping, policy: { ...r.plugin.mapping.policy, create_deal: 'auto' } } } }
+    })
+    try {
+      expect(await person('op-member', 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    } finally { spy.mockRestore() }
+    expect(dealPosts()).toBe(n)
+  })
+
+  it('similar deals: only records already imported that the member may read', async () => {
+    const r = await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-member', role: 'member' }, 'sample-hub', 'リーダー研修（例示製作所）')
+    expect(r.ok).toBe(true)
+    expect(r.value.similar.map((s: Json) => s.recordId)).toContain(recordOf('1000000009'))
+    expect(r.value.similar.every((s: Json) => typeof s.title === 'string')).toBe(true)
+    // Cannot read where deals are: nothing is asked outside.
+    const asked = fake.requests.length
+    expect(await services.pluginOperations.similarDeals({ companyId: CO, userId: 'op-reader', role: 'member' }, 'sample-hub', 'リーダー研修')).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
+    expect(fake.requests.length).toBe(asked)
+  })
+
+  it('prepareApproval builds the payload without sending; executeApproved creates the deal as a record, approved by another person', async () => {
+    const member = { companyId: CO, userId: 'op-member', role: 'member' }
+    const n = dealPosts()
+    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'ai', source: 'claude-code', conversationId: 'conv-op' }, 'sample-hub', null, 'create_deal', NEW_DEAL)
+    expect(prepared.ok).toBe(true)
+    expect(prepared.value).toMatchObject({
+      approver: 'self', folder: '営業部',
+      payload: { v: 1, kind: 'plugin_operation', operation: 'create_deal', record: null, externalId: null, accountId: '90000001',
+        create: { title: NEW_DEAL.title, properties: { dealname: NEW_DEAL.title, dealstage: 'qualifiedtobuy', amount: '1200000' } } },
+    })
+    expect(dealPosts()).toBe(n)
+    const done = await services.pluginOperations.executeApproved(owner, { userId: 'op-member', actorKind: 'ai', conversationId: 'conv-op', source: 'claude-code' }, prepared.value.payload, '金額と時期を確認した')
+    expect(done.ok).toBe(true)
+    expect(done.value).toMatchObject({ kind: 'create', state: 'applied', approvedBy: 'op-owner', actorKind: 'ai', undoable: true })
+    expect(dealPosts()).toBe(n + 1)
+    const made = fake.withOperationId(done.value.id)
+    expect(made).toEqual([{ type: 'deals', id: expect.any(String), archived: false }])
+    expect(fake.deal(made[0].id)!.properties).toMatchObject({ dealname: NEW_DEAL.title, dealstage: 'qualifiedtobuy', amount: '1200000' })
+    // A record of the company map: server only (no file), linked like an import; its entry is the requester's, a decision with the approver's reason.
+    const recordId = done.value.recordId
+    expect(recordId).toBe(recordOf(made[0].id))
+    expect(db.prepare('SELECT path, folder, title FROM records WHERE company_id = ? AND id = ?').get(CO, recordId)).toEqual({ path: null, folder: '営業部', title: NEW_DEAL.title })
+    const entry = services.recordEngine.history(member, recordId).value.entries[0]
+    expect(entry).toMatchObject({ actorId: 'op-member', actorKind: 'ai', isDecision: true, decision: { reason: '金額と時期を確認した' }, receipt: { kind: 'written', approvedBy: 'op-owner', operationId: done.value.id } })
+    // 「作ったものを取り消す」: archived in HubSpot, only that deal.
+    const undo = await person('op-member', 'POST', `/operations/${done.value.id}/undo`)
+    expect(undo.body.data.operation).toMatchObject({ kind: 'undo', state: 'applied' })
+    expect(fake.deal(made[0].id)!.archived).toBe(true)
+    expect(fake.deal('1000000009')!.archived).toBe(false)
+  })
+
+  it('executeApproved refuses without a reason, and when the requester is no longer a member', async () => {
+    const member = { companyId: CO, userId: 'op-member', role: 'member' }
+    const prepared = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', null, 'create_deal', NEW_DEAL)
+    const n = dealPosts()
+    expect(await services.pluginOperations.executeApproved(owner, { userId: 'op-member', actorKind: 'human', conversationId: null }, prepared.value.payload, ' '))
+      .toMatchObject({ ok: false, body: { code: 'REASON_REQUIRED' } })
+    expect(await services.pluginOperations.executeApproved(owner, { userId: 'op-gone', actorKind: 'human', conversationId: null }, prepared.value.payload, '理由'))
+      .toMatchObject({ ok: false, body: { code: 'REQUESTER_NOT_MEMBER' } })
+    expect(dealPosts()).toBe(n)
+  })
+})
+
+describe('stage by approval (milestone 4): the approval seam for updates', () => {
+  const member = { companyId: CO, userId: 'op-member', role: 'member' }
+  const prepare = async (fields: Record<string, unknown>) => {
+    const id = recordOf('1000000010') // assignee op-member
+    // Bring in what HubSpot holds now (earlier tests change this deal there).
+    await person('op-member', 'POST', `/records/${id}/operations/refresh_deal`, {})
+    const r = await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', { expectedVersion: versionOf(id), fields })
+    expect(r.ok).toBe(true)
+    return r.value
+  }
+  const execute = (payload: Json, requester: Json = { userId: 'op-member', actorKind: 'human', conversationId: 'conv-op' }) =>
+    services.pluginOperations.executeApproved(owner, requester, payload, '提案の段階に進んだことを確認')
+
+  it('a stage change is APPROVAL_REQUIRED (no longer "not writable"); prepareApproval fixes the raw values before and after', async () => {
+    const id = recordOf('1000000010')
+    const n = patches()
+    expect(await person('op-member', 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' })))
+      .toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
+    const prepared = await prepare({ stage: 'final' })
+    expect(prepared).toMatchObject({
+      approver: 'self',
+      payload: { operation: 'update_deal', externalId: '1000000010', changes: [{ field: 'stage', property: 'dealstage', after: 'final', rawBefore: 'presentationscheduled', rawAfter: 'decisionmakerboughtin' }] },
+    })
+    // Every field auto: no approval needed; an off field: refused.
+    expect(await services.pluginOperations.prepareApproval(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', { expectedVersion: versionOf(id), fields: { next_step: 'x' } }))
+      .toMatchObject({ ok: false, body: { code: 'APPROVAL_NOT_NEEDED' } })
+    expect(patches()).toBe(n)
+  })
+
+  it('refuses when HubSpot\'s value changed since rawBefore — nothing sent', async () => {
+    const prepared = await prepare({ stage: 'final' })
+    fake.changeDealOutside('1000000010', { dealstage: 'qualifiedtobuy' })
+    const n = patches()
+    expect(await execute(prepared.payload)).toMatchObject({ ok: false, body: { code: 'CHANGED_OUTSIDE', current: { stage: 'qualifiedtobuy' } } })
+    expect(patches()).toBe(n)
+    fake.changeDealOutside('1000000010', { dealstage: 'presentationscheduled' })
+  })
+
+  it('refuses when the mapping version or the connection changed, or the field became off — nothing sent', async () => {
+    const n = patches()
+    const a = await prepare({ stage: 'final' })
+    expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+    expect(await execute(a.payload)).toMatchObject({ ok: false, body: { code: 'APPROVAL_STALE' } })
+    const b = await prepare({ stage: 'final' })
+    expect(await execute({ ...b.payload, connectionId: 'another-connection' })).toMatchObject({ ok: false, body: { code: 'APPROVAL_STALE' } })
+    // The field turned off under the same mapping version (only reachable by a forged plugin; the check holds anyway).
+    const real = services.plugins.active.bind(services.plugins)
+    const spy = vi.spyOn(services.plugins, 'active').mockImplementation(async (...args: Json[]) => {
+      const r = await (real as Json)(...args)
+      if (!r.ok) return r
+      const deal = r.plugin.mapping.objects.deal
+      return { ok: true, plugin: { ...r.plugin, mapping: { ...r.plugin.mapping, objects: { ...r.plugin.mapping.objects, deal: { ...deal, fields: { ...deal.fields, stage: { ...deal.fields.stage, write: false } } } } } } }
+    })
+    try {
+      expect(await execute(b.payload)).toMatchObject({ ok: false, body: { code: 'FIELD_NOT_WRITABLE' } })
+    } finally { spy.mockRestore() }
+    expect(patches()).toBe(n)
+  })
+
+  it('sends exactly the payload\'s raw values (never re-translated); the ledger actor is the requester, a decision with the approver\'s reason', async () => {
+    const prepared = await prepare({ stage: 'final' })
+    // The fixed content says which raw value goes out; a translation of `after` would give decisionmakerboughtin.
+    const payload = { ...prepared.payload, changes: [{ ...prepared.payload.changes[0], rawAfter: 'contractsent' }] }
+    const n = patches()
+    const done = await execute(payload, { userId: 'op-member', actorKind: 'ai', conversationId: 'conv-op', source: 'claude-code' })
+    expect(done.ok).toBe(true)
+    expect(done.value).toMatchObject({ kind: 'update', state: 'applied', approvedBy: 'op-owner', actorKind: 'ai' })
+    expect(patches()).toBe(n + 1)
+    expect(fake.deal('1000000010')!.properties.dealstage).toBe('contractsent')
+    const entry = services.recordEngine.history(member, recordOf('1000000010')).value.entries.find((e: Json) => e.receipt?.operationId === done.value.id)
+    expect(entry).toMatchObject({ actorId: 'op-member', actorKind: 'ai', isDecision: true, decision: { reason: '提案の段階に進んだことを確認' }, receipt: { approvedBy: 'op-owner' } })
+    fake.changeDealOutside('1000000010', { dealstage: 'presentationscheduled' })
+  })
+})
+
+describe('creates and approvals keep keys and other companies out', () => {
+  it('no key value in any operation record or ledger entry', () => {
+    const rows = JSON.stringify(db.prepare('SELECT * FROM plugin_operations').all()) + JSON.stringify(db.prepare('SELECT * FROM record_ledger').all())
+    expect(rows).not.toContain(KEY)
+    expect(rows).not.toContain('pat-fake')
   })
 })
 

@@ -116,8 +116,13 @@ export interface PluginOperationRow {
   connectionId: string
   accountId: string
   object: string
-  externalId: string
-  recordId: string
+  /** The outside object written; for a create, the object it made — null until its id is known. */
+  externalId: string | null
+  /**
+   * The record written (update) or the one a create is attached to; for a
+   * create of a record (create_deal), null until the record exists.
+   */
+  recordId: string | null
   actorId: string
   actorKind: 'human' | 'ai'
   actorSource: string | null
@@ -139,6 +144,10 @@ export interface PluginOperationRow {
   recordVersion: number | null
   createdAt: string
   updatedAt: string
+  /** A create whose answer was lost and that a person made again (「もう一度作る」): the new operation. */
+  replacedBy: string | null
+  /** The person who approved it (milestone 4, `executeApproved`); null for a direct run. */
+  approvedBy: string | null
 }
 
 /** One subject of a connection's relay read scope: a department (members who can read its folder) or a member. */
@@ -196,7 +205,10 @@ export interface PluginRepository {
   /** Record acknowledgements (replacing a field's earlier one) and a history row (one transaction). */
   addPolicyAcks(rows: PluginPolicyAckRow[], history: PluginHistoryRow): void
   insertOperation(row: PluginOperationRow): void
-  /** Move an operation on (only its state, reason, record version, undone_by change). */
-  updateOperation(id: string, changes: Partial<Pick<PluginOperationRow, 'state' | 'reason' | 'recordVersion' | 'undoneBy'>>, at: string): void
+  /**
+   * Move an operation on (only its state, reason, record version, undone_by,
+   * replaced_by change; a create's outside id and record are set once, from null).
+   */
+  updateOperation(id: string, changes: Partial<Pick<PluginOperationRow, 'state' | 'reason' | 'recordVersion' | 'undoneBy' | 'replacedBy' | 'externalId' | 'recordId'>>, at: string): void
   operation(id: string): PluginOperationRow | null
 }

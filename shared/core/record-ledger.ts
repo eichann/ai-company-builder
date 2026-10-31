@@ -105,6 +105,11 @@ export interface ExternalReceipt {
    * written: ACB's own write, confirmed by the outside system's answer.
    */
   kind: 'observed' | 'written'
+  /**
+   * Milestone 4: the person who approved the write (the actor stays the member
+   * or AI it was requested for; the entry's decision holds the approver's reason).
+   */
+  approvedBy?: string | null
 }
 
 export interface ReplayedState {

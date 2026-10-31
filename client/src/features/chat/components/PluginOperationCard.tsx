@@ -1,8 +1,8 @@
 import { memo, useState } from 'react'
 import { ArrowCounterClockwise, ArrowRight, CheckCircle, Question, Robot, Warning, XCircle } from '@phosphor-icons/react'
 import {
-  UNDO_BUTTON_LABEL, UNDO_NOTICE_FALLBACK, reconcileResultView, shownValue, undoResultView,
-  type CardActionView, type PluginCardOutcome, type PluginOperationCard as Card,
+  CREATE_UNDO_BUTTON_LABEL, CREATE_UNDO_NOTICE_FALLBACK, UNDO_BUTTON_LABEL, UNDO_NOTICE_FALLBACK, reconcileResultView, shownValue, undoResultView,
+  type CardActionView, type PluginCardField, type PluginCardOutcome, type PluginOperationCard as Card,
 } from '../../../../shared/plugin-operations'
 import { reconcilePluginOperation, undoPluginOperation } from '../api'
 
@@ -14,6 +14,25 @@ const HEADINGS: Record<PluginCardOutcome, { text: (s: string) => string; tone: '
   conflict: { text: () => '先にほかの変更がありました', tone: 'warn' },
   unknown: { text: s => `${s} に届いたか分かりません`, tone: 'warn' },
   observed: { text: () => '値は変わっていますが、確かめきれていません', tone: 'warn' },
+}
+
+/** A create (milestone 4: a meeting on a deal, a new deal): what was made, not what changed. */
+const CREATE_HEADINGS: Record<PluginCardOutcome, (s: string) => string> = {
+  applied: s => `${s} に作りました`,
+  unchanged: () => '何も作っていません',
+  refused: () => 'まだ作っていません',
+  'not-sent': s => `${s} に作れませんでした`,
+  conflict: () => '先にほかの変更がありました',
+  unknown: s => `${s} に作れたか分かりません`,
+  observed: s => `${s} にはありますが、確かめきれていません`,
+}
+
+/** A create's time (ISO) in the member's own clock. */
+function shownField(card: Card, f: PluginCardField, v: PluginCardField['after']): string {
+  if (card.kind === 'create' && f.field === 'at' && typeof v === 'string' && !Number.isNaN(Date.parse(v))) {
+    return new Date(v).toLocaleString('ja-JP', { year: 'numeric', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+  }
+  return shownValue(v)
 }
 
 const TONE_CLASS = {
@@ -38,7 +57,8 @@ function ToneIcon({ tone }: { tone: 'ok' | 'warn' | 'error' | 'plain' }) {
 export const PluginOperationCard = memo(function PluginOperationCard({ card }: { card: Card }) {
   const [busy, setBusy] = useState(false)
   const [action, setAction] = useState<CardActionView | null>(null)
-  const heading = HEADINGS[card.outcome]
+  const created = card.kind === 'create'
+  const heading = created ? { text: CREATE_HEADINGS[card.outcome], tone: HEADINGS[card.outcome].tone } : HEADINGS[card.outcome]
   const canUndo = card.outcome === 'applied' && card.undoable && !!card.operationId && !action?.done
   const canReconcile = card.outcome === 'unknown' && !!card.operationId && !action?.done
 
@@ -65,18 +85,18 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
         </span>}
       </div>
       {card.recordTitle && <p className="mt-1 text-sm text-gray-800 dark:text-zinc-200">{card.recordTitle}</p>}
-      {card.fields.length > 0 && <ul aria-label="変更した欄" className="mt-2 space-y-1">
+      {card.fields.length > 0 && <ul aria-label={created ? '作ったもの' : '変更した欄'} className="mt-2 space-y-1">
         {card.fields.map(f => <li key={f.field} className="flex flex-wrap items-center gap-1.5 text-xs text-gray-800 dark:text-zinc-200">
           <span className="text-gray-500 dark:text-zinc-400">{f.label}</span>
           {f.before !== undefined
             ? <><span>{shownValue(f.before, f.valueLabels)}</span><ArrowRight size={11} aria-hidden /><span className="sr-only">から</span><span className="font-medium">{shownValue(f.after, f.valueLabels)}</span></>
-            : <span>{card.outcome === 'unchanged' ? '' : '変えようとした値：'}<span className="font-medium">{shownValue(f.after, f.valueLabels)}</span></span>}
+            : <span>{card.outcome === 'unchanged' || created ? '' : '変えようとした値：'}<span className="font-medium">{shownField(card, f, f.after)}</span></span>}
           {f.current !== undefined && <span className="text-amber-700 dark:text-amber-400">（いまの値：{shownValue(f.current, f.valueLabels)}）</span>}
         </li>)}
       </ul>}
       <p className="mt-2 text-xs text-gray-700 dark:text-zinc-300">{card.message}</p>
       {card.reason && <p className="mt-1 text-xs text-gray-500 dark:text-zinc-400">理由：{card.reason}</p>}
-      {card.outcome === 'applied' && <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{UNDO_NOTICE_FALLBACK}</p>}
+      {card.outcome === 'applied' && <p className="mt-1 text-[11px] text-gray-500 dark:text-zinc-400">{created ? CREATE_UNDO_NOTICE_FALLBACK : UNDO_NOTICE_FALLBACK}</p>}
       {action && <div role="status" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS[action.tone]}`}>
         {action.message}
         {action.current && action.current.length > 0 && <ul className="mt-1">
@@ -86,7 +106,7 @@ export const PluginOperationCard = memo(function PluginOperationCard({ card }: {
       {(canUndo || canReconcile) && <div className="mt-2 flex flex-wrap items-center gap-2">
         {canUndo && <button type="button" disabled={busy} onClick={() => void run('undo')}
           className="flex items-center gap-1 rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">
-          <ArrowCounterClockwise size={13} aria-hidden />{busy ? '書き戻しています…' : UNDO_BUTTON_LABEL}
+          <ArrowCounterClockwise size={13} aria-hidden />{busy ? (created ? '取り消しています…' : '書き戻しています…') : card.undoLabel ?? (created ? CREATE_UNDO_BUTTON_LABEL : UNDO_BUTTON_LABEL)}
         </button>}
         {canReconcile && <button type="button" disabled={busy} onClick={() => void run('reconcile')}
           className="rounded-lg border border-gray-300 px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-100 disabled:opacity-50 dark:border-zinc-600 dark:text-zinc-200 dark:hover:bg-zinc-800">

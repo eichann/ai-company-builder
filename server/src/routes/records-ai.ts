@@ -14,11 +14,13 @@
  *
  *   GET  /plugins                         the running plugins' operations this AI may call (tools, P7)
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
- *        (refresh: read; update: act — Codex's read tokens cannot write)
+ *        (refresh: read; update and log_meeting: act — Codex's read tokens cannot write)
+ *   POST /plugins/:pluginId/create/:operation   a create of a record (create_deal; act) — never auto:
+ *        409 APPROVAL_REQUIRED until a person approves (milestone 4)
  *   GET  /plugins/:pluginId/operations/:operationId
  *
- * No undo for the AI, and nothing it can approve: a person undoes (their
- * app's screens).
+ * No undo, no 「もう一度作る」 and nothing it can approve for the AI: a person
+ * does those (their app's screens). A create is never re-sent.
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -115,6 +117,13 @@ recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation'
     return c.json({ error: 'この AI は読むことだけができます', code: 'READ_ONLY_TOKEN' }, 403)
   }
   return answer(c, await pluginOperations.run(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c)))
+})
+
+// A create of a record (create_deal; milestone 4): writes, so an act token only. Never auto: APPROVAL_REQUIRED.
+recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
+  const h = holderOf(c, 'act')
+  if (h instanceof Response) return h
+  return answer(c, await pluginOperations.createRecord(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), await jsonBody(c)))
 })
 
 recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {

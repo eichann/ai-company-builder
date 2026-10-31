@@ -27,7 +27,7 @@ import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/c
 import type { FieldKind, TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
-import { aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
+import { CREATE_CONTENT_LABELS, aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 
@@ -42,8 +42,8 @@ export interface RecordToolSpec {
   description: string
   schema: z.ZodObject<Record<string, ZodTypeAny>>
   readOnly: boolean
-  /** A connector's update: its outcome becomes a card in the reply. */
-  card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>> }
+  /** A connector's update or create: its outcome becomes a card in the reply. */
+  card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>>; kind?: 'update' | 'create' }
   /** The server call for a validated input. */
   request(input: Record<string, unknown>): { method: 'GET' | 'POST'; path: string; body?: unknown }
 }
@@ -201,10 +201,73 @@ export function pluginToolSpecs(tools: PluginAiTools, writes: boolean): RecordTo
         continue
       }
       if (!writes) continue
+      if (op.kind === 'create') {
+        specs.push(op.createsRecord
+          ? createRecordSpec(p.id, p.label, op, name, () => `/plugins/${enc(p.id)}/create/${enc(op.name)}`)
+          : attachedCreateSpec(p.id, p.label, op, name, path))
+        continue
+      }
       specs.push(updateSpec(p.id, p.label, op, name, path))
     }
   }
   return specs
+}
+
+/** What every create tool says (milestone 4): never re-sent; approval is a person's. */
+const CREATE_RULES_JA = '作る操作は送り直さない：結果が「分からない（unknown）」でも、同じものをもう一度作らない（二重になる）。メンバーに確かめてもらう。' +
+  '「承認が要る（APPROVAL_REQUIRED）」と返ったら、人が承認するまで何も作られていない。そう伝え、言い換えて作り直そうとしない。'
+const CREATE_RULES_EN = ' A create is never re-sent: when the outcome is `unknown`, do NOT call the tool again (it could make a duplicate); ask the member to check.' +
+  ' `APPROVAL_REQUIRED` means a person must approve it first: nothing was made; say so and do not try to work around it. Never claim it was created unless the outcome is `applied`.'
+
+/** A create attached to a record (log_meeting): its content slots, in ACB words. */
+function attachedCreateSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: (id: unknown) => string): RecordToolSpec {
+  const slots = new Set(op.content ?? [])
+  const shape: Record<string, ZodTypeAny> = { id }
+  if (slots.has('title')) shape.title = z.string().trim().min(1).max(200).describe('件名（例：初回商談） / the title')
+  if (slots.has('body')) shape.body = z.string().max(20_000).optional().describe('内容：要約と決まったこと / what was discussed and decided')
+  if (slots.has('at')) shape.at = z.string().regex(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d+)?)?(Z|[+-]\d{2}:\d{2})$/).describe('日時（ISO 8601、時差つき。例 2026-11-05T15:00:00+09:00） / when, ISO 8601 with offset')
+  if (slots.has('outcome')) shape.outcome = z.string().max(100).optional().describe(`結果（${system} の値。例 COMPLETED） / the outcome, as ${system} names it`)
+  shape.note = op.decision
+    ? z.string().trim().min(1).max(2000).describe('相談のどの発言からそう判断したか / the reason, citing the message it rests on')
+    : z.string().max(2000).optional()
+  const policy = op.policy === 'auto' ? 'すぐ作る（自動）' : '承認が要る（いまは断られる）'
+  return {
+    name, readOnly: false,
+    card: { pluginId, systemLabel: system, labels: CREATE_CONTENT_LABELS, valueLabels: {}, kind: 'create' },
+    schema: z.object(shape).strict(),
+    description: `「${op.label}」：この案件に ${system} の記録を1件作る（${policy}）。${CREATE_RULES_JA}結果は相談の中にカードとして出る。
+` +
+      `${name}: create one item on this record in ${system} (${op.policy === 'auto' ? 'runs at once' : 'needs approval: refused for now'}).${CREATE_RULES_EN}`,
+    request: input => ({
+      method: 'POST', path: path(input.id),
+      body: Object.fromEntries(Object.entries(input).filter(([k, v]) => k !== 'id' && v !== undefined)),
+    }),
+  }
+}
+
+/** A create of a record (create_deal): never automatic; similar existing records are shown to the person who approves. */
+function createRecordSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: () => string): RecordToolSpec {
+  const fieldShape: Record<string, ZodTypeAny> = {}
+  for (const f of op.fields) fieldShape[f.name] = kindSchema(f.kind as FieldKind, f.options).optional().describe(f.label)
+  return {
+    name, readOnly: false,
+    card: {
+      pluginId, systemLabel: system, labels: { title: '件名', ...Object.fromEntries(op.fields.map(f => [f.name, f.label])) },
+      valueLabels: Object.fromEntries(op.fields.flatMap(f => (f.optionLabels ? [[f.name, f.optionLabels]] : []))), kind: 'create',
+    },
+    schema: z.object({
+      title: z.string().trim().min(1).max(200).describe('件名 / the title'),
+      fields: z.object(fieldShape).strict().optional().describe('最初に入れる欄（ACB の言葉） / initial fields, ACB values'),
+      note: z.string().max(2000).optional().describe('なぜ作るか（相談の発言を示す） / why, citing the consultation'),
+    }).strict(),
+    description: `「${op.label}」：${system} に新しく作る。必ず人の承認が要る（いまは承認を頼めないため断られる）。作る前に、似たものがすでに無いか records_query で探し、メンバーに確かめる。${CREATE_RULES_JA}
+` +
+      `${name}: create a new one in ${system}. Always needs a person's approval (refused for now). First look for similar existing records with records_query and ask the member.${CREATE_RULES_EN}`,
+    request: input => ({
+      method: 'POST', path: path(),
+      body: { title: input.title, fields: Object.fromEntries(Object.entries((input.fields ?? {}) as Record<string, unknown>).filter(([, v]) => v !== undefined)), ...(input.note !== undefined ? { note: input.note } : {}) },
+    }),
+  }
 }
 
 function updateSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: (id: unknown) => string): RecordToolSpec {
@@ -314,13 +377,18 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     },
   }
 
-  /** A connector's update: the server's answer becomes a card, and the AI is told only what is known. */
+  /** A connector's update or create: the server's answer becomes a card, and the AI is told only what is known. */
   async function runUpdate(card: NonNullable<RecordToolSpec['card']>, input: Record<string, unknown>, req: ReturnType<RecordToolSpec['request']>): Promise<string> {
-    const body = req.body as { fields: Record<string, CardContext['asked'][string]>; note?: string }
+    type Value = CardContext['asked'][string]
+    const body = req.body as { fields?: Record<string, Value>; note?: string; title?: string; at?: string; outcome?: string }
+    // An update asks for fields; a create carries its title and time (and, for a new record, its fields).
+    const asked: Record<string, Value> = card.kind === 'create'
+      ? Object.fromEntries(Object.entries({ title: body.title, at: body.at, outcome: body.outcome, ...(body.fields ?? {}) }).filter(([, v]) => v !== undefined)) as Record<string, Value>
+      : body.fields ?? {}
     const ctx: CardContext = {
       id: newId(), companyId: options.companyId ?? '', conversationId: options.conversationId ?? null, pluginId: card.pluginId, systemLabel: card.systemLabel,
-      recordId: String(input.id), labels: card.labels, valueLabels: card.valueLabels, asked: body.fields, reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
-      byAi: true, at: now().toISOString(),
+      recordId: typeof input.id === 'string' ? input.id : '', labels: card.labels, valueLabels: card.valueLabels, asked, reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
+      byAi: true, at: now().toISOString(), ...(card.kind === 'create' ? { kind: 'create' as const } : {}),
     }
     let result: PluginOperationCard
     try {

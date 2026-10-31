@@ -162,12 +162,21 @@ export type PluginFieldValue = string | number | boolean | null
 export interface PluginOperationRecordView {
   id: string
   operation: string
-  recordId: string
+  /**
+   * The record written, or the one a create is attached to (log_meeting: the
+   * deal); for a create of a record (create_deal), null until it exists.
+   */
+  recordId: string | null
+  /** update / create (milestone 4) / undo (also the archive of a create). */
+  kind: 'update' | 'create' | 'undo'
   /** The record's title now (null when it has none). */
   recordTitle: string | null
   /** pending / sent-unknown / external-ok / applied / observed / failed. */
   state: 'pending' | 'sent-unknown' | 'external-ok' | 'applied' | 'observed' | 'failed'
-  /** The ACB fields and values asked for. */
+  /**
+   * The ACB fields and values asked for; for a create, what it carries in ACB
+   * words (log_meeting: `title`, `at`, `body`, `outcome`; create_deal: `title` and its fields).
+   */
   fields: Record<string, PluginFieldValue>
   /** For an applied write: each field's value before → after, from its ledger entry. */
   changes: Array<{ field: string; before: PluginFieldValue; after: PluginFieldValue }> | null
@@ -177,12 +186,24 @@ export interface PluginOperationRecordView {
   actorKind: 'human' | 'ai'
   /** Why it is in its state (`rate-limited`, `not-observed`, `observed-actor-unknown`, …); not the AI's note. */
   reason: string | null
-  /** Only an applied update (ACB's own confirmed write) not undone yet. */
+  /**
+   * Only an applied update or create (ACB's own confirmed write — for a create
+   * also one found again by its correlation value) not undone yet.
+   */
   undoable: boolean
   undoLabel: string
   undoNotice: string
   undoOf: string | null
   undoneBy: string | null
+  /** A create made again after a lost answer (「もう一度作る」): the new operation. */
+  replacedBy: string | null
+  /**
+   * A create whose answer was lost and which reconciling did not find: a person
+   * may make it again (「もう一度作る」, with a warning; a new operation).
+   */
+  recreatable: boolean
+  /** Approved by a person (milestone 4) — their id; null for a direct run. */
+  approvedBy: string | null
   recordVersion: number | null
   createdAt: string
 }
@@ -196,7 +217,7 @@ export interface PluginAiField {
   options?: string[]
   /** How the options are shown to people (value → label), when the type says. */
   optionLabels?: Record<string, string>
-  /** `auto` writes at once; `prior` is refused in milestone 3 (a person approves first). `off` fields are not listed. */
+  /** `auto` writes at once; `prior` needs a person's approval (refused with APPROVAL_REQUIRED for now). `off` fields are not listed. */
   policy: 'auto' | 'prior'
 }
 
@@ -204,13 +225,19 @@ export interface PluginAiField {
 export interface PluginAiOperation {
   name: string
   label: string
-  kind: 'read' | 'update'
-  /** The ACB record type the operation acts on. */
+  kind: 'read' | 'update' | 'create'
+  /** The ACB record type the operation acts on (a create attached to a record: that record's type; a create of a record: the new one's). */
   recordType: string
   /** The AI must give a reason (drafted from the consultation, citing its basis). */
   decision: boolean
-  /** For an update: the fields it may write now (none `off`). */
+  /** For an update, and a create of a record: the fields it may write now (none `off`). */
   fields: PluginAiField[]
+  /** A create (milestone 4): its policy now — `auto` runs at once, `prior` needs a person's approval. */
+  policy?: 'auto' | 'prior'
+  /** A create attached to a record (log_meeting): the content slots it takes (`title`, `body`, `at`, `outcome`). */
+  content?: string[]
+  /** A create that makes a new record (create_deal): no record id is given. */
+  createsRecord?: boolean
 }
 
 /** The company's running connector plugins, as the member's AI may use them (GET /api/records-ai/plugins). */

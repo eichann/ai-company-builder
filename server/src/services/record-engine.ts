@@ -541,6 +541,11 @@ export interface ExternalRecordInput {
   actor?: { id: string; kind: 'human' | 'ai'; source: string | null; conversationId: string | null; proposedBy?: 'ai' | null }
   /** P6: the operation is a decision (`decision: true`): the note is its reason, kept in the entry. */
   decision?: boolean
+  /**
+   * Milestone 4: write the entry even when no field changes (a meeting logged
+   * on a deal in the outside system: the record's ledger notes it, with its receipt).
+   */
+  entryWithoutChanges?: boolean
 }
 
 export type ExternalRecordResult =
@@ -589,7 +594,8 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         ]
         const entry: LedgerEntry = {
           recordId: id, version: 1, action: 'create', fromState: null, toState: def.initial, actorId: actor.id, actorKind: actor.kind,
-          actorSource: actor.source, at, note: input.note ?? '', changes, attachments: [], decision: null, isDecision: false,
+          actorSource: actor.source, at, note: input.note ?? '', changes, attachments: [],
+          decision: input.decision ? { reason: input.note ?? '', materials: [], policyVersion: null, precedents: [], supersedes: null } : null, isDecision: input.decision === true,
           typeVersion: def.version, reversesVersion: null, proposedBy: null, conversationId: actor.conversationId, receipt: input.receipt,
         }
         deps.transactions.run(() => {
@@ -626,7 +632,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         if (titleChanged) records.upsert({ ...row, title: title as string, updatedAt: at })
         if (linksChanged) records.replaceLinks(row.id, [...records.linksFrom([row.id]).filter(l => !(l.name in input.links)), ...wanted])
       }
-      if (changes.length === 0) {
+      if (changes.length === 0 && !input.entryWithoutChanges) {
         if (titleChanged || linksChanged) deps.transactions.run(sideEffects)
         return { ok: true, recordId: row.id, version, created: false, changed: false, entry: null, problems }
       }

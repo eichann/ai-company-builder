@@ -648,7 +648,11 @@ export function initDatabase(conn: Database.Database = sqlite) {
     -- 操作の控え (P6): one row per write a plugin's typed operation makes, written
     -- BEFORE it is sent. state: pending → sent-unknown | failed | external-ok → applied,
     -- or observed (the intended values were seen, but whether ACB's write made them is
-    -- not known: never undoable). Everything needed to undo is fixed at operation time:
+    -- not known: never undoable). Milestone 4 creates (log_meeting, create_deal): external_id is
+    -- the created object's id, set once it is known (null before); record_id is null for a
+    -- create of a record until the record exists (then set once); replaced_by = the operation
+    -- that made it again after a lost answer (「もう一度作る」); approved_by = the person who
+    -- approved it (executeApproved). Everything needed to undo is fixed at operation time:
     -- the package version / fingerprint, mapping version, connection and account, the
     -- outside properties written and their raw previous values (review §6.1).
     CREATE TABLE IF NOT EXISTS plugin_operations (
@@ -662,8 +666,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
       connection_id TEXT NOT NULL,
       account_id TEXT NOT NULL,
       object TEXT NOT NULL,
-      external_id TEXT NOT NULL,
-      record_id TEXT NOT NULL,
+      external_id TEXT,
+      record_id TEXT,
       actor_id TEXT NOT NULL,
       actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'ai')),
       actor_source TEXT,
@@ -678,6 +682,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
       record_version INTEGER,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
+      replaced_by TEXT,
+      approved_by TEXT,
       PRIMARY KEY (company_id, id),
       FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
     );
@@ -723,6 +729,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
   migratePluginInstallKeyReference(conn)
+  migratePluginOperationCreates(conn)
   migratePluginTables(conn)
   migrateRecordTypeSources(conn)
   // Before the seeding below: it deletes stale manager rows per company.
@@ -884,14 +891,18 @@ export function migratePluginTables(conn: Database.Database): void {
     WHEN NEW.company_id IS NOT OLD.company_id OR NEW.record_id IS NOT OLD.record_id OR NEW.connection_id IS NOT OLD.connection_id OR NEW.account_id IS NOT OLD.account_id
     BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
 
+    -- A record (when named) of the same company; a create of a record names it once it exists.
     CREATE TRIGGER IF NOT EXISTS plugin_operations_record_insert BEFORE INSERT ON plugin_operations
-    WHEN NOT EXISTS (SELECT 1 FROM records WHERE company_id = NEW.company_id AND id = NEW.record_id)
+    WHEN NEW.record_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM records WHERE company_id = NEW.company_id AND id = NEW.record_id)
     BEGIN SELECT RAISE(ABORT, 'plugin_operations needs a record of the same company'); END;
 
-    CREATE TRIGGER IF NOT EXISTS plugin_operations_company_update BEFORE UPDATE OF company_id, record_id, connection_id, account_id, written, previous ON plugin_operations
-    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.record_id IS NOT OLD.record_id OR NEW.connection_id IS NOT OLD.connection_id
+    -- Record and outside object: set once (from null), never changed; the rest never changes.
+    CREATE TRIGGER IF NOT EXISTS plugin_operations_company_update BEFORE UPDATE OF company_id, record_id, external_id, connection_id, account_id, written, previous ON plugin_operations
+    WHEN NEW.company_id IS NOT OLD.company_id OR (OLD.record_id IS NOT NULL AND NEW.record_id IS NOT OLD.record_id)
+      OR (OLD.external_id IS NOT NULL AND NEW.external_id IS NOT OLD.external_id) OR NEW.connection_id IS NOT OLD.connection_id
       OR NEW.account_id IS NOT OLD.account_id OR NEW.written IS NOT OLD.written OR NEW.previous IS NOT OLD.previous
-    BEGIN SELECT RAISE(ABORT, 'an operation record keeps its company, record, connection and values'); END;
+      OR (NEW.record_id IS NOT NULL AND NOT EXISTS (SELECT 1 FROM records WHERE company_id = NEW.company_id AND id = NEW.record_id))
+    BEGIN SELECT RAISE(ABORT, 'an operation record keeps its company, record, outside object, connection and values'); END;
 
     CREATE TRIGGER IF NOT EXISTS plugin_history_company_update BEFORE UPDATE OF company_id ON plugin_history
     WHEN NEW.company_id IS NOT OLD.company_id
@@ -946,6 +957,66 @@ export function migratePluginInstallKeyReference(conn: Database.Database): void 
   } finally {
     if (fk) conn.pragma('foreign_keys = ON')
   }
+}
+
+/**
+ * plugin_operations for milestone 4's creates (plugins.md "Creates"): record_id
+ * and external_id may be null until known, plus replaced_by / approved_by. A
+ * table made before is rebuilt once with its rows (its triggers go with it and
+ * are recreated, in their milestone 4 form, by migratePluginTables right
+ * after). Idempotent.
+ */
+export function migratePluginOperationCreates(conn: Database.Database): void {
+  const columns = conn.pragma('table_info(plugin_operations)') as Array<{ name: string }>
+  if (columns.length === 0 || columns.some(c => c.name === 'replaced_by')) return
+  conn.transaction(() => {
+    conn.pragma('defer_foreign_keys = ON')
+    conn.exec(`
+      DROP TRIGGER IF EXISTS plugin_operations_record_insert;
+      DROP TRIGGER IF EXISTS plugin_operations_company_update;
+      CREATE TABLE plugin_operations_rebuilt (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        id TEXT NOT NULL,
+        plugin_id TEXT NOT NULL,
+        operation TEXT NOT NULL,
+        plugin_version TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        mapping_version INTEGER NOT NULL,
+        connection_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        object TEXT NOT NULL,
+        external_id TEXT,
+        record_id TEXT,
+        actor_id TEXT NOT NULL,
+        actor_kind TEXT NOT NULL CHECK (actor_kind IN ('human', 'ai')),
+        actor_source TEXT,
+        conversation_id TEXT,
+        state TEXT NOT NULL CHECK (state IN ('pending', 'sent-unknown', 'external-ok', 'applied', 'observed', 'failed')),
+        fields TEXT NOT NULL,
+        written TEXT NOT NULL,
+        previous TEXT NOT NULL,
+        reason TEXT,
+        undo_of TEXT,
+        undone_by TEXT,
+        record_version INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        replaced_by TEXT,
+        approved_by TEXT,
+        PRIMARY KEY (company_id, id),
+        FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
+      );
+      INSERT INTO plugin_operations_rebuilt (company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id,
+        object, external_id, record_id, actor_id, actor_kind, actor_source, conversation_id, state, fields, written, previous, reason, undo_of, undone_by,
+        record_version, created_at, updated_at)
+        SELECT company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id,
+          object, external_id, record_id, actor_id, actor_kind, actor_source, conversation_id, state, fields, written, previous, reason, undo_of, undone_by,
+          record_version, created_at, updated_at FROM plugin_operations;
+      DROP TABLE plugin_operations;
+      ALTER TABLE plugin_operations_rebuilt RENAME TO plugin_operations;
+      CREATE INDEX IF NOT EXISTS idx_plugin_operations_record ON plugin_operations(company_id, record_id, created_at);
+    `)
+  })()
 }
 
 /**

@@ -13,7 +13,11 @@
  * - 「変更前の値を書き戻す」 goes with the person's session (never a record
  *   token), with the consultation as provenance;
  * - an undo answer that is lost or refused never reads as done; the card
- *   survives a restart (stored with the message).
+ *   survives a restart (stored with the message);
+ * - creates (milestone 4): Claude gets `hubspot__log_meeting` /
+ *   `hubspot__create_deal`, Codex neither; a create whose answer is unknown
+ *   tells the AI never to call it again; APPROVAL_REQUIRED says a person must
+ *   approve and nothing was made; the card shows what was made (title, time).
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -36,6 +40,10 @@ const PLUGINS: PluginAiTools = {
         { name: 'next_step', label: '次のアクション', kind: 'text', policy: 'auto' },
         { name: 'amount', label: '金額', kind: 'number', policy: 'prior' },
       ] },
+      { name: 'log_meeting', label: '商談の記録を残す', kind: 'create', recordType: 'deal', decision: false, fields: [], policy: 'auto', content: ['title', 'body', 'at', 'outcome'], createsRecord: false },
+      { name: 'create_deal', label: '取引を新しく作る', kind: 'create', recordType: 'deal', decision: false, policy: 'prior', createsRecord: true, fields: [
+        { name: 'amount', label: '金額', kind: 'number', policy: 'prior' },
+      ] },
     ],
   }],
 }
@@ -45,6 +53,7 @@ const opView = (over: Partial<PluginOperationRecordView> = {}): PluginOperationR
   fields: { confidence: 'A', next_step: '11/7 デモ' },
   changes: [{ field: 'confidence', before: 'B', after: 'A' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }], valueLabels: {},
   actorKind: 'ai', reason: null, undoable: true, undoLabel: '変更前の値を書き戻す', undoNotice: 'x', undoOf: null, undoneBy: null, recordVersion: 8, createdAt: 't',
+  kind: 'update', replacedBy: null, recreatable: false, approvedBy: null,
   ...over,
 })
 
@@ -61,7 +70,7 @@ function fakeServer(scope: 'read' | 'act', operation: () => { status: number; bo
     if (url.endsWith('/api/records-ai/types')) return json(200, { types: [] })
     // Offers the write even to a read token: the app must not turn it into a tool for Codex.
     if (url.endsWith('/api/records-ai/plugins')) return json(200, PLUGINS)
-    if (url.includes('/operations/update_deal')) {
+    if (url.includes('/operations/update_deal') || url.includes('/operations/log_meeting') || url.includes('/create/create_deal')) {
       const r = operation()
       if (r === 'network-error') throw new TypeError('fetch failed')
       return new Response(JSON.stringify(r.body), { status: r.status })
@@ -218,4 +227,74 @@ test('the card is stored with the reply and comes back after a restart', async (
   assert.deepEqual(readPluginOperationCard(part.data), cards[0])
   // Malformed stored data is dropped, not shown.
   assert.equal(readPluginOperationCard({ ...cards[0], outcome: 'done' }), undefined)
+})
+
+const meetingAsk = { id: 'deal-8f3a2c01', title: '初回商談', body: '先方は前向き。', at: '2026-11-05T15:00:00+09:00', outcome: 'COMPLETED' }
+const meetingView = (over: Partial<PluginOperationRecordView> = {}) => opView({
+  operation: 'log_meeting', kind: 'create', changes: null, fields: { title: '初回商談', body: '先方は前向き。', at: '2026-11-05T06:00:00.000Z', outcome: 'COMPLETED' },
+  undoLabel: '作ったものを取り消す', ...over,
+})
+
+test('creates: Claude gets the meeting and the new-deal tools (record token); Codex neither', async () => {
+  const act = await turn('act')
+  const meeting = act.tools.specs.find(s => s.name === 'hubspot__log_meeting')!
+  const deal = act.tools.specs.find(s => s.name === 'hubspot__create_deal')!
+  assert.ok(meeting && !meeting.readOnly && deal && !deal.readOnly)
+  for (const d of [meeting.description, deal.description]) {
+    assert.match(d, /送り直さない/)
+    assert.match(d, /APPROVAL_REQUIRED/)
+  }
+  const names = (await turn('read')).tools.specs.map(s => s.name)
+  assert.ok(!names.includes('hubspot__log_meeting') && !names.includes('hubspot__create_deal'))
+
+  await act.tools.execute('hubspot__log_meeting', meetingAsk)
+  const call = act.seen.find(s => s.url.includes('/operations/log_meeting'))!
+  assert.equal(call.url, 'https://acb.example.jp/api/records-ai/plugins/hubspot/records/deal-8f3a2c01/operations/log_meeting')
+  assert.equal(call.headers.Authorization, `Bearer ${TOKEN}`)
+  assert.deepEqual(JSON.parse(call.body!), { title: '初回商談', body: '先方は前向き。', at: '2026-11-05T15:00:00+09:00', outcome: 'COMPLETED' })
+  // A time without an offset is refused before anything is sent.
+  const before = act.seen.length
+  assert.equal(JSON.parse(await act.tools.execute('hubspot__log_meeting', { ...meetingAsk, at: '2026-11-05 15:00' })).error, '入力が正しくありません。')
+  assert.equal(act.seen.length, before)
+})
+
+test('a created meeting: the card shows its title and time (not the body), with 「作ったものを取り消す」', async () => {
+  const { tools, cards } = await turn('act', () => ({ status: 200, body: { success: true, data: { operation: meetingView(), record: { id: 'deal-8f3a2c01', version: 9 } } } }))
+  const told = JSON.parse(await tools.execute('hubspot__log_meeting', meetingAsk))
+  assert.equal(told.outcome, 'applied')
+  assert.match(told.instruction, /Created and confirmed/)
+  assert.equal(cards[0].kind, 'create')
+  assert.equal(cards[0].undoLabel, '作ったものを取り消す')
+  assert.match(cards[0].message, /作りました/)
+  assert.deepEqual(cards[0].fields.map(f => [f.label, f.after]), [['件名', '初回商談'], ['日時', '2026-11-05T06:00:00.000Z'], ['結果', 'COMPLETED']])
+  assert.deepEqual(readPluginOperationCard(JSON.parse(JSON.stringify(cards[0]))), cards[0])
+})
+
+test('a create whose answer is unknown: never "created", and the AI must not call it again', async () => {
+  for (const operation of [
+    () => 'network-error' as const,
+    () => ({ status: 200, body: { success: true, data: { operation: meetingView({ state: 'sent-unknown', reason: 'too-early', undoable: false }), record: null } } }),
+  ]) {
+    const { tools, cards } = await turn('act', operation)
+    const told = JSON.parse(await tools.execute('hubspot__log_meeting', meetingAsk))
+    assert.equal(told.outcome, 'unknown')
+    assert.match(told.instruction, /NEVER call the tool again/)
+    assert.match(cards[0].message, /HubSpot で確かめてください/)
+    assert.ok(!cards[0].message.includes('作りました'))
+    assert.equal(cards[0].undoable, false)
+  }
+})
+
+test('a new deal needs approval: nothing made, the AI is told a person must approve; the card keeps no record id', async () => {
+  const { tools, cards, seen } = await turn('act', () => ({ status: 409, body: { error: 'この操作は承認が必要です。承認されるまで何も送っていません', code: 'APPROVAL_REQUIRED' } }))
+  const told = JSON.parse(await tools.execute('hubspot__create_deal', { title: 'AI 研修（例示製作所）', fields: { amount: 1200000 } }))
+  const call = seen.find(s => s.url.includes('/create/create_deal'))!
+  assert.equal(call.url, 'https://acb.example.jp/api/records-ai/plugins/hubspot/create/create_deal')
+  assert.deepEqual(JSON.parse(call.body!), { title: 'AI 研修（例示製作所）', fields: { amount: 1200000 } })
+  assert.equal(told.outcome, 'refused')
+  assert.match(told.instruction, /a person must approve/)
+  assert.equal(cards[0].needsApproval, true)
+  assert.match(cards[0].message, /^作っていません。/)
+  assert.equal(cards[0].recordId, '')
+  assert.deepEqual(readPluginOperationCard(JSON.parse(JSON.stringify(cards[0]))), cards[0])
 })

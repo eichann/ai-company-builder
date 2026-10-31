@@ -11,6 +11,12 @@ import type { PluginFieldValue, PluginOperationRecordView } from '../../shared/t
  * The outcome says only what is known (review §5.6): a write whose answer was
  * lost is `unknown`, a value seen in the outside system but not confirmed as
  * ACB's write is `observed`; neither is called a success.
+ *
+ * Milestone 4 adds creates (`hubspot__log_meeting`, `hubspot__create_deal`):
+ * the card (`kind: 'create'`) shows what was made (title, time); a create
+ * whose answer was lost is never re-sent — 「HubSpot で確かめてください」 and
+ * 「もう一度確かめる」 (the server looks it up by ACB's correlation value); one
+ * that needs approval says nothing was made yet.
  */
 export const PLUGIN_OPERATION_PART_TYPE = 'data-plugin-operation'
 
@@ -64,11 +70,22 @@ export interface PluginOperationCard {
   byAi: boolean
   undoable: boolean
   at: string
+  /** update (default) or create (milestone 4). */
+  kind?: 'update' | 'create'
+  /** The server's word for undoing it (a create: 「作ったものを取り消す」). */
+  undoLabel?: string
+  /** Refused because a person must approve it first (APPROVAL_REQUIRED): nothing was sent. */
+  needsApproval?: boolean
 }
 
 /** What the card always says next to an applied write (the server's UNDO_NOTICE, review §5.4). */
 export const UNDO_NOTICE_FALLBACK = 'HubSpot のワークフローや通知など、変更のあとに HubSpot 側で起きたことは元に戻りません。'
 export const UNDO_BUTTON_LABEL = '変更前の値を書き戻す'
+/** Next to a create ACB made (the server's CREATE_UNDO_NOTICE). */
+export const CREATE_UNDO_NOTICE_FALLBACK = 'HubSpot のごみ箱に移します。作ったあとに HubSpot 側で起きたこと（ワークフローや通知など）は元に戻りません。'
+export const CREATE_UNDO_BUTTON_LABEL = '作ったものを取り消す'
+/** The labels of a create's content (ACB words of `log_meeting`'s slots). */
+export const CREATE_CONTENT_LABELS: Record<string, string> = { title: '件名', at: '日時', body: '内容', outcome: '結果' }
 
 const REFUSAL_NOT_SENT = new Set(['WRITE_FAILED', 'OUTSIDE_UNAVAILABLE'])
 const REFUSAL_CONFLICT = new Set(['VERSION_CONFLICT', 'CHANGED_OUTSIDE'])
@@ -108,6 +125,21 @@ export function outcomeMessage(outcome: PluginCardOutcome, system: string, state
   }
 }
 
+/** The plain-Japanese line for a create's outcome (milestone 4). */
+export function createOutcomeMessage(outcome: PluginCardOutcome, system: string, reason?: string | null): string {
+  switch (outcome) {
+    case 'applied': return `${system} に作りました。`
+    case 'unchanged': return '何も作っていません。'
+    case 'refused': return 'まだ作っていません。'
+    case 'not-sent': return `${system} に作れませんでした。何も作っていません。`
+    case 'conflict': return '先にほかの変更があったため、作っていません。'
+    case 'unknown': return reason === 'not-found'
+      ? `${system} で見つかりませんでした（無いとは限りません）。自動で作り直すことはしません。${system} で確かめてください。`
+      : `${system} に作れたか分かりません。自動で作り直すことはしません。${system} で確かめてください（「もう一度確かめる」でも確かめられます）。`
+    case 'observed': return `${system} にはありますが、ACB が作ったとは確かめられませんでした。`
+  }
+}
+
 /** Server sentences are Japanese; an English one is a request-shape message meant for the AI, not the member. */
 const forMember = (text: string | undefined): string | null => text && /[぀-ヿ一-鿿]/.test(text) ? text : null
 
@@ -126,9 +158,12 @@ export interface CardContext {
   reason: string | null
   byAi: boolean
   at: string
+  /** update (default) or create. */
+  kind?: 'update' | 'create'
 }
 
 const label = (ctx: Pick<CardContext, 'labels'>, field: string) => ctx.labels[field] ?? field
+const isCreate = (ctx: Pick<CardContext, 'kind'>) => ctx.kind === 'create'
 
 /** A card field with its label and, for a choice, how its values are shown. */
 function cardField(ctx: Pick<CardContext, 'labels' | 'valueLabels'>, field: string, values: Omit<PluginCardField, 'field' | 'label' | 'valueLabels'>, server?: Record<string, Record<string, string>>): PluginCardField {
@@ -139,16 +174,25 @@ function cardField(ctx: Pick<CardContext, 'labels' | 'valueLabels'>, field: stri
 /** The card for a successful answer of the server (`{ operation, record }`). */
 export function cardFromAnswer(ctx: CardContext, answer: { operation: PluginOperationRecordView | null; record?: { id: string } }): PluginOperationCard {
   const op = answer.operation
-  const base = { id: ctx.id, companyId: ctx.companyId, conversationId: ctx.conversationId, pluginId: ctx.pluginId, systemLabel: ctx.systemLabel, recordId: ctx.recordId, reason: ctx.reason, byAi: ctx.byAi, at: ctx.at }
+  const base = {
+    id: ctx.id, companyId: ctx.companyId, conversationId: ctx.conversationId, pluginId: ctx.pluginId, systemLabel: ctx.systemLabel, recordId: ctx.recordId,
+    reason: ctx.reason, byAi: ctx.byAi, at: ctx.at, ...(isCreate(ctx) ? { kind: 'create' as const } : {}),
+  }
   if (!op) {
-    return { ...base, recordTitle: null, outcome: 'unchanged', message: outcomeMessage('unchanged', ctx.systemLabel), operationId: null, undoable: false,
+    return { ...base, recordTitle: null, outcome: 'unchanged', message: isCreate(ctx) ? createOutcomeMessage('unchanged', ctx.systemLabel) : outcomeMessage('unchanged', ctx.systemLabel), operationId: null, undoable: false,
       fields: Object.entries(ctx.asked).map(([field, after]) => cardField(ctx, field, { after })) }
   }
   const outcome = stateOutcome(op.state)
-  const fields: PluginCardField[] = op.changes
+  // A create shows what it carries (title, time…), never its long body.
+  const created = isCreate(ctx) || op.kind === 'create'
+  const fields: PluginCardField[] = op.changes && !created
     ? op.changes.map(c => cardField(ctx, c.field, { before: c.before, after: c.after }, op.valueLabels))
-    : Object.entries(op.fields).map(([field, after]) => cardField(ctx, field, { after }, op.valueLabels))
-  return { ...base, recordTitle: op.recordTitle, outcome, message: outcomeMessage(outcome, ctx.systemLabel, op.state), operationId: op.id, undoable: op.undoable, fields }
+    : Object.entries(op.fields).filter(([field]) => !created || field !== 'body').map(([field, after]) => cardField(ctx, field, { after }, op.valueLabels))
+  const message = created ? createOutcomeMessage(outcome, ctx.systemLabel, op.reason) : outcomeMessage(outcome, ctx.systemLabel, op.state)
+  return {
+    ...base, ...(created ? { kind: 'create' as const, undoLabel: op.undoLabel } : {}), recordId: op.recordId ?? ctx.recordId,
+    recordTitle: op.recordTitle, outcome, message, operationId: op.id, undoable: op.undoable, fields,
+  }
 }
 
 /** The card for a refusal (or a failure to reach the server). */
@@ -157,11 +201,16 @@ export function cardFromRefusal(ctx: CardContext, code: string, error: string | 
   const operation = details.operation as PluginOperationRecordView | undefined
   const current = details.current && typeof details.current === 'object' ? details.current as Record<string, PluginFieldValue> : {}
   const said = outcome === 'refused' || outcome === 'conflict' ? forMember(error) : null
-  const message = outcome === 'refused' && said ? `変更しませんでした。${said}` : outcomeMessage(outcome, ctx.systemLabel)
+  const created = isCreate(ctx)
+  const message = outcome === 'refused' && said
+    ? `${created ? '作っていません' : '変更しませんでした'}。${said}`
+    : created ? createOutcomeMessage(outcome, ctx.systemLabel) : outcomeMessage(outcome, ctx.systemLabel)
   return {
     id: ctx.id, companyId: ctx.companyId, conversationId: ctx.conversationId, pluginId: ctx.pluginId, systemLabel: ctx.systemLabel, recordId: ctx.recordId,
     recordTitle: operation?.recordTitle ?? null, outcome, message, operationId: operation?.id ?? null, reason: ctx.reason, byAi: ctx.byAi, undoable: false, at: ctx.at,
-    fields: Object.entries(ctx.asked).map(([field, after]) => cardField(ctx, field, { after, ...(field in current ? { current: current[field] } : {}) }, operation?.valueLabels)),
+    ...(created ? { kind: 'create' as const } : {}), ...(code === 'APPROVAL_REQUIRED' ? { needsApproval: true } : {}),
+    fields: Object.entries(ctx.asked).filter(([field]) => !created || field !== 'body')
+      .map(([field, after]) => cardField(ctx, field, { after, ...(field in current ? { current: current[field] } : {}) }, operation?.valueLabels)),
   }
 }
 
@@ -179,6 +228,13 @@ export function aiSummaryOf(card: PluginOperationCard): Record<string, unknown> 
     unknown: 'Result UNKNOWN: it may or may not have been written. Do NOT say it succeeded and do NOT send it again; tell the member to check.',
     observed: 'The outside system shows these values, but ACB cannot confirm it wrote them. Do NOT say it succeeded.',
   }
+  let told1 = told[card.outcome]
+  if (card.needsApproval) {
+    told1 = 'Not done: a person must approve this first (APPROVAL_REQUIRED). Nothing was sent. Tell the member it needs approval; do not retry or work around it.'
+  } else if (card.kind === 'create') {
+    if (card.outcome === 'applied') told1 = 'Created and confirmed. Tell the member it was created; a person can press 「作ったものを取り消す」 on the card.'
+    if (card.outcome === 'unknown') told1 = 'Result UNKNOWN: it may or may not have been created. Do NOT say it was created and NEVER call the tool again for it (that could make a duplicate); tell the member to check in the outside system or press 「もう一度確かめる」.'
+  }
   // Values as the member sees them on the card (「A（高）」, not `a`); the raw value stays for the next call.
   const fields = card.fields.map(f => ({
     field: f.field, label: f.label,
@@ -187,7 +243,7 @@ export function aiSummaryOf(card: PluginOperationCard): Record<string, unknown> 
     ...(f.current !== undefined ? { current: f.current, currentShown: shownValue(f.current, f.valueLabels) } : {}),
   }))
   return {
-    outcome: card.outcome, message: card.message, instruction: `${told[card.outcome]} Say the values as shown (…Shown) and call the record by its title; keep ids out of the reply unless asked.`,
+    outcome: card.outcome, message: card.message, instruction: `${told1} Say the values as shown (…Shown) and call the record by its title; keep ids out of the reply unless asked.`,
     recordTitle: card.recordTitle, operationId: card.operationId, fields,
   }
 }
@@ -200,7 +256,8 @@ const str = (v: unknown, max: number): v is string => typeof v === 'string' && v
 export function readPluginOperationCard(data: unknown): PluginOperationCard | undefined {
   if (!data || typeof data !== 'object') return undefined
   const d = data as Record<string, unknown>
-  if (!str(d.id, 200) || !str(d.companyId, 200) || !str(d.pluginId, 40) || !str(d.systemLabel, 100) || !str(d.recordId, 80) || !str(d.message, 2000) || !str(d.at, 40)) return undefined
+  // recordId may be empty: a create of a record that was not made.
+  if (!str(d.id, 200) || !str(d.companyId, 200) || !str(d.pluginId, 40) || !str(d.systemLabel, 100) || typeof d.recordId !== 'string' || d.recordId.length > 80 || !str(d.message, 2000) || !str(d.at, 40)) return undefined
   if (!OUTCOMES.has(d.outcome as PluginCardOutcome) || !Array.isArray(d.fields) || d.fields.length > 30) return undefined
   const fields: PluginCardField[] = []
   for (const f of d.fields as unknown[]) {
@@ -222,6 +279,9 @@ export function readPluginOperationCard(data: unknown): PluginOperationCard | un
     recordId: d.recordId, recordTitle: typeof d.recordTitle === 'string' ? d.recordTitle : null, outcome: d.outcome as PluginCardOutcome, message: d.message,
     operationId: typeof d.operationId === 'string' && d.operationId.length <= 100 ? d.operationId : null, fields,
     reason: typeof d.reason === 'string' ? d.reason.slice(0, 2000) : null, byAi: d.byAi === true, undoable: d.undoable === true, at: d.at,
+    ...(d.kind === 'create' ? { kind: 'create' as const } : {}),
+    ...(typeof d.undoLabel === 'string' && d.undoLabel.length > 0 && d.undoLabel.length <= 40 ? { undoLabel: d.undoLabel } : {}),
+    ...(d.needsApproval === true ? { needsApproval: true } : {}),
   }
 }
 
@@ -243,13 +303,13 @@ export interface CardActionView {
 }
 
 /** The undo's answer, in the card's words. */
-export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | 'fields'>, result: PluginOperationResult): CardActionView {
+export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | 'fields' | 'kind'>, result: PluginOperationResult): CardActionView {
   const sys = card.systemLabel
   const labelOf = (field: string) => card.fields.find(f => f.field === field)?.label ?? field
   const shownOf = (field: string, value: PluginFieldValue) => shownValue(value, card.fields.find(f => f.field === field)?.valueLabels)
   if (result.success) {
     const op = result.operation
-    if (op.state === 'applied') return { done: true, tone: 'ok', message: `変更前の値を ${sys} に書き戻しました。` }
+    if (op.state === 'applied') return { done: true, tone: 'ok', message: card.kind === 'create' ? `${sys} のごみ箱に移しました。` : `変更前の値を ${sys} に書き戻しました。` }
     if (op.state === 'failed') return { done: false, tone: 'error', message: `${sys} に書けませんでした。何も変わっていません。` }
     // The undo's own answer was lost: not known to have happened (never claimed).
     return { done: true, tone: 'warn', message: `書き戻しが ${sys} に届いたか分かりません。${sys} の画面で確かめてください。` }
@@ -266,10 +326,13 @@ export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | '
 }
 
 /** The reconcile's answer (a write whose answer was lost), in the card's words. */
-export function reconcileResultView(card: Pick<PluginOperationCard, 'systemLabel'>, result: PluginOperationResult): CardActionView {
+export function reconcileResultView(card: Pick<PluginOperationCard, 'systemLabel' | 'kind'>, result: PluginOperationResult): CardActionView {
   if (!result.success) return { done: false, tone: result.offline ? 'warn' : 'error', message: result.error }
   const outcome = stateOutcome(result.operation.state)
-  return { done: outcome !== 'unknown', tone: outcome === 'observed' ? 'warn' : outcome === 'unknown' ? 'warn' : 'ok', message: outcomeMessage(outcome, card.systemLabel, result.operation.state) }
+  const message = card.kind === 'create' || result.operation.kind === 'create'
+    ? createOutcomeMessage(outcome, card.systemLabel, result.operation.reason)
+    : outcomeMessage(outcome, card.systemLabel, result.operation.state)
+  return { done: outcome !== 'unknown', tone: outcome === 'observed' ? 'warn' : outcome === 'unknown' ? 'warn' : 'ok', message }
 }
 
 /** A field value as the card shows it: a choice by its label when the type gives one. */
