@@ -124,6 +124,31 @@ The same test caps `// eslint-disable… react-hooks/exhaustive-deps` in `client
 count (`MAX_EXHAUSTIVE_DEPS_DISABLES`; lower it when one goes, never raise it) and requires a
 reason with each: `-- reason` on the directive, or a comment on the line above.
 
+## Effects
+
+`useEffect` is for syncing with something outside React. The renderer had 172 (2026-10-31,
+owner-approved reduction, refactor stage 3); most belong elsewhere. Sort each one:
+
+- **A. Syncing with the outside world** — IPC event subscriptions, DOM / keyboard / mouse
+  listeners, timers, observers, a third-party widget (CodeMirror), writing to an external store.
+  Legitimate. Prefer the small shared hooks in `src/shared/hooks/` once they exist
+  (`useIpcEvent`, `useEventListener`, `useInterval`, …) over a hand-written effect; a focus on
+  mount is `autoFocus`.
+- **B. Derived state** — a value computed from props / state and stored with `setState` in an
+  effect: compute it during render (`useMemo` only when it is expensive).
+- **C. Chains that react to state to trigger an action** (save when the status turns ready,
+  tell the parent, fill a field after a choice): do it in the event handler or callback that
+  caused the change.
+- **D. Data loading**: in the feature's small data hook (`hooks/use<Thing>.ts` over its
+  `api.ts`), not inline in a component.
+- **E. Resetting state when a prop changes**: give the component a `key` (or render it only while
+  open) instead of clearing state in an effect.
+
+New effects only for category A, preferably through the shared hooks. Also avoid an effect that
+only copies the latest value into a ref (`xRef.current = x`). `architecture-boundaries.test.ts`
+caps the `useEffect(` calls in `client/src` (tests excluded) at today's count
+(`MAX_USE_EFFECTS`): lower it when you remove effects, never raise it.
+
 ## How to move code
 
 - **Move-only PRs are separate from PRs that change behaviour.** A move-only PR is `git mv` plus
