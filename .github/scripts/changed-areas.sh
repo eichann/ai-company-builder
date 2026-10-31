@@ -3,8 +3,10 @@
 # $GITHUB_OUTPUT (stdout when unset) for: sync, client, ui, perf, universal,
 # server, admin.
 #
-# Only pull requests are filtered. A push to main, the nightly schedule and a
-# manual run (workflow_dispatch) run everything. Typecheck and lint are not
+# Pull requests are filtered by path. A push to main runs the Linux areas
+# (server, admin) and skips the macOS ones (sync, client, ui, perf, universal):
+# the PR already ran them and macOS runners are scarce. The nightly schedule and
+# a manual run (workflow_dispatch) run everything. Typecheck and lint are not
 # areas: they always run.
 #
 # The lists follow what each job's tests actually load (esbuild metafile of
@@ -24,6 +26,14 @@ emit() {
   echo "$1=$2"
   if [ -n "${GITHUB_OUTPUT:-}" ]; then echo "$1=$2" >> "$GITHUB_OUTPUT"; fi
 }
+
+if [ "$event" = "push" ]; then
+  echo "Event push: Linux jobs only (macOS jobs ran on the PR; nightly runs everything)."
+  for a in "${areas[@]}"; do
+    case "$a" in server|admin) emit "$a" true ;; *) emit "$a" false ;; esac
+  done
+  exit 0
+fi
 
 if [ "$event" != "pull_request" ]; then
   echo "Event $event: running every job."
