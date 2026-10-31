@@ -16,6 +16,10 @@ paths:
   - "admin/next.config.*"
   - "admin/src/proxy.ts"
   - "client/scripts/universal-git.mjs"
+  - "server/src/cli/company-archive.ts"
+  - "server/src/adapters/company-archive.ts"
+  - "server/src/adapters/sqlite/company-archive.ts"
+  - "server/tests/integration/company-archive.test.ts"
   - ".env.example"
 ---
 
@@ -64,6 +68,55 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   so a slow leak restarts cleanly.
 - The self-hosting production compose file is `docs/self-hosting/docker-compose.production.yml`
   (built and smoke-tested by the Docker images workflow).
+
+## One company: export and restore (`server/src/cli/company-archive.ts`)
+
+Owner gate 「1社だけ戻す・渡す」 (multi-tenant foundation 案 A). Code:
+`adapters/company-archive.ts` (files, git bundles) and `adapters/sqlite/company-archive.ts` (rows,
+through the company handle). Test: `server/tests/integration/company-archive.test.ts`.
+
+```bash
+# export (reads the server's DATA_DIR / REPOS_DIR; the archive dir must not exist yet)
+docker compose run --rm --no-deps -v /srv/acb-archives:/archives api \
+  node --import tsx src/cli/company-archive.ts export <companyId> /archives/<name>
+# restore into a scratch / empty server (refuses if the company or its repositories exist there)
+DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <archive dir>
+```
+
+- The archive (dirs 0700, files 0600) holds:
+  - `manifest.json`: format/version, company id, created at, columns per table, row counts per
+    table, repositories, sha256 of every file, notes;
+  - `rows/<table>.json`: the company's row of `companies` and its rows of every table with
+    `company_id`, read in one transaction;
+  - `repos/company.bundle` and `repos/scopes/<repoId>.bundle`: `git bundle --all` of the
+    company repository and each private folder's scope repository (an empty one is recorded
+    as `empty`).
+
+  Kept private-folder archives under `PRIVATE_FOLDER_ARCHIVE_DIR/<company>/` are listed in the
+  manifest, not copied. Nothing of another company is in it.
+- Secrets:
+  - Key broker keys stay sealed. They open only on a server with the same KEK (`kekIds` in the
+    manifest; the KEK is per server today), so restoring elsewhere means keys must be
+    re-entered unless that KEK is installed.
+  - Relay tokens (`broker_tokens`) are left out.
+  - Invitation link tokens are replaced (`redacted:<id>`): old links stop working, send new ones.
+  - Better Auth accounts (`auth.sqlite`) are shared by all companies and not moved; memberships
+    keep the user ids, so members need accounts on the target server (same ids) to sign in.
+- Restore refuses, writing nothing, when:
+  - a file's sha256 differs from the manifest;
+  - a row belongs to another company;
+  - a table or column is unknown to this schema;
+  - the company or one of its repositories already exists.
+
+  Rows go in one transaction, parents first, with foreign keys checked at the end. Repositories
+  created before a failure are removed. `agent_events.seq` is renumbered (in order), so a
+  restore next to other companies cannot collide. Start the server once afterwards: startup
+  configures the restored repositories and their hook.
+- Export while the server runs is consistent for the rows (one read transaction). A push that
+  lands between the rows and the bundles is in the bundle but not in the rows' view; for an
+  exact copy, export during maintenance.
+- Deleting a company is designed but not a command (needs the retention promise first); the
+  steps are in the CLI's header comment.
 
 ## CI
 

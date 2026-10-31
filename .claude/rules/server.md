@@ -23,7 +23,7 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
                       private-folders.ts (scope repositories + their rows),
                       local-secret-cipher.ts, kek-file.ts, upstream-https.ts
 src/composition.ts — the only module that imports adapters; routes take `services` from it
-src/cli/           operator commands (generate-broker-kek.ts), each its own composition root
+src/cli/           operator commands (generate-broker-kek.ts, company-archive.ts), each its own composition root
 ```
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and

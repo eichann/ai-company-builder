@@ -35,6 +35,17 @@ const CONTROL_PLANE_TABLES: Record<string, string> = {
 
 /** Better Auth's tables in auth.sqlite: accounts and sessions, shared by every company by design. */
 const AUTH_TABLES = new Set(['user', 'session', 'account', 'verification'])
+/** SQLite's own catalog (table names, not company rows). */
+const SQLITE_CATALOG = new Set(['sqlite_master'])
+
+/**
+ * Modules allowed to build SQL with a table name chosen at run time (which this
+ * test cannot read), with the reason. Each such statement must still bind the
+ * company — reviewed by hand, covered by that module's own tests.
+ */
+const DYNAMIC_TABLE_SQL: Record<string, string> = {
+  'adapters/sqlite/company-archive.ts': 'the per-company export / restore walks every company table from the schema: export binds company_id = ?, restore refuses rows of another company (tests/integration/company-archive.test.ts)',
+}
 
 
 /** Tables behind the company handle → the modules that write them (each statement limited to its company). */
@@ -155,10 +166,15 @@ describe('company-scoped SQL (案 A)', () => {
     for (const { file, sql } of allStatements) {
       for (const s of sql) {
         for (const t of tablesOf(s)) {
-          expect(tables.has(t) || AUTH_TABLES.has(t), `${file}: unknown table ${t} in ${s}`).toBe(true)
+          expect(tables.has(t) || AUTH_TABLES.has(t) || SQLITE_CATALOG.has(t), `${file}: unknown table ${t} in ${s}`).toBe(true)
         }
       }
     }
+  })
+
+  it('table names chosen at run time only in the listed modules', () => {
+    const found = allStatements.filter(f => f.sql.some(s => /\b(?:FROM|JOIN|INTO|UPDATE)\s+\$\{/i.test(s))).map(f => f.file).sort()
+    expect(found).toEqual(Object.keys(DYNAMIC_TABLE_SQL).sort())
   })
 
   it('every statement on a company-owned table has a company condition, or is listed with its reason', () => {

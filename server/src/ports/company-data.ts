@@ -39,6 +39,16 @@ export interface CompanyData {
   readonly privateFolders: PrivateFolderRepository
   /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
   readonly orphanedScopes: OrphanedScopeReader
+  /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
+  readonly archive: CompanyRowsExport
+}
+
+/** Rows by table name; blobs as { $base64 }. */
+export type ArchivedRows = Record<string, Array<Record<string, unknown>>>
+
+export interface CompanyRowsExport {
+  /** The company's row in the registry and its rows of every company table, read in one transaction. */
+  exportRows(): ArchivedRows
 }
 
 export interface CompanyDataSource {
