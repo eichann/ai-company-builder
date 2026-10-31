@@ -124,6 +124,7 @@ beforeAll(async () => {
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
   expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step', 'close_date'] })).ok).toBe(true)
+  expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['im-member'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
 })
 

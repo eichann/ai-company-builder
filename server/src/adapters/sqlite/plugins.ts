@@ -108,8 +108,15 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
     },
     renewConnection(pluginId, connectionId, at, by, history) {
       conn.transaction(() => {
+        const old = conn.prepare('SELECT connection_id FROM plugin_installs WHERE company_id = ? AND plugin_id = ?').get(companyId, pluginId) as { connection_id: string } | undefined
         conn.prepare('UPDATE plugin_installs SET connection_id = ?, account_id = NULL, updated_at = ?, updated_by = ? WHERE company_id = ? AND plugin_id = ?')
           .run(connectionId, at, by, companyId, pluginId)
+        if (old) {
+          conn.prepare(`
+            INSERT OR IGNORE INTO plugin_read_scopes (company_id, plugin_id, connection_id, subject_type, subject_id, added_by, added_at)
+            SELECT company_id, plugin_id, ?, subject_type, subject_id, ?, ? FROM plugin_read_scopes WHERE company_id = ? AND plugin_id = ? AND connection_id = ?
+          `).run(connectionId, by, at, companyId, pluginId, old.connection_id)
+        }
         addHistory(history)
       })()
     },
@@ -128,6 +135,21 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, connection_id, account_id, object, external_id) DO UPDATE SET external_updated_at = excluded.external_updated_at, seen_at = excluded.seen_at
       `).run(companyId, l.pluginId, l.connectionId, l.accountId, l.object, l.externalId, l.recordId, l.externalUpdatedAt, l.seenAt)
+    },
+    readScope(pluginId, connectionId) {
+      return (conn.prepare('SELECT subject_type, subject_id FROM plugin_read_scopes WHERE company_id = ? AND plugin_id = ? AND connection_id = ? ORDER BY subject_type, subject_id')
+        .all(companyId, pluginId, connectionId) as Array<{ subject_type: 'department' | 'user'; subject_id: string }>)
+        .map(r => ({ type: r.subject_type, id: r.subject_id }))
+    },
+    setReadScope(pluginId, connectionId, entries, at, by, history) {
+      conn.transaction(() => {
+        conn.prepare('DELETE FROM plugin_read_scopes WHERE company_id = ? AND plugin_id = ? AND connection_id = ?').run(companyId, pluginId, connectionId)
+        for (const e of entries) {
+          conn.prepare('INSERT INTO plugin_read_scopes (company_id, plugin_id, connection_id, subject_type, subject_id, added_by, added_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(companyId, pluginId, connectionId, e.type, e.id, by, at)
+        }
+        addHistory(history)
+      })()
     },
     policyAcks(pluginId) {
       return (conn.prepare('SELECT plugin_id, field, property, acknowledged_by, acknowledged_at FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? ORDER BY field')

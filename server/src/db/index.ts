@@ -616,6 +616,22 @@ export function initDatabase(conn: Database.Database = sqlite) {
       FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
     );
 
+    -- Who may READ the outside system through the key broker's relay, per connection
+    -- (owner, 2026-10-31): departments (members who can read its folder) and members,
+    -- set by an owner / admin. No row = closed to relay reads; the plugin cannot be
+    -- turned on without one. Writes never go through the relay.
+    CREATE TABLE IF NOT EXISTS plugin_read_scopes (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      subject_type TEXT NOT NULL CHECK (subject_type IN ('department', 'user')),
+      subject_id TEXT NOT NULL,
+      added_by TEXT NOT NULL,
+      added_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, connection_id, subject_type, subject_id),
+      FOREIGN KEY (company_id, plugin_id) REFERENCES plugin_installs(company_id, plugin_id)
+    );
+
     -- A field set to write automatically needs an owner's / admin's recorded
     -- acknowledgement that no HubSpot workflow is triggered by it (owner, 2026-10-31):
     -- per field and the outside property it writes (another property needs a new one).
@@ -849,6 +865,15 @@ export function migratePluginTables(conn: Database.Database): void {
 
     CREATE TRIGGER IF NOT EXISTS plugin_mappings_company_update BEFORE UPDATE OF company_id, plugin_id ON plugin_mappings
     WHEN NEW.company_id IS NOT OLD.company_id OR NEW.plugin_id IS NOT OLD.plugin_id
+    BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+
+    -- A relay read scope names only this company's departments and members (案 A: never another company's).
+    CREATE TRIGGER IF NOT EXISTS plugin_read_scopes_subject_insert BEFORE INSERT ON plugin_read_scopes
+    WHEN (NEW.subject_type = 'department' AND NOT EXISTS (SELECT 1 FROM departments WHERE company_id = NEW.company_id AND id = NEW.subject_id))
+      OR (NEW.subject_type = 'user' AND NOT EXISTS (SELECT 1 FROM memberships WHERE company_id = NEW.company_id AND user_id = NEW.subject_id))
+    BEGIN SELECT RAISE(ABORT, 'plugin_read_scopes names a department or member of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_read_scopes_company_update BEFORE UPDATE ON plugin_read_scopes
     BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
 
     CREATE TRIGGER IF NOT EXISTS plugin_external_links_record_insert BEFORE INSERT ON plugin_external_links

@@ -375,6 +375,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
     await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-hub/mapping/restore`, { version: 1 })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/read-scope`, { departmentIds: [], userIds: [USERS.owner] })
   })
 
   it('invitations', async () => {
@@ -538,6 +539,7 @@ describe('the admin console\'s requests do what the admin means on the server', 
     await expect(A.pluginsApi.checkMapping(CO, 'sample-hub', text)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY', body: { problem: 'no-key' } })
     await expect(A.pluginsApi.import(CO, 'sample-hub')).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_ACTIVE' })
     await expect(A.pluginsApi.setEnabled(CO, 'sample-hub', true)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY' })
+    expect((await A.pluginsApi.setReadScope(CO, 'sample-hub', { departmentIds: [], userIds: [USERS.owner] })).readScope).toEqual({ departmentIds: [], userIds: [USERS.owner] })
     expect(row('SELECT enabled FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub').enabled).toBe(0)
   })
 

@@ -13,15 +13,15 @@
  * Every company row is reached through the company handle; the shelf is
  * shared and read only, filtered by `available_to` for the asking company.
  */
-import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
+import { findPrivateScope } from '../../shared/core/permissions'
 import {
   effectiveFieldPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
 } from '../../shared/core/plugins'
 import type { TypeDefinition } from '../../shared/core/record-types'
-import type { PluginAiField, PluginAiOperation, PluginAiTools, PluginDetail, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
+import type { PluginAiField, PluginAiOperation, PluginAiTools, PluginDetail, PluginReadScopeView, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { PluginHistoryRow, PluginInstallRow } from '../ports/plugins'
+import type { PluginHistoryRow, PluginInstallRow, PluginReadScopeEntry } from '../ports/plugins'
 import { requireFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import type { PluginShelf, ShelfPackage } from './plugin-shelf'
@@ -228,7 +228,26 @@ export function createPluginService(deps: PluginServiceDeps) {
       mappingErrors,
       autoAcknowledgements: repo.policyAcks(pluginId).map(a => ({ field: a.field, property: a.property, by: a.acknowledgedBy, at: a.acknowledgedAt })),
       history: repo.history(pluginId, 50).map(h => ({ action: h.action, at: h.at, by: h.by, change: JSON.parse(h.change) as unknown })),
+      readScope: install ? scopeView(repo.readScope(pluginId, install.connectionId)) : { departmentIds: [], userIds: [] },
     }
+  }
+
+  const scopeView = (entries: PluginReadScopeEntry[]): PluginReadScopeView =>
+    ({ departmentIds: entries.filter(e => e.type === 'department').map(e => e.id), userIds: entries.filter(e => e.type === 'user').map(e => e.id) })
+
+  /**
+   * The member is in the connection's relay read scope (owner, 2026-10-31): named
+   * themselves, or able to read the folder of a named department. An empty scope
+   * lets nobody in. No per-record filtering inside it (owner decision).
+   */
+  function inReadScope(companyId: string, userId: string, role: string, install: PluginInstallRow): boolean {
+    const entries = companyData.forCompany(companyId).plugins.readScope(install.pluginId, install.connectionId)
+    if (entries.some(e => e.type === 'user' && e.id === userId)) return true
+    const departments = entries.filter(e => e.type === 'department').map(e => e.id)
+    if (departments.length === 0) return false
+    const handle = companyData.forCompany(companyId)
+    const reader = recordReader({ companyId, userId, role }, handle.scopes.listWithRules())
+    return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder }))
   }
 
   const notFound = () => refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
@@ -319,11 +338,45 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (body.enabled) {
         const evaluated = await evaluate(member.companyId, row)
         if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+        // Who may read through the relay must be decided: a forgotten setting never opens it to everyone.
+        if (repo.readScope(pluginId, install.connectionId).length === 0) {
+          return refuse('conflict', '先に「中継で読める人」（部署かメンバー）を決めてください', { code: 'READ_SCOPE_REQUIRED' })
+        }
         repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version, mappingVersion: row.mappingVersion }))
         deps.relayReadOnly(member, evaluated.active.manifest.service)
       } else {
         repo.saveInstall(row, history(pluginId, 'disable', member.userId, at, {}))
       }
+      return ok(await detail(member.companyId, pluginId))
+    },
+
+    /**
+     * PUT /plugins/:pluginId/read-scope { departmentIds, userIds } — who may read
+     * the outside system through the relay, for the current connection. Only
+     * this company's departments and members. Empty = closed; not while the
+     * plugin is on (turn it off first).
+     */
+    async setReadScope(member: Member, pluginId: string, body: unknown): Promise<Outcome<PluginDetail>> {
+      const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!known(member.companyId, pluginId)) return notFound()
+      const ids = (v: unknown) => Array.isArray(v) && v.length <= 200 && v.every(x => typeof x === 'string' && x.length > 0 && x.length <= 100) ? [...new Set(v as string[])] : null
+      const departmentIds = isObject(body) ? ids(body.departmentIds ?? []) : null
+      const userIds = isObject(body) ? ids(body.userIds ?? []) : null
+      if (!departmentIds || !userIds) return refuse('bad-request', 'Body: { departmentIds: string[], userIds: string[] }')
+      const handle = companyData.forCompany(member.companyId)
+      const repo = handle.plugins
+      const install = repo.install(pluginId)
+      if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
+      const known_ = new Set(handle.departments.list().map(d => d.id))
+      if (departmentIds.some(id => !known_.has(id))) return refuse('bad-request', 'この会社にない部署が含まれています', { code: 'READ_SCOPE_INVALID' })
+      if (userIds.some(id => !deps.isMember(member.companyId, id))) return refuse('bad-request', 'この会社のメンバーではない人が含まれています', { code: 'READ_SCOPE_INVALID' })
+      if (install.enabled && departmentIds.length + userIds.length === 0) {
+        return refuse('conflict', 'オンの間は「中継で読める人」を空にできません（先にオフにしてください）', { code: 'READ_SCOPE_REQUIRED' })
+      }
+      const at = clock.now()
+      repo.setReadScope(pluginId, install.connectionId, [...departmentIds.map(id => ({ type: 'department' as const, id })), ...userIds.map(id => ({ type: 'user' as const, id }))],
+        at, member.userId, history(pluginId, 'read-scope', member.userId, at, { connectionId: install.connectionId, departmentIds, userIds }))
       return ok(await detail(member.companyId, pluginId))
     },
 
@@ -352,34 +405,27 @@ export function createPluginService(deps: PluginServiceDeps) {
     },
 
     /**
-     * The relay's rule for a service whose connection a plugin manages (one
-     * that was turned on at least once — turning it off does not undo it):
-     * null when no plugin of the company manages `service`. Asked by the relay
-     * on every call. Writes are never allowed there; searches only on the
-     * declared paths of the installed version; reads only for a member who may
-     * read every place the plugin's records are visible in (an invalid mapping:
-     * owners / admins only). Review §5.1 / §5.2.
+     * The relay's rule for a service a plugin manages (plugins.md "The relay and a
+     * managed connection"): null = not managed. Writes never pass (declared searches
+     * only); reads only for members in the connection's read scope — every managed
+     * install of the service must let them in. An empty scope lets nobody in.
      */
-    relayPolicy(companyId: string, userId: string, service: string): { searchPaths: string[]; mayRead: boolean } | null {
+    relayPolicy(companyId: string, userId: string, service: string): { searchPaths: string[]; mayRead: boolean; connectionIds: string[] } | null {
       const managed = companyData.forCompany(companyId).plugins.installs().filter(i => i.service === service && i.managedSince !== null)
       if (managed.length === 0) return null
+      const connectionIds = managed.map(i => i.connectionId)
       const role = deps.roleOf(companyId, userId)
-      if (role === null) return { searchPaths: [], mayRead: false }
-      const reader = recordReader({ companyId, userId, role }, companyData.forCompany(companyId).scopes.listWithRules())
+      if (role === null) return { searchPaths: [], mayRead: false, connectionIds }
       const searchPaths: string[] = []
       let mayRead = true
       for (const install of managed) {
+        if (!inReadScope(companyId, userId, role, install)) mayRead = false
         const found = shelf.find(companyId, install.pluginId, install.version)
-        const row = found && install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
-        const parsed = found && row ? parseForCompany(companyId, found.pkg, row.text) : null
-        if (!found || !parsed?.ok) { mayRead &&= FULL_ACCESS_ROLES.has(role); continue }
+        if (!found) continue
         const m = found.pkg.manifest
         for (const o of Object.values(m.objects)) if (o.endpoints.search) searchPaths.push(`${m.baseUrl.basePath}${o.endpoints.search.path}`)
-        for (const o of Object.values(parsed.mapping.objects)) {
-          if (!reader.record({ id: '', type: '', scopeId: null, path: null, folder: o.visibleToFolder })) mayRead = false
-        }
       }
-      return { searchPaths, mayRead }
+      return { searchPaths, mayRead, connectionIds }
     },
 
     /** The kind of an operation of the company's installed version (read / update / create), or null. */

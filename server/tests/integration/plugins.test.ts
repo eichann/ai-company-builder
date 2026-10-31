@@ -44,6 +44,7 @@ const reader = { companyId: CO, userId: 'pl-reader', role: 'member' }
 const otherOwner = { companyId: OTHER, userId: 'pl-other-owner', role: 'owner' }
 let hubKey: string, hubKeyOther: string, geminiKey: string
 let oldToken: string, readerToken: string
+let salesDept: string, otherDept: string
 /** What reached "HubSpot" through the relay. */
 const sent: Array<{ method: string; path: string }> = []
 const fakeUpstream = {
@@ -115,6 +116,12 @@ beforeAll(async () => {
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('pl-s-sales', ?, '営業部', 'folder', ?)`).run(CO, ts())
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'pl-r1', 'pl-s-sales', 'everyone', NULL, 0, 0, ?)`).run(CO, ts())
   db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'pl-r2', 'pl-s-sales', 'user', 'pl-member', 1, 1, ?)`).run(CO, ts())
+
+  // Departments (root folders): 営業部 here, another one in the other company.
+  salesDept = 'pl-d-sales'
+  otherDept = 'pl-d-other'
+  db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(salesDept, CO, '営業部', '営業部', ts(), ts())
+  db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(otherDept, OTHER, '営業部', '営業部', ts(), ts())
 
   const { createServices } = await import('../../src/composition')
   services = createServices(db, undefined, { pluginsDir: shelfDir, upstream: fakeUpstream })
@@ -216,6 +223,10 @@ describe('connector plugins: install, turn on, mapping', () => {
 
   it('turning on makes the relay read-only for the service; nothing holds the key value', async () => {
     expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(false)
+    // Who may read it through the relay must be decided first (empty = nobody; owner, 2026-10-31).
+    expect(await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_REQUIRED' } })
+    expect(services.keyBroker.relayReadOnly(CO, 'hubspot')).toBe(false)
+    expect((await services.plugins.setReadScope(owner, 'crm-hub', { departmentIds: [salesDept] })).ok).toBe(true)
     const on = await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })
     expect(on.ok).toBe(true)
     expect(on.value.plugin.install).toMatchObject({ enabled: true, problem: null, keyId: hubKey })
@@ -297,9 +308,73 @@ describe('the relay and a connection the plugin manages (review §5.1 / §5.2)',
     await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })
   })
 
-  it('someone who cannot read the cards cannot read HubSpot through the relay either', async () => {
-    expect(await relay(readerToken, 'GET', '/crm/objects/2026-03/deals/1')).toEqual({ status: 403, code: 'ACB_READ_NOT_ALLOWED', forwarded: false })
-    expect(await relay(readerToken, 'POST', '/crm/objects/2026-03/deals/search')).toEqual({ status: 403, code: 'ACB_READ_NOT_ALLOWED', forwarded: false })
-    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200 })
+})
+
+describe('who may read HubSpot through the relay: the connection\'s read scope (owner, 2026-10-31)', () => {
+  const READ: Array<[string, string]> = [['GET', '/crm/objects/2026-03/deals/1'], ['POST', '/crm/objects/2026-03/deals/search'], ['GET', '/crm/v3/objects/contacts/42']]
+  const refused = { status: 403, code: 'ACB_READ_NOT_ALLOWED', forwarded: false }
+  // The members' AI: a token issued for one of their consultations (the chat / a skill), never a session.
+  const aiToken = (m: typeof member) => services.brokerTokens.issue(m, { conversationId: `c-ai-${m.userId}`, department: '営業部', services: ['hubspot'] }).value.token
+
+  it('scope = a department: members who can read its folder, and their AI, read; others and their AI are refused', async () => {
+    expect((await services.plugins.setReadScope(owner, 'crm-hub', { departmentIds: [salesDept] })).ok).toBe(true)
+    for (const [method, path] of READ) {
+      expect(await relay(oldToken, method, path)).toMatchObject({ status: 200, forwarded: true })
+      expect(await relay(aiToken(member), method, path)).toMatchObject({ status: 200, forwarded: true })
+      expect(await relay(readerToken, method, path)).toEqual(refused)
+      expect(await relay(aiToken(reader), method, path)).toEqual(refused)
+    }
+  })
+
+  it('scope = members: only those named (no filtering by deal inside it); writes still never pass', async () => {
+    expect((await services.plugins.setReadScope(owner, 'crm-hub', { userIds: ['pl-reader'] })).ok).toBe(true)
+    expect(await relay(aiToken(reader), 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(await relay(readerToken, 'GET', '/crm/objects/2026-03/deals/999')).toMatchObject({ status: 200, forwarded: true })
+    // pl-member reads 営業部 but is not named now; an owner is not let in by role either.
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toEqual(refused)
+    expect(await relay(services.brokerTokens.issue(owner, { conversationId: 'c-owner', services: ['hubspot'] }).value.token, 'GET', '/crm/objects/2026-03/deals/1')).toEqual(refused)
+    expect(await relay(readerToken, 'PATCH', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 403, code: 'ACB_MANAGED_BY_PLUGIN', forwarded: false })
+  })
+
+  it('an empty scope lets nobody read and blocks turning on; it cannot be emptied while on', async () => {
+    expect(await services.plugins.setReadScope(owner, 'crm-hub', { departmentIds: [], userIds: [] })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_REQUIRED' } })
+    await services.plugins.setEnabled(owner, 'crm-hub', { enabled: false })
+    expect((await services.plugins.setReadScope(owner, 'crm-hub', { departmentIds: [], userIds: [] })).ok).toBe(true)
+    for (const token of [oldToken, readerToken, aiToken(member), services.brokerTokens.issue(owner, { conversationId: 'c-owner2', services: ['hubspot'] }).value.token]) {
+      expect(await relay(token, 'GET', '/crm/objects/2026-03/deals/1')).toEqual(refused)
+    }
+    expect(await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_REQUIRED' } })
+    expect((await services.plugins.setReadScope(admin, 'crm-hub', { departmentIds: [salesDept] })).ok).toBe(true)
+    expect((await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })).ok).toBe(true)
+  })
+
+  it('another company\'s departments or members cannot be named; the scope is per company', async () => {
+    expect(await services.plugins.setReadScope(owner, 'crm-hub', { userIds: ['pl-other-owner'] })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_INVALID' } })
+    expect(await services.plugins.setReadScope(owner, 'crm-hub', { departmentIds: [otherDept] })).toMatchObject({ ok: false, body: { code: 'READ_SCOPE_INVALID' } })
+    // The database refuses it too (案 A), whatever a future service does.
+    const install = db.prepare("SELECT connection_id FROM plugin_installs WHERE company_id = ? AND plugin_id = 'crm-hub'").get(CO)
+    expect(() => db.prepare("INSERT INTO plugin_read_scopes (company_id, plugin_id, connection_id, subject_type, subject_id, added_by, added_at) VALUES (?, 'crm-hub', ?, 'user', 'pl-other-owner', 'x', 'x')")
+      .run(CO, install.connection_id)).toThrow(/same company/)
+    expect(() => db.prepare("UPDATE plugin_read_scopes SET company_id = ? WHERE company_id = ?").run(OTHER, CO)).toThrow(/never move/)
+    // Only owners / admins set it.
+    expect(await services.plugins.setReadScope(member, 'crm-hub', { userIds: ['pl-member'] })).toMatchObject({ ok: false, kind: 'forbidden' })
+    // The other company's owner reaches only their own company's (missing) install, never this one.
+    expect(await services.plugins.setReadScope(otherOwner, 'crm-hub', { userIds: ['pl-other-owner'] })).toMatchObject({ ok: false, body: { code: 'NOT_INSTALLED' } })
+    expect((await services.plugins.get(owner, 'crm-hub')).value.readScope).toEqual({ departmentIds: [salesDept], userIds: [] })
+  })
+
+  it('each relay read is logged with the member, the connection and the path as a pattern — never a body or the key', async () => {
+    db.prepare("DELETE FROM agent_events WHERE company_id = ?").run(CO)
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/12345')).toMatchObject({ status: 200 })
+    const install = db.prepare("SELECT connection_id FROM plugin_installs WHERE company_id = ? AND plugin_id = 'crm-hub'").get(CO)
+    const rows = db.prepare('SELECT * FROM agent_events WHERE company_id = ?').all(CO)
+    expect(rows).toHaveLength(1)
+    expect(rows[0].user_id).toBe('pl-member')
+    const target = JSON.parse(rows[0].target)
+    expect(target).toMatchObject({ kind: 'broker', service: 'hubspot', connection: install.connection_id, path: '/crm/objects/2026-03/deals/{id}' })
+    const all = JSON.stringify(rows)
+    expect(all).not.toContain('12345')
+    expect(all).not.toContain(SECRET)
+    expect(all).not.toContain('results')
   })
 })

@@ -141,6 +141,12 @@ export interface PluginOperationRow {
   updatedAt: string
 }
 
+/** One subject of a connection's relay read scope: a department (members who can read its folder) or a member. */
+export interface PluginReadScopeEntry {
+  type: 'department' | 'user'
+  id: string
+}
+
 export interface PluginRepository {
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
@@ -164,7 +170,10 @@ export interface PluginRepository {
    * it has none (compare-and-set); false = another value is already there.
    */
   bindAccount(pluginId: string, connectionId: string, accountId: string, history: PluginHistoryRow): boolean
-  /** A new connection (the outside account changed): new id, no account yet. Links of the old one stay with it. */
+  /**
+   * A new connection (the outside account changed): new id, no account yet. Links of the old one
+   * stay with it; the read scope is carried over (the same people, decided by an owner / admin).
+   */
   renewConnection(pluginId: string, connectionId: string, at: string, by: string, history: PluginHistoryRow): void
 
   /** The record of an outside object of this connection and account. */
@@ -173,6 +182,10 @@ export interface PluginRepository {
   linkOfRecord(recordId: string): ExternalLinkRow | null
   saveLink(row: ExternalLinkRow): void
 
+  /** Who may read the outside system through the relay, for this connection (none = closed). */
+  readScope(pluginId: string, connectionId: string): PluginReadScopeEntry[]
+  /** Replace the connection's read scope and add a history row (one transaction). */
+  setReadScope(pluginId: string, connectionId: string, entries: PluginReadScopeEntry[], at: string, by: string, history: PluginHistoryRow): void
   policyAcks(pluginId: string): PluginPolicyAckRow[]
   /** Record acknowledgements (replacing a field's earlier one) and a history row (one transaction). */
   addPolicyAcks(rows: PluginPolicyAckRow[], history: PluginHistoryRow): void

@@ -278,8 +278,10 @@ the sign-in.
   「<サービス> は、ここからは読むだけです…」, nothing sent, recorded as guard-denied
   `destination-not-allowed`. Checked after the destination (the URL parser has resolved `..`
   first). A service a connector plugin manages is stricter still and checked first (no writes at
-  all, declared searches only, reads only for those who may see the cards; the switch cannot be
-  turned off: `plugins.md` "The relay and a managed connection"). **Turned on for the plugin's
+  all, declared searches only, reads only for members in the connection's **read scope** — an
+  admin's list of departments / members, empty = nobody —, each read logged with the connection
+  and the path as a pattern; the switch cannot be turned off: `plugins.md` "The relay and a
+  managed connection"). **Turned on for the plugin's
   service when a company turns a plugin on** (P4,
   `services/plugins.ts` `setEnabled`; owner 0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
   through the relay). Test: `tests/integration/broker-relay.test.ts` 「read-only switch」

@@ -9,6 +9,7 @@
  *   GET  /plugins/:pluginId                    one plugin: install, mapping in force, versions, policies, history
  *   PUT  /plugins/:pluginId                    { version, keyId } install / choose version or key
  *   PUT  /plugins/:pluginId/enabled            { enabled } on / off
+ *   PUT  /plugins/:pluginId/read-scope         { departmentIds, userIds } who may read it through the relay
  *   PUT  /plugins/:pluginId/mapping            { text } a new mapping version
  *   POST /plugins/:pluginId/mapping/restore    { version } an earlier mapping as the next version
  *   POST /plugins/:pluginId/mapping/check      { text? } 「HubSpot に聞いて確かめる」: the mapping against the outside property list
@@ -79,6 +80,12 @@ pluginsRoute.put('/plugins/:pluginId/enabled', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, await plugins.setEnabled(member, c.req.param('pluginId'), await jsonBody(c)))
+})
+
+pluginsRoute.put('/plugins/:pluginId/read-scope', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await plugins.setReadScope(member, c.req.param('pluginId'), await jsonBody(c)))
 })
 
 pluginsRoute.put('/plugins/:pluginId/mapping', async (c) => {
