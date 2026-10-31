@@ -33,7 +33,7 @@ operations:
     label: 最新を取る
     kind: read
     object: deal
-    who: [anyone, ai]
+    who: [viewer, ai]
   update_deal:
     label: 案件の欄を書き戻す
     kind: update
@@ -43,6 +43,7 @@ operations:
     reaches: internal
     undo: restore_previous
     note: optional
+    decision: true
   add_note:
     label: 案件にメモを残す
     kind: create
@@ -54,7 +55,7 @@ operations:
 
 field_policy_defaults:
   next_step: auto
-  stage: auto
+  stage: off
   confidence: auto
   close_date: auto
   amount: prior

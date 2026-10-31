@@ -7,7 +7,7 @@
  * company.
  */
 import type Database from 'better-sqlite3'
-import type { ExternalLinkRow, PluginHistoryRow, PluginInstallRow, PluginMappingRow, PluginRepository } from '../../ports/plugins'
+import type { ExternalLinkRow, PluginPolicyAckRow, PluginHistoryRow, PluginInstallRow, PluginMappingRow, PluginRepository } from '../../ports/plugins'
 
 type LinkRow = {
   plugin_id: string; connection_id: string; account_id: string; object: string; external_id: string; record_id: string
@@ -113,6 +113,22 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(company_id, connection_id, account_id, object, external_id) DO UPDATE SET external_updated_at = excluded.external_updated_at, seen_at = excluded.seen_at
       `).run(companyId, l.pluginId, l.connectionId, l.accountId, l.object, l.externalId, l.recordId, l.externalUpdatedAt, l.seenAt)
+    },
+    policyAcks(pluginId) {
+      return (conn.prepare('SELECT plugin_id, field, property, acknowledged_by, acknowledged_at FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? ORDER BY field')
+        .all(companyId, pluginId) as Array<{ plugin_id: string; field: string; property: string; acknowledged_by: string; acknowledged_at: string }>)
+        .map(r => ({ pluginId: r.plugin_id, field: r.field, property: r.property, acknowledgedBy: r.acknowledged_by, acknowledgedAt: r.acknowledged_at }))
+    },
+    addPolicyAcks(rows: PluginPolicyAckRow[], history) {
+      conn.transaction(() => {
+        for (const r of rows) {
+          conn.prepare(`
+            INSERT INTO plugin_policy_acks (company_id, plugin_id, field, property, acknowledged_by, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(company_id, plugin_id, field) DO UPDATE SET property = excluded.property, acknowledged_by = excluded.acknowledged_by, acknowledged_at = excluded.acknowledged_at
+          `).run(companyId, r.pluginId, r.field, r.property, r.acknowledgedBy, r.acknowledgedAt)
+        }
+        addHistory(history)
+      })()
     },
     history(pluginId, limit) {
       return (conn.prepare('SELECT id, plugin_id, action, at, by_user, change FROM plugin_history WHERE company_id = ? AND plugin_id = ? ORDER BY at DESC, rowid DESC LIMIT ?')

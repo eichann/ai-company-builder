@@ -7,7 +7,7 @@ deal:
     max: 500
   fields:
     title:      { from: dealname, write: false }
-    stage:      { from: dealstage, write: true, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
+    stage:      { from: dealstage, write: false, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
     confidence: { from: kakudo, write: true, values: { high: a, medium: b, low: c } }
     next_step:  { from: next_step, write: true }
     close_date: { from: closedate, write: true }

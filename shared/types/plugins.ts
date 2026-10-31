@@ -24,6 +24,8 @@ export type PluginProblem =
   | 'key-destination'
   /** No mapping, or the mapping in force no longer passes the checks. */
   | 'mapping-invalid'
+  /** A field would write automatically without the recorded acknowledgement (no HubSpot workflow is triggered by it). */
+  | 'auto-not-acknowledged'
 
 export interface PluginOperationView {
   name: string
@@ -92,6 +94,8 @@ export interface PluginDetail {
   policies: PluginFieldPolicyView[]
   /** Why the mapping in force does not pass, when it does not (Japanese sentences). */
   mappingErrors: string[]
+  /** Who confirmed, per automatically written field and its outside property, that no HubSpot workflow is triggered by it. */
+  autoAcknowledgements: Array<{ field: string; property: string; by: string; at: string }>
   /** Latest first (50). `change` is JSON without any secret. */
   history: Array<{ action: string; at: string; by: string; change: unknown }>
 }

@@ -79,6 +79,7 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_mappings: ['adapters/sqlite/plugins.ts'],
   plugin_history: ['adapters/sqlite/plugins.ts'],
   plugin_external_links: ['adapters/sqlite/plugins.ts'],
+  plugin_policy_acks: ['adapters/sqlite/plugins.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
 const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository']

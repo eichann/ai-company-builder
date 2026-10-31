@@ -616,6 +616,19 @@ export function initDatabase(conn: Database.Database = sqlite) {
       FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
     );
 
+    -- A field set to write automatically needs an owner's / admin's recorded
+    -- acknowledgement that no HubSpot workflow is triggered by it (owner, 2026-10-31):
+    -- per field and the outside property it writes (another property needs a new one).
+    CREATE TABLE IF NOT EXISTS plugin_policy_acks (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      property TEXT NOT NULL,
+      acknowledged_by TEXT NOT NULL,
+      acknowledged_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, field)
+    );
+
     -- Indexes
     CREATE INDEX IF NOT EXISTS idx_plugin_history_company ON plugin_history(company_id, plugin_id, at);
     CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);

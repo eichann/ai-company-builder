@@ -58,7 +58,7 @@ deal:
     max: 500
   fields:
     title:      { from: dealname, write: false }
-    stage:      { from: dealstage, write: true, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
+    stage:      { from: dealstage, write: false, values: { appointmentscheduled: first_meeting, qualifiedtobuy: proposal, presentationscheduled: quote, decisionmakerboughtin: final } }
     confidence: { from: juchu_kakudo, write: true, values: { high: a, medium: b, low: c } }
     next_step:  { from: hs_next_step, write: true }
     close_date: { from: closedate, write: true }
@@ -123,7 +123,7 @@ beforeAll(async () => {
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
-  expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING })).ok).toBe(true)
+  expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step', 'close_date'] })).ok).toBe(true)
   expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
 })
 

@@ -56,8 +56,13 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   the relay's own path rule (`shared/core/upstream-path.ts` `checkUpstreamPath`, the same
   function `services/broker-relay.ts` uses): no `//`, `..`, `%2f`, `\`, control characters.
 - **Operations** (`kind` read / update / create): `who` (person fields of the record's type or
-  `ai`, `dept_manager`, `admin`, `anyone` — the engine's `mayAct` reading), `reaches` internal /
-  external, `undo` (update: restore_previous / none; create: archive / none), `note`. An update
+  `PLUGIN_ACTORS`: `viewer` = anyone who can read the record, `ai` = the member's AI — only on
+  records its owner can read and only what its owner may do —, `dept_manager`, `admin`; a plugin
+  never says `anyone`), `reaches` internal / external, `undo` (update: restore_previous / none;
+  create: archive / none), `note`, `decision: true` (only on operations that write: the reason
+  is part of the ledger entry and **the AI must give one** — a note drafted from the
+  consultation, citing its basis; optional for people. `update_deal` is a decision,
+  `refresh_deal` is not). An update
   writes `fields: mapped` only (the mapping's `write: true` fields); a create names `attach_to`
   (an object with a record type) and may carry its own `policy`.
 
@@ -104,6 +109,22 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   writes nothing), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
+- **`stage` is never written in milestone 3** (`MILESTONE3_UNWRITABLE_FIELDS`, review §5.3,
+  owner 2026-10-31): moving the stage can make a deal won / lost, the outcome `closed` guards with
+  `prior`. A mapping with `write: true` on it, an `auto` default or policy for it are refused; at
+  run time it is `off` whatever is stored. No fixture or example ships it writable.
+- **Judged on the outside property**: a written field's policy is at least as strict as that of
+  every other field read from the same outside property (off > prior > auto), so an `auto`
+  field cannot reach what a stricter one reads (`effectiveFieldPolicy`).
+- **`auto` needs a recorded acknowledgement** (owner, 2026-10-31): saving (or restoring) a
+  mapping in which a field would write automatically needs `acknowledgeAuto: [field…]` — the
+  admin confirms 「この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました」
+  (`AUTO_ACKNOWLEDGEMENT`); else 400 `AUTO_NEEDS_ACKNOWLEDGEMENT` with the fields. Stored per field
+  and outside property with who and when (`plugin_policy_acks`, history `acknowledge`); a field
+  moved to another property needs a new one. A plugin whose automatic field lacks one does not
+  run (`auto-not-acknowledged`; e.g. the package's recommended defaults right after install).
+  Reading HubSpot's workflows to check this automatically would need more key scopes — an option
+  for later, not taken now.
 - **An operation reaching people outside the company is never `auto`**: refused in the
   declaration (an external create with `policy: auto`, auto defaults while an external update
   exists), refused in a mapping (`policy: auto` on a field an external update writes), and

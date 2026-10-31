@@ -93,6 +93,15 @@ export interface ExternalLinkRow {
   seenAt: string
 }
 
+export interface PluginPolicyAckRow {
+  pluginId: string
+  field: string
+  /** The outside property the field writes; an ack for another property does not count. */
+  property: string
+  acknowledgedBy: string
+  acknowledgedAt: string
+}
+
 export interface PluginRepository {
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
@@ -124,4 +133,8 @@ export interface PluginRepository {
   /** The outside object a record stands for. */
   linkOfRecord(recordId: string): ExternalLinkRow | null
   saveLink(row: ExternalLinkRow): void
+
+  policyAcks(pluginId: string): PluginPolicyAckRow[]
+  /** Record acknowledgements (replacing a field's earlier one) and a history row (one transaction). */
+  addPolicyAcks(rows: PluginPolicyAckRow[], history: PluginHistoryRow): void
 }
