@@ -3,6 +3,7 @@ import { referenceFromTool, type ConsultationReference } from '../../../shared/c
 import type { ChatSession } from '../../../shared/chat-history'
 import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
@@ -21,7 +22,13 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const choicePrompts: StoredChoicePrompt[] = []
   const steerInstructions: StoredSteer[] = []
   const reviewRequests: ReviewRecord[] = []
+  const pluginOperations: PluginOperationCard[] = []
   for (const part of msg.parts) {
+    if (part.type === PLUGIN_OPERATION_PART_TYPE) {
+      const card = readPluginOperationCard((part as { data?: unknown }).data)
+      if (card && !pluginOperations.some(c => c.id === card.id)) pluginOperations.push(card)
+      continue
+    }
     if (part.type === REVIEW_PART_TYPE) {
       const review = readReviewRecord((part as { data?: unknown }).data)
       if (review && !reviewRequests.some(r => r.id === review.id)) reviewRequests.push(review)
@@ -58,6 +65,7 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(choicePrompts.length ? { choicePrompts } : {}),
     ...(steerInstructions.length ? { steerInstructions } : {}),
     ...(reviewRequests.length ? { reviewRequests } : {}),
+    ...(pluginOperations.length ? { pluginOperations } : {}),
   }
 }
 
@@ -91,6 +99,10 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
   parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions))
   for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
+  for (const stored of msg.pluginOperations || []) {
+    const card = readPluginOperationCard(stored)
+    if (card) parts.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card })
+  }
   for (const review of msg.reviewRequests || []) {
     const record = readReviewRecord(review)
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })

@@ -229,7 +229,8 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
-  text).
+  text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
+  `data-plugin-operation` parts; `plugins.md` "The app").
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail

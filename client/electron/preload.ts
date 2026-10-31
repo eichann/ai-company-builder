@@ -122,6 +122,9 @@ const api: ElectronAPI = {
     invoke('brokerKeys:save', companyId, service, secret, displayName),
   deleteOwnBrokerKey: (companyId: string, service: string) => invoke('brokerKeys:delete', companyId, service),
   moveEnvKeyToServer: (companyId: string, rootPath: string, name: string) => invoke('brokerKeys:moveFromEnv', companyId, rootPath, name),
+  undoPluginOperation: (companyId: string, pluginId: string, operationId: string, conversationId?: string) =>
+    invoke('pluginOperations:undo', companyId, pluginId, operationId, conversationId),
+  reconcilePluginOperation: (companyId: string, pluginId: string, operationId: string) => invoke('pluginOperations:reconcile', companyId, pluginId, operationId),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

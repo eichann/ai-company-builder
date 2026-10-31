@@ -17,9 +17,10 @@
  *
  * Typed operations (P6; any member — the record, the operation's `who` and the
  * field policies decide; the member's AI uses routes/records-ai.ts):
- *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note? } / {}
+ *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, conversationId?, proposedBy? } / {}
+ *   (conversationId / proposedBy: informational provenance the app reports, never authorizing — records.md)
  *   GET  /plugins/:pluginId/operations/:operationId                   an operation record (its record's readers)
- *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only)
+ *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only) { conversationId?, proposedBy? }
  *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost
  */
 import { Hono } from 'hono'
@@ -28,6 +29,7 @@ import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
+import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
@@ -112,7 +114,8 @@ pluginsRoute.post('/plugins/:pluginId/connection/renew', async (c) => {
 pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await pluginOperations.run(member, HUMAN, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c)))
+  const body = await jsonBody(c)
+  return answer(c, await pluginOperations.run(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
 })
 
 pluginsRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
@@ -124,7 +127,7 @@ pluginsRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
 pluginsRoute.post('/plugins/:pluginId/operations/:operationId/undo', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await pluginOperations.undo(member, c.req.param('pluginId'), c.req.param('operationId')))
+  return answer(c, await pluginOperations.undo(member, c.req.param('pluginId'), c.req.param('operationId'), selfReportedProvenance(await jsonBody(c))))
 })
 
 pluginsRoute.post('/plugins/:pluginId/operations/:operationId/reconcile', async (c) => {

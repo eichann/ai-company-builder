@@ -99,6 +99,8 @@ contract.invoke git:sync
 contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
+contract.invoke pluginOperations:reconcile
+contract.invoke pluginOperations:undo
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
@@ -298,6 +300,7 @@ contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirector
 contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
 contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
 contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
+contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
@@ -323,6 +326,7 @@ contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDra
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
+contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
 contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
 contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
 contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
@@ -525,6 +529,8 @@ contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: stri
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
+contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
@@ -705,6 +711,8 @@ main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
+main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
@@ -911,6 +919,8 @@ preload readFile -> invoke fs:readFile($0)
 preload readFile : (path: string) => Promise<string | null>
 preload readFileBinary -> invoke fs:readFileBinary($0)
 preload readFileBinary : (path: string) => Promise<ArrayBuffer | null>
+preload reconcilePluginOperation -> invoke pluginOperations:reconcile($0, $1, $2)
+preload reconcilePluginOperation : (companyId: string, pluginId: string, operationId: string) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
 preload renameItem -> invoke fs:rename($0, $1)
@@ -961,6 +971,8 @@ preload stopTool -> invoke tools:stop($0)
 preload stopTool : (toolPath: string) => Promise<StopToolResult>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
 preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
+preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)
+preload undoPluginOperation : (companyId: string, pluginId: string, operationId: string, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload unwatchCompany -> invoke fs:unwatch($0)
 preload unwatchCompany : (rootPath: string) => Promise<SimpleResult>
 preload updateEnv -> invoke env:update($0, $1)

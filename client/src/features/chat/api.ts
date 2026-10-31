@@ -227,6 +227,20 @@ export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFro
   return files.onFileRequestedFromChatWindow(callback)
 }
 
+/**
+ * The person's own actions on it, with their session (never the AI's token):
+ * 「変更前の値を書き戻す」 writes to the outside system (HubSpot); reconciling reads it again.
+ */
+export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation'>
+
+export function undoPluginOperation(companyId: string, pluginId: string, operationId: string, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.undoPluginOperation(companyId, pluginId, operationId, conversationId)
+}
+
+export function reconcilePluginOperation(companyId: string, pluginId: string, operationId: string, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.reconcilePluginOperation(companyId, pluginId, operationId)
+}
+
 /** Asking the company server which services the member may use and their own keys (last 4 only): the chat's "no key" card. */
 export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
 

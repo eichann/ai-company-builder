@@ -251,6 +251,8 @@ tool), renderer `ReviewRequestCard.tsx`, `src/features/chat/reviewRequest.ts`.
 definitions each turn; Claude in-process (all in `allowedTools`), Codex loopback with look-ups
 only (registry `recordsMcp` / `recordActions`). They call the server with the turn's record
 token (never the session); the server records them as the AI's.
+A connector plugin's operations (HubSpot) are tools on the same server, and an update's outcome is
+a card in the reply with 「変更前の値を書き戻す」 for the person (`plugins.md` "The app").
 
 ## Instructions while the AI works (steering)
 

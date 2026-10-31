@@ -147,6 +147,29 @@ afterAll(async () => {
 })
 
 describe('the AI updates a deal, a person writes the previous value back', () => {
+  it('the AI\'s tools come from the running plugin: Claude gets the update with its writable fields, Codex reads only (P7)', async () => {
+    const claude = await call({ token: await tokenFor('op-member'), method: 'GET', path: '/api/records-ai/plugins' })
+    expect(claude.status).toBe(200)
+    const [hub] = claude.body.data.plugins
+    expect(hub).toMatchObject({ id: 'sample-hub', label: expect.any(String) })
+    const update = hub.operations.find((o: Json) => o.name === 'update_deal')
+    expect(update).toMatchObject({ kind: 'update', recordType: 'deal', decision: true })
+    // Written fields with their policy; stage (never written) and fields the mapping does not write are not offered.
+    expect(update.fields.map((f: Json) => [f.name, f.policy]).sort()).toEqual([['amount', 'prior'], ['confidence', 'auto'], ['next_step', 'auto']])
+    expect(update.fields.find((f: Json) => f.name === 'confidence').options).toEqual(expect.arrayContaining(['a', 'b', 'c']))
+    // No create (notes are not in milestone 3).
+    expect(hub.operations.map((o: Json) => o.name).sort()).toEqual(['refresh_deal', 'update_deal'])
+
+    const codex = await call({ user: 'op-member', method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'c', agent: 'codex', scope: 'act' } })
+    const read = await call({ token: codex.body.data.token, method: 'GET', path: '/api/records-ai/plugins' })
+    expect(read.body.data.plugins[0].operations.map((o: Json) => o.name)).toEqual(['refresh_deal'])
+
+    // Turned off: no tools from the next turn.
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: false })).ok).toBe(true)
+    expect((await call({ token: await tokenFor('op-member'), method: 'GET', path: '/api/records-ai/plugins' })).body.data.plugins).toEqual([])
+    expect((await services.plugins.setEnabled(owner, 'sample-hub', { enabled: true })).ok).toBe(true)
+  })
+
   it('the AI (its owner is the assignee) updates two auto fields; HubSpot, the record and the ledger follow', async () => {
     const notify = vi.spyOn(services.push, 'notify')
     const token = await tokenFor('op-member')
@@ -155,6 +178,11 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(r.status).toBe(200)
     expect(r.body.data.operation).toMatchObject({ state: 'applied', undoable: true, undoLabel: '変更前の値を書き戻す' })
     expect(r.body.data.operation.undoNotice).toContain('元に戻りません')
+    // What the chat's card shows (P7): each field before → after from the ledger, made by the AI.
+    expect(r.body.data.operation).toMatchObject({
+      actorKind: 'ai', recordTitle: expect.any(String),
+      changes: [{ field: 'confidence', before: 'b', after: 'a' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }],
+    })
     expect(fake.deal('1000000001')!.properties).toMatchObject({ juchu_kakudo: 'high', hs_next_step: '11/7 デモ' })
     const entry = services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1)
     expect(entry).toMatchObject({
@@ -174,8 +202,12 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     // The AI cannot write the previous value back (people do); its owner can.
     expect((await ai(token, 'POST', `/operations/${r.body.data.operation.id}/undo`)).status).toBe(404)
     const before = patches()
-    const back = await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/undo`)
+    // The card's button: the person's session, with the consultation as informational provenance.
+    const back = await person('op-member', 'POST', `/operations/${r.body.data.operation.id}/undo`, { conversationId: 'conv-card' })
     expect(back.status).toBe(200)
+    expect(back.body.data.operation).toMatchObject({ actorKind: 'human', changes: [{ field: 'confidence', before: 'a', after: 'b' }, { field: 'next_step', before: '11/7 デモ', after: '資料送付' }] })
+    expect(services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1))
+      .toMatchObject({ action: 'sample-hub.undo', actorKind: 'human', conversationId: 'conv-card' })
     expect(back.body.data.operation).toMatchObject({ operation: 'undo', state: 'applied', undoOf: r.body.data.operation.id, undoable: false })
     expect(patches()).toBe(before + 1)
     expect(fake.deal('1000000001')!.properties).toMatchObject({ juchu_kakudo: 'medium', hs_next_step: '資料送付' })

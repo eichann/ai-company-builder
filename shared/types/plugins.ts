@@ -136,3 +136,66 @@ export interface PluginMappingCheck {
   objects: Record<string, { errors: string[]; warnings: string[] }>
   checkedAt: string
 }
+
+/** A value of an ACB field, as the operation records keep it. */
+export type PluginFieldValue = string | number | boolean | null
+
+/**
+ * An operation record (操作の控え) as its record's readers see it (P6/P7):
+ * the answer of a typed operation, of 「変更前の値を書き戻す」 and of
+ * reconciling. Never holds an outside value the mapping did not translate.
+ */
+export interface PluginOperationRecordView {
+  id: string
+  operation: string
+  recordId: string
+  /** The record's title now (null when it has none). */
+  recordTitle: string | null
+  /** pending / sent-unknown / external-ok / applied / observed / failed. */
+  state: 'pending' | 'sent-unknown' | 'external-ok' | 'applied' | 'observed' | 'failed'
+  /** The ACB fields and values asked for. */
+  fields: Record<string, PluginFieldValue>
+  /** For an applied write: each field's value before → after, from its ledger entry. */
+  changes: Array<{ field: string; before: PluginFieldValue; after: PluginFieldValue }> | null
+  /** Who asked: a person or their AI (the credential decided). */
+  actorKind: 'human' | 'ai'
+  /** Why it is in its state (`rate-limited`, `not-observed`, `observed-actor-unknown`, …); not the AI's note. */
+  reason: string | null
+  /** Only an applied update (ACB's own confirmed write) not undone yet. */
+  undoable: boolean
+  undoLabel: string
+  undoNotice: string
+  undoOf: string | null
+  undoneBy: string | null
+  recordVersion: number | null
+  createdAt: string
+}
+
+/** A written field of an operation, for the member's AI (P7). */
+export interface PluginAiField {
+  name: string
+  label: string
+  kind: string
+  /** A choice field's options (ACB words). */
+  options?: string[]
+  /** `auto` writes at once; `prior` is refused in milestone 3 (a person approves first). `off` fields are not listed. */
+  policy: 'auto' | 'prior'
+}
+
+/** An operation the member's AI may call (P7: one tool each). */
+export interface PluginAiOperation {
+  name: string
+  label: string
+  kind: 'read' | 'update'
+  /** The ACB record type the operation acts on. */
+  recordType: string
+  /** The AI must give a reason (drafted from the consultation, citing its basis). */
+  decision: boolean
+  /** For an update: the fields it may write now (none `off`). */
+  fields: PluginAiField[]
+}
+
+/** The company's running connector plugins, as the member's AI may use them (GET /api/records-ai/plugins). */
+export interface PluginAiTools {
+  plugins: Array<{ id: string; label: string; operations: PluginAiOperation[] }>
+}

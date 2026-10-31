@@ -11,6 +11,7 @@
  *   POST /item                                  (act)
  *   POST /item/:recordId/actions/:action         (act)
  *
+ *   GET  /plugins                         the running plugins' operations this AI may call (tools, P7)
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
  *        (refresh: read; update: act — Codex's read tokens cannot write)
  *   GET  /plugins/:pluginId/operations/:operationId
@@ -85,6 +86,12 @@ recordsAiRoute.post('/item/:recordId/actions/:action', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
   return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+})
+
+// The operations the app turns into this AI's tools (a read token: reads only).
+recordsAiRoute.get('/plugins', async (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, await services.plugins.aiTools(h.member, h.scope))
 })
 
 // A plugin's typed operation: a read token may only run operations that read (refresh).

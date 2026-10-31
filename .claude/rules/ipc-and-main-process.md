@@ -39,7 +39,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   (git:sparse*, git:folderSizes), `skills` (skills:*, scan + cache), `tools` (tools:start/stop,
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;
-  the windows themselves come from `electron-adapter.ts` `createChatWindowHost`).
+  the windows themselves come from `electron-adapter.ts` `createChatWindowHost`),
+  `plugin-operations` (pluginOperations:undo / reconcile: the chat card's person actions on an
+  outside system's write, with the session; `plugins.md` "The app").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features
