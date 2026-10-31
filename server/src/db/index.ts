@@ -446,6 +446,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateInvitationClaims(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
+  // Before the seeding below: it deletes stale manager rows per company.
+  migrateRuleAndManagerCompanies(conn)
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
@@ -469,6 +471,90 @@ function migrateBrokerSettings(conn: Database.Database): void {
   // A generic relay service's definition (K9): JSON { label, host, basePath, header, format }, null otherwise.
   const serviceCols = new Set((conn.prepare(`PRAGMA table_info(broker_services)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!serviceCols.has('relay')) conn.exec(`ALTER TABLE broker_services ADD COLUMN relay TEXT`)
+}
+
+/**
+ * company_id on scope_rules and department_managers (multi-tenant foundation
+ * 案 A, `.claude/rules/server.md` "Company handle"). Before, these two tables
+ * reached their company only through the parent row (scope / department).
+ *
+ * Additive, so an older server build keeps working on a database this one has
+ * initialized (it inserts rows without the column):
+ * - the column is added nullable (ALTER TABLE cannot add NOT NULL without a
+ *   default) with an index;
+ * - backfill from the parent row, every startup, for rows still without it;
+ *   rows whose parent is gone belong to no company and no query can reach
+ *   them (every read joins or filters by the parent): they are removed;
+ * - triggers make the column non-null and correct for every new row: an
+ *   INSERT that names a company other than the parent's is refused, one
+ *   that leaves it out gets the parent's company (older builds), and no
+ *   UPDATE may clear it or move a row under another company's parent.
+ * Idempotent. Returns what the backfill did (tests; the startup log).
+ */
+export function migrateRuleAndManagerCompanies(conn: Database.Database): {
+  rulesBackfilled: number; rulesRemoved: number; managersBackfilled: number; managersRemoved: number
+} {
+  const columns = (table: string) => new Set((conn.prepare(`PRAGMA table_info(${table})`).all() as Array<{ name: string }>).map(c => c.name))
+  return conn.transaction(() => {
+    if (!columns('scope_rules').has('company_id')) {
+      conn.exec(`ALTER TABLE scope_rules ADD COLUMN company_id TEXT REFERENCES companies(id) ON DELETE CASCADE`)
+    }
+    if (!columns('department_managers').has('company_id')) {
+      conn.exec(`ALTER TABLE department_managers ADD COLUMN company_id TEXT REFERENCES companies(id) ON DELETE CASCADE`)
+    }
+    conn.exec(`
+      CREATE INDEX IF NOT EXISTS idx_scope_rules_company ON scope_rules(company_id, scope_id);
+      CREATE INDEX IF NOT EXISTS idx_department_managers_company ON department_managers(company_id, user_id);
+    `)
+
+    const rulesRemoved = conn.prepare(`
+      DELETE FROM scope_rules WHERE company_id IS NULL AND scope_id NOT IN (SELECT id FROM scopes)
+    `).run().changes
+    const rulesBackfilled = conn.prepare(`
+      UPDATE scope_rules SET company_id = (SELECT s.company_id FROM scopes s WHERE s.id = scope_rules.scope_id)
+      WHERE company_id IS NULL
+    `).run().changes
+    const managersRemoved = conn.prepare(`
+      DELETE FROM department_managers WHERE company_id IS NULL AND department_id NOT IN (SELECT id FROM departments)
+    `).run().changes
+    const managersBackfilled = conn.prepare(`
+      UPDATE department_managers SET company_id = (SELECT d.company_id FROM departments d WHERE d.id = department_managers.department_id)
+      WHERE company_id IS NULL
+    `).run().changes
+
+    conn.exec(`
+      CREATE TRIGGER IF NOT EXISTS scope_rules_company_insert BEFORE INSERT ON scope_rules
+      WHEN NEW.company_id IS NOT NULL AND NEW.company_id IS NOT (SELECT company_id FROM scopes WHERE id = NEW.scope_id)
+      BEGIN SELECT RAISE(ABORT, 'scope_rules.company_id must be the company of its scope'); END;
+
+      CREATE TRIGGER IF NOT EXISTS scope_rules_company_fill AFTER INSERT ON scope_rules
+      WHEN NEW.company_id IS NULL
+      BEGIN UPDATE scope_rules SET company_id = (SELECT company_id FROM scopes WHERE id = NEW.scope_id) WHERE rowid = NEW.rowid; END;
+
+      CREATE TRIGGER IF NOT EXISTS scope_rules_company_update BEFORE UPDATE OF company_id, scope_id ON scope_rules
+      WHEN NEW.company_id IS NULL OR NEW.company_id IS NOT (SELECT company_id FROM scopes WHERE id = NEW.scope_id)
+      BEGIN SELECT RAISE(ABORT, 'scope_rules.company_id must be the company of its scope'); END;
+
+      CREATE TRIGGER IF NOT EXISTS department_managers_company_insert BEFORE INSERT ON department_managers
+      WHEN NEW.company_id IS NOT NULL AND NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
+      BEGIN SELECT RAISE(ABORT, 'department_managers.company_id must be the company of its department'); END;
+
+      CREATE TRIGGER IF NOT EXISTS department_managers_company_fill AFTER INSERT ON department_managers
+      WHEN NEW.company_id IS NULL
+      BEGIN UPDATE department_managers SET company_id = (SELECT company_id FROM departments WHERE id = NEW.department_id) WHERE rowid = NEW.rowid; END;
+
+      CREATE TRIGGER IF NOT EXISTS department_managers_company_update BEFORE UPDATE OF company_id, department_id ON department_managers
+      WHEN NEW.company_id IS NULL OR NEW.company_id IS NOT (SELECT company_id FROM departments WHERE id = NEW.department_id)
+      BEGIN SELECT RAISE(ABORT, 'department_managers.company_id must be the company of its department'); END;
+    `)
+
+    const done = { rulesBackfilled, rulesRemoved, managersBackfilled, managersRemoved }
+    if (Object.values(done).some(n => n > 0)) {
+      // Counts only: no company, folder or user is named.
+      console.log(`[db] company_id on rules/managers: ${rulesBackfilled} rules and ${managersBackfilled} managers backfilled, ${rulesRemoved} rules and ${managersRemoved} managers without a parent removed`)
+    }
+    return done
+  })()
 }
 
 // Helper functions for common operations

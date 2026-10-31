@@ -163,8 +163,8 @@ beforeAll(async () => {
       .run(id, CO, name, folder, now, now)
     ensureDepartmentScope(db, CO, id, folder)
   }
-  db.prepare(`INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)`).run('d-hr', 'u-hrmgr', now)
-  db.prepare(`INSERT INTO department_managers (department_id, user_id, created_at) VALUES (?, ?, ?)`).run('d-sales', 'u-salesmgr', now)
+  db.prepare(`INSERT INTO department_managers (company_id, department_id, user_id, created_at) VALUES ('pfco', ?, ?, ?)`).run('d-hr', 'u-hrmgr', now)
+  db.prepare(`INSERT INTO department_managers (company_id, department_id, user_id, created_at) VALUES ('pfco', ?, ?, ?)`).run('d-sales', 'u-salesmgr', now)
 
   bare = join(process.env.REPOS_DIR!, `${CO}.git`)
   git(['init', '-q', '--bare', '--initial-branch=main', bare])

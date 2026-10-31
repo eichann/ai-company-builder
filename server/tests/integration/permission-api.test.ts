@@ -103,8 +103,8 @@ beforeAll(() => {
 
   // A private folder inside コンテンツ, and a rule-carrying scope elsewhere.
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('pa-s-students', ?, 'コンテンツ/受講生情報', 'folder', ?)`).run(CO, ts())
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('pa-r1', 'pa-s-students', 'user', 'pa-member', 1, 1, ?)`).run(ts())
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('pa-r2', 'pa-s-students', 'role', 'admin', 1, 0, ?)`).run(ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('pa-co', 'pa-r1', 'pa-s-students', 'user', 'pa-member', 1, 1, ?)`).run(ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('pa-co', 'pa-r2', 'pa-s-students', 'role', 'admin', 1, 0, ?)`).run(ts())
 })
 
 beforeEach(() => { currentUser.id = 'pa-owner' })

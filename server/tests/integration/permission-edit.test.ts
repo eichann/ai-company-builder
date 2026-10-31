@@ -137,7 +137,7 @@ function resetRules() {
   db.prepare(`DELETE FROM scope_rules WHERE scope_id IN (SELECT id FROM scopes WHERE company_id = ? AND path <> '')`).run(CO)
   db.prepare(`DELETE FROM scopes WHERE company_id = ? AND kind = 'folder'`).run(CO)
   db.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(root.id)
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'everyone', NULL, 1, 1, ?)`)
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('pe-co', ?, ?, 'everyone', NULL, 1, 1, ?)`)
     .run(`root-${Math.random()}`, root.id, ts())
 }
 

@@ -139,7 +139,7 @@ describe('migration of a database created by the previous server', () => {
     // An admin (Phase 2) replaced the default rule: seeding must not undo it.
     const companyScope = scopesOf(conn, 'old-b').find(s => s.kind === 'company')!
     conn.prepare('DELETE FROM scope_rules WHERE scope_id = ?').run(companyScope.id)
-    conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('custom', ?, 'everyone', NULL, 1, 0, ?)`).run(companyScope.id, ts)
+    conn.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('old-b', 'custom', ?, 'everyone', NULL, 1, 0, ?)`).run(companyScope.id, ts)
     seedPermissionScopes(conn)
     expect(rulesOf(conn, companyScope.id).map(r => r.id)).toEqual(['custom'])
   })
@@ -151,7 +151,7 @@ describe('migration of a database created by the previous server', () => {
     conn.prepare(`UPDATE departments SET folder = 'セールス' WHERE id = 'd1'`).run()
     replaceDepartmentManagers(conn, 'old-a', 'd2', ['o1'], 'o1')
     const d2Scope = scopesOf(conn, 'old-a').find(s => s.department_id === 'd2')!
-    conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('d2rule', ?, 'everyone', NULL, 1, 1, ?)`).run(d2Scope.id, ts)
+    conn.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('old-a', 'd2rule', ?, 'everyone', NULL, 1, 1, ?)`).run(d2Scope.id, ts)
     conn.prepare(`DELETE FROM departments WHERE id = 'd2'`).run()
 
     // Foreign keys clean up the deleted department's scope, rules and managers.
@@ -214,7 +214,7 @@ describe('departments API keeps scopes in sync', () => {
     const dept = scopesOf(db, CO).find(x => x.department_id === deptId)!
     const ts = new Date().toISOString()
     db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('sub', ?, 'コンテンツ/受講生情報', 'folder', ?)`).run(CO, ts)
-    db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('subrule', 'sub', 'user', 'ps-member', 1, 0, ?)`).run(ts)
+    db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('perm-sync-co', 'subrule', 'sub', 'user', 'ps-member', 1, 0, ?)`).run(ts)
     // A sibling sharing the prefix must not move.
     db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('sib', ?, 'コンテンツ2', 'folder', ?)`).run(CO, ts)
 

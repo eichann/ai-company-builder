@@ -83,10 +83,21 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `invitations`, `scopes` (permission scopes, rules, department managers:
   `adapters/sqlite/scopes.ts` over `permission-store.ts`), `privateFolders`
   (`adapters/private-folders.ts`) and `orphanedScopes` (`adapters/orphaned-scopes.ts`).
-  `scope_rules` / `department_managers` have no company column yet: their statements reach the
-  company through `scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)` (or the
-  departments equivalent), and their INSERTs select the parent row of the company. New tables (stage 4: types, company map, state engine…) are created behind the
-  handle from the start.
+  Every company table has `company_id`, and handle statements filter by it directly. New tables
+  (stage 4: types, company map, state engine…) are created behind the handle from the start,
+  with `company_id`.
+- `scope_rules` / `department_managers` got `company_id` later (2026-10-31,
+  `db/index.ts` `migrateRuleAndManagerCompanies`, every startup, idempotent): added nullable
+  (additive: an older build still inserts without it) + index; rows still without it get the
+  company of their scope / department, rows whose parent is gone are removed (they belong to no
+  company; counts are logged, nothing named). Triggers keep it non-null and correct: an INSERT
+  naming a company other than the parent's is refused (`… must be the company of its scope /
+  department`), one leaving it out gets the parent's (older builds), no UPDATE may clear it or
+  move a row under another company's parent. So adding a rule or manager under another
+  company's scope / department through a handle throws. Startup repair of managers whose
+  department is gone now runs per company (`syncCompanyScopes`). Test:
+  `tests/unit/rule-manager-company-migration.test.ts` on `tests/fixtures/app-schema-before-rule-companies.sql`
+  (the schema before, frozen): per-company counts equal before and after.
 - The company id given to `forCompany` comes from the server: `member.companyId` (the membership
   `services/access.ts` looked up for the signed-in account), a company the service just created,
   a key-broker token row, or a job looping over the companies registry — never a value taken
@@ -104,11 +115,11 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   `company_id IN (…)`, also in a subquery; a join such as `i.company_id = c.id` does not count;
   an INSERT names `company_id`), unless listed in `UNSCOPED` with a lasting reason: invitation /
   broker token lookups that find the company, the operator's KEK re-wrap, retention's list of
-  companies, server-wide cleanup of expired broker tokens and old usage counters, startup repair
-  of manager rows whose department is gone, WHERE built by a helper starting with
-  `company_id = ?`. The list only shrinks. It also checks that every table outside
-  `CONTROL_PLANE_TABLES` (`companies`, `memberships`, unused `ssh_keys`) has a `company_id`
-  column (`scope_rules`, `department_managers` still listed), that a handle table is written only
+  companies, server-wide cleanup of expired broker tokens and old usage counters, the startup
+  backfill of rows from before `company_id` (only `company_id IS NULL` rows), WHERE built by a
+  helper starting with `company_id = ?`. The list only shrinks. It also checks that every table
+  outside `CONTROL_PLANE_TABLES` (`companies`, `memberships`, unused `ssh_keys`) has a
+  `company_id` column, that a handle table is written only
   by its handle modules (`HANDLE_TABLES`), and that handle repository factories are used only by
   the source, in src and tests. Isolation per handle (A cannot read or write B's departments,
   invitations, scopes, rules, managers, private folders): `tests/unit/company-data.test.ts`.

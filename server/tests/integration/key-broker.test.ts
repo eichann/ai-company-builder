@@ -113,7 +113,7 @@ beforeAll(async () => {
     store.ensureDepartmentScope(db, CO, id, folder)
   }
   const salesScope = db.prepare('SELECT id FROM scopes WHERE company_id = ? AND path = ?').get(CO, '営業部').id
-  db.prepare('INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, 1, 1, ?)').run('r-kb-sales', salesScope, 'user', 'kb-sales', ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('kb-co', ?, ?, ?, ?, 1, 1, ?)`).run('r-kb-sales', salesScope, 'user', 'kb-sales', ts())
 
   const { Hono } = await import('hono')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')

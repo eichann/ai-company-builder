@@ -80,7 +80,7 @@ beforeAll(() => {
   // 営業部/顧客: a private folder only ae-viewer may read.
   db.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('ae-r1', ?, 'ae-s-private', ?)`).run(CO, ts())
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('ae-s-private', ?, '営業部/顧客', 'folder', 'ae-r1', ?)`).run(CO, ts())
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ae-ru1', 'ae-s-private', 'everyone', NULL, 0, 0, ?), ('ae-ru2', 'ae-s-private', 'user', 'ae-viewer', 1, 0, ?)`).run(ts(), ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ae-co', 'ae-ru1', 'ae-s-private', 'everyone', NULL, 0, 0, ?), ('ae-co', 'ae-ru2', 'ae-s-private', 'user', 'ae-viewer', 1, 0, ?)`).run(ts(), ts())
 })
 
 beforeEach(() => { services.agentEvents.resetRateLimits() })

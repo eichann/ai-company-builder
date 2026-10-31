@@ -141,7 +141,8 @@ describe('company handle: scopes, rules and managers', () => {
     a.deleteRule(bRuleId, root)
     expect(a.clearRules(hr)).toBe(0)
     expect(a.deleteUserRules('ub')).toBe(0)
-    a.replaceDepartmentManagers('b-hr', ['ua'], 'ua')
+    // Adding a manager to another company's department is refused outright (insert trigger).
+    expect(() => a.replaceDepartmentManagers('b-hr', ['ua'], 'ua')).toThrow(/company of its department/)
     a.replaceDepartmentManagers('b-hr', [], 'ua')
     a.removeManagerFromCompany('ub')
     a.deleteDepartmentScopes('b-hr', '人事')
@@ -155,14 +156,15 @@ describe('company handle: private folders', () => {
   it('another company’s private folder is not found and its viewers do not change', () => {
     conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('s-b', 'b', '人事/評価', 'folder', 'r-b', ?)`).run(TS)
     conn.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('r-b', 'b', 's-b', ?)`).run(TS)
-    conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ru-b', 's-b', 'everyone', NULL, 0, 0, ?)`).run(TS)
+    conn.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('b', 'ru-b', 's-b', 'everyone', NULL, 0, 0, ?)`).run(TS)
     const a = source.forCompany('a').privateFolders
     expect(a.list()).toEqual([])
     expect(a.paths()).toEqual([])
     expect(a.get('s-b')).toBeNull()
     expect(source.forCompany('b').privateFolders.get('s-b')?.scope.path).toBe('人事/評価')
 
-    a.replaceRules('s-b', { viewers: ['intruder'], editors: ['intruder'] }, 'intruder')
+    // Adding a rule under another company's scope is refused outright (insert trigger); nothing is removed either.
+    expect(() => a.replaceRules('s-b', { viewers: ['intruder'], editors: ['intruder'] }, 'intruder')).toThrow(/company of its scope/)
     expect(conn.prepare(`SELECT id FROM scope_rules WHERE scope_id = 's-b'`).all()).toEqual([{ id: 'ru-b' }])
   })
 })

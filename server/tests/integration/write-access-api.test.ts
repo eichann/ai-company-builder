@@ -40,7 +40,7 @@ const ROLE: Record<string, string> = { 'wa-owner': 'owner', 'wa-admin': 'admin',
 const ts = () => new Date().toISOString()
 let seq = 0
 function addRule(scopeId: string, subjectType: string, subjectId: string | null, canWrite: boolean) {
-  db.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, ?, ?, 1, ?, ?)`)
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('wa-co', ?, ?, ?, ?, 1, ?, ?)`)
     .run(`wa-r${++seq}`, scopeId, subjectType, subjectId, canWrite ? 1 : 0, ts())
 }
 function addScope(id: string, path: string) {
