@@ -99,3 +99,40 @@ export interface PluginDetail {
   /** Latest first (50). `change` is JSON without any secret. */
   history: Array<{ action: string; at: string; by: string; change: unknown }>
 }
+
+/** One object's part of an import run (`POST …/import`, P5). */
+export interface ImportObjectReport {
+  seen: number
+  created: number
+  updated: number
+  unchanged: number
+  /** The mapping's `max` stopped the run before the outside system's last result. */
+  truncated: boolean
+  /** Field names (never values) the mapping could not translate, with counts. */
+  problems: Record<string, number>
+}
+
+/** What an import run did — as it happened, never "all synchronised" (review §6.8). Also kept in the history (`import`). */
+export interface ImportReport {
+  status: 'complete' | 'truncated' | 'stopped' | 'failed' | 'timed-out'
+  /** Why it stopped or failed (a fixed word), else null. */
+  reason: string | null
+  objects: Record<string, ImportObjectReport>
+  startedAt: string
+  finishedAt: string
+}
+
+/**
+ * 「HubSpot に聞いて確かめる」 (P8): a mapping checked against the outside
+ * system's real property list (`checkMappingAgainstProperties`). Sentences
+ * and fixed words only — never a key, never the outside system's answer.
+ */
+export interface PluginMappingCheck {
+  /** false: the outside system could not be asked (the mapping can still be saved). */
+  reachable: boolean
+  /** Why it could not be asked (a fixed word: key-rejected, not-permitted, rate-limited, server-error, …), else null. */
+  reason: string | null
+  /** Per mapped object that has a property list: what does not match (errors) or deserves a look (warnings). */
+  objects: Record<string, { errors: string[]; warnings: string[] }>
+  checkedAt: string
+}

@@ -22,6 +22,11 @@ paths:
   - "server/tests/helpers/fake-upstream.ts"
   - "server/tests/fakes/hubspot/**"
   - "server/src/services/plugin-operations.ts"
+  - "server/src/services/plugin-mapping-check.ts"
+  - "server/tests/integration/plugin-mapping-check.test.ts"
+  - "admin/src/app/companies/*/integrations/**"
+  - "admin/src/lib/integrations.ts"
+  - "admin/tests/integrations.test.tsx"
   - "server/tests/integration/plugin-operations.test.ts"
 ---
 
@@ -187,6 +192,7 @@ PUT  /plugins/:pluginId                  { version, keyId } install (first time:
 PUT  /plugins/:pluginId/enabled          { enabled } on / off
 PUT  /plugins/:pluginId/mapping          { text } a new mapping version (YAML; field policies are its `policy`)
 POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved again as the next one
+POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確かめる」 (P8, below)
 ```
 
 - Tables (company handle `plugins`, `adapters/sqlite/plugins.ts`): `plugin_installs` (version,
@@ -371,11 +377,49 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
   key's stop / 「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the
   mapping), the records switch.
 
+## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
+
+- `POST /plugins/:pluginId/mapping/check { text? }` (owner/admin; 404 for a plugin not installed):
+  the text being edited (or the mapping in force) parsed for this company like a save (400
+  `MAPPING_INVALID` + `errors`), then each mapped object's declared `properties_list` read through
+  the connector and `checkMappingAgainstProperties` applied → `PluginMappingCheck` (per object
+  `errors` / `warnings`, sentences only). HubSpot's answer is read as `{ results: [{ name, type,
+  calculated, modificationMetadata.readOnlyValue, options, externalOptions }] }`
+  (`propertiesFromAnswer`; owners are `externalOptions`, translated by `people`).
+- It works **before the plugin is on and before its auto fields are acknowledged** (checking
+  comes first): `plugins.forChecking` requires the install, not stopped by the operator, the
+  same package fingerprint and a usable company key (else 409 `PLUGIN_NOT_READY` + `problem`) —
+  asked again as the connector's precheck with the caller's role. It writes nothing (no mapping
+  version, no account binding, no record).
+- HubSpot not reachable (key refused, missing scope, 429 / 5xx after the read retries…) →
+  `reachable: false` + a fixed `reason`; the mapping can still be saved (design §1-5).
+- Test: `tests/integration/plugin-mapping-check.test.ts` (against the fake HubSpot: findings
+  of each kind right after install, nothing written, owner/admin only, the operator's stop and
+  an invalid text send nothing, a refused key → not reachable and the key nowhere).
+
+## The admin page 「つなぎ先」 (P8, `admin/src/app/companies/[id]/integrations/`)
+
+- Owner/admin only (menu `integrations`; others see the lock and load nothing). Per package:
+  version and company key (the key by its name and last 4 from `GET /broker`; never a value),
+  on / off (off with a confirmation; the server's `problem` in plain words), the mapping as a
+  table (ACB field, outside property, 「書き戻さない（読むだけ）」 / 「承認が要る」 / 「自動で書き戻す」;
+  `stage` is shown as not writable) or as YAML for advanced use, versions with 「この版に戻す」,
+  「HubSpot に聞いて確かめる」 on the text being edited, import with its report (and
+  「新しいつなぎ先として始める」 after `ACCOUNT_CHANGED`), the history.
+- The table edits the YAML (`admin/src/lib/integrations.ts`): parsed with `yaml-lite`, one field
+  changed, written back (`mappingToYaml`, read back unchanged by the strict reader; comments
+  are not kept). Writing back always states the field's `policy` explicitly.
+- `auto` is saved only through the server's 400 `AUTO_NEEDS_ACKNOWLEDGEMENT`: the page lists
+  the fields, asks for the `AUTO_ACKNOWLEDGEMENT` checkbox and resends with `acknowledgeAuto`.
+- The practice HubSpot is said on the page (`practice` of the service in `GET /broker`).
+- No jargon on screen (no プラグイン / 型 / オントロジー; test).
+- Tests: `admin/tests/integrations.test.tsx`; the requests in
+  `server/tests/integration/admin-contract.test.ts`.
+
 ## Not yet (later PRs of milestone 3)
 
 P7 the app's tools (Claude writes, Codex reads; the `update_deal` tool's description tells the AI
-to draft the reason from the consultation and cite its basis); P8 the admin page 「つなぎ先」 (it
-writes the mapping's YAML, also from its table form, and asks for the auto acknowledgement); P9
+to draft the reason from the consultation and cite its basis); P9
 staging (compose wiring of `PLUGINS_DIR`); notes (`add_note`, a create: never re-sent, with a
 correlation check) after milestone 3. The real HubSpot package lives in the private
 `acb-plugins` repository (§6-6).

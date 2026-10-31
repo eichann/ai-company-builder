@@ -881,3 +881,51 @@ export const keyBrokerApi = {
   setInternalHosts: (companyId: string, internalHosts: string[]) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/settings`, { method: 'PUT', body: { internalHosts } }),
 }
+
+// ---------------------------------------------------------------------------
+// Connections to outside systems (「つなぎ先」, connector plugins, milestone 3):
+// shapes from shared/types/plugins.ts. Owner/admin only. No answer holds a
+// key value: an install names its key by id (the page shows the key's last 4
+// characters from GET /broker).
+// ---------------------------------------------------------------------------
+
+export type {
+  ImportObjectReport,
+  ImportReport,
+  PluginDetail,
+  PluginFieldPolicyView,
+  PluginInstallView,
+  PluginListItem,
+  PluginMappingCheck,
+  PluginOperationView,
+  PluginPackageView,
+  PluginProblem,
+} from '../../../shared/types/plugins'
+export type { FieldPolicy } from '../../../shared/core/plugins'
+
+import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck } from '../../../shared/types/plugins'
+
+const pluginPath = (companyId: string, pluginId: string) => `/api/companies/${enc(companyId)}/plugins/${enc(pluginId)}`
+
+export const pluginsApi = {
+  list: (companyId: string) => getData<{ plugins: PluginListItem[] }>(`/api/companies/${enc(companyId)}/plugins`),
+  get: (companyId: string, pluginId: string) => getData<PluginDetail>(pluginPath(companyId, pluginId)),
+  /** Install (first time) or choose another version / key. */
+  install: (companyId: string, pluginId: string, version: string, keyId: string | null) =>
+    getData<PluginDetail>(pluginPath(companyId, pluginId), { method: 'PUT', body: { version, keyId } }),
+  setEnabled: (companyId: string, pluginId: string, enabled: boolean) =>
+    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/enabled`, { method: 'PUT', body: { enabled } }),
+  /** A new mapping version; `acknowledgeAuto` = the fields the admin confirmed trigger no HubSpot workflow. */
+  saveMapping: (companyId: string, pluginId: string, text: string, acknowledgeAuto: string[] = []) =>
+    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/mapping`, { method: 'PUT', body: { text, acknowledgeAuto } }),
+  restoreMapping: (companyId: string, pluginId: string, version: number, acknowledgeAuto: string[] = []) =>
+    getData<PluginDetail>(`${pluginPath(companyId, pluginId)}/mapping/restore`, { method: 'POST', body: { version, acknowledgeAuto } }),
+  /** 「HubSpot に聞いて確かめる」: the text being edited (or the mapping in force) against the outside property list. */
+  checkMapping: (companyId: string, pluginId: string, text?: string) =>
+    getData<PluginMappingCheck>(`${pluginPath(companyId, pluginId)}/mapping/check`, { method: 'POST', body: text === undefined ? {} : { text } }),
+  import: (companyId: string, pluginId: string) =>
+    getData<ImportReport>(`${pluginPath(companyId, pluginId)}/import`, { method: 'POST', body: {} }),
+  /** The outside account changed on purpose: start a new connection. */
+  renewConnection: (companyId: string, pluginId: string) =>
+    getData<{ connectionId: string }>(`${pluginPath(companyId, pluginId)}/connection/renew`, { method: 'POST', body: {} }),
+}

@@ -390,6 +390,39 @@ export function createPluginService(deps: PluginServiceDeps) {
       return op?.kind ?? null
     },
 
+    /**
+     * For 「HubSpot に聞いて確かめる」 (P8, services/plugin-mapping-check.ts): the
+     * installed package with its key and a mapping — `text`, else the one in
+     * force — for the connector's reads of the outside property list. Unlike
+     * `active()` it does not need the plugin on or its auto fields
+     * acknowledged (checking the mapping comes before both); the operator's
+     * stop, the package's fingerprint, the key and the mapping's own checks
+     * still apply. Re-decided on every call (it is also the precheck).
+     */
+    async forChecking(companyId: string, pluginId: string, text: string | null): Promise<{ ok: true; plugin: ActivePlugin } | { ok: false; problem: PluginProblem; errors?: string[] }> {
+      const repo = companyData.forCompany(companyId).plugins
+      const install = repo.install(pluginId)
+      if (!install) return { ok: false, problem: 'off' }
+      if (await shelf.isStopped(install.pluginId, install.version)) return { ok: false, problem: 'stopped' }
+      const found = shelf.find(companyId, install.pluginId, install.version)
+      if (!found) return { ok: false, problem: 'not-on-shelf' }
+      if (found.fingerprint !== install.fingerprint) return { ok: false, problem: 'package-changed' }
+      const kp = keyProblem(companyId, found.pkg.manifest, install.keyId)
+      if (kp) return { ok: false, problem: kp }
+      const source = text ?? (install.mappingVersion > 0 ? repo.mapping(install.pluginId, install.mappingVersion)?.text ?? null : null)
+      if (source === null) return { ok: false, problem: 'mapping-invalid', errors: ['読み替え表がまだありません'] }
+      const parsed = parseForCompany(companyId, found.pkg, source)
+      if (!parsed.ok) return { ok: false, problem: 'mapping-invalid', errors: parsed.errors }
+      return {
+        ok: true,
+        plugin: {
+          pluginId: install.pluginId, version: install.version, manifest: found.pkg.manifest, types: found.pkg.types,
+          mapping: parsed.mapping, mappingVersion: install.mappingVersion, keyId: install.keyId as string,
+          fingerprint: install.fingerprint, connectionId: install.connectionId, accountId: install.accountId,
+        },
+      }
+    },
+
     /** Whether a plugin of the company manages `service` (the relay's read-only switch stays on). */
     manages(companyId: string, service: string): boolean {
       return companyData.forCompany(companyId).plugins.installs().some(i => i.service === service && i.managedSince !== null)
