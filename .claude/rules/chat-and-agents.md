@@ -84,7 +84,7 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   capabilities it claims); (4) its factories in `electron/agents/registry.ts`; (5) its sign-in
   card in `ChatAuthSettings.tsx` (and a header picker if its models are neither a static list nor
   a live catalog). Then fix what `tsc` flags (the literal `setAuthMode` param types in
-  `preload.ts` / `features/settings/ipc.ts`; regenerate `ipc-inventory.json` with
+  `preload.ts` / `features/settings/ipc.ts`; regenerate `ipc-inventory.txt` with
   `UPDATE_IPC_INVENTORY=1`) and run `agent-registry*.test.ts`.
 
 ## The AI's environment (allowlist)

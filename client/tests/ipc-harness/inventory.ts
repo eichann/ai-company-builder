@@ -1,5 +1,6 @@
 // The IPC surface between the renderer and the main process, as data
-// (tests/ipc-contract.test.ts compares it with ipc-inventory.json).
+// (tests/ipc-contract.test.ts compares it, as inventoryLines(), with
+// ipc-inventory.txt).
 //
 //  - main: every ipcMain.handle / ipcMain.on channel, with the handler's
 //    parameters as written (TypeScript AST of the files that import
@@ -56,7 +57,10 @@ export interface Inventory {
   preload: Record<string, { calls: string[]; declared: string | null }>
   /**
    * shared/ipc-contract.ts: the channels it lists per kind, and every type it
-   * exports as written (a change to a payload's shape shows up here).
+   * exports as written (a change to a payload's shape shows up here). An
+   * interface is recorded per member (`Name.member`, plus `Name` for its
+   * heading), so two branches adding different channels change different
+   * entries instead of the same long line.
    */
   contract: {
     channels: ContractChannels
@@ -90,8 +94,17 @@ export function contractFromSource(): Inventory['contract'] {
     if (!ts.isInterfaceDeclaration(statement) && !ts.isTypeAliasDeclaration(statement)) continue
     const exported = statement.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword)
     if (!exported) continue
-    // Comments inside a declaration are not part of its shape.
-    types[statement.name.text] = squash(statement.getText().replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, ''))
+    const name = statement.name.text
+    if (ts.isInterfaceDeclaration(statement)) {
+      // The heading (`export interface X extends Y {`) and each member on its own.
+      types[name] = `${squash(withoutComments(source.text.slice(statement.getStart(), statement.members.pos)))} }`
+      for (const member of statement.members) {
+        const text = squash(withoutComments(member.getText())).replace(/[;,]$/, '')
+        types[`${name}.${member.name ? squash(member.name.getText()) : text}`] = text
+      }
+    } else {
+      types[name] = squash(withoutComments(statement.getText()))
+    }
     const kind = kinds[statement.name.text]
     if (kind && ts.isInterfaceDeclaration(statement)) {
       for (const member of statement.members) {
@@ -105,6 +118,8 @@ export function contractFromSource(): Inventory['contract'] {
 }
 
 const squash = (text: string) => text.replace(/\s+/g, ' ').trim()
+// Comments inside a declaration are not part of its shape.
+const withoutComments = (text: string) => text.replace(/\/\*[\s\S]*?\*\/|\/\/[^\n]*/g, '')
 
 function parse(rel: string): ts.SourceFile {
   const file = path.join(CLIENT, rel)
@@ -319,4 +334,35 @@ export async function buildInventory(registered: { handle: string[]; on: string[
       ].sort(),
     },
   }
+}
+
+/**
+ * The inventory as one fact per line, sorted (code-unit order, not the
+ * locale's). Each line stands alone — no counts, no line numbers, nothing
+ * derived from other entries — so two branches that each add a channel change
+ * different lines, git merges them, and the merged file is what regenerating
+ * on the merged code writes.
+ */
+export function inventoryLines(inventory: Inventory): string[] {
+  const lines: string[] = []
+  for (const kind of ['handle', 'on'] as const) {
+    for (const [channel, c] of Object.entries(inventory.main[kind])) lines.push(`main.${kind} ${channel} @ ${c.file} (${c.params})`)
+  }
+  for (const [channel, files] of Object.entries(inventory.main.send)) {
+    for (const file of files) lines.push(`main.send ${channel} @ ${file}`)
+  }
+  for (const [name, p] of Object.entries(inventory.preload)) {
+    lines.push(`preload ${name} -> ${p.calls.length > 0 ? p.calls.join(' ; ') : '(no IPC)'}`)
+    lines.push(`preload ${name} : ${p.declared ?? '(not declared)'}`)
+  }
+  for (const [kind, channels] of Object.entries(inventory.contract.channels)) {
+    for (const channel of channels) lines.push(`contract.${kind} ${channel}`)
+  }
+  for (const [name, text] of Object.entries(inventory.contract.types)) lines.push(`contract.type ${name} = ${text}`)
+  for (const [list, items] of Object.entries(inventory.unmatched)) {
+    for (const item of items) lines.push(`unmatched.${list} ${item}`)
+  }
+  const bad = lines.find(line => /[\r\n]/.test(line))
+  if (bad) throw new Error(`Inventory entry spans lines: ${bad.slice(0, 80)}`)
+  return lines.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
 }

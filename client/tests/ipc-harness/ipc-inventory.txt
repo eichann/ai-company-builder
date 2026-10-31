@@ -1,0 +1,993 @@
+contract.events agent-interaction:closed
+contract.events agent-interaction:request
+contract.events app:closeRequested
+contract.events chat-server:info
+contract.events chatHistory:changed
+contract.events chatWindow:changed
+contract.events chatWindow:fileRequested
+contract.events fs:changes
+contract.events handoff:changed
+contract.events setup:progress
+contract.events sparse:progress
+contract.events tool-approval-request
+contract.events voice:event
+contract.events writeAccess:changed
+contract.invoke agent-interaction:list
+contract.invoke agent-interaction:respond
+contract.invoke api:createCompany
+contract.invoke api:getCompanies
+contract.invoke api:getDepartments
+contract.invoke app:closeResponse
+contract.invoke auth:getSession
+contract.invoke auth:signIn
+contract.invoke auth:signOut
+contract.invoke auth:signUp
+contract.invoke backup:list
+contract.invoke backup:openFolder
+contract.invoke backup:restore
+contract.invoke brokerKeys:delete
+contract.invoke brokerKeys:list
+contract.invoke brokerKeys:moveFromEnv
+contract.invoke brokerKeys:save
+contract.invoke chat-server:getInfo
+contract.invoke chatHistory:deleteSession
+contract.invoke chatHistory:getSession
+contract.invoke chatHistory:getSummaries
+contract.invoke chatHistory:patchSession
+contract.invoke chatHistory:saveSession
+contract.invoke chatHistory:search
+contract.invoke chatWindow:closeAll
+contract.invoke chatWindow:focus
+contract.invoke chatWindow:getContext
+contract.invoke chatWindow:list
+contract.invoke chatWindow:open
+contract.invoke chatWindow:openFile
+contract.invoke chatWindow:reportStatus
+contract.invoke codex:status
+contract.invoke config:getAgentEnvPassthrough
+contract.invoke config:getApiKeyStatus
+contract.invoke config:getAuthMode
+contract.invoke config:getClaudeCodeStatus
+contract.invoke config:getPermissionMode
+contract.invoke config:getServerUrl
+contract.invoke config:hasApiKey
+contract.invoke config:setAgentEnvPassthrough
+contract.invoke config:setApiKey
+contract.invoke config:setAuthMode
+contract.invoke config:setPermissionMode
+contract.invoke config:setServerUrl
+contract.invoke config:validateServerUrl
+contract.invoke dialog:selectDirectory
+contract.invoke editor:backupBeforeOverwrite
+contract.invoke env:status
+contract.invoke env:update
+contract.invoke fs:copy
+contract.invoke fs:createDirectory
+contract.invoke fs:createFile
+contract.invoke fs:delete
+contract.invoke fs:exists
+contract.invoke fs:move
+contract.invoke fs:moveFromExternal
+contract.invoke fs:readDirectory
+contract.invoke fs:readDirectoryTree
+contract.invoke fs:readFile
+contract.invoke fs:readFileBinary
+contract.invoke fs:registerAllowedRoot
+contract.invoke fs:rename
+contract.invoke fs:stat
+contract.invoke fs:unwatch
+contract.invoke fs:watch
+contract.invoke fs:writeFile
+contract.invoke git:autoSync
+contract.invoke git:commitFileDiff
+contract.invoke git:fileDiff
+contract.invoke git:folderSizes
+contract.invoke git:generateSummary
+contract.invoke git:getBinaryStatus
+contract.invoke git:grep
+contract.invoke git:inspectCompanyFolder
+contract.invoke git:listFiles
+contract.invoke git:log
+contract.invoke git:preview
+contract.invoke git:revertFile
+contract.invoke git:setupCompanyRemote
+contract.invoke git:showCommit
+contract.invoke git:sparseGetExclusions
+contract.invoke git:sparseSetExclusions
+contract.invoke git:sparseUncommittedChanges
+contract.invoke git:sync
+contract.invoke handoff:complete
+contract.invoke handoff:get
+contract.invoke handoff:update
+contract.invoke privateFolders:create
+contract.invoke privateFolders:createContext
+contract.invoke privateFolders:mine
+contract.invoke privateFolders:reservedPathRefusal
+contract.invoke shell:openExternal
+contract.invoke skills:list
+contract.invoke skills:makePrivate
+contract.invoke skills:publish
+contract.invoke skills:toggleNurturing
+contract.invoke tool-approval-response
+contract.invoke tools:start
+contract.invoke tools:stop
+contract.invoke voice:cancel
+contract.invoke voice:capabilities
+contract.invoke voice:devices
+contract.invoke voice:getPrompt
+contract.invoke voice:resetPrompt
+contract.invoke voice:setPrompt
+contract.invoke voice:start
+contract.invoke voice:stop
+contract.invoke writeAccess:get
+contract.send fs:startDrag
+contract.sync chatHistory:flushSession
+contract.type ApiKeyStatus = export interface ApiKeyStatus { }
+contract.type ApiKeyStatus.encryptionAvailable = encryptionAvailable: boolean
+contract.type ApiKeyStatus.last4 = last4?: string
+contract.type ApiKeyStatus.set = set: boolean
+contract.type ApiKeyStatus.storedInPlainText = storedInPlainText?: boolean
+contract.type ApiKeyStatus.unreadable = unreadable?: boolean
+contract.type AuthResult = export interface AuthResult { }
+contract.type AuthResult.error = error?: string
+contract.type AuthResult.success = success: boolean
+contract.type AuthUser = export interface AuthUser { }
+contract.type AuthUser.email = email: string
+contract.type AuthUser.emailVerified = emailVerified: boolean
+contract.type AuthUser.id = id: string
+contract.type AuthUser.image = image: string | null
+contract.type AuthUser.name = name: string | null
+contract.type BackupInfo = export interface BackupInfo { }
+contract.type BackupInfo.files = files: string[]
+contract.type BackupInfo.id = id: string
+contract.type BackupInfo.path = path: string
+contract.type BackupInfo.reason = reason: string
+contract.type BackupInfo.timestamp = timestamp: string
+contract.type BackupListResult = export interface BackupListResult { }
+contract.type BackupListResult.backups = backups: BackupInfo[]
+contract.type BackupListResult.error = error?: string
+contract.type BackupListResult.success = success: boolean
+contract.type BackupRestoreResult = export interface BackupRestoreResult { }
+contract.type BackupRestoreResult.error = error?: string
+contract.type BackupRestoreResult.keptPath = keptPath?: string
+contract.type BackupRestoreResult.message = message?: string
+contract.type BackupRestoreResult.success = success: boolean
+contract.type ChatServerInfo = export interface ChatServerInfo { }
+contract.type ChatServerInfo.authToken = authToken: string
+contract.type ChatServerInfo.port = port: number
+contract.type ClaudeCodeStatus = export interface ClaudeCodeStatus { }
+contract.type ClaudeCodeStatus.authenticated = authenticated: boolean
+contract.type ClaudeCodeStatus.available = available: boolean
+contract.type ClaudeCodeStatus.checkedAt = checkedAt: number
+contract.type ClaudeCodeStatus.cliPath = cliPath: string | null
+contract.type ClaudeCodeStatus.error = error: string | null
+contract.type ClaudeCodeStatus.version = version: string | null
+contract.type CompaniesResult = export interface CompaniesResult { }
+contract.type CompaniesResult.data = data?: CompanyInfo[]
+contract.type CompaniesResult.error = error?: string
+contract.type CompaniesResult.success = success: boolean
+contract.type CompanyFolderDecisionView = export type CompanyFolderDecisionView = | { action: 'firstSetup' | 'existingClone' | 'uploadExisting' } | { action: 'refuse'; reason: 'otherRemote' | 'unrelatedRepo' | 'notEmpty'; message: string }
+contract.type CompanyInfo = export interface CompanyInfo { }
+contract.type CompanyInfo.createdAt = createdAt: string
+contract.type CompanyInfo.id = id: string
+contract.type CompanyInfo.name = name: string
+contract.type CompanyInfo.ownerId = ownerId: string
+contract.type CompanyInfo.repoPath = repoPath: string | null
+contract.type CompanyInfo.role = role: string
+contract.type CompanyInfo.slug = slug: string
+contract.type CompanyInfo.updatedAt = updatedAt: string
+contract.type CompanyResult = export interface CompanyResult { }
+contract.type CompanyResult.data = data?: CompanyInfo
+contract.type CompanyResult.error = error?: string
+contract.type CompanyResult.success = success: boolean
+contract.type DepartmentInfo = export interface DepartmentInfo { }
+contract.type DepartmentInfo.color = color: string
+contract.type DepartmentInfo.companyId = companyId: string
+contract.type DepartmentInfo.createdAt = createdAt: string
+contract.type DepartmentInfo.description = description: string | null
+contract.type DepartmentInfo.folder = folder: string
+contract.type DepartmentInfo.icon = icon: string
+contract.type DepartmentInfo.id = id: string
+contract.type DepartmentInfo.isActive = isActive: boolean
+contract.type DepartmentInfo.name = name: string
+contract.type DepartmentInfo.nameEn = nameEn: string | null
+contract.type DepartmentInfo.parentId = parentId: string | null
+contract.type DepartmentInfo.sortOrder = sortOrder: number
+contract.type DepartmentInfo.updatedAt = updatedAt: string
+contract.type DepartmentsResult = export interface DepartmentsResult { }
+contract.type DepartmentsResult.data = data?: DepartmentInfo[]
+contract.type DepartmentsResult.error = error?: string
+contract.type DepartmentsResult.success = success: boolean
+contract.type DirectoryEntry = export interface DirectoryEntry { }
+contract.type DirectoryEntry.isDirectory = isDirectory: boolean
+contract.type DirectoryEntry.name = name: string
+contract.type DirectoryEntry.path = path: string
+contract.type DirectoryTreeNode = export interface DirectoryTreeNode extends DirectoryEntry { }
+contract.type DirectoryTreeNode.children = children?: DirectoryTreeNode[]
+contract.type DownloadProgress = export interface DownloadProgress { }
+contract.type DownloadProgress.receivedBytes = receivedBytes: number
+contract.type DownloadProgress.repoPath = repoPath: string
+contract.type EditorBackupResult = export interface EditorBackupResult { }
+contract.type EditorBackupResult.backupPath = backupPath?: string
+contract.type EditorBackupResult.error = error?: string
+contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
+contract.type EditorBackupResult.success = success: boolean
+contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
+contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
+contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
+contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
+contract.type ElectronAPI.backupRestore = backupRestore: Invoke<'backup:restore'>
+contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
+contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
+contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
+contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
+contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
+contract.type ElectronAPI.createFile = createFile: Invoke<'fs:createFile'>
+contract.type ElectronAPI.createPrivateFolder = createPrivateFolder: Invoke<'privateFolders:create'>
+contract.type ElectronAPI.deleteChatSession = deleteChatSession: Invoke<'chatHistory:deleteSession'>
+contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
+contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
+contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
+contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
+contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
+contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
+contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
+contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
+contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
+contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
+contract.type ElectronAPI.getChatServerInfo = getChatServerInfo: Invoke<'chat-server:getInfo'>
+contract.type ElectronAPI.getChatSession = getChatSession: Invoke<'chatHistory:getSession'>
+contract.type ElectronAPI.getChatSessionSummaries = getChatSessionSummaries: Invoke<'chatHistory:getSummaries'>
+contract.type ElectronAPI.getChatWindowContext = getChatWindowContext: Invoke<'chatWindow:getContext'>
+contract.type ElectronAPI.getClaudeCodeStatus = getClaudeCodeStatus: Invoke<'config:getClaudeCodeStatus'>
+contract.type ElectronAPI.getCodexStatus = getCodexStatus: Invoke<'codex:status'>
+contract.type ElectronAPI.getCompanies = getCompanies: Invoke<'api:getCompanies'>
+contract.type ElectronAPI.getDepartments = getDepartments: Invoke<'api:getDepartments'>
+contract.type ElectronAPI.getEnvStatus = getEnvStatus: Invoke<'env:status'>
+contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
+contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
+contract.type ElectronAPI.getPermissionMode = getPermissionMode: Invoke<'config:getPermissionMode'>
+contract.type ElectronAPI.getPrivateFolderCreateContext = getPrivateFolderCreateContext: Invoke<'privateFolders:createContext'>
+contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
+contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
+contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
+contract.type ElectronAPI.getWriteAccess = getWriteAccess: Invoke<'writeAccess:get'>
+contract.type ElectronAPI.gitAutoSync = gitAutoSync: Invoke<'git:autoSync'>
+contract.type ElectronAPI.gitBinaryStatus = gitBinaryStatus: Invoke<'git:getBinaryStatus'>
+contract.type ElectronAPI.gitCommitFileDiff = gitCommitFileDiff: Invoke<'git:commitFileDiff'>
+contract.type ElectronAPI.gitFileDiff = gitFileDiff: Invoke<'git:fileDiff'>
+contract.type ElectronAPI.gitGenerateSummary = gitGenerateSummary: Invoke<'git:generateSummary'>
+contract.type ElectronAPI.gitGrep = gitGrep: Invoke<'git:grep'>
+contract.type ElectronAPI.gitInspectCompanyFolder = gitInspectCompanyFolder: Invoke<'git:inspectCompanyFolder'>
+contract.type ElectronAPI.gitListFiles = gitListFiles: Invoke<'git:listFiles'>
+contract.type ElectronAPI.gitLog = gitLog: Invoke<'git:log'>
+contract.type ElectronAPI.gitPreview = gitPreview: Invoke<'git:preview'>
+contract.type ElectronAPI.gitRevertFile = gitRevertFile: Invoke<'git:revertFile'>
+contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
+contract.type ElectronAPI.gitShowCommit = gitShowCommit: Invoke<'git:showCommit'>
+contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
+contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
+contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
+contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
+contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
+contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
+contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
+contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
+contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
+contract.type ElectronAPI.onAgentInteraction = onAgentInteraction: Subscribe<'agent-interaction:request'>
+contract.type ElectronAPI.onAgentInteractionClosed = onAgentInteractionClosed: Subscribe<'agent-interaction:closed'>
+contract.type ElectronAPI.onChatHistoryChanged = onChatHistoryChanged: Subscribe<'chatHistory:changed'>
+contract.type ElectronAPI.onChatServerInfo = onChatServerInfo: Subscribe<'chat-server:info'>
+contract.type ElectronAPI.onChatWindowsChanged = onChatWindowsChanged: Subscribe<'chatWindow:changed'>
+contract.type ElectronAPI.onCloseRequested = onCloseRequested: Subscribe<'app:closeRequested'>
+contract.type ElectronAPI.onFileChange = onFileChange: (callback: (data: FileChangeEvent) => void) => () => void
+contract.type ElectronAPI.onFileChanges = onFileChanges: Subscribe<'fs:changes'>
+contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
+contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
+contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
+contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
+contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
+contract.type ElectronAPI.onWriteAccessChanged = onWriteAccessChanged: Subscribe<'writeAccess:changed'>
+contract.type ElectronAPI.openChatWindow = openChatWindow: Invoke<'chatWindow:open'>
+contract.type ElectronAPI.openExternal = openExternal: Invoke<'shell:openExternal'>
+contract.type ElectronAPI.openFileInMainWindow = openFileInMainWindow: Invoke<'chatWindow:openFile'>
+contract.type ElectronAPI.patchChatSession = patchChatSession: Invoke<'chatHistory:patchSession'>
+contract.type ElectronAPI.publishSkill = publishSkill: Invoke<'skills:publish'>
+contract.type ElectronAPI.readDirectory = readDirectory: Invoke<'fs:readDirectory'>
+contract.type ElectronAPI.readDirectoryTree = readDirectoryTree: (path: string, maxDepth?: number) => Promise<InvokeResult<'fs:readDirectoryTree'>>
+contract.type ElectronAPI.readFile = readFile: Invoke<'fs:readFile'>
+contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBinary'>
+contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
+contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
+contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
+contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
+contract.type ElectronAPI.respondAgentInteraction = respondAgentInteraction: Invoke<'agent-interaction:respond'>
+contract.type ElectronAPI.respondToolApproval = respondToolApproval: Invoke<'tool-approval-response'>
+contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory:saveSession'>
+contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
+contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
+contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
+contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
+contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
+contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
+contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
+contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
+contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
+contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
+contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git:sparseGetExclusions'>
+contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
+contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
+contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDrag'>) => void
+contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
+contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
+contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
+contract.type ElectronAPI.unwatchCompany = unwatchCompany: Invoke<'fs:unwatch'>
+contract.type ElectronAPI.updateEnv = updateEnv: Invoke<'env:update'>
+contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'>
+contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:validateServerUrl'>
+contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
+contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
+contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
+contract.type EnvStatusResult = export interface EnvStatusResult { }
+contract.type EnvStatusResult.error = error?: string
+contract.type EnvStatusResult.success = success: boolean
+contract.type EnvStatusResult.vars = vars?: Record<string, EnvVarStatus>
+contract.type EventChannel = export type EventChannel = keyof IpcEventChannels
+contract.type EventPayload = export type EventPayload<C extends EventChannel> = IpcEventChannels[C]
+contract.type FileChangeEvent = export interface FileChangeEvent { }
+contract.type FileChangeEvent.path = path: string
+contract.type FileChangeEvent.type = type: string
+contract.type FileOpResult = export interface FileOpResult extends SimpleResult { }
+contract.type FileOpResult.code = code?: 'name_taken'
+contract.type FileStats = export interface FileStats { }
+contract.type FileStats.ctime = ctime: string
+contract.type FileStats.isDirectory = isDirectory: boolean
+contract.type FileStats.isFile = isFile: boolean
+contract.type FileStats.mtime = mtime: string
+contract.type FileStats.size = size: number
+contract.type FolderSizesResponse = export type FolderSizesResponse = | { success: true path: string size: number | null folders: Array<{ name: string; path: string; size: number | null; files: number | null; hasChildren: boolean; private?: boolean }> measured: Record<string, number | null> offline: boolean } | { success: false; error: string }
+contract.type GitBinaryStatus = export interface GitBinaryStatus { }
+contract.type GitBinaryStatus.binary = binary: string
+contract.type GitBinaryStatus.bundled = bundled: boolean
+contract.type GitCommitFileDiffResult = export interface GitCommitFileDiffResult { }
+contract.type GitCommitFileDiffResult.diff = diff: string
+contract.type GitCommitFileDiffResult.error = error?: string
+contract.type GitCommitFileDiffResult.success = success: boolean
+contract.type GitFileDiffResult = export interface GitFileDiffResult { }
+contract.type GitFileDiffResult.diff = diff: string
+contract.type GitFileDiffResult.error = error?: string
+contract.type GitFileDiffResult.isDeletedFile = isDeletedFile?: boolean
+contract.type GitFileDiffResult.isNewFile = isNewFile?: boolean
+contract.type GitFileDiffResult.success = success: boolean
+contract.type GitFileStatus = export type GitFileStatus = 'added' | 'modified' | 'deleted'
+contract.type GitGrepResult = export interface GitGrepResult { }
+contract.type GitGrepResult.cancelled = cancelled?: boolean
+contract.type GitGrepResult.error = error?: string
+contract.type GitGrepResult.results = results: Array<{ file: string; line: number; text: string; column?: number }>
+contract.type GitGrepResult.success = success: boolean
+contract.type GitGrepResult.timedOut = timedOut?: boolean
+contract.type GitGrepResult.truncated = truncated?: boolean
+contract.type GitListFilesResult = export interface GitListFilesResult { }
+contract.type GitListFilesResult.error = error?: string
+contract.type GitListFilesResult.files = files: string[]
+contract.type GitListFilesResult.success = success: boolean
+contract.type GitListFilesResult.truncated = truncated?: boolean
+contract.type GitLogResult = export interface GitLogResult { }
+contract.type GitLogResult.commits = commits: Array<{ hash: string hashShort: string message: string author: string date: string }>
+contract.type GitLogResult.error = error?: string
+contract.type GitLogResult.success = success: boolean
+contract.type GitPreviewResult = export interface GitPreviewResult { }
+contract.type GitPreviewResult.changes = changes: { added: string[]; modified: string[]; deleted: string[] }
+contract.type GitPreviewResult.error = error?: string
+contract.type GitPreviewResult.hasChanges = hasChanges: boolean
+contract.type GitPreviewResult.success = success: boolean
+contract.type GitPreviewResult.totalCount = totalCount: number
+contract.type GitResult = export interface GitResult { }
+contract.type GitResult.backupPath = backupPath?: string
+contract.type GitResult.conflictFiles = conflictFiles?: string[]
+contract.type GitResult.deletedConflictFiles = deletedConflictFiles?: string[]
+contract.type GitResult.error = error?: string
+contract.type GitResult.errorType = errorType?: SyncErrorType
+contract.type GitResult.excludedNestedRepos = excludedNestedRepos?: string[]
+contract.type GitResult.hadConflicts = hadConflicts?: boolean
+contract.type GitResult.ignoredLargeFiles = ignoredLargeFiles?: string[]
+contract.type GitResult.message = message?: string
+contract.type GitResult.nestedRepoBackupFiles = nestedRepoBackupFiles?: string[]
+contract.type GitResult.nestedRepoBackupPath = nestedRepoBackupPath?: string
+contract.type GitResult.outsideCheckoutBackupPath = outsideCheckoutBackupPath?: string
+contract.type GitResult.outsideCheckoutFiles = outsideCheckoutFiles?: string[]
+contract.type GitResult.personalFiles = personalFiles?: string[]
+contract.type GitResult.protectedBackupPath = protectedBackupPath?: string
+contract.type GitResult.protectedFiles = protectedFiles?: string[]
+contract.type GitResult.pushFailed = pushFailed?: boolean
+contract.type GitResult.remoteUrl = remoteUrl?: string
+contract.type GitResult.restoredFolders = restoredFolders?: string[]
+contract.type GitResult.restoredProtectedFiles = restoredProtectedFiles?: string[]
+contract.type GitResult.restoredWriteDeniedFiles = restoredWriteDeniedFiles?: string[]
+contract.type GitResult.secretDetected = secretDetected?: boolean
+contract.type GitResult.success = success: boolean
+contract.type GitResult.untrackedPersonalFiles = untrackedPersonalFiles?: string[]
+contract.type GitResult.writeDeniedBackupPath = writeDeniedBackupPath?: string
+contract.type GitResult.writeDeniedFiles = writeDeniedFiles?: string[]
+contract.type GitShowCommitResult = export interface GitShowCommitResult { }
+contract.type GitShowCommitResult.error = error?: string
+contract.type GitShowCommitResult.files = files: Array<{ status: string; path: string }>
+contract.type GitShowCommitResult.success = success: boolean
+contract.type InspectCompanyFolderResult = export interface InspectCompanyFolderResult { }
+contract.type InspectCompanyFolderResult.decision = decision?: CompanyFolderDecisionView
+contract.type InspectCompanyFolderResult.error = error?: string
+contract.type InspectCompanyFolderResult.success = success: boolean
+contract.type InvokeArgs = export type InvokeArgs<C extends InvokeChannel> = IpcInvokeChannels[C]['args']
+contract.type InvokeChannel = export type InvokeChannel = keyof IpcInvokeChannels
+contract.type InvokeResult = export type InvokeResult<C extends InvokeChannel> = IpcInvokeChannels[C]['result']
+contract.type IpcEventChannels = export interface IpcEventChannels { }
+contract.type IpcEventChannels.'agent-interaction:closed' = 'agent-interaction:closed': [request: AgentInteractionRequest]
+contract.type IpcEventChannels.'agent-interaction:request' = 'agent-interaction:request': [request: AgentInteractionRequest]
+contract.type IpcEventChannels.'app:closeRequested' = 'app:closeRequested': []
+contract.type IpcEventChannels.'chat-server:info' = 'chat-server:info': [info: ChatServerInfo]
+contract.type IpcEventChannels.'chatHistory:changed' = 'chatHistory:changed': [data: ChatHistoryChange]
+contract.type IpcEventChannels.'chatWindow:changed' = 'chatWindow:changed': [change: ChatWindowsChange]
+contract.type IpcEventChannels.'chatWindow:fileRequested' = 'chatWindow:fileRequested': [request: ChatWindowFileRequest]
+contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChangeEvent[]]
+contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
+contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
+contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
+contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
+contract.type IpcEventChannels.'voice:event' = 'voice:event': [event: VoiceEvent]
+contract.type IpcEventChannels.'writeAccess:changed' = 'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
+contract.type IpcInvokeChannels = export interface IpcInvokeChannels { }
+contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
+contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
+contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { args: [name: string]; result: CompanyResult }
+contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
+contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
+contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+contract.type IpcInvokeChannels.'auth:getSession' = 'auth:getSession': { args: []; result: SessionResult }
+contract.type IpcInvokeChannels.'auth:signIn' = 'auth:signIn': { args: [email: string, password: string]; result: AuthResult }
+contract.type IpcInvokeChannels.'auth:signOut' = 'auth:signOut': { args: []; result: SimpleResult }
+contract.type IpcInvokeChannels.'auth:signUp' = 'auth:signUp': { args: [email: string, password: string, name?: string]; result: AuthResult }
+contract.type IpcInvokeChannels.'backup:list' = 'backup:list': { args: [repoPath: string]; result: BackupListResult }
+contract.type IpcInvokeChannels.'backup:openFolder' = 'backup:openFolder': { args: [backupPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'backup:restore' = 'backup:restore': { args: [repoPath: string, backupId: string, filePath: string]; result: BackupRestoreResult }
+contract.type IpcInvokeChannels.'brokerKeys:delete' = 'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'brokerKeys:list' = 'brokerKeys:list': { args: [companyId: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'brokerKeys:moveFromEnv' = 'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
+contract.type IpcInvokeChannels.'brokerKeys:save' = 'brokerKeys:save': { args: [companyId: string, service: string, secret: string, displayName?: string]; result: OwnKeysResult }
+contract.type IpcInvokeChannels.'chat-server:getInfo' = 'chat-server:getInfo': { args: []; result: ChatServerInfo | null }
+contract.type IpcInvokeChannels.'chatHistory:deleteSession' = 'chatHistory:deleteSession': { args: [companyId: string, sessionId: string]; result: boolean }
+contract.type IpcInvokeChannels.'chatHistory:getSession' = 'chatHistory:getSession': { args: [companyId: string, sessionId: string]; result: ChatSession | null }
+contract.type IpcInvokeChannels.'chatHistory:getSummaries' = 'chatHistory:getSummaries': { args: [companyId: string]; result: ChatSessionSummary[] }
+contract.type IpcInvokeChannels.'chatHistory:patchSession' = 'chatHistory:patchSession': { args: [companyId: string, sessionId: string, patch: ChatMetadataPatch]; result: ChatSession | null }
+contract.type IpcInvokeChannels.'chatHistory:saveSession' = 'chatHistory:saveSession': { args: [companyId: string, session: ChatSession]; result: ChatSaveReceipt }
+contract.type IpcInvokeChannels.'chatHistory:search' = 'chatHistory:search': { args: [companyId: string, query: string]; result: string[] }
+contract.type IpcInvokeChannels.'chatWindow:closeAll' = 'chatWindow:closeAll': { args: []; result: void }
+contract.type IpcInvokeChannels.'chatWindow:focus' = 'chatWindow:focus': { args: [sessionId: string]; result: boolean }
+contract.type IpcInvokeChannels.'chatWindow:getContext' = 'chatWindow:getContext': { args: []; result: ChatWindowContext | null }
+contract.type IpcInvokeChannels.'chatWindow:list' = 'chatWindow:list': { args: []; result: ChatWindowInfo[] }
+contract.type IpcInvokeChannels.'chatWindow:open' = 'chatWindow:open': { args: [sessionId: string, request: ChatWindowOpenRequest]; result: ChatWindowOpenResult }
+contract.type IpcInvokeChannels.'chatWindow:openFile' = 'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
+contract.type IpcInvokeChannels.'chatWindow:reportStatus' = 'chatWindow:reportStatus': { args: [status: ChatWindowStatus]; result: boolean }
+contract.type IpcInvokeChannels.'codex:status' = 'codex:status': { args: []; result: CodexStatus }
+contract.type IpcInvokeChannels.'config:getAgentEnvPassthrough' = 'config:getAgentEnvPassthrough': { args: []; result: string[] }
+contract.type IpcInvokeChannels.'config:getApiKeyStatus' = 'config:getApiKeyStatus': { args: []; result: ApiKeyStatus }
+contract.type IpcInvokeChannels.'config:getAuthMode' = 'config:getAuthMode': { args: []; result: AuthMode }
+contract.type IpcInvokeChannels.'config:getClaudeCodeStatus' = 'config:getClaudeCodeStatus': { args: []; result: ClaudeCodeStatus }
+contract.type IpcInvokeChannels.'config:getPermissionMode' = 'config:getPermissionMode': { args: []; result: PermissionMode }
+contract.type IpcInvokeChannels.'config:getServerUrl' = 'config:getServerUrl': { args: []; result: string | null }
+contract.type IpcInvokeChannels.'config:hasApiKey' = 'config:hasApiKey': { args: []; result: boolean }
+contract.type IpcInvokeChannels.'config:setAgentEnvPassthrough' = 'config:setAgentEnvPassthrough': { args: [names: string[]]; result: { names: string[]; invalid: string[]; denied: string[] } }
+contract.type IpcInvokeChannels.'config:setApiKey' = 'config:setApiKey': { args: [apiKey: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'config:setAuthMode' = 'config:setAuthMode': { args: [mode: AuthMode]; result: boolean }
+contract.type IpcInvokeChannels.'config:setPermissionMode' = 'config:setPermissionMode': { args: [mode: PermissionMode]; result: boolean }
+contract.type IpcInvokeChannels.'config:setServerUrl' = 'config:setServerUrl': { args: [url: string]; result: boolean }
+contract.type IpcInvokeChannels.'config:validateServerUrl' = 'config:validateServerUrl': { args: [url: string]; result: ServerUrlValidation }
+contract.type IpcInvokeChannels.'dialog:selectDirectory' = 'dialog:selectDirectory': { args: []; result: string | null }
+contract.type IpcInvokeChannels.'editor:backupBeforeOverwrite' = 'editor:backupBeforeOverwrite': { args: [rootPath: string, filePath: string]; result: EditorBackupResult }
+contract.type IpcInvokeChannels.'env:status' = 'env:status': { args: [rootPath: string]; result: EnvStatusResult }
+contract.type IpcInvokeChannels.'env:update' = 'env:update': { args: [rootPath: string, changes: Record<string, string | null>]; result: SimpleResult }
+contract.type IpcInvokeChannels.'fs:copy' = 'fs:copy': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:createDirectory' = 'fs:createDirectory': { args: [path: string]; result: boolean }
+contract.type IpcInvokeChannels.'fs:createFile' = 'fs:createFile': { args: [path: string, content: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:delete' = 'fs:delete': { args: [path: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'fs:exists' = 'fs:exists': { args: [path: string]; result: boolean }
+contract.type IpcInvokeChannels.'fs:move' = 'fs:move': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:moveFromExternal' = 'fs:moveFromExternal': { args: [sourcePath: string, destPath: string]; result: FileOpResult }
+contract.type IpcInvokeChannels.'fs:readDirectory' = 'fs:readDirectory': { args: [path: string]; result: DirectoryEntry[] }
+contract.type IpcInvokeChannels.'fs:readDirectoryTree' = 'fs:readDirectoryTree': { args: [path: string, maxDepth: number]; result: DirectoryTreeNode[] }
+contract.type IpcInvokeChannels.'fs:readFile' = 'fs:readFile': { args: [path: string]; result: string | null }
+contract.type IpcInvokeChannels.'fs:readFileBinary' = 'fs:readFileBinary': { args: [path: string]; result: ArrayBuffer | null }
+contract.type IpcInvokeChannels.'fs:registerAllowedRoot' = 'fs:registerAllowedRoot': { args: [path: string]; result: { success: boolean } }
+contract.type IpcInvokeChannels.'fs:rename' = 'fs:rename': { args: [oldPath: string, newPath: string]; result: FileOpResult & { newPath?: string } }
+contract.type IpcInvokeChannels.'fs:stat' = 'fs:stat': { args: [path: string]; result: { success: boolean; data?: FileStats } }
+contract.type IpcInvokeChannels.'fs:unwatch' = 'fs:unwatch': { args: [rootPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'fs:watch' = 'fs:watch': { args: [rootPath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'fs:writeFile' = 'fs:writeFile': { args: [path: string, content: string]; result: boolean }
+contract.type IpcInvokeChannels.'git:autoSync' = 'git:autoSync': { args: [repoPath: string, companyId: string, mode: AutoSyncMode, state: AutoSyncRendererState]; result: AutoSyncResult<GitResult> }
+contract.type IpcInvokeChannels.'git:commitFileDiff' = 'git:commitFileDiff': { args: [repoPath: string, commitHash: string, filePath: string]; result: GitCommitFileDiffResult }
+contract.type IpcInvokeChannels.'git:fileDiff' = 'git:fileDiff': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: GitFileDiffResult }
+contract.type IpcInvokeChannels.'git:folderSizes' = 'git:folderSizes': { args: [repoPath: string, companyId: string, folder: string, measure: string[]]; result: FolderSizesResponse }
+contract.type IpcInvokeChannels.'git:generateSummary' = 'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
+contract.type IpcInvokeChannels.'git:getBinaryStatus' = 'git:getBinaryStatus': { args: []; result: GitBinaryStatus }
+contract.type IpcInvokeChannels.'git:grep' = 'git:grep': { args: [repoPath: string, query: string, folderPath: string]; result: GitGrepResult }
+contract.type IpcInvokeChannels.'git:inspectCompanyFolder' = 'git:inspectCompanyFolder': { args: [folder: string, companyId: string]; result: InspectCompanyFolderResult }
+contract.type IpcInvokeChannels.'git:listFiles' = 'git:listFiles': { args: [repoPath: string, folderPath: string]; result: GitListFilesResult }
+contract.type IpcInvokeChannels.'git:log' = 'git:log': { args: [repoPath: string, folderPath: string, limit?: number]; result: GitLogResult }
+contract.type IpcInvokeChannels.'git:preview' = 'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
+contract.type IpcInvokeChannels.'git:revertFile' = 'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
+contract.type IpcInvokeChannels.'git:setupCompanyRemote' = 'git:setupCompanyRemote': { args: [repoPath: string, companyId: string, selectedPaths?: string[]]; result: GitResult & { refused?: boolean } }
+contract.type IpcInvokeChannels.'git:showCommit' = 'git:showCommit': { args: [repoPath: string, commitHash: string, folderPath?: string]; result: GitShowCommitResult }
+contract.type IpcInvokeChannels.'git:sparseGetExclusions' = 'git:sparseGetExclusions': { args: [repoPath: string]; result: SparseExclusionsResult }
+contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclusions': { args: [repoPath: string, excluded: string[]]; result: SparseSetExclusionsResult }
+contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
+contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
+contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
+contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
+contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
+contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
+contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
+contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
+contract.type IpcInvokeChannels.'privateFolders:reservedPathRefusal' = 'privateFolders:reservedPathRefusal': { args: [targetPath: string]; result: string | null }
+contract.type IpcInvokeChannels.'shell:openExternal' = 'shell:openExternal': { args: [url: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean }]; result: SkillsResult }
+contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
+contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
+contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
+contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
+contract.type IpcInvokeChannels.'tools:stop' = 'tools:stop': { args: [toolPath: string]; result: StopToolResult }
+contract.type IpcInvokeChannels.'voice:cancel' = 'voice:cancel': { args: [requestId: string]; result: void }
+contract.type IpcInvokeChannels.'voice:capabilities' = 'voice:capabilities': { args: []; result: VoiceCapabilities }
+contract.type IpcInvokeChannels.'voice:devices' = 'voice:devices': { args: []; result: VoiceDeviceList }
+contract.type IpcInvokeChannels.'voice:getPrompt' = 'voice:getPrompt': { args: []; result: VoicePromptSettings }
+contract.type IpcInvokeChannels.'voice:resetPrompt' = 'voice:resetPrompt': { args: []; result: VoicePromptSettings }
+contract.type IpcInvokeChannels.'voice:setPrompt' = 'voice:setPrompt': { args: [instructions: string]; result: VoicePromptSettings }
+contract.type IpcInvokeChannels.'voice:start' = 'voice:start': { args: [requestId: string, deviceId?: string]; result: void }
+contract.type IpcInvokeChannels.'voice:stop' = 'voice:stop': { args: [requestId: string]; result: void }
+contract.type IpcInvokeChannels.'writeAccess:get' = 'writeAccess:get': { args: [companyId: string, refresh?: boolean]; result: WriteAccess | null }
+contract.type IpcSendChannels = export interface IpcSendChannels { }
+contract.type IpcSendChannels.'fs:startDrag' = 'fs:startDrag': { args: [filePath: string] }
+contract.type IpcSyncChannels = export interface IpcSyncChannels { }
+contract.type IpcSyncChannels.'chatHistory:flushSession' = 'chatHistory:flushSession': { args: [companyId: string, session: ChatSession]; result: { result: ChatSaveReceipt; error?: undefined } | { error: string; result?: undefined } }
+contract.type PrivateFoldersFailure = export type PrivateFoldersFailure = { success: false; offline: boolean; error: string }
+contract.type SendArgs = export type SendArgs<C extends SendChannel> = IpcSendChannels[C]['args']
+contract.type SendChannel = export type SendChannel = keyof IpcSendChannels
+contract.type ServerUrlValidation = export interface ServerUrlValidation { }
+contract.type ServerUrlValidation.error = error?: string
+contract.type ServerUrlValidation.serverName = serverName?: string
+contract.type ServerUrlValidation.valid = valid: boolean
+contract.type ServerUrlValidation.version = version?: string
+contract.type SessionResult = export interface SessionResult { }
+contract.type SessionResult.success = success: boolean
+contract.type SessionResult.user = user: AuthUser | null
+contract.type SimpleResult = export interface SimpleResult { }
+contract.type SimpleResult.error = error?: string
+contract.type SimpleResult.success = success: boolean
+contract.type SkillInfo = export interface SkillInfo { }
+contract.type SkillInfo.departmentId = departmentId: string
+contract.type SkillInfo.description = description: string
+contract.type SkillInfo.files = files: { skillMd: string rules?: string[] references?: string[] scripts?: string[] tools?: ToolInfo[] }
+contract.type SkillInfo.group = group?: string
+contract.type SkillInfo.id = id: string
+contract.type SkillInfo.isNurturing = isNurturing?: boolean
+contract.type SkillInfo.isPrivate = isPrivate?: boolean
+contract.type SkillInfo.name = name: string
+contract.type SkillInfo.skillPath = skillPath: string
+contract.type SkillsResult = export interface SkillsResult { }
+contract.type SkillsResult.error = error?: string
+contract.type SkillsResult.skills = skills: SkillInfo[]
+contract.type SkillsResult.success = success: boolean
+contract.type SparseExclusionsResult = export interface SparseExclusionsResult { }
+contract.type SparseExclusionsResult.error = error?: string
+contract.type SparseExclusionsResult.excluded = excluded: string[]
+contract.type SparseExclusionsResult.success = success: boolean
+contract.type SparseSetExclusionsResult = export interface SparseSetExclusionsResult { }
+contract.type SparseSetExclusionsResult.enabled = enabled?: boolean
+contract.type SparseSetExclusionsResult.error = error?: string
+contract.type SparseSetExclusionsResult.excluded = excluded?: string[]
+contract.type SparseSetExclusionsResult.offline = offline?: boolean
+contract.type SparseSetExclusionsResult.success = success: boolean
+contract.type SparseUncommittedChangesResult = export interface SparseUncommittedChangesResult { }
+contract.type SparseUncommittedChangesResult.error = error?: string
+contract.type SparseUncommittedChangesResult.files = files: string[]
+contract.type SparseUncommittedChangesResult.success = success: boolean
+contract.type StartToolResult = export interface StartToolResult { }
+contract.type StartToolResult.alreadyRunning = alreadyRunning?: boolean
+contract.type StartToolResult.error = error?: string
+contract.type StartToolResult.pid = pid?: number
+contract.type StartToolResult.port = port?: number
+contract.type StartToolResult.success = success: boolean
+contract.type StopToolResult = export interface StopToolResult { }
+contract.type StopToolResult.error = error?: string
+contract.type StopToolResult.message = message?: string
+contract.type StopToolResult.success = success: boolean
+contract.type SyncArgs = export type SyncArgs<C extends SyncChannel> = IpcSyncChannels[C]['args']
+contract.type SyncChannel = export type SyncChannel = keyof IpcSyncChannels
+contract.type SyncErrorType = export type SyncErrorType = | 'network' | 'auth' | 'conflict' | 'locked' | 'push_failed' | 'protected_config' | 'write_denied' | 'personal_path' | 'local_only_path' | 'reserved_path' | 'needs_member' | 'unknown' | (string & Record<never, never>)
+contract.type SyncResult = export type SyncResult<C extends SyncChannel> = IpcSyncChannels[C]['result']
+contract.type ToolApprovalRequest = export interface ToolApprovalRequest { }
+contract.type ToolApprovalRequest.appSessionId = appSessionId?: string
+contract.type ToolApprovalRequest.reason = reason?: string
+contract.type ToolApprovalRequest.toolInput = toolInput: Record<string, unknown>
+contract.type ToolApprovalRequest.toolName = toolName: string
+contract.type ToolApprovalRequest.toolUseId = toolUseId: string
+contract.type ToolInfo = export interface ToolInfo { }
+contract.type ToolInfo.displayName = displayName: string
+contract.type ToolInfo.hasPackageJson = hasPackageJson: boolean
+contract.type ToolInfo.name = name: string
+contract.type ToolInfo.path = path: string
+contract.type ToolInfo.startCommand = startCommand?: string
+main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
+main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
+main.handle api:createCompany @ features/auth/ipc.ts (name: string)
+main.handle api:getCompanies @ features/auth/ipc.ts ()
+main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
+main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
+main.handle auth:getSession @ features/auth/ipc.ts ()
+main.handle auth:signIn @ features/auth/ipc.ts (email: string, password: string)
+main.handle auth:signOut @ features/auth/ipc.ts ()
+main.handle auth:signUp @ features/auth/ipc.ts (email: string, password: string, name?: string)
+main.handle backup:list @ features/backups/ipc.ts (unsafeRepoPath: string)
+main.handle backup:openFolder @ features/backups/ipc.ts (backupPath: string)
+main.handle backup:restore @ features/backups/ipc.ts (repoPath: string, backupId: string, filePath: string)
+main.handle brokerKeys:delete @ features/broker/ipc.ts (companyId: string, service: string)
+main.handle brokerKeys:list @ features/broker/ipc.ts (companyId: string)
+main.handle brokerKeys:moveFromEnv @ features/broker/ipc.ts (companyId: string, rootPath: string, name: string)
+main.handle brokerKeys:save @ features/broker/ipc.ts (companyId: string, service: string, secret: string, displayName?: string)
+main.handle chat-server:getInfo @ main.ts ()
+main.handle chatHistory:deleteSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
+main.handle chatHistory:getSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string)
+main.handle chatHistory:getSummaries @ features/chat-history/ipc.ts (companyId: string)
+main.handle chatHistory:patchSession @ features/chat-history/ipc.ts (companyId: string, sessionId: string, patch: ChatMetadataPatch)
+main.handle chatHistory:saveSession @ features/chat-history/ipc.ts (companyId: string, session: ChatSession)
+main.handle chatHistory:search @ features/chat-history/ipc.ts (companyId: string, query: string)
+main.handle chatWindow:closeAll @ features/chat-windows/ipc.ts ()
+main.handle chatWindow:focus @ features/chat-windows/ipc.ts (sessionId: string)
+main.handle chatWindow:getContext @ features/chat-windows/ipc.ts ()
+main.handle chatWindow:list @ features/chat-windows/ipc.ts ()
+main.handle chatWindow:open @ features/chat-windows/ipc.ts (sessionId: string, request: unknown)
+main.handle chatWindow:openFile @ features/chat-windows/ipc.ts (filePath: string)
+main.handle chatWindow:reportStatus @ features/chat-windows/ipc.ts (status: unknown)
+main.handle codex:status @ features/settings/ipc.ts ()
+main.handle config:getAgentEnvPassthrough @ features/settings/ipc.ts ()
+main.handle config:getApiKeyStatus @ features/settings/ipc.ts ()
+main.handle config:getAuthMode @ features/settings/ipc.ts ()
+main.handle config:getClaudeCodeStatus @ features/settings/ipc.ts ()
+main.handle config:getPermissionMode @ features/settings/ipc.ts ()
+main.handle config:getServerUrl @ features/settings/ipc.ts ()
+main.handle config:hasApiKey @ features/settings/ipc.ts ()
+main.handle config:setAgentEnvPassthrough @ features/settings/ipc.ts (names: string[])
+main.handle config:setApiKey @ features/settings/ipc.ts (apiKey: string)
+main.handle config:setAuthMode @ features/settings/ipc.ts (mode: 'claude-code' | 'codex' | 'api-key')
+main.handle config:setPermissionMode @ features/settings/ipc.ts (mode: PermissionMode)
+main.handle config:setServerUrl @ features/settings/ipc.ts (url: string)
+main.handle config:validateServerUrl @ features/settings/ipc.ts (url: string)
+main.handle dialog:selectDirectory @ features/fs/ipc.ts ()
+main.handle editor:backupBeforeOverwrite @ features/fs/ipc.ts (rootPath: string, filePath: string)
+main.handle env:status @ features/env/ipc.ts (rootPath: string)
+main.handle env:update @ features/env/ipc.ts (rootPath: string, changes: Record<string, string | null>)
+main.handle fs:copy @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
+main.handle fs:createDirectory @ features/fs/ipc.ts (dirPath: string)
+main.handle fs:createFile @ features/fs/ipc.ts (filePath: string, content: string)
+main.handle fs:delete @ features/fs/ipc.ts (targetPath: string)
+main.handle fs:exists @ features/fs/ipc.ts (targetPath: string)
+main.handle fs:move @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
+main.handle fs:moveFromExternal @ features/fs/ipc.ts (sourcePath: string, destinationPath: string)
+main.handle fs:readDirectory @ features/fs/ipc.ts (dirPath: string)
+main.handle fs:readDirectoryTree @ features/fs/ipc.ts (dirPath: string, maxDepth: number = 2)
+main.handle fs:readFile @ features/fs/ipc.ts (filePath: string)
+main.handle fs:readFileBinary @ features/fs/ipc.ts (filePath: string)
+main.handle fs:registerAllowedRoot @ features/fs/ipc.ts (dirPath: string)
+main.handle fs:rename @ features/fs/ipc.ts (oldPath: string, newPath: string)
+main.handle fs:stat @ features/fs/ipc.ts (targetPath: string)
+main.handle fs:unwatch @ features/fs/ipc.ts (rootPath: string)
+main.handle fs:watch @ features/fs/ipc.ts (rootPath: string)
+main.handle fs:writeFile @ features/fs/ipc.ts (filePath: string, content: string)
+main.handle git:autoSync @ features/sync/ipc.ts (repoPath: string, companyId: string, mode: AutoSyncMode, state: AutoSyncRendererState)
+main.handle git:commitFileDiff @ features/git-history/ipc.ts (repoPath: string, commitHash: string, filePath: string)
+main.handle git:fileDiff @ features/git-history/ipc.ts (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted')
+main.handle git:folderSizes @ features/download-choices/ipc.ts (repoPath: string, companyId: string, folder: string, measure: string[])
+main.handle git:generateSummary @ features/git-history/ipc.ts (repoPath: string)
+main.handle git:getBinaryStatus @ features/git-history/ipc.ts ()
+main.handle git:grep @ features/git-history/ipc.ts (repoPath: string, query: string, folderPath: string)
+main.handle git:inspectCompanyFolder @ features/company-setup/ipc.ts (folder: string, companyId: string)
+main.handle git:listFiles @ features/git-history/ipc.ts (repoPath: string, folderPath: string)
+main.handle git:log @ features/git-history/ipc.ts (repoPath: string, folderPath: string, limit: number = 50)
+main.handle git:preview @ features/git-history/ipc.ts (repoPath: string)
+main.handle git:revertFile @ features/git-history/ipc.ts (repoPath: string, filePath: string, fileStatus: 'added' | 'modified' | 'deleted')
+main.handle git:setupCompanyRemote @ features/company-setup/ipc.ts (repoPath: string, companyId: string, selectedPaths?: string[])
+main.handle git:showCommit @ features/git-history/ipc.ts (repoPath: string, commitHash: string, folderPath?: string)
+main.handle git:sparseGetExclusions @ features/download-choices/ipc.ts (repoPath: string)
+main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath: string, excluded: string[])
+main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
+main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string, commitMessage: string)
+main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
+main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
+main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
+main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
+main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
+main.handle privateFolders:reservedPathRefusal @ features/private-folders/ipc.ts (targetPath: string)
+main.handle shell:openExternal @ features/tools/ipc.ts (url: string)
+main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string, options?: { force?: boolean })
+main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
+main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
+main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
+main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
+main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
+main.handle tools:stop @ features/tools/ipc.ts (toolPath: string)
+main.handle voice:cancel @ voice-input.ts (id: string)
+main.handle voice:capabilities @ voice-input.ts (<capabilities>)
+main.handle voice:devices @ voice-input.ts ()
+main.handle voice:getPrompt @ voice-input.ts ()
+main.handle voice:resetPrompt @ voice-input.ts ()
+main.handle voice:setPrompt @ voice-input.ts (instructions: unknown)
+main.handle voice:start @ voice-input.ts (id: unknown, deviceId?: unknown)
+main.handle voice:stop @ voice-input.ts (id: string)
+main.handle writeAccess:get @ features/sync/ipc.ts (companyId: string, refresh?: boolean)
+main.on chatHistory:flushSession @ features/chat-history/ipc.ts (companyId: string, session: ChatSession)
+main.on fs:startDrag @ features/fs/ipc.ts (filePath: string)
+main.send agent-interaction:${event} @ main.ts
+main.send app:closeRequested @ main.ts
+main.send chat-server:info @ main.ts
+main.send chatHistory:changed @ features/chat-history/ipc.ts
+main.send chatWindow:changed @ features/chat-windows/ipc.ts
+main.send chatWindow:fileRequested @ features/chat-windows/ipc.ts
+main.send fs:changes @ features/fs/ipc.ts
+main.send handoff:changed @ main.ts
+main.send setup:progress @ features/company-setup/ipc.ts
+main.send sparse:progress @ features/download-choices/ipc.ts
+main.send tool-approval-request @ main.ts
+main.send voice:event @ voice-input.ts
+main.send writeAccess:changed @ main.ts
+preload answerCloseRequest -> invoke app:closeResponse($0)
+preload answerCloseRequest : (answer: "ack" | "close" | "stay") => Promise<void>
+preload backupBeforeOverwrite -> invoke editor:backupBeforeOverwrite($0, $1)
+preload backupBeforeOverwrite : (rootPath: string, filePath: string) => Promise<EditorBackupResult>
+preload backupList -> invoke backup:list($0)
+preload backupList : (repoPath: string) => Promise<BackupListResult>
+preload backupOpenFolder -> invoke backup:openFolder($0)
+preload backupOpenFolder : (backupPath: string) => Promise<SimpleResult>
+preload backupRestore -> invoke backup:restore($0, $1, $2)
+preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
+preload closeChatWindows -> invoke chatWindow:closeAll()
+preload closeChatWindows : () => Promise<void>
+preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
+preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
+preload copyItem -> invoke fs:copy($0, $1)
+preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload createCompany -> invoke api:createCompany($0)
+preload createCompany : (name: string) => Promise<CompanyResult>
+preload createDirectory -> invoke fs:createDirectory($0)
+preload createDirectory : (path: string) => Promise<boolean>
+preload createFile -> invoke fs:createFile($0, $1)
+preload createFile : (path: string, content: string) => Promise<FileOpResult>
+preload createPrivateFolder -> invoke privateFolders:create($0, $1)
+preload createPrivateFolder : (companyId: string, input: CreatePrivateFolderRequest) => Promise<CreatePrivateFolderResult>
+preload deleteChatSession -> invoke chatHistory:deleteSession($0, $1)
+preload deleteChatSession : (companyId: string, sessionId: string) => Promise<boolean>
+preload deleteItem -> invoke fs:delete($0)
+preload deleteItem : (path: string) => Promise<SimpleResult>
+preload deleteOwnBrokerKey -> invoke brokerKeys:delete($0, $1)
+preload deleteOwnBrokerKey : (companyId: string, service: string) => Promise<OwnKeysResult>
+preload exists -> invoke fs:exists($0)
+preload exists : (path: string) => Promise<boolean>
+preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
+preload flushChatSession : (companyId: string, session: ChatSession) => ChatSaveReceipt
+preload focusChatWindow -> invoke chatWindow:focus($0)
+preload focusChatWindow : (sessionId: string) => Promise<boolean>
+preload folderSizes -> invoke git:folderSizes($0, $1, $2, $3)
+preload folderSizes : (repoPath: string, companyId: string, folder: string, measure: string[]) => Promise<FolderSizesResponse>
+preload getAgentEnvPassthrough -> invoke config:getAgentEnvPassthrough()
+preload getAgentEnvPassthrough : () => Promise<string[]>
+preload getAgentInteractions -> invoke agent-interaction:list()
+preload getAgentInteractions : () => Promise<AgentInteractionRequest[]>
+preload getApiKeyStatus -> invoke config:getApiKeyStatus()
+preload getApiKeyStatus : () => Promise<ApiKeyStatus>
+preload getAuthMode -> invoke config:getAuthMode()
+preload getAuthMode : () => Promise<AuthMode>
+preload getChatServerInfo -> invoke chat-server:getInfo()
+preload getChatServerInfo : () => Promise<ChatServerInfo | null>
+preload getChatSession -> invoke chatHistory:getSession($0, $1)
+preload getChatSession : (companyId: string, sessionId: string) => Promise<ChatSession | null>
+preload getChatSessionSummaries -> invoke chatHistory:getSummaries($0)
+preload getChatSessionSummaries : (companyId: string) => Promise<ChatSessionSummary[]>
+preload getChatWindowContext -> invoke chatWindow:getContext()
+preload getChatWindowContext : () => Promise<ChatWindowContext | null>
+preload getClaudeCodeStatus -> invoke config:getClaudeCodeStatus()
+preload getClaudeCodeStatus : () => Promise<ClaudeCodeStatus>
+preload getCodexStatus -> invoke codex:status()
+preload getCodexStatus : () => Promise<CodexStatus>
+preload getCompanies -> invoke api:getCompanies()
+preload getCompanies : () => Promise<CompaniesResult>
+preload getDepartments -> invoke api:getDepartments($0)
+preload getDepartments : (companyId: string) => Promise<DepartmentsResult>
+preload getEnvStatus -> invoke env:status($0)
+preload getEnvStatus : (rootPath: string) => Promise<EnvStatusResult>
+preload getHandoff -> invoke handoff:get($0, $1)
+preload getHandoff : (company: string, id: string) => Promise<HandoffView>
+preload getMyPrivateFolders -> invoke privateFolders:mine($0)
+preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
+preload getPermissionMode -> invoke config:getPermissionMode()
+preload getPermissionMode : () => Promise<"auto" | "default" | "bypassPermissions">
+preload getPrivateFolderCreateContext -> invoke privateFolders:createContext($0, $1)
+preload getPrivateFolderCreateContext : (companyId: string, parentPath: string) => Promise<PrivateFoldersFailure | { success: true; context: PrivateFolderCreateContext; }>
+preload getServerUrl -> invoke config:getServerUrl()
+preload getServerUrl : () => Promise<string | null>
+preload getSession -> invoke auth:getSession()
+preload getSession : () => Promise<SessionResult>
+preload getStats -> invoke fs:stat($0)
+preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
+preload getWriteAccess -> invoke writeAccess:get($0, $1)
+preload getWriteAccess : (companyId: string, refresh?: boolean | undefined) => Promise<WriteAccess | null>
+preload gitAutoSync -> invoke git:autoSync($0, $1, $2, $3)
+preload gitAutoSync : (repoPath: string, companyId: string, mode: AutoSyncMode, state: AutoSyncRendererState) => Promise<AutoSyncResult<GitResult>>
+preload gitBinaryStatus -> invoke git:getBinaryStatus()
+preload gitBinaryStatus : () => Promise<GitBinaryStatus>
+preload gitCommitFileDiff -> invoke git:commitFileDiff($0, $1, $2)
+preload gitCommitFileDiff : (repoPath: string, commitHash: string, filePath: string) => Promise<GitCommitFileDiffResult>
+preload gitFileDiff -> invoke git:fileDiff($0, $1, $2)
+preload gitFileDiff : (repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<GitFileDiffResult>
+preload gitGenerateSummary -> invoke git:generateSummary($0)
+preload gitGenerateSummary : (repoPath: string) => Promise<{ success: boolean; summary: string | null; }>
+preload gitGrep -> invoke git:grep($0, $1, $2)
+preload gitGrep : (repoPath: string, query: string, folderPath: string) => Promise<GitGrepResult>
+preload gitInspectCompanyFolder -> invoke git:inspectCompanyFolder($0, $1)
+preload gitInspectCompanyFolder : (folder: string, companyId: string) => Promise<InspectCompanyFolderResult>
+preload gitListFiles -> invoke git:listFiles($0, $1)
+preload gitListFiles : (repoPath: string, folderPath: string) => Promise<GitListFilesResult>
+preload gitLog -> invoke git:log($0, $1, $2)
+preload gitLog : (repoPath: string, folderPath: string, limit?: number | undefined) => Promise<GitLogResult>
+preload gitPreview -> invoke git:preview($0)
+preload gitPreview : (repoPath: string) => Promise<GitPreviewResult>
+preload gitRevertFile -> invoke git:revertFile($0, $1, $2)
+preload gitRevertFile : (repoPath: string, filePath: string, fileStatus: GitFileStatus) => Promise<SimpleResult>
+preload gitSetupCompanyRemote -> invoke git:setupCompanyRemote($0, $1, $2)
+preload gitSetupCompanyRemote : (repoPath: string, companyId: string, selectedPaths?: string[] | undefined) => Promise<GitResult & { refused?: boolean | undefined; }>
+preload gitShowCommit -> invoke git:showCommit($0, $1, $2)
+preload gitShowCommit : (repoPath: string, commitHash: string, folderPath?: string | undefined) => Promise<GitShowCommitResult>
+preload gitSync -> invoke git:sync($0, $1, $2)
+preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
+preload hasApiKey -> invoke config:hasApiKey()
+preload hasApiKey : () => Promise<boolean>
+preload listChatWindows -> invoke chatWindow:list()
+preload listChatWindows : () => Promise<ChatWindowInfo[]>
+preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
+preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
+preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
+preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
+preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)
+preload makeSkillPrivate : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult & { code?: "already_shared" | undefined; }>
+preload moveEnvKeyToServer -> invoke brokerKeys:moveFromEnv($0, $1, $2)
+preload moveEnvKeyToServer : (companyId: string, rootPath: string, name: string) => Promise<OwnKeyMoveResult>
+preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)
+preload moveFromExternal : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload moveItem -> invoke fs:move($0, $1)
+preload moveItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
+preload onAgentInteraction -> on agent-interaction:request(<fn>) ; removeListener agent-interaction:request(<fn>)
+preload onAgentInteraction : (callback: (request: AgentInteractionRequest) => void) => () => void
+preload onAgentInteractionClosed -> on agent-interaction:closed(<fn>) ; removeListener agent-interaction:closed(<fn>)
+preload onAgentInteractionClosed : (callback: (request: AgentInteractionRequest) => void) => () => void
+preload onChatHistoryChanged -> on chatHistory:changed(<fn>) ; removeListener chatHistory:changed(<fn>)
+preload onChatHistoryChanged : (callback: (data: ChatHistoryChange) => void) => () => void
+preload onChatServerInfo -> on chat-server:info(<fn>) ; removeListener chat-server:info(<fn>)
+preload onChatServerInfo : (callback: (info: ChatServerInfo) => void) => () => void
+preload onChatWindowsChanged -> on chatWindow:changed(<fn>) ; removeListener chatWindow:changed(<fn>)
+preload onChatWindowsChanged : (callback: (change: ChatWindowsChange) => void) => () => void
+preload onCloseRequested -> on app:closeRequested(<fn>) ; removeListener app:closeRequested(<fn>)
+preload onCloseRequested : (callback: () => void) => () => void
+preload onFileChange -> on fs:changes(<fn>) ; removeListener fs:changes(<fn>)
+preload onFileChange : (callback: (data: FileChangeEvent) => void) => () => void
+preload onFileChanges -> on fs:changes(<fn>) ; removeListener fs:changes(<fn>)
+preload onFileChanges : (callback: (changes: FileChangeEvent[]) => void) => () => void
+preload onFileRequestedFromChatWindow -> on chatWindow:fileRequested(<fn>) ; removeListener chatWindow:fileRequested(<fn>)
+preload onFileRequestedFromChatWindow : (callback: (request: ChatWindowFileRequest) => void) => () => void
+preload onHandoffChanged -> on handoff:changed(<fn>) ; removeListener handoff:changed(<fn>)
+preload onHandoffChanged : (callback: (scope: { companyId: string; sessionId: string; }) => void) => () => void
+preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
+preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
+preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)
+preload onSparseProgress : (callback: (data: DownloadProgress) => void) => () => void
+preload onToolApprovalRequest -> on tool-approval-request(<fn>) ; removeListener tool-approval-request(<fn>)
+preload onToolApprovalRequest : (callback: (data: ToolApprovalRequest) => void) => () => void
+preload onWriteAccessChanged -> on writeAccess:changed(<fn>) ; removeListener writeAccess:changed(<fn>)
+preload onWriteAccessChanged : (callback: (data: { companyId: string; access: WriteAccess; }) => void) => () => void
+preload openChatWindow -> invoke chatWindow:open($0, $1)
+preload openChatWindow : (sessionId: string, request: ChatWindowOpenRequest) => Promise<ChatWindowOpenResult>
+preload openExternal -> invoke shell:openExternal($0)
+preload openExternal : (url: string) => Promise<SimpleResult>
+preload openFileInMainWindow -> invoke chatWindow:openFile($0)
+preload openFileInMainWindow : (filePath: string) => Promise<ChatWindowOpenFileResult>
+preload patchChatSession -> invoke chatHistory:patchSession($0, $1, $2)
+preload patchChatSession : (companyId: string, sessionId: string, patch: Partial<Pick<ChatSession, "title" | "titleAutoGenerated" | "pinned" | "claudeSessionId" | "agentSession">>) => Promise<ChatSession | null>
+preload publishSkill -> invoke skills:publish($0, $1)
+preload publishSkill : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult>
+preload readDirectory -> invoke fs:readDirectory($0)
+preload readDirectory : (path: string) => Promise<DirectoryEntry[]>
+preload readDirectoryTree -> invoke fs:readDirectoryTree($0, $1)
+preload readDirectoryTree : (path: string, maxDepth?: number | undefined) => Promise<DirectoryTreeNode[]>
+preload readFile -> invoke fs:readFile($0)
+preload readFile : (path: string) => Promise<string | null>
+preload readFileBinary -> invoke fs:readFileBinary($0)
+preload readFileBinary : (path: string) => Promise<ArrayBuffer | null>
+preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
+preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
+preload renameItem -> invoke fs:rename($0, $1)
+preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
+preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)
+preload reportChatWindowStatus : (status: ChatWindowStatus) => Promise<boolean>
+preload reservedPathRefusal -> invoke privateFolders:reservedPathRefusal($0)
+preload reservedPathRefusal : (targetPath: string) => Promise<string | null>
+preload respondAgentInteraction -> invoke agent-interaction:respond($0, $1)
+preload respondAgentInteraction : (id: string, response: AgentInteractionResponse) => Promise<boolean>
+preload respondToolApproval -> invoke tool-approval-response($0, $1)
+preload respondToolApproval : (toolUseId: string, approved: boolean) => Promise<boolean>
+preload saveChatSession -> invoke chatHistory:saveSession($0, $1)
+preload saveChatSession : (companyId: string, session: ChatSession) => Promise<ChatSaveReceipt>
+preload saveOwnBrokerKey -> invoke brokerKeys:save($0, $1, $2, $3)
+preload saveOwnBrokerKey : (companyId: string, service: string, secret: string, displayName?: string | undefined) => Promise<OwnKeysResult>
+preload searchChatSessions -> invoke chatHistory:search($0, $1)
+preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
+preload selectDirectory -> invoke dialog:selectDirectory()
+preload selectDirectory : () => Promise<string | null>
+preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
+preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
+preload setApiKey -> invoke config:setApiKey($0)
+preload setApiKey : (apiKey: string) => Promise<SimpleResult>
+preload setAuthMode -> invoke config:setAuthMode($0)
+preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setPermissionMode -> invoke config:setPermissionMode($0)
+preload setPermissionMode : (mode: "auto" | "default" | "bypassPermissions") => Promise<boolean>
+preload setServerUrl -> invoke config:setServerUrl($0)
+preload setServerUrl : (url: string) => Promise<boolean>
+preload signIn -> invoke auth:signIn($0, $1)
+preload signIn : (email: string, password: string) => Promise<AuthResult>
+preload signOut -> invoke auth:signOut()
+preload signOut : () => Promise<SimpleResult>
+preload signUp -> invoke auth:signUp($0, $1, $2)
+preload signUp : (email: string, password: string, name?: string | undefined) => Promise<AuthResult>
+preload sparseGetExclusions -> invoke git:sparseGetExclusions($0)
+preload sparseGetExclusions : (repoPath: string) => Promise<SparseExclusionsResult>
+preload sparseSetExclusions -> invoke git:sparseSetExclusions($0, $1)
+preload sparseSetExclusions : (repoPath: string, excluded: string[]) => Promise<SparseSetExclusionsResult>
+preload sparseUncommittedChanges -> invoke git:sparseUncommittedChanges($0, $1)
+preload sparseUncommittedChanges : (repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>
+preload startDrag -> send fs:startDrag($0)
+preload startDrag : (filePath: string) => void
+preload startTool -> invoke tools:start($0, $1, $2)
+preload startTool : (toolPath: string, startCommand?: string | undefined, companyId?: string | undefined) => Promise<StartToolResult>
+preload stopTool -> invoke tools:stop($0)
+preload stopTool : (toolPath: string) => Promise<StopToolResult>
+preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
+preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
+preload unwatchCompany -> invoke fs:unwatch($0)
+preload unwatchCompany : (rootPath: string) => Promise<SimpleResult>
+preload updateEnv -> invoke env:update($0, $1)
+preload updateEnv : (rootPath: string, changes: Record<string, string | null>) => Promise<SimpleResult>
+preload updateHandoff -> invoke handoff:update($0, $1)
+preload updateHandoff : (company: string, id: string) => Promise<void>
+preload validateServerUrl -> invoke config:validateServerUrl($0)
+preload validateServerUrl : (url: string) => Promise<ServerUrlValidation>
+preload voiceInput.cancel -> invoke voice:cancel($0)
+preload voiceInput.cancel : (requestId: string) => Promise<void>
+preload voiceInput.capabilities -> invoke voice:capabilities()
+preload voiceInput.capabilities : () => Promise<VoiceCapabilities>
+preload voiceInput.devices -> invoke voice:devices()
+preload voiceInput.devices : () => Promise<VoiceDeviceList>
+preload voiceInput.getPrompt -> invoke voice:getPrompt()
+preload voiceInput.getPrompt : () => Promise<VoicePromptSettings>
+preload voiceInput.onEvent -> on voice:event(<fn>) ; removeListener voice:event(<fn>)
+preload voiceInput.onEvent : (callback: (event: VoiceEvent) => void) => () => void
+preload voiceInput.resetPrompt -> invoke voice:resetPrompt()
+preload voiceInput.resetPrompt : () => Promise<VoicePromptSettings>
+preload voiceInput.setPrompt -> invoke voice:setPrompt($0)
+preload voiceInput.setPrompt : (instructions: string) => Promise<VoicePromptSettings>
+preload voiceInput.start -> invoke voice:start($0, $1)
+preload voiceInput.start : (requestId: string, deviceId?: string | undefined) => Promise<void>
+preload voiceInput.stop -> invoke voice:stop($0)
+preload voiceInput.stop : (requestId: string) => Promise<void>
+preload watchCompany -> invoke fs:watch($0)
+preload watchCompany : (rootPath: string) => Promise<SimpleResult>
+preload writeFile -> invoke fs:writeFile($0, $1)
+preload writeFile : (path: string, content: string) => Promise<boolean>

@@ -46,7 +46,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   need. `agent-control` (AI policy, emergency stop + push channel, AI action log), `chat-history`
   (history store, hand-offs), `sync` (git:sync, commit messages, git-history), `private-folders`,
   `broker` (tokens, own keys, tools). No Electron, and no window event is sent from a wire
-  module: sends stay where `ipc-inventory.json` records them (`main.ts` passes a callback).
+  module: sends stay where `ipc-inventory.txt` records them (`main.ts` passes a callback).
 - `electron/services/` — shared state as explicit objects instead of module variables:
   `config-store.ts` (config.json, cached, written atomically), `api-key-store.ts` (the API key,
   encrypted through the shell's `SecretBox`; main decrypts it only where it is used), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
@@ -105,7 +105,9 @@ How to add a channel:
    the feature module. A local path from the renderer goes through the allowed-roots validator,
    and the parameter goes into GUARDED (or EXEMPT, with a reason) in
    `tests/ipc-path-guard.test.ts`.
-4. Regenerate `tests/ipc-harness/ipc-inventory.json` and review the diff in the PR.
+4. Regenerate `tests/ipc-harness/ipc-inventory.txt` and review the diff in the PR. If `main`
+   moved meanwhile, a rebase normally merges the file by itself (see below); regenerate after
+   resolving a conflict in it rather than hand-editing.
 
 ## IPC characterization tests
 
@@ -115,14 +117,26 @@ How to add a channel:
 the `local-file` protocol; a fake server sits behind global `fetch` (`main-harness.ts`,
 `loadMain()`; one main.ts per test file, all under one temp dir).
 
-- `ipc-contract.test.ts` compares the whole IPC surface with `ipc-inventory.json` (every handler
+- `ipc-contract.test.ts` compares the whole IPC surface with `ipc-inventory.txt` (every handler
   and its parameters in main.ts, voice-input.ts and `features/**`, every window event, each
   preload function's calls and compiler-resolved type, unmatched ends = dead-code candidates; the
   renderer "uses" a method by calling it on `window.electronAPI` or naming it in an
   `ElectronPort<…>` / `VoiceInputPort<…>`) and
   asserts contract and running app agree (`notInContract`, `inContractButUnused` empty).
   Changing a channel or payload fails it on purpose: regenerate with
-  `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and review the JSON diff.
+  `UPDATE_IPC_INVENTORY=1 npx tsx --test tests/ipc-contract.test.ts` and review the diff; the
+  failure lists the lines added (`+`) and gone (`-`).
+- The inventory file is one independent fact per line, sorted by code unit (`inventoryLines` in
+  `tests/ipc-harness/inventory.ts`): `main.handle|on <channel> @ <file> (<params>)`,
+  `main.send <channel> @ <file>`, `preload <name> -> <calls>` / `preload <name> : <type>`,
+  `contract.<kind> <channel>`, `contract.type <Name>[.<member>] = <text>` (an interface per
+  member), `unmatched.<list> <item>`. Keep it that way — no counts, line numbers or other
+  entries derived from the rest, no multi-fact lines — because that is what makes PRs that add
+  different channels merge cleanly, with the merged file equal to a regeneration on the merged
+  code (the old JSON kept each contract interface on one line, so every two channel PRs
+  conflicted). Two new names that sort next to each other (e.g. two new `unmatched.*` entries)
+  can still conflict: keep both sides, then regenerate. No `merge=union` for it: the test would
+  catch a bad union, but only after the merge reached `main`.
 - `ipc-path-guard.test.ts`: every handler parameter named like a path (path / root / folder /
   dir) is GUARDED (called with a path outside every root it must reach `AllowedRoots.validate`
   and fail) or EXEMPT with the reason. A new path parameter fails until classified.
