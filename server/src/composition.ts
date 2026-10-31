@@ -63,6 +63,7 @@ import { createPluginShelf } from './services/plugin-shelf'
 import { createPluginService } from './services/plugins'
 import { createPluginConnector } from './services/plugin-connector'
 import { createPluginImportService } from './services/plugin-import'
+import { createPluginOperationService } from './services/plugin-operations'
 import { createExternalRecordWriter } from './services/record-engine'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 
@@ -221,11 +222,19 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
   })
 
+  const pluginOperations = createPluginOperationService({
+    ...shared, plugins, connector: pluginConnector, writer: externalRecords, importer: pluginImport,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    aiStopped: companyId => agentStops.companyStopped(companyId),
+  })
+
   return {
     access,
     pluginShelf,
     plugins,
     pluginImport,
+    pluginOperations,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),

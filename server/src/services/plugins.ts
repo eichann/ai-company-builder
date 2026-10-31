@@ -155,10 +155,11 @@ export function createPluginService(deps: PluginServiceDeps) {
   type Evaluated = { problem: PluginProblem; active: null } | { problem: null; active: ActivePlugin }
 
   /** Every kill switch and missing piece, in a fixed order (the operator's stop first). */
-  async function evaluate(companyId: string, install: PluginInstallRow): Promise<Evaluated> {
+  async function evaluate(companyId: string, install: PluginInstallRow, collectingFacts = false): Promise<Evaluated> {
     const found = shelf.find(companyId, install.pluginId, install.version)
-    if (await shelf.isStopped(install.pluginId, install.version)) return { problem: 'stopped', active: null }
-    if (!install.enabled) return { problem: 'off', active: null }
+    // Collecting the facts of a write already sent (reconciling) goes on while stopped (review §6.5).
+    if (!collectingFacts && await shelf.isStopped(install.pluginId, install.version)) return { problem: 'stopped', active: null }
+    if (!collectingFacts && !install.enabled) return { problem: 'off', active: null }
     if (!found) return { problem: 'not-on-shelf', active: null }
     if (found.fingerprint !== install.fingerprint) return { problem: 'package-changed', active: null }
     const kp = keyProblem(companyId, found.pkg.manifest, install.keyId)
@@ -381,6 +382,14 @@ export function createPluginService(deps: PluginServiceDeps) {
       return { searchPaths, mayRead }
     },
 
+    /** The kind of an operation of the company's installed version (read / update / create), or null. */
+    operationKind(companyId: string, pluginId: string, operation: string): string | null {
+      const install = typeof pluginId === 'string' ? companyData.forCompany(companyId).plugins.install(pluginId) : null
+      const found = install ? shelf.find(companyId, pluginId, install.version) : null
+      const op = found && Object.prototype.hasOwnProperty.call(found.pkg.manifest.operations, operation) ? found.pkg.manifest.operations[operation] : null
+      return op?.kind ?? null
+    },
+
     /** Whether a plugin of the company manages `service` (the relay's read-only switch stays on). */
     manages(companyId: string, service: string): boolean {
       return companyData.forCompany(companyId).plugins.installs().some(i => i.service === service && i.managedSince !== null)
@@ -389,11 +398,14 @@ export function createPluginService(deps: PluginServiceDeps) {
     /**
      * For the connector and the typed operations (P5 / P6): the company's
      * plugin if it may run now, else why not. Re-decided on every call.
+     * `collectingFacts`: for reading back the result of a write already sent
+     * — the operator's stop and the company's switch stop new writes, not
+     * the collection of facts (review §6.5); key, account and mapping still apply.
      */
-    async active(companyId: string, pluginId: string): Promise<{ ok: true; plugin: ActivePlugin } | { ok: false; problem: PluginProblem }> {
+    async active(companyId: string, pluginId: string, options: { collectingFacts?: boolean } = {}): Promise<{ ok: true; plugin: ActivePlugin } | { ok: false; problem: PluginProblem }> {
       const install = companyData.forCompany(companyId).plugins.install(pluginId)
       if (!install) return { ok: false, problem: 'off' }
-      const evaluated = await evaluate(companyId, install)
+      const evaluated = await evaluate(companyId, install, options.collectingFacts === true)
       return evaluated.problem ? { ok: false, problem: evaluated.problem } : { ok: true, plugin: evaluated.active }
     },
   }

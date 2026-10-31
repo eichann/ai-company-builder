@@ -193,10 +193,14 @@ GET  /api/config                                  setup state (no auth)
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/import,
-                              POST …/connection/renew                             plugins.ts
+                              POST …/connection/renew,
+                              POST …/records/:recordId/operations/:operation,
+                              GET …/operations/:operationId (+ POST /undo, /reconcile)  plugins.ts
                                                                 (つなぎ先のプラグイン: plugins.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
-                              POST /item, POST /item/:recordId/actions/:action — the AI's
+                              POST /item, POST /item/:recordId/actions/:action,
+                              POST /plugins/:pluginId/records/:recordId/operations/:operation,
+                              GET /plugins/:pluginId/operations/:operationId — the AI's
                               routes (record token instead of a session; records.md) records-ai.ts
                                                                 (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay

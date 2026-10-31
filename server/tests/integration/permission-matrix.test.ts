@@ -104,6 +104,8 @@ interface World {
     recordToken: string
     /** A plugin package available only to the other company, installed there. */
     plugin: string
+    /** An operation record (操作の控え) of the other company. */
+    operation: string
   }
 }
 
@@ -300,6 +302,13 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/plugins/:pluginId/mapping', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/restore`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/import', w => ({ path: `${C(w)}/plugins/no-such-plugin/import`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal`, body: {} }), [404, 404, 404, 404, 404, 401],
+    'any member: the record (it does not exist), the operation\'s who and the field policies decide'),
+  r('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
 
   // Invitations
@@ -366,6 +375,10 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/plugins/:pluginId/enabled', (w, id) => ({ path: `${C(w)}/plugins/${id}/enabled`, body: { enabled: true } }), w => w.other.plugin, 'no-such-plugin'),
   x('PUT /api/companies/:companyId/plugins/:pluginId/mapping', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping`, body: { text: 'deal: {}' } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/import', (w, id) => ({ path: `${C(w)}/plugins/${id}/import`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', (w, id) => ({ path: `${C(w)}/plugins/other-crm/records/${id}/operations/update_deal`, body: { expectedVersion: 1, fields: { next_step: '乗っ取り' } } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}` }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/undo`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
 
@@ -393,6 +406,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
   'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
+  'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
+  'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
 }
 
 /** The parameters of a route that name something other than the company in the URL. */
@@ -540,6 +555,10 @@ async function seed(): Promise<World> {
   await services.pluginShelf.load()
   const installed = await services.plugins.install({ companyId: other, userId: USER.outsider, role: 'owner' }, 'other-crm', { version: '0.1.0', keyId: null })
   if (!installed.ok) throw new Error(`plugin: ${JSON.stringify(installed)}`)
+  db.prepare(`INSERT INTO plugin_operations (company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object,
+    external_id, record_id, actor_id, actor_kind, state, fields, written, previous, created_at, updated_at)
+    VALUES (?, 'op-other-1', 'other-crm', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
+    .run(other, USER.outsider, expires, expires)
 
   return {
     co, sales, accounting,
@@ -565,6 +584,7 @@ async function seed(): Promise<World> {
       record: 'deal-other001',
       recordToken: 'rt-other-1',
       plugin: 'other-crm',
+      operation: 'op-other-1',
     },
   }
 }

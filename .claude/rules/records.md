@@ -288,7 +288,9 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   outside and **never writes a file** (imported records are server-only, `path` null; owner rule
   §8-3). Values are checked by the type's field kinds; a person must be a member.
 - Ledger: actor kind `external` (source = the plugin id) for an observed change; for a plugin's
-  write (P6) the person or AI it was done for. Column `receipt` (additive,
+  write (P6) the person or AI it was done for (`receipt.kind: written`, the operation id), with the
+  note and — for a `decision: true` operation — `isDecision` and the reason; P6 passes
+  `expectedVersion`. Column `receipt` (additive,
   `migrateRecordLedgerProvenance`; `ExternalReceipt` in `shared/core/record-ledger.ts`): plugin,
   version, fingerprint, mapping version, connection, outside account, object, outside id, the
   outside last-modified time, operation id, `kind` observed / written.

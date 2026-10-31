@@ -210,6 +210,23 @@ describe('company handle: connector plugins', () => {
     expect(() => conn.prepare(`UPDATE plugin_installs SET company_id = 'b' WHERE company_id = 'a'`).run()).toThrow(/never move/)
   })
 
+  it('an operation record belongs to a record of its own company, and keeps what it wrote and what it replaced', () => {
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('b', 'deal-b00009', 'deal', 'B', ?, ?)`).run(TS, TS)
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('a', 'deal-a00009', 'deal', 'A', ?, ?)`).run(TS, TS)
+    const op = (recordId: string) => ({
+      id: 'op-1', pluginId: 'p', operation: 'update_deal', pluginVersion: '0.1.0', fingerprint: 'f', mappingVersion: 1, connectionId: 'c', accountId: '1',
+      object: 'deal', externalId: '1', recordId, actorId: 'u', actorKind: 'human' as const, actorSource: null, conversationId: null, state: 'pending' as const,
+      fields: '{}', written: '{"x":"1"}', previous: '{"x":"0"}', reason: null, undoOf: null, undoneBy: null, recordVersion: null, createdAt: TS, updatedAt: TS,
+    })
+    const a = source.forCompany('a').plugins
+    expect(() => a.insertOperation(op('deal-b00009'))).toThrow(/record of the same company/)
+    a.insertOperation(op('deal-a00009'))
+    expect(source.forCompany('b').plugins.operation('op-1')).toBeNull()
+    expect(() => conn.prepare(`UPDATE plugin_operations SET previous = '{"x":"9"}' WHERE id = 'op-1'`).run()).toThrow(/keeps its company/)
+    a.updateOperation('op-1', { state: 'applied' }, TS)
+    expect(a.operation('op-1')).toMatchObject({ state: 'applied', previous: '{"x":"0"}' })
+  })
+
   it('an outside object links only to a record of its own company, and links are found per company, connection and account', () => {
     conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('b', 'deal-b00001', 'deal', 'B', ?, ?)`).run(TS, TS)
     conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('a', 'deal-a00001', 'deal', 'A', ?, ?)`).run(TS, TS)

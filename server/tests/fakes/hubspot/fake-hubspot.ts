@@ -121,6 +121,8 @@ export interface FakeFaults {
   delayMs: number
   /** The next `count` requests answer `status` (default 500) without doing anything. */
   failNext(count?: number, status?: number): void
+  /** The next `count` writes (PATCH, POST, DELETE) answer `status` (default 500) without doing anything; reads pass. */
+  failNextWrite(count?: number, status?: number): void
   /**
    * The next `count` writes (PATCH, POST, DELETE) are applied and then never
    * answered: over a real socket the connection is cut; through `app.fetch`
@@ -268,12 +270,15 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
   let failCount = 0
   let failStatus = 500
   let dropCount = 0
+  let failWriteCount = 0
+  let failWriteStatus = 500
   const held = new Set<() => void>()
   const faults: FakeFaults = {
     delayMs: 0,
     failNext(count = 1, status = 500) { failCount = count; failStatus = status },
+    failNextWrite(count = 1, status = 500) { failWriteCount = count; failWriteStatus = status },
     dropAnswerAfterWrite(count = 1) { dropCount = count },
-    reset() { faults.delayMs = 0; failCount = 0; dropCount = 0 },
+    reset() { faults.delayMs = 0; failCount = 0; dropCount = 0; failWriteCount = 0 },
   }
 
   // ---- rate limits (sliding windows) ----
@@ -396,6 +401,10 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       if (failCount > 0) {
         failCount--
         throw new HubSpotError(failStatus, errorBody('INTERNAL_ERROR', 'internal error'))
+      }
+      if (failWriteCount > 0 && c.req.method !== 'GET') {
+        failWriteCount--
+        throw new HubSpotError(failWriteStatus, errorBody('INTERNAL_ERROR', 'internal error'))
       }
       if (!route) throw new HubSpotError(404, errorBody('OBJECT_NOT_FOUND', 'Not found'))
       const handler = resolve(c.req.method, route)

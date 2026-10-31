@@ -102,6 +102,45 @@ export interface PluginPolicyAckRow {
   acknowledgedAt: string
 }
 
+export type PluginOperationState = 'pending' | 'sent-unknown' | 'external-ok' | 'applied' | 'observed' | 'failed'
+
+/** 操作の控え: one write of a typed operation, recorded before it is sent. */
+export interface PluginOperationRow {
+  id: string
+  pluginId: string
+  /** The declaration's operation (`update_deal`), or `undo`. */
+  operation: string
+  pluginVersion: string
+  fingerprint: string
+  mappingVersion: number
+  connectionId: string
+  accountId: string
+  object: string
+  externalId: string
+  recordId: string
+  actorId: string
+  actorKind: 'human' | 'ai'
+  actorSource: string | null
+  conversationId: string | null
+  state: PluginOperationState
+  /** JSON: the ACB fields and values asked for. */
+  fields: string
+  /** JSON: outside property → raw value sent. */
+  written: string
+  /** JSON: outside property → raw value read just before (what an undo writes back). */
+  previous: string
+  /** A fixed word (failed / unknown), never an outside body. */
+  reason: string | null
+  /** For an undo: the operation it compensates. */
+  undoOf: string | null
+  /** The undo that compensated this one. */
+  undoneBy: string | null
+  /** The record's version the operation's ledger entry made. */
+  recordVersion: number | null
+  createdAt: string
+  updatedAt: string
+}
+
 export interface PluginRepository {
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
@@ -137,4 +176,8 @@ export interface PluginRepository {
   policyAcks(pluginId: string): PluginPolicyAckRow[]
   /** Record acknowledgements (replacing a field's earlier one) and a history row (one transaction). */
   addPolicyAcks(rows: PluginPolicyAckRow[], history: PluginHistoryRow): void
+  insertOperation(row: PluginOperationRow): void
+  /** Move an operation on (only its state, reason, record version, undone_by change). */
+  updateOperation(id: string, changes: Partial<Pick<PluginOperationRow, 'state' | 'reason' | 'recordVersion' | 'undoneBy'>>, at: string): void
+  operation(id: string): PluginOperationRow | null
 }
