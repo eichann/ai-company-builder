@@ -104,10 +104,7 @@ export async function createPrivateFolder(
         VALUES (?, ?, ?, 'folder', NULL, ?, ?, ?)
       `).run(scopeId, companyId, path, repoId, ts, input.createdBy)
       for (const r of privateRules(input.rules)) {
-        conn.prepare(`
-          INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        `).run(crypto.randomUUID(), scopeId, r.subjectType, r.subjectId, r.canRead ? 1 : 0, r.canWrite ? 1 : 0, ts, input.createdBy)
+        insertPrivateRule(conn, companyId, scopeId, r, ts, input.createdBy)
       }
       conn.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at, created_by) VALUES (?, ?, ?, ?, ?)`)
         .run(repoId, companyId, scopeId, ts, input.createdBy)
@@ -124,37 +121,45 @@ export async function createPrivateFolder(
   // rather than leave public content inside a "private" folder.
   const before = companyPushesRunning(companyId)
   if (!(await waitForCompanyPushes(companyId, before))) {
-    deletePrivateFolderRows(conn, scopeId, repoId)
+    deletePrivateFolderRows(conn, companyId, scopeId, repoId)
     await removeScopeRepo(repo)
     throw new PrivateFolderBusyError()
   }
   if (await existsInCompanyRepo(companyId, path)) {
-    deletePrivateFolderRows(conn, scopeId, repoId)
+    deletePrivateFolderRows(conn, companyId, scopeId, repoId)
     await removeScopeRepo(repo)
     throw new PathUnavailableError()
   }
   return { scopeId, repoId }
 }
 
-function deletePrivateFolderRows(conn: Conn, scopeId: string, repoId: string): void {
+/** A rule on a scope of the company (nothing is inserted under another company's scope). */
+function insertPrivateRule(conn: Conn, companyId: string, scopeId: string, r: ReturnType<typeof privateRules>[number], ts: string, by: string): void {
+  conn.prepare(`
+    INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
+    SELECT ?, id, ?, ?, ?, ?, ?, ? FROM scopes WHERE id = ? AND company_id = ?
+  `).run(crypto.randomUUID(), r.subjectType, r.subjectId, r.canRead ? 1 : 0, r.canWrite ? 1 : 0, ts, by, scopeId, companyId)
+}
+
+/** Remove a scope of the company with its rules. */
+function deleteScopeAndRules(conn: Conn, companyId: string, scopeId: string): void {
+  conn.prepare(`DELETE FROM scope_rules WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`).run(scopeId, companyId)
+  conn.prepare(`DELETE FROM scopes WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
+}
+
+function deletePrivateFolderRows(conn: Conn, companyId: string, scopeId: string, repoId: string): void {
   conn.transaction(() => {
-    conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(scopeId)
-    conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(scopeId)
-    conn.prepare(`DELETE FROM scope_repos WHERE id = ?`).run(repoId)
+    deleteScopeAndRules(conn, companyId, scopeId)
+    conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(repoId, companyId)
   })()
 }
 
-/** Replace the viewers/editors of a private folder (its own rule set). */
-export function replacePrivateFolderRules(conn: Conn, scopeId: string, rules: PrivateRuleSet, by: string): void {
+/** Replace the viewers/editors of a private folder of the company (its own rule set). */
+export function replacePrivateFolderRules(conn: Conn, companyId: string, scopeId: string, rules: PrivateRuleSet, by: string): void {
   const ts = new Date().toISOString()
   conn.transaction(() => {
-    conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(scopeId)
-    for (const r of privateRules(rules)) {
-      conn.prepare(`
-        INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(crypto.randomUUID(), scopeId, r.subjectType, r.subjectId, r.canRead ? 1 : 0, r.canWrite ? 1 : 0, ts, by)
-    }
+    conn.prepare(`DELETE FROM scope_rules WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`).run(scopeId, companyId)
+    for (const r of privateRules(rules)) insertPrivateRule(conn, companyId, scopeId, r, ts, by)
   })()
 }
 
@@ -255,9 +260,11 @@ export async function makePrivateFolderPublic(conn: Conn, companyId: string, fol
     conn.transaction(() => {
       const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
         .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
-      for (const s of subtree) conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = ?`).run(s.id)
-      conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ?`).run(scopeId)
-      conn.prepare(`DELETE FROM scope_repos WHERE id = ?`).run(folder.repoId)
+      for (const s of subtree) {
+        conn.prepare(`UPDATE scope_rules SET can_read = 1 WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`).run(s.id, companyId)
+      }
+      conn.prepare(`UPDATE scopes SET repo_id = NULL WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
+      conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
     })()
     await removeScopeRepo(scopeRepo)
     return { path: folder.scope.path, commit }
@@ -309,11 +316,8 @@ export async function deletePrivateFolder(conn: Conn, companyId: string, folder:
     conn.transaction(() => {
       const subtree = (conn.prepare(`SELECT id, path FROM scopes WHERE company_id = ?`).all(companyId) as Array<{ id: string; path: string }>)
         .filter(s => isSameOrAncestorPath(folder.scope.path, s.path))
-      for (const s of subtree) {
-        conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(s.id)
-        conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(s.id)
-      }
-      conn.prepare(`DELETE FROM scope_repos WHERE id = ?`).run(folder.repoId)
+      for (const s of subtree) deleteScopeAndRules(conn, companyId, s.id)
+      conn.prepare(`DELETE FROM scope_repos WHERE id = ? AND company_id = ?`).run(folder.repoId, companyId)
     })()
     await removeScopeRepo(privateRepoPath(companyId, folder.repoId))
     return { path: folder.scope.path }
@@ -323,19 +327,20 @@ export async function deletePrivateFolder(conn: Conn, companyId: string, folder:
 }
 
 /**
- * The port: rows, scope repositories, the race protections. Refusals become
- * results; any other error propagates.
+ * The port for one company (built only by its handle, sqlite/company-data.ts):
+ * rows, scope repositories, the race protections. Refusals become results;
+ * any other error propagates.
  */
-export function sqlitePrivateFolderRepository(conn: Database.Database): PrivateFolderRepository {
+export function sqlitePrivateFolderRepository(conn: Database.Database, companyId: string): PrivateFolderRepository {
   return {
-    list: (companyId, scopes) => listPrivateFolders(conn, companyId, scopes),
-    get: (companyId, scopeId) => getPrivateFolder(conn, companyId, scopeId),
-    paths: companyId => listPrivateFolders(conn, companyId).map(p => p.scope.path),
-    access: (companyId, path, scopes) => folderAccess(conn, companyId, path, scopes),
+    list: scopes => listPrivateFolders(conn, companyId, scopes),
+    get: scopeId => getPrivateFolder(conn, companyId, scopeId),
+    paths: () => listPrivateFolders(conn, companyId).map(p => p.scope.path),
+    access: (path, scopes) => folderAccess(conn, companyId, path, scopes),
 
     async create(input) {
       try {
-        const { scopeId } = await createPrivateFolder(conn, input)
+        const { scopeId } = await createPrivateFolder(conn, { ...input, companyId })
         return { ok: true, scopeId }
       } catch (err) {
         if (err instanceof PathUnavailableError) return { ok: false, reason: 'unavailable' }
@@ -346,9 +351,9 @@ export function sqlitePrivateFolderRepository(conn: Database.Database): PrivateF
       }
     },
 
-    replaceRules: (scopeId, rules, by) => replacePrivateFolderRules(conn, scopeId, rules, by),
+    replaceRules: (scopeId, rules, by) => replacePrivateFolderRules(conn, companyId, scopeId, rules, by),
 
-    async makePublic(companyId, folder, by) {
+    async makePublic(folder, by) {
       try {
         return { ok: true, value: await makePrivateFolderPublic(conn, companyId, folder, by) }
       } catch (err) {
@@ -357,7 +362,7 @@ export function sqlitePrivateFolderRepository(conn: Database.Database): PrivateF
       }
     },
 
-    async delete(companyId, folder, by) {
+    async delete(folder, by) {
       try {
         return { ok: true, value: await deletePrivateFolder(conn, companyId, folder, by) }
       } catch (err) {

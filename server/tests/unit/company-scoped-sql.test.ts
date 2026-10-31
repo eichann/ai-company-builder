@@ -3,26 +3,24 @@
  * `.claude/rules/server.md` "Company handle"): a statement that reads or writes
  * a company's rows names its company. This test reads every SQL statement in
  * server/src and fails when one touches a company-owned table without a
- * company condition (`company_id = ?` / `company_id IN`; an INSERT names
- * `company_id`), unless it is listed below with its reason.
+ * company condition (`company_id = ?` / `company_id IN (…)`, possibly in a
+ * subquery; an INSERT names `company_id`), unless it is listed below with its
+ * reason.
  *
- * The list has two kinds of entries:
- * - PENDING: statements of areas not yet moved behind the company handle
- *   (ports/company-data.ts). Each migration PR removes its entries; the list
- *   only shrinks.
- * - Reasoned exceptions that stay: the control plane (lookups that come before
- *   a company is known — an invitation or key-broker token — and operator /
- *   retention jobs that walk every company), and statements whose WHERE is
- *   built by a helper that always starts with `company_id = ?`.
+ * Every listed exception has a reason that stays: the control plane (lookups
+ * that come before a company is known — an invitation or key-broker token —
+ * and operator / retention / startup jobs that walk every company), and
+ * statements whose WHERE is built by a helper that always starts with
+ * `company_id = ?`. The list only shrinks: a new statement gets its company.
  *
  * Tables without a company (the companies registry, memberships, the unused
  * ssh_keys) are the control plane and listed in CONTROL_PLANE_TABLES. Every
  * other table must have a company_id column (TABLES_WITHOUT_COMPANY_ID lists
  * the two still missing it).
  *
- * A table already behind the handle (HANDLE_TABLES) is written only by its
- * handle repository, and that repository is built only by the handle source
- * (adapters/sqlite/company-data.ts).
+ * A table behind the handle (HANDLE_TABLES) is written only by its handle
+ * modules, and the handle repositories are built only by the handle source
+ * (adapters/sqlite/company-data.ts), in src and in tests.
  */
 import { describe, expect, it } from 'vitest'
 import { readdirSync, readFileSync, statSync } from 'fs'
@@ -44,49 +42,34 @@ const TABLES_WITHOUT_COMPANY_ID: Record<string, string> = {
   department_managers: 'company only through department_id → departments; company_id is added in a later PR',
 }
 
-/** Tables behind the company handle → the one module that writes them. */
-const HANDLE_TABLES: Record<string, string> = {
-  departments: 'adapters/sqlite/departments.ts',
+/** Tables behind the company handle → the modules that write them (each statement limited to its company). */
+const HANDLE_TABLES: Record<string, string[]> = {
+  departments: ['adapters/sqlite/departments.ts'],
+  invitations: ['adapters/sqlite/invitations.ts'],
+  scopes: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
+  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
+  department_managers: ['adapters/sqlite/permission-store.ts'],
+  scope_repos: ['adapters/private-folders.ts'],
+  private_folder_archives: ['adapters/private-folders.ts'],
+  orphaned_scopes: ['adapters/orphaned-scopes.ts'],
 }
-/** Handle repositories → the handle source, the only module that may build them. */
-const HANDLE_MODULES: Record<string, string> = {
-  'adapters/sqlite/departments.ts': 'adapters/sqlite/company-data.ts',
-}
+/** Handle repository factories (each bound to one company): only the handle source builds them. */
+const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader']
+const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
-const PENDING = 'not yet behind the company handle (案 A): moves there in a later PR'
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'
 const BY_TOKEN = 'the company is not known before the token: this lookup is what finds it (control plane)'
 
 /** file → statements without a company condition (normalized whitespace; each occurrence listed). */
 const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
-  'adapters/orphaned-scopes.ts': [
-    ['DELETE FROM orphaned_scopes WHERE scope_id = ?', PENDING],
-  ],
-  'adapters/private-folders.ts': [
-    ['INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', PENDING],
-    ['INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scope_repos WHERE id = ?', PENDING],
-    ['DELETE FROM scope_repos WHERE id = ?', PENDING],
-    ['DELETE FROM scope_repos WHERE id = ?', PENDING],
-    ['UPDATE scope_rules SET can_read = 1 WHERE scope_id = ?', PENDING],
-    ['UPDATE scopes SET repo_id = NULL WHERE id = ?', PENDING],
-  ],
   'adapters/sqlite/agent-events.ts': [
     ['SELECT ${COLUMNS} FROM agent_events WHERE ${w.sql}${cursor} ORDER BY at DESC, seq DESC LIMIT ?', BUILT_WHERE],
     ["SELECT strftime('%Y-%m-%d', at, ?) AS day, user_id, category, ${denied} AS denied, COUNT(*) AS n FROM agent_events WHERE ${w.sql} GROUP BY day, user_id, category, denied ORDER BY day ASC, user_id ASC, category ASC", BUILT_WHERE],
     ['SELECT DISTINCT company_id FROM agent_events', 'the retention job lists the companies it then prunes one at a time (ids only)'],
   ],
   'adapters/sqlite/invitations.ts': [
-    ['DELETE FROM invitations WHERE id = ?', PENDING],
-    ['UPDATE invitations SET used_by = ?, used_at = ? WHERE id = ? AND used_by IS NULL AND (signup_user_id IS NULL OR signup_user_id = ?)', PENDING],
-    ['UPDATE invitations SET signup_claimed_at = ? WHERE token = ? AND used_by IS NULL AND signup_claimed_at IS NULL AND expires_at > ? RETURNING id', BY_TOKEN],
-    ['UPDATE invitations SET signup_claimed_at = NULL, signup_user_id = NULL WHERE id = ? AND used_by IS NULL', PENDING],
-    ['UPDATE invitations SET signup_user_id = ? WHERE id = ?', PENDING],
+    ['SELECT i.*, c.name as company_name FROM invitations i JOIN companies c ON i.company_id = c.id WHERE i.token = ?', BY_TOKEN],
+    ['UPDATE invitations SET signup_claimed_at = ? WHERE token = ? AND used_by IS NULL AND signup_claimed_at IS NULL AND expires_at > ? RETURNING id, company_id', BY_TOKEN],
   ],
   'adapters/sqlite/key-broker.ts': [
     ['SELECT company_id, id, cipher_scheme, ciphertext, nonce, tag, wrapped_key, kek_id FROM broker_keys ORDER BY rowid', 'operator command: re-wrapping every sealed key under a new KEK (no route reaches it; key-broker.md)'],
@@ -95,31 +78,7 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['DELETE FROM broker_tokens WHERE expires_at < ?', 'server-wide cleanup of expired tokens (no row is read); to become per company'],
   ],
   'adapters/sqlite/permission-store.ts': [
-    ["INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by) VALUES (?, ?, 'everyone', NULL, 1, 1, ?, ?)", PENDING],
-    ['INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', PENDING],
-    ['SELECT id, path FROM scopes WHERE department_id = ?', PENDING],
-    ['UPDATE scopes SET path = ? WHERE id = ?', PENDING],
-    ['UPDATE scopes SET path = ? WHERE id = ?', PENDING],
-    ["UPDATE scopes SET kind = 'department', department_id = ? WHERE id = ?", PENDING],
-    ['SELECT repo_id FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scopes WHERE id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE scope_id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE id = ?', PENDING],
-    ['DELETE FROM scope_rules WHERE id = ?', PENDING],
-    ['SELECT * FROM scope_rules WHERE scope_id = ? ORDER BY created_at ASC, rowid ASC', PENDING],
-    ['UPDATE scope_rules SET can_read = ?, can_write = ? WHERE id = ?', PENDING],
-    ['UPDATE scope_rules SET scope_id = ? WHERE scope_id = ?', PENDING],
-    ['DELETE FROM department_managers WHERE department_id NOT IN (SELECT id FROM departments)', PENDING],
-    ['DELETE FROM department_managers WHERE department_id = ?', PENDING],
-    ['DELETE FROM department_managers WHERE department_id = ? AND user_id = ?', PENDING],
-    ['SELECT user_id FROM department_managers WHERE department_id = ?', PENDING],
-    ['INSERT INTO department_managers (department_id, user_id, created_at, created_by) VALUES (?, ?, ?, ?)', PENDING],
+    ['DELETE FROM department_managers WHERE department_id NOT IN (SELECT id FROM departments)', 'startup repair: manager rows whose department is gone belong to no company (department_managers gets company_id in a later PR)'],
   ],
   'adapters/sqlite/push-rejections.ts': [
     ["SELECT COUNT(*) AS n FROM push_rejections WHERE ${where.join(' AND ')}", BUILT_WHERE],
@@ -153,9 +112,15 @@ const tablesOf = (sql: string) => [...sql.matchAll(/\b(?:FROM|JOIN|INTO|UPDATE)\
 /** The table an INSERT / UPDATE / DELETE writes. */
 const writtenTable = (sql: string) => /^(?:INSERT\s+(?:OR\s+\w+\s+)?INTO|REPLACE\s+INTO|UPDATE|DELETE\s+FROM)\s+([A-Za-z_]+)/i.exec(sql)?.[1]
 
+/**
+ * A bound company: `company_id = ?` or `company_id IN (…)`, also inside a
+ * subquery (`scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`).
+ * A join condition such as `i.company_id = c.id` binds nothing and does not count.
+ * An INSERT names company_id (as a column, or in the SELECT it inserts from).
+ */
 function hasCompanyCondition(sql: string): boolean {
   if (/^(INSERT|REPLACE)\b/i.test(sql)) return /\bcompany_id\b/.test(sql)
-  return /\bcompany_id\s*(=|IN\b)/i.test(sql)
+  return /\bcompany_id\s*=\s*\?|\bcompany_id\s+IN\s*\(/i.test(sql)
 }
 
 /** The application schema: table → its columns (CREATE TABLE in db/index.ts, plus ALTER TABLE … ADD COLUMN). */
@@ -207,24 +172,25 @@ describe('company-scoped SQL (案 A)', () => {
     expect(found).toEqual(allowed)
   })
 
-  it('a table behind the company handle is written only by its handle repository', () => {
+  it('a table behind the company handle is written only by its handle modules', () => {
     for (const { file, sql } of allStatements) {
       for (const s of sql) {
         const t = writtenTable(s)
-        if (t && t in HANDLE_TABLES) expect(file, `${file} writes ${t}: go through the company handle`).toBe(HANDLE_TABLES[t])
+        if (t && t in HANDLE_TABLES) expect(HANDLE_TABLES[t], `${file} writes ${t}: go through the company handle`).toContain(file)
       }
     }
   })
 
   it('handle repositories are built only by the handle source', () => {
-    const importer = /(?:^|\n)\s*(?:import|export)\b[^'"]*?from\s+['"]([^'"]+)['"]/g
     const testsDir = resolve(__dirname, '..')
     for (const file of [...tsFiles(SRC), ...tsFiles(testsDir)]) {
-      for (const m of withoutComments(readFileSync(file, 'utf8')).matchAll(importer)) {
-        if (!m[1].startsWith('.')) continue
-        const target = relative(SRC, resolve(join(file, '..'), m[1])).replace(/\.ts$/, '') + '.ts'
-        if (!(target in HANDLE_MODULES)) continue
-        expect(relative(SRC, file), `${relative(SRC, file)} imports ${target}: use the handle (forCompany)`).toBe(HANDLE_MODULES[target])
+      const rel = relative(SRC, file)
+      if (rel === HANDLE_SOURCE || file === __filename) continue
+      const source = withoutComments(readFileSync(file, 'utf8'))
+      for (const factory of HANDLE_FACTORIES) {
+        const defines = new RegExp(`export function ${factory}\\b`).test(source)
+        const uses = source.split(factory).length - 1
+        expect(uses - (defines ? 1 : 0), `${rel} uses ${factory}: open a handle (forCompany) instead`).toBe(0)
       }
     }
   })

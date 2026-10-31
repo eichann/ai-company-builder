@@ -114,7 +114,7 @@ beforeAll(() => {
   db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ids.content, CO, 'コンテンツ', 'コンテンツ', 1, ts(), ts())
   initDatabase() // seed scopes
-  replaceDepartmentManagers(db, ids.content, ['og-manager'], 'og-owner')
+  replaceDepartmentManagers(db, CO, ids.content, ['og-manager'], 'og-owner')
 
   tmp = mkdtempSync(join(tmpdir(), 'og-'))
   const work = join(tmp, 'work')

@@ -13,9 +13,7 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { DepartmentChanges, DepartmentRow } from '../ports/departments'
 import type { MembershipRepository } from '../ports/memberships'
-import type { PrivateFolderRepository } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
-import type { ScopeRepository } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
 import { pathKey } from '../../shared/core/paths'
 import { isValidFolderName } from '../../shared/core/names'
@@ -40,8 +38,6 @@ export interface ManagerView {
 export interface DepartmentServiceDeps {
   companyData: CompanyDataSource
   memberships: MembershipRepository
-  scopes: ScopeRepository
-  privateFolders: PrivateFolderRepository
   accounts: AccountDirectory
   repoStore: RepoStore
   transactions: Transactions
@@ -50,14 +46,17 @@ export interface DepartmentServiceDeps {
 }
 
 export function createDepartmentService(deps: DepartmentServiceDeps) {
-  const { companyData, memberships, scopes, privateFolders, accounts, repoStore, transactions, clock, ids } = deps
+  const { companyData, memberships, accounts, repoStore, transactions, clock, ids } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
+  const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
 
   // Private folders whose path is `folder` or inside it, compared NFC + A–Z
   // folded. Department endpoints are owner/admin only, who may see every
   // private folder.
   function privateFoldersAtOrUnder(companyId: string, folder: string): string[] {
     const key = pathKey(folder)
-    return privateFolders.paths(companyId).filter(p => {
+    return privateFoldersOf(companyId).paths().filter(p => {
       const k = pathKey(p)
       return k === key || k.startsWith(`${key}/`)
     })
@@ -75,8 +74,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
     return (departmentsOf(member).maxSortOrder() ?? -1) + 1
   }
 
-  function managers(departmentId: string): ManagerView[] {
-    const managerIds = scopes.departmentManagerIds(departmentId)
+  function managers(member: Member, departmentId: string): ManagerView[] {
+    const managerIds = scopesOf(member.companyId).departmentManagerIds(departmentId)
     const users = accounts.byIds(managerIds)
     return managerIds.map(id => ({ userId: id, name: users.get(id)?.name ?? null, email: users.get(id)?.email ?? null }))
   }
@@ -133,7 +132,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         createdAt: timestamp,
         createdBy: userId,
       })
-      scopes.ensureDepartmentScope(companyId, id, body.folder.trim(), userId)
+      scopesOf(companyId).ensureDepartmentScope(id, body.folder.trim(), userId)
 
       return ok(departments.find(id)!)
     },
@@ -186,8 +185,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
           // Folder renamed: the department's scope and every folder scope
           // under it move with it (rules stay attached).
           if (body.folder !== undefined && body.folder.trim() !== oldFolder) {
-            scopes.moveScopeSubtree(companyId, oldFolder, body.folder.trim())
-            scopes.ensureDepartmentScope(companyId, existing.id, body.folder.trim(), userId)
+            scopesOf(companyId).moveScopeSubtree(oldFolder, body.folder.trim())
+            scopesOf(companyId).ensureDepartmentScope(existing.id, body.folder.trim(), userId)
           }
         })
       }
@@ -204,7 +203,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       const folder = existing.folder
       const counts = await repoStore.deleteDepartmentFolder(companyId, folder, `Delete department: ${existing.name} (${folder})`)
       transactions.run(() => {
-        scopes.deleteDepartmentScopes(companyId, existing.id, folder)
+        scopesOf(companyId).deleteDepartmentScopes(existing.id, folder)
         departmentsOf(member).delete(existing.id)
       })
       return counts
@@ -266,7 +265,7 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
         }
       }
 
-      scopes.syncCompanyScopes(companyId)
+      scopesOf(companyId).syncCompanyScopes()
       return { added, removed }
     },
 
@@ -287,8 +286,8 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       if (notMembers.length > 0) {
         return refuse('bad-request', `Not members of this company: ${notMembers.join(', ')}`)
       }
-      scopes.replaceDepartmentManagers(departmentId, unique, member.userId)
-      return ok(managers(departmentId))
+      scopesOf(member.companyId).replaceDepartmentManagers(departmentId, unique, member.userId)
+      return ok(managers(member, departmentId))
     },
   }
 }

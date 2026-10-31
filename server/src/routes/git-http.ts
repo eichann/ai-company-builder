@@ -434,15 +434,18 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
 // changes under private folders' paths ([RESERVED_PATH]).
 function pushCheckFor(companyId: string, userId: string, scopePath?: string): PreparedPushCheck {
   try {
-    services.scopes.ensureCompanyScope(companyId, null)
-    const role = services.access.memberOf(companyId, userId)?.role ?? null
+    // The pusher's membership (checked before this runs); without one, no snapshot (fail closed).
+    const member = services.access.memberOf(companyId, userId)
+    if (!member) throw new Error('not a member')
+    services.companyScopes.ensureCompanyScope(member)
+    const role = member.role
     // Department folders this pusher manages: instruction files (CLAUDE.md,
     // AGENTS.md ...) inside them are theirs to change.
     const managedFolders = services.permissionViews.managedFolders(companyId, userId)
     return preparePushCheck({
       companyId,
       pusher: { id: userId, role },
-      scopes: services.scopes.listWithRules(companyId),
+      scopes: services.companyScopes.listWithRules(member),
       ...(scopePath !== undefined ? { scopePath } : {}),
       managedFolders,
     })
@@ -477,7 +480,8 @@ function trackActivity(
           services.clientActivity.record({ userId, companyId, kind: 'push', version, platform })
           // A push may have renamed or removed a folder that has rules.
           // Deferred (setImmediate) and asynchronous: never delays the push.
-          services.orphanedScopes.scheduleCheck(companyId)
+          const member = services.access.memberOf(companyId, userId)
+          if (member) services.companyScopes.scheduleOrphanCheck(member)
         } else {
           // Rejected (or unproven): record any pre-receive hook sections it
           // printed. Deferred and non-throwing — see services/push-rejections.ts.
@@ -589,9 +593,10 @@ function authAndAuthorizeScope(c: { req: { raw: Request; header: (name: string) 
   const companyId = sanitizeCompanyId(c.req.param('company'))
   const scopeId = c.req.param('repo').replace(/\.git$/, '')
   if (!companyId || !SCOPE_ID_RE.test(scopeId)) return notFound()
-  const role = authorizeForCompany(user.id, companyId)
-  if (!role) return notFound()
-  const scopes = services.scopes.listWithRules(companyId)
+  const member = services.access.memberOf(companyId, user.id)
+  if (!member) return notFound()
+  const role = member.role
+  const scopes = services.companyScopes.listWithRules(member)
   const scope = scopes.find(s => s.id === scopeId && s.repoId !== null)
   if (!scope || !canReadPrivateScope(scope, user.id, role)) return notFound()
   let repoPath: string

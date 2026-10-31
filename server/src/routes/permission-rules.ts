@@ -246,7 +246,7 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
   if (privateError) return c.json({ error: privateError, code: 'PRIVATE_FOLDER_RULE' }, 400)
 
   const update = () => {
-    editor.updateRuleAccess(found.rule.id, ruleAccess.canRead, ruleAccess.canWrite)
+    editor.updateRuleAccess(actor, found.rule.id, ruleAccess.canRead, ruleAccess.canWrite)
     return true
   }
   const done = place ? update() : guarded(c, actor, force, [found.scope.path], update)
@@ -265,7 +265,7 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
   const force = parseForce(c, actor, await readJson(c))
   if (force instanceof Response) return force
 
-  const rules = editor.rulesOf(found.scope.id)
+  const rules = editor.rulesOf(actor, found.scope.id)
   const place = editor.privatePlaceOf(actor.companyId, found.scope.path)
   if (rules.length === 1) {
     if (found.scope.path === '') {
@@ -279,7 +279,7 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
   }
 
   const remove = () => {
-    editor.deleteRule(found.rule.id, found.scope)
+    editor.deleteRule(actor, found.rule.id, found.scope)
     return true
   }
   const done = place ? remove() : guarded(c, actor, force, [found.scope.path], remove)
@@ -301,7 +301,7 @@ permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
   const force = parseForce(c, actor, await readJson(c))
   if (force instanceof Response) return force
 
-  const removed = place ? editor.clearRules(scope) : guarded(c, actor, force, [scope.path], () => editor.clearRules(scope))
+  const removed = place ? editor.clearRules(actor, scope) : guarded(c, actor, force, [scope.path], () => editor.clearRules(actor, scope))
   if (removed instanceof Response) return removed
   return c.json({ success: true, data: { removed } })
 })

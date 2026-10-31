@@ -23,7 +23,7 @@ carve-out of existing folders; move files into a new private folder instead). Ea
 bare repository (a "scope repository"); its path is reserved in the company repository. The
 contract for clients and UIs is `shared/types/private-folders.ts`. Code: `routes/private-folders.ts`
 (HTTP, the `/paths/check` budget) → `services/private-folders.ts` (rules, views, first-folder
-gate under the company lock) → `PrivateFolderRepository` (`adapters/private-folders.ts`: the
+gate under the company lock) → the company handle's `PrivateFolderRepository` (`adapters/private-folders.ts`: the
 rows and the create / make-public / delete steps; it uses `lib/private-folders.ts`, which has no
 database: paths, company-repository lookups, archive files, pushes in flight, the folder browser).
 `canWriteInPrivateFolder` lives in `shared/core/permissions.ts`. Client side:

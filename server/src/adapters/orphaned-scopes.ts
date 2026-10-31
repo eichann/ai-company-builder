@@ -166,7 +166,7 @@ async function compute(db: Database.Database, companyId: string): Promise<Orphan
     const keep = new Set(orphanIds)
     const rows = db.prepare(`SELECT scope_id FROM orphaned_scopes WHERE company_id = ?`).all(companyId) as Array<{ scope_id: string }>
     for (const r of rows) {
-      if (!keep.has(r.scope_id)) db.prepare(`DELETE FROM orphaned_scopes WHERE scope_id = ?`).run(r.scope_id)
+      if (!keep.has(r.scope_id)) db.prepare(`DELETE FROM orphaned_scopes WHERE scope_id = ? AND company_id = ?`).run(r.scope_id, companyId)
     }
     for (const id of orphanIds) {
       db.prepare(`
@@ -203,10 +203,11 @@ async function findOrphanedScopes(db: Database.Database, companyId: string): Pro
   }
 }
 
-export function gitOrphanedScopeReader(conn: Database.Database): OrphanedScopeReader {
+/** One company's reader, built only by its handle (sqlite/company-data.ts). */
+export function gitOrphanedScopeReader(conn: Database.Database, companyId: string): OrphanedScopeReader {
   return {
-    find: companyId => findOrphanedScopes(conn, companyId),
-    scheduleCheck(companyId) {
+    find: () => findOrphanedScopes(conn, companyId),
+    scheduleCheck() {
       setImmediate(() => {
         void findOrphanedScopes(conn, companyId)
       })

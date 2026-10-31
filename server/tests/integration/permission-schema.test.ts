@@ -149,7 +149,7 @@ describe('migration of a database created by the previous server', () => {
     // deletes a department with plain SQL — exactly what it does today.
     conn.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('d4', 'old-a', '人事部', '人事部', ts, ts)
     conn.prepare(`UPDATE departments SET folder = 'セールス' WHERE id = 'd1'`).run()
-    replaceDepartmentManagers(conn, 'd2', ['o1'], 'o1')
+    replaceDepartmentManagers(conn, 'old-a', 'd2', ['o1'], 'o1')
     const d2Scope = scopesOf(conn, 'old-a').find(s => s.department_id === 'd2')!
     conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('d2rule', ?, 'everyone', NULL, 1, 1, ?)`).run(d2Scope.id, ts)
     conn.prepare(`DELETE FROM departments WHERE id = 'd2'`).run()
@@ -168,7 +168,7 @@ describe('migration of a database created by the previous server', () => {
 
   it('removes orphans when foreign keys were not enforced', () => {
     conn.pragma('foreign_keys = OFF')
-    replaceDepartmentManagers(conn, 'd4', ['o1'], 'o1')
+    replaceDepartmentManagers(conn, 'old-a', 'd4', ['o1'], 'o1')
     conn.prepare(`DELETE FROM departments WHERE id = 'd4'`).run()
     expect(scopesOf(conn, 'old-a').some(s => s.department_id === 'd4')).toBe(true)
     conn.pragma('foreign_keys = ON')
@@ -234,7 +234,7 @@ describe('departments API keeps scopes in sync', () => {
   })
 
   it('delete removes the department scope subtree, its rules and its managers', async () => {
-    replaceDepartmentManagers(db, deptId, ['ps-member'], 'ps-owner')
+    replaceDepartmentManagers(db, CO, deptId, ['ps-member'], 'ps-owner')
     const res = await json('DELETE', `${base}/${deptId}`)
     expect(res.status).toBe(200)
     const after = scopesOf(db, CO)

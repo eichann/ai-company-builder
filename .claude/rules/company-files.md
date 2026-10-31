@@ -19,7 +19,7 @@ local. Full text: `docs/architecture/chat-and-agents.md` (internal).
 ## Server (`server/src/routes/company-files.ts`, logic `server/src/lib/company-files.ts`)
 
 Membership is checked through the access policy; the view is built via `adapters/company-files.ts`,
-which hands `buildView` the company's scopes from the `ScopeRepository` (`lib/company-files.ts`
+which hands `buildView` the company's scopes from the company handle's `ScopeRepository` (`lib/company-files.ts`
 runs git only and does not touch the database).
 
 Contract: `shared/types/company-files.ts`. Any member, under `/api/companies/:companyId/files`:

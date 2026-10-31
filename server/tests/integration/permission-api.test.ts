@@ -99,7 +99,7 @@ beforeAll(() => {
   addMember(OTHER, 'pa-other-owner', 'owner')
   addDept(OTHER, ids.otherDept, 'other', 0)
   initDatabase() // seed scopes for the companies above
-  replaceDepartmentManagers(db, ids.content, ['pa-manager'], 'pa-owner')
+  replaceDepartmentManagers(db, CO, ids.content, ['pa-manager'], 'pa-owner')
 
   // A private folder inside コンテンツ, and a rule-carrying scope elsewhere.
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('pa-s-students', ?, 'コンテンツ/受講生情報', 'folder', ?)`).run(CO, ts())
@@ -150,7 +150,7 @@ describe('authorization', () => {
   }
 
   it('a manager of a department in another company gets nothing here', async () => {
-    replaceDepartmentManagers(db, ids.otherDept, ['pa-other-owner'], 'pa-other-owner')
+    replaceDepartmentManagers(db, OTHER, ids.otherDept, ['pa-other-owner'], 'pa-other-owner')
     expect((await as('pa-other-owner', 'GET', `/api/companies/${CO}/permissions`)).status).toBe(404)
   })
 })

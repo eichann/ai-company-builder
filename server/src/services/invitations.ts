@@ -19,7 +19,8 @@
 import type { AccountDirectory, AccountSummary } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyRepository, CompanyRow } from '../ports/companies'
-import type { InvitationRepository, InvitationWithCompany } from '../ports/invitations'
+import type { CompanyDataSource } from '../ports/company-data'
+import type { InvitationTokenLookup, InvitationWithCompany } from '../ports/invitations'
 import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { isOwner, type Member } from './access'
@@ -40,7 +41,9 @@ export interface InvitationListItem {
 }
 
 export interface InvitationServiceDeps {
-  invitations: InvitationRepository
+  /** By token (control plane): finds the invitation and its company. */
+  invitationTokens: InvitationTokenLookup
+  companyData: CompanyDataSource
   companies: CompanyRepository
   memberships: MembershipRepository
   accounts: AccountDirectory
@@ -50,13 +53,15 @@ export interface InvitationServiceDeps {
 }
 
 export function createInvitationService(deps: InvitationServiceDeps) {
-  const { invitations, companies, memberships, accounts, transactions, clock, ids } = deps
+  const { invitationTokens, companyData, companies, memberships, accounts, transactions, clock, ids } = deps
+  // The company's invitations: the member's company, or the one the token row names.
+  const invitationsOf = (companyId: string) => companyData.forCompany(companyId).invitations
 
   const isExpired = (inv: InvitationWithCompany) => new Date(inv.expires_at).getTime() < clock.nowMs()
 
   /** A link that can still be used: exists, unused, unexpired. */
   function usable(token: string): Outcome<InvitationWithCompany> {
-    const invitation = invitations.findByToken(token)
+    const invitation = invitationTokens.findByToken(token)
     if (!invitation) return refuse('not-found', 'Invalid invitation link')
     if (invitation.used_by) return refuse('gone', 'This invitation has already been used')
     if (isExpired(invitation)) return refuse('gone', 'This invitation has expired')
@@ -65,7 +70,7 @@ export function createInvitationService(deps: InvitationServiceDeps) {
 
   return {
     list(member: Member): InvitationListItem[] {
-      const rows = invitations.listByCompany(member.companyId)
+      const rows = invitationsOf(member.companyId).list()
       // Who created and who used each one
       const userIds = rows
         .flatMap(inv => [inv.created_by, inv.used_by])
@@ -98,12 +103,13 @@ export function createInvitationService(deps: InvitationServiceDeps) {
       const token = ids.newToken()
       const createdAt = clock.now()
       const expiresAt = new Date(clock.nowMs() + expiresInDays * DAY_MS).toISOString()
-      invitations.insert({ id, companyId: member.companyId, token, role, createdBy: member.userId, expiresAt, createdAt })
+      invitationsOf(member.companyId).insert({ id, token, role, createdBy: member.userId, expiresAt, createdAt })
       return { id, token, companyId: member.companyId, role, expiresAt, createdAt }
     },
 
     delete(member: Member, invitationId: string): Outcome<void> {
-      if (!invitations.existsInCompany(invitationId, member.companyId)) {
+      const invitations = invitationsOf(member.companyId)
+      if (!invitations.exists(invitationId)) {
         return refuse('not-found', 'Invitation not found')
       }
       invitations.delete(invitationId)
@@ -119,8 +125,10 @@ export function createInvitationService(deps: InvitationServiceDeps) {
      * Returns null when the token cannot be claimed (the caller answers 403).
      */
     async signUp(token: string, signUp: () => Promise<Response>): Promise<Response | null> {
-      const id = invitations.claimForSignup(token)
-      if (!id) return null
+      const claimed = invitationTokens.claimForSignup(token)
+      if (!claimed) return null
+      const { id } = claimed
+      const invitations = invitationsOf(claimed.companyId)
       let res: Response
       try {
         res = await signUp()
@@ -159,7 +167,7 @@ export function createInvitationService(deps: InvitationServiceDeps) {
       const membershipId = ids.newId()
       const timestamp = clock.now()
       const joined = transactions.run(() => {
-        if (!invitations.consume(invitation.id, userId)) return false
+        if (!invitationsOf(invitation.company_id).consume(invitation.id, userId)) return false
         memberships.insert({ id: membershipId, userId, companyId: invitation.company_id, role: invitation.role, createdAt: timestamp })
         return true
       })

@@ -30,8 +30,8 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
   shared/core types), services only ports / services / shared / pure lib, only the composition
   root imports adapters (and `db/index.ts`, whose startup seeding runs
   `adapters/sqlite/permission-store.ts` on the connection it migrates), no route runs SQL or
-  imports `db` (git-http's push snapshot and private-folder lookups use `services.access` /
-  `services.scopes`), and `lib/` does not import the database except the modules listed in
+  imports `db` (git-http's push snapshot, private-folder lookups and orphan checks use
+  `services.access` / `services.companyScopes` with the Member), and `lib/` does not import the database except the modules listed in
   `LIB_WITH_DATABASE` with their reason (only `lib/auth.ts`: Better Auth's own connection, next
   to every route's sign-in check). Storage goes in `adapters/*` behind a port; a module that only
   computes or runs git / files stays in `lib/` (`lib/push-rejections.ts` parses,
@@ -78,29 +78,40 @@ construction, not by remembering a check (owner plan 0.13–0.14).
 
 - A company's own rows are reached through its **handle**: `CompanyDataSource.forCompany(companyId)`
   (`ports/company-data.ts`, `adapters/sqlite/company-data.ts`) returns repositories whose
-  methods take **no company parameter** and whose every statement carries `company_id = ?`, so
-  another company's object id finds, changes and deletes nothing. Migrated so far:
-  `departments`. New tables (stage 4: types, company map, state engine…) are created behind the
+  methods take **no company parameter** and whose every statement is limited to that company, so
+  another company's object id finds, changes and deletes nothing. Behind it: `departments`,
+  `invitations`, `scopes` (permission scopes, rules, department managers:
+  `adapters/sqlite/scopes.ts` over `permission-store.ts`), `privateFolders`
+  (`adapters/private-folders.ts`) and `orphanedScopes` (`adapters/orphaned-scopes.ts`).
+  `scope_rules` / `department_managers` have no company column yet: their statements reach the
+  company through `scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)` (or the
+  departments equivalent), and their INSERTs select the parent row of the company. New tables (stage 4: types, company map, state engine…) are created behind the
   handle from the start.
 - The company id given to `forCompany` comes from the server: `member.companyId` (the membership
   `services/access.ts` looked up for the signed-in account), a company the service just created,
   a key-broker token row, or a job looping over the companies registry — never a value taken
   from a request as is. Only services get the source (`composition.ts` passes it in `shared`,
-  never in the `services` routes see). Handle repositories (`adapters/sqlite/departments.ts`)
-  are built only by `company-data.ts`.
+  never in the `services` routes see); git-http passes a Member to `services.companyScopes`.
+  Handle repositories are built only by `company-data.ts`.
+- The control plane outside handles: the companies registry, memberships, accounts, and lookups
+  that find the company — an invitation by token (`InvitationTokenLookup`:
+  `findByToken`, `claimForSignup`, which returns the company; everything after uses that
+  company's handle) and a key-broker token by hash.
 - Do not add a repository method that reads or writes a company's rows without its company
   (`findById(id)`, `delete(id)`…); "the service checked first" is the old pattern this replaces.
 - `tests/unit/company-scoped-sql.test.ts` reads every SQL string in `server/src` and fails when a
-  statement touches a company-owned table without a company condition (`company_id = ?` / `IN`;
-  an INSERT names `company_id`), unless listed in `UNSCOPED` with its reason: `PENDING` (areas
-  not yet behind the handle — invitations, permission store, private folders, orphaned scopes;
-  each migration removes its entries, the list only shrinks) or a lasting control-plane reason
-  (invitation / broker token lookups that find the company, operator KEK re-wrap, retention's
-  list of companies, WHERE built by a helper starting with `company_id = ?`). It also checks
-  that every table outside `CONTROL_PLANE_TABLES` (`companies`, `memberships`, unused
-  `ssh_keys`) has a `company_id` column (`scope_rules`, `department_managers` still listed),
-  that a handle table is written only by its handle repository, and that handle repositories
-  are built only by the source. Isolation per handle: `tests/unit/company-data.test.ts`.
+  statement touches a company-owned table without a bound company (`company_id = ?` /
+  `company_id IN (…)`, also in a subquery; a join such as `i.company_id = c.id` does not count;
+  an INSERT names `company_id`), unless listed in `UNSCOPED` with a lasting reason: invitation /
+  broker token lookups that find the company, the operator's KEK re-wrap, retention's list of
+  companies, server-wide cleanup of expired broker tokens and old usage counters, startup repair
+  of manager rows whose department is gone, WHERE built by a helper starting with
+  `company_id = ?`. The list only shrinks. It also checks that every table outside
+  `CONTROL_PLANE_TABLES` (`companies`, `memberships`, unused `ssh_keys`) has a `company_id`
+  column (`scope_rules`, `department_managers` still listed), that a handle table is written only
+  by its handle modules (`HANDLE_TABLES`), and that handle repository factories are used only by
+  the source, in src and tests. Isolation per handle (A cannot read or write B's departments,
+  invitations, scopes, rules, managers, private folders): `tests/unit/company-data.test.ts`.
 - Later moves — a database per company (B) or PostgreSQL with row-level security (C) — change
   only where `forCompany` opens its connection.
 
@@ -211,7 +222,7 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
 
 Code: `routes/departments.ts` (HTTP) → `services/departments.ts` (rules) → the company handle's
 `DepartmentRepository` (`companyData.forCompany(member.companyId).departments`)
-/ `ScopeRepository` (SQLite) and `RepoStore` (`adapters/git-repo-store.ts`: shared-branch reads
+/ the handle's `ScopeRepository` (SQLite) and `RepoStore` (`adapters/git-repo-store.ts`: shared-branch reads
 from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
 `lib/bare-commit.ts` under `withCompanyLock`).
 

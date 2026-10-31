@@ -66,7 +66,7 @@ beforeAll(() => {
   db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('wa-d-sales', CO, '営業部', '営業部', 0, ts(), ts())
   initDatabase() // seed the company + department scopes
-  replaceDepartmentManagers(db, 'wa-d-sales', ['wa-manager'], 'wa-owner')
+  replaceDepartmentManagers(db, CO, 'wa-d-sales', ['wa-manager'], 'wa-owner')
 })
 
 beforeEach(() => { currentUser.id = 'wa-owner' })

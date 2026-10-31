@@ -28,7 +28,6 @@ import type {
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
-import type { ScopeRepository } from '../ports/scopes'
 import { foldAsciiCase, pathKey } from '../../shared/core/paths'
 import { resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import {
@@ -95,7 +94,6 @@ export interface AgentEventDeps {
   agentEvents: AgentEventRepository
   agentEventSettings: AgentEventSettingsRepository
   memberships: MembershipRepository
-  scopes: ScopeRepository
   companyData: CompanyDataSource
   accounts: AccountDirectory
   clock: Clock
@@ -200,7 +198,9 @@ type Reader =
   | { all: false; rootKeys: string[]; canRead: (path: string) => boolean }
 
 export function createAgentEventService(deps: AgentEventDeps) {
-  const { agentEvents: events, agentEventSettings, memberships, scopes, companyData, accounts, clock, ids } = deps
+  const { agentEvents: events, agentEventSettings, memberships, companyData, accounts, clock, ids } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
   const yieldNow = deps.yieldNow ?? (() => Promise.resolve())
   const budget = new Map<string, { windowStart: number; used: number }>()
 
@@ -239,7 +239,7 @@ export function createAgentEventService(deps: AgentEventDeps) {
   }
 
   function managedDepartments(companyId: string, userId: string) {
-    const managed = new Set(scopes.managedDepartmentIds(companyId, userId))
+    const managed = new Set(scopesOf(companyId).managedDepartmentIds(userId))
     if (managed.size === 0) return []
     return companyData.forCompany(companyId).departments.list().filter(d => managed.has(d.id))
   }
@@ -249,7 +249,7 @@ export function createAgentEventService(deps: AgentEventDeps) {
     if (settingsOf(member.companyId).viewers !== 'admins-and-managers') return refuse('forbidden', AGENT_EVENTS_READ_FORBIDDEN)
     const managed = managedDepartments(member.companyId, member.userId)
     if (managed.length === 0) return refuse('forbidden', AGENT_EVENTS_READ_FORBIDDEN)
-    const list = scopes.listWithRules(member.companyId)
+    const list = scopesOf(member.companyId).listWithRules()
     const repo: PermissionRepository = { getMemberRole: () => member.role, listScopes: () => list }
     const cache = new Map<string, boolean>()
     return ok({
@@ -622,7 +622,7 @@ export function createAgentEventService(deps: AgentEventDeps) {
       for (const m of rows) {
         if (hasFullAccess(m.role)) { found.push({ userId: m.user_id, role: m.role, scope: 'all', departments: [] }); continue }
         if (mode !== 'admins-and-managers') continue
-        const managed = new Set(scopes.managedDepartmentIds(member.companyId, m.user_id))
+        const managed = new Set(scopesOf(member.companyId).managedDepartmentIds(m.user_id))
         const theirs = departmentRows.filter(d => managed.has(d.id)).map(d => ({ id: d.id, name: d.name, folder: d.folder }))
         if (theirs.length > 0) found.push({ userId: m.user_id, role: m.role, scope: 'departments', departments: theirs })
       }

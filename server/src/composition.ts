@@ -11,10 +11,8 @@ import type Database from 'better-sqlite3'
 import { db } from './db'
 import { sqliteCompanyRepository } from './adapters/sqlite/companies'
 import { sqliteMembershipRepository } from './adapters/sqlite/memberships'
-import { sqliteInvitationRepository } from './adapters/sqlite/invitations'
+import { sqliteInvitationTokens } from './adapters/sqlite/invitations'
 import { sqliteCompanyData } from './adapters/sqlite/company-data'
-import { sqliteScopeRepository } from './adapters/sqlite/scopes'
-import { sqlitePrivateFolderRepository } from './adapters/private-folders'
 import { sqliteClientActivityRepository } from './adapters/sqlite/client-activity'
 import { sqlitePushRejectionRepository } from './adapters/sqlite/push-rejections'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from './adapters/sqlite/agent-events'
@@ -22,7 +20,6 @@ import { sqliteAgentSandboxRepository } from './adapters/sqlite/agent-sandbox'
 import { sqliteAgentStopRepository } from './adapters/sqlite/agent-stops'
 import { sqliteBrokerTokenRepository, sqliteKeyBrokerRepository } from './adapters/sqlite/key-broker'
 import { sqliteTransactions } from './adapters/sqlite/transactions'
-import { gitOrphanedScopeReader } from './adapters/orphaned-scopes'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
@@ -43,6 +40,7 @@ import { createDepartmentService } from './services/departments'
 import { createPermissionViewService } from './services/permission-views'
 import { createPermissionEditorService } from './services/permission-editor'
 import { createPrivateFolderService } from './services/private-folders'
+import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
 import { createAgentStopService } from './services/agent-stops'
@@ -94,9 +92,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const repos = {
     companies: sqliteCompanyRepository(conn),
     memberships: sqliteMembershipRepository(conn),
-    invitations: sqliteInvitationRepository(conn),
-    scopes: sqliteScopeRepository(conn),
-    privateFolders: sqlitePrivateFolderRepository(conn),
+    invitationTokens: sqliteInvitationTokens(conn),
     clientActivity: sqliteClientActivityRepository(conn),
     pushRejections: sqlitePushRejectionRepository(conn),
     agentEvents: sqliteAgentEventRepository(conn),
@@ -105,7 +101,6 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentStops: sqliteAgentStopRepository(conn),
     brokerKeys: sqliteKeyBrokerRepository(conn),
     brokerTokens: sqliteBrokerTokenRepository(conn),
-    orphanedScopes: gitOrphanedScopeReader(conn),
   }
   const shared = {
     // Company handles (ports/company-data.ts): services only; routes never get one.
@@ -181,10 +176,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     clientActivity: createClientActivityService({ ...repos, ...shared }),
     pushRejections: createPushRejectionRecorder(repos),
-    companyFiles: companyFileViews(repos.scopes),
-    orphanedScopes: repos.orphanedScopes,
-    /** git-http's push snapshot and private-folder lookups (read; the company scope is ensured). */
-    scopes: repos.scopes,
+    companyFiles: companyFileViews(shared.companyData),
+    /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
+    companyScopes: createCompanyScopeService(shared),
     accounts: shared.accounts,
     repoStore,
   }
