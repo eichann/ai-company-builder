@@ -12,8 +12,9 @@
  */
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { createRequire } from 'module'
-import { dirname, join } from 'path'
+import { basename, dirname, join } from 'path'
 import { fileURLToPath, pathToFileURL } from 'url'
+import { logError } from '../error-log'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
@@ -58,7 +59,7 @@ export function installPreReceiveHook(repoPath: string, options: RenderHookOptio
     chmodSync(hookDest, 0o755)
     return true
   } catch (error) {
-    console.error(`Failed to install pre-receive hook to ${repoPath}:`, error)
+    logError('git-server', 'failed to install the pre-receive hook', error, { repository: basename(repoPath) })
     return false
   }
 }

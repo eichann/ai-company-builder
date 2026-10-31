@@ -26,6 +26,7 @@ import {
   type CompanyFilesView,
 } from '../lib/company-files'
 import { COMPANY_FILES_LIMITS as LIMITS } from '../../shared/types/company-files'
+import { logError } from '../lib/error-log'
 
 export const companyFilesRoute = new Hono()
 
@@ -63,7 +64,7 @@ async function respond(c: Context, m: Member, run: (view: CompanyFilesView) => P
     return c.json({ success: true, data: await run(view) })
   } catch (error) {
     if (error instanceof CompanyFilesError) return c.json({ error: error.message, code: error.code }, error.status)
-    console.error('company-files error:', error)
+    logError('company-files', 'failed to read company files', error)
     return c.json({ error: 'Failed to read company files' }, 500)
   }
 }

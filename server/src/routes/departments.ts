@@ -13,6 +13,7 @@ import { requireFullAccess } from '../services/access'
 import { INVALID_FOLDER_NAME_ERROR, MAX_MANAGERS_PER_DEPARTMENT } from '../services/departments'
 import type { DepartmentRow } from '../ports/departments'
 import { refusal } from './respond'
+import { logError } from '../lib/error-log'
 
 export { MAX_MANAGERS_PER_DEPARTMENT }
 
@@ -53,7 +54,7 @@ departmentsRoute.get('/', async (c) => {
       data: rows.map(departmentToCamelCase) as unknown as Department[],
     })
   } catch (error) {
-    console.error('Failed to list departments:', error)
+    logError('departments', 'failed to list departments', error)
     return c.json({
       success: true,
       data: [], // Return empty if repo doesn't exist yet
@@ -131,7 +132,7 @@ departmentsRoute.post('/', async (c) => {
       data: departmentToCamelCase(created.value),
     }, 201)
   } catch (error) {
-    console.error('Failed to create department:', error)
+    logError('departments', 'failed to create a department', error)
     return c.json({
       error: `Failed to create department: ${errorMessage(error)}`,
     }, 500)
@@ -172,7 +173,7 @@ departmentsRoute.put('/:id', async (c) => {
       data: departmentToCamelCase(updated.value),
     })
   } catch (error) {
-    console.error('Failed to update department:', error)
+    logError('departments', 'failed to update a department', error)
     return c.json({
       error: `Failed to update department: ${errorMessage(error)}`,
     }, 500)
@@ -216,7 +217,7 @@ departmentsRoute.delete('/:id', async (c) => {
       deletedFolders,
     })
   } catch (error) {
-    console.error('Failed to delete department:', error)
+    logError('departments', 'failed to delete a department', error)
     return c.json({
       error: `Failed to delete department: ${errorMessage(error)}`,
     }, 500)
@@ -308,7 +309,7 @@ departmentsRoute.post('/sync', async (c) => {
       removed,
     })
   } catch (error) {
-    console.error('Failed to sync departments:', error)
+    logError('departments', 'failed to sync departments', error)
     return c.json({
       error: `Failed to sync: ${errorMessage(error)}`,
     }, 500)

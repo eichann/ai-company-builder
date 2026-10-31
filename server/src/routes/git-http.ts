@@ -17,6 +17,7 @@ import {
   isScopeClosing,
   privateRepoPath,
 } from '../lib/private-folders'
+import { logError } from '../lib/error-log'
 
 export const gitHttpRoute = new Hono()
 
@@ -176,7 +177,7 @@ async function handleGitCgi(
       onRequestBodyConsumed?.()
     })
     incoming.on('error', (err) => {
-      console.error('[git-http] Error streaming request body:', err)
+      logError('git-http', 'error streaming the request body', err)
       cgi.stdin.destroy()
       cgi.kill()
       requestBodyConsumed = true
@@ -196,7 +197,7 @@ async function handleGitCgi(
         }
         cgi.stdin.end()
       } catch (err) {
-        console.error('[git-http] Error streaming request body:', err)
+        logError('git-http', 'error streaming the request body', err)
         cgi.stdin.destroy()
         cgi.kill()
       } finally {
@@ -215,8 +216,9 @@ async function handleGitCgi(
     // CGI may close stdin early (e.g. on protocol errors); avoid crashing the server.
   })
 
-  let stderrData = ''
-  cgi.stderr.on('data', (data: Buffer) => { stderrData += data.toString() })
+  // Drained, never logged: git's stderr can carry the push checker's messages,
+  // which name paths (lib/error-log.ts).
+  cgi.stderr.resume()
 
   // Observation only: a copy of stdout (headers included) for the observer.
   let observedChunks: Buffer[] | null = observer?.captureBody ? [] : null
@@ -240,7 +242,7 @@ async function handleGitCgi(
     try {
       observer.onClose(code, body)
     } catch (err) {
-      console.error('[git-http] observer failed:', err)
+      logError('git-http', 'observer failed', err)
     }
   }
 
@@ -329,19 +331,15 @@ async function handleGitCgi(
       if (headerBuffer.length > MAX_HEADER_BYTES) {
         headersDone = true
         resolved = true
-        console.error('[git-http] CGI header section exceeded limit', stderrData)
+        logError('git-http', 'CGI header section exceeded the limit', undefined, { user: user.id })
         cgi.kill()
         resolve(new Response('Internal Server Error', { status: 500 }))
       }
     })
 
     const logFailure = (code: number | null, phase: string) => {
-      console.error(
-        `[git-http] git http-backend exited with code ${code} (${phase})\n` +
-        `  request: ${method} ${pathInfo}\n` +
-        `  user: ${user.email}\n` +
-        `  stderr: ${stderrData || '(empty)'}`
-      )
+      // Not pathInfo or stderr: stderr carries the push checker's rejections, which name paths.
+      logError('git-http', `git http-backend exited with code ${code} (${phase})`, undefined, { method, user: user.id })
     }
 
     cgi.on('close', (code) => {
@@ -375,20 +373,10 @@ async function handleGitCgi(
       pushCheck?.cleanup()
       if (!resolved) {
         resolved = true
-        console.error(
-          `[git-http] Failed to spawn git http-backend: ${err}\n` +
-          `  request: ${method} ${pathInfo}\n` +
-          `  user: ${user.email}\n` +
-          `  stderr: ${stderrData || '(empty)'}`
-        )
+        logError('git-http', 'failed to spawn git http-backend', err, { method, user: user.id })
         resolve(new Response('Internal Server Error', { status: 500 }))
       } else if (bodyController) {
-        console.error(
-          `[git-http] git http-backend error after headers: ${err}\n` +
-          `  request: ${method} ${pathInfo}\n` +
-          `  user: ${user.email}\n` +
-          `  stderr: ${stderrData || '(empty)'}`
-        )
+        logError('git-http', 'git http-backend error after headers', err, { method, user: user.id })
         bodyController.error(err)
       }
     })
@@ -459,7 +447,7 @@ function pushCheckFor(companyId: string, userId: string, scopePath?: string): Pr
       managedFolders,
     })
   } catch (err) {
-    console.error('[git-http] cannot build the push permission snapshot:', err)
+    logError('git-http', 'cannot build the push permission snapshot', err)
     return { env: { ACB_PUSH_POLICY: '' }, cleanup: () => {} }
   }
 }

@@ -29,6 +29,7 @@ import type { BrokerKeyRepository } from '../ports/key-broker'
 import type { MembershipRepository } from '../ports/memberships'
 import { requireFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
+import { logError } from '../lib/error-log'
 
 export const AGENT_STOP_FORBIDDEN = 'Only owners and admins can stop the AI'
 const HISTORY_LIMIT = 50
@@ -54,7 +55,7 @@ export function createAgentStopService(deps: AgentStopDeps) {
 
   const changed = (companyId: string) => {
     try { deps.onChange?.(companyId) } catch (error) {
-      console.warn('[agent-stop] announcing the change failed:', error instanceof Error ? error.message : 'unknown')
+      logError('agent-stop', 'announcing the change failed', error)
     }
   }
 

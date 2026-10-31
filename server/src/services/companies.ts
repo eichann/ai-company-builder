@@ -28,6 +28,7 @@ import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/c
 import { isOwner, type Member } from './access'
 import type { CompanyCreationPolicy } from './company-creation-policy'
 import { ok, refuse, type Outcome } from './outcome'
+import { logError } from '../lib/error-log'
 
 // Default departments for new companies
 // Folder names are intentionally the same as the Japanese department names —
@@ -194,7 +195,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       try {
         repoPath = await repoStore.createCompanyRepo(id)
       } catch (e) {
-        console.error('Failed to create repo:', e)
+        logError('companies', 'failed to create the repository', e, { company: id })
         // Continue without repo - can be created later
       }
 
@@ -204,7 +205,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       try {
         initializeDefaultDepartments(id, ownerId)
       } catch (e) {
-        console.error('Failed to initialize departments:', e)
+        logError('companies', 'failed to create the default departments', e, { company: id })
         // Continue - company is created, departments can be added later
       }
 
@@ -214,7 +215,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         scopes.ensureCompanyScope(id, ownerId)
         scopes.syncCompanyScopes(id)
       } catch (e) {
-        console.error('Failed to initialize permission scopes:', e)
+        logError('companies', 'failed to create the permission scopes', e, { company: id })
         // Continue - startup seeding creates them on the next restart
       }
 
@@ -223,7 +224,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         try {
           await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
         } catch (e) {
-          console.error('Failed to seed department folders:', e)
+          logError('companies', 'failed to seed the department folders', e, { company: id })
           // Continue - folders can be created later via the departments API
         }
       }

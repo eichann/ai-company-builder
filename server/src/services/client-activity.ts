@@ -9,6 +9,7 @@ import type { Clock } from '../ports/clock'
 import type { ActivityKind, ClientActivityRepository } from '../ports/client-activity'
 import type { MembershipRepository } from '../ports/memberships'
 import { compareClientVersions, parseClientVersion, type ParsedClientVersion } from '../lib/client-version'
+import { logError } from '../lib/error-log'
 
 export const THROTTLE_MS = 60_000
 
@@ -138,7 +139,7 @@ export function createClientActivityService(deps: {
         lastWrites.set(key, { at: nowMs, version, platform })
         return true
       } catch (err) {
-        console.error('[client-activity] Failed to record activity:', err)
+        logError('client-activity', 'failed to record activity', err)
         return false
       }
     },
