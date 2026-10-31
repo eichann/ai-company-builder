@@ -5,7 +5,7 @@ storage: server
 fields:
   title:      { label: 件名, kind: text, source: file }
   stage:      { label: 段階, kind: choice, options: [first_meeting, proposal, quote, final], source: server }
-  confidence: { label: 確度, kind: choice, options: [a, b, c], source: server }
+  confidence: { label: 確度, kind: choice, options: [a, b, c], option_labels: { a: A（高）, b: B（中）, c: C（低） }, source: server }
   next_step:  { label: 次のアクション, kind: text, source: server }
   close_date: { label: 受注予定日, kind: date, source: server }
   amount:     { label: 金額, kind: number, source: server }

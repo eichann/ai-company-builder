@@ -40,6 +40,12 @@ export interface FieldDef {
   source: FieldSource
   /** kind choice: the allowed values. */
   options?: string[]
+  /**
+   * kind choice: how an option is shown to people (YAML `option_labels`, e.g.
+   * `{ a: A（高）, b: B（中） }`); an option without one is shown as it is.
+   * Display only: values are stored, queried and written as the options.
+   */
+  optionLabels?: Record<string, string>
   /** kind record: the type of the record it names. */
   target?: string
 }
@@ -150,7 +156,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       if (!ONTOLOGY_NAME_RE.test(fname)) { err(`欄の名前「${fname}」は英小文字・数字・_ で書いてください`); continue }
       if (RESERVED_FIELD_NAMES.has(fname) && fname !== 'title' && fname !== 'summary') { err(`「${fname}」は欄の名前に使えません`); continue }
       if (!isYamlMap(f)) { err(`欄「${fname}」は { label, kind, source } の形で書いてください`); continue }
-      for (const k of Object.keys(f)) if (!['label', 'kind', 'source', 'options', 'target'].includes(k)) err(`欄「${fname}」に知らない項目「${k}」があります`)
+      for (const k of Object.keys(f)) if (!['label', 'kind', 'source', 'options', 'option_labels', 'target'].includes(k)) err(`欄「${fname}」に知らない項目「${k}」があります`)
       const kind = f.kind
       if (!FIELD_KINDS.includes(kind as FieldKind)) { err(`欄「${fname}」の kind は ${FIELD_KINDS.join(' / ')} のどれかです`); continue }
       const source = f.source ?? 'server'
@@ -163,6 +169,13 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         if (!opts || opts.length === 0 || !opts.every(o => typeof o === 'string' && ONTOLOGY_NAME_RE.test(o))) err(`欄「${fname}」の options は英小文字の値の並びで書いてください`)
         else def.options = opts as string[]
       } else if (f.options !== undefined) err(`欄「${fname}」の options は kind: choice のときだけ書けます`)
+      if (f.option_labels !== undefined) {
+        const labels = f.option_labels
+        if (kind !== 'choice') err(`欄「${fname}」の option_labels は kind: choice のときだけ書けます`)
+        else if (!isYamlMap(labels) || Object.entries(labels).some(([o, l]) => !def.options?.includes(o) || !isStr(l) || l.length > 40)) {
+          err(`欄「${fname}」の option_labels は「選択肢: 表示名（40 文字まで）」の形で、options にある値だけを書いてください`)
+        } else if (Object.keys(labels).length > 0) def.optionLabels = { ...(labels as Record<string, string>) }
+      }
       if (kind === 'record') {
         if (!isStr(f.target) || !ONTOLOGY_NAME_RE.test(f.target)) err(`欄「${fname}」の target に型の名前を書いてください`)
         else def.target = f.target

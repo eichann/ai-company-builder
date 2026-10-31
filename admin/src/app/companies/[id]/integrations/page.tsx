@@ -488,7 +488,10 @@ function MappingEditor({ pluginId, detail, busy, nameOf, onSave, onRestore }: {
               <tbody>
                 {table.rows.map((r) => (
                   <tr key={`${r.object}.${r.field}`} className="border-t">
-                    <td className="py-1.5 pr-3">{r.object}・{r.field}</td>
+                    <td className="py-1.5 pr-3">
+                      {detail.labels?.[r.object]?.label ?? r.object}・{detail.labels?.[r.object]?.fields[r.field] ?? r.field}
+                      <span className="ml-1 text-xs text-muted-foreground">{r.object}.{r.field}</span>
+                    </td>
                     <td className="py-1.5 pr-3">
                       <Input aria-label={`${r.field} の HubSpot の項目`} className="h-8" value={r.from}
                         onChange={(e) => setField(r.object, r.field, { from: e.target.value })} />

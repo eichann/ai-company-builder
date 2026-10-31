@@ -158,6 +158,8 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     // Written fields with their policy; stage (never written) and fields the mapping does not write are not offered.
     expect(update.fields.map((f: Json) => [f.name, f.policy]).sort()).toEqual([['amount', 'prior'], ['confidence', 'auto'], ['next_step', 'auto']])
     expect(update.fields.find((f: Json) => f.name === 'confidence').options).toEqual(expect.arrayContaining(['a', 'b', 'c']))
+    // How the options are shown (the type's option_labels), so the AI says 「A（高）」 rather than `a`.
+    expect(update.fields.find((f: Json) => f.name === 'confidence').optionLabels).toEqual({ a: 'A（高）', b: 'B（中）', c: 'C（低）' })
     // No create (notes are not in milestone 3).
     expect(hub.operations.map((o: Json) => o.name).sort()).toEqual(['refresh_deal', 'update_deal'])
 
@@ -183,6 +185,8 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(r.body.data.operation).toMatchObject({
       actorKind: 'ai', recordTitle: expect.any(String),
       changes: [{ field: 'confidence', before: 'b', after: 'a' }, { field: 'next_step', before: '資料送付', after: '11/7 デモ' }],
+      // The card shows the values by their labels.
+      valueLabels: { confidence: { a: 'A（高）', b: 'B（中）', c: 'C（低）' } },
     })
     expect(fake.deal('1000000001')!.properties).toMatchObject({ juchu_kakudo: 'high', hs_next_step: '11/7 デモ' })
     const entry = services.recordEngine.history({ companyId: CO, userId: 'op-member', role: 'member' }, id).value.entries.at(-1)

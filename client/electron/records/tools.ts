@@ -43,7 +43,7 @@ export interface RecordToolSpec {
   schema: z.ZodObject<Record<string, ZodTypeAny>>
   readOnly: boolean
   /** A connector's update: its outcome becomes a card in the reply. */
-  card?: { pluginId: string; systemLabel: string; labels: Record<string, string> }
+  card?: { pluginId: string; systemLabel: string; labels: Record<string, string>; valueLabels: Record<string, Record<string, string>> }
   /** The server call for a validated input. */
   request(input: Record<string, unknown>): { method: 'GET' | 'POST'; path: string; body?: unknown }
 }
@@ -210,7 +210,8 @@ export function pluginToolSpecs(tools: PluginAiTools, writes: boolean): RecordTo
 function updateSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: (id: unknown) => string): RecordToolSpec {
   const fieldShape: Record<string, ZodTypeAny> = {}
   for (const f of op.fields) {
-    const desc = `${f.label}${f.policy === 'prior' ? '（承認が要る欄：いまは書けず、断られる / needs approval: refused for now）' : ''}`
+    const shown = f.options && f.optionLabels ? `（${f.options.map(o => `${o}＝${f.optionLabels?.[o] ?? o}`).join('・')}。メンバーには表示名で言う / say the label to the member）` : ''
+    const desc = `${f.label}${shown}${f.policy === 'prior' ? '（承認が要る欄：いまは書けず、断られる / needs approval: refused for now）' : ''}`
     fieldShape[f.name] = kindSchema(f.kind as FieldKind, f.options).optional().describe(desc)
   }
   const auto = op.fields.filter(f => f.policy === 'auto').map(f => f.label)
@@ -220,7 +221,10 @@ function updateSpec(pluginId: string, system: string, op: PluginAiOperation, nam
     : z.string().max(2000).optional()
   return {
     name, readOnly: false,
-    card: { pluginId, systemLabel: system, labels: Object.fromEntries(op.fields.map(f => [f.name, f.label])) },
+    card: {
+      pluginId, systemLabel: system, labels: Object.fromEntries(op.fields.map(f => [f.name, f.label])),
+      valueLabels: Object.fromEntries(op.fields.flatMap(f => (f.optionLabels ? [[f.name, f.optionLabels]] : []))),
+    },
     schema: z.object({
       id,
       expectedVersion: z.number().int().min(0).describe('records_get で見た version / the version you read'),
@@ -315,7 +319,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     const body = req.body as { fields: Record<string, CardContext['asked'][string]>; note?: string }
     const ctx: CardContext = {
       id: newId(), companyId: options.companyId ?? '', conversationId: options.conversationId ?? null, pluginId: card.pluginId, systemLabel: card.systemLabel,
-      recordId: String(input.id), labels: card.labels, asked: body.fields, reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
+      recordId: String(input.id), labels: card.labels, valueLabels: card.valueLabels, asked: body.fields, reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
       byAi: true, at: now().toISOString(),
     }
     let result: PluginOperationCard

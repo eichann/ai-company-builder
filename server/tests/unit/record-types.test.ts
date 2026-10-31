@@ -105,6 +105,16 @@ describe('type definitions', () => {
     for (const edit of cases) expect(parseTypeFile('task', withYaml(edit)).ok).toBe(false)
   })
 
+  it('a choice may say how its options are shown, only for options it has', () => {
+    const reviewer = '  reviewer:     { label: レビューする人, kind: person, source: server }\n'
+    const choice = (labels: string) => parseTypeFile('task', withYaml(y => y.replace(reviewer, `${reviewer}  confidence:   { label: 確度, kind: choice, options: [a, b, c], source: server${labels} }\n`)))
+    const ok = choice(', option_labels: { a: A（高）, b: B（中） }')
+    expect(ok.ok && ok.definition.fields.confidence).toMatchObject({ options: ['a', 'b', 'c'], optionLabels: { a: 'A（高）', b: 'B（中）' } })
+    expect(choice(', option_labels: { d: D }').ok).toBe(false)
+    expect(choice(', option_labels: { a: "" }').ok).toBe(false)
+    expect(parseTypeFile('task', withYaml(y => y.replace('kind: date, source: server', 'kind: date, source: server, option_labels: { a: A }'))).ok).toBe(false)
+  })
+
   it('an interface needs its fields on the server', () => {
     expect(parseTypeFile('task', withYaml(y => y.replace(/ {2}due: .*\n/, ''))).ok).toBe(false)
     expect(parseTypeFile('task', withYaml(y => y.replace('kind: date, source: server', 'kind: date, source: file'))).ok).toBe(false)

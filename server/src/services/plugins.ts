@@ -208,6 +208,14 @@ export function createPluginService(deps: PluginServiceDeps) {
     const plugin = await listItem(companyId, pluginId, install)
     const mappingRow = install && install.mappingVersion > 0 ? repo.mapping(pluginId, install.mappingVersion) : null
     const found = install ? shelf.find(companyId, pluginId, install.version) : null
+    // What each mapped object and field is called (the package's types): the page shows 「案件・確度」, not deal.confidence.
+    const labels: PluginDetail['labels'] = {}
+    if (found) {
+      for (const [object, o] of Object.entries(found.pkg.manifest.objects)) {
+        const def = o.recordType ? found.pkg.types[o.recordType] : undefined
+        if (def) labels[object] = { label: def.label, fields: Object.fromEntries(Object.entries(def.fields).map(([n, f]) => [n, f.label])) }
+      }
+    }
     let policies: PluginFieldPolicyView[] = []
     let mappingErrors: string[] = []
     if (found && mappingRow) {
@@ -225,6 +233,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       mapping: mappingRow ? { version: mappingRow.version, text: mappingRow.text, createdAt: mappingRow.createdAt, createdBy: mappingRow.createdBy } : null,
       mappingVersions: repo.mappingVersions(pluginId).map(v => ({ version: v.version, createdAt: v.createdAt, createdBy: v.createdBy })),
       policies,
+      labels,
       mappingErrors,
       autoAcknowledgements: repo.policyAcks(pluginId).map(a => ({ field: a.field, property: a.property, by: a.acknowledgedBy, at: a.acknowledgedAt })),
       history: repo.history(pluginId, 50).map(h => ({ action: h.action, at: h.at, by: h.by, change: JSON.parse(h.change) as unknown })),
@@ -506,7 +515,7 @@ export function createPluginService(deps: PluginServiceDeps) {
               if (!rule.write || !f) continue
               const policy = effectiveFieldPolicy(manifest, mapping, name, field)
               if (policy !== 'auto' && policy !== 'prior') continue
-              fields.push({ name: field, label: f.label, kind: f.kind, ...(f.options ? { options: [...f.options] } : {}), policy })
+              fields.push({ name: field, label: f.label, kind: f.kind, ...(f.options ? { options: [...f.options] } : {}), ...(f.optionLabels ? { optionLabels: { ...f.optionLabels } } : {}), policy })
             }
             if (fields.length === 0) continue
           }
