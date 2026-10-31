@@ -1,6 +1,7 @@
 /**
  * Unit Test: which addresses the key broker's relay refuses (SSRF guard,
- * lib/net-ranges.ts), and that the request log never prints a relay query.
+ * lib/net-ranges.ts). (That the request log never prints a relay token:
+ * tests/integration/request-log.test.ts.)
  *
  * Every internal form an attacker could make a destination name resolve to is
  * refused — loopback, RFC 1918, carrier-grade NAT, link-local / the cloud
@@ -9,7 +10,6 @@
  */
 import { describe, it, expect } from 'vitest'
 import { isPrivateAddress } from '../../src/lib/net-ranges'
-import { redactBrokerQuery } from '../../src/lib/log-redaction'
 
 describe('the relay refuses private and internal addresses', () => {
   it.each([
@@ -29,12 +29,3 @@ describe('the relay refuses private and internal addresses', () => {
     })
 })
 
-describe('request log', () => {
-  it('never prints the query of a relay request (a token may be in ?key=)', () => {
-    const token = `acb_tok_${'a'.repeat(64)}`
-    const line = `<-- POST /api/broker/gemini/v1beta/models/gemini-2.5-flash:generateContent?key=${token}&alt=sse`
-    expect(redactBrokerQuery(line)).not.toContain(token)
-    expect(redactBrokerQuery(line)).toContain('/api/broker/gemini/v1beta/models/gemini-2.5-flash:generateContent')
-    expect(redactBrokerQuery('<-- GET /api/companies/x/files/search?q=hello')).toContain('q=hello')
-  })
-})
