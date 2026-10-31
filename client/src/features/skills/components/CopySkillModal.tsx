@@ -8,11 +8,11 @@ import {
   SpinnerGap,
   Check,
 } from '@phosphor-icons/react'
-import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
-import type { DepartmentConfig } from '../../types'
-import type { Skill } from '../../features/skills/model'
-import { COMPANY_TAB_ID } from '../../shared/lib/departments'
-import { listSkills, readSkillFile } from '../../features/skills/api'
+import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../../shared/core/names'
+import type { DepartmentConfig } from '../../../types'
+import type { Skill } from '../model'
+import { COMPANY_TAB_ID } from '../../../shared/lib/departments'
+import { listSkills, readSkillFile } from '../api'
 
 interface CopySkillModalProps {
   rootPath: string

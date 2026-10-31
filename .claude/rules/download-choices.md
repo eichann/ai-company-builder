@@ -10,7 +10,6 @@ paths:
   - "client/shared/sparse-paths.ts"
   - "client/electron/features/download-choices/**"
   - "client/electron/features/company-setup/**"
-  - "client/src/components/settings/**"
   - "client/src/features/settings/**"
   - "client/src/features/company/components/CompanySelector.tsx"
   - "client/src/lib/download-selection.ts"
@@ -123,12 +122,12 @@ on disk and the next sync moves them to `.backups/<ts>_outside_checkout/`.
   every blob). `git:folderSizes` (`sync/folder-sizes.ts`) falls back to local trees (names only,
   `offline: true`) and adds readable private folders (no size). `git:sparseSetExclusions`
   reports bytes arriving in `.git/objects/pack` as `sparse:progress`.
-- `client/src/components/settings/DownloadFoldersSection.tsx` (logic `src/lib/download-selection.ts`):
+- `client/src/features/settings/components/DownloadFoldersSection.tsx` (logic `src/lib/download-selection.ts`):
   tri-state tree (one level per expand) with sizes; summary
   「6.5 GB をダウンロード済み（全体 10.4 GB）」 + bar + size after applying; search over loaded
   folders; sticky footer — changes are a draft until 適用 (取り消す drops it); applying asks
   first about uncommitted changes and shows bytes received. Offline: sizes 「—」, the draft is
-  kept. The settings panel has a left section nav and shares `settings/ui.tsx` (neutral zinc,
+  kept. The settings panel has a left section nav and shares `src/shared/ui/primitives.tsx` (neutral zinc,
   one indigo accent, light and dark). The panel reaches the main process only through
   `src/features/settings/api.ts`: `FolderSizeReads` (sizes from the server), `DownloadChoiceReads`
   (uncommitted changes, progress), and separate ports for the company `.env` (status only),

@@ -1,8 +1,8 @@
 import { useState, useEffect, useCallback } from 'react'
 import { X, FolderOpen, ArrowCounterClockwise, Clock, File, Warning } from '@phosphor-icons/react'
-import { listBackups, openBackupFolder, restoreBackupFile } from '../../features/sync/api'
-import type { BackupInfo } from '../../../shared/ipc-contract'
-import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
+import { listBackups, openBackupFolder, restoreBackupFile } from '../api'
+import type { BackupInfo } from '../../../../shared/ipc-contract'
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 
 interface BackupHistorySlideOverProps {
   isOpen: boolean

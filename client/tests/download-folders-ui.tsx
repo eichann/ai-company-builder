@@ -11,7 +11,7 @@ import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
 import { useAppStore } from '../src/stores/appStore'
-import { SettingsPanel } from '../src/components/settings/SettingsPanel'
+import { SettingsPanel } from '../src/features/settings/components/SettingsPanel'
 import { FileTreePanel } from '../src/features/files/components/FileTreePanel'
 import { dispatchFileChanges } from '../src/lib/fileEvents'
 

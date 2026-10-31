@@ -6,12 +6,12 @@
 // is left out). Applying: electron/sync/sparse.ts via useSparseCheckout.
 import { useCallback, useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react'
 import { CaretRight, FolderSimple, FolderSimpleDashed, Lock, MagnifyingGlass, SpinnerGap, X, CheckCircle, WifiSlash, WarningCircle } from '@phosphor-icons/react'
-import { useSparseCheckout } from '../../shared/hooks/useSparseCheckout'
-import { findUncommittedChanges, getFolderSizes, onDownloadProgress } from '../../features/settings/api'
-import type { DepartmentConfig } from '../../types'
-import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../lib/download-selection'
-import { normalizeExclusions, pathKey } from '../../../shared/sparse-paths'
-import { Button, Callout, Card, IndeterminateBar, SectionHeader, TriCheckbox, UsageBar } from './ui'
+import { useSparseCheckout } from '../../../shared/hooks/useSparseCheckout'
+import { findUncommittedChanges, getFolderSizes, onDownloadProgress } from '../api'
+import type { DepartmentConfig } from '../../../types'
+import { diffSelection, downloadedBytes, folderCheckState, formatBytes, sameSelection, toggleFolder } from '../../../lib/download-selection'
+import { normalizeExclusions, pathKey } from '../../../../shared/sparse-paths'
+import { Button, Callout, Card, IndeterminateBar, SectionHeader, TriCheckbox, UsageBar } from '../../../shared/ui/primitives'
 
 interface FolderNode {
   name: string

@@ -1,5 +1,5 @@
 import { useState, useSyncExternalStore } from 'react'
-import { defaultVoiceShortcut, formatVoiceShortcut, shortcutFromEvent, validShortcut, voiceShortcut } from '../../lib/voiceShortcut'
+import { defaultVoiceShortcut, formatVoiceShortcut, shortcutFromEvent, validShortcut, voiceShortcut } from '../../../lib/voiceShortcut'
 
 export function VoiceShortcutSettings() {
   const shortcut = useSyncExternalStore(voiceShortcut.subscribe, voiceShortcut.getSnapshot)

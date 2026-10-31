@@ -19,9 +19,9 @@ import {
   Warning,
   Flask
 } from '@phosphor-icons/react'
-import type { Skill, SkillTool } from '../../features/skills/model'
-import { startSkillTool, stopSkillTool } from '../../features/skills/api'
-import { useAppStore } from '../../stores/appStore'
+import type { Skill, SkillTool } from '../model'
+import { startSkillTool, stopSkillTool } from '../api'
+import { useAppStore } from '../../../stores/appStore'
 
 type TabId = 'overview' | 'rules' | 'references' | 'scripts' | 'tools'
 

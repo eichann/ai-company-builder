@@ -2,9 +2,9 @@
 // Open /tests/voice-prompt-ui.html?theme=light|dark&state=default|edited|empty
 import { createRoot } from 'react-dom/client'
 import '../src/index.css'
-import { Card, SectionHeader } from '../src/components/settings/ui'
-import { VoiceShortcutSettings } from '../src/components/settings/VoiceShortcutSettings'
-import { VoicePromptSettings } from '../src/components/settings/VoicePromptSettings'
+import { Card, SectionHeader } from '../src/shared/ui/primitives'
+import { VoiceShortcutSettings } from '../src/features/voice/components/VoiceShortcutSettings'
+import { VoicePromptSettings } from '../src/features/voice/components/VoicePromptSettings'
 import { DEFAULT_VOICE_INSTRUCTIONS, validateVoiceInstructions } from '../shared/voice-prompt'
 
 const params = new URLSearchParams(location.search)

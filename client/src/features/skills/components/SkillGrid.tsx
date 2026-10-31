@@ -2,7 +2,7 @@ import { useState, useMemo, useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Plus, CircleNotch, Lightning, CaretRight, Flask, Globe, Copy } from '@phosphor-icons/react'
 import { SkillCard } from './SkillCard'
-import type { Skill } from '../../features/skills/model'
+import type { Skill } from '../model'
 
 interface SkillGridProps {
   skills: Skill[]

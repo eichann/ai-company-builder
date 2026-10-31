@@ -9,7 +9,7 @@ import {
   Sparkle,
   Check
 } from '@phosphor-icons/react'
-import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../shared/core/names'
+import { isValidSkillName, sanitizeSkillNameInput, suggestSkillName } from '../../../../../shared/core/names'
 
 interface NewSkillWizardProps {
   departmentName: string

@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { CaretDown, CaretRight, Plus, PencilSimple, Minus, X, SpinnerGap, Sparkle, ArrowCounterClockwise, CloudArrowUp } from '@phosphor-icons/react'
-import { DiffModal } from './DiffViewer'
-import { ConfirmDialog } from '../../shared/ui/ConfirmDialog'
+import { DiffModal } from '../../../shared/ui/DiffViewer'
+import { ConfirmDialog } from '../../../shared/ui/ConfirmDialog'
 
 interface SyncPreviewDialogProps {
   isOpen: boolean

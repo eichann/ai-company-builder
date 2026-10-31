@@ -1,6 +1,6 @@
 import { useEffect, useId, useState } from 'react'
-import { Button, Callout, SubHeading } from './ui'
-import { getAgentEnvPassthrough, setAgentEnvPassthrough } from '../../features/settings/api'
+import { Button, Callout, SubHeading } from '../../../shared/ui/primitives'
+import { getAgentEnvPassthrough, setAgentEnvPassthrough } from '../api'
 
 // Settings → AIに渡す環境変数: extra environment variable names the AI (and
 // the commands it runs) may see on this computer. By default the AI gets only

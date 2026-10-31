@@ -2,7 +2,7 @@
 // The text lives in shared/private-folder-help.ts (the admin shows the same).
 import { useEffect, useId, useRef } from 'react'
 import { Question, X } from '@phosphor-icons/react'
-import { Button } from '../../../components/settings/ui'
+import { Button } from '../../../shared/ui/primitives'
 import { PRIVATE_FOLDER_HELP, PRIVATE_FOLDER_HELP_TITLE } from '../../../../shared/private-folder-help'
 
 /** The link that opens the help (inside the 「新しいフォルダ」 dialog). */

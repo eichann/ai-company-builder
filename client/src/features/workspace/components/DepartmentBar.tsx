@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next'
 import { Info } from '@phosphor-icons/react'
-import { DepartmentTabs } from '../../../components/skill-ui/DepartmentTabs'
+import { DepartmentTabs } from './DepartmentTabs'
 import type { DepartmentConfig } from '../../../types'
 
 interface Props {

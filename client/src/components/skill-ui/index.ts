@@ -1,6 +1,0 @@
-export { DepartmentTabs } from './DepartmentTabs'
-export { SkillCard } from './SkillCard'
-export { SkillGrid } from './SkillGrid'
-export { SkillDetailPanel } from './SkillDetailPanel'
-export { NewSkillWizard } from './NewSkillWizard'
-export { FileTreePanel } from '../../features/files/components/FileTreePanel'

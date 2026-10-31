@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
-import { useAuthStore } from '../../stores/authStore'
-import { getServerUrl } from '../../features/auth/api'
+import { useAuthStore } from '../../../stores/authStore'
+import { getServerUrl } from '../api'
 import {
   Key,
   EnvelopeSimple,

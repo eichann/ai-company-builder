@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Check, LockSimple, SpinnerGap } from '@phosphor-icons/react'
-import { Button, Callout, SubHeading } from './ui'
-import { DEFAULT_VOICE_INSTRUCTIONS, VOICE_FIXED_PROMPT, VOICE_INSTRUCTIONS_MAX_LENGTH } from '../../../shared/voice-prompt'
-import { getVoicePrompt, resetVoicePrompt, setVoicePrompt } from '../../features/voice/api'
+import { Button, Callout, SubHeading } from '../../../shared/ui/primitives'
+import { DEFAULT_VOICE_INSTRUCTIONS, VOICE_FIXED_PROMPT, VOICE_INSTRUCTIONS_MAX_LENGTH } from '../../../../shared/voice-prompt'
+import { getVoicePrompt, resetVoicePrompt, setVoicePrompt } from '../api'
 
 // Settings → 音声入力 → 整え方の指示. The fixed part is shown read-only; the
 // member edits only the instructions after it. Saved on this PC (userData),

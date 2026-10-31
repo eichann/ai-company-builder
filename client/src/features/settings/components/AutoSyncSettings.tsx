@@ -1,6 +1,6 @@
 import { useId, useState, useSyncExternalStore, type ReactNode } from 'react'
 import { Plus, X } from '@phosphor-icons/react'
-import { Card, SubHeading } from '../../../components/settings/ui'
+import { Card, SubHeading } from '../../../shared/ui/primitives'
 import {
   autoSyncSettings,
   normalizeTimes,
