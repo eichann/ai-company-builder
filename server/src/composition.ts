@@ -23,6 +23,7 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
+import { gitRecordFileSource } from './adapters/record-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
@@ -52,6 +53,8 @@ import { createBrokerTokenService } from './services/broker-tokens'
 import { createOwnBrokerKeyService } from './services/own-broker-keys'
 import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
+import { createRecordIndexer } from './services/record-index'
+import { createRecordService } from './services/records'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -136,6 +139,9 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
   })
 
+  // The company map (light ontology 4-2): indexed from pushes, off per company by default.
+  const recordIndexer = createRecordIndexer({ ...shared, recordFiles: gitRecordFileSource() })
+
   return {
     access: createAccessPolicy(repos.memberships),
     companies: createCompanyService({ ...repos, ...shared, repoStore,
@@ -179,6 +185,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
+    records: createRecordService({ ...shared, indexer: recordIndexer }),
     accounts: shared.accounts,
     repoStore,
   }

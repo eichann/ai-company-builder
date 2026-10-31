@@ -91,7 +91,8 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   another company's object id finds, changes and deletes nothing. Behind it: `departments`,
   `invitations`, `scopes` (permission scopes, rules, department managers:
   `adapters/sqlite/scopes.ts` over `permission-store.ts`), `privateFolders`
-  (`adapters/private-folders.ts`) and `orphanedScopes` (`adapters/orphaned-scopes.ts`).
+  (`adapters/private-folders.ts`), `orphanedScopes` (`adapters/orphaned-scopes.ts`) and `records`
+  (the company map of the light ontology, `adapters/sqlite/records.ts`, `records.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -180,6 +181,10 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+                              GET|PUT /records/settings, GET /records/problems,
+                              POST /records/reindex, GET /records/types,
+                              POST /records/query, GET /records/item/:recordId records.ts
+                                                                (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts

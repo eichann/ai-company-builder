@@ -100,6 +100,7 @@ interface World {
     relayService: string
     token: string
     invitation: string
+    record: string
   }
 }
 
@@ -224,6 +225,15 @@ const MATRIX: Row[] = [
   r('DELETE /api/companies/:companyId/agent-stops/:stopId', w => ({ path: `${C(w)}/agent-stops/no-such-stop` }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/events', w => ({ path: `${C(w)}/me/events` }), MEMBERS),
 
+  // The company map (light ontology 4-2; records.md). On for this company (seed).
+  r('GET /api/companies/:companyId/records/settings', w => ({ path: `${C(w)}/records/settings` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/records/settings', w => ({ path: `${C(w)}/records/settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/records/problems', w => ({ path: `${C(w)}/records/problems` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/records/reindex', w => ({ path: `${C(w)}/records/reindex`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/records/types', w => ({ path: `${C(w)}/records/types` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/query', w => ({ path: `${C(w)}/records/query`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+
   // Key broker (「API キー」)
   r('GET /api/companies/:companyId/broker', w => ({ path: `${C(w)}/broker` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/broker/keys', w => ({ path: `${C(w)}/broker/keys`, body: {} }), [400, 400, 403, 403, 404, 401]),
@@ -311,6 +321,8 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/broker/keys/:keyId', (w, id) => ({ path: `${C(w)}/broker/keys/${id}` }), w => w.other.key),
   x('DELETE /api/companies/:companyId/broker/relay-services/:service', (w, id) => ({ path: `${C(w)}/broker/relay-services/${id}` }), w => w.other.relayService, 'nosuchservice'),
   x('DELETE /api/companies/:companyId/me/broker-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/broker-tokens/${id}` }), w => w.other.token),
+
+  x('GET /api/companies/:companyId/records/item/:recordId', (w, id) => ({ path: `${C(w)}/records/item/${id}` }), w => w.other.record, 'deal-nosuch01'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
@@ -458,6 +470,14 @@ async function seed(): Promise<World> {
   const otherToken = await call('outsider', 'POST', `${O}/me/broker-tokens`, { conversationId: 'conv-other', department: '営業部' })
   const otherInv = await call('outsider', 'POST', `${O}/invitations`, { role: 'member' })
 
+  // The company map, on in both companies (rows written directly: turning it on
+  // through the API would start an index run in the background), with a record in the other.
+  for (const c of [co, other]) {
+    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(c, expires, USER.owner)
+  }
+  db.prepare("INSERT INTO records (company_id, id, type, path, title, created_at, updated_at) VALUES (?, 'deal-other001', 'deal', '営業部/商談.md', '他社の商談', ?, ?)")
+    .run(other, expires, expires)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -479,6 +499,7 @@ async function seed(): Promise<World> {
       relayService: 'crm',
       token: otherToken.tokenId,
       invitation: otherInv.id,
+      record: 'deal-other001',
     },
   }
 }
