@@ -109,6 +109,15 @@ export interface RecordDetail {
   links: RecordLinkView[]
 }
 
+/**
+ * The agents whose record tokens may act (create / run actions); any other
+ * agent gets a `read` token whatever it asks for (owner decision 0.3-3:
+ * Codex reads only). Server-side defence in depth: the agent name is the
+ * app's word, and the app restricts the same way (its registry's
+ * `recordActions`, pinned to this list by client/tests/records-tools.test.ts).
+ */
+export const RECORD_ACTION_AGENTS: readonly string[] = ['claude-code']
+
 /** Who acts: the member by hand (default) or the member's AI. */
 export interface RecordActor {
   kind: 'human' | 'ai'

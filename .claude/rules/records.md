@@ -220,7 +220,11 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   reaches them through a loopback endpoint that main serves (`client/electron/records/`).
 - `scope`: `read` (look up) or `act` (also create / run actions). The app asks `act` only for
   agents with registry `recordActions` (Claude Code; owner decision 0.3-3: Codex reads only), and
-  the server refuses an action with a read token (403 `READ_ONLY_TOKEN`).
+  the server refuses an action with a read token (403 `READ_ONLY_TOKEN`). Defence in depth: the
+  server grants `act` only to agents in `RECORD_ACTION_AGENTS` (`shared/types/records.ts`; any
+  other agent asking for `act` gets — and is told — `read`), pinned to the registry by
+  `client/tests/records-tools.test.ts`. The agent name is the app's word, so this stops a
+  mistaken app, not a forged one.
 - The company id in the token only chooses which company's handle to look the digest up in:
   another company's id finds nothing (no `UNSCOPED` lookup across companies). The holder must
   still be a member; while the company's whole AI is stopped (`agent-stop.md`) every token gets

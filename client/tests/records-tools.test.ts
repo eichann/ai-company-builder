@@ -23,6 +23,8 @@ import { decideRecordEdit } from '../electron/write-guard'
 import { AGENTS } from '../shared/agents/registry'
 import { recordActionChoices } from '../shared/record-actions'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
+import { RECORD_ACTION_AGENTS } from '../../shared/types/records'
+import { AGENT_IDS } from '../shared/agents/registry'
 
 const TYPES = coreTypeDefinitions()
 const TASK = TYPES.find(t => t.name === 'task')!
@@ -78,6 +80,8 @@ test('tools come from the type definitions; a read token gets no state-changing 
   assert.ok(read!.specs.every(s => s.readOnly), read!.specs.filter(s => !s.readOnly).map(s => s.name).join())
   assert.equal(AGENTS.codex.capabilities.recordActions, false)
   assert.equal(AGENTS['claude-code'].capabilities.recordActions, true)
+  // The server's own list (it downgrades any other agent to a read token) agrees with the registry.
+  assert.deepEqual(AGENT_IDS.filter(id => AGENTS[id].capabilities.recordActions).sort(), [...RECORD_ACTION_AGENTS].sort())
 })
 
 test('a tool refuses what its schema refuses before calling the server (a required note)', async () => {

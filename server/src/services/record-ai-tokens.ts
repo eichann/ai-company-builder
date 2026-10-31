@@ -10,7 +10,9 @@
  * The member's app (main process) asks for a token per chat turn with the
  * member's session and hands only the token to its AI tools; the AI process
  * never receives the session. A token is scoped to one company and member,
- * `read` (look up) or `act` (also run actions: Claude only, 0.3-3), lives at
+ * `read` (look up) or `act` (also run actions: only agents in
+ * RECORD_ACTION_AGENTS — Claude Code, 0.3-3; any other agent asking for `act`
+ * gets `read`, and the answer says so), lives at
  * most RECORD_TOKEN_TTL_MINUTES and is revoked when the turn ends. Only its
  * sha256 is stored.
  *
@@ -20,6 +22,7 @@
  * still be a member. While the company's AI is stopped (emergency stop,
  * agent-stop.md) every token is refused.
  */
+import { RECORD_ACTION_AGENTS } from '../../shared/types/records'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
@@ -81,15 +84,17 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       if (records.liveAiTokens(member.userId, new Date(now).toISOString()) >= RECORD_TOKENS_PER_MEMBER) {
         return refuse('rate-limited', 'Too many live record tokens', { code: 'TOO_MANY_TOKENS', retryAfterSeconds: 60 })
       }
+      // Codex (or any agent not listed) never gets an act token, whatever the app asked.
+      const granted: 'read' | 'act' = scope === 'act' && RECORD_ACTION_AGENTS.includes(agent) ? 'act' : 'read'
       const secret = ids.newToken()
       const token = `${RECORD_TOKEN_PREFIX}${member.companyId}.${secret}`
       const tokenId = ids.newId()
       const expiresAt = new Date(now + RECORD_TOKEN_TTL_MINUTES * 60_000).toISOString()
       records.insertAiToken({
-        id: tokenId, userId: member.userId, tokenHash: tokenDigest.digest(token), scope, agent, conversationId,
+        id: tokenId, userId: member.userId, tokenHash: tokenDigest.digest(token), scope: granted, agent, conversationId,
         createdAt: new Date(now).toISOString(), expiresAt, revokedAt: null,
       })
-      return ok({ token, tokenId, scope, expiresAt })
+      return ok({ token, tokenId, scope: granted, expiresAt })
     },
 
     /** DELETE …/me/record-tokens/:tokenId — the member's own token only. */
