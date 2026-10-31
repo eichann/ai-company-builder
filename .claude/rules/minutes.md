@@ -67,7 +67,7 @@ access itself: `google-connector.md` (G3).
 
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin
 `GET /api/companies/:id/me/minutes/item/:recordId/text` → `MinutesText`: `{ header:
-MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, attendees:
+MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, folder (the minutes folder: where its decisions go), attendees:
 [{ memberId, displayName }], externalAttendees (count only), deal: { id, title, state, fields,
 version } | null, candidates: [{ id, title }], instructionLike: [{ label, words }] }`.
 

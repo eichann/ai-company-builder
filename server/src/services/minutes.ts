@@ -389,6 +389,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         truncated,
         docVersion: versions.join(','),
         meeting: { title: row.title, at: typeof now.fields.meeting_at === 'string' ? now.fields.meeting_at : null },
+        folder: row.folder,
         attendees: attendeeIds(now.fields.attendees).map(id => ({ memberId: id, displayName: names.get(id) ?? '' })),
         externalAttendees: typeof now.fields.external_count === 'number' ? now.fields.external_count : 0,
         deal: dealSummary,
