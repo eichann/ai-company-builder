@@ -36,6 +36,7 @@ import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
 import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
+import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -466,6 +467,18 @@ export interface IpcInvokeChannels {
   'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
   'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
   'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
+  'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
+  // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
+  /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
+  'minutes:watch': { args: [companyId: string | null]; result: void }
+  /** 「議事録を確かめる」. */
+  'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
+  'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
+  /** 「今は読まない」. */
+  'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+  /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
+  'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -569,6 +582,8 @@ export interface IpcEventChannels {
   // One batch per ~100 ms from the company watcher.
   'fs:changes': [changes: FileChangeEvent[]]
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
+  /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
+  'minutes:changed': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -742,6 +757,14 @@ export interface ElectronAPI {
   approveApproval: Invoke<'approvals:approve'>
   sendBackApproval: Invoke<'approvals:sendBack'>
   withdrawApproval: Invoke<'approvals:withdraw'>
+  recreatePluginOperation: Invoke<'pluginOperations:recreate'>
+  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the deal choice.
+  watchMinutes: Invoke<'minutes:watch'>
+  checkMinutes: Invoke<'minutes:check'>
+  getMinutesNotices: Invoke<'minutes:notices'>
+  skipMinutes: Invoke<'minutes:skip'>
+  linkMinutesDeal: Invoke<'minutes:linkDeal'>
+  onMinutesChanged: Subscribe<'minutes:changed'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

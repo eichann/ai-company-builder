@@ -44,6 +44,8 @@ import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
+import { createMinutesChecker } from './features/minutes/checker'
+import { registerMinutesIpc } from './features/minutes/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import type { StoppableTurns } from './services/agent-stop'
@@ -181,7 +183,19 @@ console.log(`[client-identity] build ${BUILD_INFO.version} (built ${BUILD_INFO.b
 const session = createSession()
 
 // The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
-const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle })
+// Set once 「議事録が届きました」 exists (below): a records signal only makes it ask the server again.
+let recordsSignal: (companyId: string) => void = () => {}
+const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle, onRecords: companyId => recordsSignal(companyId) })
+// 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
+const minutes = createMinutesChecker({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  onChanged: companyId => appWindow.send('minutes:changed', { companyId }),
+  watchSignals: companyId => agentControl.watchSignals(companyId),
+})
+recordsSignal = companyId => minutes.recordsSignal(companyId)
+lifecycle.beforeQuit(() => minutes.stop())
+registerMinutesIpc(ipc, minutes)
 
 // Local chat history and hand-off memos (features/chat-history).
 const chatHistory = wireChatHistory(ipc, {
@@ -223,6 +237,7 @@ registerAuthIpc(ipc, {
     agentControl.signedOut()
     brokerTokens.clear()
     companyFilesApi.clear()
+    minutes.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },

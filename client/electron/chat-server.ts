@@ -5,6 +5,7 @@ import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
 import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
 import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
+import { MINUTES_DEAL_CHOICE_PART_TYPE, type MinutesDealChoiceCard } from '../shared/minutes-app'
 import type { WebResearchTools } from './web-research/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
@@ -50,7 +51,7 @@ export interface ChatServerConfig extends AgentHost {
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
   /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
-  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void }, signal: AbortSignal) => Promise<RecordTools | null>
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onDealChoice?: (card: MinutesDealChoiceCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -308,6 +309,8 @@ export async function startChatServer(config: ChatServerConfig) {
         onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
         // An approval request made or shown: the app's own card (approvals.ts), never the AI's text.
         onApprovalCard: card => injector.push({ type: APPROVAL_PART_TYPE, id: `approval-${card.id}`, data: card }),
+        // 「どの案件の議事録ですか？」: the app's own card (minutes-app.ts), never the AI's text.
+        onDealChoice: card => injector.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card }),
       }, c.req.raw.signal)).catch(() => null) ?? undefined
       : undefined
     if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions

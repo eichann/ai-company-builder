@@ -271,8 +271,9 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 - **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
   the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
   value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
-  event itself (0.18-1, SSE rule). Today's app ignores `records` events (only `policy` refetches
-  the policy); the records view that listens comes with 4-6.
+  event itself (0.18-1, SSE rule). The app's one listener is 「議事録が届きました」: a `records`
+  event only makes main ask the server again for the member's received minutes (`minutes.md`
+  "The app").
 - **Milestone line** (duty 5, `history_line: true`, file records only): appended to the file's
   「## 経緯」 section (created at the end when missing) as the server's own commit
   (`lib/bare-commit.ts` `commitFileEdit`: trees along the path rewritten, pushed to itself under the
@@ -340,8 +341,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   server never reads state from files anyway).
 - Commands (E1, `commands.md`): `records.runAction` (class outbound) for the screens to come;
   `client/shared/record-actions.ts` `recordActionChoices` lists the actions that can start from a
-  record's state. The push channel's `records` event has an optional listener in the app
-  (`onRecords`), not wired to anything yet.
+  record's state. The push channel's `records` event reaches the app's `onRecords` listener
+  (`wireAgentControl`), which only re-asks for received minutes (`minutes.md` "The app").
 - Connector plugins' operations become tools on the same server (`hubspot__update_deal`; writes
   only with an `act` token) and an update's outcome a card in the reply: `plugins.md` "The app".
 - Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);

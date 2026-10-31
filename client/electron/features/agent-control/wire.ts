@@ -17,9 +17,11 @@ export interface AgentControlDeps {
   /** The chat server's running turns, once it started. */
   turns: () => StoppableTurns | null
   lifecycle: AppLifecycle
+  /** A `records` signal for a company (no content: the listener asks the server again). */
+  onRecords?: (companyId: string) => void
 }
 
-export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle }: AgentControlDeps) {
+export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords }: AgentControlDeps) {
   // The member's AI policy per company (「AI の囲い」 and the stop), read at each chat turn.
   // The stop part is also kept on disk per account (the emergency stop survives a restart offline).
   const policy = createAgentPolicyStore({
@@ -37,6 +39,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
       if (version && policy.get(companyId)?.version === version) return
       void policy.refresh(companyId)
     },
+    onRecords,
   })
   lifecycle.beforeQuit(() => pushChannel.stopAll())
   const stop = createAgentStop({ policy, watch: companyId => pushChannel.watch(companyId), turns })
@@ -58,6 +61,8 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     stop,
     events,
     eventSender,
+    /** Keep a company's push channel open (its records signals reach `onRecords`). */
+    watchSignals: (companyId: string) => pushChannel.watch(companyId),
     /** Another account must not inherit this one's policies, watches or queued events. */
     signedOut() {
       policy.clear()

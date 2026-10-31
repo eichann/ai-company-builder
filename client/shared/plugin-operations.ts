@@ -300,7 +300,14 @@ export interface CardActionView {
   message: string
   /** For a refusal because the outside system changed meanwhile: the values there now. */
   current?: Array<{ label: string; value: PluginFieldValue }>
+  /** A create the outside system did not show (reconcile: not found): 「もう一度作る」 may be offered. */
+  recreatable?: boolean
 }
+
+/** The button for a create reconciling did not find (the server's `recreatable`). */
+export const RECREATE_BUTTON_LABEL = 'もう一度作る'
+/** The server answers this, with its warning, until the person confirms. */
+export const RECREATE_NEEDS_CONFIRMATION = 'RECREATE_NEEDS_CONFIRMATION'
 
 /** The undo's answer, in the card's words. */
 export function undoResultView(card: Pick<PluginOperationCard, 'systemLabel' | 'fields' | 'kind'>, result: PluginOperationResult): CardActionView {
@@ -332,7 +339,18 @@ export function reconcileResultView(card: Pick<PluginOperationCard, 'systemLabel
   const message = card.kind === 'create' || result.operation.kind === 'create'
     ? createOutcomeMessage(outcome, card.systemLabel, result.operation.reason)
     : outcomeMessage(outcome, card.systemLabel, result.operation.state)
-  return { done: outcome !== 'unknown', tone: outcome === 'observed' ? 'warn' : outcome === 'unknown' ? 'warn' : 'ok', message }
+  return {
+    done: outcome !== 'unknown', tone: outcome === 'observed' ? 'warn' : outcome === 'unknown' ? 'warn' : 'ok', message,
+    ...(result.operation.recreatable === true ? { recreatable: true } : {}),
+  }
+}
+
+/** 「もう一度作る」's answer (after the person confirmed), in the card's words: what the new create did. */
+export function recreateResultView(card: Pick<PluginOperationCard, 'systemLabel'>, result: PluginOperationResult): CardActionView {
+  if (!result.success) return { done: false, tone: result.offline ? 'warn' : 'error', message: result.error }
+  const outcome = stateOutcome(result.operation.state)
+  const message = outcome === 'applied' ? `もう一度作りました。${card.systemLabel} で二つになっていないか確かめてください。` : createOutcomeMessage(outcome, card.systemLabel, result.operation.reason)
+  return { done: true, tone: outcome === 'applied' ? 'ok' : outcome === 'not-sent' ? 'error' : 'warn', message }
 }
 
 /** A field value as the card shows it: a choice by its label when the type gives one. */

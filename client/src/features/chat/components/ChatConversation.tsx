@@ -5,6 +5,7 @@ import { agentCan } from '../../../../shared/agents/registry'
 import { promptSuggestionSetting } from '../../../shared/lib/promptSuggestionSetting'
 import { useEffect, useCallback, useMemo, useRef, memo } from 'react'
 import { REVIEW_CONFIRM_MESSAGE } from '../../../../shared/review-request'
+import { MINUTES_NEEDS_CLAUDE_TEXT } from '../../../../shared/minutes-app'
 import { pendingReviewOf } from '../reviewRequest'
 import { ReviewActionsContext, type ReviewActions } from '../review-context'
 import { useTranslation } from 'react-i18next'
@@ -80,7 +81,7 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string }
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string }
   | { kind: 'insertText'; text: string }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
@@ -158,7 +159,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     companyId: currentCompany?.id,
@@ -304,10 +305,19 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const message = inputRequest.message
+    const { message, title, minutesId } = inputRequest
     onInputRequestConsumed?.()
+    // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
+    if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
     startNewChat().then(started => {
-      if (started && message) void handleSend(message)
+      if (!started) return
+      if (title) {
+        customTitleRef.current = { title, auto: false }
+        titleGenerationDoneRef.current = true
+        onTitleChange?.(title)
+      }
+      if (minutesId) minutesIdRef.current = minutesId
+      if (message) void handleSend(message)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 

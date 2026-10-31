@@ -230,7 +230,11 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
-  `data-plugin-operation` parts; `plugins.md` "The app").
+  `data-plugin-operation` parts; `plugins.md` "The app"), `minutesDealChoices`
+  (「どの案件の議事録ですか？」, `minutes.md` "The app"). The app's cards come back after the text in
+  the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
+  more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
+  `minutesId` (and its title, not generated).
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail

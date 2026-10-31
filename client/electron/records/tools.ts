@@ -32,6 +32,7 @@ import { approvalSummaryForAi, type ApprovalCardRef } from '../../shared/approva
 import type { ApprovalRequested, ApprovalView } from '../../../shared/types/approvals'
 import type { MinutesText } from '../../../shared/types/minutes'
 import { MINUTES_SUMMARY_MAX } from '../../../shared/core/minutes'
+import { dealChoiceFor, type MinutesDealChoiceCard } from '../../shared/minutes-app'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 
@@ -54,6 +55,8 @@ export interface RecordToolSpec {
   request(input: Record<string, unknown>): { method: 'GET' | 'POST'; path: string; body?: unknown }
   /** The tool's text from the server's answer (default: the answer as JSON, cut at MAX_OUTPUT). */
   format?(answer: unknown): string
+  /** Reading minutes: when no deal is linked and not exactly one candidate, the app's 「どの案件の議事録ですか？」 card. */
+  dealChoice?: boolean
 }
 
 const id = z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/)
@@ -146,6 +149,7 @@ const MINUTES_READ_TOOL: RecordToolSpec = {
     `the HubSpot update / meeting tools (fields needing approval become approval requests), the mail draft tool. Cite the exact minutes text each output rests on. If no deal is linked, choose one of \`candidates\` with minutes_link_deal (ask the member when unsure). Start with minutes__start_reading and end with minutes__finish_reading and a summary of at most ${MINUTES_SUMMARY_MAX} characters.`,
   request: input => ({ method: 'GET', path: `/minutes/${encodeURIComponent(String(input.id))}/text` }),
   format: answer => minutesReadText(answer as MinutesText),
+  dealChoice: true,
 }
 
 const MINUTES_LINK_DEAL_TOOL: RecordToolSpec = {
@@ -419,6 +423,8 @@ export interface RecordToolsOptions {
   onOperationCard?: (card: PluginOperationCard) => void
   /** An approval request was made (an update needing approval) or shown (approvals_show): the app's card for the reply. */
   onApprovalCard?: (card: ApprovalCardRef) => void
+  /** Minutes read with no deal linked and not exactly one candidate: the member chooses on this card. */
+  onDealChoice?: (card: MinutesDealChoiceCard) => void
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -457,7 +463,13 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       if (spec.approvalCard) return showApproval(req)
       try {
         const answer = await access.call(req.method, req.path, req.body, signal)
-        if (spec.format) return spec.format(answer)
+        const choice = spec.dealChoice && options.companyId && answer && typeof answer === 'object'
+          ? dealChoiceFor(answer as Parameters<typeof dealChoiceFor>[0], { id: newId(), companyId: options.companyId }) : null
+        if (choice) options.onDealChoice?.(choice)
+        const told = choice
+          ? '\n\n画面に「どの案件の議事録ですか？」のカードを出しました。メンバーが選ぶまで、案件への書き込み（HubSpot）はしないでください。 / A card asks the member which deal these minutes are about; do not write to the deal until they choose.'
+          : ''
+        if (spec.format) return spec.format(answer) + told
         const out = JSON.stringify(answer)
         return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
       } catch (error) {

@@ -67,7 +67,9 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   (`records.md`): `event: records` + `{"kind":"records","version":"<fresh 32 hex>"}` to the
   members an action names (`notify(companyId, userIds, event)`; test
   `server/tests/unit/push-channel.test.ts`). Released apps drop it (unknown kind); the app only
-  refetches the policy on `policy` (`client/tests/agent-stop.test.ts`). Nothing else.
+  refetches the policy on `policy` (`client/tests/agent-stop.test.ts`) and, on `records`, asks the
+  server again for the member's received minutes (`minutes.md` "The app",
+  `client/tests/minutes-app.test.ts`). Nothing else.
 - **No content in an event**: kind + version only — never a reason, name or folder
   (`parsePushEvent` in `shared/types/agent-stop.ts` is the one shape; test "sends only kind +
   version, never the reason or a name").

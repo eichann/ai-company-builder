@@ -231,7 +231,7 @@ export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFro
  * The person's own actions on it, with their session (never the AI's token):
  * 「変更前の値を書き戻す」 writes to the outside system (HubSpot); reconciling reads it again.
  */
-export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation'>
+export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation' | 'recreatePluginOperation'>
 
 /** The approval card: reading a request and the person's own acts on it, with their session (never the AI's). */
 export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval'>
@@ -258,6 +258,18 @@ export function undoPluginOperation(companyId: string, pluginId: string, operati
 
 export function reconcilePluginOperation(companyId: string, pluginId: string, operationId: string, outbound: PluginOperationOutbound = window.electronAPI) {
   return outbound.reconcilePluginOperation(companyId, pluginId, operationId)
+}
+
+/** 「もう一度作る」: without `confirm` the server answers the warning the person then confirms. */
+export function recreatePluginOperation(companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.recreatePluginOperation(companyId, pluginId, operationId, confirm, conversationId)
+}
+
+/** 「どの案件の議事録ですか？」: the person links the minutes to a deal with their session (nothing goes to HubSpot). */
+export type MinutesDealWrites = ElectronPort<'linkMinutesDeal'>
+
+export function linkMinutesDeal(companyId: string, minutesId: string, dealId: string, writes: MinutesDealWrites = window.electronAPI) {
+  return writes.linkMinutesDeal(companyId, minutesId, dealId)
 }
 
 /** Asking the company server which services the member may use and their own keys (last 4 only): the chat's "no key" card. */
