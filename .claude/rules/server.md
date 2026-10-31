@@ -186,7 +186,11 @@ GET  /api/config                                  setup state (no auth)
                               POST /records/query, GET /records/item/:recordId,
                               GET /records/my-turn, POST /records/item,
                               POST /records/item/:recordId/actions/:action,
-                              POST …/undo, GET …/history, GET …/versions/:version   records.ts
+                              POST …/undo, GET …/history, GET …/versions/:version,
+                              POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
+/api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
+                              POST /item, POST /item/:recordId/actions/:action — the AI's
+                              routes (record token instead of a session; records.md) records-ai.ts
                                                                 (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts

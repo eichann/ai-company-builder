@@ -29,6 +29,12 @@
  * - `git clone` (and `gh repo clone`) into the company folder outside
  *   `.workspace/`: an external repository there would be shared with the
  *   whole company (or stop sync as a nested repository).
+ * - The company map (records.md): type definitions (`.acb/types/`, at the
+ *   company root) for a member who is not owner/admin (the push check's
+ *   rule; unknown authority never blocks), and — `decideRecordEdit` — a
+ *   Write / Edit / MultiEdit that would write state, assignee, due… into a
+ *   record file's frontmatter, or change an existing record's id or type:
+ *   the AI changes a record only through the record tools (records/tools.ts).
  * Private folders (`getPrivateFolderView`): a write that would create
  * something at a folder name the member may not use (a private folder they
  * cannot read; asked of the server, decideReservedWrite) is refused with the
@@ -41,6 +47,10 @@ import { evaluateWrite, readOnlyMessage, repoRelativePath, type WriteAccess } fr
 import { excludedFolderOf, notDownloadedAgentMessage } from '../shared/sparse-paths'
 import { reservedPathMessage } from '../../shared/types/private-folders'
 import { isInstructionFile, mayChangeInstructionFile } from '../../shared/core/instruction-files'
+import { recordFileEditProblem } from '../../shared/core/records'
+import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
 import type { GuardReason } from '../shared/agent-events'
 
 /** Private folders as the guard sees them (from the cached /me/scopes answer, sync/private-folders.ts). */
@@ -107,6 +117,19 @@ export function instructionFileMessage(path: string): string {
   return `このファイル（${path}）はAIへの指示ファイルのため、管理者（部署内は部署の責任者）だけが変更できます。変更が必要な場合は、管理者か部署の責任者に依頼してください。`
 }
 
+export function typeDefinitionMessage(path: string): string {
+  return `このファイル（${path}）は会社の記録の形を決める定義のため、オーナーと管理者だけが変更できます。変更が必要な場合は、管理者に依頼してください。`
+}
+
+export function recordFileMessage(path: string, problem: 'state' | 'identity'): string {
+  return problem === 'state'
+    ? `記録のファイル（${path}）の先頭には id・type・links だけを書きます。状態・担当・期限などはサーバーが持つため、ファイルには書けません。変えるときは記録の道具（mcp__acb_records__…）を使ってください。`
+    : `記録のファイル（${path}）の id と type は変えられません（別の記録になってしまうため）。内容の文章だけを編集してください。`
+}
+
+/** `.acb/types/` at the company root, or a file named `.acb` there (the push check's rule, A–Z folded). */
+const TYPE_DEFINITION_RE = /^\.acb\/types(\/|$)|^\.acb$/i
+
 export type GuardDecision =
   | { deny: false }
   /** `code`: which rule refused, for the AI action log (shared/agent-events.ts); never shown. */
@@ -136,6 +159,12 @@ export function checkWritePath(guard: WriteGuard, target: string, cwd?: string):
     const authority = guard.getInstructionAuthority?.()
     if (authority && !mayChangeInstructionFile(authority, rel)) {
       return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: instructionFileMessage(rel), code: 'instruction-file' }
+    }
+  }
+  if (TYPE_DEFINITION_RE.test(rel)) {
+    const authority = guard.getInstructionAuthority?.()
+    if (authority && !FULL_ACCESS_ROLES.has(authority.role)) {
+      return { deny: true, path: rel, folder: '.acb/types', message: typeDefinitionMessage(rel), code: 'type-definition' }
     }
   }
   // A private folder the member may only read: known locally (cached
@@ -256,13 +285,49 @@ export async function decideReservedWrite(guard: WriteGuard | undefined, toolNam
   return { deny: false }
 }
 
+/**
+ * Edits of a record file (`.md` with a `type` in its frontmatter) that only
+ * the record tools may make: state & co. in the frontmatter, or another id /
+ * type. `read` gives the file as it is now (null: none yet). Best effort, like
+ * the rest of this guard: Bash writes are not inspected, and the server never
+ * reads state from files anyway (records.md).
+ */
+export function decideRecordEdit(
+  guard: WriteGuard | undefined, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string,
+  read: (absolute: string) => string | null = absolute => { try { return readFileSync(absolute, 'utf8') } catch { return null } },
+): GuardDecision {
+  if (!guard || !toolInput || !['Write', 'Edit', 'MultiEdit'].includes(toolName)) return { deny: false }
+  const target = toolInput.file_path
+  if (typeof target !== 'string' || !/\.md$/i.test(target)) return { deny: false }
+  const rel = repoRelativePath(guard.root, target, cwd)
+  if (rel === null || isUnsharedPath(rel)) return { deny: false }
+  const absolute = path.resolve(cwd ?? guard.root, target)
+  const before = read(absolute)
+  let after: string | null = null
+  if (toolName === 'Write') after = typeof toolInput.content === 'string' ? toolInput.content : null
+  else {
+    const edits = toolName === 'Edit' ? [toolInput] : Array.isArray(toolInput.edits) ? toolInput.edits as Array<Record<string, unknown>> : []
+    after = before
+    for (const e of edits) {
+      if (after === null || typeof e?.old_string !== 'string' || typeof e?.new_string !== 'string') { after = null; break }
+      after = e.replace_all === true ? after.split(e.old_string).join(e.new_string) : after.replace(e.old_string, () => e.new_string as string)
+    }
+  }
+  if (after === null) return { deny: false }
+  const problem = recordFileEditProblem(before, after)
+  if (!problem) return { deny: false }
+  return { deny: true, path: rel, folder: rel.split('/').slice(0, -1).join('/'), message: recordFileMessage(rel, problem), code: 'record-file' }
+}
+
 /** The PreToolUse decision for one Claude Code tool call. */
 export function decideToolWrite(guard: WriteGuard | undefined, toolName: string, toolInput: Record<string, unknown> | undefined, cwd?: string): GuardDecision {
   if (!guard) return { deny: false }
   const key = FILE_TOOLS[toolName]
   if (key) {
     const target = toolInput?.[key]
-    return typeof target === 'string' ? checkWritePath(guard, target, cwd) : { deny: false }
+    if (typeof target !== 'string') return { deny: false }
+    const path = checkWritePath(guard, target, cwd)
+    return path.deny ? path : decideRecordEdit(guard, toolName, toolInput, cwd)
   }
   if (toolName === 'Bash') {
     const command = toolInput?.command

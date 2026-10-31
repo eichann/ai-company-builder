@@ -4,7 +4,7 @@ import * as fs from 'fs/promises'
 import * as path from 'path'
 import { exec } from 'child_process'
 import crypto from 'crypto'
-import { checkWritePath, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
+import { checkWritePath, decideRecordEdit, decideReservedWrite, decideToolWrite, type WriteGuard } from './write-guard'
 import { agentEnv } from './agents/agent-env'
 import { withoutBrokerEnv } from '../shared/broker-env'
 import { categorizeTool, type GuardReason, type ToolDecision, type ToolEventTracker } from '../shared/agent-events'
@@ -173,6 +173,9 @@ export function createFileSystemTools(workingDirectory: string, requestApproval?
         // Read-only folder: refuse before asking the member to approve it.
         const guarded = writeGuard ? checkWritePath(writeGuard, validatePath(filePath, workingDirectory)) : undefined
         if (guarded?.deny) { log.decide('guard-denied', guarded.code); throw new Error(guarded.message) }
+        // Record files: state & co. only through the record tools (records.md).
+        const recordEdit = decideRecordEdit(writeGuard, 'Write', { file_path: validatePath(filePath, workingDirectory), content }, workingDirectory)
+        if (recordEdit.deny) { log.decide('guard-denied', recordEdit.code); throw new Error(recordEdit.message) }
         const reserved = await decideReservedWrite(writeGuard, 'Write', { file_path: validatePath(filePath, workingDirectory) }, workingDirectory)
         if (reserved.deny) { log.decide('guard-denied', reserved.code); throw new Error(reserved.message) }
         if (requestApproval) {

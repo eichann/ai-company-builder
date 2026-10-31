@@ -89,6 +89,19 @@ export interface RecordAccessRow {
   folder: string | null
 }
 
+/** The AI's credential for the company map (only the digest of its value). */
+export interface RecordAiTokenRow {
+  id: string
+  userId: string
+  tokenHash: string
+  scope: 'read' | 'act'
+  agent: string
+  conversationId: string
+  createdAt: string
+  expiresAt: string
+  revokedAt: string | null
+}
+
 export interface RecordRepository {
   settings(): RecordSettingsRow
   setEnabled(enabled: boolean, by: string, at: string): void
@@ -130,6 +143,15 @@ export interface RecordRepository {
   setHead(repo: RecordRepoKey, commitSha: string, at: string): void
   /** Forget every head: the next index run reads every repository in full. */
   clearHeads(): void
+
+  insertAiToken(row: RecordAiTokenRow): void
+  /** The token of this company with this digest (another company's never matches). */
+  aiTokenByHash(tokenHash: string): RecordAiTokenRow | null
+  /** End one of the member's tokens; false when it is not theirs (or already ended). */
+  revokeAiToken(userId: string, tokenId: string, at: string): boolean
+  liveAiTokens(userId: string, now: string): number
+  /** Forget tokens that expired before `before`. */
+  pruneAiTokens(before: string): void
 
   problems(limit: number): RecordProblemRow[]
   /** Replace the problems of these paths in one repository (all of its problems when `paths` is null). */

@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url'
 import { startChatServer } from './chat-server'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createCompanyFilesApi } from './company-files/api'
+import { createRecordsApi } from './records/api'
 import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { AllowedRoots } from './allowed-roots'
@@ -203,6 +204,7 @@ const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
+const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
 registerAuthIpc(ipc, {
   session,
@@ -288,6 +290,7 @@ app.whenReady().then(async () => {
       writeAccess: writeAccessStore,
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
+      records: recordsApi,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,

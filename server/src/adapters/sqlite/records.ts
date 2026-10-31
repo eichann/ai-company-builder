@@ -188,6 +188,28 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       conn.prepare('DELETE FROM record_index_heads WHERE company_id = ?').run(companyId)
     },
 
+    insertAiToken(t) {
+      conn.prepare(`INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)`).run(t.id, companyId, t.userId, t.tokenHash, t.scope, t.agent, t.conversationId, t.createdAt, t.expiresAt)
+    },
+    aiTokenByHash(tokenHash) {
+      const r = conn.prepare('SELECT id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at, revoked_at FROM record_ai_tokens WHERE company_id = ? AND token_hash = ?')
+        .get(companyId, tokenHash) as { id: string; user_id: string; token_hash: string; scope: 'read' | 'act'; agent: string; conversation_id: string; created_at: string; expires_at: string; revoked_at: string | null } | undefined
+      return r ? {
+        id: r.id, userId: r.user_id, tokenHash: r.token_hash, scope: r.scope, agent: r.agent, conversationId: r.conversation_id,
+        createdAt: r.created_at, expiresAt: r.expires_at, revokedAt: r.revoked_at,
+      } : null
+    },
+    revokeAiToken(userId, tokenId, at) {
+      return conn.prepare('UPDATE record_ai_tokens SET revoked_at = ? WHERE company_id = ? AND user_id = ? AND id = ? AND revoked_at IS NULL').run(at, companyId, userId, tokenId).changes === 1
+    },
+    liveAiTokens(userId, now) {
+      return (conn.prepare('SELECT COUNT(*) AS n FROM record_ai_tokens WHERE company_id = ? AND user_id = ? AND revoked_at IS NULL AND expires_at > ?').get(companyId, userId, now) as { n: number }).n
+    },
+    pruneAiTokens(before) {
+      conn.prepare('DELETE FROM record_ai_tokens WHERE company_id = ? AND expires_at < ?').run(companyId, before)
+    },
+
     problems(limit) {
       return (conn.prepare('SELECT repo, path, kind, detail, found_at FROM record_index_problems WHERE company_id = ? ORDER BY found_at DESC, path LIMIT ?')
         .all(companyId, limit) as Array<{ repo: RecordRepoKey; path: string; kind: string; detail: string; found_at: string }>)

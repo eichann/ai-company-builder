@@ -15,6 +15,9 @@
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
  *   GET     /records/item/:recordId/history           the ledger
  *   GET     /records/item/:recordId/versions/:version the server values at that version
+ *   POST    /me/record-tokens     any member: a record token for their AI (one chat turn;
+ *                                 routes/records-ai.ts), { conversationId, agent, scope }
+ *   DELETE  /me/record-tokens/:tokenId  end one of the member's own tokens
  *
  * Non-members get 404 like every company route.
  */
@@ -27,7 +30,9 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 
 export const recordsRoute = new Hono()
-const { access, records, recordEngine } = services
+/** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
+const HUMAN = { kind: 'human' } as const
+const { access, records, recordEngine, recordAiTokens } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -99,7 +104,7 @@ recordsRoute.get('/records/my-turn', async (c) => {
 recordsRoute.post('/records/item', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  const result = recordEngine.create(member, await jsonBody(c))
+  const result = recordEngine.create(member, HUMAN, await jsonBody(c))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, 201)
 })
@@ -107,13 +112,13 @@ recordsRoute.post('/records/item', async (c) => {
 recordsRoute.post('/records/item/:recordId/actions/:action', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await recordEngine.act(member, c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+  return answer(c, await recordEngine.act(member, HUMAN, c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
 })
 
 recordsRoute.post('/records/item/:recordId/undo', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, recordEngine.undo(member, c.req.param('recordId'), await jsonBody(c)))
+  return answer(c, recordEngine.undo(member, HUMAN, c.req.param('recordId'), await jsonBody(c)))
 })
 
 recordsRoute.get('/records/item/:recordId/history', async (c) => {
@@ -126,4 +131,18 @@ recordsRoute.get('/records/item/:recordId/versions/:version', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, recordEngine.atVersion(member, c.req.param('recordId'), c.req.param('version')))
+})
+
+recordsRoute.post('/me/record-tokens', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const result = recordAiTokens.issue(member, await jsonBody(c))
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value }, 201)
+})
+
+recordsRoute.delete('/me/record-tokens/:tokenId', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, recordAiTokens.revoke(member, c.req.param('tokenId')))
 })

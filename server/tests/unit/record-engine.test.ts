@@ -60,9 +60,17 @@ function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
   return r.value
 }
 
+// The route decides the actor from the credential (session → human, record token → ai);
+// these tests pass it the way the routes do, from the `actor` written next to each call.
+type Body = Record<string, unknown>
+const actorOf = (body: unknown) => ((body as Body | null)?.actor as { kind: 'human' | 'ai'; source?: string } | undefined) ?? { kind: 'human' as const }
+const act = (member: Member, id: string, action: string, body: Body) => engine.act(member, actorOf(body), id, action, body)
+const create = (member: Member, body: Body) => engine.create(member, actorOf(body), body)
+const undo = (member: Member, id: string, body: Body) => engine.undo(member, actorOf(body), id, body)
+
 /** A task requested by alice, assigned to bob. */
 function newTask(co = 'a', extra: Record<string, unknown> = {}) {
-  return ok(engine.create(m('u-alice', co), { type: 'task', title: '提案書を作る', fields: { assignee: 'u-bob' }, ...extra })).record
+  return ok(create(m('u-alice', co), { type: 'task', title: '提案書を作る', fields: { assignee: 'u-bob' }, ...extra })).record
 }
 
 beforeEach(() => {
@@ -99,41 +107,41 @@ describe('duties 1 and 2: from where, and who', () => {
 
   it('an action outside its from states is refused and changes nothing', async () => {
     const t = newTask()
-    const r = await engine.act(m('u-bob'), t.id, 'complete', { expectedVersion: 1 })
+    const r = await act(m('u-bob'), t.id, 'complete', { expectedVersion: 1 })
     expect(r).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'ACTION_NOT_ALLOWED_IN_STATE' } })
     expect(source.forCompany('a').records.ledger(t.id)).toHaveLength(1)
   })
 
   it('only whom `who` names may act; the AI may only where the type says ai', async () => {
     const t = newTask()
-    expect(await engine.act(m('u-mallory'), t.id, 'start', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1, actor: ai }))
-    ok(await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, actor: ai }))
+    expect(await act(m('u-mallory'), t.id, 'start', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1, actor: ai }))
+    ok(await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, actor: ai }))
     // complete: who = requested_by, reviewer — no ai: carol's AI cannot, carol can.
-    const byAi = await engine.act(m('u-carol'), t.id, 'complete', { expectedVersion: 3, actor: ai })
+    const byAi = await act(m('u-carol'), t.id, 'complete', { expectedVersion: 3, actor: ai })
     expect(byAi).toMatchObject({ ok: false, kind: 'forbidden', body: { code: 'NOT_ALLOWED' } })
     // An owner is not in `who` either: roles do not bypass the type.
-    expect(await engine.act(owner(), t.id, 'complete', { expectedVersion: 3 })).toMatchObject({ ok: false, kind: 'forbidden' })
-    expect(ok(await engine.act(m('u-carol'), t.id, 'complete', { expectedVersion: 3 })).record.state).toBe('done')
+    expect(await act(owner(), t.id, 'complete', { expectedVersion: 3 })).toMatchObject({ ok: false, kind: 'forbidden' })
+    expect(ok(await act(m('u-carol'), t.id, 'complete', { expectedVersion: 3 })).record.state).toBe('done')
   })
 
   it('a note is required where the type says so', async () => {
     const t = newTask()
-    expect(await engine.act(m('u-alice'), t.id, 'cancel', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NOTE_REQUIRED' } })
-    expect(ok(await engine.act(m('u-alice'), t.id, 'cancel', { expectedVersion: 1, note: '方針が変わった' })).record.state).toBe('cancelled')
+    expect(await act(m('u-alice'), t.id, 'cancel', { expectedVersion: 1 })).toMatchObject({ ok: false, body: { code: 'NOTE_REQUIRED' } })
+    expect(ok(await act(m('u-alice'), t.id, 'cancel', { expectedVersion: 1, note: '方針が変わった' })).record.state).toBe('cancelled')
   })
 
   it('a person argument must be a member of the company', async () => {
     const t = newTask()
-    expect(await engine.act(m('u-bob'), t.id, 'assign', { expectedVersion: 1, args: { assignee: 'u-stranger' }, note: 'x' })).toMatchObject({ ok: false, body: { code: 'BAD_VALUE' } })
+    expect(await act(m('u-bob'), t.id, 'assign', { expectedVersion: 1, args: { assignee: 'u-stranger' }, note: 'x' })).toMatchObject({ ok: false, body: { code: 'BAD_VALUE' } })
   })
 })
 
 describe('duty 3: state and ledger together', () => {
   it('each entry holds before/after of the state and every field it changed; the version goes up by one', async () => {
     const t = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    const r = ok(await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, note: '見てください' }))
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    const r = ok(await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, note: '見てください' }))
     expect(r.record.version).toBe(3)
     expect(r.entry).toMatchObject({ version: 3, action: 'request_review', fromState: 'in_progress', toState: 'review', actorId: 'u-bob', actorKind: 'human', note: '見てください' })
     const byField = (a: { field: string }, b: { field: string }) => (a.field < b.field ? -1 : 1)
@@ -146,19 +154,19 @@ describe('duty 3: state and ledger together', () => {
 
   it('a stale expectedVersion is refused ("someone changed it first") and nothing is written', async () => {
     const t = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    const late = await engine.act(m('u-bob'), t.id, 'wait', { expectedVersion: 1, args: { waiting_on: '先方の返事' } })
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    const late = await act(m('u-bob'), t.id, 'wait', { expectedVersion: 1, args: { waiting_on: '先方の返事' } })
     expect(late).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'VERSION_CONFLICT', version: 2 } })
     expect(source.forCompany('a').records.ledger(t.id).map(e => e.version)).toEqual([1, 2])
   })
 
   it('undo appends a reversing entry; it is refused once something changed since', async () => {
     const t = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'set_due', { expectedVersion: 1, args: { due: '2026-11-08' } }))
-    ok(await engine.act(m('u-bob'), t.id, 'set_due', { expectedVersion: 2, args: { due: '2026-11-15' } }))
-    expect(engine.undo(m('u-bob'), t.id, { version: 2, expectedVersion: 3 })).toMatchObject({ ok: false, body: { code: 'CHANGED_SINCE' } })
-    expect(engine.undo(m('u-mallory'), t.id, { version: 3, expectedVersion: 3 })).toMatchObject({ ok: false, kind: 'forbidden' })
-    const undone = ok(engine.undo(m('u-bob'), t.id, { version: 3, expectedVersion: 3, note: '日付を間違えた' }))
+    ok(await act(m('u-bob'), t.id, 'set_due', { expectedVersion: 1, args: { due: '2026-11-08' } }))
+    ok(await act(m('u-bob'), t.id, 'set_due', { expectedVersion: 2, args: { due: '2026-11-15' } }))
+    expect(undo(m('u-bob'), t.id, { version: 2, expectedVersion: 3 })).toMatchObject({ ok: false, body: { code: 'CHANGED_SINCE' } })
+    expect(undo(m('u-mallory'), t.id, { version: 3, expectedVersion: 3 })).toMatchObject({ ok: false, kind: 'forbidden' })
+    const undone = ok(undo(m('u-bob'), t.id, { version: 3, expectedVersion: 3, note: '日付を間違えた' }))
     expect(undone.entry).toMatchObject({ action: 'undo', version: 4, reversesVersion: 3, changes: [{ field: 'due', before: '2026-11-15', after: '2026-11-08' }] })
     expect(undone.record.fields.due).toBe('2026-11-08')
     expect(source.forCompany('a').records.ledger(t.id)).toHaveLength(4)
@@ -168,9 +176,9 @@ describe('duty 3: state and ledger together', () => {
 describe('replaying a record’s past (§13.11)', () => {
   it('every version is the fold of the ledger up to it', async () => {
     const t = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    ok(await engine.act(m('u-bob'), t.id, 'assign', { expectedVersion: 2, args: { assignee: 'u-carol' }, note: '担当交代' }))
-    ok(await engine.act(m('u-carol'), t.id, 'set_due', { expectedVersion: 3, args: { due: '2026-12-01' } }))
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    ok(await act(m('u-bob'), t.id, 'assign', { expectedVersion: 2, args: { assignee: 'u-carol' }, note: '担当交代' }))
+    ok(await act(m('u-carol'), t.id, 'set_due', { expectedVersion: 3, args: { due: '2026-12-01' } }))
     expect(ok(engine.atVersion(m('u-mallory'), t.id, '1'))).toEqual({ version: 1, state: 'todo', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob' } })
     expect(ok(engine.atVersion(m('u-mallory'), t.id, '3'))).toEqual({ version: 3, state: 'in_progress', fields: { requested_by: 'u-alice', assignee: 'u-carol', next_actor: 'u-carol' } })
     const latest = ok(engine.atVersion(m('u-mallory'), t.id, '4'))
@@ -190,25 +198,25 @@ describe('duties 4 and 5: whom to tell, the milestone line', () => {
     const t = newTask()
     expect(notified).toEqual([['a', ['u-bob']]])
     notified = []
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
     expect(notified).toEqual([])
-    ok(await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' } }))
+    ok(await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' } }))
     expect(notified).toEqual([['a', ['u-carol']]])
   })
 
   it('writes the history line on milestones of file records only, with ids, not names', async () => {
     const t = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    ok(await engine.act(m('u-alice'), t.id, 'complete', { expectedVersion: 2 }))
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    ok(await act(m('u-alice'), t.id, 'complete', { expectedVersion: 2 }))
     expect(lines).toEqual([]) // server-only: no file to write to
     // The task gets its file (0.6): the index adopts it.
     sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany('a').records, {
       repoKey: 'company', scopeId: null, prefix: '', full: false, tip: 'a'.repeat(40), at: at(), scopes: source.forCompany('a').scopes.listWithRules(),
       changes: [{ path: '営業部/タスク/提案書.md', text: `---\nid: ${t.id}\ntype: task\n---\n# 提案書を作る\n` }],
     }))
-    ok(await engine.act(m('u-alice'), t.id, 'reopen', { expectedVersion: 3 }))
+    ok(await act(m('u-alice'), t.id, 'reopen', { expectedVersion: 3 }))
     expect(lines).toEqual([]) // reopen is not a milestone
-    ok(await engine.act(m('u-alice'), t.id, 'cancel', { expectedVersion: 4, note: '不要になった' }))
+    ok(await act(m('u-alice'), t.id, 'cancel', { expectedVersion: 4, note: '不要になった' }))
     expect(lines).toEqual([{ companyId: 'a', path: '営業部/タスク/提案書.md', line: expect.stringMatching(/^2026-11-01 中止する（u-alice）：不要になった$/) }])
   })
 })
@@ -216,23 +224,23 @@ describe('duties 4 and 5: whom to tell, the milestone line', () => {
 describe('attachments and decisions', () => {
   it('attached files must be linked and exist at the commit; the version is kept in the entry', async () => {
     const t = newTask('a', { links: { files: ['営業部/提案書.md'] } })
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    const unsynced = await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '営業部/提案書.md', commit: 'd'.repeat(40) }] })
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    const unsynced = await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '営業部/提案書.md', commit: 'd'.repeat(40) }] })
     expect(unsynced).toMatchObject({ ok: false, body: { code: 'ATTACHMENT_NOT_SYNCED' } })
-    const unlinked = await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '経理/給与.md', commit: COMMIT }] })
+    const unlinked = await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '経理/給与.md', commit: COMMIT }] })
     expect(unlinked).toMatchObject({ ok: false, body: { code: 'BAD_ATTACHMENT' } })
-    const r = ok(await engine.act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '営業部/提案書.md', commit: COMMIT }] }))
+    const r = ok(await act(m('u-bob'), t.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' }, attachments: [{ link: 'files', path: '営業部/提案書.md', commit: COMMIT }] }))
     expect(r.entry.attachments).toEqual([{ link: 'files', path: '営業部/提案書.md', commit: COMMIT }])
   })
 
   it('decision fields only on decision actions; materials are references the actor may read', async () => {
     const t = newTask()
     const other = newTask()
-    ok(await engine.act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
-    expect(await engine.act(m('u-bob'), t.id, 'wait', { expectedVersion: 2, args: { waiting_on: 'x' }, decision: { materials: [] } })).toMatchObject({ ok: false })
-    expect(await engine.act(m('u-alice'), t.id, 'complete', { expectedVersion: 2, decision: { materials: [{ kind: 'record', id: other.id, version: 9 }] } }))
+    ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
+    expect(await act(m('u-bob'), t.id, 'wait', { expectedVersion: 2, args: { waiting_on: 'x' }, decision: { materials: [] } })).toMatchObject({ ok: false })
+    expect(await act(m('u-alice'), t.id, 'complete', { expectedVersion: 2, decision: { materials: [{ kind: 'record', id: other.id, version: 9 }] } }))
       .toMatchObject({ ok: false, body: { code: 'BAD_MATERIAL' } })
-    const r = ok(await engine.act(m('u-alice'), t.id, 'complete', {
+    const r = ok(await act(m('u-alice'), t.id, 'complete', {
       expectedVersion: 2, note: '品質に問題なし',
       decision: { materials: [{ kind: 'record', id: other.id, version: 1 }, { kind: 'file', path: '営業部/提案書.md', commit: COMMIT }], precedents: [`${other.id}@1`], policyVersion: 'review-policy@3' },
     }))
@@ -249,15 +257,15 @@ describe('「あなたの番」 across types implementing request', () => {
     }))
     const t1 = newTask()
     const t2 = newTask()
-    const ap = ok(engine.create(m('u-alice'), { type: 'approval', title: '値引きの承認', fields: { assignee: 'u-bob' } })).record
+    const ap = ok(create(m('u-alice'), { type: 'approval', title: '値引きの承認', fields: { assignee: 'u-bob' } })).record
     newTask('b') // another company's task for bob: never here
-    ok(await engine.act(m('u-bob'), t2.id, 'start', { expectedVersion: 1 }))
-    ok(await engine.act(m('u-bob'), t2.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' } }))
-    ok(await engine.act(m('u-alice'), t1.id, 'cancel', { expectedVersion: 1, note: 'やめる' }))
+    ok(await act(m('u-bob'), t2.id, 'start', { expectedVersion: 1 }))
+    ok(await act(m('u-bob'), t2.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' } }))
+    ok(await act(m('u-alice'), t1.id, 'cancel', { expectedVersion: 1, note: 'やめる' }))
     const ids = (r: { records: Array<{ id: string }> }) => r.records.map(x => x.id).sort()
     expect(ids(ok(service.myTurn(m('u-bob'))))).toEqual([ap.id])
     expect(ids(ok(service.myTurn(m('u-carol'))))).toEqual([t2.id])
-    ok(await engine.act(m('u-bob'), ap.id, 'approve', { expectedVersion: 1 }))
+    ok(await act(m('u-bob'), ap.id, 'approve', { expectedVersion: 1 }))
     expect(ok(service.myTurn(m('u-bob'))).total).toBe(0)
   })
 })
@@ -265,11 +273,11 @@ describe('「あなたの番」 across types implementing request', () => {
 describe('across companies', () => {
   it('one company cannot act on, read the history of, or replay another’s record', async () => {
     const theirs = newTask('b')
-    const missing = await engine.act(owner('a'), 'task-zzzzzzzz', 'start', { expectedVersion: 1 })
-    expect(await engine.act(m('u-bob', 'a'), theirs.id, 'start', { expectedVersion: 1 })).toEqual(missing)
+    const missing = await act(owner('a'), 'task-zzzzzzzz', 'start', { expectedVersion: 1 })
+    expect(await act(m('u-bob', 'a'), theirs.id, 'start', { expectedVersion: 1 })).toEqual(missing)
     expect(engine.history(owner('a'), theirs.id)).toEqual(engine.history(owner('a'), 'task-zzzzzzzz'))
     expect(engine.atVersion(owner('a'), theirs.id, '1')).toEqual(engine.atVersion(owner('a'), 'task-zzzzzzzz', '1'))
-    expect(engine.undo(owner('a'), theirs.id, { version: 1, expectedVersion: 1 })).toEqual(engine.undo(owner('a'), 'task-zzzzzzzz', { version: 1, expectedVersion: 1 }))
+    expect(undo(owner('a'), theirs.id, { version: 1, expectedVersion: 1 })).toEqual(undo(owner('a'), 'task-zzzzzzzz', { version: 1, expectedVersion: 1 }))
     expect(source.forCompany('b').records.ledger(theirs.id)).toHaveLength(1)
   })
 })

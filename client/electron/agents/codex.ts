@@ -1,6 +1,7 @@
 import { startReferenceMcp } from '../consultations/mcp'
 import { COMPANY_FILES_SERVER, startCompanyFilesMcp } from '../company-files/tools'
 import { REVIEW_SERVER, startReviewMcp } from '../review/tools'
+import { RECORDS_SERVER, startRecordsMcp } from '../records/tools'
 import { WEB_RESEARCH_SERVER, startWebResearchMcp } from '../web-research/tools'
 import { MissingAgentSession } from './recovery'
 import type { AgentInteraction } from '../../shared/agent-interaction'
@@ -96,6 +97,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
       let referenceMcp: Awaited<ReturnType<typeof startReferenceMcp>> | undefined
       let companyFilesMcp: Awaited<ReturnType<typeof startCompanyFilesMcp>> | undefined
       let reviewMcp: Awaited<ReturnType<typeof startReviewMcp>> | undefined
+      let recordsMcp: Awaited<ReturnType<typeof startRecordsMcp>> | undefined
       let webResearchMcp: Awaited<ReturnType<typeof startWebResearchMcp>> | undefined
       let askMcp: Awaited<ReturnType<typeof startLoopbackMcp>> | undefined
       // ask_user calls Codex has started and not yet asked (oldest first): links the card to its tool row.
@@ -148,6 +150,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
         referenceMcp?.close()
         companyFilesMcp?.close()
         reviewMcp?.close()
+        recordsMcp?.close()
         webResearchMcp?.close()
         askMcp?.close()
         rpc?.close()
@@ -287,7 +290,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                   }
                   emit({ type: 'text-end', id: item.id }); openText.delete(item.id)
                 }
-                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === REVIEW_SERVER || item.server === WEB_RESEARCH_SERVER || item.server === CODEX_CHOICE_SERVER)
+                const appTool = item.type === 'mcpToolCall' && (item.server === 'acb_consultations' || item.server === COMPANY_FILES_SERVER || item.server === REVIEW_SERVER || item.server === RECORDS_SERVER || item.server === WEB_RESEARCH_SERVER || item.server === CODEX_CHOICE_SERVER)
                 if (appTool && item.server === CODEX_CHOICE_SERVER && item.tool === CODEX_CHOICE_TOOL) {
                   if (message.method === 'item/started' && !tools.has(item.id)) askItems.push(item.id)
                   else if (message.method === 'item/completed') { const at = askItems.indexOf(item.id); if (at >= 0) askItems.splice(at, 1) }
@@ -316,6 +319,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
             if (!title && request.references) referenceMcp = await startReferenceMcp(request.references)
             if (!title && request.companyFiles && !ended) companyFilesMcp = await startCompanyFilesMcp(request.companyFiles)
             if (!title && request.review && !ended) reviewMcp = await startReviewMcp(request.review)
+            if (!title && request.records && !ended) recordsMcp = await startRecordsMcp(request.records)
             if (!title && request.webResearch && !ended) webResearchMcp = await startWebResearchMcp(request.webResearch)
             const askUser = request.askUser
             if (!title && askUser && !ended) {
@@ -325,7 +329,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
                 interactionAbort.signal,
               )], { toolTimeoutSec: Math.ceil(CHOICE_TIMEOUT_MS / 1000) + 60 })
             }
-            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); reviewMcp?.close(); webResearchMcp?.close(); askMcp?.close(); return }
+            if (ended) { referenceMcp?.close(); companyFilesMcp?.close(); reviewMcp?.close(); recordsMcp?.close(); webResearchMcp?.close(); askMcp?.close(); return }
             await rpc.initialize()
             await requireChatGPT(rpc)
             // The full snapshot once per turn; `account/rateLimits/updated` follows as usage changes.
@@ -341,6 +345,7 @@ function createModel(config: Config, request: Request, title = false, createRpc:
               ...(referenceMcp ? { acb_consultations: referenceMcp.config } : {}),
               ...(companyFilesMcp ? { [COMPANY_FILES_SERVER]: companyFilesMcp.config } : {}),
               ...(reviewMcp ? { [REVIEW_SERVER]: reviewMcp.config } : {}),
+              ...(recordsMcp ? { [RECORDS_SERVER]: recordsMcp.config } : {}),
               ...(webResearchMcp ? { [WEB_RESEARCH_SERVER]: webResearchMcp.config } : {}),
               ...(askMcp ? { [CODEX_CHOICE_SERVER]: askMcp.config } : {}),
             }

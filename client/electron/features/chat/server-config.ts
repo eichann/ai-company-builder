@@ -9,6 +9,8 @@ import { normalizePermissionMode } from '../../../shared/permission-mode'
 import type { ChatServerConfig } from '../../chat-server'
 import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
+import type { RecordsApi } from '../../records/api'
+import { createRecordTools } from '../../records/tools'
 import { companyFilesInstructions, createCompanyFileTools } from '../../company-files/tools'
 import { createWebResearchBudget, createWebResearchTools } from '../../web-research/tools'
 import { WEB_RESEARCH_INSTRUCTIONS } from '../../../shared/web-research'
@@ -44,6 +46,8 @@ export interface ChatServerConfigDeps {
   writeAccess: WriteAccessStore
   privateFolders: PrivateFolderGuards
   companyFiles: CompanyFilesApi
+  /** The company map for the AI: a record token per turn (records/api.ts). */
+  records: RecordsApi
   toolApprovals: ToolApprovals
   /** A choice prompt in the window that owns the chat (closed with it). */
   requestInteraction: ChatServerConfig['requestInteraction']
@@ -125,6 +129,10 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
         tools: createCompanyFileTools({ api: deps.companyFiles, companyId, companyRoot: root, signal }),
         instructions: companyFilesInstructions(notDownloaded),
       }
+    },
+    createRecordTools: async ({ companyId, conversationId, agent, actions }, signal) => {
+      const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
+      return access ? createRecordTools(access, signal) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({

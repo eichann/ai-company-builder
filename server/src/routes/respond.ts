@@ -2,6 +2,8 @@ import type { Context } from 'hono'
 import type { Refusal, RefusalKind } from '../services/outcome'
 
 const STATUS = {
+  /** No valid credential (a record token, records.md). */
+  unauthorized: 401,
   'bad-request': 400,
   forbidden: 403,
   'not-found': 404,

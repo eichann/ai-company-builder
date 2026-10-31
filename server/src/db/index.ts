@@ -506,6 +506,24 @@ export function initDatabase(conn: Database.Database = sqlite) {
       PRIMARY KEY (company_id, record_id, version)
     );
 
+    -- The AI's credential for the company map (records.md "Who is acting"): issued
+    -- per chat turn by the member's app, sent by the AI's record tools instead of
+    -- the member's session (which the AI process never gets). Only the sha256 of
+    -- the value is stored. The server records actions made with one as actor_kind
+    -- 'ai'. scope: read (look up only) or act (also run actions).
+    CREATE TABLE IF NOT EXISTS record_ai_tokens (
+      id TEXT PRIMARY KEY,
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      token_hash TEXT NOT NULL UNIQUE,
+      scope TEXT NOT NULL CHECK (scope IN ('read', 'act')),
+      agent TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+
     -- The last commit indexed per repository (repo: 'company' or a private
     -- folder's scope id), so a push is indexed from its diff.
     CREATE TABLE IF NOT EXISTS record_index_heads (
@@ -533,6 +551,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
     CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
     CREATE INDEX IF NOT EXISTS idx_record_links_target ON record_links(company_id, target_id);
     CREATE INDEX IF NOT EXISTS idx_record_ledger_company_at ON record_ledger(company_id, at);
+    CREATE INDEX IF NOT EXISTS idx_record_ai_tokens_member ON record_ai_tokens(company_id, user_id, expires_at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);

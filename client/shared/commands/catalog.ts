@@ -57,6 +57,22 @@ export const COMMANDS = defineCommands([
     args: z.object({ service: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,39}$/).optional().describe('The service to show first (gemini, openai, …)') }),
   },
   {
+    // Runs an action of a record's type through the server's state engine
+    // (records.md). It changes shared state and tells the person it names,
+    // hence outbound. The member's own screens call it with their session; the
+    // AI never runs commands — it has its own record tools (records/tools.ts),
+    // which the server records as the AI's. No handler yet (the task screen,
+    // milestone 5); the choices offered are `recordActionChoices`.
+    id: 'records.runAction', title: '記録の操作を実行する', class: 'outbound',
+    args: z.object({
+      recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/),
+      action: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
+      expectedVersion: z.number().int().min(0).describe('The record version the member saw'),
+      note: z.string().max(2000).optional(),
+      args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+    }),
+  },
+  {
     id: 'layout.toggleChat', title: 'AIチャットの表示を切り替える', class: 'view',
     args: z.object({}), keybinding: { key: 'mod+shift+c', area: 'app' },
   },
