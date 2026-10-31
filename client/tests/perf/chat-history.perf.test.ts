@@ -3,7 +3,7 @@
 // only briefly (in-memory store, per-session serialisation cache, writes off
 // the main thread), and the session list sent over IPC carries summaries,
 // not message bodies. Behaviour is covered by tests/chat-history-store.test.ts
-// and tests/chat-rendering.test.ts; these add the scale and the numbers.
+// and src/features/chat/chat-rendering.test.ts; these add the scale and the numbers.
 import { test, after } from 'node:test'
 import assert from 'node:assert/strict'
 import path from 'node:path'
@@ -11,10 +11,10 @@ import React from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { ChatHistoryStore } from '../../electron/chat-history-store'
 import type { ChatSession } from '../../shared/chat-history'
-import { MESSAGE_WINDOW, windowStart } from '../../src/components/chat/messageWindow'
+import { MESSAGE_WINDOW, windowStart } from '../../src/features/chat/messageWindow'
 import Markdown from 'react-markdown'
-import { chatMarkdownSafety } from '../../src/components/chat/chatMarkdownSafety'
-import { splitMarkdownBlocks } from '../../src/components/chat/markdownBlocks'
+import { chatMarkdownSafety } from '../../src/features/chat/chatMarkdownSafety'
+import { splitMarkdownBlocks } from '../../src/features/chat/markdownBlocks'
 import { budget, scratch, timeMs } from './perf'
 
 const box = scratch('history')

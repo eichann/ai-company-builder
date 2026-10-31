@@ -16,7 +16,7 @@ import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, companyRelativePath, readReviewRecord
 import { REVIEW_ACCEPTED, createReviewTools } from '../electron/review/tools'
 import { pendingReviewOf } from '../src/lib/reviewRequest'
 import { deriveConsultationStatus, toolActivity } from '../src/lib/consultationStatus'
-import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/components/chat/chatSessionMessages'
+import { sessionMessageToUIMessage, uiMessageToSessionMessage } from '../src/features/chat/chatSessionMessages'
 
 const ROOT = '/Users/demo/会社'
 

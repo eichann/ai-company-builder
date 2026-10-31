@@ -5,7 +5,7 @@ import { flushSync } from 'react-dom'
 import type { UIMessage } from 'ai'
 import '../src/i18n'
 import '../src/index.css'
-import { AssistantMessageParts } from '../src/components/chat/MessageParts'
+import { AssistantMessageParts } from '../src/features/chat/components/MessageParts'
 
 // Preview / measurement page for the tool-row rendering. It replays a
 // synthetic turn shaped like the one that froze the chat (9 subagents, 902

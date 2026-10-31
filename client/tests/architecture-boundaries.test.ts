@@ -154,9 +154,9 @@ test('an agent implementation is reached through the registry', () => {
  * (chat-ui-and-history.md); the rest are named here with the reason.
  */
 const AGENT_ID_EXCEPTIONS: Record<string, string> = {
-  'src/components/chat/ChatAuthSettings.tsx': 'per-agent sign-in cards',
-  'src/components/chat/ChatHeader.tsx': 'per-agent model pickers',
-  'src/components/chat/hooks/useAgentAuth.ts': 'restores the saved sign-in per agent',
+  'src/features/chat/components/ChatAuthSettings.tsx': 'per-agent sign-in cards',
+  'src/features/chat/components/ChatHeader.tsx': 'per-agent model pickers',
+  'src/features/chat/hooks/useAgentAuth.ts': 'restores the saved sign-in per agent',
   'shared/rate-limits.ts': 'each agent reports its usage windows in its own shape',
   'electron/chat-server.ts': 'the legacy claudeSessionId history field',
   'electron/features/chat/server-config.ts': 'the legacy claudeSessionId history field',
@@ -230,6 +230,8 @@ const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
     'a Markdown preview tab shows the review banners, side panel, comment popover and snapshot diff, driven by the open file and the editor\'s scroll and selection',
   'files -> doc-review':
     'the tree hides review sidecars and marks documents with reviews (pure model.ts only: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
+  'chat -> voice':
+    'the composer\'s microphone button (VoiceInputControl) records and transcribes into the chat input through the voice ports (features/voice/api.ts only)',
 }
 
 /** Feature pairs a set of (importing file, imported path) edges crosses. */

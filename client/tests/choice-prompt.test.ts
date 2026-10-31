@@ -17,8 +17,8 @@ import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron
 import { createCodexConnection, type CodexTransport } from '../electron/agents/codex'
 import type { RpcMessage } from '../electron/agents/codex-rpc'
 import { agentInputMessages } from '../electron/agents/session'
-import { restoreTextWithChoices, storedChoiceFromPart, type StoredChoicePrompt } from '../src/components/chat/choiceHistory'
-import { buildChoiceAnswers, emptyDraft, toggleOption, toggleOther } from '../src/components/chat/choicePromptState'
+import { restoreTextWithChoices, storedChoiceFromPart, type StoredChoicePrompt } from '../src/features/chat/choiceHistory'
+import { buildChoiceAnswers, emptyDraft, toggleOption, toggleOther } from '../src/features/chat/choicePromptState'
 
 // The input Claude Code sends to AskUserQuestion (CLI 2.1.304; the same shape Codex's ask_user takes).
 const claudeInput = {

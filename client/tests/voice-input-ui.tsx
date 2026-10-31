@@ -1,6 +1,6 @@
 import { useRef } from 'react'
 import { createRoot } from 'react-dom/client'
-import { VoiceInputControl, type VoiceEditor } from '../src/components/chat/VoiceInputControl'
+import { VoiceInputControl, type VoiceEditor } from '../src/features/chat/components/VoiceInputControl'
 import '../src/index.css'
 import type { VoiceCapabilities, VoiceDeviceList } from '../shared/voice-input'
 

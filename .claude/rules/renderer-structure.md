@@ -44,7 +44,7 @@ not call it `review`: in the app "review" already means 「確認をお願いす
 
 ## Legacy folders
 
-`components/` (all of it: `skill-ui/`, `common/`, `settings/`, `auth/`, `chat/`), `lib/` and
+`components/` (all of it: `skill-ui/`, `common/`, `settings/`, `auth/`), `lib/` and
 `utils/` are legacy (`src/hooks/` was emptied into `shared/hooks/` and the features' `hooks/`). `skill-ui/` in particular holds far more than skills (file tree,
 editor, review, search, history, backups).
 
@@ -83,7 +83,7 @@ editor, review, search, history, backups).
 5. **A screen component composes named hooks.** State, effects and IPC go into hooks named after
    their concern (`useDepartmentSelection`, `useEditorPersistence`); presentational parts take
    props and render; React-free computation is a pure function in `model.ts`. The chat panel
-   (`components/chat/`, `chat-ui-and-history.md`) is the model to follow.
+   (`features/chat/`, `chat-ui-and-history.md`) is the model to follow.
 6. **One hook per `use*.ts` file, in its owner's `hooks/`.** A hook lives in the `hooks/` of
    the feature that uses it; only a hook two or more features use goes to `shared/hooks/` (the
    skeleton `app/` does not count as a feature). Do not gather all hooks in one folder, and do

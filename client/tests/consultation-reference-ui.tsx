@@ -1,7 +1,7 @@
-import { OpenConsultationContext } from '../src/components/chat/consultation-context'
+import { OpenConsultationContext } from '../src/features/chat/consultation-context'
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { ConsultationReferenceLink } from '../src/components/chat/ConsultationReference'
+import { ConsultationReferenceLink } from '../src/features/chat/components/ConsultationReference'
 import '../src/index.css'
 export function Preview() {
   const [opened, setOpened] = useState(false)

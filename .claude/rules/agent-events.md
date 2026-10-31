@@ -12,7 +12,7 @@ paths:
   - "client/electron/services/agent-event-sender.ts"
   - "client/tests/agent-event-sender.test.ts"
   - "client/src/lib/agentLogNotice.ts"
-  - "client/src/components/chat/AgentLogNotice.tsx"
+  - "client/src/features/chat/components/AgentLogNotice.tsx"
   - "admin/src/app/companies/*/agent-events/**"
   - "admin/src/components/agent-events/**"
   - "admin/src/lib/agent-events.ts"

@@ -422,7 +422,7 @@ this computer) is now 「APIキー（このPC）」.
 **「自分の鍵」 is the one place for keys (owner, 2026-10-31).**
 - **From the chat**: when a reply has ended, `features/chat/brokerKeyNeeds.ts` finds the relay's
   `[ACB_NO_KEY:<service>]` markers in tool outputs / errors and the AI's text (service names only,
-  ≤ 256 KB per part searched) and `components/chat/MessageParts.tsx` shows one
+  ≤ 256 KB per part searched) and `features/chat/components/MessageParts.tsx` shows one
   `features/chat/components/BrokerKeyNeededCard.tsx` per service: 「<サービス> の鍵がありません」,
   the member's state read from `GET /me/broker-keys` (`hooks/useOwnKeyService.ts`, port
   `OwnKeyStatusReads` in `features/chat/api.ts`) — may register → 「自分の鍵を登録する」 runs the
