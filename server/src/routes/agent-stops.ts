@@ -25,6 +25,7 @@ import { services } from '../composition'
 import type { Member } from '../services/access'
 import { AGENT_STOP_SUPPORT_HEADER, PUSH_HEARTBEAT_MS, type PushEvent } from '../../shared/types/agent-stop'
 import { refusal } from './respond'
+import { logError } from '../lib/error-log'
 
 export const agentStopsRoute = new Hono()
 const { access, agentStops, agentPolicy, push } = services
@@ -59,7 +60,7 @@ export function noteStopSupport(c: Context, member: Member): void {
   const raw = c.req.header('X-ACB-Client-Version')
   const version = raw && /^[\x20-\x7e]{1,128}$/.test(raw) ? raw : null
   try { agentStops.seen(member, version) } catch (error) {
-    console.warn('[agent-stop] recording the app failed:', error instanceof Error ? error.message : 'unknown')
+    logError('agent-stop', 'recording the app failed', error)
   }
 }
 

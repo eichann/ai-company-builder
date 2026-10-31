@@ -5,6 +5,7 @@
  */
 import type { PushRejectionRepository } from '../ports/push-rejections'
 import { parseHookRejections, sidebandMessages } from '../lib/push-rejections'
+import { logError } from '../lib/error-log'
 
 export function createPushRejectionRecorder(deps: { pushRejections: PushRejectionRepository }) {
   const { pushRejections } = deps
@@ -24,10 +25,10 @@ export function createPushRejectionRecorder(deps: { pushRejections: PushRejectio
           try {
             pushRejections.record(companyId, userId, rejections)
           } catch (err) {
-            console.error('[push-rejections] Failed to record rejection:', err)
+            logError('push-rejections', 'failed to record a rejection', err)
           }
         } catch (err) {
-          console.error('[push-rejections] Failed to parse rejection:', err)
+          logError('push-rejections', 'failed to parse a rejection', err)
         }
       })
     },

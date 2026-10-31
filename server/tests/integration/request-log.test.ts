@@ -91,6 +91,33 @@ describe('request log', () => {
     expect(printed.filter(l => l.startsWith('[http] '))).toHaveLength(8)
   })
 
+  it('an error during a request is logged without its text, with the request id', async () => {
+    const { services } = await import('../../src/composition')
+    // What lib/git-exec.ts throws when git fails: the command line and stderr name the paths.
+    const gitFailure = () => Object.assign(
+      new Error(`Command failed: git ls-tree main 営業部/${SECRET_FOLDER} (exit 128)\nfatal: Not a valid object name 営業部/${SECRET_FOLDER}`),
+      { code: 128, stderr: `fatal: 営業部/${SECRET_FOLDER}` })
+    vi.spyOn(services.companyFiles, 'build').mockRejectedValue(gitFailure())
+    vi.spyOn(services.departments, 'list').mockRejectedValue(gitFailure())
+    vi.spyOn(services.privateFolders, 'create').mockRejectedValue(gitFailure())
+    const base = `/api/companies/${co}`
+    const requests: Array<[string, string, unknown?]> = [
+      ['GET', `${base}/files/tree`],
+      ['GET', `${base}/departments`],
+      ['POST', `${base}/private-folders`, { parentPath: '営業部', name: SECRET_FOLDER, force: true }],
+    ]
+    for (const [method, path, body] of requests) {
+      printed.length = 0
+      const res = await send(method, path, body)
+      const all = printed.join('\n')
+      expect(all, path).not.toContain(SECRET_FOLDER)
+      expect(all, path).not.toContain('Command failed')
+      const errorLine = printed.find(l => !l.startsWith('[http] '))
+      expect(errorLine, path).toBeDefined()
+      expect(errorLine, path).toContain(`exit=128 request=${res.headers.get('X-Request-Id')}`)
+    }
+  })
+
   it('prints the request id (also returned as X-Request-Id), method, route pattern, status, duration, company and user', async () => {
     printed.length = 0
     const res = await send('GET', `/api/companies/${co}/files/search?q=${encodeURIComponent(SEARCH_TERM)}`)

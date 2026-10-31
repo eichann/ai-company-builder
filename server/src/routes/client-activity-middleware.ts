@@ -2,6 +2,7 @@ import type { MiddlewareHandler } from 'hono'
 import { getUserFromRequest } from '../lib/auth'
 import { CLIENT_VERSION_HEADER, clientIdentityFromHeaders } from '../lib/client-activity'
 import { services } from '../composition'
+import { logError } from '../lib/error-log'
 
 // API paths that carry a company context.
 const COMPANY_PATHS = [
@@ -42,6 +43,6 @@ export const clientActivityMiddleware: MiddlewareHandler = async (c, next) => {
     const { version, platform } = clientIdentityFromHeaders((n) => c.req.header(n))
     services.clientActivity.record({ userId: user.id, companyId, kind: 'seen', version, platform })
   } catch (err) {
-    console.error('[client-activity] middleware failed:', err)
+    logError('client-activity', 'middleware failed', err)
   }
 }

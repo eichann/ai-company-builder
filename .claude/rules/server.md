@@ -223,7 +223,17 @@ id is returned in `X-Request-Id` (also on responses a handler built itself, e.g.
 support can find a member's request. The user id is noted by whoever authenticated the request
 (`getUserFromRequest`, git-http's token check: `noteRequestUser`). Detailed per-company history
 belongs in the per-company, access-controlled records (`agent_events`, `broker_history`,
-`push_rejections`…), not in this log. Test: `tests/integration/request-log.test.ts` (captures
+`push_rejections`…), not in this log.
+
+Errors are logged with `logError(tag, fixed sentence, err, ids)` (`lib/error-log.ts`), never
+`console.error(…, err)`: a git error's message is its command line and stderr (paths, private
+folder names, the push checker's rejections). The line holds the sentence, the error's kind
+(`name`, id-shaped `code`, git's exit code / signal), `request=<id>` (the same id as the request
+line and `X-Request-Id`, carried by `AsyncLocalStorage` in `lib/request-log.ts`) and the stack's
+code locations — not the message. git-http drains `git http-backend`'s stderr without logging
+it, and no longer logs the member's email or `PATH_INFO`. Services may import `lib/error-log`
+(listed in `layering.test.ts` with that reason). Tests: `tests/unit/error-log.test.ts`, and
+`tests/integration/request-log.test.ts` (a git failure naming a private folder in three routes). Test: `tests/integration/request-log.test.ts` (captures
 every console output while sending paths, search terms, a relay `?key=` token and an invitation
 token).
 

@@ -218,9 +218,9 @@ describe('company creation seeds the department folders asynchronously', () => {
       expect(result.status).toBe(201)
       expect(result.body.data.role).toBe('owner')
 
-      const failure = errors.mock.calls.find(call => call[0] === 'Failed to seed department folders:')
+      const failure = errors.mock.calls.map(call => String(call[0])).find(line => line.startsWith('[companies] failed to seed the department folders:'))
       expect(failure).toBeDefined()
-      expect(String(failure![1])).toMatch(/timed out/)
+      expect(failure).toContain('GitTimeoutError')
 
       // Nothing reached the shared branch
       expect(() => bareGit(result.body.data.id, ['rev-parse', '--verify', '--quiet', 'refs/heads/main'])).toThrow()

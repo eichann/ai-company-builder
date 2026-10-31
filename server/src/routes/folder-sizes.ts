@@ -11,6 +11,7 @@ import { Hono } from 'hono'
 import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import { folderSizes } from '../lib/folder-sizes'
+import { logError } from '../lib/error-log'
 
 export const folderSizesRoute = new Hono()
 
@@ -39,7 +40,7 @@ folderSizesRoute.get('/', async (c) => {
     if (!result) return c.json({ error: 'Folder not found' }, 404)
     return c.json({ success: true, data: result })
   } catch (error) {
-    console.error('folder-sizes error:', error)
+    logError('folder-sizes', 'failed to read folder sizes', error)
     return c.json({ error: 'Failed to read folder sizes' }, 500)
   }
 })

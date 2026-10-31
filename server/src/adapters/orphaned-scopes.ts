@@ -40,6 +40,7 @@ import { listScopesWithRules } from './sqlite/permission-store'
 import type { ScopeWithRules } from '../../shared/core/permissions'
 import { nameKey } from '../../shared/core/paths'
 import type { OrphanedScope, OrphanedScopeReader } from '../ports/orphaned-scopes'
+import { logError } from '../lib/error-log'
 
 // Output limit of the git calls here (rev-parse, one directory's ls-tree).
 const GIT_OPTS = { maxBuffer: 64 * 1024 * 1024 }
@@ -191,7 +192,7 @@ async function findOrphanedScopes(db: Database.Database, companyId: string): Pro
     await running.catch(() => {})
   }
   const p = compute(db, companyId).catch((err: unknown) => {
-    console.error(`[orphaned-scopes] check failed for ${companyId}:`, err)
+    logError('orphaned-scopes', 'check failed', err, { company: companyId })
     return [] as OrphanedScope[]
   })
   inflight.set(companyId, p)

@@ -59,6 +59,7 @@ import { services } from '../composition'
 import { hasFullAccess, requireFullAccess, type Member } from '../services/access'
 import { PRIVATE_FOLDERS_OUTDATED_ERROR } from '../services/private-folders'
 import { refusal } from './respond'
+import { logError } from '../lib/error-log'
 
 export { PRIVATE_FOLDERS_OUTDATED_ERROR }
 
@@ -132,7 +133,7 @@ privateFoldersRoute.post('/private-folders', async (c) => {
     if (!created.ok) return refusal(c, created)
     return c.json({ success: true, data: created.value }, 201)
   } catch (err) {
-    console.error('Failed to create private folder:', err)
+    logError('private-folders', 'failed to create a private folder', err)
     return c.json({ error: 'Failed to create the private folder' }, 500)
   }
 })
@@ -182,7 +183,7 @@ privateFoldersRoute.post('/private-folders/:scopeId/make-public', async (c) => {
     if (!result.ok) return refusal(c, result)
     return c.json({ success: true, data: result.value })
   } catch (err) {
-    console.error('Failed to make a private folder public:', err)
+    logError('private-folders', 'failed to make a private folder public', err)
     return c.json({ error: 'Failed to make the folder public' }, 500)
   }
 })
@@ -316,7 +317,7 @@ privateFoldersRoute.delete('/private-folders/:scopeId', async (c) => {
     const data: DeletePrivateFolderResult = { path: result.value.path, archived: true }
     return c.json({ success: true, data })
   } catch (err) {
-    console.error('Failed to delete a private folder:', err instanceof Error ? err.message : err)
+    logError('private-folders', 'failed to delete a private folder', err)
     return c.json({ error: 'Failed to delete the private folder' }, 500)
   }
 })

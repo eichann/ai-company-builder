@@ -28,7 +28,7 @@
 import { execFileSync } from 'child_process'
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
-import { join } from 'path'
+import { basename, join } from 'path'
 import { installPreReceiveHook } from './hook'
 import { BARE_REPO_CONFIG } from './repo-config'
 import { configureBareRepoAsync, listAllScopeRepos } from './scope-repo'
@@ -47,6 +47,7 @@ export {
   SCOPE_REPO_GITIGNORE,
   SERVER_GIT_IDENTITY,
 } from './scope-repo'
+import { logError } from '../error-log'
 export type { PushPolicy } from '../push-check/policy'
 
 /**
@@ -90,7 +91,7 @@ export function configureAllBareRepos(reposDir: string): { total: number; failed
       configureBareRepo(join(reposDir, name))
     } catch (error) {
       failed++
-      console.error(`Failed to configure repository ${name}:`, error)
+      logError('git-server', 'failed to configure a repository', error, { repository: name })
     }
   }
   // Private folders' scope repositories (<companyId>.scopes/<repoId>.git)
@@ -100,7 +101,7 @@ export function configureAllBareRepos(reposDir: string): { total: number; failed
       configureBareRepo(repo)
     } catch (error) {
       failed++
-      console.error(`Failed to configure scope repository ${repo}:`, error)
+      logError('git-server', 'failed to configure a scope repository', error, { repository: basename(repo) })
     }
   }
   return { total, failed }
@@ -173,7 +174,7 @@ export function preparePushCheck(req: PushCheckRequest): PreparedPushCheck {
       },
     }
   } catch (err) {
-    console.error('[git-server] cannot write the push policy snapshot:', err)
+    logError('git-server', 'cannot write the push policy snapshot', err)
     if (dir) rmSync(dir, { recursive: true, force: true })
     return { env: { ACB_PUSH_POLICY: '' }, cleanup: () => {} }
   }

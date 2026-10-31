@@ -18,11 +18,20 @@
  * Detailed per-company history belongs in the per-company, access-controlled
  * records (agent_events, broker_history, push_rejections…), not here.
  */
+import { AsyncLocalStorage } from 'async_hooks'
 import { randomUUID } from 'crypto'
 import type { MiddlewareHandler } from 'hono'
 import { matchedRoutes } from 'hono/route'
 
 export const REQUEST_ID_HEADER = 'X-Request-Id'
+
+// The request being handled, for error lines printed further down (lib/error-log.ts).
+const currentRequest = new AsyncLocalStorage<string>()
+
+/** The id of the request this code runs for (also after awaits and setImmediate), if any. */
+export function currentRequestId(): string | undefined {
+  return currentRequest.getStore()
+}
 
 /** Route parameters that hold opaque ids (or a service name), safe to print. */
 const OPAQUE_PARAMS = new Set([
@@ -70,7 +79,7 @@ export function requestLog(print: (line: string) => void = line => console.log(l
     const started = performance.now()
     c.header(REQUEST_ID_HEADER, id)
     try {
-      await next()
+      await currentRequest.run(id, () => next())
     } finally {
       // The route that answered; middleware (app.use: method ALL) answering
       // means no route did (unknown path, CORS preflight).
