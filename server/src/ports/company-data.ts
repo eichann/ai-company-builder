@@ -23,6 +23,7 @@
  * in tests/unit/company-scoped-sql.test.ts, which fails on any new statement
  * that touches a company's rows without a company condition.
  */
+import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
 import type { InvitationRepository } from './invitations'
 import type { OrphanedScopeReader } from './orphaned-scopes'
@@ -45,6 +46,8 @@ export interface CompanyData {
   readonly records: RecordRepository
   /** Connector plugins: installs, mapping versions, history (ports/plugins.ts). */
   readonly plugins: PluginRepository
+  /** The Google connection: the OAuth client, members' grants, pending starts (ports/connectors.ts). */
+  readonly connectors: ConnectorRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

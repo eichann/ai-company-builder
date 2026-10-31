@@ -106,6 +106,7 @@ interface World {
     plugin: string
     /** An operation record (操作の控え) of the other company. */
     operation: string
+    googleGrant: string
   }
 }
 
@@ -324,6 +325,17 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
 
+  // The Google connection (google-connector.md): the client and members' grants are owner/admin;
+  // a member's own permission is any member's; Google's return to the server is public.
+  r('GET /api/companies/:companyId/google', w => ({ path: `${C(w)}/google` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/client', w => ({ path: `${C(w)}/google/client`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/enabled', w => ({ path: `${C(w)}/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/google/grants/:userId', w => ({ path: `${C(w)}/google/grants/pm-nobody` }), [404, 404, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/google/connect', w => ({ path: `${C(w)}/me/google/connect`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('DELETE /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS, 'nothing to stop: answers the member\'s own (empty) state'),
+  r('GET /api/oauth/google/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
+
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
   r('POST /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations`, body: { role: 'nobody' } }), [400, 400, 403, 403, 403, 401]),
@@ -395,6 +407,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
   x('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', (w, id) => ({ path: `${C(w)}/plugins/${id}/create/create_deal`, body: { title: '乗っ取り', fields: {} } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-crm/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
+  x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
@@ -578,6 +591,10 @@ async function seed(): Promise<World> {
     VALUES (?, 'op-other-1', 'other-crm', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
     .run(other, USER.outsider, expires, expires)
 
+  // A Google permission of the other company's member (a row as the callback writes it, token cleared).
+  db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason, created_at, updated_at)
+    VALUES (?, ?, 'google', 'g-other-1', 'other@example.com', '[]', NULL, 'stopped', 'admin', ?, ?)`).run(other, otherMember, expires, expires)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -603,6 +620,7 @@ async function seed(): Promise<World> {
       recordToken: 'rt-other-1',
       plugin: 'other-crm',
       operation: 'op-other-1',
+      googleGrant: otherMember,
     },
   }
 }

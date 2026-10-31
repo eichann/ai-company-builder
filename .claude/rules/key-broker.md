@@ -317,7 +317,11 @@ the sign-in.
   `PRACTICE_UPSTREAMS` — `ACB_FAKE_HUBSPOT_URL` (`http(s)://127.0.0.1 | [::1] | localhost |
   host.docker.internal[:port]`, nothing more) takes effect only with `ACB_ALLOW_FAKE_UPSTREAMS=1`,
   `NODE_ENV` not `production` and `PUBLIC_URL` (default `http://localhost:3001`) on this machine;
-  otherwise `ignored` with the reason in the startup log. **Server-wide, never per company** (a
+  otherwise `ignored` with the reason in the startup log. **Per service**: each variable
+  redirects only its own service (`ACB_FAKE_GOOGLE_URL` the Google connection's hosts,
+  `google-connector.md`), so the practice Google alone leaves HubSpot real — its keys need no
+  `pat-fake-` prefix and go out the real way (test 「per service: the practice Google alone leaves
+  HubSpot real」). **Server-wide, never per company** (a
   company that could move a service's destination could send its key elsewhere). On:
   `adapters/upstream-practice.ts` wraps the way out (`composition.ts`) so connections for
   `api.hubapi.com` — the key check and the relay — go to the practice server (plain HTTP allowed
@@ -411,7 +415,10 @@ who uses it).
   `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
   reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
   「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
-  the history; resuming is per key. Tokens are not revoked, so the AI gets the "stopped" answer
+  the history; resuming is per key. It also stops every member's **Google permission** in the
+  company at once (`onStopAll` → `googleConnector.stopAll`: grants `stopped`, the sealed refresh
+  tokens cleared, revoked at Google in the background); a member resumes with 「Google で許可」
+  (`google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
   (revoking would answer "token expired").
   A company-wide stop of the whole AI (M2, `agent-stop.md`) also refuses every relay call with
   `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。…」 until it is released.

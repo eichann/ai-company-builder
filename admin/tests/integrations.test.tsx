@@ -15,7 +15,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import IntegrationsPage from '@/app/companies/[id]/integrations/page'
 import { NAV_ITEMS } from '@/components/app/app-shell'
-import type { BrokerKeySummary, BrokerView, Capabilities, PluginDetail, PluginListItem } from '@/lib/api'
+import type { BrokerKeySummary, BrokerView, Capabilities, GoogleAdminView, GoogleGrantSummary, PluginDetail, PluginListItem } from '@/lib/api'
 import { changeMappingField, mappingRows, mappingToYaml } from '@/lib/integrations'
 import { parseYamlLite } from '../../shared/core/yaml-lite'
 import { base, companyRoutes, renderInCompany } from './company-harness'
@@ -95,6 +95,17 @@ const broker = (practice: boolean): BrokerView => ({
   history: [],
 })
 
+const GOOGLE_SECRET = 'fake-google-secret-NOT-REAL-admin-1234'
+const googleGrant: GoogleGrantSummary = {
+  userId: 'u_member', memberEmail: 'tanaka@example.com', memberName: '田中 太郎', googleEmail: 'tanaka@example.com',
+  features: ['minutes'], scopes: [], status: 'active', createdAt: '2026-11-01T00:00:00.000Z', updatedAt: '2026-11-01T00:00:00.000Z', lastUsedAt: null,
+}
+const googleView = (over: Partial<GoogleAdminView> = {}): GoogleAdminView => ({
+  vaultEnabled: true, configured: true, clientId: '123-abc.apps.googleusercontent.com', secretLast4: GOOGLE_SECRET.slice(-4), domain: 'example.com',
+  enabled: true, redirectUri: 'https://acb.example.com/api/oauth/google/callback', practice: false, operatorStopped: false,
+  updatedAt: '2026-11-01T00:00:00.000Z', updatedBy: 'u_owner', grants: [googleGrant], history: [], ...over,
+})
+
 type Reply = { status?: number; body: unknown }
 function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call) => Reply)> = {}, practice = false) {
   const routes = {
@@ -102,6 +113,7 @@ function stubApi(caps: Capabilities, extra: Record<string, Reply | ((call: Call)
     [`GET ${base}/plugins`]: { body: ok({ plugins: [item] }) },
     [`GET ${base}/plugins/hubspot`]: { body: ok(detail) },
     [`GET ${base}/broker`]: { body: ok(broker(practice)) },
+    [`GET ${base}/google`]: { body: ok(googleView({ configured: false, clientId: null, secretLast4: null, domain: null, enabled: false, grants: [] })) },
     ...extra,
   } as Record<string, Reply | ((call: Call) => Reply)>
   const calls: Call[] = []
@@ -252,5 +264,48 @@ describe('つなぎ先', () => {
     await userEvent.click(within(section).getByRole('button', { name: '読める人を保存' }))
     await waitFor(() => expect(saves).toHaveLength(1))
     expect(saves[0].body).toEqual({ departmentIds: ['d_sales'], userIds: ['u_member'] })
+  })
+})
+
+describe('つなぎ先 → Google', () => {
+  it('shows the address to register, sends the secret once (never shown), keeps it when left empty, stops a member, and uses no jargon', async () => {
+    const saves: Call[] = []
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/google`]: { body: ok(googleView({ practice: true })) },
+      [`PUT ${base}/google/client`]: (call) => { saves.push(call); return { body: ok(googleView({ practice: true })) } },
+      [`DELETE ${base}/google/grants/u_member`]: { body: ok(googleView({ practice: true, grants: [{ ...googleGrant, status: 'stopped' }] })) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByTestId('google-redirect-uri')).toHaveTextContent('https://acb.example.com/api/oauth/google/callback')
+    expect(screen.getByText(/練習用の Google につながっています/)).toBeInTheDocument()
+    expect(screen.getByText(/予定と議事録を読む/)).toBeInTheDocument()
+
+    // A typed secret is sent once, in the PUT, and the field is emptied.
+    const secret = screen.getByLabelText('クライアント シークレット')
+    expect(secret).toHaveAttribute('type', 'password')
+    expect(secret).toHaveAttribute('placeholder', expect.stringContaining(`末尾 ${GOOGLE_SECRET.slice(-4)}`))
+    await userEvent.type(secret, GOOGLE_SECRET)
+    await userEvent.click(screen.getByRole('button', { name: 'Google の設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ clientId: '123-abc.apps.googleusercontent.com', domain: 'example.com', clientSecret: GOOGLE_SECRET })
+    await waitFor(() => expect(secret).toHaveValue(''))
+    expect(document.body.innerHTML).not.toContain(GOOGLE_SECRET)
+    // Changing only the domain never sends a secret.
+    const domain = screen.getByLabelText('社内のドメイン')
+    await userEvent.clear(domain)
+    await userEvent.type(domain, 'example.co.jp')
+    await userEvent.click(screen.getByRole('button', { name: 'Google の設定を保存' }))
+    await waitFor(() => expect(saves).toHaveLength(2))
+    expect(saves[1].body).toEqual({ clientId: '123-abc.apps.googleusercontent.com', domain: 'example.co.jp' })
+
+    // 「止める」 asks first, then stops that member only.
+    const row = screen.getByTestId('google-grant-u_member')
+    await userEvent.click(within(row).getByRole('button', { name: '止める' }))
+    await userEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: '止める' }))
+    await waitFor(() => expect(calls.some((c) => c.method === 'DELETE' && c.url === `${base}/google/grants/u_member`)).toBe(true))
+    expect(await screen.findByText('止めました')).toBeInTheDocument()
+
+    const text = document.body.textContent ?? ''
+    for (const word of ['OAuth', 'スコープ', 'トークン', 'プラグイン', 'オントロジー']) expect(text).not.toContain(word)
   })
 })

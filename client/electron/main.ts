@@ -41,6 +41,7 @@ import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
+import { registerGoogleIpc } from './features/google/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
@@ -202,6 +203,8 @@ const writeAccessStore = createWriteAccessStore({
 })
 // The key broker's tokens, the member's own keys and skills' tools (features/broker).
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
+// 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
+registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays

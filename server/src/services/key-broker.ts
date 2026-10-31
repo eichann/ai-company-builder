@@ -101,6 +101,11 @@ export interface KeyBrokerDeps {
   practiceServices?: readonly string[]
   /** A connector plugin manages the service for this company: the read-only switch cannot be turned off (plugins.md). */
   managedByPlugin?: (companyId: string, service: string) => boolean
+  /**
+   * 「すべての鍵を止める」 also stops what else holds a member's credentials (the Google
+   * connection's grants: google-connector.md). Called after the keys were disabled.
+   */
+  onStopAll?: (companyId: string, by: string) => void
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -494,6 +499,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
           action: 'update', service: row.service, displayName: row.displayName, before: { status: 'active' }, after: { status: 'disabled' },
         }))
       }
+      deps.onStopAll?.(member.companyId, member.userId)
       return ok(view(member.companyId))
     },
 

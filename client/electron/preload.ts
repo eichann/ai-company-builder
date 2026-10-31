@@ -14,6 +14,7 @@ import type { HandoffCompletion } from '../shared/handoff'
 import type { AgentInteractionResponse } from '../shared/agent-interaction'
 import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
+import type { GoogleFeature } from '../shared/google'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
@@ -122,6 +123,9 @@ const api: ElectronAPI = {
     invoke('brokerKeys:save', companyId, service, secret, displayName),
   deleteOwnBrokerKey: (companyId: string, service: string) => invoke('brokerKeys:delete', companyId, service),
   moveEnvKeyToServer: (companyId: string, rootPath: string, name: string) => invoke('brokerKeys:moveFromEnv', companyId, rootPath, name),
+  getGoogleStatus: (companyId: string) => invoke('google:status', companyId),
+  connectGoogle: (companyId: string, features: GoogleFeature[]) => invoke('google:connect', companyId, features),
+  disconnectGoogle: (companyId: string) => invoke('google:disconnect', companyId),
   undoPluginOperation: (companyId: string, pluginId: string, operationId: string, conversationId?: string) =>
     invoke('pluginOperations:undo', companyId, pluginId, operationId, conversationId),
   reconcilePluginOperation: (companyId: string, pluginId: string, operationId: string) => invoke('pluginOperations:reconcile', companyId, pluginId, operationId),

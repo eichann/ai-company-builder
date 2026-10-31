@@ -82,9 +82,14 @@ const HANDLE_TABLES: Record<string, string[]> = {
   plugin_policy_acks: ['adapters/sqlite/plugins.ts'],
   plugin_read_scopes: ['adapters/sqlite/plugins.ts'],
   plugin_operations: ['adapters/sqlite/plugins.ts'],
+  // The Google connection (google-connector.md).
+  google_oauth_clients: ['adapters/sqlite/connectors.ts'],
+  connector_grants: ['adapters/sqlite/connectors.ts'],
+  oauth_pending: ['adapters/sqlite/connectors.ts'],
+  connector_history: ['adapters/sqlite/connectors.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository']
+const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository']
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'

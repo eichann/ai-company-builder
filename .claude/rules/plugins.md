@@ -310,7 +310,8 @@ plugin's switch:
   `tests/integration/plugin-import.test.ts` 「records of the earlier connection…」 (each filter
   and the company condition mutation-checked).
 - **A real secret never reaches the fake**: while a service goes to its practice copy
-  (`ACB_FAKE_HUBSPOT_URL`, staging), registering a company key, replacing one or saving an own
+  (`ACB_FAKE_HUBSPOT_URL`, staging; per service — `ACB_FAKE_GOOGLE_URL` alone leaves HubSpot
+  real, `google-connector.md`), registering a company key, replacing one or saving an own
   key whose value is not a practice key (`pat-fake-…`, `PRACTICE_KEY_PREFIX`) is refused (400
   `REAL_KEY_ON_PRACTICE`), and the practice way out (`adapters/upstream-practice.ts`) never sends
   a request whose credential is not a practice key (`practice-real-secret`; a key saved before

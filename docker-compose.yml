@@ -38,6 +38,7 @@ services:
       # compose file; the server also ignores it when NODE_ENV=production or PUBLIC_URL is public.
       - ACB_ALLOW_FAKE_UPSTREAMS=${ACB_ALLOW_FAKE_UPSTREAMS:-}
       - ACB_FAKE_HUBSPOT_URL=${ACB_FAKE_HUBSPOT_URL:-}
+      - ACB_FAKE_GOOGLE_URL=${ACB_FAKE_GOOGLE_URL:-}
       # Who may create companies after the first one: the operators' user ids
       # (comma-separated). Policy: operator (default; the only one so far).
       - OPERATOR_USER_IDS=${OPERATOR_USER_IDS:-}
