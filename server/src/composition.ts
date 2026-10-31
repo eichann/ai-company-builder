@@ -169,6 +169,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
+    // With several company keys, the one a plugin's connection uses (bound below).
+    connectionKeyId: (companyId, service) => plugins.connectionKeyId(companyId, service),
   })
 
   // The company map (light ontology 4-2): indexed from pushes, off per company by default.

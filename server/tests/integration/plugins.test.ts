@@ -46,11 +46,11 @@ let hubKey: string, hubKeyOther: string, geminiKey: string
 let oldToken: string, readerToken: string
 let salesDept: string, otherDept: string
 /** What reached "HubSpot" through the relay. */
-const sent: Array<{ method: string; path: string }> = []
+const sent: Array<{ method: string; path: string; authorization?: string }> = []
 const fakeUpstream = {
-  async send(req: { method: string; path: string; body: AsyncIterable<Uint8Array> | null }) {
+  async send(req: { method: string; path: string; headers: Record<string, string>; body: AsyncIterable<Uint8Array> | null }) {
     if (req.body) for await (const chunk of req.body) void chunk
-    sent.push({ method: req.method, path: req.path })
+    sent.push({ method: req.method, path: req.path, authorization: req.headers.authorization })
     return { ok: true as const, response: { status: 200, headers: [['content-type', 'application/json']] as Array<[string, string]>, body: (async function* () { yield new TextEncoder().encode('{"results":[]}') })(), viaPrivateAddress: false } }
   },
 }
@@ -376,5 +376,24 @@ describe('who may read HubSpot through the relay: the connection\'s read scope (
     expect(all).not.toContain('12345')
     expect(all).not.toContain(SECRET)
     expect(all).not.toContain('results')
+  })
+})
+
+describe('the relay uses the key of the connection the plugin manages (staging: an older practice key went to the real HubSpot)', () => {
+  it('with several company keys the member may use, a relay call goes out with the connection\'s key, not the first registered', async () => {
+    const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
+    const second = `${SECRET}-connection`
+    const created = await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot（本物）', secret: second, audience })
+    const newer = created.value.keys.find((k: Json) => k.service === 'hubspot' && k.id !== hubKey).id
+    // Before: the connection uses the first key, and so does the relay.
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(sent.at(-1)!.authorization).toBe(`Bearer ${SECRET}`)
+    // The admin points the connection at the newer key: the relay follows (the same key as the connector).
+    expect((await services.plugins.install(owner, 'crm-hub', { version: '0.1.0', keyId: newer })).ok).toBe(true)
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(sent.at(-1)!.authorization).toBe(`Bearer ${second}`)
+    expect((await services.plugins.install(owner, 'crm-hub', { version: '0.1.0', keyId: hubKey })).ok).toBe(true)
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(sent.at(-1)!.authorization).toBe(`Bearer ${SECRET}`)
   })
 })

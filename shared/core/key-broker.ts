@@ -77,14 +77,6 @@ export interface BrokerServiceInfo {
    * against the decoded path the client sent.
    */
   readOnlyPosts?: readonly RegExp[]
-  /**
-   * An API that refuses requests carrying more than it expects (HubSpot answers
-   * 400 「Invalid request」 to what Node's fetch adds: `sec-fetch-mode`,
-   * `accept-language: *`, …): only the client headers in `forward` go upstream,
-   * and `set` is put on top — the same request the connector plugin sends.
-   * Absent = every header the relay does not drop (the AI SDKs' own headers).
-   */
-  requestHeaders?: { forward: readonly string[]; set: Readonly<Record<string, string>> }
 }
 
 export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
@@ -113,7 +105,6 @@ export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
     service: 'hubspot', label: 'HubSpot', category: 'system', defaultHosts: ['api.hubapi.com'], credential: 'authorization',
     check: { path: '/crm/objects/2026-03/deals', headers: {}, rejected: [401], limited: [403] },
     readOnlyPosts: [/^\/crm\/v3\/objects\/[a-z0-9_-]+\/search$/, /^\/crm\/objects\/\d{4}-\d{2}\/[a-z0-9_-]+\/search$/],
-    requestHeaders: { forward: ['content-type', 'content-length'], set: { accept: 'application/json' } },
   },
 ]
 

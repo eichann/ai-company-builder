@@ -470,6 +470,11 @@ export function createPluginService(deps: PluginServiceDeps) {
     },
 
     /** Whether a plugin of the company manages `service` (the relay's read-only switch stays on). */
+    /** The company key the connection managing `service` uses (the first such install), or null. */
+    connectionKeyId(companyId: string, service: string): string | null {
+      return companyData.forCompany(companyId).plugins.installs().find(i => i.service === service && i.managedSince !== null && i.keyId !== null)?.keyId ?? null
+    },
+
     manages(companyId: string, service: string): boolean {
       return companyData.forCompany(companyId).plugins.installs().some(i => i.service === service && i.managedSince !== null)
     },
