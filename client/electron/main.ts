@@ -41,6 +41,7 @@ import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
+import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import type { StoppableTurns } from './services/agent-stop'
@@ -201,6 +202,8 @@ const writeAccessStore = createWriteAccessStore({
 })
 // The key broker's tokens, the member's own keys and skills' tools (features/broker).
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
+// The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
+registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })

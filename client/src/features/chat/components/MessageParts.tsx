@@ -25,6 +25,8 @@ import { useAgentProgress } from '../agentStatusStore'
 import { STEER_PART_TYPE, readSteerRecord } from '../../../../shared/steer'
 import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, readReviewRecord } from '../../../../shared/review-request'
 import { ReviewRequestCard } from './ReviewRequestCard'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
+import { PluginOperationCard } from './PluginOperationCard'
 import { SteerInstructionView } from './SteerInstruction'
 import { BrokerKeyNeededCard } from './BrokerKeyNeededCard'
 import { brokerKeyNeedsOf } from '../brokerKeyNeeds'
@@ -321,6 +323,10 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === REVIEW_PART_TYPE) {
           const record = readReviewRecord((part as { data?: unknown }).data)
           return record ? <ReviewRequestCard key={item.key} record={record} /> : null
+        }
+        if (part.type === PLUGIN_OPERATION_PART_TYPE) {
+          const card = readPluginOperationCard((part as { data?: unknown }).data)
+          return card ? <PluginOperationCard key={item.key} card={card} /> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

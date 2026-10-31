@@ -18,7 +18,7 @@ import {
   effectiveFieldPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
 } from '../../shared/core/plugins'
 import type { TypeDefinition } from '../../shared/core/record-types'
-import type { PluginDetail, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
+import type { PluginAiField, PluginAiOperation, PluginAiTools, PluginDetail, PluginFieldPolicyView, PluginInstallView, PluginListItem, PluginPackageView, PluginProblem } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { PluginHistoryRow, PluginInstallRow } from '../ports/plugins'
@@ -426,6 +426,44 @@ export function createPluginService(deps: PluginServiceDeps) {
     /** Whether a plugin of the company manages `service` (the relay's read-only switch stays on). */
     manages(companyId: string, service: string): boolean {
       return companyData.forCompany(companyId).plugins.installs().some(i => i.service === service && i.managedSince !== null)
+    },
+
+    /**
+     * GET /api/records-ai/plugins (P7) — the running plugins' operations the
+     * member's AI may call: only operations whose `who` lists `ai`, no
+     * `create` (not in milestone 3), and with a `read` token (Codex) no write
+     * at all. An update lists the fields it may write now (`off` left out).
+     * Any member: what they may do on a record is decided per call (P6).
+     */
+    async aiTools(member: Member, scope: 'read' | 'act'): Promise<Outcome<PluginAiTools>> {
+      const out: PluginAiTools['plugins'] = []
+      for (const install of companyData.forCompany(member.companyId).plugins.installs()) {
+        const evaluated = await evaluate(member.companyId, install)
+        if (!evaluated.active) continue
+        const { manifest, mapping, types } = evaluated.active
+        const operations: PluginAiOperation[] = []
+        for (const [name, op] of Object.entries(manifest.operations)) {
+          if (!op.who.includes('ai') || op.kind === 'create') continue
+          if (op.kind === 'update' && scope !== 'act') continue
+          const recordType = manifest.objects[op.object]?.recordType
+          const def = recordType ? types[recordType] : undefined
+          if (!recordType || !def) continue
+          const fields: PluginAiField[] = []
+          if (op.kind === 'update') {
+            for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
+              const f = def.fields[field]
+              if (!rule.write || !f) continue
+              const policy = effectiveFieldPolicy(manifest, mapping, name, field)
+              if (policy !== 'auto' && policy !== 'prior') continue
+              fields.push({ name: field, label: f.label, kind: f.kind, ...(f.options ? { options: [...f.options] } : {}), policy })
+            }
+            if (fields.length === 0) continue
+          }
+          operations.push({ name, label: op.label, kind: op.kind, recordType, decision: op.decision, fields })
+        }
+        if (operations.length > 0) out.push({ id: install.pluginId, label: manifest.label, operations })
+      }
+      return ok({ plugins: out })
     },
 
     /**

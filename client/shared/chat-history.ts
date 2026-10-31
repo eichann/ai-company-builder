@@ -2,6 +2,7 @@ import type { AgentSession } from './agent'
 import type { ChoicePromptRecord } from './choice-prompt'
 import type { SteerRecord } from './steer'
 import type { ReviewRecord } from './review-request'
+import type { PluginOperationCard } from './plugin-operations'
 export interface ChatSession {
   id: string
   companyId: string
@@ -21,6 +22,8 @@ export interface ChatSession {
     steerInstructions?: Array<SteerRecord & { at?: number; seq?: number }>
     /** 「確認をお願いします」 requests in this reply (review-request.ts); shown after its text. */
     reviewRequests?: ReviewRecord[]
+    /** Outside systems' writes (HubSpot) in this reply, with 「変更前の値を書き戻す」 (plugin-operations.ts); shown after its text. */
+    pluginOperations?: PluginOperationCard[]
   }>
   createdAt: string
   updatedAt: string

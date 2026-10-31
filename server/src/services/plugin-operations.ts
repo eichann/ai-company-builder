@@ -37,6 +37,7 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { PluginOperationRow } from '../ports/plugins'
+import type { PluginOperationRecordView } from '../../shared/types/plugins'
 import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import type { PluginConnector } from './plugin-connector'
@@ -56,26 +57,12 @@ export interface OperationActor {
   /** For the AI: the agent of its token. */
   source?: string
   conversationId?: string | null
+  /** A person confirming what their AI suggested (informational, self-reported by the app; records.md "Provenance"). */
+  proposedBy?: 'ai' | null
 }
 
-export interface OperationView {
-  id: string
-  operation: string
-  recordId: string
-  /** pending / sent-unknown / external-ok / applied / observed / failed. */
-  state: PluginOperationRow['state']
-  /** The ACB fields and values asked for. */
-  fields: Record<string, AcbValue>
-  reason: string | null
-  /** Only an applied update (ACB's own confirmed write) not undone yet. */
-  undoable: boolean
-  undoLabel: string
-  undoNotice: string
-  undoOf: string | null
-  undoneBy: string | null
-  recordVersion: number | null
-  createdAt: string
-}
+/** An operation record as its record's readers see it (contract: shared/types/plugins.ts). */
+export type OperationView = PluginOperationRecordView
 
 export interface PluginOperationDeps {
   companyData: CompanyDataSource
@@ -141,9 +128,15 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     return { prior, off }
   }
 
-  function view(o: PluginOperationRow): OperationView {
+  function view(companyId: string, o: PluginOperationRow): OperationView {
+    const handle = companyData.forCompany(companyId)
+    // The ledger entry of an applied write says exactly what changed (before → after).
+    const entry = o.state === 'applied' && o.recordVersion !== null ? handle.records.ledger(o.recordId).find(e => e.version === o.recordVersion) : undefined
     return {
-      id: o.id, operation: o.operation, recordId: o.recordId, state: o.state, fields: JSON.parse(o.fields) as Record<string, AcbValue>, reason: o.reason,
+      id: o.id, operation: o.operation, recordId: o.recordId, recordTitle: handle.records.byIds([o.recordId])[0]?.title ?? null,
+      state: o.state, fields: JSON.parse(o.fields) as Record<string, AcbValue>,
+      changes: entry ? entry.changes.map(c => ({ field: c.field, before: c.before as AcbValue, after: c.after as AcbValue })) : null,
+      actorKind: o.actorKind === 'ai' ? 'ai' : 'human', reason: o.reason,
       undoable: o.operation !== 'undo' && o.state === 'applied' && o.undoneBy === null, undoLabel: UNDO_LABEL, undoNotice: UNDO_NOTICE,
       undoOf: o.undoOf, undoneBy: o.undoneBy, recordVersion: o.recordVersion, createdAt: o.createdAt,
     }
@@ -212,7 +205,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       recordId: op.recordId, type: plugin.manifest.objects[op.object].recordType as string, folder: null, title: null,
       fields: acbFields as Record<string, LedgerValue>, links: {}, action: ledger.action, source: plugin.pluginId, note: ledger.note, decision: ledger.decision,
       expectedVersion: current.version,
-      actor: { id: member.userId, kind: actor.kind, source: actor.kind === 'ai' ? actor.source ?? null : null, conversationId: actor.conversationId ?? null },
+      actor: { id: member.userId, kind: actor.kind, source: actor.kind === 'ai' ? actor.source ?? null : null, conversationId: actor.conversationId ?? null, proposedBy: actor.kind === 'human' ? actor.proposedBy ?? null : null },
       receipt: {
         plugin: plugin.pluginId, pluginVersion: op.pluginVersion, fingerprint: op.fingerprint, mappingVersion: op.mappingVersion,
         connectionId: op.connectionId, accountId: op.accountId, object: op.object, externalId: op.externalId,
@@ -348,7 +341,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     /** The operation (only for someone who may read its record). */
     async get(member: Member, pluginId: string, operationId: string): Promise<Outcome<{ operation: OperationView }>> {
       const op = await opFor(member, pluginId, operationId)
-      return op ? ok({ operation: view(op) }) : refuse('not-found', 'その操作はありません', { code: 'OPERATION_RECORD_NOT_FOUND' })
+      return op ? ok({ operation: view(member.companyId, op) }) : refuse('not-found', 'その操作はありません', { code: 'OPERATION_RECORD_NOT_FOUND' })
     },
 
     /**
@@ -358,7 +351,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
      * account, only while HubSpot still holds what ACB wrote, after every
      * check a new write gets. Downstream effects are not undone.
      */
-    async undo(member: Member, pluginId: string, operationId: string): Promise<Outcome<{ operation: OperationView | null; record: { id: string; version: number } }>> {
+    async undo(member: Member, pluginId: string, operationId: string, provenance: Pick<OperationActor, 'conversationId' | 'proposedBy'> = {}): Promise<Outcome<{ operation: OperationView | null; record: { id: string; version: number } }>> {
       const op = await opFor(member, pluginId, operationId)
       if (!op) return refuse('not-found', 'その操作はありません', { code: 'OPERATION_RECORD_NOT_FOUND' })
       if (op.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', '自分の（自分の AI の）変更か、管理者だけが書き戻せます', { code: 'NOT_ALLOWED' })
@@ -378,7 +371,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       if (!declared || declared.undo !== 'restore_previous') return conflict('この操作は書き戻せません', 'NOT_UNDOABLE')
       const row = readable(member, op.recordId)!
       const place = row.path ?? row.folder ?? ''
-      const human: OperationActor = { kind: 'human' }
+      const human: OperationActor = { kind: 'human', conversationId: provenance.conversationId ?? null, proposedBy: provenance.proposedBy ?? null }
       if (!mayRun(member, human, declared.who, op.recordId, place)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
       const asked = JSON.parse(op.fields) as Record<string, AcbValue>
       const names = Object.keys(asked)
@@ -404,7 +397,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
         const at = clock.now()
         const undoRow: PluginOperationRow = {
           ...op, id: deps.ids.newId(), operation: 'undo', pluginVersion: plugin.version, fingerprint: plugin.fingerprint, mappingVersion: plugin.mappingVersion,
-          actorId: member.userId, actorKind: 'human', actorSource: null, conversationId: null, state: 'pending',
+          actorId: member.userId, actorKind: 'human', actorSource: null, conversationId: human.conversationId ?? null, state: 'pending',
           fields: JSON.stringify(Object.fromEntries(names.filter(n => n in back).map(n => [n, back[n]]))),
           written: JSON.stringify(previous), previous: JSON.stringify(rawOf(outside.properties, props)),
           reason: null, undoOf: op.id, undoneBy: null, recordVersion: null, createdAt: at, updatedAt: at,
@@ -427,22 +420,22 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       const op = await opFor(member, pluginId, operationId)
       if (!op) return refuse('not-found', 'その操作はありません', { code: 'OPERATION_RECORD_NOT_FOUND' })
       if (op.actorId !== member.userId && !FULL_ACCESS_ROLES.has(member.role)) return refuse('forbidden', '自分の変更か、管理者だけが確かめられます', { code: 'NOT_ALLOWED' })
-      if (op.state !== 'sent-unknown') return ok({ operation: view(op) })
+      if (op.state !== 'sent-unknown') return ok({ operation: view(member.companyId, op) })
       const active = await plugins.active(member.companyId, pluginId, { collectingFacts: true })
       if (!active.ok) return conflict('いまは HubSpot を読めません', 'PLUGIN_NOT_ACTIVE', { problem: active.problem })
       if (active.plugin.connectionId !== op.connectionId) return conflict('この変更は別の接続でしたものです', 'ACCOUNT_CHANGED')
       const account = await importer.verifyAccount(member.companyId, active.plugin, async () => null)
       if (!account.ok || account.accountId !== op.accountId) return conflict('この変更は別の HubSpot のアカウントでしたものです', 'ACCOUNT_CHANGED')
-      return ok({ operation: view(await reconcileOnce(member, active.plugin, op)) })
+      return ok({ operation: view(member.companyId, await reconcileOnce(member, active.plugin, op)) })
     },
   }
 
   function answerFor(member: Member, op: PluginOperationRow): Outcome<{ operation: OperationView | null; record: { id: string; version: number } }> {
     const record = { id: op.recordId, version: valuesOf(member.companyId, op.recordId).version }
     if (op.state === 'failed') {
-      return refuse(op.reason === 'rate-limited' ? 'rate-limited' : 'conflict', 'HubSpot に書けませんでした（何も変わっていません）', { code: 'WRITE_FAILED', reason: op.reason, operation: view(op), record })
+      return refuse(op.reason === 'rate-limited' ? 'rate-limited' : 'conflict', 'HubSpot に書けませんでした（何も変わっていません）', { code: 'WRITE_FAILED', reason: op.reason, operation: view(member.companyId, op), record })
     }
-    return ok({ operation: view(op), record })
+    return ok({ operation: view(member.companyId, op), record })
   }
 }
 

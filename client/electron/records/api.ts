@@ -10,7 +10,8 @@
  */
 
 export class RecordsApiError extends Error {
-  constructor(readonly code: string, message: string) {
+  /** The refusal's other fields (a plugin operation's `operation`, `current`, `fields`…); never a session or token. */
+  constructor(readonly code: string, message: string, readonly details: Record<string, unknown> = {}) {
     super(message)
   }
 }
@@ -47,7 +48,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
   const timeoutMs = deps.timeoutMs ?? 20_000
   const base = () => deps.baseUrl().replace(/\/+$/, '')
 
-  async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<{ status: number; body: { data?: unknown; error?: string; code?: string } }> {
+  async function request(url: string, init: RequestInit, signal?: AbortSignal): Promise<{ status: number; body: { data?: unknown; error?: string; code?: string; [extra: string]: unknown } }> {
     const timeout = AbortSignal.timeout(timeoutMs)
     let res: Response
     try {
@@ -57,7 +58,7 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
       deps.log?.warn(`[records] request failed: ${error instanceof Error ? error.name : 'unknown'}`)
       throw new RecordsApiError('OFFLINE', RECORDS_OFFLINE_MESSAGE)
     }
-    let body: { data?: unknown; error?: string; code?: string } = {}
+    let body: { data?: unknown; error?: string; code?: string; [extra: string]: unknown } = {}
     try { body = await res.json() as typeof body } catch { /* not JSON */ }
     return { status: res.status, body }
   }
@@ -92,7 +93,10 @@ export function createRecordsApi(deps: RecordsApiDeps): RecordsApi {
             ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
           }, signal)
           if (r.status >= 500) throw new RecordsApiError('SERVER_ERROR', `サーバーでエラーが起きました（HTTP ${r.status}）。`)
-          if (r.status < 200 || r.status >= 300) throw new RecordsApiError(r.body.code || `HTTP_${r.status}`, r.body.error || `HTTP ${r.status}`)
+          if (r.status < 200 || r.status >= 300) {
+            const { error, code, ...details } = r.body
+            throw new RecordsApiError(code || `HTTP_${r.status}`, error || `HTTP ${r.status}`, details)
+          }
           return r.body.data
         },
         async close() {

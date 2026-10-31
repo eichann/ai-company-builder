@@ -28,6 +28,10 @@ paths:
   - "admin/src/lib/integrations.ts"
   - "admin/tests/integrations.test.tsx"
   - "server/tests/integration/plugin-operations.test.ts"
+  - "client/shared/plugin-operations.ts"
+  - "client/electron/features/plugin-operations/**"
+  - "client/src/features/chat/components/PluginOperationCard.tsx"
+  - "client/tests/plugin-tools.test.ts"
 ---
 
 # Connector plugins (milestone 3): declaration, mapping, field policies
@@ -372,6 +376,12 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
   as a new operation (`operation: undo`, `undoOf`), and marks the original `undoneBy`. Every
   answer carries `undoNotice` (`UNDO_NOTICE`): HubSpot workflows and notifications that followed
   are not undone (§5.4). A value changed B → A → S → A in HubSpot looks unchanged to this check.
+- Answers carry the operation record as its record's readers see it (`PluginOperationRecordView`,
+  `shared/types/plugins.ts`): the record's title, `actorKind`, and for an applied write
+  `changes` — each field before → after, from its ledger entry. The session routes (run, undo)
+  take the app's informational provenance `conversationId` / `proposedBy`
+  (`selfReportedProvenance`, records.md "Provenance"); it lands on the ledger entry and never
+  authorizes anything.
 - Notices: the engine's `records` signal (kind + version, no content) to the record's assignee.
 - Kill switches, each from the next call: the operator's stop file, the company's switch, the
   key's stop / 「すべての鍵を止める」, the AI emergency stop (AI only), a field's `off` (the
@@ -416,10 +426,40 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconci
 - Tests: `admin/tests/integrations.test.tsx`; the requests in
   `server/tests/integration/admin-contract.test.ts`.
 
+## The app (P7): the AI's tools and the chat card
+
+- `GET /api/records-ai/plugins` (record token; `plugins.aiTools`): the running plugins'
+  operations the member's AI may call — `who` lists `ai`, no `create`, and with a `read` token
+  (Codex) no update; an update lists the fields it may write now (`auto` / `prior`; `off` and
+  `stage` never). `client/electron/records/tools.ts` `pluginToolSpecs` turns each into a tool on
+  the `acb_records` server (`hubspot__update_deal`, `hubspot__refresh_deal`), generated each turn
+  like the type tools, called with the turn's record token. The app drops writes for a read
+  token too (`client/tests/plugin-tools.test.ts`).
+- The update tool's `note` is required for a `decision` operation; its description tells the AI to
+  draft the reason from the consultation and cite the message it rests on, that one approval
+  field refuses the whole request, and **never to claim success unless the outcome is
+  `applied`** (an `unknown` result is not re-sent; the member checks).
+- The outcome becomes a card in the reply (`client/shared/plugin-operations.ts`, data part
+  `data-plugin-operation`, stored with the message as `pluginOperations`;
+  `src/features/chat/components/PluginOperationCard.tsx`). Outcomes, only what is known:
+  `applied` (before → after per field, 「AI が記録」 when the AI asked), `unchanged`, `refused`
+  (ACB's checks; nothing changed), `not-sent` (HubSpot refused or could not be read), `conflict`
+  (changed first; the values there now), `unknown` (answer lost, a 5xx, the app could not reach
+  the server — never "updated"), `observed` (HubSpot shows it, not confirmed as ACB's; no undo).
+  The AI is told the same (`aiSummaryOf`).
+- 「変更前の値を書き戻す」 on an applied card: the person's own action through IPC
+  `pluginOperations:undo` (`client/electron/features/plugin-operations/ipc.ts`) with the
+  member's **session**, never the record token, and the consultation as `conversationId`. The
+  card always states that HubSpot workflows and notifications are not undone. An unknown card
+  offers 「もう一度確かめる」 (`pluginOperations:reconcile`). The card does not re-read the
+  operation on its own: after a restart the server answers the button (`NOT_UNDOABLE` when it was
+  already written back).
+- No jargon on the card (no 型 / プラグイン / オントロジー); the outside system is named by its
+  label (HubSpot).
+
 ## Not yet (later PRs of milestone 3)
 
-P7 the app's tools (Claude writes, Codex reads; the `update_deal` tool's description tells the AI
-to draft the reason from the consultation and cite its basis); P9
+P9
 staging (compose wiring of `PLUGINS_DIR`); notes (`add_note`, a create: never re-sent, with a
 correlation check) after milestone 3. The real HubSpot package lives in the private
 `acb-plugins` repository (§6-6).

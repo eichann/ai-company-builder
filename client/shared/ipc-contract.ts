@@ -33,6 +33,7 @@ import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
 import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
+import type { PluginOperationResult } from './plugin-operations'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -447,6 +448,10 @@ export interface IpcInvokeChannels {
   'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
   /** Moves a built-in service's key from the company folder's .env to the server (removed locally only after the server kept it). */
   'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
+  // The chat card of an outside system's write (HubSpot): the person's own actions, with their session.
+  /** 「変更前の値を書き戻す」 (a person's action; the consultation is informational provenance). */
+  'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
+  'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -711,6 +716,9 @@ export interface ElectronAPI {
   saveOwnBrokerKey: Invoke<'brokerKeys:save'>
   deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
   moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
+  // The chat card of an outside system's write: the person's own actions (never the AI's).
+  undoPluginOperation: Invoke<'pluginOperations:undo'>
+  reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

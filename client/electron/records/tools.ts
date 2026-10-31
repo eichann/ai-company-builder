@@ -13,9 +13,19 @@
  * type's `who` (an action without `ai` — completing a task — is refused).
  * The AI changes state only through these tools; the chat write guard stops
  * it from writing state into a record file instead.
+ *
+ * Connector plugins (milestone 3 P7, `.claude/rules/plugins.md` "The app"):
+ * the operations of the plugins that run for the company become tools on the
+ * same server (`hubspot__update_deal`, `hubspot__refresh_deal`), from
+ * `GET /api/records-ai/plugins` — the same way the type definitions do.
+ * Writes only with an `act` token (Claude); Codex gets reads. An update's
+ * outcome becomes a card in the reply (`client/shared/plugin-operations.ts`)
+ * with 「変更前の値を書き戻す」 for the person.
  */
 import { z, type ZodTypeAny } from 'zod'
 import type { FieldKind, TypeDefinition } from '../../../shared/core/record-types'
+import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
+import { aiSummaryOf, cardFromAnswer, cardFromRefusal, type CardContext, type PluginOperationCard } from '../../shared/plugin-operations'
 import { startLoopbackMcp } from '../agents/loopback-mcp'
 import { RecordsApiError, type RecordTurnAccess } from './api'
 
@@ -30,6 +40,8 @@ export interface RecordToolSpec {
   description: string
   schema: z.ZodObject<Record<string, ZodTypeAny>>
   readOnly: boolean
+  /** A connector's update: its outcome becomes a card in the reply. */
+  card?: { pluginId: string; systemLabel: string; labels: Record<string, string> }
   /** The server call for a validated input. */
   request(input: Record<string, unknown>): { method: 'GET' | 'POST'; path: string; body?: unknown }
 }
@@ -131,6 +143,73 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
   return specs
 }
 
+/** Tool names are `<plugin>__<operation>`; the plugin id is the declaration's (`^[a-z][a-z0-9_-]*`). */
+export function pluginToolName(pluginId: string, operation: string): string { return `${pluginId}__${operation}` }
+
+/**
+ * The tools for the running plugins' operations (P7). `writes`: whether this
+ * agent may write (registry `recordActions`; Codex never). The server
+ * filters the same way for a read token and decides every call anyway.
+ */
+export function pluginToolSpecs(tools: PluginAiTools, writes: boolean): RecordToolSpec[] {
+  const specs: RecordToolSpec[] = []
+  for (const p of tools.plugins) {
+    for (const op of p.operations) {
+      const name = pluginToolName(p.id, op.name)
+      if (!TOOL_NAME_RE.test(name)) continue
+      const path = (id: unknown) => `/plugins/${enc(p.id)}/records/${enc(String(id))}/operations/${enc(op.name)}`
+      if (op.kind === 'read') {
+        specs.push({
+          name, readOnly: true, schema: z.object({ id }).strict(),
+          description: `${p.label} から、この案件の最新の値を取り込む（読むだけ。${p.label} は変えない）。そのあと records_get で読む。\n` +
+            `Bring the record's latest values in from ${p.label} (read only), then read it with records_get.`,
+          request: input => ({ method: 'POST', path: path(input.id), body: {} }),
+        })
+        continue
+      }
+      if (!writes) continue
+      specs.push(updateSpec(p.id, p.label, op, name, path))
+    }
+  }
+  return specs
+}
+
+function updateSpec(pluginId: string, system: string, op: PluginAiOperation, name: string, path: (id: unknown) => string): RecordToolSpec {
+  const fieldShape: Record<string, ZodTypeAny> = {}
+  for (const f of op.fields) {
+    const desc = `${f.label}${f.policy === 'prior' ? '（承認が要る欄：いまは書けず、断られる / needs approval: refused for now）' : ''}`
+    fieldShape[f.name] = kindSchema(f.kind as FieldKind, f.options).optional().describe(desc)
+  }
+  const auto = op.fields.filter(f => f.policy === 'auto').map(f => f.label)
+  const prior = op.fields.filter(f => f.policy === 'prior').map(f => f.label)
+  const reason = op.decision
+    ? z.string().trim().min(1).max(2000).describe('相談のどの発言からそう判断したか：理由と根拠（発言の要約か引用） / the reason, drafted from the consultation, citing the message it rests on')
+    : z.string().max(2000).optional()
+  return {
+    name, readOnly: false,
+    card: { pluginId, systemLabel: system, labels: Object.fromEntries(op.fields.map(f => [f.name, f.label])) },
+    schema: z.object({
+      id,
+      expectedVersion: z.number().int().min(0).describe('records_get で見た version / the version you read'),
+      fields: z.object(fieldShape).strict().describe('変える欄だけ（1つ以上） / only the fields to change (at least one)'),
+      note: reason,
+    }).strict(),
+    description: `「${op.label}」：${system} の案件の欄を書き換える（ACB の言葉で渡す。${system} の項目名への読み替えは ACB が行う）。` +
+      `すぐ書ける欄：${auto.join('、') || 'なし'}。${prior.length ? `承認が要る欄（いまは断られる）：${prior.join('、')}。` : ''}` +
+      `承認が要る欄が1つでも入ると、全部を断られる。` +
+      (op.decision ? '理由（note）は必須：相談の中のメンバーの発言から下書きし、根拠になった発言を示す。' : '') +
+      `結果は相談の中にカードとして出る。結果が「更新した（applied）」でないときは、成功したと言わない。届いたか分からない（unknown）ときは送り直さず、メンバーに確かめてもらう。\n` +
+      `${name}: write fields of this deal to ${system} (ACB values; the mapping translates). Auto: ${op.fields.filter(f => f.policy === 'auto').map(f => f.name).join(', ') || 'none'}.` +
+      `${prior.length ? ` Needs approval (refused now): ${op.fields.filter(f => f.policy === 'prior').map(f => f.name).join(', ')}.` : ''}` +
+      (op.decision ? ' `note` is required: draft the reason from the consultation and cite the message it rests on.' : '') +
+      ' Never claim success unless the outcome is `applied`; when it is `unknown`, do not resend — ask the member to check.',
+    request: input => ({
+      method: 'POST', path: path(input.id),
+      body: { expectedVersion: input.expectedVersion, fields: Object.fromEntries(Object.entries(input.fields as Record<string, unknown>).filter(([, v]) => v !== undefined)), ...(input.note !== undefined ? { note: input.note } : {}) },
+    }),
+  }
+}
+
 export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECORDS_SERVER}__*${'`'} は会社の記録（タスクなど）の道具です。状態・担当・期限はサーバーが持ち、記録のファイルには書きません（ファイルの先頭は id・type・links だけ）。状態を変えるときは必ずこの道具の操作を使い、ファイルを書き換えないでください。人や顧客の名前ではなく id を使ってください。`
 
 export interface RecordTools {
@@ -145,7 +224,18 @@ export interface RecordTools {
  * unreachable). `actions`: whether this agent may change state (registry
  * `recordActions`); the token's scope follows it.
  */
-export async function createRecordTools(access: RecordTurnAccess, signal?: AbortSignal): Promise<RecordTools | null> {
+export interface RecordToolsOptions {
+  /** For the cards: the company and the consultation. */
+  companyId?: string
+  conversationId?: string | null
+  /** A connector's update finished (any outcome): its card for the reply. */
+  onOperationCard?: (card: PluginOperationCard) => void
+  /** Card ids (default: random). */
+  newId?: () => string
+  now?: () => Date
+}
+
+export async function createRecordTools(access: RecordTurnAccess, signal?: AbortSignal, options: RecordToolsOptions = {}): Promise<RecordTools | null> {
   let types: TypeDefinition[]
   try {
     const answer = await access.call('GET', '/types', undefined, signal) as { types?: Array<{ definition: TypeDefinition }> }
@@ -154,7 +244,15 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
     await access.close()
     return null
   }
-  const specs = [...LOOKUPS, ...(access.scope === 'act' ? actionToolSpecs(types) : [])]
+  // The running plugins' operations; none when the server has none (or is older).
+  let plugins: PluginAiTools = { plugins: [] }
+  try {
+    const answer = await access.call('GET', '/plugins', undefined, signal) as PluginAiTools | undefined
+    if (answer && Array.isArray(answer.plugins)) plugins = answer
+  } catch { /* no plugin tools this turn */ }
+  const specs = [...LOOKUPS, ...(access.scope === 'act' ? actionToolSpecs(types) : []), ...pluginToolSpecs(plugins, access.scope === 'act')]
+  const newId = options.newId ?? (() => crypto.randomUUID())
+  const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
   return {
     specs,
@@ -166,6 +264,7 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
       const parsed = spec.schema.safeParse(input ?? {})
       if (!parsed.success) return JSON.stringify({ error: '入力が正しくありません。', issues: parsed.error.issues.slice(0, 5).map(i => `${i.path.join('.')}: ${i.message}`) })
       const req = spec.request(parsed.data)
+      if (spec.card) return runUpdate(spec.card, parsed.data, req)
       try {
         const out = JSON.stringify(await access.call(req.method, req.path, req.body, signal))
         return out.length > MAX_OUTPUT ? `${out.slice(0, MAX_OUTPUT)}…（長いため切り詰めました / truncated）` : out
@@ -174,6 +273,29 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
         throw error
       }
     },
+  }
+
+  /** A connector's update: the server's answer becomes a card, and the AI is told only what is known. */
+  async function runUpdate(card: NonNullable<RecordToolSpec['card']>, input: Record<string, unknown>, req: ReturnType<RecordToolSpec['request']>): Promise<string> {
+    const body = req.body as { fields: Record<string, CardContext['asked'][string]>; note?: string }
+    const ctx: CardContext = {
+      id: newId(), companyId: options.companyId ?? '', conversationId: options.conversationId ?? null, pluginId: card.pluginId, systemLabel: card.systemLabel,
+      recordId: String(input.id), labels: card.labels, asked: body.fields, reason: typeof body.note === 'string' && body.note.trim() ? body.note.trim() : null,
+      byAi: true, at: now().toISOString(),
+    }
+    let result: PluginOperationCard
+    try {
+      result = cardFromAnswer(ctx, await access.call(req.method, req.path, req.body, signal) as Parameters<typeof cardFromAnswer>[1])
+    } catch (error) {
+      // Not a refusal the server gave (the turn stopped mid-request…): whether it arrived is not known.
+      result = error instanceof RecordsApiError ? cardFromRefusal(ctx, error.code, error.message, error.details) : cardFromRefusal(ctx, 'OFFLINE', undefined)
+      if (!(error instanceof RecordsApiError)) {
+        if (options.companyId) options.onOperationCard?.(result)
+        throw error
+      }
+    }
+    if (options.companyId) options.onOperationCard?.(result)
+    return JSON.stringify(aiSummaryOf(result))
   }
 }
 

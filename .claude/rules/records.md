@@ -274,6 +274,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `client/shared/record-actions.ts` `recordActionChoices` lists the actions that can start from a
   record's state. The push channel's `records` event has an optional listener in the app
   (`onRecords`), not wired to anything yet.
+- Connector plugins' operations become tools on the same server (`hubspot__update_deal`; writes
+  only with an `act` token) and an update's outcome a card in the reply: `plugins.md` "The app".
 - Not done (TODO): the plugin-SDK and admin-API surfaces of the same definitions (stages 5 / 7);
   pushing an action's attached files before calling it (0.18-1 — the tools send no
   `attachments` yet); the app assigning ids to new record files and repairing duplicates.

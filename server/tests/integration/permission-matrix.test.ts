@@ -308,6 +308,7 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/plugins', () => ({ path: '/api/records-ai/plugins' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
