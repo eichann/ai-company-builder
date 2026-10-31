@@ -30,6 +30,7 @@ import { isValidBrokerServiceName, parseRelayBaseUrl, builtinBrokerService } fro
 import { normalizeRepoPath } from './paths'
 import { ONTOLOGY_NAME_RE, parseTypeFile, type FieldDef, type NoteRule, type TypeDefinition } from './record-types'
 import { checkUpstreamPath } from './upstream-path'
+import { APPROVER_RULES, stricterApprover, type ApproverRule } from './approvals'
 import { isYamlMap, parseYamlLite, type YamlValue } from './yaml-lite'
 
 /**
@@ -43,13 +44,21 @@ import { isYamlMap, parseYamlLite, type YamlValue } from './yaml-lite'
 export const PLUGIN_ACTORS = ['viewer', 'ai', 'dept_manager', 'admin'] as const
 
 /**
- * Fields no plugin may write in milestone 3 (review §5.3, owner 2026-10-31):
- * changing `stage` can move a deal to won / lost — the outcome a
- * pre-approval field guards — so it is not written back at all (a mapping
- * with `write: true` and an `auto` default or policy are refused; at run time
- * it is `off` whatever is stored).
+ * Fields a plugin writes only after a person approves (milestone 4, design
+ * 節目4 §9 q2, replacing milestone 3's "never"): changing `stage` can move a
+ * deal to won / lost, so it is never `auto` — an `auto` default or policy is
+ * refused, and at run time it is at least `prior` whatever is stored. A
+ * mapping may now say `write: true` on it (div's 確度 is HubSpot's stage).
  */
-export const MILESTONE3_UNWRITABLE_FIELDS: readonly string[] = ['stage']
+export const PRIOR_ONLY_FIELDS: readonly string[] = ['stage']
+
+/**
+ * What an attached create (a meeting or a note on a deal) may fill: fixed
+ * slots, each named to one outside property by the declaration's `content`.
+ * `at` is a time (sent as epoch milliseconds, HubSpot's `hs_timestamp`).
+ */
+export const CREATE_CONTENT_SLOTS = ['title', 'body', 'at', 'outcome'] as const
+export type CreateContentSlot = typeof CREATE_CONTENT_SLOTS[number]
 
 /** The plugin contract this build understands (0.17). A declaration naming another is not used. */
 export const PLUGIN_CONTRACT = 1
@@ -116,8 +125,27 @@ export interface PluginOperation {
   reaches: OperationReach
   undo: UndoKind
   note: NoteRule
-  /** For operations that write no mapped fields (create): its policy. Never `auto` when external. */
+  /** For operations that write no mapped fields (create): its policy. Never `auto` when external or when it creates a record. */
   policy: FieldPolicy
+  /**
+   * create attached to a record (`attach_to`): which outside property each
+   * content slot goes to. Empty for other kinds.
+   */
+  content: Partial<Record<CreateContentSlot, string>>
+  /** create attached to a record: the outside association type linking the new item to it (HubSpot: 212 meeting → deal). */
+  associationType: number | null
+  /**
+   * create: the outside property (a unique-value custom property the company
+   * made, e.g. `acb_operation_id`) where the core writes the operation id, so
+   * a create whose answer was lost can be looked up instead of re-sent
+   * (design 節目4 §3-6, §4-4). Required on every create.
+   */
+  correlationProperty: string | null
+  /**
+   * create with no `attach_to`: the item becomes a new record of the object's
+   * own type (`create_deal`). Such an operation is never `auto`.
+   */
+  createsRecord: boolean
 }
 
 export interface PluginManifest {
@@ -300,7 +328,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   else for (const [opname, op] of Object.entries(rawOps)) {
     if (!ONTOLOGY_NAME_RE.test(opname)) { err(`操作の名前「${opname}」は英小文字・数字・_ で書いてください`); continue }
     if (!isYamlMap(op)) { err(`操作「${opname}」は { … } の形で書いてください`); continue }
-    unknownKeys(`操作「${opname}」: `, op, ['label', 'kind', 'object', 'who', 'fields', 'attach_to', 'reaches', 'undo', 'note', 'policy', 'decision'], err)
+    unknownKeys(`操作「${opname}」: `, op, ['label', 'kind', 'object', 'who', 'fields', 'attach_to', 'reaches', 'undo', 'note', 'policy', 'decision', 'content', 'association_type', 'correlation_property'], err)
     const where = `操作「${opname}」`
     if (!isStr(op.label)) err(`${where}に label を書いてください`)
     const opKind = op.kind
@@ -321,6 +349,13 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     if (undo !== 'none' && undo !== 'restore_previous' && undo !== 'archive') err(`${where}の undo は restore_previous / archive / none です`)
     let fields: 'mapped' | null = null
     let attachTo: string | null = null
+    const content: Partial<Record<CreateContentSlot, string>> = {}
+    let associationType: number | null = null
+    let correlationProperty: string | null = null
+    let createsRecord = false
+    if (opKind !== 'create' && (op.content !== undefined || op.association_type !== undefined || op.correlation_property !== undefined)) {
+      err(`${where}: content / association_type / correlation_property は作る操作だけに書けます`)
+    }
     if (opKind === 'read') {
       if (!obj.endpoints.get || !obj.recordType) err(`${where}: 読む操作の対象には get と record_type が要ります`)
       if (op.fields !== undefined || op.attach_to !== undefined || op.undo !== undefined || op.policy !== undefined) err(`${where}: 読む操作に fields / attach_to / undo / policy は書けません`)
@@ -333,19 +368,41 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       if (op.policy !== undefined) err(`${where}: 書き換える操作の決まりは欄ごとです（field_policy_defaults と読み替え表）`)
     } else {
       if (!obj.endpoints.create) err(`${where}: 作る操作の対象には create が要ります`)
-      if (op.fields !== undefined) err(`${where}: 作る操作に fields は書けません`)
       if (undo === 'restore_previous') err(`${where}: 作ったものの戻し方は archive か none です`)
       if (undo === 'archive' && !obj.endpoints.archive) err(`${where}: undo: archive には対象の archive が要ります`)
-      const target = typeof op.attach_to === 'string' ? objects[op.attach_to] : undefined
-      if (!target?.recordType) err(`${where}の attach_to は record_type のある対象の名前です`)
-      else attachTo = op.attach_to as string
+      if (typeof op.correlation_property !== 'string' || !EXTERNAL_NAME_RE.test(op.correlation_property)) {
+        err(`${where}: 作る操作には correlation_property（ACB の操作の番号を書き込む、外の「一意の値」の項目名）が要ります`)
+      } else correlationProperty = op.correlation_property
+      if (op.attach_to === undefined) {
+        // Creates a record of the object's own type (create_deal): its fields come from the mapping.
+        createsRecord = true
+        if (!obj.recordType || !obj.endpoints.get) err(`${where}: 記録を作る操作の対象には get と record_type が要ります`)
+        if (op.fields !== 'mapped') err(`${where}: 記録を作る操作の fields は mapped です（読み替え表の件名と「書く」にした欄）`)
+        else fields = 'mapped'
+        if (op.content !== undefined || op.association_type !== undefined) err(`${where}: 記録を作る操作に content / association_type は書けません`)
+      } else {
+        if (op.fields !== undefined) err(`${where}: 記録につける作る操作に fields は書けません（content で書きます）`)
+        const target = typeof op.attach_to === 'string' ? objects[op.attach_to] : undefined
+        if (!target?.recordType) err(`${where}の attach_to は record_type のある対象の名前です`)
+        else attachTo = op.attach_to as string
+        if (!isYamlMap(op.content) || Object.keys(op.content).length === 0) err(`${where}の content は「${CREATE_CONTENT_SLOTS.join(' / ')}: 外の項目名」の形で書いてください`)
+        else for (const [slot, prop] of Object.entries(op.content)) {
+          if (!(CREATE_CONTENT_SLOTS as readonly string[]).includes(slot)) err(`${where}の content の「${slot}」は ${CREATE_CONTENT_SLOTS.join(' / ')} のどれかです`)
+          else if (typeof prop !== 'string' || !EXTERNAL_NAME_RE.test(prop)) err(`${where}の content の「${slot}」は外の項目名です`)
+          else content[slot as CreateContentSlot] = prop
+        }
+        const at = op.association_type
+        if (typeof at !== 'number' || !Number.isInteger(at) || at < 1 || at > 1_000_000) err(`${where}の association_type は外の結びつきの種類の番号です（例：212）`)
+        else associationType = at
+      }
     }
-    let policy: FieldPolicy = reaches === 'external' ? 'prior' : 'auto'
+    let policy: FieldPolicy = reaches === 'external' || createsRecord ? 'prior' : 'auto'
     if (op.policy !== undefined) {
       if (!FIELD_POLICIES.includes(op.policy as FieldPolicy)) err(`${where}の policy は auto / prior / off です`)
       else policy = op.policy as FieldPolicy
     }
     if (reaches === 'external' && policy === 'auto') err(`${where}: 社外の人に届く操作は「自動」にできません`)
+    if (createsRecord && policy === 'auto') err(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
     operations[opname] = {
       label: isStr(op.label) ? op.label : opname,
       kind: opKind,
@@ -358,6 +415,10 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       note: note as NoteRule,
       policy,
       decision: decision === true,
+      content,
+      associationType,
+      correlationProperty,
+      createsRecord,
     }
   }
 
@@ -391,7 +452,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   if (!isYamlMap(rawDefaults)) err('field_policy_defaults は「欄の名前: auto / prior / off」の形で書いてください')
   else for (const [f, p] of Object.entries(rawDefaults)) {
     if (!ONTOLOGY_NAME_RE.test(f) || !FIELD_POLICIES.includes(p as FieldPolicy)) err(`field_policy_defaults の「${f}」は auto / prior / off です`)
-    else if (p === 'auto' && MILESTONE3_UNWRITABLE_FIELDS.includes(f)) err(`field_policy_defaults の「${f}」: 節目3ではこの欄は書き戻せないため、auto にできません`)
+    else if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) err(`field_policy_defaults の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`)
     else fieldPolicyDefaults[f] = p as FieldPolicy
   }
   for (const [f, p] of Object.entries(fieldPolicyDefaults)) {
@@ -466,7 +527,7 @@ export function validatePluginPackage(input: { manifest: string; types: Record<s
   }
   if (errors.length === 0) {
     for (const [opname, op] of Object.entries(manifest.operations)) {
-      const typeName = manifest.objects[op.kind === 'create' ? op.attachTo! : op.object].recordType!
+      const typeName = manifest.objects[op.kind === 'create' && op.attachTo ? op.attachTo : op.object].recordType!
       const type = types[typeName]
       const persons = new Set(Object.entries(type.fields).filter(([, f]) => f.kind === 'person').map(([n]) => n))
       for (const w of op.who) {
@@ -514,9 +575,24 @@ export interface PluginMapping {
   objects: Record<string, MappingObject>
   /** Outside person id → ACB member id, per table (names never, ids only: 13.10). */
   people: Record<string, Record<string, string>>
-  /** The company's field policies (only where they differ from the declaration's defaults). */
+  /**
+   * The company's field policies (only where they differ from the
+   * declaration's defaults); a create operation's name sets that operation's
+   * policy (`log_meeting: auto`).
+   */
   policy: Record<string, FieldPolicy>
+  /**
+   * Who approves a `prior` field or create operation (design 節目4 §3-4, §9 q3):
+   * `self` (the member the request is for), `dept_manager`, `admin`. Absent:
+   * `DEFAULT_APPROVERS`, else `dept_manager`.
+   */
+  approvalBy: Record<string, ApproverRule>
+  /** ACB values of `stage` that close a deal (won / lost): moving there needs at least a department manager. */
+  closingStages: string[]
 }
+
+/** The recommended approvers (design §9 q3): 確度・段階 the member, 受注失注・金額 the department manager. */
+export const DEFAULT_APPROVERS: Readonly<Record<string, ApproverRule>> = { stage: 'self', confidence: 'self', amount: 'dept_manager', closed: 'dept_manager' }
 
 export const MAPPING_IMPORT_MAX = 10_000
 const MEMBER_ID_RE = /^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$/
@@ -556,7 +632,7 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
 
   const objects: Record<string, MappingObject> = {}
   for (const [oname, o] of Object.entries(raw)) {
-    if (oname === 'people' || oname === 'policy') continue
+    if (MAPPING_SECTIONS.includes(oname)) continue
     const obj = manifest.objects[oname]
     const type = obj?.recordType ? types[obj.recordType] : undefined
     if (!obj || !type) { err(`「${oname}」は、このプラグインの取り込む対象ではありません`); continue }
@@ -601,7 +677,6 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
       if (typeof write !== 'boolean') { err(`${where}の write は true か false です`); continue }
       if (write && !writable) err(`${where}: このプラグインには「${oname}」を書き換える操作がないため、write: true にできません`)
       if (write && def.source === 'file') err(`${where}: 件名・要約は書き戻せません`)
-      if (write && MILESTONE3_UNWRITABLE_FIELDS.includes(fname)) err(`${where}: 節目3ではこの欄は書き戻せません（受注・失注への変更を承認なしにできてしまうため）。write: false にしてください`)
       let values: Record<string, string> | null = null
       if (f.values !== undefined) {
         if (def.kind !== 'choice') err(`${where}: values は選択肢の欄だけに書けます`)
@@ -642,12 +717,19 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     objects[oname] = { visibleToFolder, import: importRule, fields, links }
   }
 
+  const createOps = Object.entries(manifest.operations).filter(([, op]) => op.kind === 'create')
   const policy: Record<string, FieldPolicy> = {}
   const rawPolicy = raw.policy ?? {}
   if (!isYamlMap(rawPolicy)) err('policy は「欄の名前: auto / prior / off」の形で書いてください')
   else for (const [f, p] of Object.entries(rawPolicy)) {
     if (!FIELD_POLICIES.includes(p as FieldPolicy)) { err(`policy の「${f}」は auto / prior / off です`); continue }
-    if (p === 'auto' && MILESTONE3_UNWRITABLE_FIELDS.includes(f)) { err(`policy の「${f}」: 節目3ではこの欄は書き戻せないため、auto にできません`); continue }
+    const createOp = createOps.find(([n]) => n === f)?.[1]
+    if (createOp) {
+      if (p === 'auto' && (createOp.reaches === 'external' || createOp.createsRecord)) { err(`policy の「${f}」: この操作は「自動」にできません（必ず人が承認します）`); continue }
+      policy[f] = p as FieldPolicy
+      continue
+    }
+    if (p === 'auto' && PRIOR_ONLY_FIELDS.includes(f)) { err(`policy の「${f}」: この欄は受注・失注につながるため、承認なし（auto）にできません`); continue }
     if (!Object.values(objects).some(o => o.fields[f])) { err(`policy の「${f}」は読み替え表にない欄です`); continue }
     if (p === 'auto' && Object.entries(objects).some(([on, o]) => o.fields[f]?.write && externalFieldWriters(manifest, on).length > 0)) {
       err(`policy の「${f}」: 社外の人に届く操作で書かれる欄は「自動」にできません`)
@@ -656,42 +738,86 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     policy[f] = p as FieldPolicy
   }
 
+  const approvalBy: Record<string, ApproverRule> = {}
+  const rawApprovalBy = raw.approval_by ?? {}
+  if (!isYamlMap(rawApprovalBy)) err(`approval_by は「欄の名前: ${APPROVER_RULES.join(' / ')}」の形で書いてください`)
+  else for (const [f, who] of Object.entries(rawApprovalBy)) {
+    if (!(APPROVER_RULES as readonly string[]).includes(who as string)) { err(`approval_by の「${f}」は ${APPROVER_RULES.join(' / ')} のどれかです`); continue }
+    if (!createOps.some(([n]) => n === f) && !Object.values(objects).some(o => o.fields[f]?.write)) { err(`approval_by の「${f}」は、書き戻す欄か作る操作の名前です`); continue }
+    approvalBy[f] = who as ApproverRule
+  }
+
+  const closingStages: string[] = []
+  if (raw.closing_stages !== undefined) {
+    const list = strList(raw.closing_stages)
+    const stageOptions = new Set(Object.values(types).flatMap(t => t.fields.stage?.options ?? []))
+    if (!list || !list.every(v => stageOptions.has(v))) err(`closing_stages は段階（stage）の選択肢の並びです（受注・失注になる段階）`)
+    else closingStages.push(...list)
+  }
+
   if (errors.length > 0) return { ok: false, errors }
-  return { ok: true, value: { objects, people, policy } }
+  return { ok: true, value: { objects, people, policy, approvalBy, closingStages } }
+}
+
+/** Top-level mapping keys that are not objects. */
+export const MAPPING_SECTIONS: readonly string[] = ['people', 'policy', 'approval_by', 'closing_stages']
+
+/**
+ * Who approves a request to run `operationName` with these ACB values
+ * (update: the fields asked; create: none) — the strictest of the fields'
+ * approvers; moving `stage` to a closing stage needs at least a department
+ * manager (design §9 q2/q3). Only asked for `prior` fields / operations.
+ */
+export function approverFor(manifest: PluginManifest, mapping: PluginMapping, operationName: string, fields: Record<string, AcbValue>): ApproverRule {
+  const op = manifest.operations[operationName]
+  if (op?.kind === 'create') return mapping.approvalBy[operationName] ?? (op.createsRecord ? 'self' : 'dept_manager')
+  let rule: ApproverRule | null = null
+  for (const [field, value] of Object.entries(fields)) {
+    let r = mapping.approvalBy[field] ?? DEFAULT_APPROVERS[field] ?? 'dept_manager'
+    if (field === 'stage' && typeof value === 'string' && mapping.closingStages.includes(value)) r = stricterApprover(r, 'dept_manager')
+    rule = rule === null ? r : stricterApprover(rule, r)
+  }
+  return rule ?? 'dept_manager'
 }
 
 /**
  * The policy that applies when operation `operationName` writes `field`:
- * `off` unless the mapping writes it (and always for
- * `MILESTONE3_UNWRITABLE_FIELDS`), else the company's choice, else the
+ * `off` unless the mapping writes it, else the company's choice, else the
  * declaration's default, else `prior` — and at least as strict as any other
- * field read from the same outside property; never `auto` for an operation
- * that reaches people outside the company, whatever the settings say (0.21).
+ * field read from the same outside property; never `auto` for
+ * `PRIOR_ONLY_FIELDS` nor for an operation that reaches people outside the
+ * company, whatever the settings say (0.21).
  */
 export function effectiveFieldPolicy(manifest: PluginManifest, mapping: PluginMapping, operationName: string, field: string): FieldPolicy {
   const op = manifest.operations[operationName]
   if (!op || op.kind !== 'update') return 'off'
   const rule = mapping.objects[op.object]?.fields[field]
-  if (!rule?.write || MILESTONE3_UNWRITABLE_FIELDS.includes(field)) return 'off'
+  if (!rule?.write) return 'off'
   // Judged on the outside property written, not only the ACB field (review §5.3): every field read
   // from the same property brings its own policy, and the strictest wins (a field another field
   // reads as `prior` cannot be reached through an `auto` one).
   let chosen: FieldPolicy = mapping.policy[field] ?? manifest.fieldPolicyDefaults[field] ?? 'prior'
   for (const [other, r] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
     if (other === field || r.from !== rule.from) continue
-    const theirs: FieldPolicy = MILESTONE3_UNWRITABLE_FIELDS.includes(other) ? 'off' : mapping.policy[other] ?? manifest.fieldPolicyDefaults[other] ?? 'prior'
+    let theirs: FieldPolicy = mapping.policy[other] ?? manifest.fieldPolicyDefaults[other] ?? 'prior'
+    if (PRIOR_ONLY_FIELDS.includes(other) && theirs === 'auto') theirs = 'prior'
     if (POLICY_STRICTNESS[theirs] > POLICY_STRICTNESS[chosen]) chosen = theirs
   }
-  return op.reaches === 'external' && chosen === 'auto' ? 'prior' : chosen
+  return (op.reaches === 'external' || PRIOR_ONLY_FIELDS.includes(field)) && chosen === 'auto' ? 'prior' : chosen
 }
 
 const POLICY_STRICTNESS: Record<FieldPolicy, number> = { auto: 0, prior: 1, off: 2 }
 
-/** An operation's own policy (create): never `auto` when it reaches outside people. */
-export function effectiveOperationPolicy(manifest: PluginManifest, operationName: string): FieldPolicy {
+/**
+ * An operation's own policy (create): the company's choice in the mapping,
+ * else the declaration's; never `auto` when it reaches outside people or
+ * creates a record (create_deal), whatever is stored.
+ */
+export function effectiveOperationPolicy(manifest: PluginManifest, operationName: string, mapping?: Pick<PluginMapping, 'policy'> | null): FieldPolicy {
   const op = manifest.operations[operationName]
   if (!op) return 'off'
-  return op.reaches === 'external' && op.policy === 'auto' ? 'prior' : op.policy
+  const chosen = (op.kind === 'create' ? mapping?.policy[operationName] : undefined) ?? op.policy
+  return (op.reaches === 'external' || op.createsRecord) && chosen === 'auto' ? 'prior' : chosen
 }
 
 // ── Translating values (both directions) ──

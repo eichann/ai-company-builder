@@ -126,7 +126,7 @@ describe('the table view of the mapping', () => {
     expect(parseYamlLite(mappingToYaml(odd))).toEqual({ ok: true, value: odd })
   })
 
-  it('a choice sets write and an explicit policy; reading only drops the policy; the stage is never offered', () => {
+  it('a choice sets write and an explicit policy; reading only drops the policy; the stage is never automatic', () => {
     const auto = changeMappingField(MAPPING, 'deal', 'confidence', { choice: 'auto' })
     const rows = mappingRows(auto, [])
     if (!rows.ok) throw new Error(rows.error)
@@ -142,7 +142,7 @@ describe('the table view of the mapping', () => {
     // A policy the text leaves to the package's defaults shows what the server says is in force.
     const fromServer = mappingRows(MAPPING, detail.policies)
     expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'next_step')?.choice).toBe('auto')
-    expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'stage')?.locked).toBe(true)
+    expect(fromServer.ok && fromServer.rows.find((r) => r.field === 'stage')?.priorOnly).toBe(true)
   })
 })
 
@@ -164,8 +164,9 @@ describe('つなぎ先', () => {
     expect(await screen.findByRole('option', { name: `営業の HubSpot（末尾 ${SECRET.slice(-4)}）` })).toBeInTheDocument()
     expect(await screen.findByText(/練習用の HubSpot につながっています/)).toBeInTheDocument()
     // The mapping table arrives with the detail (its own request).
-    expect(await screen.findByText('書き戻せません（受注・失注につながるため）')).toBeInTheDocument()
-    expect(screen.queryByRole('combobox', { name: 'stage の書き戻し' })).not.toBeInTheDocument()
+    expect(await screen.findByText('受注・失注につながるため、自動にはできません')).toBeInTheDocument()
+    const stage = screen.getByRole('combobox', { name: 'stage の書き戻し' })
+    expect([...stage.querySelectorAll('option')].map((o) => o.textContent)).not.toContain('自動で書き戻す')
     const text = document.body.textContent ?? ''
     for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
   })

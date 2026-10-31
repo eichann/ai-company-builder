@@ -5,7 +5,7 @@
 // The server decides: everything here is for the screen (`plugins.md`).
 
 import { isYamlMap, parseYamlLite, type YamlValue } from '../../../shared/core/yaml-lite'
-import { MILESTONE3_UNWRITABLE_FIELDS } from '../../../shared/core/plugins'
+import { MAPPING_SECTIONS, PRIOR_ONLY_FIELDS } from '../../../shared/core/plugins'
 import type { FieldPolicy, ImportReport, PluginFieldPolicyView, PluginProblem } from './api'
 
 /** Why it does not run, for people (no jargon). */
@@ -92,7 +92,7 @@ export function integrationRefusal(code: string | undefined, body: Record<string
 export type WriteChoice = 'read' | 'prior' | 'auto'
 export const WRITE_CHOICE_LABELS: Record<WriteChoice, string> = {
   read: '書き戻さない（読むだけ）',
-  prior: '承認が要る（いまは書き戻さない）',
+  prior: '承認してから書き戻す',
   auto: '自動で書き戻す',
 }
 
@@ -102,14 +102,14 @@ export interface MappingRow {
   /** The outside property. */
   from: string
   choice: WriteChoice
-  /** The field can never be written back now (the stage: it can make a deal won / lost). */
-  locked: boolean
+  /** The field is written back only after an approval, never automatically (the stage: it can make a deal won / lost). */
+  priorOnly: boolean
 }
 
 type YamlMap = { [key: string]: YamlValue }
 
-/** The mapping's sections that are objects (everything but `people` / `policy`). */
-const objectNames = (doc: YamlMap) => Object.keys(doc).filter(k => k !== 'people' && k !== 'policy' && isYamlMap(doc[k]))
+/** The mapping's sections that are objects (everything but `people`, `policy`, `approval_by`, `closing_stages`). */
+const objectNames = (doc: YamlMap) => Object.keys(doc).filter(k => !MAPPING_SECTIONS.includes(k) && isYamlMap(doc[k]))
 
 function choiceOf(field: string, write: boolean, policy: YamlMap, policies: PluginFieldPolicyView[]): WriteChoice {
   if (!write) return 'read'
@@ -138,7 +138,7 @@ export function mappingRows(text: string, policies: PluginFieldPolicyView[]): { 
       rows.push({
         object, field, from: typeof rule.from === 'string' ? rule.from : '',
         choice: choiceOf(field, rule.write === true, policy, policies),
-        locked: MILESTONE3_UNWRITABLE_FIELDS.includes(field),
+        priorOnly: PRIOR_ONLY_FIELDS.includes(field),
       })
     }
   }

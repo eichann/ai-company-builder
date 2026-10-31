@@ -18,7 +18,7 @@ import { describe, expect, it } from 'vitest'
 import { readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
-  acbToExternal, checkMappingAgainstProperties, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
+  acbToExternal, approverFor, checkMappingAgainstProperties, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
   parsePluginManifest, parsePluginMapping, pluginAvailableTo, typeNameLayerProblem, validatePluginPackage,
   type PluginPackage,
 } from '../../../shared/core/plugins'
@@ -171,16 +171,21 @@ describe('types (§8-2, §8-3)', () => {
 })
 
 describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
-  it('stage is never written back in milestone 3: not write: true, not an auto default or policy; off at run time', () => {
+  it('stage is written only after an approval (milestone 4): never an auto default or policy; at least prior at run time', () => {
     const p = crm()
-    const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\n', p)
-    expect(write.ok ? [] : write.errors.join()).toContain('書き戻せません')
-    expect(manifestErrors(crmWith('  stage: off', '  stage: auto')).join()).toContain('auto にできません')
-    const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
-    expect(policy.ok ? [] : policy.errors.join()).toContain('auto にできません')
-    // Whatever is stored: a mapping object built by hand still answers off.
-    const forged = { ...p.mapping!, objects: { deal: { ...p.mapping!.objects.deal, fields: { ...p.mapping!.objects.deal.fields, stage: { ...p.mapping!.objects.deal.fields.stage, write: true } } } }, policy: { stage: 'auto' as const } }
-    expect(effectiveFieldPolicy(p.manifest, forged, 'update_deal', 'stage')).toBe('off')
+    const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
+    if (!write.ok) throw new Error(write.errors.join())
+    expect(effectiveFieldPolicy(p.manifest, write.value, 'update_deal', 'stage')).toBe('prior')
+    expect(manifestErrors(crmWith('  stage: off', '  stage: auto')).join()).toContain('auto）にできません')
+    const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
+    expect(policy.ok ? [] : policy.errors.join()).toContain('auto）にできません')
+    // Whatever is stored: a mapping object built by hand still answers prior.
+    const forged = { ...write.value, policy: { stage: 'auto' as const } }
+    expect(effectiveFieldPolicy(p.manifest, forged, 'update_deal', 'stage')).toBe('prior')
+    // A field reading the same property as the stage cannot be written automatically either.
+    const shared = parsePluginMapping('deal:\n  fields:\n    next_step: { from: dealstage, write: true }\n    stage: { from: dealstage, write: false, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: prior\n', p)
+    if (!shared.ok) throw new Error(shared.errors.join())
+    expect(effectiveFieldPolicy(p.manifest, { ...shared.value, policy: { ...shared.value.policy, stage: 'auto' as const } }, 'update_deal', 'next_step')).toBe('prior')
   })
 
   it('the policy is judged on the outside property: an auto field cannot reach what a stricter field reads', () => {
@@ -298,5 +303,61 @@ describe('mapping checks', () => {
     const auto = parsePluginMapping('deal:\n  fields:\n    next_step: { from: stage_probability, write: true }\n', p)
     if (!auto.ok) throw new Error(auto.errors.join())
     expect(checkMappingAgainstProperties(p.manifest, auto.value, 'deal', [{ name: 'stage_probability', readOnly: false, options: null }]).warnings).toHaveLength(1)
+  })
+})
+
+describe('create operations (milestone 4: log_meeting, create_deal; design 節目4 §3-6)', () => {
+  it('every create names the unique outside property its operation id goes to, so a lost answer is looked up, never re-sent', () => {
+    expect(crm().manifest.operations.log_meeting).toMatchObject({ correlationProperty: 'acb_operation_id', associationType: 212, createsRecord: false })
+    expect(manifestErrors(crmWith('    association_type: 212\n    correlation_property: acb_operation_id\n', '    association_type: 212\n')).join()).toContain('correlation_property')
+  })
+
+  it('an attached create fills fixed content slots only, with an association type', () => {
+    expect(crm().manifest.operations.log_meeting.content).toEqual({ title: 'hs_meeting_title', body: 'hs_meeting_body', at: 'hs_timestamp' })
+    expect(manifestErrors(crmWith('content: { title: hs_meeting_title,', 'content: { amount: amount, title: hs_meeting_title,')).join()).toContain('content の「amount」')
+    expect(manifestErrors(crmWith('    association_type: 212\n', '')).join()).toContain('association_type')
+  })
+
+  it('creating a record (create_deal) is never automatic: declaration, company mapping and run time', () => {
+    const p = crm()
+    expect(p.manifest.operations.create_deal.createsRecord).toBe(true)
+    expect(effectiveOperationPolicy(p.manifest, 'create_deal', p.mapping)).toBe('prior')
+    expect(manifestErrors(crmWith('    fields: mapped\n    who: [viewer, ai]\n', '    fields: mapped\n    who: [viewer, ai]\n    policy: auto\n')).join()).toContain('自動」にできません')
+    const m = parsePluginMapping(`${CRM.mapping}  create_deal: auto\n`, p)
+    expect(m.ok ? [] : m.errors.join()).toContain('自動」にできません')
+    expect(effectiveOperationPolicy(p.manifest, 'create_deal', { policy: { create_deal: 'auto' } })).toBe('prior')
+  })
+
+  it('the company chooses whether a meeting log is automatic (design §9 q17)', () => {
+    const p = crm()
+    expect(effectiveOperationPolicy(p.manifest, 'log_meeting', p.mapping)).toBe('auto')
+    const m = parsePluginMapping(`${CRM.mapping}  log_meeting: prior\n`, p)
+    if (!m.ok) throw new Error(m.errors.join())
+    expect(effectiveOperationPolicy(p.manifest, 'log_meeting', m.value)).toBe('prior')
+  })
+})
+
+describe('who approves (design 節目4 §3-4, §9 q2/q3)', () => {
+  it('defaults: the member for the stage and creating a deal, the department manager for the amount; the strictest field wins', () => {
+    const p = crm()
+    const m = p.mapping!
+    expect(approverFor(p.manifest, m, 'update_deal', { confidence: 'a' })).toBe('self')
+    expect(approverFor(p.manifest, m, 'update_deal', { amount: 1500000 })).toBe('dept_manager')
+    expect(approverFor(p.manifest, m, 'update_deal', { confidence: 'a', amount: 1500000 })).toBe('dept_manager')
+    expect(approverFor(p.manifest, m, 'create_deal', {})).toBe('self')
+  })
+
+  it('moving the stage to a closing stage needs at least a department manager, whatever the mapping says', () => {
+    const p = crm()
+    const m = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal, closedwon: final } }\napproval_by:\n  stage: self\nclosing_stages: [final]\n', p)
+    if (!m.ok) throw new Error(m.errors.join())
+    expect(approverFor(p.manifest, m.value, 'update_deal', { stage: 'proposal' })).toBe('self')
+    expect(approverFor(p.manifest, m.value, 'update_deal', { stage: 'final' })).toBe('dept_manager')
+  })
+
+  it('approval_by names only written fields or create operations, with a known rule', () => {
+    const p = crm()
+    const bad = parsePluginMapping(`${CRM.mapping}approval_by:\n  title: self\n  amount: boss\n`, p)
+    expect(bad.ok ? [] : bad.errors.join()).toMatch(/title.*書き戻す欄か作る操作|amount.*self \/ dept_manager \/ admin/s)
   })
 })

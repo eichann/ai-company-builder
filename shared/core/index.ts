@@ -18,6 +18,10 @@
  *   core-types.ts         the core types task and interaction
  *   upstream-path.ts      the one check of a path sent to an outside service (relay, plugins)
  *   plugins.ts            connector plugins: declaration, mapping, field policies, value translation
+ *   fixed-content.ts      canonical JSON of content a person approves or sends (the server hashes it)
+ *   approvals.ts          approval requests: who approves, reasons, the fixed payload
+ *   mail.ts               outgoing mail: verified recipients, limits, canonical form
+ *   minutes.ts            minutes handed to the AI as outside text; quotes
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -40,3 +44,7 @@ export * from './record-ledger'
 export * from './core-types'
 export * from './upstream-path'
 export * from './plugins'
+export * from './fixed-content'
+export * from './approvals'
+export * from './mail'
+export * from './minutes'

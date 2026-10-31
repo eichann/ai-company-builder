@@ -74,8 +74,18 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   is part of the ledger entry and **the AI must give one** — a note drafted from the
   consultation, citing its basis; optional for people. `update_deal` is a decision,
   `refresh_deal` is not). An update
-  writes `fields: mapped` only (the mapping's `write: true` fields); a create names `attach_to`
-  (an object with a record type) and may carry its own `policy`.
+  writes `fields: mapped` only (the mapping's `write: true` fields).
+- **Creates** (milestone 4, design §3-6): every create names `correlation_property` (a unique-value
+  custom property the company makes in the outside system, e.g. `acb_operation_id`; the core writes
+  the operation id there so a lost answer is looked up, never re-sent). Two shapes: **attached**
+  (`attach_to` an object with a record type; `content { title | body | at | outcome: <outside
+  property> }` — fixed slots, no expressions — and `association_type`, e.g. HubSpot's 212 meeting →
+  deal: `log_meeting`, `add_note`), or **creating a record** of the object's own type (no
+  `attach_to`, `fields: mapped`, its title from the mapping's `title.from`: `create_deal`). A create
+  may carry its own `policy` (default `auto`, `prior` when external or creating a record); the
+  company overrides it in the mapping's `policy` by operation name (`log_meeting: auto`,
+  `effectiveOperationPolicy(manifest, op, mapping)`). **Creating a record is never `auto`**
+  (declaration, mapping, run time), like an external operation.
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 
@@ -117,13 +127,21 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
 ## Field policies (0.21)
 
 - `auto` (write at once, undoable), `prior` (a person approves first — milestone 3 refuses and
-  writes nothing), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
+  writes nothing; milestone 4 turns it into an approval request), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
-- **`stage` is never written in milestone 3** (`MILESTONE3_UNWRITABLE_FIELDS`, review §5.3,
-  owner 2026-10-31): moving the stage can make a deal won / lost, the outcome `closed` guards with
-  `prior`. A mapping with `write: true` on it, an `auto` default or policy for it are refused; at
-  run time it is `off` whatever is stored. No fixture or example ships it writable.
+- **`stage` is written only after an approval** (`PRIOR_ONLY_FIELDS`; milestone 3 never wrote it,
+  milestone 4 design §9 q2 allows `prior` because div's 確度 is HubSpot's stage): moving the stage
+  can make a deal won / lost. A mapping may say `write: true`; an `auto` default or policy for it is
+  refused; at run time it is at least `prior` whatever is stored, and so is any field read from the
+  same outside property.
+- **Who approves** a `prior` field or create (milestone 4, design §3-4 / §9 q3; `approverFor`,
+  `shared/core/approvals.ts`): the mapping's `approval_by { <field or create op>: self |
+  dept_manager | admin }`, else `DEFAULT_APPROVERS` (stage / confidence `self`, amount / closed
+  `dept_manager`), else `dept_manager`; a create of a record `self`. The strictest field of a request
+  wins; moving `stage` to one of the mapping's `closing_stages` needs at least `dept_manager`.
+  `mayApprove`: a stricter role qualifies for a looser rule; a member alone only for `self`. The
+  declaration still cannot name approvers (`approve` / `approver(s)` are forbidden keys there).
 - **Judged on the outside property**: a written field's policy is at least as strict as that of
   every other field read from the same outside property (off > prior > auto), so an `auto`
   field cannot reach what a stricter one reads (`effectiveFieldPolicy`).

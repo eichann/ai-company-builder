@@ -39,8 +39,12 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
 | `core-types.ts` | the core types `task` and `interaction`, in the definition format |
 | `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
+| `fixed-content.ts` | `canonicalJson` (sorted keys, NFC, nothing trimmed): what the server hashes (`sha256:…`) to fix approved / sent content; the app only echoes a hash |
+| `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
+| `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
+| `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
-| `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto), value translation both ways, `available_to` (`plugins.md`) |
+| `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.

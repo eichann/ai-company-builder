@@ -13,6 +13,7 @@ scopes:
   - crm.objects.deals.write
 operation_scopes:
   add_note: [crm.objects.notes.write]
+  log_meeting: [crm.objects.deals.write]
 types: [deal]
 
 objects:
@@ -22,8 +23,13 @@ objects:
     get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
     search: { method: POST,  path: "/crm/objects/2026-03/deals/search" }
     update: { method: PATCH, path: "/crm/objects/2026-03/deals/{id}" }
+    create: { method: POST,  path: "/crm/objects/2026-03/deals" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/deals/{id}" }
     properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
     stages_list:     { method: GET, path: "/crm/pipelines/2026-03/deals" }
+  meeting:
+    create:  { method: POST,   path: "/crm/objects/2026-03/meetings" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/meetings/{id}" }
   note:
     create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
     archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }
@@ -52,6 +58,29 @@ operations:
     who: [assignee, dept_manager, admin, ai]
     reaches: internal
     undo: archive
+    content: { body: hs_note_body, at: hs_timestamp }
+    association_type: 214
+    correlation_property: acb_operation_id
+  log_meeting:
+    label: 商談の記録を残す
+    kind: create
+    object: meeting
+    attach_to: deal
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: archive
+    content: { title: hs_meeting_title, body: hs_meeting_body, at: hs_timestamp }
+    association_type: 212
+    correlation_property: acb_operation_id
+  create_deal:
+    label: 取引を新しく作る
+    kind: create
+    object: deal
+    fields: mapped
+    who: [viewer, ai]
+    reaches: internal
+    undo: archive
+    correlation_property: acb_operation_id
 
 field_policy_defaults:
   next_step: auto
