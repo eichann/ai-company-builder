@@ -1,18 +1,17 @@
 ---
 paths:
-  - "client/src/components/chat/**"
   - "client/src/features/chat/**"
   - "client/electron/chat-history-store.ts"
   - "client/electron/features/chat-history/**"
   - "client/electron/ui-stream-limits.ts"
   - "client/shared/chat-history*.ts"
   - "client/tests/chat-history-store.test.ts"
-  - "client/tests/chat-rendering.test.ts"
+  - "client/src/features/chat/chat-rendering.test.ts"
   - "client/tests/chat-header-ui.*"
   - "client/tests/ui-stream-limits.test.ts"
   - "client/shared/chat-server-api.ts"
   - "client/electron/chat-server.ts"
-  - "client/tests/chat-server-client.test.ts"
+  - "client/src/features/chat/chat-server-client.test.ts"
   - "client/tests/chat-panel-helpers.test.ts"
   - "client/tests/ui/chat-*.spec.ts"
   - "client/src/app/ChatWindowApp.tsx"
@@ -32,7 +31,7 @@ is in `chat-and-agents.md`. Full text: `docs/architecture/chat-and-agents.md`, `
 
 ## Chat panel layout (R6)
 
-`src/components/chat/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
+`src/features/chat/components/`: `ChatPanel.tsx` (tabs, sidebar, settings overlay) → `ChatConversation.tsx`
 (one tab, `ChatPanelChat`, memo: hooks + composition) → `ChatHeader.tsx` (label, usage meter,
 per-agent model pickers, buttons; owns its width observer), `ChatMessageList.tsx`
 (`MessageList`, `MessageItem`, `UserMessageBubble`), `ChatComposer.tsx` (`ChatInput`, CodeMirror
@@ -163,10 +162,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - The embedded chat server's HTTP contract is `client/shared/chat-server-api.ts`
   (`CHAT_SERVER_PATHS` + request/response types); `electron/chat-server.ts` parses and answers
   with it.
-- The renderer talks to it only through `src/components/chat/chatServerClient.ts`
+- The renderer talks to it only through `src/features/chat/chatServerClient.ts`
   (`useChatServer()` returns one client per address, memoised by port + token). Build
   `http://127.0.0.1:<port>` URLs and the bearer header only there: add a method and its test in
-  `client/tests/chat-server-client.test.ts`. Each method keeps its caller's error behaviour
+  `src/features/chat/chat-server-client.test.ts`. Each method keeps its caller's error behaviour
   (steer → `unavailable`, forget never throws, suggestion / title → `null` on an error status).
   `fetch` is looked up per call (preview pages swap `window.fetch`).
 - Everything else the chat asks the main process goes through `src/features/chat/api.ts` too:
@@ -205,13 +204,13 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail
-  (`components/chat/historyThumbnail.ts`). Old full-size data URLs still load. An image that
+  (`features/chat/historyThumbnail.ts`). Old full-size data URLs still load. An image that
   cannot be read stops the send: the typed text goes back into the composer with
   「添付した画像を読み込めなかったため、送信しませんでした。…」 (`useMessageAttachments.ts`
   rejects; `tests/ui/chat-panel.spec.ts` 「an attached image that cannot be read…」).
 - Tests: `client/tests/chat-history-store.test.ts`.
 
-## Rendering (`client/src/components/chat/`)
+## Rendering (`client/src/features/chat/`)
 
 - `MessageList` renders the latest 50 messages (`messageWindow.ts`, anchored by message id so
   streaming messages append); 「以前のメッセージを表示」 adds 50 and keeps the scroll position.
@@ -235,5 +234,5 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.
 - Preview `client/tests/chat-header-ui.html?history=long` (a restored 240-message conversation);
-  tests `client/tests/chat-rendering.test.ts`. UI specs drive replies through `window.__acbChat`
+  tests `src/features/chat/chat-rendering.test.ts`. UI specs drive replies through `window.__acbChat`
   (`chat-header-ui.html?turn=manual`; see `testing.md`).

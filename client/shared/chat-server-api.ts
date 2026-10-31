@@ -2,7 +2,7 @@
  * The chat server's HTTP contract (electron/chat-server.ts, 127.0.0.1 only,
  * `Authorization: Bearer <token>` on every /api route). Pure types and paths:
  * the server parses requests with these shapes, and the renderer's one client
- * (src/components/chat/chatServerClient.ts) builds every URL and request from
+ * (src/features/chat/chatServerClient.ts) builds every URL and request from
  * them. Not IPC: the address and token come over IPC (`chat-server:getInfo` /
  * `chat-server:info`, `ChatServerInfo` in ipc-contract.ts).
  */

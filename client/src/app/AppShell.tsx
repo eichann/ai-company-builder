@@ -1,7 +1,7 @@
 import { useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, GitCommit, MagnifyingGlass, ChatCircle, CaretLeft } from '@phosphor-icons/react'
-import { ChatPanel } from '../components/chat/ChatPanel'
+import { ChatPanel } from '../features/chat/components/ChatPanel'
 import { CommitHistoryPanel, invalidateCommitCache, prefetchCommits } from '../components/skill-ui/CommitHistoryPanel'
 import { SearchPanel } from '../components/skill-ui/SearchPanel'
 import { useAppStore } from '../stores/appStore'

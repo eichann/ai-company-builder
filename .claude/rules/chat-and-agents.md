@@ -23,18 +23,18 @@ paths:
   - "client/shared/rate-limits.ts"
   - "client/shared/agent*.ts"
   - "client/src/lib/aiModels.ts"
-  - "client/src/components/chat/ChoicePrompt.tsx"
-  - "client/src/components/chat/RateLimitMeter.tsx"
-  - "client/src/components/chat/promptSuggestion.ts"
-  - "client/src/components/chat/ghostSuggestion.ts"
-  - "client/src/components/chat/SteerInstruction.tsx"
+  - "client/src/features/chat/components/ChoicePrompt.tsx"
+  - "client/src/features/chat/components/RateLimitMeter.tsx"
+  - "client/src/features/chat/promptSuggestion.ts"
+  - "client/src/features/chat/ghostSuggestion.ts"
+  - "client/src/features/chat/components/SteerInstruction.tsx"
   - "client/tests/choice-prompt*"
   - "client/tests/steering.test.ts"
   - "client/tests/prompt-suggestion.test.ts"
   - "client/tests/chat-composer-ui.*"
   - "client/electron/review/**"
   - "client/shared/review-request.ts"
-  - "client/src/components/chat/ReviewRequestCard.tsx"
+  - "client/src/features/chat/components/ReviewRequestCard.tsx"
   - "client/tests/review-request.test.ts"
 ---
 
@@ -270,7 +270,7 @@ tool), renderer `ReviewRequestCard.tsx`, `src/lib/reviewRequest.ts`.
 
 ## Next-prompt suggestions (Claude Code only)
 
-`client/shared/prompt-suggestion.ts`; rules `src/components/chat/promptSuggestion.ts`; ghost text
+`client/shared/prompt-suggestion.ts`; rules `src/features/chat/promptSuggestion.ts`; ghost text
 `ghostSuggestion.ts` (CodeMirror).
 
 - `promptSuggestions: true` + the provider's `onPromptSuggestion`. The CLI sends

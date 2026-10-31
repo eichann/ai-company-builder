@@ -5,8 +5,8 @@ import type { UIMessage } from 'ai'
 import '../src/i18n'
 import '../src/index.css'
 import i18n from '../src/i18n'
-import { AssistantMessageParts } from '../src/components/chat/MessageParts'
-import { ChatInput } from '../src/components/chat/ChatComposer'
+import { AssistantMessageParts } from '../src/features/chat/components/MessageParts'
+import { ChatInput } from '../src/features/chat/components/ChatComposer'
 import { STEER_PART_TYPE } from '../shared/steer'
 
 // Preview page for the composer: the next-prompt suggestion as ghost text in

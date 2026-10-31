@@ -9,7 +9,7 @@ import type { RpcMessage } from '../electron/agents/codex-rpc'
 import { agentInputMessages } from '../electron/agents/session'
 import { createChatTurns } from '../electron/chat-turns'
 import { STEER_PART_TYPE, canSteerText, MAX_STEER_LENGTH, readSteerRecord } from '../shared/steer'
-import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from '../src/components/chat/choiceHistory'
+import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from '../src/features/chat/choiceHistory'
 import { CHOICE_PART_TYPE } from '../shared/choice-prompt'
 
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
