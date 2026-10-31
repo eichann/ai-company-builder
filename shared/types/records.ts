@@ -47,7 +47,7 @@ export interface RecordIndexProblem {
 export interface RecordTypeView {
   /** The version in force. */
   definition: TypeDefinition
-  source: 'file' | 'core'
+  source: 'file' | 'core' | 'plugin'
   /** Every stored version, oldest first. */
   versions: number[]
 }

@@ -7,7 +7,7 @@
  * builds SQL from values and never hits the bound-parameter limit.
  */
 import type Database from 'better-sqlite3'
-import type { LedgerEntry } from '../../../shared/core/record-ledger'
+import type { ExternalReceipt, LedgerEntry } from '../../../shared/core/record-ledger'
 import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
@@ -29,13 +29,14 @@ type LedgerRow = {
   record_id: string; version: number; action: string; from_state: string | null; to_state: string | null; actor_id: string
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
-  proposed_by: string | null; conversation_id: string | null
+  proposed_by: string | null; conversation_id: string | null; receipt: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
   actorKind: r.actor_kind, actorSource: r.actor_source, at: r.at, note: r.note, changes: JSON.parse(r.changes), attachments: JSON.parse(r.attachments),
   decision: r.decision ? JSON.parse(r.decision) : null, isDecision: r.is_decision === 1, typeVersion: r.type_version, reversesVersion: r.reverses_version,
   proposedBy: r.proposed_by === 'ai' ? 'ai' : null, conversationId: r.conversation_id,
+  receipt: r.receipt ? JSON.parse(r.receipt) as ExternalReceipt : null,
 })
 
 /** A LIKE pattern matching `text` anywhere, with %, _ and \ taken literally. */
@@ -59,7 +60,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     typeVersions() {
       return (conn.prepare('SELECT name, version, definition, source, commit_sha, created_at FROM record_types WHERE company_id = ? ORDER BY name, version')
-        .all(companyId) as Array<{ name: string; version: number; definition: string; source: 'file' | 'core'; commit_sha: string | null; created_at: string }>)
+        .all(companyId) as Array<{ name: string; version: number; definition: string; source: 'file' | 'core' | 'plugin'; commit_sha: string | null; created_at: string }>)
         .map(r => ({ name: r.name, version: r.version, definition: r.definition, source: r.source, commitSha: r.commit_sha, createdAt: r.created_at }))
     },
     insertTypeVersion(row: RecordTypeRow) {
@@ -129,15 +130,15 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     ledger(recordId) {
       return (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
     },
     appendLedger(e: LedgerEntry) {
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
-          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId)
+          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null)
     },
 
     candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[] {

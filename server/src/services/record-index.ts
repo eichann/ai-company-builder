@@ -39,7 +39,7 @@ import { logError } from '../lib/error-log'
 export interface CurrentType {
   version: number
   definition: TypeDefinition
-  source: 'file' | 'core'
+  source: 'file' | 'core' | 'plugin'
 }
 
 /** The version in force of every type (the highest stored). */

@@ -82,6 +82,26 @@ export interface PluginHistoryRow {
   change: string
 }
 
+export interface ExternalLinkRow {
+  pluginId: string
+  connectionId: string
+  accountId: string
+  object: string
+  externalId: string
+  recordId: string
+  externalUpdatedAt: string | null
+  seenAt: string
+}
+
+export interface PluginPolicyAckRow {
+  pluginId: string
+  field: string
+  /** The outside property the field writes; an ack for another property does not count. */
+  property: string
+  acknowledgedBy: string
+  acknowledgedAt: string
+}
+
 export interface PluginRepository {
   install(pluginId: string): PluginInstallRow | null
   installs(): PluginInstallRow[]
@@ -98,4 +118,23 @@ export interface PluginRepository {
   addMapping(row: PluginMappingRow, history: PluginHistoryRow): void
   /** Latest first. */
   history(pluginId: string, limit: number): PluginHistoryRow[]
+  addHistory(row: PluginHistoryRow): void
+
+  /**
+   * Bind the connection to the outside account the connector saw, only while
+   * it has none (compare-and-set); false = another value is already there.
+   */
+  bindAccount(pluginId: string, connectionId: string, accountId: string, history: PluginHistoryRow): boolean
+  /** A new connection (the outside account changed): new id, no account yet. Links of the old one stay with it. */
+  renewConnection(pluginId: string, connectionId: string, at: string, by: string, history: PluginHistoryRow): void
+
+  /** The record of an outside object of this connection and account. */
+  link(connectionId: string, accountId: string, object: string, externalId: string): ExternalLinkRow | null
+  /** The outside object a record stands for. */
+  linkOfRecord(recordId: string): ExternalLinkRow | null
+  saveLink(row: ExternalLinkRow): void
+
+  policyAcks(pluginId: string): PluginPolicyAckRow[]
+  /** Record acknowledgements (replacing a field's earlier one) and a history row (one transaction). */
+  addPolicyAcks(rows: PluginPolicyAckRow[], history: PluginHistoryRow): void
 }

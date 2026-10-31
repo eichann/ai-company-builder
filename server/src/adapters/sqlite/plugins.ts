@@ -7,7 +7,17 @@
  * company.
  */
 import type Database from 'better-sqlite3'
-import type { PluginHistoryRow, PluginInstallRow, PluginMappingRow, PluginRepository } from '../../ports/plugins'
+import type { ExternalLinkRow, PluginPolicyAckRow, PluginHistoryRow, PluginInstallRow, PluginMappingRow, PluginRepository } from '../../ports/plugins'
+
+type LinkRow = {
+  plugin_id: string; connection_id: string; account_id: string; object: string; external_id: string; record_id: string
+  external_updated_at: string | null; seen_at: string
+}
+const toLink = (r: LinkRow): ExternalLinkRow => ({
+  pluginId: r.plugin_id, connectionId: r.connection_id, accountId: r.account_id, object: r.object, externalId: r.external_id,
+  recordId: r.record_id, externalUpdatedAt: r.external_updated_at, seenAt: r.seen_at,
+})
+const LINK_COLUMNS = 'plugin_id, connection_id, account_id, object, external_id, record_id, external_updated_at, seen_at'
 
 type InstallRow = {
   plugin_id: string; version: string; fingerprint: string; service: string; connection_id: string; account_id: string | null
@@ -69,6 +79,54 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
         const changed = conn.prepare('UPDATE plugin_installs SET mapping_version = ?, updated_at = ?, updated_by = ? WHERE company_id = ? AND plugin_id = ?')
           .run(row.version, row.createdAt, row.createdBy, companyId, row.pluginId).changes
         if (changed !== 1) throw new Error('plugin mapping without its install')
+        addHistory(history)
+      })()
+    },
+    addHistory(h) { addHistory(h) },
+    bindAccount(pluginId, connectionId, accountId, history) {
+      return conn.transaction(() => {
+        const changed = conn.prepare('UPDATE plugin_installs SET account_id = ? WHERE company_id = ? AND plugin_id = ? AND connection_id = ? AND account_id IS NULL')
+          .run(accountId, companyId, pluginId, connectionId).changes
+        if (changed === 1) addHistory(history)
+        return changed === 1
+      })()
+    },
+    renewConnection(pluginId, connectionId, at, by, history) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE plugin_installs SET connection_id = ?, account_id = NULL, updated_at = ?, updated_by = ? WHERE company_id = ? AND plugin_id = ?')
+          .run(connectionId, at, by, companyId, pluginId)
+        addHistory(history)
+      })()
+    },
+    link(connectionId, accountId, object, externalId) {
+      const r = conn.prepare(`SELECT ${LINK_COLUMNS} FROM plugin_external_links WHERE company_id = ? AND connection_id = ? AND account_id = ? AND object = ? AND external_id = ?`)
+        .get(companyId, connectionId, accountId, object, externalId) as LinkRow | undefined
+      return r ? toLink(r) : null
+    },
+    linkOfRecord(recordId) {
+      const r = conn.prepare(`SELECT ${LINK_COLUMNS} FROM plugin_external_links WHERE company_id = ? AND record_id = ?`).get(companyId, recordId) as LinkRow | undefined
+      return r ? toLink(r) : null
+    },
+    saveLink(l) {
+      conn.prepare(`
+        INSERT INTO plugin_external_links (company_id, plugin_id, connection_id, account_id, object, external_id, record_id, external_updated_at, seen_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(company_id, connection_id, account_id, object, external_id) DO UPDATE SET external_updated_at = excluded.external_updated_at, seen_at = excluded.seen_at
+      `).run(companyId, l.pluginId, l.connectionId, l.accountId, l.object, l.externalId, l.recordId, l.externalUpdatedAt, l.seenAt)
+    },
+    policyAcks(pluginId) {
+      return (conn.prepare('SELECT plugin_id, field, property, acknowledged_by, acknowledged_at FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? ORDER BY field')
+        .all(companyId, pluginId) as Array<{ plugin_id: string; field: string; property: string; acknowledged_by: string; acknowledged_at: string }>)
+        .map(r => ({ pluginId: r.plugin_id, field: r.field, property: r.property, acknowledgedBy: r.acknowledged_by, acknowledgedAt: r.acknowledged_at }))
+    },
+    addPolicyAcks(rows: PluginPolicyAckRow[], history) {
+      conn.transaction(() => {
+        for (const r of rows) {
+          conn.prepare(`
+            INSERT INTO plugin_policy_acks (company_id, plugin_id, field, property, acknowledged_by, acknowledged_at) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(company_id, plugin_id, field) DO UPDATE SET property = excluded.property, acknowledged_by = excluded.acknowledged_by, acknowledged_at = excluded.acknowledged_at
+          `).run(companyId, r.pluginId, r.field, r.property, r.acknowledgedBy, r.acknowledgedAt)
+        }
         addHistory(history)
       })()
     },

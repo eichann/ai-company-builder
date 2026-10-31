@@ -28,6 +28,9 @@ import type { PluginShelf, ShelfPackage } from './plugin-shelf'
 import { recordReader } from './record-access'
 
 export const PLUGINS_FORBIDDEN = 'つなぎ先のプラグインを設定できるのは、オーナーと管理者だけです'
+/** What an owner / admin confirms before a field writes automatically (owner, 2026-10-31). */
+export const AUTO_ACKNOWLEDGEMENT = 'この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました'
+
 export const PLUGIN_NOT_FOUND = { error: 'このプラグインはありません', code: 'PLUGIN_NOT_FOUND' } as const
 
 /** What the connector needs to know about a key (never its value). */
@@ -65,8 +68,16 @@ export interface ActivePlugin {
   mapping: PluginMapping
   mappingVersion: number
   keyId: string
+  /** The package's fingerprint (kept on every ledger receipt). */
+  fingerprint: string
+  connectionId: string
+  /** The outside account, once the connector has bound the connection to it. */
+  accountId: string | null
 }
 
+/** The body's acknowledged field names (absent = none); null when malformed. */
+const ackList = (v: unknown): string[] | null =>
+  v === undefined ? [] : Array.isArray(v) && v.length <= 100 && v.every(x => typeof x === 'string' && x.length <= 40) ? v as string[] : null
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const MAPPING_MAX = 128 * 1024
 
@@ -123,6 +134,24 @@ export function createPluginService(deps: PluginServiceDeps) {
     return null
   }
 
+  /** Fields that would write automatically, with the outside property each writes. */
+  function autoFields(manifest: PluginManifest, mapping: PluginMapping): Array<{ field: string; property: string }> {
+    const out = new Map<string, string>()
+    for (const [name, op] of Object.entries(manifest.operations)) {
+      if (op.kind !== 'update') continue
+      for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
+        if (effectiveFieldPolicy(manifest, mapping, name, field) === 'auto') out.set(field, rule.from)
+      }
+    }
+    return [...out].map(([field, property]) => ({ field, property }))
+  }
+
+  /** Auto fields without a recorded acknowledgement for the property they write now. */
+  function unacknowledgedAuto(companyId: string, pluginId: string, manifest: PluginManifest, mapping: PluginMapping) {
+    const acks = new Map(companyData.forCompany(companyId).plugins.policyAcks(pluginId).map(a => [a.field, a.property]))
+    return autoFields(manifest, mapping).filter(f => acks.get(f.field) !== f.property)
+  }
+
   type Evaluated = { problem: PluginProblem; active: null } | { problem: null; active: ActivePlugin }
 
   /** Every kill switch and missing piece, in a fixed order (the operator's stop first). */
@@ -137,11 +166,13 @@ export function createPluginService(deps: PluginServiceDeps) {
     const row = install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
     const parsed = row ? parseForCompany(companyId, found.pkg, row.text) : null
     if (!parsed?.ok) return { problem: 'mapping-invalid', active: null }
+    if (unacknowledgedAuto(companyId, install.pluginId, found.pkg.manifest, parsed.mapping).length > 0) return { problem: 'auto-not-acknowledged', active: null }
     return {
       problem: null,
       active: {
         pluginId: install.pluginId, version: install.version, manifest: found.pkg.manifest, types: found.pkg.types,
         mapping: parsed.mapping, mappingVersion: install.mappingVersion, keyId: install.keyId as string,
+        fingerprint: install.fingerprint, connectionId: install.connectionId, accountId: install.accountId,
       },
     }
   }
@@ -194,6 +225,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       mappingVersions: repo.mappingVersions(pluginId).map(v => ({ version: v.version, createdAt: v.createdAt, createdBy: v.createdBy })),
       policies,
       mappingErrors,
+      autoAcknowledgements: repo.policyAcks(pluginId).map(a => ({ field: a.field, property: a.property, by: a.acknowledgedBy, at: a.acknowledgedAt })),
       history: repo.history(pluginId, 50).map(h => ({ action: h.action, at: h.at, by: h.by, change: JSON.parse(h.change) as unknown })),
     }
   }
@@ -299,8 +331,10 @@ export function createPluginService(deps: PluginServiceDeps) {
       const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
       if (!allowed.ok) return allowed
       if (!known(member.companyId, pluginId)) return notFound()
-      if (!isObject(body) || typeof body.text !== 'string' || body.text.length > MAPPING_MAX) return refuse('bad-request', 'Body: { text: string } (up to 128 KB)')
-      return saveVersion(member, pluginId, body.text, 'mapping', {})
+      if (!isObject(body) || typeof body.text !== 'string' || body.text.length > MAPPING_MAX) return refuse('bad-request', 'Body: { text: string, acknowledgeAuto?: string[] } (up to 128 KB)')
+      const acks = ackList(body.acknowledgeAuto)
+      if (!acks) return refuse('bad-request', 'acknowledgeAuto: field names')
+      return saveVersion(member, pluginId, body.text, 'mapping', {}, acks)
     },
 
     /** POST /plugins/:pluginId/mapping/restore { version } — an earlier version becomes the next one (checked again). */
@@ -308,10 +342,12 @@ export function createPluginService(deps: PluginServiceDeps) {
       const allowed = requireFullAccess(member, PLUGINS_FORBIDDEN)
       if (!allowed.ok) return allowed
       if (!known(member.companyId, pluginId)) return notFound()
-      if (!isObject(body) || !Number.isInteger(body.version) || (body.version as number) < 1) return refuse('bad-request', 'Body: { version: integer ≥ 1 }')
+      if (!isObject(body) || !Number.isInteger(body.version) || (body.version as number) < 1) return refuse('bad-request', 'Body: { version: integer ≥ 1, acknowledgeAuto?: string[] }')
+      const acks = ackList(body.acknowledgeAuto)
+      if (!acks) return refuse('bad-request', 'acknowledgeAuto: field names')
       const row = companyData.forCompany(member.companyId).plugins.mapping(pluginId, body.version as number)
       if (!row) return refuse('not-found', 'この版の読み替え表はありません', { code: 'MAPPING_VERSION_NOT_FOUND' })
-      return saveVersion(member, pluginId, row.text, 'restore', { from: row.version })
+      return saveVersion(member, pluginId, row.text, 'restore', { from: row.version }, acks)
     },
 
     /**
@@ -362,7 +398,7 @@ export function createPluginService(deps: PluginServiceDeps) {
     },
   }
 
-  async function saveVersion(member: Member, pluginId: string, text: string, action: string, extra: Record<string, unknown>): Promise<Outcome<PluginDetail>> {
+  async function saveVersion(member: Member, pluginId: string, text: string, action: string, extra: Record<string, unknown>, acknowledge: string[]): Promise<Outcome<PluginDetail>> {
     const repo = companyData.forCompany(member.companyId).plugins
     const install = repo.install(pluginId)
     if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
@@ -370,8 +406,20 @@ export function createPluginService(deps: PluginServiceDeps) {
     if (!found) return refuse('conflict', '入れた版が棚にありません。版を選び直してください', { code: 'VERSION_NOT_ON_SHELF' })
     const parsed = parseForCompany(member.companyId, found.pkg, text)
     if (!parsed.ok) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: parsed.errors })
+    // A field that would write automatically needs the acknowledgement, recorded with who and when.
+    const missing = unacknowledgedAuto(member.companyId, pluginId, found.pkg.manifest, parsed.mapping)
+    const unconfirmed = missing.filter(f => !acknowledge.includes(f.field))
+    if (unconfirmed.length > 0) {
+      return refuse('bad-request', `自動で書き戻す欄は、「${AUTO_ACKNOWLEDGEMENT}」の確認が要ります`, {
+        code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: unconfirmed.map(f => f.field), acknowledgement: AUTO_ACKNOWLEDGEMENT,
+      })
+    }
     const version = (repo.mappingVersions(pluginId)[0]?.version ?? 0) + 1
     const at = clock.now()
+    if (missing.length > 0) {
+      repo.addPolicyAcks(missing.map(f => ({ pluginId, field: f.field, property: f.property, acknowledgedBy: member.userId, acknowledgedAt: at })),
+        history(pluginId, 'acknowledge', member.userId, at, { fields: missing, acknowledgement: AUTO_ACKNOWLEDGEMENT }))
+    }
     repo.addMapping({ pluginId, version, text, createdAt: at, createdBy: member.userId },
       history(pluginId, action, member.userId, at, { version, ...extra }))
     return ok(await detail(member.companyId, pluginId))

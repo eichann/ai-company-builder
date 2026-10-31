@@ -22,7 +22,7 @@ export interface RecordTypeRow {
   version: number
   /** JSON of shared/core TypeDefinition. */
   definition: string
-  source: 'file' | 'core'
+  source: 'file' | 'core' | 'plugin'
   commitSha: string | null
   createdAt: string
 }

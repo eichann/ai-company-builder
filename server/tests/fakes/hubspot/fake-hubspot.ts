@@ -16,7 +16,9 @@
  *
  * Only what the plugin uses: deals (list, get, search, update), deal
  * properties and pipelines, companies (get) and deal → company associations,
- * owners (list), notes (create with an association, get, archive).
+ * owners (list), notes (create with an association, get, archive), and the
+ * account details (`/account-info/v3/details` or a dated version: the portal
+ * id, which tells the fake and the real HubSpot — or two accounts — apart).
  *
  * Keys: `Authorization: Bearer pat-fake-…` only, each with its own scopes; a
  * missing scope answers HubSpot's 403 MISSING_SCOPES. Rate limits (100 per
@@ -65,6 +67,8 @@ export interface FakeHubSpotOptions {
   rateLimits?: RateLimitOptions | true
   /** Serve `/__fake/*` (faults and outside changes over HTTP, for the staging CLI). Off by default. */
   controlRoutes?: boolean
+  /** The account's portal id (`GET /account-info/…/details`); another fake = another account. Default 90000001. */
+  portalId?: number
 }
 
 interface StoredObject {
@@ -211,6 +215,8 @@ export function normalizeCrmPath(path: string): string | null {
   if (v3) return v3[1] + (v3[2] ?? '')
   const dated = /^\/crm\/(objects|properties|pipelines|owners|associations)\/(\d{4}-\d{2})(\/.*)?$/.exec(path)
   if (dated) return dated[1] + (dated[3] ?? '')
+  const account = /^\/account-info\/(?:v3|\d{4}-\d{2})\/details$/.exec(path)
+  if (account) return 'account-info/details'
   return null
 }
 
@@ -220,6 +226,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     ? null
     : { perTenSeconds: 100, searchPerSecond: 5, ...(options.rateLimits === true ? {} : options.rateLimits) }
   const seed = options.seed ?? defaultSeed()
+  const portalId = options.portalId ?? 90000001
   const keys = new Map<string, Set<string>>()
   const requests: FakeRequestLog[] = []
 
@@ -374,7 +381,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     })
   }
 
-  app.all('/crm/*', async c => {
+  const handle = async (c: Context) => {
     const route = normalizeCrmPath(c.req.path)
     if (faults.delayMs > 0) await new Promise(r => setTimeout(r, faults.delayMs))
     try {
@@ -394,7 +401,7 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       const handler = resolve(c.req.method, route)
       if (!handler) throw new HubSpotError(404, errorBody('OBJECT_NOT_FOUND', `Unable to infer object type from: ${route}`))
 
-      if (!handler.anyOf.some(s => scopes.has(s))) {
+      if (handler.anyOf.length > 0 && !handler.anyOf.some(s => scopes.has(s))) {
         throw new HubSpotError(403, errorBody('MISSING_SCOPES', 'This app hasn\'t been granted all required scopes to make this call. Read more about required scopes here: https://developers.hubspot.com/scopes.', {
           errors: [{ message: 'One or more of the following scopes are required.', context: { requiredGranularScopes: handler.anyOf } }],
           links: { scopes: 'https://developers.hubspot.com/scopes' },
@@ -422,7 +429,9 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
       if (err instanceof HubSpotError) return c.json(err.body, err.status as 400)
       throw err
     }
-  })
+  }
+  app.all('/crm/*', handle)
+  app.all('/account-info/*', handle)
 
   /** The write happened; the answer does not arrive. */
   function dropAnswer(c: Context): Promise<Response> {
@@ -445,6 +454,8 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
     const parts = route.split('/').filter(Boolean)
     const [api, objectType, id, extra] = parts
     const dealsRead = [HUBSPOT_SCOPES.dealsRead]
+    // Account details: any valid key (no scope of its own).
+    if (api === 'account-info' && objectType === 'details' && method === 'GET' && !id) return { anyOf: [], run: accountDetails }
     if (api === 'objects' && objectType === 'deals') {
       if (method === 'GET' && !id) return { anyOf: dealsRead, run: listDeals }
       if (method === 'POST' && id === 'search' && !extra) return { anyOf: dealsRead, run: searchDeals }
@@ -637,6 +648,10 @@ export function createFakeHubSpot(options: FakeHubSpotOptions = {}): FakeHubSpot
         }],
       },
     }
+  }
+
+  function accountDetails(): Result {
+    return { status: 200, body: { portalId, accountType: 'STANDARD', timeZone: 'Asia/Tokyo', companyCurrency: 'JPY', additionalCurrencies: [], utcOffset: '+09:00', utcOffsetMilliseconds: 32400000, uiDomain: 'app-na2.hubspot.com', dataHostingLocation: 'na2' } }
   }
 
   function listOwners(): Result {

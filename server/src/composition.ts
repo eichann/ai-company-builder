@@ -61,6 +61,10 @@ import { createRecordEngine } from './services/record-engine'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
 import { createPluginService } from './services/plugins'
+import { createPluginConnector } from './services/plugin-connector'
+import { createPluginImportService } from './services/plugin-import'
+import { createExternalRecordWriter } from './services/record-engine'
+import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -193,10 +197,35 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
   })
 
+  // The connector (P5): the only part that talks to an outside system for a plugin; the engine's
+  // external entry is handed to the plugin services only (never to a route).
+  const pluginConnector = createPluginConnector({
+    upstream,
+    reveal: (companyId, keyId) => brokerVault.reveal(companyId, keyId),
+    credential: (companyId, service) => {
+      const builtin = builtinBrokerService(service)
+      if (builtin) return { header: builtin.credential, value: key => builtin.credential === 'authorization' ? `Bearer ${key}` : key }
+      const relay = keyBroker.relayService(companyId, service)
+      return relay ? { header: relay.header, value: key => relayCredentialValue(relay.format, key) } : null
+    },
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    nowMs: () => shared.clock.nowMs(),
+  })
+  const externalRecords = createExternalRecordWriter({
+    ...shared,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const pluginImport = createPluginImportService({
+    ...shared, plugins, connector: pluginConnector, writer: externalRecords,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+  })
+
   return {
     access,
     pluginShelf,
     plugins,
+    pluginImport,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),

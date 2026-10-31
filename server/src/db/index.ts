@@ -425,13 +425,14 @@ export function initDatabase(conn: Database.Database = sqlite) {
     );
 
     -- Type definitions in force, every version kept (records remember the
-    -- version they were made under). source: file (.acb/types/<name>.md) or core.
+    -- version they were made under). source: file (.acb/types/<name>.md), core,
+    -- or plugin (a connector plugin's package, plugins.md).
     CREATE TABLE IF NOT EXISTS record_types (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       name TEXT NOT NULL,
       version INTEGER NOT NULL,
       definition TEXT NOT NULL,
-      source TEXT NOT NULL CHECK (source IN ('file', 'core')),
+      source TEXT NOT NULL CHECK (source IN ('file', 'core', 'plugin')),
       commit_sha TEXT,
       created_at TEXT NOT NULL,
       PRIMARY KEY (company_id, name, version)
@@ -566,7 +567,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
       -- First turned on: from then on the relay never writes to the service for this
       -- company (turning the plugin off does not undo it; plugins.md).
       managed_since TEXT,
-      key_id TEXT REFERENCES broker_keys(id),
+      -- A deleted key leaves the plugin without one (problem no-key), never blocks the delete.
+      key_id TEXT REFERENCES broker_keys(id) ON DELETE SET NULL,
       mapping_version INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       updated_by TEXT NOT NULL,
@@ -594,6 +596,37 @@ export function initDatabase(conn: Database.Database = sqlite) {
       at TEXT NOT NULL,
       by_user TEXT NOT NULL,
       change TEXT NOT NULL
+    );
+
+    -- Outside object ↔ ACB record (P5): one row per object of one connection and
+    -- outside account (review §5.7: the same outside id in the fake, the real system
+    -- or another account is another object). The record lives on the server only.
+    CREATE TABLE IF NOT EXISTS plugin_external_links (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      connection_id TEXT NOT NULL,
+      account_id TEXT NOT NULL,
+      object TEXT NOT NULL,
+      external_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      external_updated_at TEXT,
+      seen_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, connection_id, account_id, object, external_id),
+      UNIQUE (company_id, record_id),
+      FOREIGN KEY (company_id, record_id) REFERENCES records(company_id, id)
+    );
+
+    -- A field set to write automatically needs an owner's / admin's recorded
+    -- acknowledgement that no HubSpot workflow is triggered by it (owner, 2026-10-31):
+    -- per field and the outside property it writes (another property needs a new one).
+    CREATE TABLE IF NOT EXISTS plugin_policy_acks (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      plugin_id TEXT NOT NULL,
+      field TEXT NOT NULL,
+      property TEXT NOT NULL,
+      acknowledged_by TEXT NOT NULL,
+      acknowledged_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, plugin_id, field)
     );
 
     -- Indexes
@@ -635,7 +668,9 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordLedgerProvenance(conn)
   migrateAgentEventSandbox(conn)
   migrateBrokerSettings(conn)
+  migratePluginInstallKeyReference(conn)
   migratePluginTables(conn)
+  migrateRecordTypeSources(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
 
@@ -778,10 +813,96 @@ export function migratePluginTables(conn: Database.Database): void {
     WHEN NEW.company_id IS NOT OLD.company_id OR NEW.plugin_id IS NOT OLD.plugin_id
     BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
 
+    CREATE TRIGGER IF NOT EXISTS plugin_external_links_record_insert BEFORE INSERT ON plugin_external_links
+    WHEN NOT EXISTS (SELECT 1 FROM records WHERE company_id = NEW.company_id AND id = NEW.record_id)
+    BEGIN SELECT RAISE(ABORT, 'plugin_external_links needs a record of the same company'); END;
+
+    CREATE TRIGGER IF NOT EXISTS plugin_external_links_company_update BEFORE UPDATE OF company_id, record_id, connection_id, account_id ON plugin_external_links
+    WHEN NEW.company_id IS NOT OLD.company_id OR NEW.record_id IS NOT OLD.record_id OR NEW.connection_id IS NOT OLD.connection_id OR NEW.account_id IS NOT OLD.account_id
+    BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
+
     CREATE TRIGGER IF NOT EXISTS plugin_history_company_update BEFORE UPDATE OF company_id ON plugin_history
     WHEN NEW.company_id IS NOT OLD.company_id
     BEGIN SELECT RAISE(ABORT, 'plugin rows never move to another company'); END;
   `)
+}
+
+/**
+ * plugin_installs.key_id: ON DELETE SET NULL (a deleted key must not block the
+ * delete — better-sqlite3 enforces foreign keys). A table made by the first
+ * build of P4 is rebuilt once with its rows; the triggers are recreated by
+ * migratePluginTables right after. Idempotent.
+ */
+export function migratePluginInstallKeyReference(conn: Database.Database): void {
+  const row = conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'plugin_installs'`).get() as { sql: string } | undefined
+  if (!row || row.sql.includes('ON DELETE SET NULL')) return
+  // SQLite's way to rebuild a parent table: foreign keys off (outside the
+  // transaction), rebuild, check, on again.
+  const fk = conn.pragma('foreign_keys', { simple: true }) as number
+  conn.pragma('foreign_keys = OFF')
+  try {
+    conn.transaction(() => {
+    conn.exec(`
+      CREATE TABLE plugin_installs_rebuilt (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        plugin_id TEXT NOT NULL,
+        version TEXT NOT NULL,
+        fingerprint TEXT NOT NULL,
+        service TEXT NOT NULL,
+        connection_id TEXT NOT NULL,
+        account_id TEXT,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        managed_since TEXT,
+        key_id TEXT REFERENCES broker_keys(id) ON DELETE SET NULL,
+        mapping_version INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        updated_by TEXT NOT NULL,
+        PRIMARY KEY (company_id, plugin_id)
+      );
+      DROP TRIGGER IF EXISTS plugin_mappings_company_insert;
+      INSERT INTO plugin_installs_rebuilt (company_id, plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since,
+        key_id, mapping_version, updated_at, updated_by)
+        SELECT company_id, plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since,
+          key_id, mapping_version, updated_at, updated_by FROM plugin_installs;
+      DROP TABLE plugin_installs;
+      ALTER TABLE plugin_installs_rebuilt RENAME TO plugin_installs;
+    `)
+    for (const t of ['plugin_installs', 'plugin_mappings']) {
+      if ((conn.pragma(`foreign_key_check(${t})`) as unknown[]).length > 0) throw new Error('plugin_installs rebuild left a dangling reference')
+    }
+    })()
+  } finally {
+    if (fk) conn.pragma('foreign_keys = ON')
+  }
+}
+
+/**
+ * record_types.source may be 'plugin' (milestone 3: a connector plugin's
+ * types). SQLite cannot change a CHECK, so a table created before is rebuilt
+ * once with the same rows (inside one transaction). Idempotent.
+ */
+export function migrateRecordTypeSources(conn: Database.Database): void {
+  const row = conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'record_types'`).get() as { sql: string } | undefined
+  if (!row || row.sql.includes("'plugin'")) return
+  conn.transaction(() => {
+    conn.pragma('defer_foreign_keys = ON')
+    conn.exec(`
+      CREATE TABLE record_types_rebuilt (
+        company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        definition TEXT NOT NULL,
+        source TEXT NOT NULL CHECK (source IN ('file', 'core', 'plugin')),
+        commit_sha TEXT,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (company_id, name, version)
+      );
+      INSERT INTO record_types_rebuilt (company_id, name, version, definition, source, commit_sha, created_at)
+        SELECT company_id, name, version, definition, source, commit_sha, created_at FROM record_types;
+      DROP TABLE record_types;
+      ALTER TABLE record_types_rebuilt RENAME TO record_types;
+    `)
+  })()
 }
 
 // Helper functions for common operations
@@ -796,6 +917,8 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(record_ledger)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('proposed_by')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN proposed_by TEXT`)
   if (!cols.has('conversation_id')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN conversation_id TEXT`)
+  // 「外の受領書」 of a connector plugin's entry (JSON of shared/core ExternalReceipt), null otherwise.
+  if (!cols.has('receipt')) conn.exec(`ALTER TABLE record_ledger ADD COLUMN receipt TEXT`)
 }
 
 export function migrateInvitationClaims(conn: Database.Database): void {

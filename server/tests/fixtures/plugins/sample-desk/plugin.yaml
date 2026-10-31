@@ -20,4 +20,4 @@ operations:
     label: 最新を取る
     kind: read
     object: ticket
-    who: [anyone]
+    who: [viewer]

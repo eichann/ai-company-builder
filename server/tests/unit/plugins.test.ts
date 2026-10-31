@@ -71,6 +71,14 @@ describe('a declaration is data only', () => {
     expect(manifestErrors(`${CRM.manifest}\nwhatever: 1\n`).join()).toContain('知らない項目「whatever」')
   })
 
+  it('a package that writes names how to read its outside account (a connection is bound to one account, review §5.7)', () => {
+    const without = crmWith('account_info: { method: GET, path: "/account-info/v3/details" }\n', '')
+    expect(manifestErrors(without).join()).toContain('account_info')
+    expect(manifestErrors(crmWith('account_info: { method: GET,', 'account_info: { method: POST,')).join()).toContain('account_info')
+    // A package that only reads (the help desk) needs none.
+    expect(validatePluginPackage(readPackage('sample-desk')).ok).toBe(true)
+  })
+
   it('refuses a contract this build does not know', () => {
     expect(manifestErrors(crmWith('contract: 1', 'contract: 2')).join()).toContain('contract')
   })
@@ -153,8 +161,43 @@ describe('types (§8-2, §8-3)', () => {
   })
 
   it("who names the type's person fields or the fixed actors only", () => {
-    const r = validatePluginPackage({ ...CRM, manifest: crmWith('    who: [anyone, ai]', '    who: [anyone, ai, boss]') })
+    const r = validatePluginPackage({ ...CRM, manifest: crmWith('    who: [viewer, ai]', '    who: [viewer, ai, boss]') })
     expect(r.ok ? [] : r.errors.join()).toContain('who「boss」')
+  })
+
+  it('a plugin says viewer (can read the record), never anyone', () => {
+    expect(manifestErrors(crmWith('    who: [viewer, ai]', '    who: [anyone, ai]')).join()).toContain('viewer')
+  })
+})
+
+describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
+  it('stage is never written back in milestone 3: not write: true, not an auto default or policy; off at run time', () => {
+    const p = crm()
+    const write = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, write: true, values: { qualifiedtobuy: proposal } }\n', p)
+    expect(write.ok ? [] : write.errors.join()).toContain('書き戻せません')
+    expect(manifestErrors(crmWith('  stage: off', '  stage: auto')).join()).toContain('auto にできません')
+    const policy = parsePluginMapping('deal:\n  fields:\n    stage: { from: dealstage, values: { qualifiedtobuy: proposal } }\npolicy:\n  stage: auto\n', p)
+    expect(policy.ok ? [] : policy.errors.join()).toContain('auto にできません')
+    // Whatever is stored: a mapping object built by hand still answers off.
+    const forged = { ...p.mapping!, objects: { deal: { ...p.mapping!.objects.deal, fields: { ...p.mapping!.objects.deal.fields, stage: { ...p.mapping!.objects.deal.fields.stage, write: true } } } }, policy: { stage: 'auto' as const } }
+    expect(effectiveFieldPolicy(p.manifest, forged, 'update_deal', 'stage')).toBe('off')
+  })
+
+  it('the policy is judged on the outside property: an auto field cannot reach what a stricter field reads', () => {
+    const p = crm()
+    // `closed` (prior) and `next_step` (auto) read the same outside property: writing next_step is prior.
+    const m = parsePluginMapping('deal:\n  fields:\n    next_step: { from: shared_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
+    if (!m.ok) throw new Error(m.errors.join())
+    expect(effectiveFieldPolicy(p.manifest, m.value, 'update_deal', 'next_step')).toBe('prior')
+    const alone = parsePluginMapping('deal:\n  fields:\n    next_step: { from: own_prop, write: true }\n    closed: { from: shared_prop, write: false }\n', p)
+    if (!alone.ok) throw new Error(alone.errors.join())
+    expect(effectiveFieldPolicy(p.manifest, alone.value, 'update_deal', 'next_step')).toBe('auto')
+  })
+
+  it('decision: only on operations that write; update_deal is one', () => {
+    expect(crm().manifest.operations.update_deal.decision).toBe(true)
+    expect(crm().manifest.operations.refresh_deal.decision).toBe(false)
+    expect(manifestErrors(crmWith('    who: [viewer, ai]\n', '    who: [viewer, ai]\n    decision: true\n')).join()).toContain('decision')
   })
 })
 
@@ -187,10 +230,10 @@ describe('translating values', () => {
   })
 
   it('ACB → outside → ACB gives back what was written, for every writable field', () => {
-    const change = { stage: 'final', confidence: 'a', next_step: '11/7 デモ', close_date: '2027-01-31', amount: 1500000, assignee: 'member-b' }
+    const change = { confidence: 'a', next_step: '11/7 デモ', close_date: '2027-01-31', amount: 1500000, assignee: 'member-b' }
     const out = acbToExternal(p, p.mapping!, 'deal', change)
     if (!out.ok) throw new Error(out.errors.join())
-    expect(out.properties).toEqual({ dealstage: 'decisionmakerboughtin', kakudo: 'high', next_step: '11/7 デモ', closedate: '2027-01-31', amount: '1500000', owner_id: '75123002' })
+    expect(out.properties).toEqual({ kakudo: 'high', next_step: '11/7 デモ', closedate: '2027-01-31', amount: '1500000', owner_id: '75123002' })
     expect(externalToAcb(p, p.mapping!, 'deal', out.properties).values).toEqual(change)
   })
 

@@ -209,4 +209,20 @@ describe('company handle: connector plugins', () => {
     expect(a.install('sample-crm')?.keyId).toBe('key-a')
     expect(() => conn.prepare(`UPDATE plugin_installs SET company_id = 'b' WHERE company_id = 'a'`).run()).toThrow(/never move/)
   })
+
+  it('an outside object links only to a record of its own company, and links are found per company, connection and account', () => {
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('b', 'deal-b00001', 'deal', 'B', ?, ?)`).run(TS, TS)
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('a', 'deal-a00001', 'deal', 'A', ?, ?)`).run(TS, TS)
+    const link = (recordId: string, accountId = '9001') => ({
+      pluginId: 'sample-crm', connectionId: 'conn-1', accountId, object: 'deal', externalId: '42', recordId, externalUpdatedAt: null, seenAt: TS,
+    })
+    const a = source.forCompany('a').plugins
+    expect(() => a.saveLink(link('deal-b00001'))).toThrow(/record of the same company/)
+    a.saveLink(link('deal-a00001'))
+    expect(a.link('conn-1', '9001', 'deal', '42')?.recordId).toBe('deal-a00001')
+    expect(a.link('conn-1', '9002', 'deal', '42')).toBeNull()
+    expect(a.link('conn-2', '9001', 'deal', '42')).toBeNull()
+    expect(source.forCompany('b').plugins.link('conn-1', '9001', 'deal', '42')).toBeNull()
+    expect(source.forCompany('b').plugins.linkOfRecord('deal-a00001')).toBeNull()
+  })
 })

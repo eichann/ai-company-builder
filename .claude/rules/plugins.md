@@ -14,6 +14,13 @@ paths:
   - "server/tests/unit/plugin-shelf.test.ts"
   - "server/tests/integration/plugins.test.ts"
   - "server/src/adapters/upstream-practice.ts"
+  - "server/src/services/plugin-connector.ts"
+  - "server/src/services/plugin-import.ts"
+  - "server/tests/unit/plugin-connector.test.ts"
+  - "server/tests/unit/plugin-schema-migrations.test.ts"
+  - "server/tests/integration/plugin-import.test.ts"
+  - "server/tests/helpers/fake-upstream.ts"
+  - "server/tests/fakes/hubspot/**"
 ---
 
 # Connector plugins (milestone 3): declaration, mapping, field policies
@@ -49,8 +56,13 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   the relay's own path rule (`shared/core/upstream-path.ts` `checkUpstreamPath`, the same
   function `services/broker-relay.ts` uses): no `//`, `..`, `%2f`, `\`, control characters.
 - **Operations** (`kind` read / update / create): `who` (person fields of the record's type or
-  `ai`, `dept_manager`, `admin`, `anyone` — the engine's `mayAct` reading), `reaches` internal /
-  external, `undo` (update: restore_previous / none; create: archive / none), `note`. An update
+  `PLUGIN_ACTORS`: `viewer` = anyone who can read the record, `ai` = the member's AI — only on
+  records its owner can read and only what its owner may do —, `dept_manager`, `admin`; a plugin
+  never says `anyone`), `reaches` internal / external, `undo` (update: restore_previous / none;
+  create: archive / none), `note`, `decision: true` (only on operations that write: the reason
+  is part of the ledger entry and **the AI must give one** — a note drafted from the
+  consultation, citing its basis; optional for people. `update_deal` is a decision,
+  `refresh_deal` is not). An update
   writes `fields: mapped` only (the mapping's `write: true` fields); a create names `attach_to`
   (an object with a record type) and may carry its own `policy`.
 
@@ -97,6 +109,22 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   writes nothing), `off`. Declaration defaults `field_policy_defaults`; the company's mapping
   `policy` overrides; unspecified = `prior`; a field the mapping does not write = `off`
   (`effectiveFieldPolicy`, `effectiveOperationPolicy`).
+- **`stage` is never written in milestone 3** (`MILESTONE3_UNWRITABLE_FIELDS`, review §5.3,
+  owner 2026-10-31): moving the stage can make a deal won / lost, the outcome `closed` guards with
+  `prior`. A mapping with `write: true` on it, an `auto` default or policy for it are refused; at
+  run time it is `off` whatever is stored. No fixture or example ships it writable.
+- **Judged on the outside property**: a written field's policy is at least as strict as that of
+  every other field read from the same outside property (off > prior > auto), so an `auto`
+  field cannot reach what a stricter one reads (`effectiveFieldPolicy`).
+- **`auto` needs a recorded acknowledgement** (owner, 2026-10-31): saving (or restoring) a
+  mapping in which a field would write automatically needs `acknowledgeAuto: [field…]` — the
+  admin confirms 「この欄の変更をきっかけに動く HubSpot のワークフローがないか確かめました」
+  (`AUTO_ACKNOWLEDGEMENT`); else 400 `AUTO_NEEDS_ACKNOWLEDGEMENT` with the fields. Stored per field
+  and outside property with who and when (`plugin_policy_acks`, history `acknowledge`); a field
+  moved to another property needs a new one. A plugin whose automatic field lacks one does not
+  run (`auto-not-acknowledged`; e.g. the package's recommended defaults right after install).
+  Reading HubSpot's workflows to check this automatically would need more key scopes — an option
+  for later, not taken now.
 - **An operation reaching people outside the company is never `auto`**: refused in the
   declaration (an external create with `policy: auto`, auto defaults while an external update
   exists), refused in a mapping (`policy: auto` on a field an external update writes), and
@@ -212,10 +240,15 @@ plugin's switch:
 ## Connections (review §5.7, §5.8)
 
 - An install is one **connection**: `connection_id` (new at install) and `account_id` (the outside
-  account — HubSpot's portal id — set by the connector's first call, P5). Rotating the key keeps
-  the connection; another account means a new connection, and outside ids are keyed by company
-  + connection + account + object + external id (P5), so the fake and the real HubSpot, or two
-  accounts, never mix. Undo never writes to another account (P6).
+  account). A package that writes must declare `account_info` (a GET; the connector reads
+  HubSpot's `portalId` from it). The first answer binds the connection (`bindAccount`, a
+  compare-and-set; history `account`); on every import and refresh (and before every P6 write)
+  the account is read again, and another account → `ACCOUNT_CHANGED`: nothing is read into or
+  written for the old connection until an owner/admin starts a new one (`POST
+  /plugins/:id/connection/renew`, history `connection`; account bound again by the next call).
+  Rotating the key keeps the connection. Outside ids are keyed by company + connection + account
+  + object + external id (`plugin_external_links`), so the fake and the real HubSpot, or two
+  accounts, never mix (their records are separate). Undo never writes to another account (P6).
 - **A real secret never reaches the fake**: while a service goes to its practice copy
   (`ACB_FAKE_HUBSPOT_URL`, staging), registering a company key, replacing one or saving an own
   key whose value is not a practice key (`pat-fake-…`, `PRACTICE_KEY_PREFIX`) is refused (400
@@ -223,9 +256,62 @@ plugin's switch:
   a request whose credential is not a practice key (`practice-real-secret`; a key saved before
   the redirect was on). Test: `tests/integration/broker-practice-upstream.test.ts`.
 
+## The connector (P5, `services/plugin-connector.ts`)
+
+- The only part of the core that talks to an outside system for a plugin. It makes exactly the
+  declared calls — the endpoint's fixed method and path template under the one `base_url`, `{id}`
+  filled with a plain outside id (`EXTERNAL_ID_RE`), a query of fixed parameter names — to the
+  declared host only, through the key broker's way out (`UpstreamClient`: address checks;
+  staging's practice redirect). Anything else is `not-sent` / `undeclared-call`.
+- The key: `vault.reveal` right before each attempt, only into the service's credential header
+  (`Authorization: Bearer` for HubSpot); never logged, stored, returned or put in an error. Error
+  answers' bodies are dropped (they could echo what was sent).
+- Wire format: HubSpot's CRM API (search `{ filterGroups, properties, sorts, limit, after }` →
+  `{ results, paging.next.after, total }`; objects `{ id, properties, associations }`; account
+  `{ portalId }`; `pipeline` and `hs_lastmodifieddate` for the import window). Another shape
+  needs another connector kind in the core — never conditions in a declaration (§8-1).
+- **Pace**: per company × connection at most 80 requests per 10 s and 4 searches per second
+  (HubSpot Free / Starter: 100 per 10 s, search 5 per second; headroom for scripts on the same
+  key), waiting rather than failing.
+- **Retries differ by kind** (review §5.6). Reads (get, search, lists, account): after a 429, a
+  5xx or a failed connection — wait `Retry-After` (capped at 10 s) or 1 s, 2 s, 4 s; at most 3
+  retries and 15 s of waiting (HubSpot does not say how long to wait after a 429; this is our
+  conservative choice). **Writes (update, create, archive) are never re-sent**: a 429 / 5xx is
+  returned as is; a connection lost after sending (anything but dns / tls / a refused address) is
+  `unknown` — the caller compares the outside state with its stored evidence (P6) and **never
+  re-sends a create**.
+- **`precheck` before every attempt**, also after each wait: the plugin's `active()` (every kill
+  switch), the same connection, the records switch, and the caller's membership / role (review
+  §6.5). A refusal sends nothing.
+
+## Import (P5, `services/plugin-import.ts`)
+
+- `POST /plugins/:pluginId/import` (owner/admin; 404 for a plugin the company has not
+  installed): one run per company at a time (409 `IMPORT_RUNNING`), at most 5 minutes, one
+  company per run (no server-wide sweep). Needs the plugin running (409 `PLUGIN_NOT_ACTIVE` +
+  `problem`) and the records switch on (409 `RECORDS_DISABLED`). The account is checked first.
+- Per mapped object with a `search`: the mapping's window (`pipelines`, `updated_within_days`,
+  newest first) up to `max`; per item, when the mapping has `links`, a `get` with the
+  associations and the linked objects' own `get` (a target object needs a record type, a `get` and
+  a mapping section; at most 20 per link). Values through `externalToAcb` (untranslatable values
+  reported by field name only).
+- Records are written by the engine's **external entry** (`createExternalRecordWriter`,
+  `records.md` "Outside systems"): **server-only, no file, no commit** (owner rule §8-3), folder =
+  the mapping's `visible_to_folder`, ledger actor `external` / the plugin id with a **receipt**
+  (`kind: observed`: who changed it outside is not known). The package's types are stored with
+  source `plugin` unless a version at least as new is there.
+- The report says what happened, not more (review §6.8): per object `seen / created / updated /
+  unchanged / truncated` (the `max` cut it) and problem counts; status `complete`, `truncated`,
+  `stopped` (a kill switch between requests), `failed`, `timed-out` — kept in the history
+  (`import`). "Not in the map" never means "not in HubSpot".
+- `refreshRecord(member, pluginId, recordId)` (for P6's reads and writes): only a record the
+  member may read (else the same 404 as a missing one, and **nothing is asked outside**; review
+  §5.1 — there is no read by outside id); only one imported through the current connection and
+  account.
+
 ## Not yet (later PRs of milestone 3)
 
-P5 the connector and import; P6 typed operations, undo and the remaining stops (AI stop, field
+P6 typed operations, undo and the remaining stops (AI stop, field
 `off`, records switch); P7 the app's tools; P8 the admin page 「つなぎ先」 (it writes the mapping's
 YAML, also from its table form); P9 staging (compose wiring of `PLUGINS_DIR`). The real HubSpot
 package lives in the private `acb-plugins` repository (§6-6).
@@ -238,7 +324,14 @@ naming only the folder; fingerprint; `available_to`; the stop list read per call
 owner/admin only; keys of another company / service refused; members only, no private folder;
 versions and restore; read-only relay on; no key value anywhere; every kill switch on the next
 call; the managed relay: no writes from old tokens or after turning off, declared searches only,
-no reads for those who cannot see the cards, the switch locked), `tests/unit/company-data.test.ts` (handle isolation and the triggers), permission matrix
+no reads for those who cannot see the cards, the switch locked), `tests/unit/company-data.test.ts`
+(handle isolation and the triggers, external links per company / connection / account),
+`server/tests/unit/plugin-connector.test.ts` (declared calls only, plain ids, key only in its
+header, read retries and caps, writes never re-sent, lost write = unknown, precheck after waits),
+`server/tests/integration/plugin-import.test.ts` (against the fake HubSpot: no file / commit,
+external ledger with receipt, declared calls only, no key anywhere, visibility, refresh only when
+readable, one run per company, a stop between requests, another account and a new connection,
+the records switch, deleting the key), `tests/unit/plugin-schema-migrations.test.ts`, permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-crm`, a
 HubSpot-shaped fictional CRM; `sample-desk`, a read-only company package of another shape):

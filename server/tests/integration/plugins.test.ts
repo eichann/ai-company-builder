@@ -186,8 +186,19 @@ describe('connector plugins: install, turn on, mapping', () => {
     expect(notMember.body.errors.join()).toMatch(/pl-other-owner はこの会社のメンバーではありません/)
     const privateFolder = await services.plugins.saveMapping(admin, 'crm-hub', { text: MAPPING('pl-member', '営業部/評価/2026') })
     expect(privateFolder.body.errors.join()).toMatch(/非公開のフォルダ/)
-    const saved = await services.plugins.saveMapping(admin, 'crm-hub', { text: MAPPING() })
+    // Fields that would write automatically need the recorded acknowledgement (no HubSpot workflow behind them).
+    const unconfirmed = await services.plugins.saveMapping(admin, 'crm-hub', { text: MAPPING(), acknowledgeAuto: ['confidence'] })
+    expect(unconfirmed).toMatchObject({ ok: false, body: { code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['next_step'] } })
+    expect(db.prepare('SELECT COUNT(*) AS n FROM plugin_policy_acks').get().n).toBe(0)
+    const saved = await services.plugins.saveMapping(admin, 'crm-hub', { text: MAPPING(), acknowledgeAuto: ['confidence', 'next_step'] })
     expect(saved.value.mapping.version).toBe(2)
+    expect(saved.value.autoAcknowledgements).toEqual([
+      { field: 'confidence', property: 'juchu_kakudo', by: 'pl-admin', at: expect.any(String) },
+      { field: 'next_step', property: 'hs_next_step', by: 'pl-admin', at: expect.any(String) },
+    ])
+    // The same field writing another property is not covered by the old acknowledgement.
+    const moved = await services.plugins.saveMapping(admin, 'crm-hub', { text: MAPPING().replace('from: hs_next_step', 'from: description') })
+    expect(moved).toMatchObject({ ok: false, body: { code: 'AUTO_NEEDS_ACKNOWLEDGEMENT', fields: ['next_step'] } })
     expect(saved.value.mappingErrors).toEqual([])
     // amount has no company policy: the declaration's default (prior); next_step auto.
     expect(saved.value.policies).toEqual(expect.arrayContaining([
@@ -229,6 +240,13 @@ describe('connector plugins: every kill switch acts on the next call', () => {
     await services.keyBroker.update(owner, hubKey, { status: 'disabled' })
     expect(await active()).toEqual({ ok: false, problem: 'key-stopped' })
     await services.keyBroker.update(owner, hubKey, { status: 'active' })
+    expect((await active()).ok).toBe(true)
+
+    // An automatic field whose acknowledgement is gone (or never recorded) stops the plugin.
+    const ack = db.prepare("SELECT * FROM plugin_policy_acks WHERE company_id = ? AND field = 'next_step'").get(CO)
+    db.prepare("DELETE FROM plugin_policy_acks WHERE company_id = ? AND field = 'next_step'").run(CO)
+    expect(await active()).toEqual({ ok: false, problem: 'auto-not-acknowledged' })
+    db.prepare('INSERT INTO plugin_policy_acks (company_id, plugin_id, field, property, acknowledged_by, acknowledged_at) VALUES (@company_id, @plugin_id, @field, @property, @acknowledged_by, @acknowledged_at)').run(ack)
     expect((await active()).ok).toBe(true)
 
     await services.plugins.setEnabled(admin, 'crm-hub', { enabled: false })
