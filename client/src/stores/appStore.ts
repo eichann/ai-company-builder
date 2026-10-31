@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import i18n from '../i18n'
 import type { CompanyView } from '../types'
 import { canRegisterCompanyFolder, registerCompanyFolder } from '../shared/ipc/allowed-folders'
-import { resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../lib/aiModels'
+import { MODEL_EFFORT_OPTIONS as EFFORTS_OF_MODEL, resolveSavedEffort, resolveSavedModel, type AIEffort, type AIModel } from '../lib/aiModels'
 
 // Theme type
 export type Theme = 'light' | 'dark'
@@ -18,7 +18,12 @@ const readSaved = (key: string): string | null => {
   try { return typeof window !== 'undefined' ? localStorage.getItem(key) : null } catch { return null }
 }
 const getInitialModel = (): AIModel => resolveSavedModel(readSaved('aiModel'))
-const getInitialEffort = (): AIEffort => resolveSavedEffort(readSaved('aiEffort'))
+/**
+ * An effort the model does not support (e.g. xhigh on Opus 4.6) becomes 'high', a level every
+ * model supports, instead of relying on the CLI's silent fallback.
+ */
+const effortFor = (model: AIModel, effort: AIEffort): AIEffort => EFFORTS_OF_MODEL[model].includes(effort) ? effort : 'high'
+const getInitialEffort = (): AIEffort => effortFor(getInitialModel(), resolveSavedEffort(readSaved('aiEffort')))
 
 // Get initial chat markdown render setting from localStorage (default ON)
 const getInitialChatMarkdownRender = (): boolean => {
@@ -117,7 +122,9 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setAIModel: (model) => {
     localStorage.setItem('aiModel', model)
-    set({ aiModel: model })
+    const effort = effortFor(model, get().aiEffort)
+    if (effort !== get().aiEffort) localStorage.setItem('aiEffort', effort)
+    set({ aiModel: model, aiEffort: effort })
   },
 
   setAIEffort: (effort) => {

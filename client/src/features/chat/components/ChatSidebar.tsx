@@ -76,9 +76,10 @@ function GroupHeading({ group, first, count, folded, unread, onToggle }: { group
 
 export function ChatSidebar({ companyId, tabs, activeTabId, onSelectTab, onOpenSession, onCloseTab, onNew, onHide, windows = NO_WINDOWS, onOpenInWindow }: Props) {
   const [sessions, setSessions] = useState<ChatSessionSummary[]>([])
-  const [query, setQuery] = useState('')
+  const [query, setQueryState] = useState('')
   const [historyLimit, setHistoryLimit] = useState(20)
-  useEffect(() => { setHistoryLimit(20) }, [companyId, query])
+  // A new search starts from the first page again (the panel is keyed by company).
+  const setQuery = (next: string) => { setQueryState(next); setHistoryLimit(20) }
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [editing, setEditing] = useState<string | null>(null)

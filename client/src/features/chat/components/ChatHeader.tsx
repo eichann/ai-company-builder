@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useIsNarrowerThan } from '../../../shared/hooks/useIsNarrowerThan'
 import { useTranslation } from 'react-i18next'
 import { Sparkle, GearSix, CircleNotch, Plus, SidebarSimple, X, MarkdownLogo, ArrowSquareOut } from '@phosphor-icons/react'
 import type { AuthMode, CodexStatus } from '../../../../shared/agent'
@@ -41,15 +41,7 @@ export function ChatHeader({ authMode, status, codexStatus, models, modelLocked,
   const setChatMarkdownRender = useAppStore((state) => state.setChatMarkdownRender)
 
   // The usage meter shows only its fullest window when the header is narrow.
-  const headerRef = useRef<HTMLElement>(null)
-  const [narrowHeader, setNarrowHeader] = useState(false)
-  useEffect(() => {
-    const header = headerRef.current
-    if (!header) return
-    const observer = new ResizeObserver(([entry]) => setNarrowHeader(entry.contentRect.width < 600))
-    observer.observe(header)
-    return () => observer.disconnect()
-  }, [])
+  const [headerRef, narrowHeader] = useIsNarrowerThan<HTMLElement>(600)
 
   return (
     <header ref={headerRef} className="flex-shrink-0 h-12 flex items-center justify-between gap-2 px-4 border-b border-gray-200 dark:border-zinc-800">

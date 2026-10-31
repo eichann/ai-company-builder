@@ -1,4 +1,4 @@
-import { memo, useEffect, useId, useRef, useState } from 'react'
+import { memo, useId, useRef, useState } from 'react'
 import { CheckCircle, ListChecks, XCircle } from '@phosphor-icons/react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../../shared/agent-interaction'
 import { agentShortLabel } from '../../../../shared/agents/registry'
@@ -67,7 +67,6 @@ export function ChoicePromptCard({ request, onRespond }: { request: ChoiceReques
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
   const name = useId()
-  useEffect(() => { setDrafts(request.questions.map(emptyDraft)); setSending(false); setError('') }, [request.id, request.questions])
   const answers = buildChoiceAnswers(request.questions, drafts)
   const respond = async (response: AgentInteractionResponse) => {
     setSending(true); setError('')

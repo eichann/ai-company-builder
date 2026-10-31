@@ -1,5 +1,10 @@
-import { voiceShortcut, formatVoiceShortcut, matchesVoiceShortcut } from '../../../lib/voiceShortcut'
+import { voiceShortcut, formatVoiceShortcut } from '../../../lib/voiceShortcut'
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react'
+import { useCommandHandler } from '../../../shared/commands/commands'
+import { useEventListener } from '../../../shared/hooks/useEventListener'
+import { useInterval } from '../../../shared/hooks/useInterval'
+import { useIpcEvent } from '../../../shared/hooks/useIpcEvent'
+import { useVoiceShortcut } from '../hooks/useVoiceShortcut'
 import { Microphone, Stop, X, CaretDown } from '@phosphor-icons/react'
 import { microphoneSelection, deviceFailureMessage } from '../../../lib/microphoneSelection'
 import { voiceAvailability, recheckView } from '../../../lib/voiceAvailability'
@@ -10,9 +15,18 @@ export interface VoiceEditor {
   captureInsertion: () => (text: string) => boolean
 }
 
-export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
+/** Registers the voice key's command for this pane while its composer is shown. */
+function VoiceInputCommand({ pane, onToggle }: { pane: string; onToggle: () => void }) {
+  useCommandHandler('chat.toggleVoiceInput', () => onToggle(), { target: pane })
+  return null
+}
+
+export function VoiceInputControl({ editor, active, pane, disabled, scope, onBusy }: {
   editor: React.MutableRefObject<VoiceEditor | null>
+  /** Its composer is the shown tab of its pane. */
   active: boolean
+  /** The chat pane: the voice key reaches the pane used last (useVoiceShortcut). */
+  pane: string
   disabled: boolean
   scope: string
   onBusy: (busy: boolean) => void
@@ -29,11 +43,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
   const lastAudible = useRef(0)
   const refreshDevices = microphoneSelection.refresh
   useEffect(() => { void voiceAvailability.load() }, [])
-  useEffect(() => {
-    if (!active || !showDevices) return
-    const timer = setInterval(() => { void refreshDevices() }, 3000)
-    return () => clearInterval(timer)
-  }, [active, showDevices, refreshDevices])
+  useInterval(() => { void refreshDevices() }, active && showDevices ? 3000 : null)
   const deviceMissing = Boolean(selectedDevice && devices && !devices.some(d => d.id === selectedDevice))
   const deviceLabel = selectedDevice ? devices?.find(d => d.id === selectedDevice)?.name ?? '未接続のマイク' : `システムの既定：${devices?.find(d => d.isDefault)?.name ?? '未接続'}`
   const [phase, setPhase] = useState('idle')
@@ -56,7 +66,7 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     setRawText('')
   }, [onBusy])
 
-  useEffect(() => onVoiceEvent(event => {
+  useIpcEvent(onVoiceEvent, event => {
     const op = operation.current
     if (!op || op.id !== event.requestId || !current.current.active || op.scope !== current.current.scope) return
     if (event.type === 'level') {
@@ -76,13 +86,9 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
       setPhase(event.type)
       if (event.type === 'listening') { editor.current?.focus?.(); setSeconds(0); setRecordingDevice(event.deviceName ?? 'マイク'); lastSample.current = 0; lastAudible.current = Date.now() }
     }
-  }), [onBusy, editor])
+  })
   useEffect(() => { if (!active || disabled) cancel(); return cancel }, [active, scope, disabled, cancel])
-  useEffect(() => {
-    if (phase !== 'listening') return
-    const timer = setInterval(() => { setSeconds(value => value + 1); if (Date.now() - lastSample.current > 500) { setLevel(0); setClipping(false) } }, 1000)
-    return () => clearInterval(timer)
-  }, [phase])
+  useInterval(() => { setSeconds(value => value + 1); if (Date.now() - lastSample.current > 500) { setLevel(0); setClipping(false) } }, phase === 'listening' ? 1000 : null)
   const startOrStop = useCallback(async () => {
     if (phaseRef.current === 'listening' && operation.current) {
       phaseRef.current = 'finalizing'
@@ -98,23 +104,20 @@ export function VoiceInputControl({ editor, active, disabled, scope, onBusy }: {
     try { await startRecording(id, selectedDevice || undefined) }
     catch { if (operation.current?.id === id) { cancel(); setError('音声入力を開始できませんでした。別の録音が動作していないかご確認ください') } }
   }, [active, caps, disabled, editor, scope, onBusy, cancel, selectedDevice, devices, deviceMissing])
-  useEffect(() => {
-    if (!active) return
-    const keydown = (event: KeyboardEvent) => {
-      if (event.isComposing || event.repeat || document.querySelector('[role="dialog"]')) return
-      if (matchesVoiceShortcut(event, shortcut)) { event.preventDefault(); event.stopPropagation(); void startOrStop() }
-      if (event.key === 'Escape' && operation.current) { event.preventDefault(); cancel() }
-    }
-    const blur = () => { if (phaseRef.current !== 'preparing') cancel() }
-    window.addEventListener('keydown', keydown, true)
-    window.addEventListener('blur', blur)
-    return () => { window.removeEventListener('keydown', keydown, true); window.removeEventListener('blur', blur) }
-  }, [active, startOrStop, cancel, shortcut])
+  // The start / stop key goes through chat.toggleVoiceInput (the pane used last);
+  // Esc and leaving the window cancel this composer's own recording.
+  useVoiceShortcut()
+  useEventListener<KeyboardEvent>(window, 'keydown', event => {
+    if (event.isComposing || event.repeat || document.querySelector('[role="dialog"]')) return
+    if (event.key === 'Escape' && operation.current) { event.preventDefault(); cancel() }
+  }, { capture: true, enabled: active })
+  useEventListener(window, 'blur', () => { if (phaseRef.current !== 'preparing') cancel() }, { enabled: active })
   // 「もう一度確認」: re-runs both the speech probe and the microphone list.
   // Rendered next to every message that asks the user to retry.
   const recheckButton = <button type="button" disabled={recheck.running} onClick={() => void voiceAvailability.recheck()}
     className="shrink-0 rounded border border-current px-2 py-0.5 font-medium disabled:opacity-50">{recheck.running ? '確認中…' : 'もう一度確認'}</button>
   return <div className="px-2 pt-2 text-xs" aria-live="polite">
+    {active && <VoiceInputCommand pane={pane} onToggle={() => void startOrStop()} />}
     <div className="flex items-center gap-2 flex-wrap">
       <button type="button" onMouseDown={event => event.preventDefault()} onClick={() => void startOrStop()}
         disabled={phase !== 'listening' && (busy || disabled || !caps?.available || !devices?.length || deviceMissing)}

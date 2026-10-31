@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useRef } from 'react'
 import type { UIMessage } from 'ai'
+import { useEventListener } from '../../../shared/hooks/useEventListener'
 
 export interface ChatAutoScrollOptions {
-  isActive: boolean
+  isShown: boolean
   isRestoringSession: boolean
   messages: UIMessage[]
   status: string
@@ -18,7 +19,7 @@ export interface ChatAutoScrollOptions {
  * All refs: scroll position and composition change constantly and nothing
  * renders from them.
  */
-export function useChatAutoScroll({ isActive, isRestoringSession, messages, status }: ChatAutoScrollOptions) {
+export function useChatAutoScroll({ isShown, isRestoringSession, messages, status }: ChatAutoScrollOptions) {
   // Composition state for auto-scroll
   const isInputComposingRef = useRef(false)
   const compositionEndTimerRef = useRef<number | null>(null)
@@ -32,35 +33,24 @@ export function useChatAutoScroll({ isActive, isRestoringSession, messages, stat
   // History content mounts after restoration; hidden tabs have no layout.
   // Reset only on opening a chat, so reading older messages stays possible.
   useLayoutEffect(() => {
-    if (!isActive || isRestoringSession) return
+    if (!isShown || isRestoringSession) return
     shouldAutoScrollRef.current = true
     pendingAutoScrollRef.current = false
     const container = messagesContainerRef.current
     if (container) container.scrollTop = container.scrollHeight
-  }, [isActive, isRestoringSession])
+  }, [isShown, isRestoringSession])
 
   // Attach after the message list actually mounts, not while the spinner is shown.
-  useEffect(() => {
-    if (!isActive || isRestoringSession) return
-    const container = messagesContainerRef.current
-    if (!container) return
-
-    const handleScroll = () => {
-      const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
-      shouldAutoScrollRef.current = distanceFromBottom < 120
-    }
-
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    handleScroll()
-
-    return () => {
-      container.removeEventListener('scroll', handleScroll)
-    }
-  }, [isActive, isRestoringSession])
+  const container = useCallback(() => messagesContainerRef.current, [])
+  useEventListener(container, 'scroll', () => {
+    const element = messagesContainerRef.current
+    if (!element) return
+    shouldAutoScrollRef.current = element.scrollHeight - element.scrollTop - element.clientHeight < 120
+  }, { passive: true, enabled: isShown && !isRestoringSession })
 
   // Auto-scroll when messages change
   useEffect(() => {
-    if (!isActive || isRestoringSession) return
+    if (!isShown || isRestoringSession) return
     if (isInputComposingRef.current) {
       pendingAutoScrollRef.current = true
       return
@@ -68,7 +58,7 @@ export function useChatAutoScroll({ isActive, isRestoringSession, messages, stat
     if (!shouldAutoScrollRef.current) return
     pendingAutoScrollRef.current = false
     messagesEndRef.current?.scrollIntoView({ behavior: 'auto' })
-  }, [messages, status, isActive, isRestoringSession])
+  }, [messages, status, isShown, isRestoringSession])
 
   // Composition handling
   const flushAfterComposition = useCallback(() => {

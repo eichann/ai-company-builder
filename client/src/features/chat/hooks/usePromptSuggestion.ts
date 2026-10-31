@@ -55,7 +55,12 @@ export function usePromptSuggestion({ chatServer, authModeRef, appSessionIdRef, 
     return () => { cancelled = true }
   }, [finishedTurn, chatServer, appSessionIdRef, inputApiRef])
 
-  useEffect(() => { setPromptSuggestion(null) }, [currentSessionId])
+  // Another conversation in this tab drops the suggestion (adjusted while rendering).
+  const [suggestionSession, setSuggestionSession] = useState(currentSessionId)
+  if (currentSessionId !== suggestionSession) {
+    setSuggestionSession(currentSessionId)
+    setPromptSuggestion(null)
+  }
   const clearPromptSuggestion = useCallback(() => setPromptSuggestion(null), [])
 
   return { promptSuggestion, clearPromptSuggestion, onTurnFinished, resetSuggestion }

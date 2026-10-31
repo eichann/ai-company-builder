@@ -34,13 +34,6 @@ export function ChatWindowApp() {
 }
 
 function ChatWindowChat({ context }: { context: ChatWindowContext }) {
-  // The chat reads the company from the store (its folder for the AI, the history file).
-  const [companyReady, setCompanyReady] = useState(false)
-  useEffect(() => {
-    useAppStore.setState({ currentCompany: { id: context.companyId, name: context.companyName, rootPath: context.rootPath, departments: [], createdAt: new Date() } })
-    setCompanyReady(true)
-  }, [context])
-
   const chatServer = useChatServer()
   const auth = useAgentAuth()
   const [showSettings, setShowSettings] = useState(false)
@@ -53,7 +46,7 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
   // File links (a review request's files) open in the main window's editor.
   const fileNotice = useOpenFileInMainWindow()
 
-  if (!companyReady || auth.isChecking || !chatServer) return <ChatAuthChecking />
+  if (auth.isChecking || !chatServer) return <ChatAuthChecking />
   const settingsOverlay = showSettings && (
     <div role="dialog" aria-label="相談の設定" className="absolute inset-0 z-10">
       <AuthSettings authMode={auth.authMode} claudeCodeAvailable={auth.claudeCodeAvailable} claudeCodeError={auth.claudeCodeError}
@@ -66,7 +59,7 @@ function ChatWindowChat({ context }: { context: ChatWindowContext }) {
         {auth.isReady
           ? <ChatPanelChat
               tabId={TAB_ID}
-              isActive
+              isShown
               standalone
               departmentPath={context.rootPath}
               activeDepartment={context.department}

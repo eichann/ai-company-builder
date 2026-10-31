@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { AgentInteractionRequest, AgentInteractionResponse } from '../../../../shared/agent-interaction'
 import { ChoicePromptCard } from './ChoicePrompt'
 
+// Keyed by the request: a new question starts with empty answers.
 export function AgentInteractionCard({ request, onRespond }: { request: AgentInteractionRequest; onRespond: (response: AgentInteractionResponse) => Promise<boolean> }) {
-  if (request.kind === 'choices') return <ChoicePromptCard request={request} onRespond={onRespond} />
-  return <CodexInteractionCard request={request} onRespond={onRespond} />
+  if (request.kind === 'choices') return <ChoicePromptCard key={request.id} request={request} onRespond={onRespond} />
+  return <CodexInteractionCard key={request.id} request={request} onRespond={onRespond} />
 }
 
 function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentInteractionRequest, { kind: 'choices' }>; onRespond: (response: AgentInteractionResponse) => Promise<boolean> }) {
@@ -12,7 +13,6 @@ function CodexInteractionCard({ request, onRespond }: { request: Exclude<AgentIn
   const [other, setOther] = useState<Record<string, boolean>>({})
   const [sending, setSending] = useState(false)
   const [error, setError] = useState('')
-  useEffect(() => { setAnswers({}); setOther({}); setSending(false); setError('') }, [request.id])
   const respond = async (response: AgentInteractionResponse) => {
     setSending(true); setError('')
     try { if (!await onRespond(response)) setError('この確認は終了しています。回答は送信されませんでした。') }

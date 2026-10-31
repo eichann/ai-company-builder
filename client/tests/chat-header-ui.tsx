@@ -31,6 +31,7 @@ import { commands, runCommand } from '../src/shared/commands/commands'
 //                  Playwright UI tests drive it: tests/ui/chat-panel.spec.ts)
 //   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
 //   ?storage=keep  keep localStorage across reloads (remembered folded groups)
+//   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -290,10 +291,14 @@ useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com',
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
 const width = Number(params.get('width')) || 760
-createRoot(document.getElementById('root')!).render(
-  <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
-    <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-      <ChatPanel departmentPath="/tmp/acb-preview" />
+createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
+  ? <div className="h-screen flex bg-gray-50 dark:bg-zinc-950">
+      <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" /></section>
+      <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
     </div>
-  </div>,
+  : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
+      <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
+        <ChatPanel departmentPath="/tmp/acb-preview" />
+      </div>
+    </div>,
 )

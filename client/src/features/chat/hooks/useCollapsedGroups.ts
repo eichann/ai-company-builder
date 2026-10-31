@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useState } from 'react'
 import type { ConversationGroupKey } from '../../../lib/consultationStatus'
 import { COLLAPSED_GROUPS_KEY_PREFIX, canCollapse, parseCollapsedGroups } from '../conversationGroups'
 
@@ -9,7 +9,12 @@ function read(companyId: string): ReadonlySet<ConversationGroupKey> {
 /** The groups of the 「AIへの相談」 list this member folded in this company (this PC only). */
 export function useCollapsedGroups(companyId: string) {
   const [collapsed, setCollapsed] = useState(() => read(companyId))
-  useEffect(() => { setCollapsed(read(companyId)) }, [companyId])
+  // Another company reads its own (adjusted while rendering).
+  const [readFor, setReadFor] = useState(companyId)
+  if (readFor !== companyId) {
+    setReadFor(companyId)
+    setCollapsed(read(companyId))
+  }
   const toggle = useCallback((key: ConversationGroupKey) => {
     if (!canCollapse(key)) return
     setCollapsed(previous => {
