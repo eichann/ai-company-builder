@@ -262,7 +262,15 @@ the sign-in.
    (`BrokerServiceInfo.credential`: gemini `x-goog-api-key`, openai `Authorization: Bearer`,
    anthropic `x-api-key`). Dropped upstream: every credential header, `?key=`, cookies,
    `x-forwarded-*`, `forwarded`, `via`, `x-acb-*`, origin, referer, hop-by-hop;
-   `accept-encoding: identity` (K5 reads usage).
+   `accept-encoding: identity` (K5 reads usage). A strict API declares `requestHeaders`
+   (`BrokerServiceInfo`): only its `forward` client headers pass and `set` goes on top. HubSpot:
+   `content-type` / `content-length` + `accept: application/json` — the connector plugin's
+   request. Why: staging's Node-fetch caller got 400 「Invalid request」 (15 bytes, text/plain) from
+   the real HubSpot on every relay call while the connector worked with the same key; Node's
+   fetch adds `accept-language: *`, `sec-fetch-mode: cors`, `user-agent: node`, which the relay
+   used to forward (main does the same for a generic `hubspot`; Python callers such as div's
+   `anken-sync` send none of them). Test: `tests/integration/broker-relay.test.ts` 「HubSpot is
+   strict」 (a fake that answers like that to any other header; mutation-checked).
 5. **Way out** (`adapters/upstream-https.ts`): DNS once; **any** answer in a private / internal
    range (`lib/net-ranges.ts`: loopback, RFC 1918, 100.64/10, link-local incl.
    169.254.169.254, ULA, multicast, documentation, reserved; IPv4 inside mapped / NAT64 / 6to4
