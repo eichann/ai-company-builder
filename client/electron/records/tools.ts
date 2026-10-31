@@ -23,6 +23,7 @@
  * with 「変更前の値を書き戻す」 for the person.
  */
 import { z, type ZodTypeAny } from 'zod'
+import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import type { FieldKind, TypeDefinition } from '../../../shared/core/record-types'
 import type { PluginAiOperation, PluginAiTools } from '../../../shared/types/plugins'
 import { OLD_CONNECTION_LABEL } from '../../../shared/types/records'
@@ -74,6 +75,11 @@ const LOOKUPS: RecordToolSpec[] = [
     request: () => ({ method: 'GET', path: '/my-turn' }),
   },
   {
+    name: 'records_ai_turn', readOnly: true, schema: z.object({}).strict(),
+    description: '「AI の番」：このメンバーが担当の記録のうち、AI だけができる操作が残っているもの（例：届いた議事録を読み始める）。\nThe AI\'s turn: the member\'s records waiting for an action only the AI does (e.g. minutes that arrived and wait to be read).',
+    request: () => ({ method: 'GET', path: '/ai-turn' }),
+  },
+  {
     name: 'records_query', readOnly: true,
     schema: z.object({
       type: z.string().max(40).optional(), implements: z.string().max(40).optional(),
@@ -104,10 +110,32 @@ const LOOKUPS: RecordToolSpec[] = [
   },
 ]
 
+const recordRef = (type: string) => z.string().regex(new RegExp(`^${type}-[0-9a-z]{6,32}$`))
+
+/** 「決めたこと」 as a file the server writes (services/decisions.ts). */
+const DECISION_TOOL: RecordToolSpec = {
+  name: 'decisions_record', readOnly: false,
+  schema: z.object({
+    folder: z.string().min(1).max(200).describe('置く部署のフォルダ（例「営業部」）。非公開のフォルダには置けない / the department folder (never a private folder)'),
+    title: z.string().min(1).max(120).describe('決めたことを1行で。人や顧客の名前は書かない / one line; no person or customer names'),
+    why: z.string().min(1).max(1000).describe('なぜそう決めたか。根拠になった発言の要約か引用 / why, citing what it rests on'),
+    source: z.string().min(1).max(300).describe('元（例「議事録 2026-11-05（minutes-…）」） / where it came from'),
+    links: z.object({ deal: recordRef('deal').optional(), minutes: recordRef('minutes').optional(), approval: recordRef('approval').optional() }).strict().optional(),
+    important: z.boolean().optional(),
+    key: z.string().min(1).max(200).optional().describe('同じ項目を2回残さないための目印（例「minutes-…:decision:2」） / an idempotency key'),
+  }).strict(),
+  description: '「決めたこと」を部署の「意思決定」フォルダにファイルとして残す（サーバーが書く。未確認の状態で始まり、確かめるのは人）。' +
+    '件名・本文に人や顧客の名前は書かず、案件・議事録はつながり（links）で示す（名前が入っていると断られる）。同じ項目は key をそろえれば1回だけ残る。\n' +
+    'Record a decision as a file in the department\'s 意思決定 folder (the server writes it; it starts unconfirmed and a person confirms it). ' +
+    'No person or customer names in the title or text — link the deal / minutes instead (names are refused). The same `key` records once.',
+  request: input => ({ method: 'POST', path: '/decisions', body: input }),
+}
+
 /** The state-changing tools for these types (one per action, and creating server-only records). */
 export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
   const specs: RecordToolSpec[] = []
-  const creatable = types.filter(t => t.storage !== 'file').map(t => t.name)
+  // Service-owned types (議事録・承認のお願い・送るメール・決めたこと) are made by the server's own steps only.
+  const creatable = types.filter(t => t.storage !== 'file' && !SERVICE_OWNED_TYPES.includes(t.name)).map(t => t.name)
   if (creatable.length > 0) {
     specs.push({
       name: 'records_create', readOnly: false,
@@ -120,6 +148,8 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
     })
   }
   for (const t of types) {
+    // Approving and sending change state through their own screens only (the server refuses the rest).
+    if (SERVICE_STATE_TYPES.includes(t.name)) continue
     for (const [name, a] of Object.entries(t.actions)) {
       const tool = `${t.name}__${name}`
       if (!TOOL_NAME_RE.test(tool)) continue
@@ -142,6 +172,7 @@ export function actionToolSpecs(types: TypeDefinition[]): RecordToolSpec[] {
       })
     }
   }
+  if (types.some(t => t.name === 'decision')) specs.push(DECISION_TOOL)
   return specs
 }
 

@@ -297,6 +297,40 @@ export function createRecordService({ companyData, clock, indexer }: RecordServi
       return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
     },
 
+    /**
+     * 「AI の番」 (milestone 4, design §3-1 / q16): records whose current
+     * state has an action only the AI may do (`who` exactly `[ai]`), for which
+     * the member is the `assignee` or `next_actor`, readable by them. Nothing
+     * new in the type format and no type named here: a state with an AI-only
+     * action left is the AI's turn.
+     */
+    aiTurn(member: Member): Outcome<RecordQueryResult> {
+      const records = handleOf(member).records
+      if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const aiStates = new Map<string, Set<string>>()
+      for (const [name, t] of currentTypes(records)) {
+        const d = t.definition
+        const states = new Set<string>()
+        for (const a of Object.values(d.actions)) {
+          if (a.who.length !== 1 || a.who[0] !== 'ai') continue
+          for (const s of a.from ?? d.states.filter(x => !d.final.includes(x))) states.add(s)
+        }
+        if (states.size > 0) aiStates.set(name, states)
+      }
+      if (aiStates.size === 0) return ok({ total: 0, records: [] })
+      const names = [...aiStates.keys()]
+      const reader = recordReader(member, handleOf(member).scopes.listWithRules())
+      const seen = new Set<string>()
+      const visible = ['assignee', 'next_actor']
+        .flatMap(field => records.candidates({ types: names, fields: [{ name: field, values: [member.userId] }] }, MAX_CANDIDATES))
+        .filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r))
+      const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s.state]))
+      const waiting = visible.filter(r => aiStates.get(r.type)?.has(states.get(r.id) ?? ''))
+      const page = waiting.slice(0, 200)
+      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
+      return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
+    },
+
     get(member: Member, recordId: string): Outcome<RecordDetail> {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })

@@ -11,6 +11,7 @@ paths:
   - "server/src/services/record-index.ts"
   - "server/src/services/record-access.ts"
   - "server/src/services/record-engine.ts"
+  - "server/src/services/decisions.ts"
   - "server/src/services/record-ai-tokens.ts"
   - "server/src/routes/records-ai.ts"
   - "client/electron/records/**"
@@ -159,6 +160,62 @@ own `.acb/types/task.md` (higher version, additive only). Definitions may also s
 (states where nobody's turn is waiting) and, per action, `hand_to` (the person field or argument
 copied into `next_actor`; only for types implementing `request`).
 
+Milestone 4 adds four (no customer or person names in any of them; people by id):
+
+- `minutes` (議事録, server): `meeting_at`, `assignee` (organizer or first discoverer),
+  `attendees` (text: JSON array of member ids — no person-list kind exists), `external_count`,
+  `source_ref` (opaque pointer, no text), `doc_version`, `summary_text` (long_text; ≤ 300 is the
+  intake's rule); links `deal`, `customer`. received → reading → read / skipped / failed:
+  `start_reading`, `finish_reading` (arg `summary_text`), `fail_reading` are `who: [ai]` —
+  received is the example of 「AI の番」 (no separate reader AI: the consultation AI reads, owner
+  §11); `retry` (reading / failed → received, also for "reading > 30 min") and `skip` are
+  assignee / admin.
+- `approval` (承認のお願い, server, implements `request` → the approver's 「あなたの番」):
+  `approver_rule` [self, dept_manager, admin], `operation`, `payload_hash`, `payload_version`,
+  `reason`, `result_operation_id`; links `about` (target `deal`), `minutes`. pending → approved /
+  sent_back / stale / withdrawn / failed. **No actions.**
+- `outbound_message` (送るメール, server): `requested_by` / `assignee` (the author), `subject`,
+  `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email]; links
+  `about`, `minutes`. draft → sent / unknown / discarded; unknown → sent or back to draft
+  (送られていた／送られていなかった). **No actions.**
+- `decision` (決めたこと, **file**, "Decisions" below): `recorded_by` [ai, human], `important`,
+  `decided_by` (null when the AI recorded it), `owner` (the linked minutes' assignee at creation,
+  else the member — `who` cannot name "the minutes' assignee"), `source_key`; links `deal`,
+  `minutes`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
+  (note required), both `who: [owner, dept_manager, admin]`, decisions.
+
+A link's `target` is a label, not a check: `deal` / `customer` come from a plugin and may not
+exist in a company; the parser and the engine accept a link to a type that is not defined.
+
+### Service-owned types (`SERVICE_OWNED_TYPES`, `shared/core/core-types.ts`)
+
+`minutes`, `approval`, `outbound_message`, `decision` are made only by the server's own services:
+the generic create (`POST /records/item`, the AI's `records_create`) answers 400
+`TYPE_CREATED_BY_SERVICE`, and the app's `records_create` tool never offers them. Of those,
+`SERVICE_STATE_TYPES` (`approval`, `outbound_message`) change state only through their service
+(approving checks the content hash and runs the operation; sending reaches outside): the generic
+action and undo routes answer 403 `STATE_CHANGED_BY_SERVICE` even if a company's own definition
+adds an action, and the app generates no action tools for them. Tests:
+`server/tests/unit/record-service-types.test.ts`, `record-tokens.test.ts` (an AI token creating
+an approval), `client/tests/records-tools.test.ts` — mutation-checked.
+
+### Service writer (`createServiceRecordWriter`, `services/record-engine.ts`)
+
+The engine's entry for the core services (approvals G6, minutes G7, mail G8, decisions). Like the
+external writer, composition.ts hands it to those services only (`serviceRecords`, not in
+`services`). `create(companyId, { type, id?, title, summary?, folder? | path?, fields, links,
+actor, note? })` — service-owned types only; `path` for a file record the caller has already
+committed (company repository, not private), `folder` for a server record (not private);
+`check(companyId, input)` is the same validation without writing (ask it before committing a
+file). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, actor,
+note?, decisionReason?, notify? })` — the state only along `SERVICE_TRANSITIONS` (next to the
+types; `serviceTransitionAllowed`), `to: null` changes fields only. Both: values checked by kind,
+every person field set must be able to read the record (`assignee-cannot-read`, never naming the
+place), state + ledger in one transaction with a compare-and-set (`stale`), the ledger actor is
+the one passed (human / ai / external), assignee / next actor / `notify` told (kind + version
+only). Results `{ ok: true, record, entry }` or `{ ok: false, reason }`. Whether that actor may
+do it (the approver approving) is the calling service's rule.
+
 ## The state engine (4-3, `services/record-engine.ts`)
 
 Exactly five duties (ontology §17.7): (1) the action's `from` states, (2) its `who`, (3) state and
@@ -258,8 +315,9 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 
 - `api.ts`: the token per turn (above). `tools.ts`: MCP server `acb_records`, generated from the
   company's type definitions at the start of each turn — look-ups (`records_my_turn`,
-  `records_query`, `records_get`, `records_history`, `records_types`) and, with an `act` token,
-  `records_create` and one tool per type × action (`task__request_review`: `id`,
+  `records_ai_turn`, `records_query`, `records_get`, `records_history`, `records_types`) and,
+  with an `act` token, `records_create` (not for service-owned types), `decisions_record`, and
+  one tool per type × action (none for `SERVICE_STATE_TYPES`) (`task__request_review`: `id`,
   `expectedVersion`, `note` — required where the type says —, the action's arguments). Wired like
   the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
   decide, nothing is asked), Codex as a loopback endpoint; registry `recordsMcp` /
@@ -306,11 +364,37 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
   `.acb/types/<name>.md` (higher version, additive).
 
-## 「あなたの番」 (4-4)
+## 「あなたの番」 (4-4) and 「AI の番」 (milestone 4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the
 member, or with no `next_actor` and the member as `assignee`, not in a `final` state, readable by
 them. Types are not named: a new request type shows up without changing the list.
+
+`GET /records/ai-turn` (session) and `GET /api/records-ai/ai-turn` (record token, tool
+`records_ai_turn`): records whose current state has an action with `who` exactly `[ai]` (from
+null = every non-final state), where the member is `assignee` or `next_actor`, readable by them
+(design q16: no new type syntax). Takes no object id (no `CROSS` row).
+
+## Decisions (`services/decisions.ts`, design §3-3)
+
+`POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
+`decisions_record`): `{ folder, title, why, source, links?: { deal?, minutes?, approval? },
+important?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
+- The server writes `<department>/意思決定/<id>.md` (frontmatter id / type / links; `# title`;
+  `- なぜ：` / `- 元：` / `- 記録：` who recorded it, by id — no state in the file) as its own
+  commit (`gitRecordFileCreator`: `commitFileEdit` under the company lock, through the push
+  checker; never over an existing file), then the index row + state (`unconfirmed`) through the
+  service writer. Everything is checked before the commit.
+- Place: `folder` must be a department folder (`departments.folders()`) the member may write,
+  the file not inside a private folder (q14), and inside every linked server record's folder.
+  Every refusal is 400 `DECISION_PLACE_REFUSED` with the same words, never naming the place.
+- Names (q7, 13.10): title / why / source containing a member's display name (whole, or a part of
+  2+ letters) or the title of the linked deal or of a customer linked from the deal / minutes
+  (also without 株式会社 & co.) → 400 `NAME_IN_DECISION` (the name is not echoed).
+- Links: readable records of this company of the link's type (else 400 `BAD_LINK`).
+- `key` (e.g. `minutes-…:decision:2`): the id is derived from it (sha256) and it is stored in
+  `source_key`; a known key answers the existing record, so the same item is written once even
+  for two calls at once.
 
 ## Not yet
 
@@ -322,7 +406,10 @@ the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 `server/tests/integration/record-tokens.test.ts` (the credential decides human / ai),
 `client/tests/records-tools.test.ts` (token not session on AI calls, revoked at turn end, tools
 from definitions, read scope / Codex without actions, schema refusals, write guard, action
-choices), `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
+choices), `server/tests/unit/record-service-types.test.ts` (service-owned types refused by the generic
+create, no generic action / undo on approvals, the writer's transition table and CAS, 「AI の番」
+own + readable only, decisions: names, private folder, key, links — each mutation-checked),
+`server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
 members of that company), `server/tests/unit/record-types.test.ts` (YAML subset, definitions, versions, record files),
@@ -330,5 +417,5 @@ members of that company), `server/tests/unit/record-types.test.ts` (YAML subset,
 filtering incl. counts and links, cross-company), `server/tests/integration/records.test.ts`
 (switch, full index, a member's push over git-http indexed, `.acb/types/` push rules, a task
 through the engine over HTTP with a real attached commit and the history line committed through
-the push checker),
+the push checker, a decision file committed through the push checker and indexed),
 permission matrix rows + `CROSS`.

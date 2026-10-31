@@ -5,7 +5,7 @@ import { companyRepoPath } from '../lib/config'
 import { gitAsync } from '../lib/git-exec'
 import { privateRepoPath } from '../lib/private-folders'
 import { readRecordFiles } from '../lib/record-files'
-import type { RecordFileRepo, RecordFileSource, RecordFileWriter } from '../ports/record-files'
+import type { RecordFileCreator, RecordFileRepo, RecordFileSource, RecordFileWriter } from '../ports/record-files'
 
 const repoPath = (companyId: string, repo: RecordFileRepo) =>
   (repo.kind === 'company' ? companyRepoPath(companyId) : privateRepoPath(companyId, repo.repoId))
@@ -39,5 +39,17 @@ export function gitRecordFileWriter(): RecordFileWriter {
         return false
       }
     },
+  }
+}
+
+/** Record files the server writes itself (decisions): one commit, under the company lock, through the push checker. */
+export function gitRecordFileCreator(): RecordFileCreator {
+  return {
+    createFile: (companyId, path, text, message) =>
+      withCompanyLock(companyId, () => commitFileEdit(companyRepoPath(companyId), path, {
+        message,
+        identity: HISTORY_IDENTITY,
+        timeouts: TIMEOUTS,
+      }, current => (current === null ? text : null))),
   }
 }

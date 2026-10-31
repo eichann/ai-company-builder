@@ -19,6 +19,7 @@
  * one. Every entry carries before/after values of each field it changed, so
  * any version of a record can be replayed (shared/core/record-ledger.ts).
  */
+import { SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES, serviceTransitionAllowed } from '../../shared/core/core-types'
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import { isSameOrAncestorPath, normalizeRepoPath } from '../../shared/core/paths'
 import type { ActionDef, FieldKind, TypeDefinition } from '../../shared/core/record-types'
@@ -104,6 +105,12 @@ const conflict = (error: string, code: string, extra: Record<string, unknown> = 
 /** Says nothing about where the record is (a private folder's name never leaks). */
 export const ASSIGNEE_CANNOT_READ = 'この人はこの記録を見られないため、担当にできません。見られる人を選んでください。'
 const bad = (error: string, code = 'BAD_REQUEST') => refuse('bad-request', error, { code })
+
+/** The generic create refuses the types the server's own services make (records.md "Service-owned types"). */
+export const TYPE_CREATED_BY_SERVICE = { error: 'この種類の記録は ACB が決まった手順で作ります。ここからは作れません', code: 'TYPE_CREATED_BY_SERVICE' }
+/** …and the generic action / undo routes refuse the types whose state only those services change. */
+export const STATE_CHANGED_BY_SERVICE = { error: 'この記録の状態は、決まった画面の手順でだけ変わります', code: 'STATE_CHANGED_BY_SERVICE' }
+const serviceStateOnly = (type: string) => SERVICE_STATE_TYPES.includes(type)
 
 /** A value for a field of `kind`, or an error text. */
 function checkValue(kind: FieldKind, value: unknown, options: string[] | undefined, isMember: (id: string) => boolean): LedgerValue | { error: string } {
@@ -221,6 +228,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (typeof b.type !== 'string') return bad('type is required')
       const def = currentTypes(records).get(b.type)?.definition
       if (!def) return bad('Unknown type', 'TYPE_UNKNOWN')
+      if (SERVICE_OWNED_TYPES.includes(def.name)) return bad(TYPE_CREATED_BY_SERVICE.error, TYPE_CREATED_BY_SERVICE.code)
       if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
       if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
       if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')
@@ -302,6 +310,8 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const { records, reader } = opened
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      // Approving / sending run through their services only (a company's definition adding an action changes nothing).
+      if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
       const def = currentTypes(records).get(row.type)?.definition
       if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
       const action: ActionDef | undefined = Object.prototype.hasOwnProperty.call(def.actions, actionName) ? def.actions[actionName] : undefined
@@ -430,6 +440,8 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       const { records, reader } = opened
       const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
       if (!row) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+      // An undo would reopen a used approval or a sent message: never through here.
+      if (serviceStateOnly(row.type)) return refuse('forbidden', STATE_CHANGED_BY_SERVICE.error, { code: STATE_CHANGED_BY_SERVICE.code })
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null) return bad('The body must be an object')
       if (!Number.isInteger(b.version) || !Number.isInteger(b.expectedVersion)) return bad('version and expectedVersion are required')
@@ -641,3 +653,248 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
 }
 
 export type ExternalRecordWriter = ReturnType<typeof createExternalRecordWriter>
+
+
+/** Who a core service acts for (the ledger's actor): a person, their AI, or an outside system. */
+export interface ServiceActor {
+  id: string
+  kind: 'human' | 'ai' | 'external'
+  /** The agent for an AI, the plugin / service for an outside system. */
+  source: string | null
+  conversationId?: string | null
+  proposedBy?: 'ai' | null
+}
+
+/** A new record of a service-owned type (`SERVICE_OWNED_TYPES`). */
+export interface ServiceCreateInput {
+  type: string
+  /** A chosen id (e.g. derived from an idempotency key); default: a new one. */
+  id?: string
+  title: string
+  summary?: string
+  /** A server-only record's readers' folder (null = everyone); never a private folder. */
+  folder?: string | null
+  /**
+   * A file record (storage `file` / `either`): the company path of the file
+   * the caller has committed (company repository; never inside a private folder).
+   */
+  path?: string | null
+  /** Server fields, checked by the type's kinds; every person named must be able to read the record. */
+  fields?: Record<string, LedgerValue>
+  /** Link name → record ids. */
+  links?: Record<string, string[]>
+  actor: ServiceActor
+  note?: string
+}
+
+/** A state change (checked against `SERVICE_TRANSITIONS`) and/or field change of a service-owned record. */
+export interface ServiceTransitionInput {
+  recordId: string
+  /** The ledger's action name (`approve`, `send`, `start_reading`…). */
+  action: string
+  /** The version the caller decided on: compare-and-set, nothing written when it moved. */
+  expectedVersion: number
+  /** The new state; null = the state stays (fields only). */
+  to: string | null
+  fields?: Record<string, LedgerValue>
+  actor: ServiceActor
+  note?: string
+  /** Keep the entry as a decision with this reason (approving, sending back). */
+  decisionReason?: string
+  /** Also tell these members (besides the assignee and next actor). */
+  notify?: string[]
+}
+
+export type ServiceWriteFailure =
+  | 'records-off' | 'type-unknown' | 'not-service-owned' | 'bad-value' | 'bad-place' | 'assignee-cannot-read'
+  | 'exists' | 'not-found' | 'stale' | 'transition-not-allowed'
+
+export type ServiceWriteFailed = { ok: false; reason: ServiceWriteFailure; detail?: string }
+export type ServiceWriteResult = { ok: true; record: RecordSummary; entry: LedgerEntry } | ServiceWriteFailed
+
+const fail = (reason: ServiceWriteFailure, detail?: string): ServiceWriteFailed => ({ ok: false, reason, ...(detail ? { detail } : {}) })
+
+/**
+ * The engine's entry for the core services of milestone 4 (minutes intake,
+ * approvals, outbound mail, decisions; records.md "Service writer"). Like
+ * `createExternalRecordWriter`, composition.ts hands it to those services
+ * only — no route, screen or AI reaches it. It creates records of
+ * `SERVICE_OWNED_TYPES` (with values, links and a folder or a committed file
+ * path) and changes their state along `SERVICE_TRANSITIONS`, with the
+ * engine's duties: values checked by kind, every person named able to read
+ * the record (`ASSIGNEE_CANNOT_READ`), state + ledger in one transaction with
+ * a compare-and-set on the version, the actor the caller names, and the
+ * members it names told (kind + version only). Whether that actor may do it
+ * (an approver approving, the author sending) is the calling service's rule.
+ */
+export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyData' | 'transactions' | 'clock' | 'ids' | 'isMember' | 'roleOf' | 'notify'>) {
+  const { companyData } = deps
+
+  /** Every person value can read a record at `place` (a private folder's name is never said). */
+  function readersOk(companyId: string, place: RecordAccessRow, values: Record<string, LedgerValue>, def: TypeDefinition): boolean {
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    return Object.entries(values).every(([name, v]) => {
+      if (def.fields[name]?.kind !== 'person' || typeof v !== 'string') return true
+      const role = deps.roleOf(companyId, v)
+      return role !== null && recordReader({ companyId, userId: v, role }, scopes).record(place)
+    })
+  }
+
+  function checkFields(companyId: string, def: TypeDefinition, raw: Record<string, LedgerValue> | undefined): { values: Record<string, LedgerValue> } | ServiceWriteFailed {
+    const values: Record<string, LedgerValue> = {}
+    for (const [name, value] of Object.entries(raw ?? {})) {
+      const f = Object.prototype.hasOwnProperty.call(def.fields, name) ? def.fields[name] : undefined
+      if (!f || f.source !== 'server') return fail('bad-value', `${name} is not a server field of ${def.name}`)
+      const v = checkValue(f.kind, value, f.options, id => deps.isMember(companyId, id))
+      if (v !== null && typeof v === 'object') return fail('bad-value', `${name}: ${v.error}`)
+      values[name] = v
+    }
+    return { values }
+  }
+
+  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>) {
+    const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
+    if (to.length > 0) { try { deps.notify(companyId, to) } catch { /* the app's own check catches up */ } }
+  }
+
+  /** Everything `create` checks, without writing: the prepared rows, or why not. */
+  function prepare(companyId: string, input: ServiceCreateInput) {
+    const records = companyData.forCompany(companyId).records
+    if (!records.settings().enabled) return fail('records-off')
+    if (!SERVICE_OWNED_TYPES.includes(input.type)) return fail('not-service-owned')
+    const def = currentTypes(records).get(input.type)?.definition
+    if (!def) return fail('type-unknown')
+    const title = input.title.normalize('NFC').trim()
+    if (title === '' || title.length > 200) return fail('bad-value', 'title: 1–200 characters')
+    const summary = (input.summary ?? '').normalize('NFC').slice(0, 300)
+    const scopes = companyData.forCompany(companyId).scopes.listWithRules()
+    let path: string | null = null
+    let folder: string | null = null
+    if (input.path !== undefined && input.path !== null) {
+      if (def.storage === 'server') return fail('bad-place', 'this type is server only')
+      path = fileLinkPath(input.path)
+      if (!path || findPrivateScope(scopes, path)) return fail('bad-place')
+    } else if (def.storage === 'file') return fail('bad-place', 'records of this type are files: pass the committed path')
+    if (input.folder !== undefined && input.folder !== null) {
+      if (path) return fail('bad-place', 'a file record has no folder')
+      folder = normalizeRepoPath(input.folder)
+      if (folder === null || findPrivateScope(scopes, folder)) return fail('bad-place')
+    }
+    const checked = checkFields(companyId, def, input.fields)
+    if (!('values' in checked)) return checked
+    const values = checked.values
+    if (def.implements.includes('request')) {
+      if (input.actor.kind !== 'external') values.requested_by ??= input.actor.id
+      values.next_actor ??= values.assignee ?? null
+    }
+    const id = input.id ?? newRecordId(def.name, deps.ids.newToken().slice(0, 16))
+    if (!RECORD_ID_RE.test(id) || !id.startsWith(`${def.name}-`)) return fail('bad-value', 'id')
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path, folder }
+    if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
+    const links: RecordLinkRow[] = []
+    for (const [name, targets] of Object.entries(input.links ?? {})) {
+      const l = Object.prototype.hasOwnProperty.call(def.links, name) ? def.links[name] : undefined
+      if (!l || l.target === 'file') return fail('bad-value', `${name} is not a record link of ${def.name}`)
+      for (const t of targets) {
+        if (!RECORD_ID_RE.test(t)) return fail('bad-value', `${name}: a record id`)
+        links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
+      }
+    }
+    const existing = records.find(id)
+    if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
+    return { ok: true as const, records, def, id, title, summary, path, folder, values, links }
+  }
+
+  return {
+    /** Would `create` accept this now? (A caller committing a file asks first, so nothing is left half-made.) */
+    check(companyId: string, input: ServiceCreateInput): ServiceWriteFailed | null {
+      const p = prepare(companyId, input)
+      return p.ok ? null : p
+    },
+
+    create(companyId: string, input: ServiceCreateInput): ServiceWriteResult {
+      const p = prepare(companyId, input)
+      if (!p.ok) return p
+      const { records, def, id, values, links } = p
+      const at = deps.clock.now()
+      const entry: LedgerEntry = {
+        recordId: id, version: 1, action: 'create', fromState: null, toState: def.initial, actorId: input.actor.id, actorKind: input.actor.kind,
+        actorSource: input.actor.source, at, note: input.note ?? '',
+        changes: [
+          { field: 'state', before: null, after: def.initial },
+          ...Object.entries(values).filter(([, v]) => v !== null).map(([field, after]) => ({ field, before: null, after })),
+        ],
+        attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
+        proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
+      }
+      // The indexer may already hold a just-committed file (a row without state): the state decides.
+      const existing = records.find(id)
+      let written = false
+      try {
+        written = deps.transactions.run(() => {
+          records.upsert({
+            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: p.path, folder: p.folder,
+            title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
+          })
+          records.replaceLinks(id, links)
+          if (!records.writeState({ recordId: id, state: def.initial, fields: JSON.stringify(values), version: 1, updatedAt: at }, 0)) throw new Error('exists')
+          records.appendLedger(entry)
+          return true
+        })
+      } catch {
+        written = false
+      }
+      if (!written) return fail('exists')
+      tell(companyId, input.actor.id, [values.assignee, values.next_actor])
+      return { ok: true, record: recordSummaries(records, records.byIds([id])).get(id) as RecordSummary, entry }
+    },
+
+    transition(companyId: string, input: ServiceTransitionInput): ServiceWriteResult {
+      const records = companyData.forCompany(companyId).records
+      if (!records.settings().enabled) return fail('records-off')
+      const row = RECORD_ID_RE.test(input.recordId) ? records.byIds([input.recordId])[0] : undefined
+      if (!row || row.removedAt !== null) return fail('not-found')
+      if (!SERVICE_OWNED_TYPES.includes(row.type)) return fail('not-service-owned')
+      const def = currentTypes(records).get(row.type)?.definition
+      if (!def) return fail('type-unknown')
+      const s = records.states([row.id])[0]
+      let now: Record<string, LedgerValue> = {}
+      try { now = s ? JSON.parse(s.fields) as Record<string, LedgerValue> : {} } catch { now = {} }
+      const version = s?.version ?? 0
+      const state = s ? s.state : def.initial
+      if (input.expectedVersion !== version) return fail('stale')
+      const nextState = input.to ?? state
+      if (nextState !== state && (nextState === null || !serviceTransitionAllowed(row.type, state, nextState))) return fail('transition-not-allowed')
+      const checked = checkFields(companyId, def, input.fields)
+      if (!('values' in checked)) return checked
+      const set = checked.values
+      if (!readersOk(companyId, row, set, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
+      const next = { ...now, ...set }
+      const changes: LedgerChange[] = []
+      if (nextState !== state) changes.push({ field: 'state', before: state, after: nextState })
+      for (const [field, after] of Object.entries(set)) {
+        const before = now[field] ?? null
+        if (before !== after) changes.push({ field, before, after })
+      }
+      const at = deps.clock.now()
+      const isDecision = input.decisionReason !== undefined
+      const entry: LedgerEntry = {
+        recordId: row.id, version: version + 1, action: input.action, fromState: state, toState: nextState,
+        actorId: input.actor.id, actorKind: input.actor.kind, actorSource: input.actor.source, at, note: input.note ?? '', changes, attachments: [],
+        decision: isDecision ? { reason: input.decisionReason as string, materials: [], policyVersion: null, precedents: [], supersedes: null } : null,
+        isDecision, typeVersion: row.typeVersion, reversesVersion: null,
+        proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
+      }
+      const written = deps.transactions.run(() => {
+        if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false
+        records.appendLedger(entry)
+        return true
+      })
+      if (!written) return fail('stale')
+      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])])
+      return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
+    },
+  }
+}
+
+export type ServiceRecordWriter = ReturnType<typeof createServiceRecordWriter>

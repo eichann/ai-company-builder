@@ -12,7 +12,10 @@
  *   in [PROTECTED_CONFIG], the repository unchanged);
  * - for owners too, a definition change that removes a state is refused
  *   (reason line under the path); adding one with a higher version, and
- *   deleting a definition, are accepted.
+ *   deleting a definition, are accepted;
+ * - a decision is written by the server as its own commit through the push
+ *   checker and indexed with its server state kept; one naming the linked
+ *   customer is refused and nothing is committed; the same key commits once.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync, spawn, spawnSync } from 'child_process'
@@ -167,7 +170,7 @@ describe('the company map, end to end', () => {
     await services.records.refreshIndex(owner)
     expect(titles(await api('u-member', 'POST', '/query', {}))).toEqual(['A社', 'A社 提案'])
     const types = await api('u-member', 'GET', '/types')
-    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['customer', 'deal', 'interaction', 'task'])
+    expect((types.body.data?.types as Array<{ definition: { name: string } }>).map(t => t.definition.name)).toEqual(['approval', 'customer', 'deal', 'decision', 'interaction', 'minutes', 'outbound_message', 'task'])
     const detail = await api('u-member', 'GET', '/item/customer-cust0001')
     expect(detail.body.data?.links).toEqual([expect.objectContaining({ name: 'customer', direction: 'in', record: expect.objectContaining({ id: 'deal-deal0001' }) })])
   })
@@ -261,5 +264,31 @@ describe('the company map, end to end', () => {
     const history = await api('u-member', 'GET', `/item/${id}/history`)
     expect((history.body.data?.entries as Array<{ action: string }>).map(e => e.action)).toEqual(['create', 'start', 'request_review', 'complete'])
     expect((await api('u-member', 'GET', `/item/${id}/versions/2`)).body.data).toMatchObject({ version: 2, state: 'in_progress' })
+  })
+
+  it('a decision: the server commits its file through the push checker; the index keeps its state; a customer name is refused', async () => {
+    const { db } = await import('../../src/db')
+    const now = new Date().toISOString()
+    db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('dep-sales', CO, '営業部', '営業部', now, now)
+    const before = git(['-C', bare, 'rev-parse', 'main']).trim()
+    const named = await api('u-member', 'POST', '/decisions', { folder: '営業部', title: 'A社に窓口を3つ出す', why: '要望があった', source: '商談', links: { deal: 'deal-deal0001' } })
+    expect(named).toMatchObject({ status: 400, body: { code: 'NAME_IN_DECISION' } })
+    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(before)
+
+    const made = await api('u-member', 'POST', '/decisions', {
+      folder: '営業部', title: '対象の窓口を3つにする', why: 'チャット窓口も最初から入れたいとの要望', source: '商談のメモ', links: { deal: 'deal-deal0001' }, key: 'k-1',
+    })
+    expect(made.status).toBe(201)
+    const id = (made.body.data?.record as { id: string }).id
+    const text = git(['-C', bare, 'show', `main:営業部/意思決定/${id}.md`])
+    expect(text).toContain(`id: ${id}\ntype: decision\nlinks:\n  deal: deal-deal0001\n---\n# 対象の窓口を3つにする`)
+    expect(git(['-C', bare, 'log', '-1', '--format=%an'])).toContain('AI Company Builder')
+    await services.records.refreshIndex(owner)
+    const detail = await api('u-owner', 'GET', `/item/${id}`)
+    expect(detail.body.data?.record).toMatchObject({ id, path: `営業部/意思決定/${id}.md`, state: 'unconfirmed', version: 1, fields: { recorded_by: 'human', decided_by: 'u-member' } })
+    // Again with the same key: nothing new.
+    const tip = git(['-C', bare, 'rev-parse', 'main']).trim()
+    expect((await api('u-member', 'POST', '/decisions', { folder: '営業部', title: '対象の窓口を3つにする', why: '同じ', source: '同じ', key: 'k-1' })).status).toBe(200)
+    expect(git(['-C', bare, 'rev-parse', 'main']).trim()).toBe(tip)
   })
 })

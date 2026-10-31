@@ -84,6 +84,22 @@ test('tools come from the type definitions; a read token gets no state-changing 
   assert.deepEqual(AGENT_IDS.filter(id => AGENTS[id].capabilities.recordActions).sort(), [...RECORD_ACTION_AGENTS].sort())
 })
 
+test('service-owned types: records_create never offers them, approvals / messages get no action tool, decisions go through decisions_record', async () => {
+  const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
+  const create = act!.specs.find(s => s.name === 'records_create')!
+  for (const type of ['minutes', 'approval', 'outbound_message', 'decision']) {
+    assert.equal(create.schema.safeParse({ type, title: 'x' }).success, false, type)
+  }
+  assert.equal(create.schema.safeParse({ type: 'task', title: 'x' }).success, true)
+  const names = act!.specs.map(s => s.name)
+  assert.ok(!names.some(n => n.startsWith('approval__') || n.startsWith('outbound_message__')), names.join())
+  assert.ok(names.includes('minutes__start_reading') && names.includes('records_ai_turn') && names.includes('decisions_record'))
+  const decision = act!.specs.find(s => s.name === 'decisions_record')!
+  assert.deepEqual(decision.request({ folder: '営業部', title: 't', why: 'w', source: 's' }), { method: 'POST', path: '/decisions', body: { folder: '営業部', title: 't', why: 'w', source: 's' } })
+  const read = await createRecordTools((await fakeServer('read').api.openTurn('co', { conversationId: 'c', agent: 'codex', scope: 'read' }))!)
+  assert.ok(!read!.specs.some(s => s.name === 'decisions_record'))
+})
+
 test('a tool refuses what its schema refuses before calling the server (a required note)', async () => {
   const { api, seen } = fakeServer('act')
   const tools = await createRecordTools((await api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)

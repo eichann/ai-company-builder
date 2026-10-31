@@ -240,6 +240,12 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/records/my-turn', w => ({ path: `${C(w)}/records/my-turn` }), MEMBERS),
   r('POST /api/companies/:companyId/records/item', w => ({ path: `${C(w)}/records/item`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  // 「AI の番」 and decisions (milestone 4): any member; no object id in the URL (a linked record id
+  // in the body is looked up behind the company handle: tests/unit/record-service-types.test.ts).
+  r('GET /api/companies/:companyId/records/ai-turn', w => ({ path: `${C(w)}/records/ai-turn` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/decisions', w => ({ path: `${C(w)}/records/decisions`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/records-ai/ai-turn', () => ({ path: '/api/records-ai/ai-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/decisions', () => ({ path: '/api/records-ai/decisions', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/records/item/:recordId/actions/:action', w => ({ path: `${C(w)}/records/item/deal-nosuch01/actions/start`, body: { expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/records/item/:recordId/undo', w => ({ path: `${C(w)}/records/item/deal-nosuch01/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/records/item/:recordId/history', w => ({ path: `${C(w)}/records/item/deal-nosuch01/history` }), [404, 404, 404, 404, 404, 401]),

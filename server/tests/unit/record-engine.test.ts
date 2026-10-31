@@ -258,14 +258,14 @@ describe('attachments and decisions', () => {
 
 describe('「あなたの番」 across types implementing request', () => {
   it('collects every request type waiting for the member, not final ones, not others’', async () => {
-    // A second type implementing request: the list needs no change for it.
-    const approval = `---\nlabel: 承認\nversion: 1\nimplements: [request]\nstorage: server\nfields:\n  requested_by: { label: 依頼, kind: person, source: server }\n  assignee: { label: 担当, kind: person, source: server }\n  next_actor: { label: 次, kind: person, source: server }\n  waiting_on: { label: 待ち, kind: text, source: server }\n  due: { label: 期限, kind: date, source: server }\nstates: [asked, approved]\nfinal: [approved]\nactions:\n  approve: { label: 承認する, from: [asked], to: approved, who: [assignee] }\n---\n`
+    // A second type implementing request (a company's own): the list needs no change for it.
+    const consent = `---\nlabel: 承認\nversion: 1\nimplements: [request]\nstorage: server\nfields:\n  requested_by: { label: 依頼, kind: person, source: server }\n  assignee: { label: 担当, kind: person, source: server }\n  next_actor: { label: 次, kind: person, source: server }\n  waiting_on: { label: 待ち, kind: text, source: server }\n  due: { label: 期限, kind: date, source: server }\nstates: [asked, approved]\nfinal: [approved]\nactions:\n  approve: { label: 承認する, from: [asked], to: approved, who: [assignee] }\n---\n`
     sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany('a').records, {
-      repoKey: 'company', scopeId: null, prefix: '', full: false, tip: 'a'.repeat(40), at: at(), scopes: [], changes: [{ path: '.acb/types/approval.md', text: approval }],
+      repoKey: 'company', scopeId: null, prefix: '', full: false, tip: 'a'.repeat(40), at: at(), scopes: [], changes: [{ path: '.acb/types/consent.md', text: consent }],
     }))
     const t1 = newTask()
     const t2 = newTask()
-    const ap = ok(create(m('u-alice'), { type: 'approval', title: '値引きの承認', fields: { assignee: 'u-bob' } })).record
+    const ap = ok(create(m('u-alice'), { type: 'consent', title: '値引きの承認', fields: { assignee: 'u-bob' } })).record
     newTask('b') // another company's task for bob: never here
     ok(await act(m('u-bob'), t2.id, 'start', { expectedVersion: 1 }))
     ok(await act(m('u-bob'), t2.id, 'request_review', { expectedVersion: 2, args: { reviewer: 'u-carol' } }))

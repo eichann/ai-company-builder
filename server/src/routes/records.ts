@@ -10,6 +10,9 @@
  *   POST    /records/query        any member: the fixed-shape query
  *   GET     /records/item/:recordId  any member: one record and its links
  *   GET     /records/my-turn      any member: 「あなたの番」 across types implementing request
+ *   GET     /records/ai-turn      any member: 「AI の番」 — their records waiting for an AI-only action
+ *   POST    /records/decisions    any member: record a decision (the server writes its file;
+ *                                 services/decisions.ts)
  *   POST    /records/item         any member: a server-only record (state engine, 4-3)
  *   POST    /records/item/:recordId/actions/:action   run an action of the record's type
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
@@ -35,7 +38,7 @@ export const recordsRoute = new Hono()
 const HUMAN = { kind: 'human' } as const
 /** A person's action, with the provenance their app reports (informational only, never authorizes: record-engine.ts). */
 const humanWith = (body: unknown) => ({ ...HUMAN, ...selfReportedProvenance(body) })
-const { access, records, recordEngine, recordAiTokens } = services
+const { access, records, recordEngine, recordAiTokens, decisions } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -102,6 +105,21 @@ recordsRoute.get('/records/my-turn', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, records.myTurn(member))
+})
+
+recordsRoute.get('/records/ai-turn', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, records.aiTurn(member))
+})
+
+recordsRoute.post('/records/decisions', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const body = await jsonBody(c)
+  const result = await decisions.record(member, humanWith(body), body)
+  if (!result.ok) return refusal(c, result)
+  return c.json({ success: true, data: result.value }, result.value.created ? 201 : 200)
 })
 
 recordsRoute.post('/records/item', async (c) => {

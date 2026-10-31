@@ -23,7 +23,7 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
-import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
+import { gitRecordFileCreator, gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
@@ -65,7 +65,8 @@ import { createPluginConnector } from './services/plugin-connector'
 import { createPluginImportService } from './services/plugin-import'
 import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
-import { createExternalRecordWriter } from './services/record-engine'
+import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
+import { createDecisionService } from './services/decisions'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
 
 /**
@@ -187,6 +188,23 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
   })
 
+  // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
+  // decisions): handed to those services only, never to a route (records.md "Service writer").
+  const serviceRecords = createServiceRecordWriter({
+    ...shared,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const decisions = createDecisionService({
+    ...shared,
+    writer: serviceRecords,
+    files: gitRecordFileCreator(),
+    tokenDigest: sha256TokenDigest,
+    memberNames: companyId => [...shared.accounts.byIds(repos.memberships.listByCompany(companyId).map(m => m.user_id)).values()]
+      .flatMap(a => (a.name ? [a.name] : [])),
+  })
+
   // Connector plugins (milestone 3): the shelf is shared and read only; installs are behind the company handle.
   const pluginShelf = createPluginShelf(diskPluginShelf(options.pluginsDir !== undefined ? options.pluginsDir : PLUGINS_DIR))
   const plugins = createPluginService({
@@ -289,6 +307,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyScopes: createCompanyScopeService(shared),
     records: createRecordService({ ...shared, indexer: recordIndexer }),
     recordEngine,
+    decisions,
     recordAiTokens: createRecordAiTokenService({
       ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,
     }),

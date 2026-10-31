@@ -6,9 +6,10 @@
  * everything done here is recorded as the member's AI (actor kind `ai`),
  * whatever the request body says. A `read` token only looks up.
  *
- *   GET  /types   GET /my-turn   POST /query   GET /item/:recordId
+ *   GET  /types   GET /my-turn   GET /ai-turn   POST /query   GET /item/:recordId
  *   GET  /item/:recordId/history
  *   POST /item                                  (act)
+ *   POST /decisions                             (act) record a decision (services/decisions.ts)
  *   POST /item/:recordId/actions/:action         (act)
  *
  *   GET  /plugins                         the running plugins' operations this AI may call (tools, P7)
@@ -28,7 +29,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens, pluginOperations } = services
+const { records, recordEngine, recordAiTokens, pluginOperations, decisions } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -60,6 +61,18 @@ recordsAiRoute.get('/types', (c) => {
 recordsAiRoute.get('/my-turn', (c) => {
   const h = holderOf(c, 'read')
   return h instanceof Response ? h : answer(c, records.myTurn(h.member))
+})
+
+recordsAiRoute.get('/ai-turn', (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, records.aiTurn(h.member))
+})
+
+recordsAiRoute.post('/decisions', async (c) => {
+  const h = holderOf(c, 'act')
+  if (h instanceof Response) return h
+  const result = await decisions.record(h.member, aiActor(h), await jsonBody(c))
+  return answer(c, result, result.ok && result.value.created ? 201 : 200)
 })
 
 recordsAiRoute.post('/query', async (c) => {
