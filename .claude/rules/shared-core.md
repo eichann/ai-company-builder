@@ -38,7 +38,7 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId`, `appendHistoryLine` |
 | `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
 | `core-types.ts` | the core types `task` and `interaction`, in the definition format |
-| `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
+| `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 | `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
 | `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto), value translation both ways, `available_to` (`plugins.md`) |
 

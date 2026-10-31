@@ -174,7 +174,7 @@ GET  /api/config                                  setup state (no auth)
                                                                 (緊急停止: agent-stop.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service (+ /own-keys),
+                              PUT /broker/services/:service (+ /own-keys, /read-only),
                               PUT|DELETE /broker/relay-services/:service,
                               PUT /broker/settings, POST /broker/stop-all,
                               POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,

@@ -4,7 +4,7 @@
  * service's fixed host, with the key in the service's own header:
  *
  * - built-in services: their `check` (Gemini `GET /v1beta/models`, OpenAI and
- *   Anthropic `GET /v1/models`) on the built-in host, and only when the key may
+ *   Anthropic `GET /v1/models`, HubSpot `GET /crm/objects/2026-03/deals`) on the built-in host, and only when the key may
  *   go to that host (its destinations);
  * - generic services (K9): the definition's optional `checkPath` under its one
  *   host and base path; without one → `not-checkable`.
@@ -54,12 +54,14 @@ export function createBrokerKeyCheck(deps: BrokerKeyCheckDeps) {
       let host: string
       let path: string
       let rejected: readonly number[]
+      let limited: readonly number[] = []
       const headers: Record<string, string> = { accept: 'application/json', 'accept-encoding': 'identity' }
       if (builtin) {
         host = builtin.defaultHosts[0]
         if (!hosts.includes(host)) return 'not-checkable'
         path = builtin.check.path
         rejected = builtin.check.rejected
+        limited = builtin.check.limited ?? []
         Object.assign(headers, builtin.check.headers)
         headers[builtin.credential] = builtin.credential === 'authorization' ? `Bearer ${secret}` : secret
       } else {
@@ -85,7 +87,7 @@ export function createBrokerKeyCheck(deps: BrokerKeyCheckDeps) {
         log.warn(`[broker] key check ${service}: ${result.reason}`)
         return 'unreachable'
       }
-      const outcome = brokerKeyCheckOutcome(result.response.status, rejected)
+      const outcome = brokerKeyCheckOutcome(result.response.status, rejected, limited)
       // Read a little and drop it, so the connection closes; the body is never looked at.
       try {
         let read = 0

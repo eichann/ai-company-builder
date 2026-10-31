@@ -138,7 +138,7 @@ describe('API keys (key broker admin)', () => {
     expect(view.status).toBe(200)
     expect(view.json.data.status).toEqual({ enabled: true, reason: null })
     expect(view.json.data.settings.memberKeysAllowed).toBe(true)
-    expect(view.json.data.services.map((s: Json) => [s.service, s.rule])).toEqual([['gemini', 'company-only'], ['openai', 'company-only'], ['anthropic', 'company-only']])
+    expect(view.json.data.services.map((s: Json) => [s.service, s.rule])).toEqual([['gemini', 'company-only'], ['openai', 'company-only'], ['anthropic', 'company-only'], ['hubspot', 'company-only']])
   })
 
   it('registers a company key: last 4 only, built-in destinations, who can use it, recorded', async () => {

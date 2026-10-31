@@ -34,6 +34,10 @@ services:
       - BROKER_KEY_CHECK=${BROKER_KEY_CHECK:-on}
       # Where the daily caps' day begins, minutes east of UTC (540 = Japan).
       - BROKER_DAY_UTC_OFFSET_MINUTES=${BROKER_DAY_UTC_OFFSET_MINUTES:-540}
+      # Staging only: HubSpot → the practice HubSpot (.env.example). Not in the production
+      # compose file; the server also ignores it when NODE_ENV=production or PUBLIC_URL is public.
+      - ACB_ALLOW_FAKE_UPSTREAMS=${ACB_ALLOW_FAKE_UPSTREAMS:-}
+      - ACB_FAKE_HUBSPOT_URL=${ACB_FAKE_HUBSPOT_URL:-}
       # Who may create companies after the first one: the operators' user ids
       # (comma-separated). Policy: operator (default; the only one so far).
       - OPERATOR_USER_IDS=${OPERATOR_USER_IDS:-}

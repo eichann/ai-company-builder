@@ -134,6 +134,21 @@ describe('checking a key when it is saved', () => {
     expect(sent.at(-1)!.headers.authorization).toBe(`Bearer ${FAKE_GOOD}`)
   })
 
+  it('HubSpot: GET the dated deals list on api.hubapi.com, Bearer only; 401 not saved, 403 (missing scopes) saved as "limited"', async () => {
+    reply = byKey(401)
+    const before = db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n
+    expect(await keep(services.keyBroker.create(owner, { service: 'hubspot', displayName: 'H', secret: FAKE_BAD, audience: everyone })))
+      .toMatchObject({ ok: false, body: { code: 'KEY_REJECTED' } })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n).toBe(before)
+    expect(sent.at(-1)).toMatchObject({ host: 'api.hubapi.com', method: 'GET', path: '/crm/objects/2026-03/deals', hasBody: false })
+    expect(Object.entries(sent.at(-1)!.headers).filter(([, v]) => v.includes(FAKE_BAD))).toEqual([['authorization', `Bearer ${FAKE_BAD}`]])
+
+    reply = () => 403
+    const limited = await keep(services.keyBroker.create(owner, { service: 'hubspot', displayName: 'H', secret: FAKE_GOOD, audience: everyone }))
+    expect(limited.value.check).toEqual({ service: 'hubspot', result: 'limited' })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n).toBe(before + 1)
+  })
+
   it('a key that may not go to the built-in host is not sent there (not checkable)', async () => {
     reply = () => 200
     const before = sent.length

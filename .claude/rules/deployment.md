@@ -57,6 +57,11 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   `BROKER_DAY_UTC_OFFSET_MINUTES` (540, Japan) is where the daily caps' day begins;
   `BROKER_KEY_CHECK` (on; `off` for a server without internet access, and in the server tests)
   checks a key once when it is saved.
+  Staging only: `ACB_ALLOW_FAKE_UPSTREAMS=1` + `ACB_FAKE_HUBSPOT_URL` (loopback, `localhost` or
+  `host.docker.internal`, port only) send the broker's HubSpot requests to the practice HubSpot;
+  passed through by `docker-compose.yml` only — **never add them to the production compose
+  file**. The server ignores them under `NODE_ENV=production` or a non-local `PUBLIC_URL`
+  (`lib/config.ts` `practiceUpstreamsFrom`, `key-broker.md`).
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
   never prints a URL or query (`lib/request-log.ts`, `server.md` "Request log"), so no relay
   token in `?key=` either.
