@@ -352,6 +352,13 @@ Expected: `HTTP/2 401` — the API is running behind HTTPS.
 4. Share the invitation link with your team members
 
 When team members open the invitation link, they can register a new account and join the company.
+Someone who already has an account (for example in another company on this server) joins the same
+way: they open the link while signed in and accept it. A company never adds an account directly.
+
+The first company can be created by the first account of a fresh server. To create more companies
+later, list the operators' user ids in `OPERATOR_USER_IDS` (see below; a signed-in operator sees
+their id at `https://your-domain.com/api/me`) and restart the api service
+(`docker compose up -d api`). Everyone else gets "only the server's operators can create a company".
 
 ---
 
@@ -372,6 +379,8 @@ When team members open the invitation link, they can register a new account and 
 | `BROKER_MAX_REQUEST_MB` | No | `100` | Largest request body the key broker's relay (`/api/broker/…`) forwards. |
 | `BROKER_UPSTREAM_TIMEOUT_SECONDS` | No | `600` | How long the relay waits for the provider's answer. |
 | `BROKER_DAY_UTC_OFFSET_MINUTES` | No | `540` | Where the API keys' daily caps begin, in minutes east of UTC (540 = Japan). |
+| `OPERATOR_USER_IDS` | No | — | Comma-separated user ids of the server operators: the only accounts that may create companies once the first company exists. |
+| `COMPANY_CREATION_POLICY` | No | `operator` | Who may create companies. Only `operator` exists today; `approved` and `self_serve` are planned and refused at startup. |
 | `BROKER_KEY_CHECK` | No | `on` | Check a key once when it is registered or replaced (one free, read-only request to the provider). `off` on a server without internet access (keys are saved unchecked). |
 
 ### Key broker (optional)

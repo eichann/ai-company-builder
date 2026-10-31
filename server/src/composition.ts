@@ -30,11 +30,12 @@ import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from '.
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, DATA_DIR } from './lib/config'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, operatorUserIds } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
 import { createCompanyService } from './services/companies'
+import { parseCompanyCreationPolicy, type CompanyCreationPolicy } from './services/company-creation-policy'
 import { createInvitationService } from './services/invitations'
 import { createClientActivityService } from './services/client-activity'
 import { createPushRejectionRecorder } from './services/push-rejections'
@@ -69,6 +70,17 @@ export function brokerCipherFromEnv(): BrokerCipherState {
 /** The relay's day for daily caps (YYYY-MM-DD at BROKER_DAY_UTC_OFFSET_MINUTES, default Japan). */
 export function brokerDayOf(ms: number): string {
   return new Date(ms + BROKER_DAY_UTC_OFFSET_MINUTES * 60_000).toISOString().slice(0, 10)
+}
+
+/**
+ * COMPANY_CREATION_POLICY as configured. An unknown or not-yet-implemented
+ * policy stops the server at startup (this module is imported by index.ts)
+ * instead of running with a rule nobody chose.
+ */
+function companyCreationPolicyFromEnv(): CompanyCreationPolicy {
+  const parsed = parseCompanyCreationPolicy(COMPANY_CREATION_POLICY)
+  if (!parsed.ok) throw new Error(`Refusing to start: ${parsed.error}`)
+  return parsed.policy
 }
 
 export interface ServiceOptions {
@@ -130,7 +142,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   return {
     access: createAccessPolicy(repos.memberships),
-    companies: createCompanyService({ ...repos, ...shared, repoStore }),
+    companies: createCompanyService({ ...repos, ...shared, repoStore,
+      creationPolicy: companyCreationPolicyFromEnv(),
+      isOperator: userId => operatorUserIds().has(userId),
+    }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
     permissionViews,

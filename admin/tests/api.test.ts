@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { API_TIMEOUT_MS, ApiError, ApiTimeoutError, apiClient, authApi, invitationsApi, overviewApi } from '@/lib/api'
+import { API_TIMEOUT_MS, ApiError, ApiTimeoutError, apiClient, authApi, companiesApi, invitationsApi, overviewApi } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { COMPANY_ID, ok } from './fixtures'
 import { mockApi } from './mock-api'
@@ -29,6 +29,13 @@ describe('API client', () => {
     expect(err).toBeInstanceOf(ApiError)
     expect((err as ApiError).status).toBe(403)
     expect((err as ApiError).message).toMatch(/owners and admins/)
+  })
+
+  it('creating a company as a non-operator says who can, not "ask an owner or admin"', async () => {
+    const error = '新しい会社を作れるのは、このサーバーの運用担当者だけです。会社に参加するには、その会社の管理者から届いた招待リンクを開いてください。'
+    mockApi({ ['POST /api/companies']: { status: 403, body: { error, code: 'COMPANY_CREATION_RESTRICTED' } } })
+    const err = await companiesApi.create('新会社').catch((e: unknown) => e)
+    expect(describeError(err)).toBe(error)
   })
 
   it('an empty answer (204, a proxy\'s empty error) is not mistaken for a broken page', async () => {

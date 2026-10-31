@@ -55,6 +55,9 @@ Self-hosting guides (English and Japanese, published): `docs/self-hosting/`. Ful
   checks a key once when it is saved.
   The relay (`/api/broker/…`) needs outbound HTTPS from the api container. The request log
   never prints a query on `/api/broker/` (a token may be in `?key=`: `lib/log-redaction.ts`).
+- `OPERATOR_USER_IDS` (comma-separated user ids; a signed-in operator sees theirs at
+  `/api/me`) and `COMPANY_CREATION_POLICY` (`operator`) decide who creates companies after the
+  first one (`server.md` "Accounts and roles"); passed through by both compose files.
 - Required env (`.env`, from `.env.example`): `AUTH_SECRET` (`openssl rand -base64 32`),
   `PUBLIC_URL`. Node heap is capped (`NODE_OPTIONS=--max-old-space-size`, 2048 api / 1024 admin)
   so a slow leak restarts cleanly.

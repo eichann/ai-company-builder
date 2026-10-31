@@ -8,6 +8,7 @@
  *
  *   DATA_DIR      default <cwd>/data
  *   REPOS_DIR     the bare repositories; default <DATA_DIR>/repos
+ *   COMPANY_CREATION_POLICY, OPERATOR_USER_IDS  who may create companies (below)
  *
  * <DATA_DIR>/workdirs held the server's working clones until department and
  * seeding commits moved into the bare repositories (lib/bare-commit.ts).
@@ -52,6 +53,27 @@ export const BROKER_KEY_CHECK = process.env.BROKER_KEY_CHECK?.trim().toLowerCase
 export const BROKER_DAY_UTC_OFFSET_MINUTES = Number.isFinite(Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)) && process.env.BROKER_DAY_UTC_OFFSET_MINUTES
   ? Number(process.env.BROKER_DAY_UTC_OFFSET_MINUTES)
   : 540
+
+/**
+ * Who may create companies: `operator` (default), later `approved` /
+ * `self_serve` (services/company-creation-policy.ts). Raw value; the
+ * composition root parses it and refuses to start on an unknown or
+ * not-yet-implemented one.
+ */
+export const COMPANY_CREATION_POLICY = process.env.COMPANY_CREATION_POLICY?.trim() || null
+
+/**
+ * Server operators: the accounts (Better Auth user ids, comma-separated) that
+ * may create companies once the first company exists (services/companies.ts
+ * `mayCreate`). Ids, not emails: sign-up through an invitation does not verify
+ * the address, so an email listed before its account exists could be claimed
+ * by any invitee. Read on every call (cheap), so tests can set it at run time;
+ * the server reads it again after a restart like every other setting.
+ * A signed-in operator finds their id at GET /api/me.
+ */
+export function operatorUserIds(): ReadonlySet<string> {
+  return new Set((process.env.OPERATOR_USER_IDS ?? '').split(',').map(s => s.trim()).filter(Boolean))
+}
 
 /** A company's bare repository; the id is reduced to [A-Za-z0-9_-]. */
 export function companyRepoPath(companyId: string): string {

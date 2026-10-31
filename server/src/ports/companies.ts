@@ -26,6 +26,8 @@ export interface CompanyRepository {
   listForUser(userId: string): Array<CompanyRow & { role: string }>
   findById(companyId: string): CompanyRow | undefined
   isSlugTaken(slug: string): boolean
+  /** Whether the server holds any company at all (the first one may be created by its first account). */
+  anyExists(): boolean
   insert(company: NewCompany): void
   rename(companyId: string, name: string, updatedAt: string): void
 }

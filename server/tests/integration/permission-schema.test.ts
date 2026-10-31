@@ -244,7 +244,9 @@ describe('departments API keeps scopes in sync', () => {
   })
 
   it('a company created through the API gets the default scopes', async () => {
+    process.env.OPERATOR_USER_IDS = 'ps-owner' // creating a company is for server operators
     const res = await json('POST', '/api/companies', { name: 'Fresh Co' })
+    delete process.env.OPERATOR_USER_IDS
     expect(res.status).toBe(201)
     const id = ((await res.json()) as { data: { id: string } }).data.id
     const scopes = scopesOf(db, id)

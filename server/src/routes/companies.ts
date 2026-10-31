@@ -43,12 +43,15 @@ companiesRoute.get('/:id', async (c) => {
   })
 })
 
-// Create a new company
+// Create a new company: server operators only, except the first company of a
+// fresh server (services/companies.ts mayCreate)
 companiesRoute.post('/', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {
     return c.json({ error: 'Unauthorized' }, 401)
   }
+  const allowed = companies.mayCreate(user.id)
+  if (!allowed.ok) return refusal(c, allowed)
 
   const body = await c.req.json()
   const { name } = body
@@ -103,7 +106,8 @@ companiesRoute.get('/:id/client-activity', async (c) => {
   })
 })
 
-// Add an existing account to the company (owner/admin)
+// Add an existing account to the company (owner/admin): only one that once
+// accepted an invitation to this company; everyone else gets an invitation link
 companiesRoute.post('/:id/members', async (c) => {
   const user = await getUserFromRequest(c.req.raw)
   if (!user) {

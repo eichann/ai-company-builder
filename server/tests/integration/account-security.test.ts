@@ -3,7 +3,10 @@
  * 2026-10-22 security review.
  *
  * - only owners add owners/admins (an admin adding an owner = takeover);
- *   the account must exist;
+ *   only an account that once accepted an invitation to this company can be
+ *   added directly (2026-10-31): nobody — another company's people included —
+ *   is put into a company without agreeing, and an unknown id gets the same
+ *   answer as an existing one;
  * - removing a member deletes every rule naming them (private folders
  *   included), so re-adding them does not restore their old access; a
  *   promotion to owner/admin drops their (moot) rules too;
@@ -79,6 +82,10 @@ const addUser = (id: string) => {
 }
 const addMember = (id: string, role: string) =>
   db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${id}`, id, CO, role, ts(), ts())
+/** `id` accepted an invitation to `companyId` once (they agreed to join it). */
+const acceptedInvitation = (id: string, companyId = CO) =>
+  db.prepare('INSERT INTO invitations (id, company_id, token, role, created_by, used_by, used_at, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+    .run(`inv-${companyId}-${id}`, companyId, `tok-${companyId}-${id}`, 'member', 'u-owner', id, ts(), ts(), ts())
 const roleOf = (id: string) => (db.prepare('SELECT role FROM memberships WHERE user_id = ? AND company_id = ?').get(id, CO) as { role: string } | undefined)?.role
 const userRules = (id: string) => (db.prepare(`SELECT COUNT(*) AS n FROM scope_rules WHERE subject_type = 'user' AND subject_id = ?`).get(id) as { n: number }).n
 
@@ -89,13 +96,28 @@ beforeAll(() => {
     addUser(id)
     addMember(id, role)
   }
-  for (const id of ['u-alt', 'u-new', 'u-promo', 'u-leaver']) addUser(id)
+  for (const id of ['u-alt', 'u-new', 'u-promo', 'u-leaver', 'u-elsewhere']) addUser(id)
+  db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('acct-other', 'Other', 'acct-other', 'u-elsewhere', ts(), ts())
   ensureCompanyScope(db, CO)
   mkdirSync(join(process.env.REPOS_DIR!, `${CO}.git`), { recursive: true })
 })
 
 describe('POST /companies/:id/members', () => {
+  it('an account that never accepted this company\'s invitation cannot be added, and an unknown id gets the same answer', async () => {
+    // u-elsewhere belongs to (and accepted an invitation of) another company only
+    acceptedInvitation('u-elsewhere', 'acct-other')
+    const other = await as('u-owner', 'POST', `/api/companies/${CO}/members`, { userId: 'u-elsewhere', role: 'member' })
+    const ghost = await as('u-owner', 'POST', `/api/companies/${CO}/members`, { userId: 'u-does-not-exist', role: 'member' })
+    expect(other.status).toBe(403)
+    expect(other.body).toEqual({ error: expect.any(String), code: 'INVITATION_REQUIRED' })
+    expect(ghost.status).toBe(other.status)
+    expect(ghost.body).toEqual(other.body)
+    expect(roleOf('u-elsewhere')).toBeUndefined()
+    expect(roleOf('u-does-not-exist')).toBeUndefined()
+  })
+
   it('an admin cannot add an owner or an admin (company takeover)', async () => {
+    acceptedInvitation('u-alt')
     for (const role of ['owner', 'admin']) {
       const r = await as('u-admin', 'POST', `/api/companies/${CO}/members`, { userId: 'u-alt', role })
       expect(r.status).toBe(403)
@@ -106,12 +128,10 @@ describe('POST /companies/:id/members', () => {
     expect(roleOf('u-alt')).toBe('member')
   })
 
-  it('an owner may add an admin; the account must exist', async () => {
+  it('an owner may add an admin who once accepted an invitation here', async () => {
+    acceptedInvitation('u-new')
     expect((await as('u-owner', 'POST', `/api/companies/${CO}/members`, { userId: 'u-new', role: 'admin' })).status).toBe(201)
     expect(roleOf('u-new')).toBe('admin')
-    const ghost = await as('u-owner', 'POST', `/api/companies/${CO}/members`, { userId: 'u-does-not-exist', role: 'member' })
-    expect(ghost.status).toBe(404)
-    expect(roleOf('u-does-not-exist')).toBeUndefined()
     expect((await as('u-owner', 'POST', `/api/companies/${CO}/members`, { userId: 42 })).status).toBe(400)
   })
 })
@@ -130,6 +150,7 @@ describe('removing a member / changing a role leaves no rules behind', () => {
 
   it('removal deletes every rule naming them, so re-adding restores nothing', async () => {
     addMember('u-leaver', 'member')
+    acceptedInvitation('u-leaver')
     seedRules('u-leaver')
     expect(userRules('u-leaver')).toBe(2)
     expect((await as('u-admin', 'DELETE', `/api/companies/${CO}/members/u-leaver`)).status).toBe(200)

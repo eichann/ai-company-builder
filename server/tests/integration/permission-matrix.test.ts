@@ -3,7 +3,8 @@
  *
  * Callers: the company's owner, an admin, a plain member, a department manager
  * (a member who manages 営業部), an outsider (signed in, owner of another
- * company) and a signed-out request. For each route the matrix states the
+ * company) and a signed-out request. Server operators (OPERATOR_USER_IDS, who
+ * may create companies) are nobody, except on rows that name them. For each route the matrix states the
  * status code each of them gets; a guard that is removed or loosened changes
  * a 401 / 403 / 404 into something else and fails the row.
  *
@@ -80,9 +81,13 @@ interface World {
 interface Req { path: string; body?: unknown; query?: string }
 /** Expected status for [owner, admin, member, manager, outsider, signedOut]. */
 type Expect = [number, number, number, number, number, number]
-interface Row { route: string; why?: string; req: (w: World) => Req; expect: Expect }
+interface Row {
+  route: string; why?: string; req: (w: World) => Req; expect: Expect
+  /** Callers listed in OPERATOR_USER_IDS (server operators) while this row runs; nobody otherwise. */
+  operators?: Array<Exclude<Role, 'signedOut'>>
+}
 
-const r = (route: string, req: (w: World) => Req, expect: Expect, why?: string): Row => ({ route, req, expect, why })
+const r = (route: string, req: (w: World) => Req, expect: Expect, why?: string, operators?: Row['operators']): Row => ({ route, req, expect, why, operators })
 const C = (w: World) => `/api/companies/${w.co}`
 
 const ALL_SIGNED_IN: Expect = [200, 200, 200, 200, 200, 401]
@@ -101,7 +106,10 @@ const MATRIX: Row[] = [
   // Signed in, any company
   r('GET /api/me', () => ({ path: '/api/me' }), ALL_SIGNED_IN),
   r('GET /api/companies', () => ({ path: '/api/companies' }), ALL_SIGNED_IN),
-  r('POST /api/companies', () => ({ path: '/api/companies', body: {} }), [400, 400, 400, 400, 400, 401]),
+  r('POST /api/companies', () => ({ path: '/api/companies', body: {} }), [403, 403, 403, 403, 403, 401],
+    'only server operators create companies, owners of one included'),
+  r('POST /api/companies', () => ({ path: '/api/companies', body: {} }), [403, 403, 403, 403, 400, 401],
+    'the outsider is a server operator', ['outsider']),
   r('POST /api/invitations/:token/accept', () => ({ path: '/api/invitations/no-such-token/accept', body: {} }), [404, 404, 404, 404, 404, 401]),
 
   // Companies
@@ -282,8 +290,8 @@ async function seed(): Promise<World> {
   const co = company.id
   const owner = { companyId: co, userId: USER.owner, role: 'owner' }
   for (const [user, role] of [[USER.admin, 'admin'], [USER.member, 'member'], [USER.manager, 'member']] as const) {
-    const added = services.companies.addMember(owner, user, role)
-    if (!added.ok) throw new Error(`addMember ${user}: ${JSON.stringify(added)}`)
+    db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+      .run(`m-${user}`, user, co, role, expires, expires)
   }
   const dept = (folder: string) => (db.prepare('SELECT id FROM departments WHERE company_id = ? AND folder = ?').get(co, folder) as { id: string }).id
   const sales = dept('営業部')
@@ -372,12 +380,14 @@ describe('permission matrix', () => {
     for (const row of MATRIX) {
       const method = row.route.split(' ')[0]
       const req = row.req(world)
+      process.env.OPERATOR_USER_IDS = (row.operators ?? []).map(role => USER[role]).join(',')
       for (const [i, role] of ROLES.entries()) {
         const status = await send(role, method, req)
         if (status !== row.expect[i]) {
           wrong.push(`${row.route}${row.why ? ` (${row.why})` : ''} as ${role}: ${status}, expected ${row.expect[i]}`)
         }
       }
+      delete process.env.OPERATOR_USER_IDS
     }
     expect(wrong, `Callers got a different answer than the matrix says:\n${wrong.join('\n')}`).toEqual([])
   })

@@ -4,7 +4,7 @@
  * Endpoints must reject malformed or dangerous inputs
  * before processing them.
  */
-import { describe, it, expect, vi, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { execFileSync } from 'child_process'
 
 const TEST_USER = {
@@ -92,6 +92,10 @@ beforeAll(async () => {
 describe('Input validation (400) — malformed inputs', () => {
   // --- Company creation ---
   describe('POST /api/companies', () => {
+    // Creating a company is for server operators; the body is checked after that.
+    beforeAll(() => { process.env.OPERATOR_USER_IDS = 'user-owner-input' })
+    afterAll(() => { delete process.env.OPERATOR_USER_IDS })
+
     it('empty name → 400', async () => {
       const res = await jsonReq('POST', '/api/companies', { name: '' })
       expect(res.status).toBe(400)

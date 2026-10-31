@@ -62,6 +62,8 @@ export function describeError(err: unknown): string {
   if (err instanceof ApiError) {
     // Already Japanese and exact (shared/types/private-folders.ts reservedPathMessage).
     if (err.code === 'FOLDER_NAME_UNAVAILABLE' && err.message) return err.message
+    // Japanese already (server/src/services/companies.ts COMPANY_CREATION_FORBIDDEN).
+    if (err.code === 'COMPANY_CREATION_RESTRICTED' && err.message) return err.message
     for (const [re, msg] of KNOWN_MESSAGES) {
       if (re.test(err.message)) return msg
     }

@@ -28,6 +28,12 @@ export function sqliteInvitationRepository(conn: Database.Database): InvitationR
       `).get(invitationId, companyId)
     },
 
+    acceptedBy(companyId, userId) {
+      return !!conn.prepare(`
+        SELECT 1 FROM invitations WHERE company_id = ? AND used_by = ? LIMIT 1
+      `).get(companyId, userId)
+    },
+
     insert(inv) {
       conn.prepare(`
         INSERT INTO invitations (id, company_id, token, role, created_by, expires_at, created_at)
