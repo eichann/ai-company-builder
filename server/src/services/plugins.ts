@@ -13,7 +13,7 @@
  * Every company row is reached through the company handle; the shelf is
  * shared and read only, filtered by `available_to` for the asking company.
  */
-import { findPrivateScope } from '../../shared/core/permissions'
+import { FULL_ACCESS_ROLES, findPrivateScope } from '../../shared/core/permissions'
 import {
   effectiveFieldPolicy, parsePluginMapping, type PluginManifest, type PluginMapping, type PluginPackage,
 } from '../../shared/core/plugins'
@@ -25,6 +25,7 @@ import type { PluginHistoryRow, PluginInstallRow } from '../ports/plugins'
 import { requireFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import type { PluginShelf, ShelfPackage } from './plugin-shelf'
+import { recordReader } from './record-access'
 
 export const PLUGINS_FORBIDDEN = 'つなぎ先のプラグインを設定できるのは、オーナーと管理者だけです'
 export const PLUGIN_NOT_FOUND = { error: 'このプラグインはありません', code: 'PLUGIN_NOT_FOUND' } as const
@@ -45,6 +46,8 @@ export interface PluginServiceDeps {
   /** The company's broker key `keyId`, or null (another company's key id finds nothing). */
   companyKey: (companyId: string, keyId: string) => PluginKeyInfo | null
   isMember: (companyId: string, userId: string) => boolean
+  /** The member's role in the company, or null. */
+  roleOf: (companyId: string, userId: string) => string | null
   /**
    * Turn the relay's read-only switch on for the service (owner 0.21: once the
    * plugin is on, writes to it go only through the plugin's typed operations).
@@ -153,6 +156,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       const evaluated = await evaluate(companyId, install)
       installView = {
         version: install.version, enabled: install.enabled, keyId: install.keyId, mappingVersion: install.mappingVersion,
+        connectionId: install.connectionId, accountId: install.accountId, managedSince: install.managedSince,
         updatedAt: install.updatedAt, updatedBy: install.updatedBy, problem: evaluated.problem,
       }
     }
@@ -238,8 +242,13 @@ export function createPluginService(deps: PluginServiceDeps) {
       const repo = companyData.forCompany(member.companyId).plugins
       const before = repo.install(pluginId)
       const at = clock.now()
+      if (before && before.service !== found.pkg.manifest.service) {
+        return refuse('conflict', 'この版は別のサービスにつなぐため、選べません', { code: 'SERVICE_CHANGED' })
+      }
       const row: PluginInstallRow = {
-        pluginId, version: body.version, fingerprint: found.fingerprint, enabled: before?.enabled ?? false, keyId,
+        pluginId, version: body.version, fingerprint: found.fingerprint, service: found.pkg.manifest.service,
+        connectionId: before?.connectionId ?? deps.ids.newId(), accountId: before?.accountId ?? null,
+        enabled: before?.enabled ?? false, managedSince: before?.managedSince ?? null, keyId,
         mappingVersion: before?.mappingVersion ?? 0, updatedAt: at, updatedBy: member.userId,
       }
       if (row.enabled) {
@@ -273,7 +282,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
       if (install.enabled === body.enabled) return ok(await detail(member.companyId, pluginId))
       const at = clock.now()
-      const row = { ...install, enabled: body.enabled, updatedAt: at, updatedBy: member.userId }
+      const row = { ...install, enabled: body.enabled, managedSince: install.managedSince ?? (body.enabled ? at : null), updatedAt: at, updatedBy: member.userId }
       if (body.enabled) {
         const evaluated = await evaluate(member.companyId, row)
         if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
@@ -303,6 +312,42 @@ export function createPluginService(deps: PluginServiceDeps) {
       const row = companyData.forCompany(member.companyId).plugins.mapping(pluginId, body.version as number)
       if (!row) return refuse('not-found', 'この版の読み替え表はありません', { code: 'MAPPING_VERSION_NOT_FOUND' })
       return saveVersion(member, pluginId, row.text, 'restore', { from: row.version })
+    },
+
+    /**
+     * The relay's rule for a service whose connection a plugin manages (one
+     * that was turned on at least once — turning it off does not undo it):
+     * null when no plugin of the company manages `service`. Asked by the relay
+     * on every call. Writes are never allowed there; searches only on the
+     * declared paths of the installed version; reads only for a member who may
+     * read every place the plugin's records are visible in (an invalid mapping:
+     * owners / admins only). Review §5.1 / §5.2.
+     */
+    relayPolicy(companyId: string, userId: string, service: string): { searchPaths: string[]; mayRead: boolean } | null {
+      const managed = companyData.forCompany(companyId).plugins.installs().filter(i => i.service === service && i.managedSince !== null)
+      if (managed.length === 0) return null
+      const role = deps.roleOf(companyId, userId)
+      if (role === null) return { searchPaths: [], mayRead: false }
+      const reader = recordReader({ companyId, userId, role }, companyData.forCompany(companyId).scopes.listWithRules())
+      const searchPaths: string[] = []
+      let mayRead = true
+      for (const install of managed) {
+        const found = shelf.find(companyId, install.pluginId, install.version)
+        const row = found && install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
+        const parsed = found && row ? parseForCompany(companyId, found.pkg, row.text) : null
+        if (!found || !parsed?.ok) { mayRead &&= FULL_ACCESS_ROLES.has(role); continue }
+        const m = found.pkg.manifest
+        for (const o of Object.values(m.objects)) if (o.endpoints.search) searchPaths.push(`${m.baseUrl.basePath}${o.endpoints.search.path}`)
+        for (const o of Object.values(parsed.mapping.objects)) {
+          if (!reader.record({ id: '', type: '', scopeId: null, path: null, folder: o.visibleToFolder })) mayRead = false
+        }
+      }
+      return { searchPaths, mayRead }
+    },
+
+    /** Whether a plugin of the company manages `service` (the relay's read-only switch stays on). */
+    manages(companyId: string, service: string): boolean {
+      return companyData.forCompany(companyId).plugins.installs().some(i => i.service === service && i.managedSince !== null)
     },
 
     /**

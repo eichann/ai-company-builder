@@ -28,6 +28,8 @@ import {
   brokerSecretLast4,
   builtinBrokerService,
   checkBrokerSecret,
+  isPracticeSecret,
+  PRACTICE_KEY_PREFIX,
   companyKeyEligibility,
   defaultBrokerRule,
   isValidBrokerServiceName,
@@ -95,6 +97,8 @@ export interface KeyBrokerDeps {
   checkKey?: BrokerKeyChecker
   /** Services this server sends to a practice copy (staging only, `lib/config.ts`); default none. */
   practiceServices?: readonly string[]
+  /** A connector plugin manages the service for this company: the read-only switch cannot be turned off (plugins.md). */
+  managedByPlugin?: (companyId: string, service: string) => boolean
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -138,6 +142,16 @@ function withCheck(view: BrokerView, service: string, check: BrokerKeyCheckResul
 export function createKeyBrokerService(deps: KeyBrokerDeps) {
   const { brokerKeys, brokerVault, memberships, companyData, accounts, clock, ids } = deps
   const checkKey: BrokerKeyChecker = deps.checkKey ?? (async () => null)
+
+  /**
+   * Staging (practice upstreams): while the service's connections go to its
+   * practice copy, a value that is not a practice key is refused — a real
+   * secret is never registered there, so never sent there (review §5.8).
+   */
+  function practiceSecretRefusal(service: string, secret: string) {
+    if (!deps.practiceServices?.includes(service) || isPracticeSecret(secret)) return null
+    return refuse('bad-request', `練習用の${builtinBrokerService(service)?.label ?? service}につながっている間は、本物の鍵を登録できません（${PRACTICE_KEY_PREFIX}… の練習用の鍵だけです）`, { code: 'REAL_KEY_ON_PRACTICE' })
+  }
 
   /**
    * The department a consultation is in, from the folder the app sent
@@ -290,6 +304,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   }
 
   return {
+    practiceSecretRefusal,
+
     /** GET …/broker */
     get(member: Member): Outcome<BrokerView> {
       const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
@@ -308,6 +324,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in name) return refuse('bad-request', name.error)
       const secret = checkBrokerSecret(body.secret)
       if ('error' in secret) return refuse('bad-request', secret.error)
+      const practice = practiceSecretRefusal(service, secret.value)
+      if (practice) return practice
       const builtin = builtinBrokerService(service)
       const relay = builtin ? null : relayOf(serviceSettings(member.companyId).get(service))
       const defaultHosts = builtin ? builtin.defaultHosts : relay ? [relay.host] : null
@@ -364,6 +382,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in secret) return refuse('bad-request', secret.error)
       const existing = brokerKeys.find(member.companyId, keyId)
       if (!existing) return refuse('not-found', 'API key not found')
+      const practice = practiceSecretRefusal(existing.service, secret.value)
+      if (practice) return practice
       if (!brokerVault.status().enabled) return refuse('unavailable', BROKER_OFF_ERROR, { code: 'BROKER_OFF' })
       const check = await checkKey(member.companyId, existing.service, secret.value, decoded(existing).destinations.hosts)
       if (check === 'rejected') return refuse('bad-request', KEY_REJECTED_ERROR, { code: 'KEY_REJECTED' })
@@ -533,6 +553,9 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const stored = serviceSettings(member.companyId).get(service)
       if (!builtinBrokerService(service) && !relayOf(stored)) return refuse('not-found', 'Unknown service')
       const before = stored?.readOnly ?? false
+      if (!body.readOnly && deps.managedByPlugin?.(member.companyId, service)) {
+        return refuse('conflict', 'つなぎ先のプラグインが管理しているため、読むだけのままです（書き換えはプラグインの決まった操作からだけ行います）', { code: 'MANAGED_BY_PLUGIN' })
+      }
       if (before === body.readOnly) return ok(view(member.companyId))
       const setting = serviceSettingOf(stored, service)
       const at = clock.now()

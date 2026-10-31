@@ -176,7 +176,8 @@ describe('company handle: connector plugins', () => {
     VALUES (?, ?, ?, ?, 'hubspot', 'k', 'abcd', 's', x'00', x'00', x'00', x'00', 'local:0', '{}', '{}', '{}', 0, 'active', ?, 'u', ?, 'u', ?)
   `).run(id, companyId, scope, scope === 'user' ? 'u' : null, TS, TS, TS)
   const install = (keyId: string | null) => ({
-    pluginId: 'sample-crm', version: '0.1.0', fingerprint: 'f', enabled: true, keyId, mappingVersion: 0, updatedAt: TS, updatedBy: 'u',
+    pluginId: 'sample-crm', version: '0.1.0', fingerprint: 'f', service: 'hubspot', connectionId: 'conn-1', accountId: null,
+    enabled: true, managedSince: TS, keyId, mappingVersion: 0, updatedAt: TS, updatedBy: 'u',
   })
   const h = (id: string) => ({ id, pluginId: 'sample-crm', action: 'install', at: TS, by: 'u', change: '{}' })
 

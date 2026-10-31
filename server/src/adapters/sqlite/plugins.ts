@@ -10,14 +10,16 @@ import type Database from 'better-sqlite3'
 import type { PluginHistoryRow, PluginInstallRow, PluginMappingRow, PluginRepository } from '../../ports/plugins'
 
 type InstallRow = {
-  plugin_id: string; version: string; fingerprint: string; enabled: number; key_id: string | null
+  plugin_id: string; version: string; fingerprint: string; service: string; connection_id: string; account_id: string | null
+  enabled: number; managed_since: string | null; key_id: string | null
   mapping_version: number; updated_at: string; updated_by: string
 }
 const toInstall = (r: InstallRow): PluginInstallRow => ({
-  pluginId: r.plugin_id, version: r.version, fingerprint: r.fingerprint, enabled: r.enabled === 1, keyId: r.key_id,
+  pluginId: r.plugin_id, version: r.version, fingerprint: r.fingerprint, service: r.service, connectionId: r.connection_id,
+  accountId: r.account_id, enabled: r.enabled === 1, managedSince: r.managed_since, keyId: r.key_id,
   mappingVersion: r.mapping_version, updatedAt: r.updated_at, updatedBy: r.updated_by,
 })
-const INSTALL_COLUMNS = 'plugin_id, version, fingerprint, enabled, key_id, mapping_version, updated_at, updated_by'
+const INSTALL_COLUMNS = 'plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since, key_id, mapping_version, updated_at, updated_by'
 type HistoryRow = { id: string; plugin_id: string; action: string; at: string; by_user: string; change: string }
 const toHistory = (r: HistoryRow): PluginHistoryRow => ({ id: r.id, pluginId: r.plugin_id, action: r.action, at: r.at, by: r.by_user, change: r.change })
 
@@ -37,12 +39,16 @@ export function sqlitePluginRepository(conn: Database.Database, companyId: strin
     saveInstall(row, history) {
       conn.transaction(() => {
         conn.prepare(`
-          INSERT INTO plugin_installs (company_id, plugin_id, version, fingerprint, enabled, key_id, mapping_version, updated_at, updated_by)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+          INSERT INTO plugin_installs (company_id, plugin_id, version, fingerprint, service, connection_id, account_id, enabled, managed_since,
+            key_id, mapping_version, updated_at, updated_by)
+          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(company_id, plugin_id) DO UPDATE SET version = excluded.version, fingerprint = excluded.fingerprint,
-            enabled = excluded.enabled, key_id = excluded.key_id, mapping_version = excluded.mapping_version,
+            service = excluded.service, connection_id = excluded.connection_id, account_id = excluded.account_id,
+            enabled = excluded.enabled, managed_since = COALESCE(plugin_installs.managed_since, excluded.managed_since),
+            key_id = excluded.key_id, mapping_version = excluded.mapping_version,
             updated_at = excluded.updated_at, updated_by = excluded.updated_by
-        `).run(companyId, row.pluginId, row.version, row.fingerprint, row.enabled ? 1 : 0, row.keyId, row.mappingVersion, row.updatedAt, row.updatedBy)
+        `).run(companyId, row.pluginId, row.version, row.fingerprint, row.service, row.connectionId, row.accountId, row.enabled ? 1 : 0,
+          row.managedSince, row.keyId, row.mappingVersion, row.updatedAt, row.updatedBy)
         addHistory(history)
       })()
     },

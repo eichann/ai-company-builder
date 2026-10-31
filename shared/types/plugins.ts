@@ -57,6 +57,12 @@ export interface PluginInstallView {
   enabled: boolean
   keyId: string | null
   mappingVersion: number
+  /** The connection: a new one when the outside account changes (a key rotation keeps it). */
+  connectionId: string
+  /** The outside account (HubSpot's portal id), known after the connector's first call. */
+  accountId: string | null
+  /** First turned on: from then on the relay only reads this service for the company, even when the plugin is off. */
+  managedSince: string | null
   updatedAt: string
   updatedBy: string
   /** null = it runs; otherwise the first reason it does not. */

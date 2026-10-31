@@ -39,8 +39,32 @@ let kekDir: string, shelfDir: string
 const owner = { companyId: CO, userId: 'pl-owner', role: 'owner' }
 const admin = { companyId: CO, userId: 'pl-admin', role: 'admin' }
 const member = { companyId: CO, userId: 'pl-member', role: 'member' }
+/** A member who cannot read 営業部 (where the cards are visible). */
+const reader = { companyId: CO, userId: 'pl-reader', role: 'member' }
 const otherOwner = { companyId: OTHER, userId: 'pl-other-owner', role: 'owner' }
 let hubKey: string, hubKeyOther: string, geminiKey: string
+let oldToken: string, readerToken: string
+/** What reached "HubSpot" through the relay. */
+const sent: Array<{ method: string; path: string }> = []
+const fakeUpstream = {
+  async send(req: { method: string; path: string; body: AsyncIterable<Uint8Array> | null }) {
+    if (req.body) for await (const chunk of req.body) void chunk
+    sent.push({ method: req.method, path: req.path })
+    return { ok: true as const, response: { status: 200, headers: [['content-type', 'application/json']] as Array<[string, string]>, body: (async function* () { yield new TextEncoder().encode('{"results":[]}') })(), viaPrivateAddress: false } }
+  },
+}
+
+async function relay(token: string, method: string, path: string, headers: Record<string, string> = {}) {
+  const { Hono } = await import('hono')
+  const { brokerRelayRoutes } = await import('../../src/routes/broker-relay')
+  const app = new Hono().route('/api/broker', brokerRelayRoutes(services.brokerRelay))
+  const before = sent.length
+  const res = await app.request(`http://acb.test/api/broker/hubspot${path}`, {
+    method, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json', ...headers }, ...(method === 'GET' ? {} : { body: '{}' }),
+  })
+  const json = await res.json().catch(() => null)
+  return { status: res.status, code: json?.error?.code as string | undefined, forwarded: sent.length > before }
+}
 
 /** A HubSpot-shaped package (the public fixture `sample-crm`, pointed at HubSpot's host and service). */
 function putHubPackage(dir: string, extra = '') {
@@ -80,20 +104,28 @@ beforeAll(async () => {
   dbModule.initDatabase()
   db = dbModule.db
   for (const co of [CO, OTHER]) db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(co, co, co, 'x', ts(), ts())
-  for (const m of [owner, admin, member, otherOwner]) {
+  for (const m of [owner, admin, member, reader, otherOwner]) {
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${m.userId}`, m.userId, m.companyId, m.role, ts(), ts())
   }
   // A private folder (its own repository) inside 営業部.
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('pl-s-priv', ?, '営業部/評価', 'folder', 'pl-r-priv', ?)`).run(CO, ts())
   db.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('pl-r-priv', ?, 'pl-s-priv', ?)`).run(CO, ts())
 
+  // 営業部: only pl-member (and owners / admins) may read it.
+  db.prepare(`INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('pl-s-sales', ?, '営業部', 'folder', ?)`).run(CO, ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'pl-r1', 'pl-s-sales', 'everyone', NULL, 0, 0, ?)`).run(CO, ts())
+  db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'pl-r2', 'pl-s-sales', 'user', 'pl-member', 1, 1, ?)`).run(CO, ts())
+
   const { createServices } = await import('../../src/composition')
-  services = createServices(db, undefined, { pluginsDir: shelfDir })
+  services = createServices(db, undefined, { pluginsDir: shelfDir, upstream: fakeUpstream })
   await services.pluginShelf.load()
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   hubKey = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: SECRET, audience })).value.keys[0].id
   geminiKey = (await services.keyBroker.create(owner, { service: 'gemini', displayName: 'Gemini', secret: `${SECRET}-gemini`, audience })).value.keys
     .find((k: Json) => k.service === 'gemini').id
+  // Tokens issued before the plugin is ever turned on (an old consultation).
+  oldToken = services.brokerTokens.issue(member, { conversationId: 'c-old', services: ['hubspot'] }).value.token
+  readerToken = services.brokerTokens.issue(reader, { conversationId: 'c-reader', services: ['hubspot'] }).value.token
   hubKeyOther = (await services.keyBroker.create(otherOwner, { service: 'hubspot', displayName: 'HubSpot', secret: `${SECRET}-other`, audience })).value.keys[0].id
 })
 
@@ -217,5 +249,39 @@ describe('connector plugins: every kill switch acts on the next call', () => {
     expect(await services.plugins.install(owner, 'crm-hub', { version: '0.2.0', keyId: null }))
       .toMatchObject({ ok: false, body: { code: 'PLUGIN_WOULD_STOP', problem: 'no-key' } })
     expect((await active()).plugin.version).toBe('0.1.0')
+  })
+})
+
+describe('the relay and a connection the plugin manages (review §5.1 / §5.2)', () => {
+  it('before the plugin was ever on, the relay is untouched (existing skills keep working)', async () => {
+    // Runs first in file order? No: the plugin is on by now. Checked on the other company, which never turned it on.
+    const otherToken = services.brokerTokens.issue(otherOwner, { conversationId: 'c-o', services: ['hubspot'] }).value.token
+    expect(await relay(otherToken, 'PATCH', '/crm/v3/objects/deals/1')).toMatchObject({ status: 200, forwarded: true })
+  })
+
+  it('writes never pass, from old tokens too, and turning the plugin off does not bring them back', async () => {
+    expect(services.plugins.manages(CO, 'hubspot')).toBe(true)
+    for (const [method, path] of [['PATCH', '/crm/objects/2026-03/deals/1'], ['POST', '/crm/objects/2026-03/deals'], ['DELETE', '/crm/objects/2026-03/deals/1'], ['POST', '/crm/v3/objects/contacts/search']] as const) {
+      expect([method, path, await relay(oldToken, method, path)]).toEqual([method, path, { status: 403, code: 'ACB_MANAGED_BY_PLUGIN', forwarded: false }])
+    }
+    // A "GET" that would write on some APIs — refused by the managed rule itself, whatever the read-only switch says.
+    db.prepare("UPDATE broker_services SET read_only = 0 WHERE company_id = ? AND service = 'hubspot'").run(CO)
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1', { 'x-http-method-override': 'PATCH' })).toMatchObject({ status: 403, code: 'ACB_MANAGED_BY_PLUGIN', forwarded: false })
+    db.prepare("UPDATE broker_services SET read_only = 1 WHERE company_id = ? AND service = 'hubspot'").run(CO)
+    // Reads and the declared search pass.
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
+    expect(await relay(oldToken, 'POST', '/crm/objects/2026-03/deals/search')).toMatchObject({ status: 200, forwarded: true })
+
+    await services.plugins.setEnabled(owner, 'crm-hub', { enabled: false })
+    expect(await relay(oldToken, 'PATCH', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 403, code: 'ACB_MANAGED_BY_PLUGIN', forwarded: false })
+    // The read-only switch cannot be turned off while a plugin manages the service.
+    expect(services.keyBroker.setReadOnly(owner, 'hubspot', { readOnly: false })).toMatchObject({ ok: false, body: { code: 'MANAGED_BY_PLUGIN' } })
+    await services.plugins.setEnabled(owner, 'crm-hub', { enabled: true })
+  })
+
+  it('someone who cannot read the cards cannot read HubSpot through the relay either', async () => {
+    expect(await relay(readerToken, 'GET', '/crm/objects/2026-03/deals/1')).toEqual({ status: 403, code: 'ACB_READ_NOT_ALLOWED', forwarded: false })
+    expect(await relay(readerToken, 'POST', '/crm/objects/2026-03/deals/search')).toEqual({ status: 403, code: 'ACB_READ_NOT_ALLOWED', forwarded: false })
+    expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200 })
   })
 })

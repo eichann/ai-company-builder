@@ -555,7 +555,17 @@ export function initDatabase(conn: Database.Database = sqlite) {
       plugin_id TEXT NOT NULL,
       version TEXT NOT NULL,
       fingerprint TEXT NOT NULL,
+      -- The key broker's service the plugin talks to (kept even if the package leaves the shelf).
+      service TEXT NOT NULL,
+      -- The connection (review §5.7): a new id when the outside account changes; a key
+      -- rotation keeps it. account_id = the outside account (HubSpot portal id), set by
+      -- the connector on its first call; null until then.
+      connection_id TEXT NOT NULL,
+      account_id TEXT,
       enabled INTEGER NOT NULL DEFAULT 0,
+      -- First turned on: from then on the relay never writes to the service for this
+      -- company (turning the plugin off does not undo it; plugins.md).
+      managed_since TEXT,
       key_id TEXT REFERENCES broker_keys(id),
       mapping_version INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,

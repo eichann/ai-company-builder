@@ -13,6 +13,7 @@ paths:
   - "server/src/routes/plugins.ts"
   - "server/tests/unit/plugin-shelf.test.ts"
   - "server/tests/integration/plugins.test.ts"
+  - "server/src/adapters/upstream-practice.ts"
 ---
 
 # Connector plugins (milestone 3): declaration, mapping, field policies
@@ -52,6 +53,24 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   external, `undo` (update: restore_previous / none; create: archive / none), `note`. An update
   writes `fields: mapped` only (the mapping's `write: true` fields); a create names `attach_to`
   (an object with a record type) and may carry its own `policy`.
+
+## What we say, and what we do not claim (review §12, owner-approved wording)
+
+- "No program in a package": **no arbitrary code runs**; communication, authorization and
+  secrets are restricted by the core. Not "isolated".
+- "The hash fixes the content"; where a package comes from is guaranteed by deployment (who may
+  write `PLUGINS_DIR`), not by the hash.
+- `reaches: internal` = the call **writes the CRM directly**; effects through the CRM's own
+  automation (workflows, notifications) are checked separately — not "no one outside is reached".
+- Reading just before a write **detects known differences**; without a conditional update in
+  the outside API, a change made after that read can still be overwritten (P6).
+- After a lost answer we **compare the outside state with our stored evidence** and keep
+  success / failure / unknown apart (P5 / P6) — not "we check whether it arrived".
+- 「変更前の値を書き戻す」 **when its conditions hold**; downstream side effects are not undone (P6).
+- Names needed for the work (a customer company in a deal title) are handled with permissions
+  and kept on the server only — not "a company name is not personal data, so it is fine".
+- The AGPL core and paid packages are **technically separated**; terms of provision depend on
+  the actual setup and rights, not on this design.
 
 ## Owner rules (§8)
 
@@ -115,7 +134,9 @@ first). Screen plugins (tabs, isolated views) are milestone 5 and not covered he
   `validatePluginPackage` refuses. Never read from a company repository; never synced.
 - **Fingerprint**: sha256 over every file's path and content. The company's install records the
   fingerprint of the version an owner/admin chose; a package changed under the same version is
-  not used for that company (`package-changed`) until they choose it again.
+  not used for that company (`package-changed`) until they choose it again. The hash fixes the
+  content; it does not prove who made it — where packages come from is guaranteed by who may
+  write `PLUGINS_DIR` (the operator; read-only deployment; never replace a published version).
 - **`available_to`** (§8-4): a package listed for other companies does not exist for this one —
   not in `GET /plugins`, and `GET|PUT /plugins/:id…` answer the same 404 `PLUGIN_NOT_FOUND` as an
   id that exists nowhere (permission matrix `CROSS` rows with a package only the other company
@@ -164,6 +185,44 @@ POST /plugins/:pluginId/mapping/restore  { version } an earlier version saved ag
   hosts do not include the declaration's host → `key-destination`; mapping missing or no longer
   passing → `mapping-invalid`.
 
+## The relay and a managed connection (review §5.1 / §5.2, P4)
+
+A plugin turned on at least once makes its service a **managed connection** for the company
+(`plugin_installs.managed_since`, never cleared). From then on, on **every** relay call
+(`services/broker-relay.ts` step 2a, `plugins.relayPolicy`), whatever the token's age or the
+plugin's switch:
+
+- **No writes**: only GET / HEAD and POSTs to the **declared search paths** of the installed
+  version (exact path, not `*/search`); a method-override header is refused → 403
+  `ACB_MANAGED_BY_PLUGIN`. Turning the plugin off does not bring writes back; the key broker's
+  read-only switch cannot be turned off (409 `MANAGED_BY_PLUGIN`). Writes go only through the
+  plugin's typed operations (P6), which never pass the relay.
+- **Reads only for those who may see every card**: the member must be able to read the place of
+  every mapped object (`visible_to_folder`; an invalid mapping → owners / admins only), else 403
+  `ACB_READ_NOT_ALLOWED`. The relay cannot apply record permissions to each outside answer, and
+  it reaches more than the cards (contacts, other deals): this rule only stops people who
+  cannot see the cards; whom the relay serves beyond that is an owner decision (open).
+- Companies whose plugin was never on keep the relay as before. **Inventory (2026-10-31)**:
+  div's `法人ソリューション/.claude/skills/anken-sync` reads (owners, pipelines, deal search /
+  get, v3 paths) **and writes** (creates deals, PATCHes deals, creates meetings) through the
+  relay when the app gives it `ACB_HUBSPOT_*`; `weekly-report` prepares the same variables.
+  Turning the HubSpot plugin on for div stops anken-sync's writes (and its v3 searches) there
+  until it moves to the typed operations — an owner decision.
+
+## Connections (review §5.7, §5.8)
+
+- An install is one **connection**: `connection_id` (new at install) and `account_id` (the outside
+  account — HubSpot's portal id — set by the connector's first call, P5). Rotating the key keeps
+  the connection; another account means a new connection, and outside ids are keyed by company
+  + connection + account + object + external id (P5), so the fake and the real HubSpot, or two
+  accounts, never mix. Undo never writes to another account (P6).
+- **A real secret never reaches the fake**: while a service goes to its practice copy
+  (`ACB_FAKE_HUBSPOT_URL`, staging), registering a company key, replacing one or saving an own
+  key whose value is not a practice key (`pat-fake-…`, `PRACTICE_KEY_PREFIX`) is refused (400
+  `REAL_KEY_ON_PRACTICE`), and the practice way out (`adapters/upstream-practice.ts`) never sends
+  a request whose credential is not a practice key (`practice-real-secret`; a key saved before
+  the redirect was on). Test: `tests/integration/broker-practice-upstream.test.ts`.
+
 ## Not yet (later PRs of milestone 3)
 
 P5 the connector and import; P6 typed operations, undo and the remaining stops (AI stop, field
@@ -178,7 +237,8 @@ naming only the folder; fingerprint; `available_to`; the stop list read per call
 `server/tests/integration/plugins.test.ts` (another company's package = 404 and nothing written;
 owner/admin only; keys of another company / service refused; members only, no private folder;
 versions and restore; read-only relay on; no key value anywhere; every kill switch on the next
-call), `tests/unit/company-data.test.ts` (handle isolation and the triggers), permission matrix
+call; the managed relay: no writes from old tokens or after turning off, declared searches only,
+no reads for those who cannot see the cards, the switch locked), `tests/unit/company-data.test.ts` (handle isolation and the triggers), permission matrix
 rows + `CROSS`, `company-scoped-sql.test.ts` (`HANDLE_TABLES`) — each guard mutation-checked.
 `server/tests/unit/plugins.test.ts` with `server/tests/fixtures/plugins/` (`sample-crm`, a
 HubSpot-shaped fictional CRM; `sample-desk`, a read-only company package of another shape):

@@ -7,12 +7,18 @@
  * real host, so the relay's destination rules and redirect rewriting are the
  * same as with the real service.
  *
- * Nothing is logged here (no header, no body, no key).
+ * Nothing is logged here (no header, no body, no key). A request whose key
+ * is not a practice key (`pat-fake-…`) is not sent at all
+ * (`practice-real-secret`): a real secret never reaches the practice copy.
  */
 import { request as httpRequest, type IncomingMessage } from 'http'
 import { request as httpsRequest } from 'https'
 import type { PracticeUpstream } from '../lib/config'
+import { isPracticeSecret } from '../../shared/core/key-broker'
 import type { UpstreamClient } from '../ports/upstream'
+
+/** Headers that carry a key (the built-in services' and the usual ones). */
+const CREDENTIAL_HEADERS = ['authorization', 'x-api-key', 'x-goog-api-key']
 
 export function practiceUpstream(real: UpstreamClient, upstreams: readonly PracticeUpstream[]): UpstreamClient {
   if (upstreams.length === 0) return real
@@ -21,6 +27,11 @@ export function practiceUpstream(real: UpstreamClient, upstreams: readonly Pract
     async send(req) {
       const target = byHost.get(req.host)
       if (!target) return real.send(req)
+      // A real secret never goes to the practice copy (review §5.8): only practice keys pass.
+      // (Registration refuses them too; this holds even for a key saved before the redirect was on.)
+      if (CREDENTIAL_HEADERS.some(h => req.headers[h] !== undefined && !isPracticeSecret(req.headers[h]))) {
+        return { ok: false, reason: 'practice-real-secret' }
+      }
       return new Promise(resolve => {
         let settled = false
         const done = (v: Awaited<ReturnType<UpstreamClient['send']>>) => { if (!settled) { settled = true; resolve(v) } }

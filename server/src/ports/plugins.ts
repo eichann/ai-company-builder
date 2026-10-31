@@ -45,7 +45,15 @@ export interface PluginInstallRow {
   version: string
   /** The package's fingerprint when an owner/admin chose this version: a changed package is not used. */
   fingerprint: string
+  /** The key broker's service the plugin talks to. */
+  service: string
+  /** The connection (a new id when the outside account changes; a key rotation keeps it). */
+  connectionId: string
+  /** The outside account (HubSpot's portal id), set by the connector's first call; null until then. */
+  accountId: string | null
   enabled: boolean
+  /** When first turned on; from then on the relay never writes to `service` for this company. */
+  managedSince: string | null
   /** The key broker's company key the connector uses (never its value). */
   keyId: string | null
   /** The mapping version in force. */

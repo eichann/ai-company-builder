@@ -65,6 +65,19 @@ export interface BrokerRelayDeps {
   log?: Pick<Console, 'warn'>
   /** The emergency stop (M2, agent-stop.md): the whole AI of this company is stopped → every call is refused. */
   companyStopped?: (companyId: string) => boolean
+  /**
+   * A connection managed by a connector plugin (plugins.md "The relay and a
+   * managed connection"): null = not managed. Asked on every call.
+   */
+  managedConnection?: (companyId: string, userId: string, service: string) => ManagedRelayPolicy | null
+}
+
+/** What the relay may still do for a service whose connection a plugin manages. */
+export interface ManagedRelayPolicy {
+  /** The declared search paths (POSTs that only read), exact. */
+  searchPaths: string[]
+  /** The member may read every place the plugin's records are visible in. */
+  mayRead: boolean
 }
 
 export interface RelayRequest {
@@ -107,6 +120,7 @@ export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
   | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
+  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
@@ -115,6 +129,8 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_BAD_PATH: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_DESTINATION_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_READ_ONLY: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_MANAGED_BY_PLUGIN: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_READ_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_REDIRECT_REFUSED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
   ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
@@ -410,7 +426,18 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       if (pathPrefixes.length > 0 && !pathPrefixes.some(p => path.decoded.startsWith(p))) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵では、この宛先（パス）は使えません。', grant)
       }
-      // 2a. The company keeps this service read-only (HubSpot once its plugin is on: writes go only through
+      // 2a. A connection managed by a connector plugin (once turned on, for good): writes go only through
+      // the plugin's typed operations; reads only by members who may see every card it brings, and
+      // searches only on the declared paths. Checked on every call, so an old token or consultation
+      // cannot write either, and turning the plugin off does not bring writes back.
+      const managed = deps.managedConnection?.(grant.companyId, grant.userId, req.service) ?? null
+      if (managed) {
+        const reads = (req.method === 'GET' || req.method === 'HEAD' || (req.method === 'POST' && managed.searchPaths.includes(path.decoded)))
+          && !req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n))
+        if (!reads) return jsonError(403, 'ACB_MANAGED_BY_PLUGIN', `${target.label} の書き換えは、ACB のプラグインの決まった操作からだけ行えます（ここからは読むだけです）。`, grant)
+        if (!managed.mayRead) return jsonError(403, 'ACB_READ_NOT_ALLOWED', `${target.label} の内容は、ACB で案件を見られる人だけがここから読めます。`, grant)
+      }
+      // 2b. The company keeps this service read-only (HubSpot once its plugin is on: writes go only through
       // the plugin's typed operations, which never pass here): only reads are forwarded.
       // A method-override header would let a "GET" write on some APIs: refused while read-only.
       if (keyBroker.relayReadOnly(grant.companyId, req.service)
@@ -578,6 +605,7 @@ export class UsageScanner {
 function upstreamFailure(reason: UpstreamFailure, grant: BrokerGrant): RelayAnswer {
   switch (reason) {
     case 'private-address': return jsonError(403, 'ACB_PRIVATE_ADDRESS', '宛先が社内のアドレスを指しているため、送りませんでした。必要なら管理者に「社内の宛先（例外）」を頼んでください。', grant)
+    case 'practice-real-secret': return jsonError(502, 'ACB_UPSTREAM_UNREACHABLE', '練習用の送り先には本物の鍵を送れないため、送りませんでした。', grant)
     case 'timeout': return jsonError(504, 'ACB_UPSTREAM_TIMEOUT', '送り先からの返事が時間内に来ませんでした。', grant)
     default: return jsonError(502, 'ACB_UPSTREAM_UNREACHABLE', '送り先につながりませんでした。時間をおいてもう一度お試しください。', grant)
   }

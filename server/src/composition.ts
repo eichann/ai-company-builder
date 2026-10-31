@@ -147,6 +147,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
     practiceServices: practiceList.map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
+    // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
+    managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -187,6 +189,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       return row ? { scope: row.scope, service: row.service, status: row.status, hosts: keyHosts(row.destinations) } : null
     },
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
   })
 
@@ -228,6 +231,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
       companyStopped: agentStops.companyStopped,
+      managedConnection: (companyId, userId, service) => plugins.relayPolicy(companyId, userId, service),
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     clientActivity: createClientActivityService({ ...repos, ...shared }),

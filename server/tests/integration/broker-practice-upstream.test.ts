@@ -141,4 +141,27 @@ describe('the practice HubSpot (staging only)', () => {
     expect(res.status).toBe(200)
     expect(atPractice.at(-1)!.url).toBe('/crm/v3/objects/deals/search')
   })
+
+  it('a real secret is never registered for, nor sent to, the practice copy (review §5.8)', async () => {
+    const REAL = 'pat-na1-NOT-REAL-but-not-a-practice-key-0123'
+    const services = await servicesFor(staging())
+    const before = atPractice.length
+    // Registering a company key, replacing one, and a member's own key: refused before anything is sent.
+    expect(await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'Real', secret: REAL, audience: everyone }))
+      .toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'REAL_KEY_ON_PRACTICE' } })
+    const made = await services.keyBroker.create(owner, { service: 'hubspot', displayName: `P-${randomBytes(3).toString('hex')}`, secret: FAKE_HUBSPOT, audience: everyone })
+    const keyId = made.ok ? made.value.keys.find(k => k.displayName.startsWith('P-'))!.id : ''
+    expect(await services.keyBroker.replaceSecret(owner, keyId, { secret: REAL })).toMatchObject({ ok: false, body: { code: 'REAL_KEY_ON_PRACTICE' } })
+    expect(await services.ownBrokerKeys.save(owner, 'hubspot', { secret: REAL })).toMatchObject({ ok: false, body: { code: 'REAL_KEY_ON_PRACTICE' } })
+    expect(atPractice.length - before).toBe(1) // only the practice key's own check
+    // A real key saved while the redirect was off is never sent once it is on.
+    const { practiceUpstream } = await import('../../src/adapters/upstream-practice')
+    const way = practiceUpstream(realWayOut, (practiceUpstreamsFrom(staging()) as { upstreams: never[] }).upstreams)
+    const sent = await way.send({ host: 'api.hubapi.com', method: 'GET', path: '/crm/objects/2026-03/deals', headers: { authorization: `Bearer ${REAL}` }, body: null, allowPrivateHosts: [], signal: new AbortController().signal, headersTimeoutMs: 5000 })
+    expect(sent).toEqual({ ok: false, reason: 'practice-real-secret' })
+    expect(atPractice.length - before).toBe(1)
+    // Off staging the same real key is accepted (no practice copy).
+    const prod = await servicesFor({ ...staging(), NODE_ENV: 'production' })
+    expect((await prod.keyBroker.create(owner, { service: 'hubspot', displayName: `R-${randomBytes(3).toString('hex')}`, secret: REAL, audience: everyone })).ok).toBe(true)
+  })
 })
