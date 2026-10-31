@@ -137,7 +137,7 @@ beforeAll(async () => {
   authDb.close()
 
   // The default: company scope with everyone: read + write; a department "sales".
-  const { ensureCompanyScope, ensureDepartmentScope } = await import('../../src/lib/permission-store')
+  const { ensureCompanyScope, ensureDepartmentScope } = await import('../../src/adapters/sqlite/permission-store')
   ensureCompanyScope(db, companyId)
   db.prepare(`INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)`)
     .run('d-sales', companyId, '営業', 'sales', now, now)

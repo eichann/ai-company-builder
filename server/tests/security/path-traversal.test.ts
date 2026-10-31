@@ -110,7 +110,7 @@ beforeAll(async () => {
       .run(`s-${user}`, user, `tok-${user}`, new Date(Date.now() + 3600_000).toISOString())
   }
   authDb.close()
-  const { ensureCompanyScope } = await import('../../src/lib/permission-store')
+  const { ensureCompanyScope } = await import('../../src/adapters/sqlite/permission-store')
   const membership = (user: string, company: string) =>
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${user}-${company}`, user, company, 'owner', now, now)
   for (const id of [OWN, DOTTED]) {

@@ -28,13 +28,15 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
 
 - `server/tests/unit/layering.test.ts` enforces the direction: ports import only ports (and
   shared/core types), services only ports / services / shared / pure lib, only the composition
-  root imports adapters, routes run no SQL and do not import `db` (every route except
-  `git-http.ts`, an intentional exception: it hands its connection to lib for the push snapshot
-  and scope pushes), and `lib/` does not import the database except the modules listed in
-  `LIB_WITH_DATABASE` with their reason (`lib/auth.ts`: Better Auth's own connection; the rest
-  are moving behind ports). Storage goes in `adapters/sqlite/*` behind a port; a module that
-  only computes stays in `lib/` (`lib/push-rejections.ts` parses, `lib/client-activity.ts`
-  reads headers and receive-pack results).
+  root imports adapters (and `db/index.ts`, whose startup seeding runs
+  `adapters/sqlite/permission-store.ts` on the connection it migrates), no route runs SQL or
+  imports `db` (git-http's push snapshot and private-folder lookups use `services.access` /
+  `services.scopes`), and `lib/` does not import the database except the modules listed in
+  `LIB_WITH_DATABASE` with their reason (only `lib/auth.ts`: Better Auth's own connection, next
+  to every route's sign-in check). Storage goes in `adapters/*` behind a port; a module that only
+  computes or runs git / files stays in `lib/` (`lib/push-rejections.ts` parses,
+  `lib/client-activity.ts` reads headers and receive-pack results, `lib/private-folders.ts` keeps
+  paths, archives and the pushes in flight).
 - Client activity (`client_activity`): `services/client-activity.ts` records it (throttled,
   never throws) from `routes/client-activity-middleware.ts` (API) and git-http, and holds the
   active-members build check; table in `adapters/sqlite/client-activity.ts`.
@@ -147,7 +149,7 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   `expiresInDays`: integer 1–30 (default 7).
 - Permission model: `resolveAccess` / `writeAccessSummary` / `canReadPrivateScope` live in
   `shared/core/permissions.ts` (moved from `server/src/lib/permissions.ts` in R2); storage in
-  `lib/permission-store.ts` behind `ScopeRepository`. Reads: `services/permission-views.ts`
+  `adapters/sqlite/permission-store.ts` behind `ScopeRepository`. Reads: `services/permission-views.ts`
   (`/overview`, `/permissions`, `/me/capabilities`, `/me/write-access`, `managedFolders` for
   git-http's snapshot). Editor: `services/permission-editor.ts` (`canEditPath`, subjects, the
   outdated-app guard `guardWrite` — mutation + write-loss check in one `transactions.run`,

@@ -3,12 +3,10 @@ import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { join } from 'path'
 import { type AuthUser } from '../lib/auth'
-import { db } from '../db'
 import { clientIdentityFromHeaders, receivePackSucceeded } from '../lib/client-activity'
 import { REPOS_DIR } from '../lib/config'
 import { services } from '../composition'
 import { preparePushCheck, scrubPushCheckEnv, type PreparedPushCheck } from '../lib/git-server'
-import { ensureCompanyScope, getMemberRole, listScopesWithRules } from '../lib/permission-store'
 import { canReadPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
 import {
   beginCompanyPush,
@@ -445,15 +443,15 @@ function authAndAuthorize(c: { req: { raw: Request; header: (name: string) => st
 // changes under private folders' paths ([RESERVED_PATH]).
 function pushCheckFor(companyId: string, userId: string, scopePath?: string): PreparedPushCheck {
   try {
-    ensureCompanyScope(db, companyId)
-    const role = getMemberRole(db, companyId, userId)
+    services.scopes.ensureCompanyScope(companyId, null)
+    const role = services.access.memberOf(companyId, userId)?.role ?? null
     // Department folders this pusher manages: instruction files (CLAUDE.md,
     // AGENTS.md ...) inside them are theirs to change.
     const managedFolders = services.permissionViews.managedFolders(companyId, userId)
     return preparePushCheck({
       companyId,
       pusher: { id: userId, role },
-      scopes: listScopesWithRules(db, companyId),
+      scopes: services.scopes.listWithRules(companyId),
       ...(scopePath !== undefined ? { scopePath } : {}),
       managedFolders,
     })
@@ -602,7 +600,7 @@ function authAndAuthorizeScope(c: { req: { raw: Request; header: (name: string) 
   if (!companyId || !SCOPE_ID_RE.test(scopeId)) return notFound()
   const role = authorizeForCompany(user.id, companyId)
   if (!role) return notFound()
-  const scopes = listScopesWithRules(db, companyId)
+  const scopes = services.scopes.listWithRules(companyId)
   const scope = scopes.find(s => s.id === scopeId && s.repoId !== null)
   if (!scope || !canReadPrivateScope(scope, user.id, role)) return notFound()
   let repoPath: string

@@ -91,7 +91,7 @@ beforeAll(async () => {
   for (const [u, r] of Object.entries(ROLE)) {
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${u}`, u, CO, r, ts(), ts())
   }
-  const store = await import('../../src/lib/permission-store')
+  const store = await import('../../src/adapters/sqlite/permission-store')
   store.ensureCompanyScope(db, CO)
   db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('bt-d-sales', CO, '営業部', '営業部', ts(), ts())
   store.ensureDepartmentScope(db, CO, 'bt-d-sales', '営業部')

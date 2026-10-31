@@ -43,7 +43,7 @@
  * - A scope with its own rules always keeps a rule for everyone: the PUT
  *   refuses a non-empty set without one (EVERYONE_RULE_REQUIRED); with the
  *   per-rule endpoints the first rule on an inheriting scope copies the
- *   inherited rules in (breakInheritance in lib/permission-store.ts), and the
+ *   inherited rules in (breakInheritance in adapters/sqlite/permission-store.ts), and the
  *   everyone rule can only go together with all the others (= back to
  *   inheriting). Without it a
  *   member not named by any rule would lose read access there, which is a

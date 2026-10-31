@@ -40,7 +40,7 @@ import { companiesRoute } from '../../src/routes/companies'
 import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { parseScopePath } from '../../shared/core/names'
-import { replaceDepartmentManagers } from '../../src/lib/permission-store'
+import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 
 vi.setConfig({ testTimeout: 30_000, hookTimeout: 60_000 })
 

@@ -12,7 +12,7 @@ export interface ScopeRecord {
 export type NewRule = Omit<ScopeRule, 'id'>
 
 /**
- * Permission scopes, rules and department managers (lib/permission-store.ts).
+ * Permission scopes, rules and department managers (adapters/sqlite/permission-store.ts).
  * Semantics: shared/core/permissions.ts. Every write that touches several
  * rows is atomic by itself (nested inside a caller's transaction, it joins it).
  */

@@ -35,7 +35,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
-import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/lib/permission-store'
+import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/adapters/sqlite/permission-store'
 import { resolveAccess } from '../../shared/core/permissions'
 import { supportsWriteDeniedRecovery, WRITE_DENIED_RECOVERY_COMMIT_DATE } from '../../src/lib/client-version'
 import { membersLosingWrite } from '../../src/lib/write-loss'

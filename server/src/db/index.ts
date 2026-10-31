@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import fs from 'fs'
-import { seedPermissionScopes } from '../lib/permission-store'
+import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 
 // Ensure data directory exists

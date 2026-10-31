@@ -106,7 +106,7 @@ beforeAll(async () => {
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${u}`, u, CO, r, ts(), ts())
   }
   // 営業部: only kb-sales (and owners/admins) can read it. 開発: open to everyone (company default).
-  const store = await import('../../src/lib/permission-store')
+  const store = await import('../../src/adapters/sqlite/permission-store')
   store.ensureCompanyScope(db, CO)
   for (const [id, folder] of [['kb-d-sales', '営業部'], ['kb-d-dev', '開発']]) {
     db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, CO, folder, folder, ts(), ts())

@@ -22,9 +22,9 @@ import {
   syncCompanyScopes,
   updateRuleAccess,
   upsertScopeRule,
-} from '../../lib/permission-store'
+} from './permission-store'
 
-/** lib/permission-store.ts (which db/index.ts also runs at startup), behind the port. */
+/** ./permission-store.ts (which db/index.ts also runs at startup), behind the port. */
 export function sqliteScopeRepository(conn: Database.Database): ScopeRepository {
   return {
     listWithRules: companyId => listScopesWithRules(conn, companyId),
