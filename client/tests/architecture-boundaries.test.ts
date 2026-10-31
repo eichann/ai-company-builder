@@ -221,43 +221,65 @@ test('the chat and the agents never reach the private-folder API, directly or th
 const featureOf = (clientPath: string): string | null => /^src\/features\/([^/]+)\//.exec(clientPath)?.[1] ?? null
 
 /**
- * Feature → feature imports allowed on purpose, as 'from -> to': reason.
- * Each must keep occurring; add one only with a reason the owner would
- * accept (otherwise let app/ compose the two through props).
+ * Feature → feature imports allowed on purpose, one entry per imported FILE,
+ * as 'from -> to/<file inside that feature>': reason. Any other file of that
+ * feature still fails, so an exception never opens a whole feature. Each must
+ * keep occurring. Add one only with a reason the owner would accept, and say
+ * in the PR why app/ cannot compose the two through props or a slot
+ * (renderer-structure.md, principle 2).
  */
+const PREVIEW_REVIEW = 'a Markdown preview tab shows its document\'s review (MarkdownPreviewPane), driven by the open file and the editor\'s scroll and selection'
 const FEATURE_IMPORT_EXCEPTIONS: Record<string, string> = {
-  'editor -> doc-review':
-    'a Markdown preview tab shows the review banners, side panel, comment popover and snapshot diff, driven by the open file and the editor\'s scroll and selection',
-  'files -> doc-review':
-    'the tree hides review sidecars and marks documents with reviews (pure model.ts only: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
-  'settings -> voice':
-    'the settings panel shows the voice input\'s own settings (its key and its prompt), owned by the voice feature',
-  'chat -> voice':
-    'the composer\'s microphone button (VoiceInputControl) records and transcribes into the chat input through the voice ports (features/voice/api.ts only)',
+  'editor -> doc-review/components/ReviewBanner.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/ReviewSaveError.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/CompletedReviewBanner.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/ReviewHistoryDropdown.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/ReviewSidePanel.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/CommentPopover.tsx': PREVIEW_REVIEW,
+  'editor -> doc-review/components/MarkdownDiffView.tsx': 'the preview and the editor\'s 「差分を見る」 show the snapshot diff of a reviewed document',
+  'editor -> doc-review/hooks/useMarkdownReview.ts': `${PREVIEW_REVIEW} (useEditorReview)`,
+  'editor -> doc-review/hooks/useTextSelection.ts': 'a comment starts from the text selected in the preview (useEditorReview)',
+  'editor -> doc-review/model.ts': 'the open document\'s review is marked seen (markReviewSeen, a pure function)',
+  'files -> doc-review/model.ts':
+    'the tree hides review sidecars and marks documents with reviews (pure functions: isReviewSidecarFile, detectReviewStatus, hasUnseenReviews)',
+  'settings -> voice/components/VoicePromptSettings.tsx': 'the settings panel shows the voice input\'s prompt settings, owned by the voice feature',
+  'settings -> voice/components/VoiceShortcutSettings.tsx': 'the settings panel shows the voice input\'s key, owned by the voice feature',
+  'chat -> voice/components/VoiceShortcutSettings.tsx': 'the chat\'s agent settings show the voice key with the other input settings',
+  'chat -> voice/api.ts': 'the composer\'s microphone button (VoiceInputControl) records and transcribes through the voice ports',
+  'chat -> voice/microphoneSelection.ts': 'the composer\'s microphone button lists and picks the microphone',
+  'chat -> voice/voiceAvailability.ts': 'the composer\'s microphone button says whether voice input can be used',
+  'chat -> voice/voiceShortcut.ts': 'the composer shows and catches the member\'s voice key (VoiceInputControl, useVoiceShortcut)',
 }
 
-/** Feature pairs a set of (importing file, imported path) edges crosses. */
-function crossFeatureImports(edges: Array<[file: string, imported: string]>): Array<[pair: string, where: string]> {
+/** The imported module as a file of the tree ('src/features/doc-review/model' → '….ts'). */
+const withExtension = (path: string): string =>
+  [`${path}.ts`, `${path}.tsx`, `${path}/index.ts`].find(candidate => existsSync(join(CLIENT, candidate))) ?? path
+
+/** Feature → feature edges, as 'from -> to/<file inside that feature>' (see FEATURE_IMPORT_EXCEPTIONS). */
+function crossFeatureImports(edges: Array<[file: string, imported: string]>, resolveFile = withExtension): Array<[entry: string, where: string]> {
   const out: Array<[string, string]> = []
   for (const [file, imported] of edges) {
     const from = featureOf(file)
     const to = featureOf(imported)
-    if (from && to && from !== to) out.push([`${from} -> ${to}`, `${file}: ${imported}`])
+    if (from && to && from !== to) {
+      const inside = resolveFile(imported).slice(`src/features/${to}/`.length)
+      out.push([`${from} -> ${to}/${inside}`, `${file}: ${imported}`])
+    }
   }
   return out
 }
 
-test('a renderer feature never imports another feature', () => {
+test('a renderer feature never imports another feature, beyond the files registered with a reason', () => {
   const files = sourceFiles(join(CLIENT, 'src', 'features'), { tests: true })
   const edges = files.flatMap(f => importsOf(f).map(s => [rel(f), target(f, s)] as [string, string]))
   const found = new Set<string>()
   const unexpected: string[] = []
-  for (const [pair, where] of crossFeatureImports(edges)) {
-    if (pair in FEATURE_IMPORT_EXCEPTIONS) found.add(pair)
-    else unexpected.push(`${pair} (${where})`)
+  for (const [entry, where] of crossFeatureImports(edges)) {
+    if (entry in FEATURE_IMPORT_EXCEPTIONS) found.add(entry)
+    else unexpected.push(`${entry} (${where})`)
   }
-  assert.deepEqual(unexpected, [], 'compose the two features in src/app/ instead, or move the shared part to src/shared/')
-  const stale = Object.keys(FEATURE_IMPORT_EXCEPTIONS).filter(p => !found.has(p))
+  assert.deepEqual(unexpected, [], 'compose the two features in src/app/ instead, move the shared part to src/shared/, or register that file with a reason')
+  const stale = Object.keys(FEATURE_IMPORT_EXCEPTIONS).filter(entry => !found.has(entry))
   assert.deepEqual(stale, [], 'remove exceptions that no longer occur')
 })
 
@@ -299,7 +321,12 @@ test('the renderer checks catch violations (self-test)', () => {
     ['src/features/editor/TabbedEditor.tsx', 'src/features/doc-review/model'],
     ['src/features/editor/hooks/useX.ts', 'src/features/editor/model'],
     ['src/app/AppShell.tsx', 'src/features/editor/TabbedEditor'],
-  ]).map(([pair]) => pair), ['editor -> doc-review'])
+  ]).map(([entry]) => entry), ['editor -> doc-review/model.ts'])
+  // An exception names files: another file of an excepted feature is not covered.
+  const [[filesToReviewApi]] = crossFeatureImports([['src/features/files/components/X.tsx', 'src/features/doc-review/api']])
+  assert.equal(filesToReviewApi, 'files -> doc-review/api.ts')
+  assert.equal(filesToReviewApi in FEATURE_IMPORT_EXCEPTIONS, false, 'files may use doc-review/model.ts only')
+  assert.equal('files -> doc-review/model.ts' in FEATURE_IMPORT_EXCEPTIONS, true)
   assert.equal(target(join(CLIENT, 'src/shared/lib/x.ts'), '@/features/chat/api'), 'src/features/chat/api')
   assert.equal(sharedMayImport(target(join(CLIENT, 'src/shared/lib/x.ts'), '../../features/chat/api')), false)
   assert.equal(sharedMayImport(target(join(CLIENT, 'src/shared/lib/x.ts'), '../../app/AppShell')), false)
