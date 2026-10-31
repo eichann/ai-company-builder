@@ -76,7 +76,7 @@ beforeAll(() => {
     db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, CO, folder, folder, order, ts(), ts())
   }
   initDatabase()
-  replaceDepartmentManagers(db, 'ae-d-sales', ['ae-manager'], 'ae-owner')
+  replaceDepartmentManagers(db, CO, 'ae-d-sales', ['ae-manager'], 'ae-owner')
   // 営業部/顧客: a private folder only ae-viewer may read.
   db.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('ae-r1', ?, 'ae-s-private', ?)`).run(CO, ts())
   db.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('ae-s-private', ?, '営業部/顧客', 'folder', 'ae-r1', ?)`).run(CO, ts())

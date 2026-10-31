@@ -7,10 +7,10 @@
 import type { AccountDirectory, AccountSummary } from '../ports/accounts'
 import type { ClientActivityRepository, OutdatedMember } from '../ports/client-activity'
 import type { MembershipRepository } from '../ports/memberships'
-import type { PrivateFolderRepository } from '../ports/private-folders'
+import type { CompanyDataSource } from '../ports/company-data'
 import type { PushRejectionRepository } from '../ports/push-rejections'
 import type { RepoStore } from '../ports/repo-store'
-import type { NewRule, ScopeRecord, ScopeRepository } from '../ports/scopes'
+import type { NewRule, ScopeRecord } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
 import { supportsWriteDeniedRecovery } from '../lib/client-version'
 import { membersLosingWrite } from '../lib/write-loss'
@@ -101,9 +101,8 @@ function subjectLabel(r: Pick<ScopeRule, 'subjectType' | 'subjectId'>, users: Ma
 }
 
 export interface PermissionEditorDeps {
-  scopes: ScopeRepository
+  companyData: CompanyDataSource
   memberships: MembershipRepository
-  privateFolders: PrivateFolderRepository
   clientActivity: ClientActivityRepository
   pushRejections: PushRejectionRepository
   accounts: AccountDirectory
@@ -114,7 +113,10 @@ export interface PermissionEditorDeps {
 }
 
 export function createPermissionEditorService(deps: PermissionEditorDeps) {
-  const { scopes, memberships, privateFolders, clientActivity, pushRejections, accounts, repoStore, transactions, managedFolders } = deps
+  const { companyData, memberships, clientActivity, pushRejections, accounts, repoStore, transactions, managedFolders } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
+  const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
 
   /** May the actor edit rules of the scope at `path`? */
   function canEditPath(actor: Member, path: string): boolean {
@@ -125,7 +127,7 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
 
   function privatePlaceOf(companyId: string, path: string): PrivatePlace | null {
     if (path === '') return null
-    const priv = findPrivateScope(scopes.listWithRules(companyId), path)
+    const priv = findPrivateScope(scopesOf(companyId).listWithRules(), path)
     return priv ? { scopeId: priv.id, scopePath: priv.path, root: priv.path === path } : null
   }
 
@@ -178,36 +180,36 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       if (path === '') return true
       if (!place) return (await repoStore.resolveFolder(companyId, path)) !== null
       if (place.root) return true
-      const folder = privateFolders.get(companyId, place.scopeId)
+      const folder = privateFoldersOf(companyId).get(place.scopeId)
       return !!folder && (await repoStore.listPrivateSubfolders(companyId, folder, path)) !== null
     },
 
     /** A move must not involve a private folder (or anything inside / around one). */
     touchesPrivate(companyId: string, path: string): boolean {
-      return scopes.listWithRules(companyId).some(s => s.repoId !== null && (isSameOrAncestorPath(path, s.path) || isSameOrAncestorPath(s.path, path)))
+      return scopesOf(companyId).listWithRules().some(s => s.repoId !== null && (isSameOrAncestorPath(path, s.path) || isSameOrAncestorPath(s.path, path)))
     },
 
     /** Does the folder (or one inside it) already have rules? */
     hasRulesAtOrBelow(companyId: string, path: string): boolean {
-      return scopes.listWithRules(companyId).some(s => isSameOrAncestorPath(path, s.path) && s.rules.length > 0)
+      return scopesOf(companyId).listWithRules().some(s => isSameOrAncestorPath(path, s.path) && s.rules.length > 0)
     },
 
-    getScope: (companyId: string, scopeId: string) => scopes.getById(companyId, scopeId),
-    getScopeByPath: (companyId: string, path: string) => scopes.getByPath(companyId, path),
-    getRule: (companyId: string, ruleId: string) => scopes.ruleWithScope(companyId, ruleId),
-    rulesOf: (scopeId: string) => scopes.rulesOf(scopeId),
+    getScope: (companyId: string, scopeId: string) => scopesOf(companyId).getById(scopeId),
+    getScopeByPath: (companyId: string, path: string) => scopesOf(companyId).getByPath(path),
+    getRule: (companyId: string, ruleId: string) => scopesOf(companyId).ruleWithScope(ruleId),
+    rulesOf: (actor: Member, scopeId: string) => scopesOf(actor.companyId).rulesOf(scopeId),
 
-    replaceRules: (actor: Member, path: string, rules: NewRule[]) => scopes.replaceRules(actor.companyId, path, rules, actor.userId),
-    upsertRule: (actor: Member, path: string, rule: NewRule) => scopes.upsertRule(actor.companyId, path, rule, actor.userId),
-    updateRuleAccess: (ruleId: string, canRead: boolean, canWrite: boolean) => scopes.updateRuleAccess(ruleId, canRead, canWrite),
-    deleteRule: (ruleId: string, scope: ScopeRecord) => scopes.deleteRule(ruleId, scope),
-    clearRules: (scope: ScopeRecord) => scopes.clearRules(scope),
-    moveRules: (actor: Member, fromPath: string, toPath: string) => scopes.moveRules(actor.companyId, fromPath, toPath, actor.userId),
+    replaceRules: (actor: Member, path: string, rules: NewRule[]) => scopesOf(actor.companyId).replaceRules(path, rules, actor.userId),
+    upsertRule: (actor: Member, path: string, rule: NewRule) => scopesOf(actor.companyId).upsertRule(path, rule, actor.userId),
+    updateRuleAccess: (actor: Member, ruleId: string, canRead: boolean, canWrite: boolean) => scopesOf(actor.companyId).updateRuleAccess(ruleId, canRead, canWrite),
+    deleteRule: (actor: Member, ruleId: string, scope: ScopeRecord) => scopesOf(actor.companyId).deleteRule(ruleId, scope),
+    clearRules: (actor: Member, scope: ScopeRecord) => scopesOf(actor.companyId).clearRules(scope),
+    moveRules: (actor: Member, fromPath: string, toPath: string) => scopesOf(actor.companyId).moveRules(fromPath, toPath, actor.userId),
 
     /** The scope and its rules as the editor shows them. */
     scopeView(companyId: string, scopeId: string) {
-      const scope = scopes.getById(companyId, scopeId)
-      const rules = scope ? scopes.rulesOf(scope.id) : []
+      const scope = scopesOf(companyId).getById(scopeId)
+      const rules = scope ? scopesOf(companyId).rulesOf(scope.id) : []
       return {
         scope: scope ? { id: scope.id, path: scope.path, kind: scope.kind, inherited: rules.length === 0 } : null,
         rules: serializeRules(rules),
@@ -224,11 +226,11 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
       const companyId = actor.companyId
       try {
         return ok(transactions.run(() => {
-          const before = scopes.listWithRules(companyId)
+          const before = scopesOf(companyId).listWithRules()
           const result = mutate()
           if (force) return result
           const members = memberships.listByCompany(companyId).map(m => ({ userId: m.user_id, role: m.role }))
-          const losing = membersLosingWrite(companyId, members, before, scopes.listWithRules(companyId), roots)
+          const losing = membersLosingWrite(companyId, members, before, scopesOf(companyId).listWithRules(), roots)
           if (losing.length === 0) return result
           const activity = clientActivity.forCompany(companyId)
           const blocked = losing.filter(id => !supportsWriteDeniedRecovery(activity.get(id)?.client_version))
@@ -260,11 +262,11 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
 
     /** Every member's access at a path, and which rule decided. */
     effective(companyId: string, path: string) {
-      const all = scopes.listWithRules(companyId)
+      const all = scopesOf(companyId).listWithRules()
       const governing = findGoverningScope(all, path)
       const repo: PermissionRepository = {
         getMemberRole: (cid, uid) => memberships.roleOf(cid, uid),
-        listScopes: cid => scopes.listWithRules(cid),
+        listScopes: cid => scopesOf(cid).listWithRules(),
       }
       const rows = memberships.listByCompany(companyId)
       const users = accounts.byIds([
@@ -310,19 +312,19 @@ export function createPermissionEditorService(deps: PermissionEditorDeps) {
      */
     async folders(actor: Member, path: string) {
       const place = privatePlaceOf(actor.companyId, path)
-      const privateFolder = place ? privateFolders.get(actor.companyId, place.scopeId) : null
+      const privateFolder = place ? privateFoldersOf(actor.companyId).get(place.scopeId) : null
       let names = privateFolder
         ? await repoStore.listPrivateSubfolders(actor.companyId, privateFolder, path)
         : await repoStore.listSubfolders(actor.companyId, path)
       if (names === null) return null
       if (!place) {
         const depth = path === '' ? 1 : path.split('/').length + 1
-        const privateChildren = privateFolders.paths(actor.companyId)
+        const privateChildren = privateFoldersOf(actor.companyId).paths()
           .filter(p => p.split('/').length === depth && isSameOrAncestorPath(path, p) && canEditPath(actor, p))
           .map(p => p.split('/').pop()!)
         names = [...new Set([...names, ...privateChildren])].sort((a, b) => a.localeCompare(b, 'ja'))
       }
-      const scoped = new Map(scopes.listWithRules(actor.companyId).map(s => [s.path, s]))
+      const scoped = new Map(scopesOf(actor.companyId).listWithRules().map(s => [s.path, s]))
       return {
         path,
         folders: names

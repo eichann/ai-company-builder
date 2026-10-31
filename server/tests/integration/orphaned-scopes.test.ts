@@ -57,10 +57,10 @@ import { services } from '../../src/composition'
 
 // git-http asks for the post-push check through the services; hold it at the gate.
 {
-  const schedule = services.orphanedScopes.scheduleCheck.bind(services.orphanedScopes)
-  vi.spyOn(services.orphanedScopes, 'scheduleCheck').mockImplementation((companyId: string) => {
-    gate.calls.push(companyId)
-    void gate.open.then(() => schedule(companyId))
+  const schedule = services.companyScopes.scheduleOrphanCheck
+  vi.spyOn(services.companyScopes, 'scheduleOrphanCheck').mockImplementation(member => {
+    gate.calls.push(member.companyId)
+    void gate.open.then(() => schedule(member))
   })
 }
 
@@ -176,7 +176,7 @@ beforeAll(async () => {
   db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run('os-d-sales', CO, '営業部', '営業部', 0, now, now)
   initDatabase() // seed scopes
-  replaceDepartmentManagers(db, 'os-d-sales', ['os-manager'], 'os-owner')
+  replaceDepartmentManagers(db, CO, 'os-d-sales', ['os-manager'], 'os-owner')
 
   const bare = join(process.env.REPOS_DIR!, `${CO}.git`)
   git(['init', '-q', '--bare', '--initial-branch=main', bare])

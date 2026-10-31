@@ -1,12 +1,21 @@
 /**
  * SQLite side of the permission model (see shared/core/permissions.ts for semantics),
- * behind ScopeRepository (./scopes.ts).
+ * behind ScopeRepository (./scopes.ts, one company's handle).
  *
  * Tables (created in db/index.ts): scopes, scope_rules, department_managers,
  * push_rejections. Every function takes the connection explicitly so the
  * schema/seeding code can run against any database file (tests use a copy of
  * an "old" database) and so this module does not import db/index.ts, which
  * calls into it during initDatabase().
+ *
+ * Every function takes the company and every statement is limited to it
+ * (tests/unit/company-scoped-sql.test.ts): a scope, rule or department id of
+ * another company matches no row. scope_rules and department_managers have no
+ * company column yet, so their statements reach the company through
+ * `scope_id … (SELECT id FROM scopes WHERE … company_id = ?)` /
+ * `department_id … (SELECT id FROM departments WHERE … company_id = ?)`, and
+ * their INSERTs select the parent row of the company (nothing is inserted
+ * under another company's scope or department).
  *
  * Ownership of scope rows:
  * - the company scope (path '') is created with the company and seeded with
@@ -60,6 +69,12 @@ interface RuleRow {
   can_write: number
 }
 
+/** Remove a scope of the company and its rules. */
+function deleteScopeAndRules(conn: Conn, companyId: string, scopeId: string): void {
+  conn.prepare(`DELETE FROM scope_rules WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`).run(scopeId, companyId)
+  conn.prepare(`DELETE FROM scopes WHERE id = ? AND company_id = ?`).run(scopeId, companyId)
+}
+
 // ----------------------------------------------------------------------------
 // Seeding / repair
 // ----------------------------------------------------------------------------
@@ -80,8 +95,8 @@ export function ensureCompanyScope(conn: Conn, companyId: string, createdBy: str
     `).run(id, companyId, ts, createdBy)
     conn.prepare(`
       INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
-      VALUES (?, ?, 'everyone', NULL, 1, 1, ?, ?)
-    `).run(newId(), id, ts, createdBy)
+      SELECT ?, id, 'everyone', NULL, 1, 1, ?, ? FROM scopes WHERE id = ? AND company_id = ?
+    `).run(newId(), ts, createdBy, id, companyId)
   })()
   return id
 }
@@ -100,19 +115,20 @@ export function ensureDepartmentScope(
 ): void {
   const path = normalizeScopePath(folder)
   if (path === null || path === '') return
-  const own = conn.prepare(`SELECT id, path FROM scopes WHERE department_id = ?`).get(departmentId) as { id: string; path: string } | undefined
+  const own = conn.prepare(`SELECT id, path FROM scopes WHERE department_id = ? AND company_id = ?`)
+    .get(departmentId, companyId) as { id: string; path: string } | undefined
   const atPath = conn.prepare(`SELECT id, department_id FROM scopes WHERE company_id = ? AND path = ?`)
     .get(companyId, path) as { id: string; department_id: string | null } | undefined
 
   if (own) {
     if (own.path === path) return
     if (atPath) return // another scope holds the path; leave both alone (moveScopeSubtree handles real renames)
-    conn.prepare(`UPDATE scopes SET path = ? WHERE id = ?`).run(path, own.id)
+    conn.prepare(`UPDATE scopes SET path = ? WHERE id = ? AND company_id = ?`).run(path, own.id, companyId)
     return
   }
   if (atPath) {
     if (atPath.department_id === null) {
-      conn.prepare(`UPDATE scopes SET kind = 'department', department_id = ? WHERE id = ?`).run(departmentId, atPath.id)
+      conn.prepare(`UPDATE scopes SET kind = 'department', department_id = ? WHERE id = ? AND company_id = ?`).run(departmentId, atPath.id, companyId)
     }
     return
   }
@@ -139,17 +155,15 @@ export function syncCompanyScopes(conn: Conn, companyId: string): void {
       WHERE company_id = ? AND kind = 'department'
         AND (department_id IS NULL OR department_id NOT IN (SELECT id FROM departments WHERE company_id = ?))
     `).all(companyId, companyId) as Array<{ id: string }>
-    for (const o of orphans) {
-      conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(o.id)
-      conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(o.id)
-    }
+    for (const o of orphans) deleteScopeAndRules(conn, companyId, o.id)
   })()
 }
 
-/** Startup seeding for every company. Idempotent. */
+/** Startup seeding for every company, one company at a time. Idempotent. */
 export function seedPermissionScopes(conn: Conn): void {
   const companies = conn.prepare(`SELECT id FROM companies`).all() as Array<{ id: string }>
   for (const c of companies) syncCompanyScopes(conn, c.id)
+  // Manager rows whose department is gone belong to no company any more.
   conn.prepare(`DELETE FROM department_managers WHERE department_id NOT IN (SELECT id FROM departments)`).run()
 }
 
@@ -170,10 +184,7 @@ export function moveScopeSubtree(conn: Conn, companyId: string, fromPath: string
     if (stale.some(s => s.repo_id !== null)) {
       throw new Error(`A separately stored folder already exists at ${to}`)
     }
-    for (const s of stale) {
-      conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(s.id)
-      conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(s.id)
-    }
+    for (const s of stale) deleteScopeAndRules(conn, companyId, s.id)
     const moving = conn.prepare(`
       SELECT id, path, repo_id FROM scopes WHERE company_id = ? AND (path = ? OR substr(path, 1, ?) = ?)
     `).all(companyId, from, from.length + 1, `${from}/`) as Array<{ id: string; path: string; repo_id: string | null }>
@@ -181,7 +192,7 @@ export function moveScopeSubtree(conn: Conn, companyId: string, fromPath: string
       throw new Error(`A private folder is inside ${from}; it cannot be moved`)
     }
     for (const m of moving) {
-      conn.prepare(`UPDATE scopes SET path = ? WHERE id = ?`).run(to + m.path.slice(from.length), m.id)
+      conn.prepare(`UPDATE scopes SET path = ? WHERE id = ? AND company_id = ?`).run(to + m.path.slice(from.length), m.id, companyId)
     }
   })()
 }
@@ -196,11 +207,11 @@ export function deleteDepartmentScopes(conn: Conn, companyId: string, department
     const privateInside = conn.prepare(`SELECT COUNT(*) AS n FROM scopes WHERE company_id = ? AND repo_id IS NOT NULL AND id IN (${ids.map(() => '?').join(',') || "''"})`)
       .get(companyId, ...ids.map(i => i.id)) as { n: number }
     if (privateInside.n > 0) throw new Error('A private folder is inside this department; make it public first')
-    for (const { id } of ids) {
-      conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(id)
-      conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(id)
-    }
-    conn.prepare(`DELETE FROM department_managers WHERE department_id = ?`).run(departmentId)
+    for (const { id } of ids) deleteScopeAndRules(conn, companyId, id)
+    conn.prepare(`
+      DELETE FROM department_managers
+      WHERE department_id = (SELECT id FROM departments WHERE id = ? AND company_id = ?)
+    `).run(departmentId, companyId)
   })()
 }
 
@@ -261,14 +272,14 @@ export function managedDepartmentIds(conn: Conn, companyId: string, userId: stri
   return rows.map(r => r.department_id)
 }
 
-/** Current managers of a department (rows of users who left the company are ignored). */
-export function listDepartmentManagerIds(conn: Conn, departmentId: string): string[] {
+/** Current managers of a department of the company (rows of users who left the company are ignored). */
+export function listDepartmentManagerIds(conn: Conn, companyId: string, departmentId: string): string[] {
   const rows = conn.prepare(`
     SELECT dm.user_id FROM department_managers dm
     JOIN departments d ON d.id = dm.department_id
     JOIN memberships m ON m.user_id = dm.user_id AND m.company_id = d.company_id
-    WHERE dm.department_id = ? ORDER BY dm.created_at ASC, dm.user_id ASC
-  `).all(departmentId) as Array<{ user_id: string }>
+    WHERE dm.department_id = ? AND d.company_id = ? ORDER BY dm.created_at ASC, dm.user_id ASC
+  `).all(departmentId, companyId) as Array<{ user_id: string }>
   return rows.map(r => r.user_id)
 }
 
@@ -297,21 +308,32 @@ export function deleteUserRules(conn: Conn, companyId: string, userId: string): 
   `).run(userId, companyId).changes
 }
 
-/** Replace the department's managers with `userIds` (kept rows keep their created_at/by). */
-export function replaceDepartmentManagers(conn: Conn, departmentId: string, userIds: string[], createdBy: string): void {
+/**
+ * Replace the managers of a department of the company with `userIds` (kept
+ * rows keep their created_at/by). Another company's department: nothing changes.
+ */
+export function replaceDepartmentManagers(conn: Conn, companyId: string, departmentId: string, userIds: string[], createdBy: string): void {
   conn.transaction(() => {
-    const current = new Set((conn.prepare(`SELECT user_id FROM department_managers WHERE department_id = ?`)
-      .all(departmentId) as Array<{ user_id: string }>).map(r => r.user_id))
+    const current = new Set((conn.prepare(`
+      SELECT user_id FROM department_managers
+      WHERE department_id = (SELECT id FROM departments WHERE id = ? AND company_id = ?)
+    `).all(departmentId, companyId) as Array<{ user_id: string }>).map(r => r.user_id))
     const wanted = new Set(userIds)
     for (const id of current) {
-      if (!wanted.has(id)) conn.prepare(`DELETE FROM department_managers WHERE department_id = ? AND user_id = ?`).run(departmentId, id)
+      if (!wanted.has(id)) {
+        conn.prepare(`
+          DELETE FROM department_managers
+          WHERE department_id = (SELECT id FROM departments WHERE id = ? AND company_id = ?) AND user_id = ?
+        `).run(departmentId, companyId, id)
+      }
     }
     const ts = timestamp()
     for (const id of wanted) {
       if (!current.has(id)) {
         conn.prepare(`
-          INSERT INTO department_managers (department_id, user_id, created_at, created_by) VALUES (?, ?, ?, ?)
-        `).run(departmentId, id, ts, createdBy)
+          INSERT INTO department_managers (department_id, user_id, created_at, created_by)
+          SELECT id, ?, ?, ? FROM departments WHERE id = ? AND company_id = ?
+        `).run(id, ts, createdBy, departmentId, companyId)
       }
     }
   })()
@@ -348,8 +370,13 @@ export function getScopeById(conn: Conn, companyId: string, scopeId: string): Sc
   return row ? toScopeRecord(row) : null
 }
 
-export function listScopeRules(conn: Conn, scopeId: string): ScopeRule[] {
-  const rows = conn.prepare(`SELECT * FROM scope_rules WHERE scope_id = ? ORDER BY created_at ASC, rowid ASC`).all(scopeId) as RuleRow[]
+/** The rules of a scope of the company, oldest first ([] for another company's scope). */
+export function listScopeRules(conn: Conn, companyId: string, scopeId: string): ScopeRule[] {
+  const rows = conn.prepare(`
+    SELECT * FROM scope_rules
+    WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)
+    ORDER BY created_at ASC, rowid ASC
+  `).all(scopeId, companyId) as RuleRow[]
   return rows.map(r => ({
     id: r.id,
     subjectType: r.subject_type,
@@ -367,7 +394,7 @@ export function getRuleWithScope(conn: Conn, companyId: string, ruleId: string):
   `).get(ruleId, companyId) as { scope_id: string } | undefined
   if (!row) return null
   const scope = getScopeById(conn, companyId, row.scope_id)
-  const rule = listScopeRules(conn, row.scope_id).find(r => r.id === ruleId)
+  const rule = listScopeRules(conn, companyId, row.scope_id).find(r => r.id === ruleId)
   return scope && rule ? { rule, scope } : null
 }
 
@@ -386,12 +413,13 @@ export function ensureFolderScope(conn: Conn, companyId: string, path: string, c
   return getScopeByPath(conn, companyId, path)!
 }
 
-function insertRule(conn: Conn, scopeId: string, rule: Omit<ScopeRule, 'id'>, createdBy: string | null): string {
+/** Add a rule to a scope of the company (nothing is inserted under another company's scope). */
+function insertRule(conn: Conn, companyId: string, scopeId: string, rule: Omit<ScopeRule, 'id'>, createdBy: string | null): string {
   const id = newId()
   conn.prepare(`
     INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at, created_by)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(id, scopeId, rule.subjectType, rule.subjectId, rule.canRead ? 1 : 0, rule.canWrite ? 1 : 0, timestamp(), createdBy)
+    SELECT ?, id, ?, ?, ?, ?, ?, ? FROM scopes WHERE id = ? AND company_id = ?
+  `).run(id, rule.subjectType, rule.subjectId, rule.canRead ? 1 : 0, rule.canWrite ? 1 : 0, timestamp(), createdBy, scopeId, companyId)
   return id
 }
 
@@ -400,14 +428,14 @@ function insertRule(conn: Conn, scopeId: string, rule: Omit<ScopeRule, 'id'>, cr
  * when the scope already has rules. Returns the scope's rules afterwards.
  */
 export function breakInheritance(conn: Conn, companyId: string, scope: ScopeRecord, createdBy: string | null): ScopeRule[] {
-  const own = listScopeRules(conn, scope.id)
+  const own = listScopeRules(conn, companyId, scope.id)
   if (own.length > 0) return own
   const others = listScopesWithRules(conn, companyId).filter(s => s.id !== scope.id)
   const governing = findGoverningScope(others, scope.path)
   for (const r of governing?.rules ?? []) {
-    insertRule(conn, scope.id, { subjectType: r.subjectType, subjectId: r.subjectId, canRead: r.canRead, canWrite: r.canWrite }, createdBy)
+    insertRule(conn, companyId, scope.id, { subjectType: r.subjectType, subjectId: r.subjectId, canRead: r.canRead, canWrite: r.canWrite }, createdBy)
   }
-  return listScopeRules(conn, scope.id)
+  return listScopeRules(conn, companyId, scope.id)
 }
 
 /**
@@ -425,45 +453,49 @@ export function upsertScopeRule(
 ): { ruleId: string; created: boolean; scope: ScopeRecord } {
   return conn.transaction(() => {
     const scope = ensureFolderScope(conn, companyId, path, createdBy)
-    const wasInheriting = listScopeRules(conn, scope.id).length === 0
+    const wasInheriting = listScopeRules(conn, companyId, scope.id).length === 0
     const rules = breakInheritance(conn, companyId, scope, createdBy)
     const same = rules.find(r => r.subjectType === rule.subjectType && (r.subjectId ?? null) === (rule.subjectId ?? null))
     if (same) {
-      updateRuleAccess(conn, same.id, rule.canRead, rule.canWrite)
+      updateRuleAccess(conn, companyId, same.id, rule.canRead, rule.canWrite)
       // A rule copied in by breakInheritance a moment ago is new to this scope.
       return { ruleId: same.id, created: wasInheriting, scope }
     }
-    return { ruleId: insertRule(conn, scope.id, rule, createdBy), created: true, scope }
+    return { ruleId: insertRule(conn, companyId, scope.id, rule, createdBy), created: true, scope }
   })()
 }
 
-export function updateRuleAccess(conn: Conn, ruleId: string, canRead: boolean, canWrite: boolean): void {
-  conn.prepare(`UPDATE scope_rules SET can_read = ?, can_write = ? WHERE id = ?`).run(canRead ? 1 : 0, canWrite ? 1 : 0, ruleId)
+export function updateRuleAccess(conn: Conn, companyId: string, ruleId: string, canRead: boolean, canWrite: boolean): void {
+  conn.prepare(`
+    UPDATE scope_rules SET can_read = ?, can_write = ?
+    WHERE id = ? AND scope_id IN (SELECT id FROM scopes WHERE company_id = ?)
+  `).run(canRead ? 1 : 0, canWrite ? 1 : 0, ruleId, companyId)
 }
 
 /** Remove a folder scope that has no rules left (company/department scopes stay). */
-function dropEmptyFolderScope(conn: Conn, scope: ScopeRecord): void {
+function dropEmptyFolderScope(conn: Conn, companyId: string, scope: ScopeRecord): void {
   if (scope.kind !== 'folder') return
   // A private folder's scope is never dropped (lib/private-folders.ts): it
   // must not fall back to inheriting, which would make it readable.
-  const row = conn.prepare(`SELECT repo_id FROM scopes WHERE id = ?`).get(scope.id) as { repo_id: string | null } | undefined
+  const row = conn.prepare(`SELECT repo_id FROM scopes WHERE id = ? AND company_id = ?`).get(scope.id, companyId) as { repo_id: string | null } | undefined
   if (row?.repo_id) return
-  if (listScopeRules(conn, scope.id).length > 0) return
-  conn.prepare(`DELETE FROM scopes WHERE id = ?`).run(scope.id)
+  if (listScopeRules(conn, companyId, scope.id).length > 0) return
+  conn.prepare(`DELETE FROM scopes WHERE id = ? AND company_id = ?`).run(scope.id, companyId)
 }
 
-export function deleteRule(conn: Conn, ruleId: string, scope: ScopeRecord): void {
+export function deleteRule(conn: Conn, companyId: string, ruleId: string, scope: ScopeRecord): void {
   conn.transaction(() => {
-    conn.prepare(`DELETE FROM scope_rules WHERE id = ?`).run(ruleId)
-    dropEmptyFolderScope(conn, scope)
+    conn.prepare(`DELETE FROM scope_rules WHERE id = ? AND scope_id IN (SELECT id FROM scopes WHERE company_id = ?)`).run(ruleId, companyId)
+    dropEmptyFolderScope(conn, companyId, scope)
   })()
 }
 
 /** Remove every rule of the scope: it inherits from its parent again. Returns how many were removed. */
-export function clearScopeRules(conn: Conn, scope: ScopeRecord): number {
+export function clearScopeRules(conn: Conn, companyId: string, scope: ScopeRecord): number {
   return conn.transaction(() => {
-    const n = conn.prepare(`DELETE FROM scope_rules WHERE scope_id = ?`).run(scope.id).changes
-    dropEmptyFolderScope(conn, scope)
+    const n = conn.prepare(`DELETE FROM scope_rules WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)`)
+      .run(scope.id, companyId).changes
+    dropEmptyFolderScope(conn, companyId, scope)
     return n
   })()
 }
@@ -491,17 +523,19 @@ export function replaceScopeRules(
     if (rules.length === 0 && !existing) return null
     const scope = existing ?? ensureFolderScope(conn, companyId, path, createdBy)
     const key = (r: Pick<ScopeRule, 'subjectType' | 'subjectId'>) => `${r.subjectType}:${r.subjectId ?? ''}`
-    const current = new Map(listScopeRules(conn, scope.id).map(r => [key(r), r]))
+    const current = new Map(listScopeRules(conn, companyId, scope.id).map(r => [key(r), r]))
     const wanted = new Set(rules.map(key))
     for (const [k, r] of current) {
-      if (!wanted.has(k)) conn.prepare(`DELETE FROM scope_rules WHERE id = ?`).run(r.id)
+      if (!wanted.has(k)) {
+        conn.prepare(`DELETE FROM scope_rules WHERE id = ? AND scope_id IN (SELECT id FROM scopes WHERE company_id = ?)`).run(r.id, companyId)
+      }
     }
     for (const r of rules) {
       const same = current.get(key(r))
-      if (same) updateRuleAccess(conn, same.id, r.canRead, r.canWrite)
-      else insertRule(conn, scope.id, r, createdBy)
+      if (same) updateRuleAccess(conn, companyId, same.id, r.canRead, r.canWrite)
+      else insertRule(conn, companyId, scope.id, r, createdBy)
     }
-    dropEmptyFolderScope(conn, scope)
+    dropEmptyFolderScope(conn, companyId, scope)
     return getScopeById(conn, companyId, scope.id)
   })()
 }
@@ -538,9 +572,12 @@ export function moveScopeRules(conn: Conn, companyId: string, fromPath: string, 
     let moved = 0
     for (const s of scopes.filter(s => inSubtree(from, s.path) && s.rules.length > 0)) {
       const dest = ensureFolderScope(conn, companyId, to + s.path.slice(from.length), createdBy)
-      moved += conn.prepare(`UPDATE scope_rules SET scope_id = ? WHERE scope_id = ?`).run(dest.id, s.id).changes
+      moved += conn.prepare(`
+        UPDATE scope_rules SET scope_id = ?
+        WHERE scope_id = (SELECT id FROM scopes WHERE id = ? AND company_id = ?)
+      `).run(dest.id, s.id, companyId).changes
       const src = getScopeById(conn, companyId, s.id)
-      if (src) dropEmptyFolderScope(conn, src)
+      if (src) dropEmptyFolderScope(conn, companyId, src)
     }
     return moved
   })()

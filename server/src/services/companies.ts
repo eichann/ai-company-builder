@@ -19,10 +19,8 @@ import type { Clock, IdGenerator } from '../ports/clock'
 import type { ClientActivityRepository } from '../ports/client-activity'
 import type { CompanyRepository, CompanyRow } from '../ports/companies'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { InvitationRepository } from '../ports/invitations'
 import type { MembershipRepository } from '../ports/memberships'
 import type { RepoStore } from '../ports/repo-store'
-import type { ScopeRepository } from '../ports/scopes'
 import type { Transactions } from '../ports/transactions'
 import { clientBuildOf, parseClientVersion, supportsAgentEvents } from '../lib/client-version'
 import { isOwner, type Member } from './access'
@@ -89,10 +87,8 @@ export const INVITATION_REQUIRED = {
 
 export interface CompanyServiceDeps {
   companies: CompanyRepository
-  invitations: InvitationRepository
   memberships: MembershipRepository
   companyData: CompanyDataSource
-  scopes: ScopeRepository
   clientActivity: ClientActivityRepository
   accounts: AccountDirectory
   repoStore: RepoStore
@@ -114,7 +110,9 @@ function createSlug(name: string): string {
 }
 
 export function createCompanyService(deps: CompanyServiceDeps) {
-  const { companies, invitations, memberships, companyData, scopes, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
+  const { companies, memberships, companyData, clientActivity, accounts, repoStore, transactions, clock, ids, creationPolicy, isOperator } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
 
   // A unique slug: the requested slug (admin API) or the name, sanitized, plus
   // a suffix from the new company's own id — always, whether or not the base
@@ -213,8 +211,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       // Permission scopes: company-wide `everyone: read + write` (today's fully
       // open behaviour) and one inheriting scope per department
       try {
-        scopes.ensureCompanyScope(id, ownerId)
-        scopes.syncCompanyScopes(id)
+        scopesOf(id).ensureCompanyScope(ownerId)
+        scopesOf(id).syncCompanyScopes()
       } catch (e) {
         logError('companies', 'failed to create the permission scopes', e, { company: id })
         // Continue - startup seeding creates them on the next restart
@@ -295,7 +293,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       if (role !== 'member' && !isOwner(actor.role)) {
         return refuse('forbidden', 'Only owners can add owners or admins')
       }
-      if (!invitations.acceptedBy(actor.companyId, userId) || !accounts.byIds([userId]).has(userId)) {
+      if (!companyData.forCompany(actor.companyId).invitations.acceptedBy(userId) || !accounts.byIds([userId]).has(userId)) {
         return refuse('forbidden', INVITATION_REQUIRED.error, { code: INVITATION_REQUIRED.code })
       }
       if (memberships.roleOf(actor.companyId, userId) !== null) {
@@ -324,7 +322,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
           memberships.updateRole(companyId, targetUserId, role, clock.now())
           // Owner/admin read and write everything; rules naming them are moot
           // and must not come back unnoticed if they are demoted later.
-          if (role === 'owner' || role === 'admin') scopes.deleteUserRules(companyId, targetUserId)
+          if (role === 'owner' || role === 'admin') scopesOf(companyId).deleteUserRules(targetUserId)
           return true
         })
         if (!changed) {
@@ -347,8 +345,8 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       }
       transactions.run(() => {
         memberships.delete(companyId, targetUserId)
-        scopes.removeManagerFromCompany(companyId, targetUserId)
-        scopes.deleteUserRules(companyId, targetUserId)
+        scopesOf(companyId).removeManagerFromCompany(targetUserId)
+        scopesOf(companyId).deleteUserRules(targetUserId)
       })
       return ok(undefined)
     },

@@ -11,7 +11,6 @@ import Database from 'better-sqlite3'
 import { initDatabase } from '../../src/db'
 import { sqliteAgentEventRepository, sqliteAgentEventSettingsRepository } from '../../src/adapters/sqlite/agent-events'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
-import { sqliteScopeRepository } from '../../src/adapters/sqlite/scopes'
 import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { replaceDepartmentManagers } from '../../src/adapters/sqlite/permission-store'
 import { createAgentEventService, parseListQuery, type AgentEventService } from '../../src/services/agent-events'
@@ -59,7 +58,7 @@ beforeEach(() => {
     conn.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)').run(id, CO, folder, folder, order, ts, ts)
   }
   initDatabase(conn) // company + department scopes, everyone read + write
-  replaceDepartmentManagers(conn, 'd-sales', ['manager'], 'owner')
+  replaceDepartmentManagers(conn, CO, 'd-sales', ['manager'], 'owner')
   // A private folder inside 営業部 that only `member` may read.
   conn.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('r1', ?, 's-secret', ?)`).run(CO, ts)
   conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('s-secret', ?, '営業部/秘密', 'folder', 'r1', ?)`).run(CO, ts)
@@ -69,7 +68,6 @@ beforeEach(() => {
     agentEvents: sqliteAgentEventRepository(conn),
     agentEventSettings: sqliteAgentEventSettingsRepository(conn),
     memberships: sqliteMembershipRepository(conn),
-    scopes: sqliteScopeRepository(conn),
     companyData: sqliteCompanyData(conn),
     accounts: { byIds: ids => new Map(ids.map(id => [id, { email: `${id}@example.com`, name: `Name ${id}` }])), bySessionToken: () => null },
     clock: { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs },
@@ -216,7 +214,7 @@ describe('who reads what', () => {
   it('the viewer of the private folder sees it unmasked as a manager too', () => {
     seed()
     service.updateSettings(OWNER, { viewers: 'admins-and-managers' })
-    replaceDepartmentManagers(conn, 'd-sales', ['manager', 'member'], 'owner')
+    replaceDepartmentManagers(conn, CO, 'd-sales', ['manager', 'member'], 'owner')
     const page = service.list(MEMBER, {})
     expect(page.ok && JSON.stringify(page.value)).toContain('営業部/秘密/x.md')
   })

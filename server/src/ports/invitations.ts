@@ -18,9 +18,9 @@ export type InvitationWithCompany = {
   company_name: string
 }
 
+/** A new invitation; its company is the handle's. */
 export interface NewInvitation {
   id: string
-  companyId: string
   token: string
   role: string
   createdBy: string
@@ -28,13 +28,16 @@ export interface NewInvitation {
   createdAt: string
 }
 
+/**
+ * One company's invitations, from its handle (`CompanyData.invitations`).
+ * Another company's invitation id is not found and nothing of it changes.
+ */
 export interface InvitationRepository {
-  /** The company's invitations, newest first. */
-  listByCompany(companyId: string): InvitationWithCompany[]
-  findByToken(token: string): InvitationWithCompany | undefined
-  existsInCompany(invitationId: string, companyId: string): boolean
+  /** The invitations, newest first. */
+  list(): InvitationWithCompany[]
+  exists(invitationId: string): boolean
   /** Whether `userId` once accepted an invitation to this company (the person agreed to join it). */
-  acceptedBy(companyId: string, userId: string): boolean
+  acceptedBy(userId: string): boolean
   insert(invitation: NewInvitation): void
   delete(invitationId: string): void
   /**
@@ -42,10 +45,19 @@ export interface InvitationRepository {
    * used meanwhile, or claimed by a sign-up of another account.
    */
   consume(invitationId: string, userId: string): boolean
-  /** Claim an unused, unexpired, unclaimed invitation for a sign-up (atomic). Its id, or null. */
-  claimForSignup(token: string): string | null
   /** Undo a claim whose sign-up did not succeed (an accepted invitation stays as it is). */
   releaseSignupClaim(invitationId: string): void
   /** The account the claiming sign-up created. */
   recordSignupUser(invitationId: string, userId: string): void
+}
+
+/**
+ * The control plane of invitation links: a token is all the caller has
+ * before the company is known, so these two find the invitation (and its
+ * company) by token. Everything after goes through that company's handle.
+ */
+export interface InvitationTokenLookup {
+  findByToken(token: string): InvitationWithCompany | undefined
+  /** Claim an unused, unexpired, unclaimed invitation for a sign-up (atomic). Its id and company, or null. */
+  claimForSignup(token: string): { id: string; companyId: string } | null
 }

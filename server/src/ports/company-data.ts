@@ -24,11 +24,21 @@
  * that touches a company's rows without a company condition.
  */
 import type { DepartmentRepository } from './departments'
+import type { InvitationRepository } from './invitations'
+import type { OrphanedScopeReader } from './orphaned-scopes'
+import type { PrivateFolderRepository } from './private-folders'
+import type { ScopeRepository } from './scopes'
 
 export interface CompanyData {
   /** The company this handle is limited to. */
   readonly companyId: string
   readonly departments: DepartmentRepository
+  readonly invitations: InvitationRepository
+  /** Permission scopes, rules and department managers. */
+  readonly scopes: ScopeRepository
+  readonly privateFolders: PrivateFolderRepository
+  /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
+  readonly orphanedScopes: OrphanedScopeReader
 }
 
 export interface CompanyDataSource {

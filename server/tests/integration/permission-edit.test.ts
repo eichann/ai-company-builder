@@ -93,7 +93,7 @@ beforeAll(() => {
   db.prepare('INSERT INTO departments (id, company_id, name, folder, sort_order, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
     .run(ids.content, CO, 'コンテンツ', 'コンテンツ', 1, ts(), ts())
   initDatabase() // seed scopes
-  replaceDepartmentManagers(db, ids.content, ['pe-manager'], 'pe-owner')
+  replaceDepartmentManagers(db, CO, ids.content, ['pe-manager'], 'pe-owner')
 
   // The company repository: department folders with sub-folders, one stored
   // with an NFD name (what a Mac commits), and a hidden folder.

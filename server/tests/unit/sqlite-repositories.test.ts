@@ -9,7 +9,8 @@ import Database from 'better-sqlite3'
 import { initDatabase } from '../../src/db'
 import { sqliteCompanyRepository } from '../../src/adapters/sqlite/companies'
 import { sqliteMembershipRepository } from '../../src/adapters/sqlite/memberships'
-import { sqliteInvitationRepository } from '../../src/adapters/sqlite/invitations'
+import { sqliteInvitationTokens } from '../../src/adapters/sqlite/invitations'
+import { sqliteCompanyData } from '../../src/adapters/sqlite/company-data'
 import { sqliteTransactions } from '../../src/adapters/sqlite/transactions'
 
 let conn: Database.Database
@@ -78,24 +79,32 @@ describe('memberships', () => {
 describe('invitations', () => {
   it('lists newest first with the company name, finds by token, consumes once', () => {
     company('a', '2026-01-01T00:00:00.000Z')
-    const repo = sqliteInvitationRepository(conn)
-    repo.insert({ id: 'i1', companyId: 'a', token: 't1', role: 'member', createdBy: 'u1', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: '2026-01-01T00:00:00.000Z' })
-    repo.insert({ id: 'i2', companyId: 'a', token: 't2', role: 'admin', createdBy: 'u1', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: '2026-01-02T00:00:00.000Z' })
+    const repo = sqliteCompanyData(conn).forCompany('a').invitations
+    const tokens = sqliteInvitationTokens(conn)
+    repo.insert({ id: 'i1', token: 't1', role: 'member', createdBy: 'u1', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: '2026-01-01T00:00:00.000Z' })
+    repo.insert({ id: 'i2', token: 't2', role: 'admin', createdBy: 'u1', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: '2026-01-02T00:00:00.000Z' })
 
-    const rows = repo.listByCompany('a')
+    const rows = repo.list()
     expect(rows.map(r => r.id)).toEqual(['i2', 'i1'])
-    expect(rows[0]).toMatchObject({ company_name: 'Co a', used_by: null, signup_claimed_at: null, signup_user_id: null })
-    expect(repo.findByToken('t1')?.id).toBe('i1')
-    expect(repo.findByToken('nope')).toBeUndefined()
-    expect(repo.existsInCompany('i1', 'a')).toBe(true)
-    expect(repo.existsInCompany('i1', 'b')).toBe(false)
+    expect(rows[0]).toMatchObject({ company_id: 'a', company_name: 'Co a', used_by: null, signup_claimed_at: null, signup_user_id: null })
+    expect(tokens.findByToken('t1')?.id).toBe('i1')
+    expect(tokens.findByToken('nope')).toBeUndefined()
+    expect(repo.exists('i1')).toBe(true)
 
     expect(repo.consume('i1', 'u9')).toBe(true)
     expect(repo.consume('i1', 'u8')).toBe(false)
-    expect(repo.findByToken('t1')?.used_by).toBe('u9')
+    expect(tokens.findByToken('t1')?.used_by).toBe('u9')
 
     repo.delete('i2')
-    expect(repo.findByToken('t2')).toBeUndefined()
+    expect(tokens.findByToken('t2')).toBeUndefined()
+  })
+
+  it('a claim by token names the invitation and its company', () => {
+    company('a', '2026-01-01T00:00:00.000Z')
+    sqliteCompanyData(conn).forCompany('a').invitations.insert({ id: 'i1', token: 't1', role: 'member', createdBy: 'u1', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: '2026-01-01T00:00:00.000Z' })
+    const tokens = sqliteInvitationTokens(conn)
+    expect(tokens.claimForSignup('t1')).toEqual({ id: 'i1', companyId: 'a' })
+    expect(tokens.claimForSignup('t1')).toBeNull()
   })
 })
 

@@ -341,7 +341,7 @@ departmentsRoute.get('/:id/managers', async (c) => {
   const found = departments.exists(member.value, deptId)
   if (!found.ok) return refusal(c, found)
 
-  return c.json({ success: true, data: { managers: departments.managers(deptId) } })
+  return c.json({ success: true, data: { managers: departments.managers(member.value, deptId) } })
 })
 
 // PUT /api/companies/:companyId/departments/:id/managers - owner/admin; replaces the set

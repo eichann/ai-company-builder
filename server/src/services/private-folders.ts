@@ -12,9 +12,8 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { ClientActivityRepository, OutdatedMember } from '../ports/client-activity'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
-import type { PrivateFolderRecord, PrivateFolderRepository, PrivateRuleSet } from '../ports/private-folders'
+import type { PrivateFolderRecord, PrivateRuleSet } from '../ports/private-folders'
 import type { RepoStore } from '../ports/repo-store'
-import type { ScopeRepository } from '../ports/scopes'
 import type { CompanyLock } from '../ports/transactions'
 import { supportsPrivateFolders } from '../lib/client-version'
 import {
@@ -45,8 +44,6 @@ export const PRIVATE_FOLDERS_OUTDATED_ERROR =
 interface DepartmentFolder { id: string; folder: string }
 
 export interface PrivateFolderServiceDeps {
-  privateFolders: PrivateFolderRepository
-  scopes: ScopeRepository
   companyData: CompanyDataSource
   memberships: MembershipRepository
   clientActivity: ClientActivityRepository
@@ -56,7 +53,10 @@ export interface PrivateFolderServiceDeps {
 }
 
 export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
-  const { privateFolders, scopes, companyData, memberships, clientActivity, accounts, repoStore, companyLock } = deps
+  const { companyData, memberships, clientActivity, accounts, repoStore, companyLock } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
+  const privateFoldersOf = (companyId: string) => companyData.forCompany(companyId).privateFolders
 
   function departmentFolders(companyId: string): DepartmentFolder[] {
     return companyData.forCompany(companyId).departments.folders().map(d => ({ id: d.id, folder: d.folder.normalize('NFC') }))
@@ -74,12 +74,12 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
   /** Owner/admin anywhere; a manager inside (not at) the folder of a department they manage. */
   function canManagePath(actor: Member, path: string): boolean {
     if (FULL_ACCESS_ROLES.has(actor.role)) return true
-    const managed = new Set(scopes.managedDepartmentIds(actor.companyId, actor.userId))
+    const managed = new Set(scopesOf(actor.companyId).managedDepartmentIds(actor.userId))
     return departmentFolders(actor.companyId).some(d => managed.has(d.id) && isSameOrAncestorPath(d.folder, path) && d.folder !== path)
   }
 
   function summarize(companyId: string, p: PrivateFolderRecord, all: ScopeWithRules[], users: Map<string, { name: string | null; email: string }>): PrivateFolderSummary {
-    const access = privateFolders.access(companyId, p.scope.path, all)
+    const access = privateFoldersOf(companyId).access(p.scope.path, all)
     return {
       scopeId: p.scope.id,
       path: p.scope.path,
@@ -93,8 +93,8 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
   }
 
   function detail(companyId: string, p: PrivateFolderRecord): PrivateFolderDetail {
-    const all = scopes.listWithRules(companyId)
-    const access = privateFolders.access(companyId, p.scope.path, all).filter(a => a.read)
+    const all = scopesOf(companyId).listWithRules()
+    const access = privateFoldersOf(companyId).access(p.scope.path, all).filter(a => a.read)
     const users = accounts.byIds([...new Set([...access.map(a => a.userId), ...(p.createdBy ? [p.createdBy] : [])])])
     return {
       ...summarize(companyId, p, all, users),
@@ -140,7 +140,7 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     canManagePath,
 
     managesAnyDepartment(actor: Member): boolean {
-      return scopes.managedDepartmentIds(actor.companyId, actor.userId).length > 0
+      return scopesOf(actor.companyId).managedDepartmentIds(actor.userId).length > 0
     },
 
     /**
@@ -181,10 +181,10 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
      */
     async checkParent(actor: Member, parentPath: string): Promise<Outcome<void>> {
       if (parentPath === '') return ok(undefined)
-      const all = scopes.listWithRules(actor.companyId)
+      const all = scopesOf(actor.companyId).listWithRules()
       const priv = findPrivateScope(all, parentPath)
       if (priv) {
-        const readable = hasFullAccess(actor.role) || privateFolders.access(actor.companyId, priv.path, all).some(a => a.userId === actor.userId && a.read)
+        const readable = hasFullAccess(actor.role) || privateFoldersOf(actor.companyId).access(priv.path, all).some(a => a.userId === actor.userId && a.read)
         return readable
           ? refuse('bad-request', 'Folders inside a private folder are private already; create an ordinary folder there', { code: 'ALREADY_PRIVATE' })
           : refuse('bad-request', 'Parent folder not found', { code: 'PARENT_NOT_FOUND' })
@@ -198,7 +198,7 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     /** Default viewers of a new folder: the managers of the department it is in. */
     defaultViewers(companyId: string, path: string): string[] {
       const dept = departmentOf(companyId, path)
-      return dept ? scopes.departmentManagerIds(dept.id) : []
+      return dept ? scopesOf(companyId).departmentManagerIds(dept.id) : []
     },
 
     /**
@@ -208,11 +208,11 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
      */
     async create(actor: Member, path: string, rules: PrivateRuleSet, force: boolean): Promise<Outcome<PrivateFolderDetail>> {
       const created = await companyLock.run(actor.companyId, async () => {
-        if (privateFolders.list(actor.companyId).length === 0 && !force) {
+        if (privateFoldersOf(actor.companyId).list().length === 0 && !force) {
           const blocked = notReadyMembers(actor.companyId)
           if (blocked.length > 0) return { blocked }
         }
-        return privateFolders.create({ companyId: actor.companyId, path, rules, createdBy: actor.userId })
+        return privateFoldersOf(actor.companyId).create({ path, rules, createdBy: actor.userId })
       })
       if ('blocked' in created) {
         return refuse('conflict', PRIVATE_FOLDERS_OUTDATED_ERROR, { code: 'OUTDATED_CLIENTS', members: created.blocked, canForce: hasFullAccess(actor.role) })
@@ -222,18 +222,18 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
           ? refuse('conflict', reservedPathMessage(path), { code: 'FOLDER_NAME_UNAVAILABLE' })
           : refusalOf(created)
       }
-      return ok(detail(actor.companyId, privateFolders.get(actor.companyId, created.scopeId)!))
+      return ok(detail(actor.companyId, privateFoldersOf(actor.companyId).get(created.scopeId)!))
     },
 
     /** The private folder if the actor may manage it; otherwise a 404 that reveals nothing. */
     managed(actor: Member, scopeId: string): Outcome<PrivateFolderRecord> {
-      const folder = privateFolders.get(actor.companyId, scopeId)
+      const folder = privateFoldersOf(actor.companyId).get(scopeId)
       return folder && canManagePath(actor, folder.scope.path) ? ok(folder) : notFound()
     },
 
     /** Any private folder of the company (owner/admin endpoints). */
     find(actor: Member, scopeId: string): Outcome<PrivateFolderRecord> {
-      const folder = privateFolders.get(actor.companyId, scopeId)
+      const folder = privateFoldersOf(actor.companyId).get(scopeId)
       return folder ? ok(folder) : notFound()
     },
 
@@ -241,23 +241,23 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
 
     /** The ones the actor may manage, with viewer counts. */
     list(actor: Member): PrivateFolderSummary[] {
-      const all = scopes.listWithRules(actor.companyId)
-      const folders = privateFolders.list(actor.companyId, all).filter(p => canManagePath(actor, p.scope.path))
+      const all = scopesOf(actor.companyId).listWithRules()
+      const folders = privateFoldersOf(actor.companyId).list(all).filter(p => canManagePath(actor, p.scope.path))
       const users = accounts.byIds([...new Set(folders.map(f => f.createdBy).filter((v): v is string => !!v))])
       return folders.map(f => summarize(actor.companyId, f, all, users))
     },
 
     replaceMembers(actor: Member, folder: PrivateFolderRecord, rules: PrivateRuleSet): PrivateFolderDetail {
-      privateFolders.replaceRules(folder.scope.id, rules, actor.userId)
-      return detail(actor.companyId, privateFolders.get(actor.companyId, folder.scope.id)!)
+      privateFoldersOf(actor.companyId).replaceRules(folder.scope.id, rules, actor.userId)
+      return detail(actor.companyId, privateFoldersOf(actor.companyId).get(folder.scope.id)!)
     },
 
     /** 公開に戻す, under the company lock (re-read there: it may be gone). */
     async makePublic(actor: Member, folder: PrivateFolderRecord): Promise<Outcome<{ path: string; commit: string }>> {
       const result = await companyLock.run(actor.companyId, async () => {
-        const current = privateFolders.get(actor.companyId, folder.scope.id)
+        const current = privateFoldersOf(actor.companyId).get(folder.scope.id)
         if (!current) return null
-        return privateFolders.makePublic(actor.companyId, current, actor.userId)
+        return privateFoldersOf(actor.companyId).makePublic(current, actor.userId)
       })
       if (!result) return notFound()
       return result.ok ? ok(result.value) : refusalOf(result)
@@ -266,9 +266,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
     /** Delete (archived first), under the company lock (re-read there: it may be gone). */
     async delete(actor: Member, folder: PrivateFolderRecord): Promise<Outcome<{ path: string }>> {
       const result = await companyLock.run(actor.companyId, async () => {
-        const current = privateFolders.get(actor.companyId, folder.scope.id)
+        const current = privateFoldersOf(actor.companyId).get(folder.scope.id)
         if (!current) return null
-        return privateFolders.delete(actor.companyId, current, actor.userId)
+        return privateFoldersOf(actor.companyId).delete(current, actor.userId)
       })
       if (!result) return notFound()
       return result.ok ? ok(result.value) : refusalOf(result)
@@ -276,9 +276,9 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
 
     /** The private folders the member may read, with who else can (named viewers first). */
     mine(actor: Member): MyPrivateFolder[] {
-      const all = scopes.listWithRules(actor.companyId)
-      const readable = privateFolders.list(actor.companyId, all).filter(p => canReadPrivateScope(p.scope, actor.userId, actor.role))
-      const access = new Map(readable.map(p => [p.scope.id, privateFolders.access(actor.companyId, p.scope.path, all).filter(a => a.read)]))
+      const all = scopesOf(actor.companyId).listWithRules()
+      const readable = privateFoldersOf(actor.companyId).list(all).filter(p => canReadPrivateScope(p.scope, actor.userId, actor.role))
+      const access = new Map(readable.map(p => [p.scope.id, privateFoldersOf(actor.companyId).access(p.scope.path, all).filter(a => a.read)]))
       const users = accounts.byIds([...new Set([...access.values()].flat().map(a => a.userId))])
       return readable.map(p => {
         const readers = access.get(p.scope.id) ?? []
@@ -303,8 +303,8 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
      * nothing about the others (not even a salted hash of the path).
      */
     myScopes(actor: Member, baseUrl: string) {
-      const all = scopes.listWithRules(actor.companyId)
-      return privateFolders.list(actor.companyId, all)
+      const all = scopesOf(actor.companyId).listWithRules()
+      return privateFoldersOf(actor.companyId).list(all)
         .filter(p => canReadPrivateScope(p.scope, actor.userId, actor.role))
         .map(p => {
           const clonePath = `/api/git-http/${actor.companyId}/scopes/${p.scope.id}.git`
@@ -320,7 +320,7 @@ export function createPrivateFolderService(deps: PrivateFolderServiceDeps) {
 
     /** May the member put something at each path (shared/core isPathUsable)? */
     pathsUsable(actor: Member, paths: string[], files: Set<string>) {
-      const all = scopes.listWithRules(actor.companyId)
+      const all = scopesOf(actor.companyId).listWithRules()
       return paths.map(path => ({
         path,
         usable: isPathUsable(all, actor.userId, actor.role, normalizeReservedPath(path), { asFile: files.has(path) }),

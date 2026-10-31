@@ -8,9 +8,7 @@ import type { AccountDirectory } from '../ports/accounts'
 import type { ClientActivityRepository } from '../ports/client-activity'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { MembershipRepository } from '../ports/memberships'
-import type { OrphanedScopeReader } from '../ports/orphaned-scopes'
 import type { PushRejectionRepository } from '../ports/push-rejections'
-import type { ScopeRepository } from '../ports/scopes'
 import { computeAttention, type OverviewMember } from '../lib/overview'
 import {
   compareScopePaths,
@@ -34,15 +32,16 @@ const ROLE_LABELS: Record<string, string> = {
 export interface PermissionViewDeps {
   memberships: MembershipRepository
   companyData: CompanyDataSource
-  scopes: ScopeRepository
   clientActivity: ClientActivityRepository
   pushRejections: PushRejectionRepository
-  orphanedScopes: OrphanedScopeReader
   accounts: AccountDirectory
 }
 
 export function createPermissionViewService(deps: PermissionViewDeps) {
-  const { memberships, companyData, scopes, clientActivity, pushRejections, orphanedScopes, accounts } = deps
+  const { memberships, companyData, clientActivity, pushRejections, accounts } = deps
+  // Company handles (ports/company-data.ts): the company is always the member's / the one just checked.
+  const scopesOf = (companyId: string) => companyData.forCompany(companyId).scopes
+  const orphanedScopesOf = (companyId: string) => companyData.forCompany(companyId).orphanedScopes
 
   return {
     /** The overview screen (an owner/admin acting). */
@@ -52,7 +51,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
       const departmentCount = companyData.forCompany(companyId).departments.count()
       const activity = clientActivity.forCompany(companyId)
       const rejections = pushRejections.recent(companyId, 20)
-      const orphaned = await orphanedScopes.find(companyId)
+      const orphaned = await orphanedScopesOf(companyId).find()
       const users = accounts.byIds([...new Set([...rows.map(m => m.user_id), ...rejections.map(r => r.userId)])])
 
       const members: OverviewMember[] = rows.map(m => {
@@ -102,11 +101,11 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
      */
     async permissions(member: Member): Promise<Outcome<unknown>> {
       const { companyId } = member
-      const all = scopes.listWithRules(companyId).sort((a, b) => compareScopePaths(a.path, b.path))
+      const all = scopesOf(companyId).listWithRules().sort((a, b) => compareScopePaths(a.path, b.path))
 
       let visible = all
       if (!FULL_ACCESS_ROLES.has(member.role)) {
-        const managed = new Set(scopes.managedDepartmentIds(companyId, member.userId))
+        const managed = new Set(scopesOf(companyId).managedDepartmentIds(member.userId))
         if (managed.size === 0) {
           return refuse('forbidden', 'Only owners, admins and department managers can view permissions')
         }
@@ -143,7 +142,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
       // Rules whose folder is gone from the shared branch (renamed or removed by a
       // sync push): see adapters/orphaned-scopes.ts.
       const visibleIds = new Set(visible.map(s => s.id))
-      const orphaned = (await orphanedScopes.find(companyId)).filter(o => visibleIds.has(o.scope.id))
+      const orphaned = (await orphanedScopesOf(companyId).find()).filter(o => visibleIds.has(o.scope.id))
 
       return ok({
         orphanedScopes: orphaned.map(o => ({
@@ -178,7 +177,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
      * department) without another round trip.
      */
     capabilities(member: Member) {
-      const managed = scopes.managedDepartmentIds(member.companyId, member.userId)
+      const managed = scopesOf(member.companyId).managedDepartmentIds(member.userId)
       const folderOf = new Map(
         managed.length === 0
           ? []
@@ -193,7 +192,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
 
     /** Where the member may write, as data the client evaluates per path (writeAccessSummary). */
     writeAccess(member: Member): WriteAccessSummary {
-      return writeAccessSummary(scopes.listWithRules(member.companyId), member.userId, member.role)
+      return writeAccessSummary(scopesOf(member.companyId).listWithRules(), member.userId, member.role)
     },
 
     /**
@@ -202,7 +201,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
      * change (the push check's managedFolders, the rule editor's reach).
      */
     managedFolders(companyId: string, userId: string): string[] {
-      const managed = new Set(scopes.managedDepartmentIds(companyId, userId))
+      const managed = new Set(scopesOf(companyId).managedDepartmentIds(userId))
       if (managed.size === 0) return []
       return companyData.forCompany(companyId).departments.folders()
         .filter(d => managed.has(d.id))

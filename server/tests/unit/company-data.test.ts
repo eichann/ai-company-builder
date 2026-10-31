@@ -77,3 +77,92 @@ describe('company handle: departments', () => {
     expect(() => source.forCompany('')).toThrow()
   })
 })
+
+describe('company handle: invitations', () => {
+  const invite = (companyId: string, id: string) => source.forCompany(companyId).invitations.insert({
+    id, token: `t-${id}`, role: 'member', createdBy: 'u', expiresAt: '2099-01-01T00:00:00.000Z', createdAt: TS,
+  })
+  const row = (id: string) => conn.prepare('SELECT * FROM invitations WHERE id = ?').get(id)
+
+  it('cannot see, use, release, mark or delete another company’s invitation', () => {
+    invite('a', 'ia')
+    invite('b', 'ib')
+    conn.prepare('UPDATE invitations SET signup_claimed_at = ? WHERE id = ?').run(TS, 'ib')
+    const before = row('ib')
+    const a = source.forCompany('a').invitations
+    expect(a.list().map(i => i.id)).toEqual(['ia'])
+    expect(a.exists('ib')).toBe(false)
+    expect(a.consume('ib', 'intruder')).toBe(false)
+    a.releaseSignupClaim('ib')
+    a.recordSignupUser('ib', 'intruder')
+    a.delete('ib')
+    expect(row('ib')).toEqual(before)
+    expect(row('ia')).toMatchObject({ company_id: 'a' })
+  })
+})
+
+describe('company handle: scopes, rules and managers', () => {
+  beforeEach(() => {
+    for (const [co, u] of [['a', 'ua'], ['b', 'ub']]) {
+      conn.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${u}`, u, co, 'member', TS, TS)
+      source.forCompany(co).scopes.syncCompanyScopes()
+    }
+    source.forCompany('b').scopes.replaceDepartmentManagers('b-hr', ['ub'], 'ub')
+    source.forCompany('b').scopes.upsertRule('人事', { subjectType: 'user', subjectId: 'ub', canRead: true, canWrite: true }, 'ub')
+  })
+  const bRoot = () => source.forCompany('b').scopes.getByPath('')!
+  const table = (sql: string) => conn.prepare(sql).all()
+  const snapshot = () => ({
+    rules: table('SELECT * FROM scope_rules ORDER BY id'),
+    managers: table('SELECT * FROM department_managers ORDER BY department_id, user_id'),
+    scopes: table(`SELECT * FROM scopes WHERE company_id = 'b' ORDER BY id`),
+  })
+
+  it('reads only its own company', () => {
+    const a = source.forCompany('a').scopes
+    const b = source.forCompany('b').scopes
+    const bRuleId = b.rulesOf(bRoot().id)[0].id
+    expect(a.listWithRules().map(s => s.path).sort()).toEqual(['', '営業部'])
+    expect(a.getById(bRoot().id)).toBeNull()
+    expect(a.rulesOf(bRoot().id)).toEqual([])
+    expect(a.ruleWithScope(bRuleId)).toBeNull()
+    expect(a.departmentManagerIds('b-hr')).toEqual([])
+    expect(b.departmentManagerIds('b-hr')).toEqual(['ub'])
+  })
+
+  it('cannot change or remove another company’s rules, scopes or managers', () => {
+    const a = source.forCompany('a').scopes
+    const root = bRoot()
+    const hr = source.forCompany('b').scopes.getByPath('人事')!
+    const bRuleId = source.forCompany('b').scopes.rulesOf(root.id)[0].id
+    const before = snapshot()
+
+    a.updateRuleAccess(bRuleId, false, false)
+    a.deleteRule(bRuleId, root)
+    expect(a.clearRules(hr)).toBe(0)
+    expect(a.deleteUserRules('ub')).toBe(0)
+    a.replaceDepartmentManagers('b-hr', ['ua'], 'ua')
+    a.replaceDepartmentManagers('b-hr', [], 'ua')
+    a.removeManagerFromCompany('ub')
+    a.deleteDepartmentScopes('b-hr', '人事')
+    a.ensureDepartmentScope('b-hr', '乗っ取り', 'ua')
+
+    expect(snapshot()).toEqual(before)
+  })
+})
+
+describe('company handle: private folders', () => {
+  it('another company’s private folder is not found and its viewers do not change', () => {
+    conn.prepare(`INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('s-b', 'b', '人事/評価', 'folder', 'r-b', ?)`).run(TS)
+    conn.prepare(`INSERT INTO scope_repos (id, company_id, scope_id, created_at) VALUES ('r-b', 'b', 's-b', ?)`).run(TS)
+    conn.prepare(`INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('ru-b', 's-b', 'everyone', NULL, 0, 0, ?)`).run(TS)
+    const a = source.forCompany('a').privateFolders
+    expect(a.list()).toEqual([])
+    expect(a.paths()).toEqual([])
+    expect(a.get('s-b')).toBeNull()
+    expect(source.forCompany('b').privateFolders.get('s-b')?.scope.path).toBe('人事/評価')
+
+    a.replaceRules('s-b', { viewers: ['intruder'], editors: ['intruder'] }, 'intruder')
+    expect(conn.prepare(`SELECT id FROM scope_rules WHERE scope_id = 's-b'`).all()).toEqual([{ id: 'ru-b' }])
+  })
+})
