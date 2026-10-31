@@ -71,6 +71,14 @@ describe('a declaration is data only', () => {
     expect(manifestErrors(`${CRM.manifest}\nwhatever: 1\n`).join()).toContain('知らない項目「whatever」')
   })
 
+  it('a package that writes names how to read its outside account (a connection is bound to one account, review §5.7)', () => {
+    const without = crmWith('account_info: { method: GET, path: "/account-info/v3/details" }\n', '')
+    expect(manifestErrors(without).join()).toContain('account_info')
+    expect(manifestErrors(crmWith('account_info: { method: GET,', 'account_info: { method: POST,')).join()).toContain('account_info')
+    // A package that only reads (the help desk) needs none.
+    expect(validatePluginPackage(readPackage('sample-desk')).ok).toBe(true)
+  })
+
   it('refuses a contract this build does not know', () => {
     expect(manifestErrors(crmWith('contract: 1', 'contract: 2')).join()).toContain('contract')
   })

@@ -75,6 +75,36 @@ export interface LedgerEntry {
   proposedBy: 'ai' | null
   /** The consultation it came from: the AI's token's for AI actions, the app's word for a person's. */
   conversationId: string | null
+  /**
+   * 「外の受領書」 (milestone 3): what an outside system was told or showed —
+   * on entries written by a connector plugin (a change read from the outside
+   * system, or one the plugin wrote there). Absent / null otherwise.
+   */
+  receipt?: ExternalReceipt | null
+}
+
+/** Evidence of an exchange with an outside system, kept on the ledger entry it explains. */
+export interface ExternalReceipt {
+  /** The plugin and the version / fingerprint of its package used. */
+  plugin: string
+  pluginVersion: string
+  fingerprint: string
+  mappingVersion: number
+  /** The connection and the outside account (HubSpot's portal id). */
+  connectionId: string
+  accountId: string
+  /** The outside object (`deal`) and its id there. */
+  object: string
+  externalId: string
+  /** The outside system's last-modified time of the object as read, when it says. */
+  externalUpdatedAt: string | null
+  /** The operation record of a write (P6), null for an observed change. */
+  operationId: string | null
+  /**
+   * observed: a change seen in the outside system (who made it is not known);
+   * written: ACB's own write, confirmed by the outside system's answer.
+   */
+  kind: 'observed' | 'written'
 }
 
 export interface ReplayedState {

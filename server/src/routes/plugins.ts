@@ -11,6 +11,8 @@
  *   PUT  /plugins/:pluginId/enabled            { enabled } on / off
  *   PUT  /plugins/:pluginId/mapping            { text } a new mapping version
  *   POST /plugins/:pluginId/mapping/restore    { version } an earlier mapping as the next version
+ *   POST /plugins/:pluginId/import             bring the outside objects into the company map (one run per company)
+ *   POST /plugins/:pluginId/connection/renew   the outside account changed on purpose: a new connection
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -21,7 +23,7 @@ import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
-const { access, plugins } = services
+const { access, plugins, pluginImport } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
   const user = await getUserFromRequest(c.req.raw)
@@ -77,4 +79,16 @@ pluginsRoute.post('/plugins/:pluginId/mapping/restore', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, await plugins.restoreMapping(member, c.req.param('pluginId'), await jsonBody(c)))
+})
+
+pluginsRoute.post('/plugins/:pluginId/import', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await pluginImport.run(member, c.req.param('pluginId')))
+})
+
+pluginsRoute.post('/plugins/:pluginId/connection/renew', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, pluginImport.renewConnection(member, c.req.param('pluginId')))
 })

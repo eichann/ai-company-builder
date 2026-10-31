@@ -299,6 +299,8 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/plugins/:pluginId/enabled', w => ({ path: `${C(w)}/plugins/no-such-plugin/enabled`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/plugins/:pluginId/mapping', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/restore`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/import', w => ({ path: `${C(w)}/plugins/no-such-plugin/import`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
 
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
@@ -363,6 +365,8 @@ const CROSS: CrossRow[] = [
   x('PUT /api/companies/:companyId/plugins/:pluginId', (w, id) => ({ path: `${C(w)}/plugins/${id}`, body: { version: '0.1.0', keyId: null } }), w => w.other.plugin, 'no-such-plugin'),
   x('PUT /api/companies/:companyId/plugins/:pluginId/enabled', (w, id) => ({ path: `${C(w)}/plugins/${id}/enabled`, body: { enabled: true } }), w => w.other.plugin, 'no-such-plugin'),
   x('PUT /api/companies/:companyId/plugins/:pluginId/mapping', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping`, body: { text: 'deal: {}' } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/import', (w, id) => ({ path: `${C(w)}/plugins/${id}/import`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),

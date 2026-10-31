@@ -65,6 +65,11 @@ export interface ActivePlugin {
   mapping: PluginMapping
   mappingVersion: number
   keyId: string
+  /** The package's fingerprint (kept on every ledger receipt). */
+  fingerprint: string
+  connectionId: string
+  /** The outside account, once the connector has bound the connection to it. */
+  accountId: string | null
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
@@ -142,6 +147,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       active: {
         pluginId: install.pluginId, version: install.version, manifest: found.pkg.manifest, types: found.pkg.types,
         mapping: parsed.mapping, mappingVersion: install.mappingVersion, keyId: install.keyId as string,
+        fingerprint: install.fingerprint, connectionId: install.connectionId, accountId: install.accountId,
       },
     }
   }

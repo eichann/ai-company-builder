@@ -114,6 +114,13 @@ export interface PluginManifest {
   fieldPolicyDefaults: Record<string, FieldPolicy>
   /** Company ids that may use the package; null = every company (§8-4). */
   availableTo: string[] | null
+  /**
+   * The one GET that names the outside account the key belongs to (HubSpot:
+   * the portal id). Required when the package writes (an update or create
+   * operation): a connection is bound to one account, and nothing is ever
+   * written to another (review §5.7).
+   */
+  accountInfo: PluginEndpoint | null
 }
 
 export type PluginParsed<T> = { ok: true; value: T } | { ok: false; errors: string[] }
@@ -194,7 +201,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   if (!isYamlMap(raw)) return { ok: false, errors: ['宣言は「項目名: 値」の形で書いてください'] }
   const errors: string[] = []
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
-  unknownKeys('', raw, ['id', 'label', 'version', 'kind', 'contract', 'description', 'service', 'base_url', 'scopes', 'operation_scopes', 'types', 'objects', 'operations', 'field_policy_defaults', 'available_to'], err)
+  unknownKeys('', raw, ['id', 'label', 'version', 'kind', 'contract', 'description', 'service', 'base_url', 'scopes', 'operation_scopes', 'types', 'objects', 'operations', 'field_policy_defaults', 'available_to', 'account_info'], err)
 
   const id = raw.id
   if (typeof id !== 'string' || !PLUGIN_ID_RE.test(id) || id.length > 40) err('id は英小文字・数字・- で書いてください（40文字まで）')
@@ -324,6 +331,21 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     }
   }
 
+  let accountInfo: PluginEndpoint | null = null
+  if (raw.account_info !== undefined) {
+    const e = raw.account_info
+    if (!isYamlMap(e)) err('account_info は { method: GET, path } の形で書いてください')
+    else {
+      unknownKeys('account_info: ', e, ['method', 'path'], err)
+      const problem = e.method !== 'GET' ? 'account_info の method は GET です' : checkPluginPathTemplate(e.path, 'properties_list')
+      if (problem) err(`account_info: ${problem}`)
+      else accountInfo = { method: 'GET', path: e.path as string }
+    }
+  }
+  if (!accountInfo && Object.values(operations).some(op => op.kind !== 'read')) {
+    err('書き込む操作があるプラグインには account_info（鍵がどのアカウントのものかを読む道）が要ります')
+  }
+
   const operationScopes: Record<string, string[]> = {}
   const rawOpScopes = raw.operation_scopes ?? {}
   if (!isYamlMap(rawOpScopes)) err('operation_scopes は「操作の名前: [権限…]」の形で書いてください')
@@ -364,6 +386,7 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       operations,
       fieldPolicyDefaults,
       availableTo,
+      accountInfo,
     },
   }
 }

@@ -278,6 +278,24 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   pushing an action's attached files before calling it (0.18-1 — the tools send no
   `attachments` yet); the app assigning ids to new record files and repairing duplicates.
 
+## Outside systems (milestone 3, `plugins.md`)
+
+- `createExternalRecordWriter` (`services/record-engine.ts`) is the engine's one entry for what a
+  connector plugin read from or wrote to an outside system. composition.ts hands it to the plugin
+  services only (not in `services`, so no route, screen or AI reaches it). Same duties as the
+  engine — state + ledger in one transaction with a compare-and-set on the version (P6 writes
+  pass `expectedVersion`), tell the assignee / next actor — and nothing else: it sends nothing
+  outside and **never writes a file** (imported records are server-only, `path` null; owner rule
+  §8-3). Values are checked by the type's field kinds; a person must be a member.
+- Ledger: actor kind `external` (source = the plugin id) for an observed change; for a plugin's
+  write (P6) the person or AI it was done for. Column `receipt` (additive,
+  `migrateRecordLedgerProvenance`; `ExternalReceipt` in `shared/core/record-ledger.ts`): plugin,
+  version, fingerprint, mapping version, connection, outside account, object, outside id, the
+  outside last-modified time, operation id, `kind` observed / written.
+- Types a package brings are stored with source `plugin` (`record_types.source`; a table made
+  before is rebuilt once by `migrateRecordTypeSources`); a company still extends one with its own
+  `.acb/types/<name>.md` (higher version, additive).
+
 ## 「あなたの番」 (4-4)
 
 `GET /records/my-turn`: records of every type implementing `request` whose `next_actor` is the

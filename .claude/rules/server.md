@@ -192,7 +192,8 @@ GET  /api/config                                  setup state (no auth)
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
-                              PUT …/mapping, POST …/mapping/restore               plugins.ts
+                              PUT …/mapping, POST …/mapping/restore, POST …/import,
+                              POST …/connection/renew                             plugins.ts
                                                                 (つなぎ先のプラグイン: plugins.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action — the AI's
@@ -349,7 +350,8 @@ no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
 - **Fake HubSpot** (`tests/fakes/hubspot/`, milestone 3 P2): an in-memory Hono app answering the
   CRM calls the HubSpot plugin makes in HubSpot's documented shapes (v3 and dated
   `/crm/<api>/<YYYY-MM>/…` paths; deals get / list / search / update, deal properties and
-  pipelines, companies, owners, notes with the 214 note → deal association), `pat-fake-…` keys
+  pipelines, companies, owners, notes with the 214 note → deal association, account details
+  with a `portalId` per fake — another fake is another account), `pat-fake-…` keys
   with per-key scopes (403 `MISSING_SCOPES`), read-only values (400), rate limits (429) and
   faults (delay, 500, a write applied whose answer never arrives, a change made "in HubSpot").
   Tests pass `createFakeHubSpot().app` in; staging runs `pnpm fake:hubspot` (127.0.0.1:4010,

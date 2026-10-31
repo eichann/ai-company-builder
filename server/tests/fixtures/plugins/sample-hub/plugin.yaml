@@ -1,0 +1,68 @@
+# A HubSpot-shaped package for the server's tests against the fake HubSpot
+# (milestone 3 P5 / P6; tests/fakes/hubspot). The real package lives in the
+# private acb-plugins repository (owner decision §6-6). HubSpot's dated API
+# paths (search and pipelines on 2026-09, the rest on 2026-03).
+id: sample-hub
+label: 見本の HubSpot
+version: 0.1.0
+kind: official
+contract: 1
+service: hubspot
+base_url: https://api.hubapi.com
+account_info: { method: GET, path: "/account-info/v3/details" }
+scopes:
+  - crm.objects.deals.read
+  - crm.objects.deals.write
+  - crm.objects.companies.read
+  - crm.objects.owners.read
+operation_scopes:
+  add_note: [crm.objects.contacts.read, crm.objects.contacts.write]
+types: [deal, customer]
+
+objects:
+  deal:
+    record_type: deal
+    auto_properties: [hs_deal_stage_probability]
+    get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
+    search: { method: POST,  path: "/crm/objects/2026-09/deals/search" }
+    update: { method: PATCH, path: "/crm/objects/2026-03/deals/{id}" }
+    properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
+    stages_list:     { method: GET, path: "/crm/pipelines/2026-09/deals" }
+  company:
+    record_type: customer
+    get: { method: GET, path: "/crm/objects/2026-03/companies/{id}" }
+  note:
+    create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }
+
+operations:
+  refresh_deal:
+    label: HubSpot から最新を取る
+    kind: read
+    object: deal
+    who: [anyone, ai]
+  update_deal:
+    label: 案件の欄を HubSpot に書き戻す
+    kind: update
+    object: deal
+    fields: mapped
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: restore_previous
+    note: optional
+  add_note:
+    label: 案件にメモを残す
+    kind: create
+    object: note
+    attach_to: deal
+    who: [assignee, dept_manager, admin, ai]
+    reaches: internal
+    undo: archive
+
+field_policy_defaults:
+  next_step: auto
+  stage: auto
+  confidence: auto
+  close_date: auto
+  amount: prior
+  closed: prior
