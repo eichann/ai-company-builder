@@ -1,5 +1,5 @@
 // The server calls git:sync makes, over fetch with the signed-in session's
-// cookies. main.ts wires the real session; tests pass a fake fetch.
+// cookies. features/sync/wire.ts wires the real session; tests pass a fake fetch.
 
 import type { SyncServerApi } from './types'
 import { parseMyScopes } from './private-folders'

@@ -3,7 +3,7 @@
 // (`app:closeRequested`), saves, asks the member about what it could not
 // save, and answers `close` or `stay` (`app:closeResponse`). A renderer that
 // does not acknowledge within `ackTimeoutMs` (still loading, hung) does not
-// keep the window open. No Electron here: main.ts wires the window.
+// keep the window open. No Electron here: electron-adapter.ts wires the window.
 
 export type CloseAnswer = 'ack' | 'close' | 'stay'
 

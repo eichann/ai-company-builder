@@ -40,6 +40,13 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   shell:openExternal; running tools stop on quit), `chat` (`server-config.ts`: what the embedded
   chat server gets; `system-prompt.ts`), `chat-windows` (chatWindow:*, 「別ウィンドウで開く」;
   the windows themselves come from `electron-adapter.ts` `createChatWindowHost`).
+- `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
+  `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
+  IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features
+  need. `agent-control` (AI policy, emergency stop + push channel, AI action log), `chat-history`
+  (history store, hand-offs), `sync` (git:sync, commit messages, git-history), `private-folders`,
+  `broker` (tokens, own keys, tools). No Electron, and no window event is sent from a wire
+  module: sends stay where `ipc-inventory.json` records them (`main.ts` passes a callback).
 - `electron/services/` — shared state as explicit objects instead of module variables:
   `config-store.ts` (config.json, cached, written atomically), `api-key-store.ts` (the API key,
   encrypted through the shell's `SecretBox`; main decrypts it only where it is used), `shell-env.ts` (PATH / env for spawned processes; AI processes get it cut down by `agents/agent-env.ts`),
@@ -48,9 +55,11 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   git the app runs: bundled-or-system binary, `GIT_ASKPASS` token, the guarded
   `sync/git-factory.ts` configuration), `commit-messages.ts` (sync's AI commit message).
 - `electron/electron-adapter.ts` — Electron's implementations of the ports (`DesktopShell`,
-  `WindowPort`, `SecretBox` (safeStorage), sync's message boxes) and the `local-file://` protocol registration.
-- `main.ts` (~330 lines) — the composition root: creates services and stores in dependency
-  order, calls each `register…Ipc`, owns the window, the app lifecycle and
+  `WindowPort`, `SecretBox` (safeStorage), sync's message boxes), the windows (`createAppPages`:
+  the page and web preferences; `createMainWindowHost`: the main window with its close guard;
+  `createChatWindowHost`) and the `local-file://` protocol registration.
+- `main.ts` (~320 lines) — the composition root: creates services and stores in dependency
+  order, calls each `register…Ipc` / `wire…`, owns the app lifecycle, `app:closeResponse` and
   `chat-server:getInfo`, starts voice input and the chat server in `app.whenReady`.
 - Shell layer = `main.ts`, `preload.ts`, `electron-adapter.ts`, `voice-input.ts`: the only files
   that import Electron, i.e. what another desktop shell (Tauri) would replace. ESLint
@@ -60,7 +69,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   feature imports, `src/shared` ↛ `src/features` / `src/app`, `window.electronAPI` only in the
   data layer, no exceptions: `renderer-structure.md`).
 - **Windows.** Every app window — the main one and the consultation windows — gets the one
-  `appWebPreferences()` in `main.ts` (contextIsolation, sandbox, no Node, the one preload; CSP from
+  `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
   `index.html`); consultation windows also deny popups and navigation. Test:
   `tests/ipc-chat-windows.test.ts`.
 - **Sender checks.** Handlers that look at who sent them accept exactly the windows they are for,
@@ -69,8 +78,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   only about itself (`openFile`: a file of its own company folder, then `chatWindow:fileRequested`
   to the main window only); `app:closeResponse` (the answer to closing the main window,
   `services/close-guard.ts`) only the main window. Choice prompts and tool approvals go to the window that shows their conversation
-  (`webContentsForSession` in `main.ts`; the owner is that window's webContents, so only it may
-  answer, as before). Conversation events (`chatHistory:changed`, `handoff:changed`) go to every
+  (`webContentsForSession` in `main.ts`, `features/agent-interactions/owner.ts`; the owner is
+  that window's webContents, so only it may answer, as before). Conversation events (`chatHistory:changed`, `handoff:changed`) go to every
   window (`createBroadcastPort`). Tests: `tests/chat-windows.test.ts`,
   `tests/ipc-chat-windows.test.ts`.
 - Keep `main.ts` importable without side effects beyond registering handlers (startup stays in

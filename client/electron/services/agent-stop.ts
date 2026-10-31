@@ -1,7 +1,7 @@
 /**
  * The emergency stop in the app (monitoring M2, .claude/rules/agent-stop.md):
  * what the chat asks before a turn and per tool call, and what happens when a
- * received stop changes. Created in main.ts; the chat server gets it through
+ * received stop changes. Created in features/agent-control/wire.ts; the chat server gets it through
  * features/chat/server-config.ts.
  *
  * - Before a turn: the company is watched on the push channel, the policy is

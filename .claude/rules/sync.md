@@ -39,8 +39,8 @@ original text: `docs/architecture/sync.md` (internal; may be absent).
 - `sync/git-sync.ts` `createGitSync` — the orchestration. It imports nothing from Electron: git
   (`sync/git-factory.ts`, the one place the app's git options live), dialogs (`SyncDialog`,
   rendered by `sync/message-box-dialog.ts`), the server API (`sync/server-api.ts`), clock and
-  logger are injected (`sync/types.ts` `SyncDeps`). `features/sync/ipc.ts` wires the real
-  implementations into `git:sync`; the app's git comes from `services/app-git.ts`.
+  logger are injected (`sync/types.ts` `SyncDeps`). `features/sync/wire.ts` wires the real
+  implementations into `git:sync` (`features/sync/ipc.ts`); the app's git comes from `services/app-git.ts`.
 - Helpers: `conflicts.ts`, `nested-repos.ts`, `large-files.ts`, `gitignore-merge.ts`,
   `sparse.ts`, `first-setup.ts`, `outside-checkout.ts`, `not-downloaded.ts`, `remote.ts`,
   `push-landed.ts`, `preview.ts`, `../protected-config.ts` (rejection recovery); private folders:

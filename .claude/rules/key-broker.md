@@ -348,7 +348,7 @@ who uses it).
 
 ## The app (K6): tokens into the AI's and tools' environment
 
-- `client/electron/services/broker-token-store.ts` (created in `main.ts`, cleared on sign-out):
+- `client/electron/services/broker-token-store.ts` (created in `features/broker/wire.ts`, cleared on sign-out):
   `POST /me/broker-tokens` with the session, one token per (company, consultation or
   `tool:<path>`, department), memory only, never logged or sent to the renderer; reused until
   less than 10 minutes (`REFRESH_MARGIN_MS`) are left, then replaced — every chat turn asks

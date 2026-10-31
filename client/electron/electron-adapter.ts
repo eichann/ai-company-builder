@@ -1,15 +1,18 @@
 // Electron's implementations of the ports feature modules depend on
 // (electron/features/ports.ts). Shell layer: with main.ts, preload.ts and
-// voice-input.ts, the only code that imports Electron.
+// voice-input.ts, the only code that imports Electron. Over 300 lines on
+// purpose: everything another desktop shell must re-implement is in one file.
 
+import path from 'path'
 import { pathToFileURL } from 'url'
-import { BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, shell, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, shell, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
 import type { DesktopShell, WindowPort } from './features/ports'
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
+import { createCloseGuard, type CloseAnswer, type CloseGuard } from './services/close-guard'
 
 export const desktopShell: DesktopShell = {
   openPath: (target) => shell.openPath(target),
@@ -165,6 +168,123 @@ export function createChatWindowHost(options: {
       return win && !win.isDestroyed() ? win.webContents : undefined
     },
     windows: () => [...windows.values()],
+  }
+}
+
+/**
+ * The app's page in every window. `appDir` holds preload.js; the page is
+ * ../dist/index.html, or the Vite dev server. `?window=chat` shows only one
+ * consultation (src/main.tsx).
+ */
+export function createAppPages(appDir: string) {
+  return {
+    /**
+     * The web preferences of every app window: the main one and the consultation
+     * windows (「別ウィンドウで開く」) share this one copy — isolated, sandboxed, no
+     * Node, the one preload; the page's CSP comes with index.html.
+     */
+    webPreferences(): WebPreferences {
+      const disableElectronSpellcheck =
+        process.env.ELECTRON_DISABLE_SPELLCHECK === '1' ||
+        process.env.ELECTRON_DISABLE_SPELL_CHECKING === '1'
+      return {
+        preload: path.join(appDir, 'preload.js'),
+        nodeIntegration: false,
+        contextIsolation: true,
+        sandbox: true,
+        // Reversible A/B test switch for input lag diagnosis.
+        spellcheck: !disableElectronSpellcheck,
+        // Required for the in-iframe Chromium PDF Viewer to render `blob:` PDFs in
+        // packaged builds. Without this, dev (HTTP origin) happens to work but the
+        // production file:// origin blocks the embedded PDF viewer.
+        plugins: true,
+      }
+    },
+    load(win: BrowserWindow, query?: Record<string, string>) {
+      if (process.env.VITE_DEV_SERVER_URL) {
+        const url = new URL(process.env.VITE_DEV_SERVER_URL)
+        for (const [key, value] of Object.entries(query ?? {})) url.searchParams.set(key, value)
+        void win.loadURL(url.toString())
+      } else {
+        void win.loadFile(path.join(appDir, '../dist/index.html'), query ? { query } : undefined)
+      }
+    },
+  }
+}
+
+/**
+ * The main window. Closing it (or quitting) first lets the renderer save every
+ * open tab (services/close-guard.ts); `askClose` sends it app:closeRequested.
+ */
+export function createMainWindowHost(options: {
+  webPreferences: () => WebPreferences
+  load: (win: BrowserWindow) => void
+  askClose: (window: WindowPort) => void
+  /** Sent with requests to image.docbase.io (its images answer 403 otherwise). */
+  docbaseCookie: () => string | undefined
+  onClosed: () => void
+}) {
+  let current: BrowserWindow | null = null
+  let guard: CloseGuard | null = null
+  let quitRequested = false
+  const live = () => (current && !current.isDestroyed() ? current : null)
+  const port = createWindowPort(() => current)
+  return {
+    window: () => current,
+    /** Events to the main window. */
+    port,
+    open() {
+      const win = new BrowserWindow({
+        width: 1400,
+        height: 900,
+        minWidth: 1000,
+        minHeight: 600,
+        titleBarStyle: 'hiddenInset',
+        webPreferences: options.webPreferences(),
+      })
+      current = win
+      win.on('closed', options.onClosed)
+      const winGuard = createCloseGuard({
+        ask: () => options.askClose(port),
+        close: () => { if (!win.isDestroyed()) win.close() },
+        quit: () => app.quit(),
+        setTimer: (fn, ms) => setTimeout(fn, ms),
+        clearTimer: timer => clearTimeout(timer as ReturnType<typeof setTimeout>),
+      })
+      if (quitRequested) winGuard.onQuitRequested()
+      guard = winGuard
+      win.on('close', event => { if (!winGuard.onClose()) event.preventDefault() })
+      // Fully disable spell checker to prevent dictionary loading overhead (especially for Japanese IME)
+      win.webContents.session.setSpellCheckerLanguages([])
+      const docbaseCookie = options.docbaseCookie()
+      if (docbaseCookie) {
+        win.webContents.session.webRequest.onBeforeSendHeaders({ urls: ['https://image.docbase.io/*'] }, (details, callback) => {
+          details.requestHeaders['Cookie'] = docbaseCookie
+          callback({ requestHeaders: details.requestHeaders })
+        })
+      }
+      // DevTools disabled for performance testing: win.webContents.openDevTools() to enable.
+      options.load(win)
+    },
+    /** `before-quit`: once the renderer says close, quit instead of only closing. */
+    quitting() { quitRequested = true; guard?.onQuitRequested() },
+    /** The renderer's answer to app:closeRequested; only the main window may answer. */
+    answerClose(senderId: number, answer: CloseAnswer) {
+      const win = live()
+      if (!win || senderId !== win.webContents.id) return
+      if (answer === 'ack' || answer === 'close' || answer === 'stay') guard?.answer(answer)
+      if (answer === 'stay') quitRequested = false
+    },
+    isWindow: (webContentsId: number) => live()?.webContents.id === webContentsId,
+    /** Brings it to the front; false when there is none. */
+    focus() {
+      const win = live()
+      if (!win) return false
+      if (win.isMinimized()) win.restore()
+      win.show()
+      win.focus()
+      return true
+    },
   }
 }
 

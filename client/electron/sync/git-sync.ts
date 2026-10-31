@@ -1658,7 +1658,7 @@ export interface GitSync {
 
 /**
  * Create the sync function. Each instance owns its per-repository lock, so
- * main.ts creates one for the app and each simulated member gets its own.
+ * features/sync/wire.ts creates one for the app and each simulated member gets its own.
  *
  * One press syncs the company repository and then every readable private
  * folder (its own repository, cloned at its path inside the company folder),
