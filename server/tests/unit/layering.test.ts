@@ -92,6 +92,17 @@ describe('server layering', () => {
     }
   })
 
+  // Test-only code (the fake HubSpot in tests/fakes/, fixtures, helpers) is not in the production
+  // image (server/Dockerfile copies src/ and shared/ only): src importing it would break the image
+  // or, worse, ship a fake upstream.
+  it('nothing in src/ imports from tests/', () => {
+    for (const file of tsFiles(SRC)) {
+      for (const spec of importsOf(file)) {
+        expect(target(file, spec), `${relative(SRC, file)}: ${spec}`).not.toMatch(/^\.\.\/tests(\/|$)/)
+      }
+    }
+  })
+
   it('lib/ does not import the database (except the listed modules)', () => {
     const seen: string[] = []
     for (const file of tsFiles(join(SRC, 'lib'))) {
