@@ -122,6 +122,18 @@ test('a refused or unreachable folder shows why on the screen it was chosen from
   expect(await callsOf(page, 'createDirectory')).toEqual([])
 })
 
+test('a folder refused for 既存のフォルダを開く is not taken as 新しく作成\'s parent folder', async ({ page }) => {
+  await open(page, { folder: 'refuse' })
+  await chooseCompany(page)
+  await button(page, /既存のフォルダを開く/).click()
+  await expect(page.getByText('別の会社のフォルダです。')).toBeVisible()
+  await button(page, /新しく作成/).click()
+  await expect(page.getByRole('heading', { name: '作業フォルダを設定' })).toBeVisible()
+  await expect(button(page, /フォルダを選択済み/)).toHaveCount(0)
+  await expect(page.getByText('作成されるフォルダ:')).toHaveCount(0)
+  await expect(button(page, /開始/)).toBeDisabled()
+})
+
 test('a cancelled folder dialog changes nothing', async ({ page }) => {
   await open(page, { pick: 'cancel' })
   await chooseCompany(page)

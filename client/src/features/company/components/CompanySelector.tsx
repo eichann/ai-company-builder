@@ -60,11 +60,11 @@ export function CompanySelector() {
     void setup.run(company, companyPath, folders, kind)
   }
 
-  // 既存のフォルダを開く: the chosen folder itself is the company folder.
+  // 既存のフォルダを開く: the chosen folder itself is the company folder. It is
+  // not 新しく作成's parent: a refused folder must not be preselected there.
   async function openExistingFolder(company: CompanyInfo) {
     const path = await chooseFolder()
     if (!path) return
-    setParentFolder(path)
     await prepare(company, path, 'clone')
   }
 
