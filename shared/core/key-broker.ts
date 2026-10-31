@@ -51,7 +51,10 @@ export interface BrokerServiceInfo {
   service: string
   label: string
   category: BrokerServiceCategory
-  /** Where the relay sends this service's requests unless the key says otherwise. */
+  /**
+   * The only hosts a key for this service may name (`builtinHostsOutside`):
+   * a built-in service's key never goes anywhere else.
+   */
   defaultHosts: readonly string[]
   /**
    * How the real key travels upstream: `Authorization: Bearer`, `x-api-key`
@@ -107,6 +110,27 @@ export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
 
 export function builtinBrokerService(service: string): BrokerServiceInfo | undefined {
   return BUILTIN_BROKER_SERVICES.find(s => s.service === service)
+}
+
+/**
+ * The hosts a key for a built-in service names outside that service's own
+ * hosts (empty: fine, also for any non-built-in service). A key for a
+ * built-in service may go only to its service's hosts — a HubSpot key must
+ * never reach Gemini's host (staging, 2026-11: one did, through the admin
+ * form). The server refuses such a key on create / update, and the relay
+ * refuses to use one saved before this rule.
+ */
+export function builtinHostsOutside(service: string, hosts: readonly string[]): string[] {
+  const builtin = builtinBrokerService(service)
+  if (!builtin) return []
+  return hosts.filter(h => !builtin.defaultHosts.includes(h))
+}
+
+/** The plain-Japanese refusal for `builtinHostsOutside` (hosts only, never a key). */
+export function builtinHostsMessage(service: string): string {
+  const builtin = builtinBrokerService(service)
+  if (!builtin) return ''
+  return `${builtin.label} の鍵は ${builtin.defaultHosts.join('、')} にだけ送れます。送り先を ${builtin.defaultHosts.join('、')} にしてください。`
 }
 
 /**

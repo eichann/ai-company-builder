@@ -117,16 +117,18 @@ describe('the relay over HTTPS', () => {
     const { createServices } = await import('../../src/composition')
     const services = createServices(db, undefined, { upstream: await adapter(async () => [{ address: '127.0.0.1', family: 4 }]) })
     const owner = { companyId: CO, userId: 'rh-owner', role: 'owner' }
+    // A built-in service's key goes only to its own host, so the local provider is a registered (generic) service.
+    expect(services.keyBroker.setRelayService(owner, 'fake-ai', { label: 'Fake AI', baseUrl: `https://${HOST}`, header: 'x-goog-api-key', format: '{key}' }).ok).toBe(true)
     expect((await services.keyBroker.create(owner, {
-      service: 'gemini', displayName: 'g', secret: FAKE_KEY,
-      destinations: { hosts: [HOST] }, audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] },
+      service: 'fake-ai', displayName: 'g', secret: FAKE_KEY,
+      audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] },
     })).ok).toBe(true)
-    const issued = services.brokerTokens.issue(owner, { conversationId: 'c', services: ['gemini'] })
+    const issued = services.brokerTokens.issue(owner, { conversationId: 'c', services: ['fake-ai'] })
     const token = issued.ok ? issued.value.token! : ''
     const { Hono } = await import('hono')
     const { brokerRelayRoutes } = await import('../../src/routes/broker-relay')
     const app = new Hono().route('/api/broker', brokerRelayRoutes(services.brokerRelay))
-    const call = () => app.request('http://acb.test/api/broker/gemini/v1beta/models/gemini-2.5-flash:generateContent', {
+    const call = () => app.request('http://acb.test/api/broker/fake-ai/v1beta/models/gemini-2.5-flash:generateContent', {
       method: 'POST', headers: { 'x-goog-api-key': token, 'content-type': 'application/json' }, body: '{"contents":[]}',
     })
 

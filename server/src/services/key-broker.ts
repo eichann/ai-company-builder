@@ -27,6 +27,8 @@ import {
   NO_BROKER_CAPS,
   brokerSecretLast4,
   builtinBrokerService,
+  builtinHostsMessage,
+  builtinHostsOutside,
   checkBrokerSecret,
   isPracticeSecret,
   PRACTICE_KEY_PREFIX,
@@ -176,6 +178,12 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   function relayHostsError(relay: BrokerRelayDefinition | null, hosts: string[], what: string): string | null {
     if (!relay || hosts.every(h => h === relay.host)) return null
     return `${what}: this service's requests go to ${relay.host} only`
+  }
+
+  /** A built-in service's keys go to its own hosts only (a HubSpot key never to Gemini's host). */
+  function builtinHostsRefusal(service: string, hosts: readonly string[]) {
+    if (builtinHostsOutside(service, hosts).length === 0) return null
+    return refuse('bad-request', builtinHostsMessage(service), { code: 'HOSTS_NOT_FOR_SERVICE' })
   }
 
   function serviceSettingOf(stored: StoredBrokerService | undefined, service: string): BrokerServiceSetting {
@@ -335,6 +343,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in destinations) return refuse('bad-request', destinations.error)
       const hostsError = relayHostsError(relay, destinations.value.hosts, 'destinations.hosts')
       if (hostsError) return refuse('bad-request', hostsError)
+      const builtinHosts = builtinHostsRefusal(service, destinations.value.hosts)
+      if (builtinHosts) return builtinHosts
       const audience = parseBrokerAudience(body.audience)
       if ('error' in audience) return refuse('bad-request', audience.error)
       const caps = parseBrokerCaps(body.caps)
@@ -421,6 +431,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         if ('error' in v) return refuse('bad-request', v.error)
         const hostsError = relayHostsError(relayOf(serviceSettings(member.companyId).get(row.service)), v.value.hosts, 'destinations.hosts')
         if (hostsError) return refuse('bad-request', hostsError)
+        const builtinHosts = builtinHostsRefusal(row.service, v.value.hosts)
+        if (builtinHosts) return builtinHosts
         after.destinations = v.value
       }
       if (body.audience !== undefined) {
@@ -509,6 +521,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const stored = serviceSettings(member.companyId).get(service)
       const hostsError = relayHostsError(relayOf(stored), hosts.value, 'ownKeyHosts')
       if (hostsError) return refuse('bad-request', hostsError)
+      const builtinHosts = builtinHostsRefusal(service, hosts.value)
+      if (builtinHosts) return builtinHosts
       saveServiceSetting(member, service, stored, { category: body.category, rule: body.rule, ownKeyHosts: hosts.value })
       return ok(view(member.companyId))
     },

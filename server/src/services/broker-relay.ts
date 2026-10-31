@@ -32,6 +32,7 @@ import {
   BROKER_TOKEN_PREFIX,
   brokerRelayReadOnlyAllows,
   builtinBrokerService,
+  builtinHostsOutside,
   isValidBrokerServiceName,
   looksLikeBrokerToken,
   normalizeBrokerModel,
@@ -427,6 +428,11 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       const path = checkUpstreamPath(rawPath)
       if (!path || path.path.includes(token)) return jsonError(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。', grant)
       const { pathPrefixes, models } = grant.destinations
+      // A built-in service's key saved with another service's host (before the server refused that):
+      // never used, so a HubSpot key cannot reach Gemini's host. The admin page marks it to fix.
+      if (builtin && builtinHostsOutside(builtin.service, grant.destinations.hosts).length > 0) {
+        return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', `この ${builtin.label} の鍵は送り先の設定が正しくないため使えません。管理者に「API キー」の画面で鍵の設定を直してもらってください。`, grant)
+      }
       const hosts = relay ? grant.destinations.hosts.filter(h => h === relay.host) : grant.destinations.hosts
       const host = relay || !builtin ? hosts[0] : hosts.includes(builtin.defaultHosts[0]) ? builtin.defaultHosts[0] : hosts[0]
       const basePath = relay?.basePath ?? ''
