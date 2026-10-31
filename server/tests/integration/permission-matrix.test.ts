@@ -25,6 +25,16 @@
  * its name never leaks). Git over HTTP is checked here on the advertisement and
  * HEAD; who may push what is git-http-access.test.ts and the push checker's
  * tests. The key broker's relay takes a token, never a session.
+ *
+ * Cross-company axis (multi-tenant foundation 案 A, `.claude/rules/server.md`
+ * "Company handle"): every route that takes an object id is also called by
+ * the owner of this company with an object of ANOTHER company (department,
+ * rule, scope, private folder, member, sandbox override, emergency stop, key,
+ * relay service, token, invitation) in this company's URL. The answer must be
+ * exactly the answer for an id that does not exist (status and body), and
+ * nothing of the other company may change. A new route with an object id that
+ * has no cross-company row fails the test (or is listed in NOT_OBJECT_IDS
+ * with its reason).
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -76,6 +86,21 @@ interface World {
   key: string
   memberToken: string
   invitationToken: string
+  /** Objects of ANOTHER company (the outsider's), for the cross-company axis. */
+  other: {
+    co: string
+    department: string
+    scope: string
+    rule: string
+    privateScope: string
+    privateName: string
+    member: string
+    stop: string
+    key: string
+    relayService: string
+    token: string
+    invitation: string
+  }
 }
 
 interface Req { path: string; body?: unknown; query?: string }
@@ -243,6 +268,81 @@ const MATRIX: Row[] = [
   r('DELETE /api/companies/:companyId/invitations/:invitationId', w => ({ path: `${C(w)}/invitations/no-such-invitation` }), [404, 404, 403, 403, 403, 401]),
 ]
 
+/**
+ * The cross-company axis: `req(w, id)` is sent once with the other company's
+ * object (`other(w)`) and once with an id that exists nowhere (`missing`);
+ * both answers must be the same.
+ */
+interface CrossRow { route: string; req: (w: World, id: string) => Req; other: (w: World) => string; missing?: string }
+const NO_SUCH_ID = '00000000-0000-4000-8000-00000000c0de'
+const x = (route: string, req: CrossRow['req'], other: CrossRow['other'], missing?: string): CrossRow => ({ route, req, other, missing })
+const D = (w: World, id: string) => `${C(w)}/departments/${id}`
+const GIT_SCOPE = (w: World, id: string) => `/api/git-http/${w.co}/scopes/${id}.git`
+
+const CROSS: CrossRow[] = [
+  x('GET /api/companies/:companyId/departments/:id', (w, id) => ({ path: D(w, id) }), w => w.other.department),
+  x('PUT /api/companies/:companyId/departments/:id', (w, id) => ({ path: D(w, id), body: { name: '乗っ取り' } }), w => w.other.department),
+  x('DELETE /api/companies/:companyId/departments/:id', (w, id) => ({ path: D(w, id) }), w => w.other.department),
+  x('GET /api/companies/:companyId/departments/:id/stats', (w, id) => ({ path: `${D(w, id)}/stats` }), w => w.other.department),
+  x('GET /api/companies/:companyId/departments/:id/managers', (w, id) => ({ path: `${D(w, id)}/managers` }), w => w.other.department),
+  x('PUT /api/companies/:companyId/departments/:id/managers', (w, id) => ({ path: `${D(w, id)}/managers`, body: { userIds: [] } }), w => w.other.department),
+
+  x('PATCH /api/companies/:companyId/permissions/rules/:ruleId', (w, id) => ({ path: `${C(w)}/permissions/rules/${id}`, body: { canRead: true, canWrite: false, force: true } }), w => w.other.rule),
+  x('DELETE /api/companies/:companyId/permissions/rules/:ruleId', (w, id) => ({ path: `${C(w)}/permissions/rules/${id}`, query: 'force=true' }), w => w.other.rule),
+  x('DELETE /api/companies/:companyId/permissions/scopes/:scopeId/rules', (w, id) => ({ path: `${C(w)}/permissions/scopes/${id}/rules`, query: 'force=true' }), w => w.other.scope),
+  x('POST /api/companies/:companyId/permissions/scopes/:scopeId/move', (w, id) => ({ path: `${C(w)}/permissions/scopes/${id}/move`, body: { toPath: '経理部', force: true } }), w => w.other.scope),
+
+  x('GET /api/companies/:companyId/private-folders/:scopeId', (w, id) => ({ path: `${C(w)}/private-folders/${id}` }), w => w.other.privateScope),
+  x('PUT /api/companies/:companyId/private-folders/:scopeId/members', (w, id) => ({ path: `${C(w)}/private-folders/${id}/members`, body: { viewers: [], editors: [] } }), w => w.other.privateScope),
+  x('POST /api/companies/:companyId/private-folders/:scopeId/make-public', (w, id) => ({ path: `${C(w)}/private-folders/${id}/make-public` }), w => w.other.privateScope),
+  x('DELETE /api/companies/:companyId/private-folders/:scopeId', (w, id) => ({ path: `${C(w)}/private-folders/${id}`, query: `confirm=${encodeURIComponent(w.other.privateName)}` }), w => w.other.privateScope),
+  x('GET /api/git-http/:company/scopes/:repo/info/refs', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/info/refs`, query: 'service=git-receive-pack' }), w => w.other.privateScope),
+  x('POST /api/git-http/:company/scopes/:repo/git-upload-pack', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/git-upload-pack` }), w => w.other.privateScope),
+  x('POST /api/git-http/:company/scopes/:repo/git-receive-pack', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/git-receive-pack` }), w => w.other.privateScope),
+  x('GET /api/git-http/:company/scopes/:repo/HEAD', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/HEAD` }), w => w.other.privateScope),
+
+  x('PUT /api/companies/:id/members/:userId/role', (w, id) => ({ path: `${C(w)}/members/${id}/role`, body: { role: 'admin' } }), w => w.other.member, 'pm-nobody'),
+  x('DELETE /api/companies/:id/members/:userId', (w, id) => ({ path: `${C(w)}/members/${id}` }), w => w.other.member, 'pm-nobody'),
+  x('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', (w, id) => ({ path: `${C(w)}/agent-sandbox/overrides/${id}`, body: { mode: 'off' } }), w => w.other.member, 'pm-nobody'),
+  x('DELETE /api/companies/:companyId/agent-stops/:stopId', (w, id) => ({ path: `${C(w)}/agent-stops/${id}` }), w => w.other.stop),
+
+  x('PUT /api/companies/:companyId/broker/keys/:keyId/secret', (w, id) => ({ path: `${C(w)}/broker/keys/${id}/secret`, body: { secret: 'fake-test-key-NOT-REAL-cross-0123456789' } }), w => w.other.key),
+  x('PATCH /api/companies/:companyId/broker/keys/:keyId', (w, id) => ({ path: `${C(w)}/broker/keys/${id}`, body: { displayName: '乗っ取り' } }), w => w.other.key),
+  x('DELETE /api/companies/:companyId/broker/keys/:keyId', (w, id) => ({ path: `${C(w)}/broker/keys/${id}` }), w => w.other.key),
+  x('DELETE /api/companies/:companyId/broker/relay-services/:service', (w, id) => ({ path: `${C(w)}/broker/relay-services/${id}` }), w => w.other.relayService, 'nosuchservice'),
+  x('DELETE /api/companies/:companyId/me/broker-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/broker-tokens/${id}` }), w => w.other.token),
+
+  x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
+]
+
+/**
+ * Routes whose parameters name no object of a company, with the reason. Every
+ * other route with a parameter beyond the company must have a CROSS row.
+ */
+const NOT_OBJECT_IDS: Record<string, string> = {
+  'GET /api/invitations/:token': 'an invitation link: the token finds the company (control plane; invitations tests)',
+  'POST /api/invitations/:token/accept': 'an invitation link: the token finds the company (control plane; invitations tests)',
+  'GET /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
+  'POST /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
+  'PUT /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
+  'PATCH /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
+  'DELETE /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
+  'PUT /api/companies/:companyId/broker/services/:service': 'a service name: sets this company\'s own settings row for it',
+  'PUT /api/companies/:companyId/broker/services/:service/own-keys': 'a service name: sets this company\'s own settings row for it',
+  'PUT /api/companies/:companyId/broker/relay-services/:service': 'a service name this company defines for itself (creates its own row)',
+  'PUT /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
+  'DELETE /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
+}
+
+/** The parameters of a route that name something other than the company in the URL. */
+function objectParams(path: string): string[] {
+  const params = [...path.matchAll(/:(\w+)/g)].map(m => m[1])
+  return params.filter((p, i) =>
+    p !== 'companyId' && p !== 'company' &&
+    !(i === 0 && p === 'id' && path.startsWith('/api/companies/:id')) &&
+    !(i === 0 && p === 'repo' && path.startsWith('/api/git-http/:repo')))
+}
+
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let app: any
 let world: World
@@ -335,6 +435,29 @@ async function seed(): Promise<World> {
   const token = await call('member', 'POST', `/api/companies/${co}/me/broker-tokens`, { conversationId: 'conv-matrix', department: '営業部' })
   const inv = await call('owner', 'POST', `/api/companies/${co}/invitations`, { role: 'member' })
 
+  // Another company (the outsider owns it) and one object of each kind there.
+  const other = (db.prepare('SELECT company_id FROM memberships WHERE user_id = ?').get(USER.outsider) as { company_id: string }).company_id
+  const O = `/api/companies/${other}`
+  const otherMember = 'pm-other-member'
+  db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
+    .run('m-other-member', otherMember, other, 'member', expires, expires)
+  const otherDept = (db.prepare('SELECT id FROM departments WHERE company_id = ? AND folder = ?').get(other, '営業部') as { id: string }).id
+  const otherRule = await call('outsider', 'POST', `${O}/permissions/rules`, {
+    path: '営業部', subjectType: 'user', subjectId: otherMember, canWrite: true, force: true,
+  })
+  const otherPf = await call('outsider', 'POST', `${O}/private-folders`, {
+    parentPath: '経理部', name: '機密', viewers: [otherMember], editors: [], force: true,
+  })
+  const otherStop = await call('outsider', 'POST', `${O}/agent-stops`, { userId: otherMember, tool: 'web' })
+  const otherKey = await services.keyBroker.create({ companyId: other, userId: USER.outsider, role: 'owner' }, {
+    service: 'gemini', displayName: 'Other Gemini', secret: 'fake-test-key-NOT-REAL-other-0123456789',
+    audience: { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] },
+  })
+  if (!otherKey.ok) throw new Error(`other key: ${JSON.stringify(otherKey)}`)
+  await call('outsider', 'PUT', `${O}/broker/relay-services/crm`, { label: '顧客管理', baseUrl: 'https://api.crm.example.com/v2/', header: 'Authorization', format: 'Token token={key}' })
+  const otherToken = await call('outsider', 'POST', `${O}/me/broker-tokens`, { conversationId: 'conv-other', department: '営業部' })
+  const otherInv = await call('outsider', 'POST', `${O}/invitations`, { role: 'member' })
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -343,7 +466,46 @@ async function seed(): Promise<World> {
     key: (db.prepare('SELECT id FROM broker_keys WHERE company_id = ?').get(co) as { id: string }).id,
     memberToken: token.tokenId,
     invitationToken: inv.token,
+    other: {
+      co: other,
+      department: otherDept,
+      scope: otherRule.scope.id,
+      rule: (otherRule.rules as Array<{ id: string; subjectId: string | null }>).find(x => x.subjectId === otherMember)!.id,
+      privateScope: otherPf.scopeId,
+      privateName: '機密',
+      member: otherMember,
+      stop: (otherStop.active as Array<{ id: string }>)[0].id,
+      key: (db.prepare('SELECT id FROM broker_keys WHERE company_id = ?').get(other) as { id: string }).id,
+      relayService: 'crm',
+      token: otherToken.tokenId,
+      invitation: otherInv.id,
+    },
   }
+}
+
+/** Every row of the other company, table by table (tables with company_id), plus its private folder's repository. */
+async function otherCompanyState(w: World): Promise<unknown> {
+  const { db } = await import('../../src/db')
+  const { existsSync } = await import('fs')
+  const { privateRepoPath } = await import('../../src/lib/private-folders')
+  const tables = (db.prepare(`SELECT name FROM sqlite_master WHERE type = 'table'`).all() as Array<{ name: string }>)
+    .map(t => t.name)
+    .filter(t => (db.prepare(`PRAGMA table_info(${t})`).all() as Array<{ name: string }>).some(c => c.name === 'company_id'))
+  const rows = Object.fromEntries(tables.map(t => [t, db.prepare(`SELECT * FROM ${t} WHERE company_id = ? ORDER BY rowid`).all(w.other.co)]))
+  const folder = (db.prepare('SELECT repo_id FROM scopes WHERE id = ?').get(w.other.privateScope) as { repo_id: string | null } | undefined)?.repo_id
+  return { rows, repo: folder ? existsSync(privateRepoPath(w.other.co, folder)) : 'gone' }
+}
+
+async function answer(method: string, req: Req, hide: string): Promise<{ status: number; body: string }> {
+  const headers: Record<string, string> = headersFor('owner')
+  const init: RequestInit = { method, headers }
+  if (req.body !== undefined) {
+    init.body = JSON.stringify(req.body)
+    headers['Content-Type'] = 'application/json'
+  }
+  const res: Response = await app.request(`http://acb.test${req.path}${req.query ? `?${req.query}` : ''}`, init)
+  const body = (await res.text()).split(hide).join('<id>')
+  return { status: res.status, body }
 }
 
 beforeAll(async () => {
@@ -373,6 +535,34 @@ describe('permission matrix', () => {
     const inMatrix = new Set(MATRIX.map(row => row.route))
     expect([...routes].filter(k => !inMatrix.has(k)), 'routes missing from the permission matrix').toEqual([])
     expect([...inMatrix].filter(k => !routes.has(k)), 'matrix rows for routes that no longer exist').toEqual([])
+  })
+
+  it('every route that takes an object id has a cross-company row (or a reason it names none)', () => {
+    const withIds = new Set<string>()
+    for (const route of app.routes as Array<{ method: string; path: string }>) {
+      if (route.method !== 'ALL' && objectParams(route.path).length > 0) withIds.add(`${route.method} ${route.path}`)
+    }
+    const covered = new Set([...CROSS.map(row => row.route), ...Object.keys(NOT_OBJECT_IDS)])
+    expect([...withIds].filter(k => !covered.has(k)), 'routes with an object id but no cross-company row').toEqual([])
+    expect([...covered].filter(k => !withIds.has(k)), 'cross-company rows for routes that no longer take an id').toEqual([])
+  })
+
+  it('another company\'s object in this company\'s URL is answered like one that does not exist, and stays unchanged', async () => {
+    const before = await otherCompanyState(world)
+    const wrong: string[] = []
+    for (const row of CROSS) {
+      const method = row.route.split(' ')[0]
+      const id = row.other(world)
+      expect(id, `${row.route}: the other company's object was not seeded`).toBeTruthy()
+      const missing = row.missing ?? NO_SUCH_ID
+      const theirs = await answer(method, row.req(world, id), id)
+      const none = await answer(method, row.req(world, missing), missing)
+      if (theirs.status !== none.status || theirs.body !== none.body) {
+        wrong.push(`${row.route}: another company's object → ${theirs.status} ${theirs.body}; a missing one → ${none.status} ${none.body}`)
+      }
+    }
+    expect(wrong, `Cross-company answers differ from not-found:\n${wrong.join('\n')}`).toEqual([])
+    expect(await otherCompanyState(world), 'the other company changed').toEqual(before)
   })
 
   it('each caller gets the expected status on every route', async () => {

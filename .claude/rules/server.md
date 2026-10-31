@@ -70,6 +70,15 @@ src/cli/           operator commands (generate-broker-kek.ts), each its own comp
   so an allowed caller passes the guard without changing state (invalid body → 400, missing
   target → 404 after the role check); keep it that way when adding rows. A changed row is a
   changed permission — say so in the PR.
+- Cross-company axis (same file, `CROSS`): every route whose URL takes an object id (department,
+  rule, scope, private folder incl. its git routes, member, sandbox override, emergency stop,
+  key, relay service, token, invitation) is called by this company's owner with ANOTHER
+  company's object in this company's URL; the status and body must equal those for an id that
+  exists nowhere, and every row of the other company (all tables with `company_id`) and its
+  private folder's repository must be unchanged afterwards. A route with an object parameter
+  and no `CROSS` row fails the test, unless it is in `NOT_OBJECT_IDS` with its reason (invitation
+  link tokens, the relay, service names that set this company's own row). A new endpoint that
+  takes an id gets its `CROSS` row in the same PR.
 
 ## Company handle (「会社つきの手形」, multi-tenant foundation 案 A, 2026-10-31)
 
