@@ -94,7 +94,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     agentStops: sqliteAgentStopRepository(conn),
     brokerKeys: sqliteKeyBrokerRepository(conn),
     brokerTokens: sqliteBrokerTokenRepository(conn),
-    orphanedScopes: gitOrphanedScopeReader(),
+    orphanedScopes: gitOrphanedScopeReader(conn),
   }
   const shared = {
     accounts: betterAuthAccountDirectory(),
@@ -165,7 +165,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     clientActivity: createClientActivityService({ ...repos, ...shared }),
     pushRejections: createPushRejectionRecorder(repos),
-    companyFiles: companyFileViews(conn),
+    companyFiles: companyFileViews(repos.scopes),
+    orphanedScopes: repos.orphanedScopes,
     accounts: shared.accounts,
     repoStore,
   }

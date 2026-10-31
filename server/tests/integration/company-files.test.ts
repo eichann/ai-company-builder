@@ -37,7 +37,7 @@ vi.mock('../../src/lib/auth', () => ({
 import { Hono } from 'hono'
 import { db, initDatabase } from '../../src/db'
 import { companyFilesRoute } from '../../src/routes/company-files'
-import { ensureCompanyScope } from '../../src/lib/permission-store'
+import { ensureCompanyScope, listScopesWithRules } from '../../src/lib/permission-store'
 import { createPrivateFolder, privateRepoPath } from '../../src/lib/private-folders'
 import { buildView, parseRequestPath, searchFiles, withSearchSlot, CompanyFilesError } from '../../src/lib/company-files'
 
@@ -392,7 +392,7 @@ describe('search', () => {
   })
 
   it('stops at the time limit and says so', async () => {
-    const view = await buildView(db, CO, 'u-other', 'member')
+    const view = await buildView(id => listScopesWithRules(db, id), CO, 'u-other', 'member')
     const r = await searchFiles(view, [], { query: 'line', regex: false, caseSensitive: false, limit: 200, timeoutMs: 1 })
     expect(r.timedOut).toBe(true)
   })

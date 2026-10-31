@@ -27,14 +27,13 @@
 import { spawn } from 'child_process'
 import { existsSync } from 'fs'
 import { StringDecoder } from 'string_decoder'
-import type Database from 'better-sqlite3'
 import { gitAsync } from './git-exec'
-import { listScopesWithRules } from './permission-store'
 import {
   canReadPrivateScope,
   isSameOrAncestorPath,
   resolveAccess,
   type PermissionRepository,
+  type ScopeWithRules,
 } from '../../shared/core/permissions'
 import { companyRepoPath } from './config'
 import { privateRepoPath } from './private-folders'
@@ -48,8 +47,6 @@ import {
   type CompanyFilesSearch,
   type CompanyFilesTree,
 } from '../../shared/types/company-files'
-
-type Conn = Database.Database
 
 export class CompanyFilesError extends Error {
   constructor(readonly code: CompanyFilesErrorCode, readonly status: 400 | 404 | 415 | 429 | 504, message: string) {
@@ -172,12 +169,13 @@ export interface CompanyFilesView {
 
 /**
  * Everything the member may read on the shared branches. Throws NOT_FOUND
- * when the company repository has no shared branch yet.
+ * when the company repository has no shared branch yet. `scopesOf` reads the
+ * company's scopes and rules (asked once, after the company snapshot).
  */
-export async function buildView(conn: Conn, companyId: string, userId: string, role: string): Promise<CompanyFilesView> {
+export async function buildView(scopesOf: (companyId: string) => ScopeWithRules[], companyId: string, userId: string, role: string): Promise<CompanyFilesView> {
   const company = await snapshotOf(companyRepoPath(companyId))
   if (!company) throw notFound()
-  const scopes = listScopesWithRules(conn, companyId)
+  const scopes = scopesOf(companyId)
   const perms: PermissionRepository = { getMemberRole: () => role, listScopes: () => scopes }
   const readable = (path: string) => resolveAccess(companyId, userId, path, perms).read
   const privateScopes = scopes.filter(s => s.repoId !== null)

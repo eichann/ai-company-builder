@@ -19,7 +19,8 @@ routes/    HTTP only: auth (getUserFromRequest), parse/validate, call a service,
     → ports/    interfaces (repositories, RepoStore, CompanyLock, Clock/IdGenerator,
                 AccountDirectory, SecretCipher, UpstreamClient, Transactions)
         ↑ adapters/   sqlite/* repositories, git-repo-store.ts, accounts.ts, system.ts,
-                      company-files.ts, local-secret-cipher.ts, kek-file.ts, upstream-https.ts
+                      company-files.ts, orphaned-scopes.ts (git + orphaned_scopes table),
+                      local-secret-cipher.ts, kek-file.ts, upstream-https.ts
 src/composition.ts — the only module that imports adapters; routes take `services` from it
 src/cli/           operator commands (generate-broker-kek.ts), each its own composition root
 ```

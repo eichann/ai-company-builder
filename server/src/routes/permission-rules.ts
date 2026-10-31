@@ -61,7 +61,7 @@
  *   POST   /permissions/scopes/:scopeId/move  { toPath } move the rules of a
  *          folder (and of folders inside it) to another existing folder — for
  *          rules left behind by a rename made by a sync push
- *          (lib/orphaned-scopes.ts). Same authorization as editing, for both
+ *          (adapters/orphaned-scopes.ts). Same authorization as editing, for both
  *          the old and the new place.
  *
  * Audit: there is no audit log in this codebase yet; rule rows keep

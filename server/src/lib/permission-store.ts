@@ -508,7 +508,7 @@ export function replaceScopeRules(
 /**
  * Move the rules of the scope at `fromPath`, and of every scope under it, to
  * the same relative places under `toPath` — "新しい場所に移す" for rules
- * whose folder was renamed by a sync push (lib/orphaned-scopes.ts). The
+ * whose folder was renamed by a sync push (adapters/orphaned-scopes.ts). The
  * caller checks that `toPath` exists and that no scope in its subtree has
  * rules; this throws if one does, so nothing is ever merged or overwritten.
  *
