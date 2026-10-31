@@ -42,17 +42,6 @@ vi.mock('../../src/lib/auth', () => ({
   },
 }))
 
-vi.mock('../../src/lib/orphaned-scopes', async (importOriginal) => {
-  const real = await importOriginal<typeof import('../../src/lib/orphaned-scopes')>()
-  return {
-    ...real,
-    scheduleOrphanedScopeCheck: (companyId: string) => {
-      gate.calls.push(companyId)
-      void gate.open.then(() => real.scheduleOrphanedScopeCheck(companyId))
-    },
-  }
-})
-
 import Database from 'better-sqlite3'
 import { Hono } from 'hono'
 import { serve } from '@hono/node-server'
@@ -63,7 +52,17 @@ import { permissionsRoute } from '../../src/routes/permissions'
 import { permissionRulesRoute } from '../../src/routes/permission-rules'
 import { replaceDepartmentManagers, replaceScopeRules, sqlitePermissionRepository } from '../../src/lib/permission-store'
 import { resolveAccess } from '../../shared/core/permissions'
-import { resetOrphanedScopeCache } from '../../src/lib/orphaned-scopes'
+import { resetOrphanedScopeCache } from '../../src/adapters/orphaned-scopes'
+import { services } from '../../src/composition'
+
+// git-http asks for the post-push check through the services; hold it at the gate.
+{
+  const schedule = services.orphanedScopes.scheduleCheck.bind(services.orphanedScopes)
+  vi.spyOn(services.orphanedScopes, 'scheduleCheck').mockImplementation((companyId: string) => {
+    gate.calls.push(companyId)
+    void gate.open.then(() => schedule(companyId))
+  })
+}
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 

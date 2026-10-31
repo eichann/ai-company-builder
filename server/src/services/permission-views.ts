@@ -141,7 +141,7 @@ export function createPermissionViewService(deps: PermissionViewDeps) {
       })
 
       // Rules whose folder is gone from the shared branch (renamed or removed by a
-      // sync push): see lib/orphaned-scopes.ts.
+      // sync push): see adapters/orphaned-scopes.ts.
       const visibleIds = new Set(visible.map(s => s.id))
       const orphaned = (await orphanedScopes.find(companyId)).filter(o => visibleIds.has(o.scope.id))
 

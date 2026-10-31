@@ -54,8 +54,6 @@ const LIB_WITH_DATABASE: Record<string, string> = {
   'lib/auth.ts': 'Better Auth owns auth.sqlite: its one connection (authDb) is built with Better Auth here, and every route\'s sign-in check (getUserFromRequest) lives next to it',
   'lib/permission-store.ts': 'scopes and rules; moving to adapters/sqlite (next PRs)',
   'lib/private-folders.ts': 'private folder rows next to their scope repositories; moving to adapters (next PRs)',
-  'lib/company-files.ts': 'reads the scopes to build a member\'s view; moving to adapters (next PRs)',
-  'lib/orphaned-scopes.ts': 'reads the scopes against the shared branch; moving to adapters (next PRs)',
 }
 
 describe('server layering', () => {

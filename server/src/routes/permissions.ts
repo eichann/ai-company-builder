@@ -12,7 +12,7 @@
  *
  * /overview (attention.orphanedScopes) and /permissions (orphanedScopes) list
  * scopes with rules whose folder no longer exists on the shared branch
- * (lib/orphaned-scopes.ts).
+ * (adapters/orphaned-scopes.ts).
  *
  * Department managers are in routes/departments.ts (/:id/managers).
  * The views are built in services/permission-views.ts; semantics of scopes

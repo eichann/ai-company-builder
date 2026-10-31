@@ -8,9 +8,15 @@ export interface OrphanedScope {
 
 /**
  * Scopes with rules whose folder is missing on the shared branch
- * (lib/orphaned-scopes.ts: the repository's tree against the scopes, cached
- * per commit). Never throws: a failed check answers [].
+ * (adapters/orphaned-scopes.ts: the repository's tree against the scopes,
+ * cached per commit). Never throws: a failed check answers [].
  */
 export interface OrphanedScopeReader {
   find(companyId: string): Promise<OrphanedScope[]>
+  /**
+   * After an accepted push: check again once the response is on its way (a
+   * later turn of the event loop, asynchronous), so it neither delays nor can
+   * fail the push.
+   */
+  scheduleCheck(companyId: string): void
 }

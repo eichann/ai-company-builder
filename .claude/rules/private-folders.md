@@ -7,7 +7,7 @@ paths:
   - "server/src/lib/git-server/scope-repo.ts"
   - "server/src/lib/client-version.ts"
   - "server/src/routes/permission-rules.ts"
-  - "server/src/lib/orphaned-scopes.ts"
+  - "server/src/adapters/orphaned-scopes.ts"
   - "shared/types/private-folders.ts"
   - "shared/core/reserved-paths.ts"
   - "server/tests/**/private-folders.test.ts"
