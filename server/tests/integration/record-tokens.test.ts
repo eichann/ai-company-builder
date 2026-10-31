@@ -150,3 +150,25 @@ describe('what a record token can reach', () => {
     expect((await ai('acb_rec_garbage', 'GET', '/my-turn')).status).toBe(401)
   })
 })
+
+describe('provenance in the ledger (informational, never authorizes)', () => {
+  it('a person confirming their AI\'s suggestion is recorded as human with proposed_by ai and the consultation; the AI\'s conversation comes from its token', async () => {
+    const made = await session('u-owner', 'POST', '/records/item', { type: 'task', title: '提案のお礼状', fields: { assignee: 'u-owner' } })
+    const id = (made.body.data?.record as { id: string }).id
+    const { token } = await tokenFor('u-owner', 'act')
+    // The AI's call: whatever its body says, the conversation is its token's and proposed_by stays empty.
+    expect((await ai(token, 'POST', `/item/${id}/actions/start`, { expectedVersion: 1, conversationId: 'forged', proposedBy: 'ai' })).status).toBe(200)
+    // The member confirms what the AI suggested: still a human action, so it may do what the AI may not (complete).
+    const done = await session('u-owner', 'POST', `/records/item/${id}/actions/complete`, { expectedVersion: 2, proposedBy: 'ai', conversationId: 'consult-42' })
+    expect(done.status).toBe(200)
+    const entries = ((await session('u-owner', 'GET', `/records/item/${id}/history`)).body.data?.entries ?? []) as Array<Record<string, unknown>>
+    expect(entries.map(e => [e.action, e.actorKind, e.proposedBy, e.conversationId])).toEqual([
+      ['create', 'human', null, null],
+      ['start', 'ai', null, 'conv-1'],
+      ['complete', 'human', 'ai', 'consult-42'],
+    ])
+    expect((await session('u-owner', 'GET', `/records/item/${id}/versions/3`)).body.data).toMatchObject({
+      state: 'done', origin: { action: 'complete', actorKind: 'human', proposedBy: 'ai', conversationId: 'consult-42' },
+    })
+  })
+})

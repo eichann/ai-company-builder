@@ -34,7 +34,8 @@ function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Respon
   return auth.value
 }
 
-const aiActor = (h: RecordTokenHolder) => ({ kind: 'ai' as const, source: h.agent })
+// The conversation comes from the token, never the body (a body's proposedBy / conversationId is ignored here).
+const aiActor = (h: RecordTokenHolder) => ({ kind: 'ai' as const, source: h.agent, conversationId: h.conversationId })
 
 async function jsonBody(c: Context): Promise<unknown> {
   try { return await c.req.json() } catch { return null }

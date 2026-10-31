@@ -70,6 +70,9 @@ export const COMMANDS = defineCommands([
       expectedVersion: z.number().int().min(0).describe('The record version the member saw'),
       note: z.string().max(2000).optional(),
       args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+      // The member confirms what their AI suggested in a consultation: informational provenance for the ledger.
+      proposedBy: z.literal('ai').optional(),
+      conversationId: z.string().max(200).optional(),
     }),
   },
   {

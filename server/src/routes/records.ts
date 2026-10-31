@@ -27,11 +27,14 @@ import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
 import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
+import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 
 export const recordsRoute = new Hono()
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
+/** A person's action, with the provenance their app reports (informational only, never authorizes: record-engine.ts). */
+const humanWith = (body: unknown) => ({ ...HUMAN, ...selfReportedProvenance(body) })
 const { access, records, recordEngine, recordAiTokens } = services
 
 async function authAndAuthorize(c: Context): Promise<Member | Response> {
@@ -104,7 +107,8 @@ recordsRoute.get('/records/my-turn', async (c) => {
 recordsRoute.post('/records/item', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  const result = recordEngine.create(member, HUMAN, await jsonBody(c))
+  const body = await jsonBody(c)
+  const result = recordEngine.create(member, humanWith(body), body)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, 201)
 })
@@ -112,13 +116,15 @@ recordsRoute.post('/records/item', async (c) => {
 recordsRoute.post('/records/item/:recordId/actions/:action', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await recordEngine.act(member, HUMAN, c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+  const body = await jsonBody(c)
+  return answer(c, await recordEngine.act(member, humanWith(body), c.req.param('recordId'), c.req.param('action'), body))
 })
 
 recordsRoute.post('/records/item/:recordId/undo', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, recordEngine.undo(member, HUMAN, c.req.param('recordId'), await jsonBody(c)))
+  const body = await jsonBody(c)
+  return answer(c, recordEngine.undo(member, humanWith(body), c.req.param('recordId'), body))
 })
 
 recordsRoute.get('/records/item/:recordId/history', async (c) => {

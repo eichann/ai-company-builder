@@ -182,12 +182,28 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   (`reason` = the note, `materials` as references — a file at a commit or a record at a version
   it has had, both readable by the actor —, `policyVersion`, `precedents`, `supersedes`; §13.2 案
   Y, only the container for now), the type version.
+- **Provenance** (owner: light and reversible; columns `proposed_by`, `conversation_id` added by
+  `migrateRecordLedgerProvenance`, nullable): `proposed_by: 'ai'` when a person confirms an action
+  their AI suggested in a consultation (`proposedBy: 'ai'` in the session route's body; actor kind
+  stays `human`), `conversation_id` the consultation (the body's for a person, **the token's** for
+  the AI — the AI routes ignore both body fields; `proposed_by` stays null for the AI, whose actor
+  kind already says ai). **Informational only**: the client can report anything, so nothing
+  authorizes on them (`selfReportedProvenance`, `services/record-engine.ts`). Shown in the history
+  and in `GET …/versions/:version` (`origin`: the entry that made that version). The command
+  `records.runAction` carries both for the confirm screen of milestone 5. Test:
+  `server/tests/integration/record-tokens.test.ts` "provenance in the ledger".
 - **Undo** (`POST …/undo { version, expectedVersion }`): a new `undo` entry with the reversed
   changes (`reversesVersion`); refused when a later entry changed the same values
   (`CHANGED_SINCE`), for `create` / `undo` entries, and for anyone but the entry's actor or an
   owner/admin.
 - **Replay** (§13.11): `replayRecordState(entries, n)` folds entries 1..n; it throws on a gap or a
-  version that does not exist rather than describe another version. `GET …/versions/:version`.
+  version that does not exist rather than describe another version. `GET …/versions/:version`
+  answers the values plus `origin` (action, actor, kind, at, provenance of entry n).
+- **Assignee must see the record**: setting `assignee` (on create, or as an action's argument)
+  to a member who cannot read the record's place (private folder, scope rules — their own
+  `recordReader`) → 400 `ASSIGNEE_CANNOT_READ` 「この人はこの記録を見られないため、担当にできません。…」,
+  which never names the place. Test: `server/tests/unit/record-engine.test.ts` "an assignee must
+  be able to see the record".
 - **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
   the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
   value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the

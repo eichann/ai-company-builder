@@ -49,6 +49,8 @@ export interface RecordTokenHolder {
   scope: 'read' | 'act'
   /** The AI's agent id as the app said when asking (recorded as the actor's source). */
   agent: string
+  /** The consultation the token was issued for (recorded in the ledger; informational). */
+  conversationId: string
   tokenId: string
 }
 
@@ -116,7 +118,7 @@ export function createRecordAiTokenService(deps: RecordAiTokenDeps) {
       if (deps.companyStopped(companyId)) {
         return refuse('forbidden', '管理者が AI の利用を一時停止しています。再開されるまで使えません。', { code: 'ACB_STOPPED' })
       }
-      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id })
+      return ok({ member, scope: row.scope, agent: row.agent, tokenId: row.id, conversationId: row.conversationId })
     },
   }
 }

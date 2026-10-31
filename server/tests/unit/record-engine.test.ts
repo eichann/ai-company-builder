@@ -68,6 +68,13 @@ const act = (member: Member, id: string, action: string, body: Body) => engine.a
 const create = (member: Member, body: Body) => engine.create(member, actorOf(body), body)
 const undo = (member: Member, id: string, body: Body) => engine.undo(member, actorOf(body), id, body)
 
+/** A replayed version without its origin (the entry that made it). */
+function replayed<T extends { origin: unknown }>(r: { ok: true; value: T } | { ok: false; body: unknown }): Omit<T, 'origin'> {
+  const rest: Partial<T> = { ...ok(r) }
+  delete rest.origin
+  return rest as Omit<T, 'origin'>
+}
+
 /** A task requested by alice, assigned to bob. */
 function newTask(co = 'a', extra: Record<string, unknown> = {}) {
   return ok(create(m('u-alice', co), { type: 'task', title: '提案書を作る', fields: { assignee: 'u-bob' }, ...extra })).record
@@ -92,6 +99,7 @@ beforeEach(() => {
     },
     managedFolders: () => [],
     isMember: (_c, userId) => PEOPLE.includes(userId),
+    roleOf: (_c, userId) => (userId === 'u-owner' ? 'owner' : PEOPLE.includes(userId) ? 'member' : null),
     notify: (companyId, userIds) => notified.push([companyId, userIds]),
   })
   service = createRecordService({ companyData: source, clock, indexer: { schedule: async () => {} } })
@@ -179,9 +187,9 @@ describe('replaying a record’s past (§13.11)', () => {
     ok(await act(m('u-bob'), t.id, 'start', { expectedVersion: 1 }))
     ok(await act(m('u-bob'), t.id, 'assign', { expectedVersion: 2, args: { assignee: 'u-carol' }, note: '担当交代' }))
     ok(await act(m('u-carol'), t.id, 'set_due', { expectedVersion: 3, args: { due: '2026-12-01' } }))
-    expect(ok(engine.atVersion(m('u-mallory'), t.id, '1'))).toEqual({ version: 1, state: 'todo', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob' } })
-    expect(ok(engine.atVersion(m('u-mallory'), t.id, '3'))).toEqual({ version: 3, state: 'in_progress', fields: { requested_by: 'u-alice', assignee: 'u-carol', next_actor: 'u-carol' } })
-    const latest = ok(engine.atVersion(m('u-mallory'), t.id, '4'))
+    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '1'))).toEqual({ version: 1, state: 'todo', fields: { requested_by: 'u-alice', assignee: 'u-bob', next_actor: 'u-bob' } })
+    expect(replayed(engine.atVersion(m('u-mallory'), t.id, '3'))).toEqual({ version: 3, state: 'in_progress', fields: { requested_by: 'u-alice', assignee: 'u-carol', next_actor: 'u-carol' } })
+    const latest = replayed(engine.atVersion(m('u-mallory'), t.id, '4'))
     const stored = source.forCompany('a').records.states([t.id])[0]
     expect(latest).toEqual({ version: stored.version, state: stored.state, fields: JSON.parse(stored.fields) })
     expect(engine.atVersion(m('u-mallory'), t.id, '5')).toMatchObject({ ok: false, body: { code: 'VERSION_NOT_FOUND' } })
@@ -267,6 +275,35 @@ describe('「あなたの番」 across types implementing request', () => {
     expect(ids(ok(service.myTurn(m('u-carol'))))).toEqual([t2.id])
     ok(await act(m('u-bob'), ap.id, 'approve', { expectedVersion: 1 }))
     expect(ok(service.myTurn(m('u-bob'))).total).toBe(0)
+  })
+})
+
+describe('an assignee must be able to see the record', () => {
+  it('is refused on create and on assign when they cannot read its place, without naming the place', async () => {
+    // 営業部/評価: a private folder only u-carol may read; 経理: closed to u-mallory by scope rules.
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES ('a-priv', 'a', '営業部/評価', 'folder', 'a-repo', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-priv-e', 'a-priv', 'everyone', NULL, 0, 0, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-priv-c', 'a-priv', 'user', 'u-carol', 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES ('a-acc', 'a', '経理', 'folder', ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-e', 'a-acc', 'everyone', NULL, 1, 1, ?)").run(TS)
+    conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES ('a-acc-m', 'a-acc', 'user', 'u-mallory', 0, 0, ?)").run(TS)
+
+    const refused = create(owner(), { type: 'task', title: '経理の締め', folder: '経理', fields: { assignee: 'u-mallory' } })
+    expect(refused).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'ASSIGNEE_CANNOT_READ' } })
+    expect(ok(create(owner(), { type: 'task', title: '経理の締め', folder: '経理', fields: { assignee: 'u-bob' } })).record.fields.assignee).toBe('u-bob')
+
+    // A task whose file is in the private folder (indexed from its repository).
+    const id = 'task-priv0001'
+    sqliteTransactions(conn).run(() => applyRecordChanges(source.forCompany('a').records, {
+      repoKey: 'scope:a-priv', scopeId: 'a-priv', prefix: '営業部/評価', full: false, tip: 'b'.repeat(40), at: at(),
+      scopes: source.forCompany('a').scopes.listWithRules(), changes: [{ path: '評価.md', text: `---\nid: ${id}\ntype: task\n---\n# 評価のまとめ\n` }],
+    }))
+    const r = await act(owner(), id, 'assign', { expectedVersion: 0, args: { assignee: 'u-bob' }, note: '担当を決める' })
+    expect(r).toMatchObject({ ok: false, body: { code: 'ASSIGNEE_CANNOT_READ' } })
+    // The answer never names where the record is.
+    expect(JSON.stringify(r)).not.toMatch(/評価|営業部/)
+    expect(source.forCompany('a').records.ledger(id)).toHaveLength(0)
+    expect(ok(await act(owner(), id, 'assign', { expectedVersion: 0, args: { assignee: 'u-carol' }, note: '担当を決める' })).record.fields.assignee).toBe('u-carol')
   })
 })
 
