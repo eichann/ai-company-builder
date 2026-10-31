@@ -33,6 +33,7 @@
 //                             exceptions only)
 //   exhaustive-deps           disabled in client/src at most as often as today,
 //                             each time with a reason
+//   useEffect                 called in client/src at most as often as today
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
@@ -375,6 +376,36 @@ test('exhaustive-deps is turned off no more often than today, and each time with
     '  // keeps the first value', '  // eslint-disable-next-line react-hooks/exhaustive-deps', '}, [])',
     '  // eslint-disable-next-line react-hooks/exhaustive-deps -- only on mount', '}, [])',
   ].join('\n')), [{ where: 'x.ts:2', reasoned: false }, { where: 'x.ts:5', reasoned: true }, { where: 'x.ts:7', reasoned: true }], 'self-test')
+})
+
+/**
+ * An effect is for syncing with something outside React (IPC events, DOM
+ * listeners, timers, observers, third-party widgets); derived state, chains
+ * that react to state, data loading and resets on a prop change have other
+ * homes (renderer-structure.md "Effects"). The count may only go down: lower
+ * this when you remove effects, never raise it.
+ */
+const MAX_USE_EFFECTS = 172
+
+/** `useEffect(` calls in one file's code (comments do not count). */
+function useEffectCalls(source: string): number {
+  return stripComments(source).match(/\buseEffect\s*\(/g)?.length ?? 0
+}
+
+test('useEffect is called no more often than today in client/src', () => {
+  const perFile = sourceFiles(join(CLIENT, 'src'))
+    .map(f => [rel(f), useEffectCalls(readFileSync(f, 'utf8'))] as const)
+    .filter(([, n]) => n > 0)
+  const total = perFile.reduce((sum, [, n]) => sum + n, 0)
+  assert.ok(total <= MAX_USE_EFFECTS,
+    `${total} useEffect calls (at most ${MAX_USE_EFFECTS}): compute derived values during render, act in the event handler, load data through the feature's data hook, reset with \`key\`; keep effects for syncing with the outside world, preferably through the shared hooks (renderer-structure.md "Effects")`)
+  if (total < MAX_USE_EFFECTS) {
+    console.log(`[useEffect ratchet] ${total} calls, ceiling ${MAX_USE_EFFECTS}: lower MAX_USE_EFFECTS to ${total}`)
+  }
+  assert.equal(useEffectCalls([
+    'useEffect(() => {}, [])', 'React.useEffect (() => {})', '// useEffect(() => {})',
+    '/* useEffect( */ useLayoutEffect(() => {})', 'const myuseEffect = 1',
+  ].join('\n')), 2, 'self-test')
 })
 
 test('the duplicate type name check sees definitions, not re-exports or imports (self-test)', () => {
