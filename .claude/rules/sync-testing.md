@@ -39,8 +39,8 @@ the machine is shared — CI runs all of it.
   in zero or two shards, or a listed file no longer exists. The required check "Sync harness (macOS)" is green
   only when every shard passed (or all were skipped).
 - Soak on PRs: one seed per world (`SYNC_SOAK_SEEDS=1`, `SYNC_SOAK_MIXED_SEEDS=101`,
-  `SYNC_SOAK_PRIVATE_SEEDS=201`, 3 members × 6 rounds). Push to main, nightly (18:17 UTC) and
-  manual runs: seeds `1,2,3` / `101,102` / `201,202`, 3 members × 8 rounds. A failing seed prints
+  `SYNC_SOAK_PRIVATE_SEEDS=201`, 3 members × 6 rounds). Nightly (18:17 UTC) and manual runs
+  (a push to main skips the macOS jobs since 2026-10-31; its PR ran them): seeds `1,2,3` / `101,102` / `201,202`, 3 members × 8 rounds. A failing seed prints
   its seed and operation log and reproduces locally with the same variables.
 - PRs run the harness only when sync's inputs change (`.github/scripts/changed-areas.sh`, list
   `SYNC`): `client/electron/sync/`, `protected-config.ts`, `write-guard.ts`, `client/shared/`,
