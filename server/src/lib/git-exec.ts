@@ -54,6 +54,18 @@ export async function gitAsync(args: string[], opts: GitAsyncOptions = {}): Prom
 }
 
 /**
+ * gitAsync for output that must stay bytes (`cat-file --batch`: its headers
+ * count bytes, so the content cannot be decoded before it is split).
+ */
+export async function gitBufferAsync(args: string[], input?: string, maxBuffer = GIT_MAX_BUFFER): Promise<Buffer> {
+  const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' }
+  const child = execFileAsync('git', args, { encoding: 'buffer', maxBuffer, env })
+  if (input !== undefined) child.child.stdin?.end(input)
+  const { stdout } = await child
+  return stdout
+}
+
+/**
  * gitAsync with a watchdog. git runs in its own process group (spawn
  * `detached`; execFile does not pass that option on) so the watchdog kills it
  * together with what it started — receive-pack, the hook, the checker. They

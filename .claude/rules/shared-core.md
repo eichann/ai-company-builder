@@ -33,13 +33,16 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
+| `yaml-lite.ts` | the strict YAML subset of type definitions and record files (`parseYamlLite`, `splitFrontmatter`) (`records.md`) |
+| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES`; the push checker uses it too |
+| `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId` |
 | `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`index.ts`).
+`records.ts`, `index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)

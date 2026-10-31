@@ -11,6 +11,9 @@
  *   client-version.ts     desktop-app build identity: parsing and ordering
  *   agent-sandbox.ts      the company's AI sandbox setting (「AI の囲い」): shape, validation
  *   key-broker.ts         the API key broker (「API キー」): services, rules, input validation
+ *   yaml-lite.ts          the strict YAML subset of type definitions and record files
+ *   record-types.ts       type definitions (.acb/types/<name>.md): parse, validate, compare versions
+ *   records.ts            record files (id / type / links frontmatter): parse, title, summary, ids
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -26,3 +29,6 @@ export * from './write-access'
 export * from './client-version'
 export * from './agent-sandbox'
 export * from './key-broker'
+export * from './yaml-lite'
+export * from './record-types'
+export * from './records'

@@ -9,6 +9,8 @@
  *   instruction files  CLAUDE.md / CLAUDE.local.md / AGENTS.md: owner/admin,
  *                      or a manager inside their department   (new)
  *   auto-run skills    owner/admin only
+ *   type definitions   .acb/types/: owner/admin only; for them too, a change
+ *                      that removes or renames something (records.md)   (new)
  *   .personal content  nobody
  *   .backups/.workspace nobody (added/modified)   (new)
  *   reserved paths     nobody — a private folder's path in the company
@@ -46,6 +48,8 @@ import {
   localOnlyPaths,
   personalPaths,
   protectedPaths,
+  recordTypePaths,
+  RECORD_TYPE_FILE_RE,
   sortUnique,
   utf8Bytes,
   windowsPathProblems,
@@ -53,6 +57,7 @@ import {
 } from './rules'
 import { emptyFindings, renderReport, type Findings } from './report'
 import { instructionFileAllowed, reservedAncestorOf, reservedPrefixOf, type WriteGate } from './policy'
+import { compareTypeDefinitions, parseTypeFile, typeNameOfPath } from '../../../shared/core/record-types'
 
 export interface PushCheckContext {
   /** ACB_PUSHER_ROLE as git-http set it (undefined when absent). */
@@ -259,6 +264,50 @@ async function checkReserved(changes: RefChanges, reserved: string[]): Promise<s
   return captured(sortUnique(out).join('\n'))
 }
 
+const TYPE_UNREADABLE = '内容を確認できませんでした'
+
+/**
+ * "path<TAB>reason" lines for type definitions (`.acb/types/<name>.md`) the
+ * net diff changes in a way that removes or renames something (a field,
+ * state, action, link…): refused for everyone, owner/admin included, until a
+ * migration tool exists (ontology 0.18-3). Only definitions that read before
+ * and after are compared; deletions and unreadable YAML are the index's
+ * business (it keeps the definition in force and reports it). A git failure
+ * rejects the changed definitions (fails closed).
+ */
+async function checkTypeChanges(ref: RefUpdate): Promise<string> {
+  if (ref.oldSha === ZERO_SHA) return ''
+  const r = await runGit(['diff-tree', '-r', '--no-renames', '--no-abbrev', '-z', ref.oldSha, ref.newSha, '--', '.acb/types'])
+  const tokens = r.stdout.toString('utf8').split('\0')
+  const pairs: Array<{ path: string; oldSha: string; newSha: string }> = []
+  for (let i = 0; i + 1 < tokens.length; i += 2) {
+    const meta = tokens[i].split(' ')
+    const path = tokens[i + 1]
+    if (!RECORD_TYPE_FILE_RE.test(path) || meta[4] !== 'M') continue
+    pairs.push({ path, oldSha: meta[2], newSha: meta[3] })
+  }
+  if (!r.ok) return captured(pairs.map(p => `${utf8Bytes(cleanControl(p.path))}\t${utf8Bytes(TYPE_UNREADABLE)}`).join('\n'))
+  if (pairs.length === 0) return ''
+  let blobs: Map<string, Buffer>
+  try {
+    blobs = await readBlobs([...new Set(pairs.flatMap(p => [p.oldSha, p.newSha]))])
+  } catch {
+    return captured(pairs.map(p => `${utf8Bytes(cleanControl(p.path))}\t${utf8Bytes(TYPE_UNREADABLE)}`).join('\n'))
+  }
+  const out: string[] = []
+  for (const p of pairs) {
+    const name = typeNameOfPath(p.path) as string
+    const before = parseTypeFile(name, (blobs.get(p.oldSha) as Buffer).toString('utf8'))
+    const after = parseTypeFile(name, (blobs.get(p.newSha) as Buffer).toString('utf8'))
+    if (!before.ok || !after.ok) continue
+    const breaking = compareTypeDefinitions(before.definition, after.definition).breaking
+    if (breaking.length > 0) {
+      out.push(`${utf8Bytes(cleanControl(p.path))}\t${utf8Bytes(`消す・名前を変える変更はまだできません: ${breaking.slice(0, 3).join('、')}`)}`)
+    }
+  }
+  return captured(out.join('\n'))
+}
+
 async function checkWindowsPaths(newSha: string): Promise<string> {
   const r = await runGit(['-c', 'core.quotePath=false', 'ls-tree', '-r', '--name-only', newSha])
   const all = captured(r.stdout.toString('latin1'))
@@ -354,6 +403,14 @@ export async function runPushCheck(stdin: Buffer, ctx: PushCheckContext): Promis
 
       const autorun = await checkAutorun(changes, ctx.contentCheckAvailable)
       if (autorun) f.autorun += autorun + '\n'
+
+      const types = lists.ok && ctx.scopePath === undefined ? captured(recordTypePaths(nameListLines(lists)).join('\n')) : ''
+      if (types) f.recordTypes += types + '\n'
+    }
+
+    if (ctx.scopePath === undefined) {
+      const typeChanges = await checkTypeChanges(ref)
+      if (typeChanges) f.typeChanges += typeChanges + '\n'
     }
 
     const added = await changes.nameLists(['--diff-filter=d'])

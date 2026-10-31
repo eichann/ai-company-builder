@@ -414,7 +414,98 @@ export function initDatabase(conn: Database.Database = sqlite) {
       revoked_at TEXT
     );
 
+    -- The company map of the light ontology (stage 4-2, .claude/rules/records.md).
+    -- Every table is behind the company handle (ports/company-data.ts records).
+    -- The feature is off per company until an owner/admin turns it on.
+    CREATE TABLE IF NOT EXISTS record_settings (
+      company_id TEXT PRIMARY KEY REFERENCES companies(id) ON DELETE CASCADE,
+      enabled INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT
+    );
+
+    -- Type definitions in force, every version kept (records remember the
+    -- version they were made under). source: file (.acb/types/<name>.md) or core.
+    CREATE TABLE IF NOT EXISTS record_types (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      name TEXT NOT NULL,
+      version INTEGER NOT NULL,
+      definition TEXT NOT NULL,
+      source TEXT NOT NULL CHECK (source IN ('file', 'core')),
+      commit_sha TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, name, version)
+    );
+
+    -- The record index: rebuildable from the files (path NULL = a record that
+    -- lives on the server only; folder = the place its readers are taken from).
+    -- scope_id: the private folder holding the file (NULL = company repository).
+    CREATE TABLE IF NOT EXISTS records (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      id TEXT NOT NULL,
+      type TEXT NOT NULL,
+      type_version INTEGER,
+      scope_id TEXT,
+      path TEXT,
+      folder TEXT,
+      title TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      removed_at TEXT,
+      PRIMARY KEY (company_id, id)
+    );
+
+    -- Links written in record files (rebuildable). target_id for a record,
+    -- target_path for a file of the company folder.
+    CREATE TABLE IF NOT EXISTS record_links (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      source_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      target_id TEXT,
+      target_path TEXT,
+      PRIMARY KEY (company_id, source_id, name, position)
+    );
+
+    -- Server-sourced values (state, assignee, due…): NOT rebuildable from files
+    -- (backups). Written only by the state engine; version +1 per change.
+    CREATE TABLE IF NOT EXISTS record_state (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      record_id TEXT NOT NULL,
+      state TEXT,
+      fields TEXT NOT NULL DEFAULT '{}',
+      version INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, record_id)
+    );
+
+    -- The last commit indexed per repository (repo: 'company' or a private
+    -- folder's scope id), so a push is indexed from its diff.
+    CREATE TABLE IF NOT EXISTS record_index_heads (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      repo TEXT NOT NULL,
+      commit_sha TEXT NOT NULL,
+      indexed_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, repo)
+    );
+
+    -- What the index could not take (duplicate ids, invalid definitions,
+    -- blocked links…), for owners/admins; replaced each time the file is read.
+    CREATE TABLE IF NOT EXISTS record_index_problems (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      repo TEXT NOT NULL,
+      path TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      detail TEXT NOT NULL DEFAULT '',
+      found_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, repo, path, kind)
+    );
+
     -- Indexes
+    CREATE INDEX IF NOT EXISTS idx_records_company_type ON records(company_id, type);
+    CREATE INDEX IF NOT EXISTS idx_records_company_path ON records(company_id, path);
+    CREATE INDEX IF NOT EXISTS idx_record_links_target ON record_links(company_id, target_id);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_at ON agent_events(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_user_at ON agent_events(company_id, user_id, at);
     CREATE INDEX IF NOT EXISTS idx_agent_events_company_conversation_at ON agent_events(company_id, conversation_id, at);

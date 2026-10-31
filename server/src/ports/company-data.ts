@@ -27,6 +27,7 @@ import type { DepartmentRepository } from './departments'
 import type { InvitationRepository } from './invitations'
 import type { OrphanedScopeReader } from './orphaned-scopes'
 import type { PrivateFolderRepository } from './private-folders'
+import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
 
 export interface CompanyData {
@@ -39,6 +40,8 @@ export interface CompanyData {
   readonly privateFolders: PrivateFolderRepository
   /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
   readonly orphanedScopes: OrphanedScopeReader
+  /** The company map of the light ontology: switch, types, record index, links, state (ports/records.ts). */
+  readonly records: RecordRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

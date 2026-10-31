@@ -35,8 +35,13 @@ const CONTROL_PLANE_TABLES: Record<string, string> = {
 
 /** Better Auth's tables in auth.sqlite: accounts and sessions, shared by every company by design. */
 const AUTH_TABLES = new Set(['user', 'session', 'account', 'verification'])
-/** SQLite's own catalog (table names, not company rows). */
-const SQLITE_CATALOG = new Set(['sqlite_master'])
+/**
+ * SQLite's own catalog (table names, not company rows), and json_each: the
+ * table-valued function a bound JSON array of ids is read through
+ * (`id IN (SELECT value FROM json_each(?))`, adapters/sqlite/records.ts) — it
+ * holds only the values bound to that statement.
+ */
+const SQLITE_CATALOG = new Set(['sqlite_master', 'json_each'])
 
 /**
  * Modules allowed to build SQL with a table name chosen at run time (which this
@@ -59,9 +64,17 @@ const HANDLE_TABLES: Record<string, string[]> = {
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
+  // The company map (records.md).
+  record_settings: ['adapters/sqlite/records.ts'],
+  record_types: ['adapters/sqlite/records.ts'],
+  records: ['adapters/sqlite/records.ts'],
+  record_links: ['adapters/sqlite/records.ts'],
+  record_state: ['adapters/sqlite/records.ts'],
+  record_index_heads: ['adapters/sqlite/records.ts'],
+  record_index_problems: ['adapters/sqlite/records.ts'],
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader']
+const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository']
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'
