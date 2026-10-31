@@ -6,6 +6,8 @@ export interface ChatInputApi {
   captureInsertion: () => (text: string) => boolean
   getValue: () => string
   setValue: (text: string) => void
+  /** chat.insertText: replace the text as an edit (undoable), focus, caret at the end; false while there is no input. */
+  replaceText: (text: string) => boolean
 }
 
 /**

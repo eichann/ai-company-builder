@@ -24,6 +24,7 @@ test('the suggestion is ghost text in the empty input, described to screen reade
   await openPreview(page, 'chat-composer')
   await expect(ghost(page)).toHaveText(SUGGESTION)
   await expect(ghost(page)).toHaveAttribute('aria-hidden', 'true')
+  await expect(page.getByText('メッセージを入力'), 'the suggestion takes the placeholder\'s place').toHaveCount(0)
   const describedBy = await input(page).getAttribute('aria-describedby')
   expect(describedBy, 'the input points at the suggestion description').toBeTruthy()
   await expect(page.locator(`[id="${describedBy}"]`)).toHaveText(`入力候補：${SUGGESTION}。→キーまたはTabキーで入力欄に入れます。Escキーで消します。`)
@@ -94,6 +95,19 @@ test.describe('slash commands', () => {
     await page.keyboard.insertText('pr')
     await expect(skills(page)).toHaveCount(2)
     await page.keyboard.press('ArrowDown')
+    await page.keyboard.press('Tab')
+    await typed(page).toBe('/press-release ')
+    await expect(skills(page)).toHaveCount(0)
+  })
+
+  test('a list that narrows starts again at its first row, even for a Tab pressed right away', async ({ page }) => {
+    // The selection used to reach the key handler two renders later, so a quick Tab picked nothing.
+    await openPreview(page, 'chat-composer', { suggestion: '' })
+    await input(page).click()
+    await page.keyboard.insertText('/pr')
+    await expect(skills(page)).toHaveCount(2)
+    await page.keyboard.press('ArrowDown')
+    await page.keyboard.insertText('e')
     await page.keyboard.press('Tab')
     await typed(page).toBe('/press-release ')
     await expect(skills(page)).toHaveCount(0)
