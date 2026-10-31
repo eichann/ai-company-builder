@@ -1,6 +1,6 @@
 import type { ScopeWithRules } from '../../shared/core/permissions'
 
-/** A private folder: a scope with its own repository (lib/private-folders.ts). */
+/** A private folder: a scope with its own repository (adapters/private-folders.ts). */
 export interface PrivateFolderRecord {
   scope: ScopeWithRules
   repoId: string
@@ -29,8 +29,8 @@ export type PrivateFolderRefusal =
 
 /**
  * Private folders: rows (scopes with repo_id, scope_repos) and their scope
- * repositories. The writes keep every race protection of
- * lib/private-folders.ts — creation waits for company pushes registered
+ * repositories (adapters/private-folders.ts). The writes keep every race protection of
+ * the in-flight pushes (lib/private-folders.ts): creation waits for company pushes registered
  * before it and re-checks the company repository; make-public and delete
  * refuse new scope pushes and archive first. Callers hold the company lock.
  */

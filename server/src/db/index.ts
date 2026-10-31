@@ -192,8 +192,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
       created_at TEXT NOT NULL
     );
 
-    -- Private folders archived (git bundle, lib/private-folders.ts
-    -- archivePrivateFolder) before being deleted or made public: who, when,
+    -- Private folders archived (git bundle written by lib/private-folders.ts,
+    -- recorded by adapters/private-folders.ts) before being deleted or made public: who, when,
     -- and the bundle's file name inside the archive directory (never served).
     CREATE TABLE IF NOT EXISTS private_folder_archives (
       id TEXT PRIMARY KEY,

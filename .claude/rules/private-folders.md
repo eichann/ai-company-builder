@@ -2,7 +2,7 @@
 paths:
   - "server/src/routes/private-folders.ts"
   - "server/src/services/private-folders.ts"
-  - "server/src/adapters/sqlite/private-folders.ts"
+  - "server/src/adapters/private-folders.ts"
   - "server/src/lib/private-folders.ts"
   - "server/src/lib/git-server/scope-repo.ts"
   - "server/src/lib/client-version.ts"
@@ -23,8 +23,9 @@ carve-out of existing folders; move files into a new private folder instead). Ea
 bare repository (a "scope repository"); its path is reserved in the company repository. The
 contract for clients and UIs is `shared/types/private-folders.ts`. Code: `routes/private-folders.ts`
 (HTTP, the `/paths/check` budget) → `services/private-folders.ts` (rules, views, first-folder
-gate under the company lock) → `PrivateFolderRepository` (`adapters/sqlite/private-folders.ts` →
-`lib/private-folders.ts`: rows, scope repositories, race protections, archives).
+gate under the company lock) → `PrivateFolderRepository` (`adapters/private-folders.ts`: the
+rows and the create / make-public / delete steps; it uses `lib/private-folders.ts`, which has no
+database: paths, company-repository lookups, archive files, pushes in flight, the folder browser).
 `canWriteInPrivateFolder` lives in `shared/core/permissions.ts`. Client side:
 `private-folders-client.md`. Full text and history: `docs/architecture/private-folders.md`.
 
