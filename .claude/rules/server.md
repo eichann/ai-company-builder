@@ -340,6 +340,17 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 (real git-http and hooks), `tests/security` (auth guards, path traversal,
 no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
 
+- **Fake HubSpot** (`tests/fakes/hubspot/`, milestone 3 P2): an in-memory Hono app answering the
+  CRM calls the HubSpot plugin makes in HubSpot's documented shapes (v3 and dated
+  `/crm/<api>/<YYYY-MM>/…` paths; deals get / list / search / update, deal properties and
+  pipelines, companies, owners, notes with the 214 note → deal association), `pat-fake-…` keys
+  with per-key scopes (403 `MISSING_SCOPES`), read-only values (400), rate limits (429) and
+  faults (delay, 500, a write applied whose answer never arrives, a change made "in HubSpot").
+  Tests pass `createFakeHubSpot().app` in; staging runs `pnpm fake:hubspot` (127.0.0.1:4010,
+  `/__fake/*` control routes, refuses `NODE_ENV=production`). Never in the image (the Dockerfile
+  copies `src/` and `shared/` only) and never imported from `src/` (`layering.test.ts`). Test:
+  `tests/unit/fake-hubspot.test.ts`.
+
 - Who reaches a company repository over git HTTP (members with a live session; others 401 /
   403 / 404 on info/refs, upload-pack and receive-pack, repository unchanged; only the two smart
   services): `tests/integration/git-http-access.test.ts`. `..%2F` company ids and repository

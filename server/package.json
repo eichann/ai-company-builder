@@ -10,7 +10,8 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "fake:hubspot": "tsx tests/fakes/hubspot/serve.ts"
   },
   "dependencies": {
     "@hono/node-server": "^1.19.17",
