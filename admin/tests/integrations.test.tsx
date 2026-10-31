@@ -158,8 +158,9 @@ describe('つなぎ先', () => {
     stubApi(ownerCapabilities, {}, true)
     renderInCompany(<IntegrationsPage />)
     expect(await screen.findByRole('option', { name: `営業の HubSpot（末尾 ${SECRET.slice(-4)}）` })).toBeInTheDocument()
-    expect(screen.getByText(/練習用の HubSpot につながっています/)).toBeInTheDocument()
-    expect(screen.queryByText('書き戻せません（受注・失注につながるため）')).toBeInTheDocument()
+    expect(await screen.findByText(/練習用の HubSpot につながっています/)).toBeInTheDocument()
+    // The mapping table arrives with the detail (its own request).
+    expect(await screen.findByText('書き戻せません（受注・失注につながるため）')).toBeInTheDocument()
     expect(screen.queryByRole('combobox', { name: 'stage の書き戻し' })).not.toBeInTheDocument()
     const text = document.body.textContent ?? ''
     for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
