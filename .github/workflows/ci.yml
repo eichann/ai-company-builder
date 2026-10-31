@@ -1,14 +1,17 @@
 name: CI
 
 # Pull requests run only the jobs their changed paths need (job `changes`,
-# .github/scripts/changed-areas.sh) and a lighter sync soak. A push to main,
-# the nightly schedule and a manual run run every job with the full soak.
+# .github/scripts/changed-areas.sh) and a lighter sync soak. A push to main
+# runs only the Linux jobs (the PR already ran the macOS ones; macOS runners are
+# scarce and a full run per merge queued the next PR's checks). The nightly
+# schedule and a manual run run every job with the full soak.
 on:
   pull_request:
     # next/** are integration branches (e.g. next/sales-meeting): their PRs get the same checks.
     branches: [main, 'next/**']
   push:
-    branches: [main, 'next/**']
+    # Pushes to next/** are covered by their PRs; only main is checked on push.
+    branches: [main]
   schedule:
     # Nightly full run (18:17 UTC = 03:17 JST), off the hour to avoid the
     # scheduler's top-of-hour backlog.

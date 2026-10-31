@@ -157,7 +157,8 @@ Environment: copy `.env.example` to `.env`; `AUTH_SECRET` (`openssl rand -base64
   jobs run only when their inputs change (`.github/scripts/changed-areas.sh`; a skipped job
   reports success). Required for merge: Typecheck, Lint (changed files), Server tests, Client
   tests (macOS), Sync harness (macOS); the UI, perf, universal-git and admin jobs should be green
-  too. Push to main and the nightly run execute everything.
+  too. The nightly run (and a manual run) execute everything; a push to main runs the
+  Linux jobs only (typecheck, lint, server, admin) because its PR already ran the macOS ones.
 - `docs/` holds internal notes and stays uncommitted: this is a public (AGPL) repository, and
   `.git/info/exclude` ignores `/docs/*` except the published `docs/self-hosting/` and
   `docs/images/` (a few older notes are still tracked; leave them, add no new ones). Durable
