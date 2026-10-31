@@ -35,3 +35,13 @@ export interface RecordFileSource {
   /** Changes since `since` (a commit indexed before), or every candidate when null / unknown. */
   read(companyId: string, repo: RecordFileRepo, since: string | null): Promise<RecordRepoRead>
 }
+
+/** A record file the server itself writes (decisions, records.md), as its own commit through the push checker. */
+export interface RecordFileCreator {
+  /**
+   * Add the file at `path` (company repository, shared branch) with `text`.
+   * false: a file is already there (nothing written). Throws when the commit
+   * is refused or times out.
+   */
+  createFile(companyId: string, path: string, text: string, message: string): Promise<boolean>
+}

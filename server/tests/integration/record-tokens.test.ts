@@ -113,6 +113,18 @@ describe('what a record token can reach', () => {
     expect(await ai(token, 'POST', `/item/${taskId}/actions/reopen`, { expectedVersion: 3 })).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
   })
 
+  it('the AI cannot make an approval or any service-owned record through the generic create; a read token records no decision', async () => {
+    const { token } = await tokenFor('u-bob', 'act')
+    for (const type of ['approval', 'outbound_message', 'minutes']) {
+      const r = await ai(token, 'POST', '/item', { type, title: '自分で承認のお願いを作る', fields: { assignee: 'u-bob' } })
+      expect(r).toMatchObject({ status: 400, body: { code: 'TYPE_CREATED_BY_SERVICE' } })
+    }
+    expect((await ai(token, 'POST', '/query', { type: 'approval', countOnly: true })).body.data).toMatchObject({ total: 0 })
+    const read = await tokenFor('u-bob', 'read')
+    expect(await ai(read.token, 'POST', '/decisions', { folder: '営業部', title: 'x', why: 'y', source: 'z' })).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
+    expect(await ai(read.token, 'GET', '/ai-turn')).toMatchObject({ status: 200, body: { data: { total: 0 } } })
+  })
+
   it('Codex (any agent not allowed to act) gets a read token even when the app asks for act', async () => {
     for (const agent of ['codex', 'api-key', 'something-else']) {
       const issued = await tokenFor('u-bob', 'act', CO, agent)
