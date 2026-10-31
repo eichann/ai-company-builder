@@ -43,6 +43,7 @@ import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
+import { registerApprovalsIpc } from './features/approvals/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import type { StoppableTurns } from './services/agent-stop'
@@ -207,6 +208,8 @@ const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl
 registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The chat's approval card: approving is the person's own act, with the session (no AI route approves).
+registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })

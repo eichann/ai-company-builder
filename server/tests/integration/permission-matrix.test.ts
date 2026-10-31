@@ -107,6 +107,8 @@ interface World {
     /** An operation record (操作の控え) of the other company. */
     operation: string
     googleGrant: string
+    /** An approval request of the other company. */
+    approval: string
   }
 }
 
@@ -317,6 +319,14 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/plugins', () => ({ path: '/api/records-ai/plugins' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // Approval requests (approvals.md): any member reads what concerns them; approving is a session's, never the AI's.
+  r('GET /api/companies/:companyId/approvals', w => ({ path: `${C(w)}/approvals`, query: 'scope=everyone' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/approvals/:approvalId', w => ({ path: `${C(w)}/approvals/approval-nosuch001` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/approve', w => ({ path: `${C(w)}/approvals/approval-nosuch001/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/send-back', w => ({ path: `${C(w)}/approvals/approval-nosuch001/send-back`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/withdraw', w => ({ path: `${C(w)}/approvals/approval-nosuch001/withdraw`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/approvals', () => ({ path: '/api/records-ai/approvals' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/approvals/:approvalId', () => ({ path: '/api/records-ai/approvals/approval-nosuch001' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/create/create_deal`, body: {} }), [409, 409, 409, 409, 404, 401],
     'any member: the plugin (not running here), the operation\'s who and its policy decide; never auto (milestone 4)'),
   r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/recreate`, body: {} }), [404, 404, 404, 404, 404, 401]),
@@ -412,6 +422,11 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
 
+  x('GET /api/companies/:companyId/approvals/:approvalId', (w, id) => ({ path: `${C(w)}/approvals/${id}` }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/approve', (w, id) => ({ path: `${C(w)}/approvals/${id}/approve`, body: { hash: `sha256:${'0'.repeat(64)}`, reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/send-back', (w, id) => ({ path: `${C(w)}/approvals/${id}/send-back`, body: { reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/withdraw', (w, id) => ({ path: `${C(w)}/approvals/${id}/withdraw`, body: {} }), w => w.other.approval, 'approval-nosuch001'),
+
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
 
@@ -439,6 +454,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'POST /api/records-ai/plugins/:pluginId/create/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
   'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
+  'GET /api/records-ai/approvals/:approvalId': 'the AI\'s routes: the company comes from the record token, never from the URL (approvals.test.ts)',
 }
 
 /** The parameters of a route that name something other than the company in the URL. */
@@ -590,6 +606,10 @@ async function seed(): Promise<World> {
     external_id, record_id, actor_id, actor_kind, state, fields, written, previous, created_at, updated_at)
     VALUES (?, 'op-other-1', 'other-crm', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
     .run(other, USER.outsider, expires, expires)
+  // An approval request of the other company, waiting for its owner.
+  db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, 'approval-other001', 'approval', '金額の変更', ?, ?)").run(other, expires, expires)
+  db.prepare("INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, 'approval-other001', 'pending', ?, 1, ?)")
+    .run(other, JSON.stringify({ requested_by: USER.outsider, assignee: USER.outsider, next_actor: USER.outsider, approver_rule: 'self' }), expires)
 
   // A Google permission of the other company's member (a row as the callback writes it, token cleared).
   db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason, created_at, updated_at)
@@ -621,6 +641,7 @@ async function seed(): Promise<World> {
       plugin: 'other-crm',
       operation: 'op-other-1',
       googleGrant: otherMember,
+      approval: 'approval-other001',
     },
   }
 }

@@ -18,13 +18,14 @@
  *
  * Typed operations (P6; any member — the record, the operation's `who` and the
  * field policies decide; the member's AI uses routes/records-ai.ts):
- *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, conversationId?, proposedBy? } / {}
+ *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, basis?, conversationId?, proposedBy? } / {}
+ *   (a field or create needing approval → 202 { outcome: 'approval-requested', approval }: routes/approvals.ts)
  *   (conversationId / proposedBy: informational provenance the app reports, never authorizing — records.md)
  *   GET  /plugins/:pluginId/operations/:operationId                   an operation record (its record's readers)
  *   POST /plugins/:pluginId/operations/:operationId/undo              「変更前の値を書き戻す」 (people only) { conversationId?, proposedBy? }
  *   POST /plugins/:pluginId/operations/:operationId/reconcile         read back a write whose answer was lost (a create: look it up by its correlation value)
  * Creates (milestone 4): log_meeting goes through the record route above ({ title, body?, at, outcome?, note? } on the deal);
- *   POST /plugins/:pluginId/create/:operation                         a create of a record (create_deal) { title, fields, note? } — never auto: 409 APPROVAL_REQUIRED
+ *   POST /plugins/:pluginId/create/:operation                         a create of a record (create_deal) { title, fields, note?, basis? } — never auto: 202 approval request
  *   POST /plugins/:pluginId/operations/:operationId/recreate          「もう一度作る」 after reconcile found nothing (people only) { confirm: true }
  */
 import { Hono } from 'hono'
@@ -37,7 +38,7 @@ import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
-const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck } = services
+const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
 
@@ -59,6 +60,14 @@ function answer<T>(c: Context, result: Outcome<T>) {
   if (!result.ok) return refusal(c, result)
   c.header('Cache-Control', 'no-store')
   return c.json({ success: true, data: result.value })
+}
+
+/** An operation's answer: 202 when it became an approval request (`{ outcome: 'approval-requested', approval }`). */
+function accepted(c: Context, result: Outcome<unknown>) {
+  if (!result.ok) return refusal(c, result)
+  c.header('Cache-Control', 'no-store')
+  const requested = typeof result.value === 'object' && result.value !== null && (result.value as { outcome?: unknown }).outcome === 'approval-requested'
+  return c.json({ success: true, data: result.value }, requested ? 202 : 200)
 }
 
 pluginsRoute.get('/plugins', async (c) => {
@@ -125,14 +134,16 @@ pluginsRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', 
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   const body = await jsonBody(c)
-  return answer(c, await pluginOperations.run(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
+  // A field or create that needs approval makes an approval request instead (202; approvals.md).
+  return accepted(c, await approvals.runOrRequest(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body))
 })
 
 pluginsRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   const body = await jsonBody(c)
-  return answer(c, await pluginOperations.createRecord(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('operation'), body))
+  // Never auto: it becomes an approval request (202; approvals.md).
+  return accepted(c, await approvals.createOrRequest(member, { ...HUMAN, ...selfReportedProvenance(body) }, c.req.param('pluginId'), c.req.param('operation'), body))
 })
 
 pluginsRoute.post('/plugins/:pluginId/operations/:operationId/recreate', async (c) => {

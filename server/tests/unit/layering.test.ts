@@ -45,6 +45,8 @@ function target(file: string, spec: string): string {
 
 /** Pure lib modules a service may use (no I/O, no database). */
 const PURE_LIB = new Set(['lib/client-version', 'lib/write-loss', 'lib/overview', 'lib/push-rejections',
+  // sha256 of fixed content (node crypto, no I/O): the one hashing helper (approvals.md).
+  'lib/content-hash',
   // Not pure (prints to stderr, reads the request id), but the one allowed way to log an error:
   // it never prints the error's text (paths, private-folder names), which a service's own
   // console.error would (.claude/rules/server.md "Request log"). No database, git or files.

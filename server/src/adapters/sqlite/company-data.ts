@@ -5,6 +5,7 @@ import { sqlitePrivateFolderRepository } from '../private-folders'
 import { sqliteCompanyRowsExport } from './company-archive'
 import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
+import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteInvitationRepository } from './invitations'
 import { sqlitePluginRepository } from './plugins'
 import { sqliteRecordRepository } from './records'
@@ -29,6 +30,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         records: sqliteRecordRepository(conn, companyId),
         plugins: sqlitePluginRepository(conn, companyId),
         connectors: sqliteConnectorRepository(conn, companyId),
+        fixedPayloads: sqliteFixedPayloadRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)

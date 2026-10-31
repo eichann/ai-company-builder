@@ -129,6 +129,10 @@ const api: ElectronAPI = {
   undoPluginOperation: (companyId: string, pluginId: string, operationId: string, conversationId?: string) =>
     invoke('pluginOperations:undo', companyId, pluginId, operationId, conversationId),
   reconcilePluginOperation: (companyId: string, pluginId: string, operationId: string) => invoke('pluginOperations:reconcile', companyId, pluginId, operationId),
+  getApproval: (companyId: string, approvalId: string) => invoke('approvals:get', companyId, approvalId),
+  approveApproval: (companyId: string, approvalId: string, hash: string, reason: string) => invoke('approvals:approve', companyId, approvalId, hash, reason),
+  sendBackApproval: (companyId: string, approvalId: string, reason: string) => invoke('approvals:sendBack', companyId, approvalId, reason),
+  withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
   gitPreview: (repoPath: string) =>
     invoke('git:preview', repoPath),
   gitGenerateSummary: (repoPath: string) =>

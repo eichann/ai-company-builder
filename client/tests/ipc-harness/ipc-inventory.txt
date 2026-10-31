@@ -18,6 +18,10 @@ contract.invoke api:createCompany
 contract.invoke api:getCompanies
 contract.invoke api:getDepartments
 contract.invoke app:closeResponse
+contract.invoke approvals:approve
+contract.invoke approvals:get
+contract.invoke approvals:sendBack
+contract.invoke approvals:withdraw
 contract.invoke auth:getSession
 contract.invoke auth:signIn
 contract.invoke auth:signOut
@@ -219,6 +223,7 @@ contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-compan
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
+contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
 contract.type ElectronAPI.backupBeforeOverwrite = backupBeforeOverwrite: Invoke<'editor:backupBeforeOverwrite'>
 contract.type ElectronAPI.backupList = backupList: Invoke<'backup:list'>
 contract.type ElectronAPI.backupOpenFolder = backupOpenFolder: Invoke<'backup:openFolder'>
@@ -242,6 +247,7 @@ contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
 contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
 contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
+contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getChatServerInfo = getChatServerInfo: Invoke<'chat-server:getInfo'>
 contract.type ElectronAPI.getChatSession = getChatSession: Invoke<'chatHistory:getSession'>
@@ -317,6 +323,7 @@ contract.type ElectronAPI.saveChatSession = saveChatSession: Invoke<'chatHistory
 contract.type ElectronAPI.saveOwnBrokerKey = saveOwnBrokerKey: Invoke<'brokerKeys:save'>
 contract.type ElectronAPI.searchChatSessions = searchChatSessions: Invoke<'chatHistory:search'>
 contract.type ElectronAPI.selectDirectory = selectDirectory: Invoke<'dialog:selectDirectory'>
+contract.type ElectronAPI.sendBackApproval = sendBackApproval: Invoke<'approvals:sendBack'>
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
@@ -339,6 +346,7 @@ contract.type ElectronAPI.updateHandoff = updateHandoff: Invoke<'handoff:update'
 contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:validateServerUrl'>
 contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
 contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
+contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
 contract.type EnvStatusResult.error = error?: string
@@ -454,6 +462,10 @@ contract.type IpcInvokeChannels.'api:createCompany' = 'api:createCompany': { arg
 contract.type IpcInvokeChannels.'api:getCompanies' = 'api:getCompanies': { args: []; result: CompaniesResult }
 contract.type IpcInvokeChannels.'api:getDepartments' = 'api:getDepartments': { args: [companyId: string]; result: DepartmentsResult }
 contract.type IpcInvokeChannels.'app:closeResponse' = 'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+contract.type IpcInvokeChannels.'approvals:approve' = 'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
+contract.type IpcInvokeChannels.'approvals:get' = 'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+contract.type IpcInvokeChannels.'approvals:sendBack' = 'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
+contract.type IpcInvokeChannels.'approvals:withdraw' = 'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
 contract.type IpcInvokeChannels.'auth:getSession' = 'auth:getSession': { args: []; result: SessionResult }
 contract.type IpcInvokeChannels.'auth:signIn' = 'auth:signIn': { args: [email: string, password: string]; result: AuthResult }
 contract.type IpcInvokeChannels.'auth:signOut' = 'auth:signOut': { args: []; result: SimpleResult }
@@ -639,6 +651,10 @@ main.handle api:createCompany @ features/auth/ipc.ts (name: string)
 main.handle api:getCompanies @ features/auth/ipc.ts ()
 main.handle api:getDepartments @ features/auth/ipc.ts (companyId: string)
 main.handle app:closeResponse @ main.ts (answer: 'ack' | 'close' | 'stay')
+main.handle approvals:approve @ features/approvals/ipc.ts (companyId, approvalId, hash, reason)
+main.handle approvals:get @ features/approvals/ipc.ts (companyId, approvalId)
+main.handle approvals:sendBack @ features/approvals/ipc.ts (companyId, approvalId, reason)
+main.handle approvals:withdraw @ features/approvals/ipc.ts (companyId, approvalId)
 main.handle auth:getSession @ features/auth/ipc.ts ()
 main.handle auth:signIn @ features/auth/ipc.ts (email: string, password: string)
 main.handle auth:signOut @ features/auth/ipc.ts ()
@@ -763,6 +779,8 @@ main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
 preload answerCloseRequest -> invoke app:closeResponse($0)
 preload answerCloseRequest : (answer: "ack" | "close" | "stay") => Promise<void>
+preload approveApproval -> invoke approvals:approve($0, $1, $2, $3)
+preload approveApproval : (companyId: string, approvalId: string, hash: string, reason: string) => Promise<ApprovalResult>
 preload backupBeforeOverwrite -> invoke editor:backupBeforeOverwrite($0, $1)
 preload backupBeforeOverwrite : (rootPath: string, filePath: string) => Promise<EditorBackupResult>
 preload backupList -> invoke backup:list($0)
@@ -809,6 +827,8 @@ preload getAgentInteractions -> invoke agent-interaction:list()
 preload getAgentInteractions : () => Promise<AgentInteractionRequest[]>
 preload getApiKeyStatus -> invoke config:getApiKeyStatus()
 preload getApiKeyStatus : () => Promise<ApiKeyStatus>
+preload getApproval -> invoke approvals:get($0, $1)
+preload getApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
 preload getChatServerInfo -> invoke chat-server:getInfo()
@@ -959,6 +979,8 @@ preload searchChatSessions -> invoke chatHistory:search($0, $1)
 preload searchChatSessions : (companyId: string, query: string) => Promise<string[]>
 preload selectDirectory -> invoke dialog:selectDirectory()
 preload selectDirectory : () => Promise<string | null>
+preload sendBackApproval -> invoke approvals:sendBack($0, $1, $2)
+preload sendBackApproval : (companyId: string, approvalId: string, reason: string) => Promise<ApprovalResult>
 preload setAgentEnvPassthrough -> invoke config:setAgentEnvPassthrough($0)
 preload setAgentEnvPassthrough : (names: string[]) => Promise<{ names: string[]; invalid: string[]; denied: string[]; }>
 preload setApiKey -> invoke config:setApiKey($0)
@@ -1019,5 +1041,7 @@ preload voiceInput.stop -> invoke voice:stop($0)
 preload voiceInput.stop : (requestId: string) => Promise<void>
 preload watchCompany -> invoke fs:watch($0)
 preload watchCompany : (rootPath: string) => Promise<SimpleResult>
+preload withdrawApproval -> invoke approvals:withdraw($0, $1)
+preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
 preload writeFile : (path: string, content: string) => Promise<boolean>

@@ -242,7 +242,7 @@ test('creates: Claude gets the meeting and the new-deal tools (record token); Co
   assert.ok(meeting && !meeting.readOnly && deal && !deal.readOnly)
   for (const d of [meeting.description, deal.description]) {
     assert.match(d, /送り直さない/)
-    assert.match(d, /APPROVAL_REQUIRED/)
+    assert.match(d, /approval-requested/)
   }
   const names = (await turn('read')).tools.specs.map(s => s.name)
   assert.ok(!names.includes('hubspot__log_meeting') && !names.includes('hubspot__create_deal'))

@@ -23,6 +23,7 @@ import { agentSandboxRoute } from './routes/agent-sandbox'
 import { recordsRoute } from './routes/records'
 import { recordsAiRoute } from './routes/records-ai'
 import { pluginsRoute } from './routes/plugins'
+import { approvalsRoute } from './routes/approvals'
 import { agentStopsRoute } from './routes/agent-stops'
 import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
@@ -109,6 +110,8 @@ app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)
 // Google sends the browser back here (public: the state finds the company; google-connector.md).
 app.route('/api/oauth', oauthRoute)
+// Approval requests: a person's session only (no AI or admin-API route; approvals.md).
+app.route('/api/companies/:companyId', approvalsRoute)
 app.route('/api/records-ai', recordsAiRoute)
 app.route('/api/broker', brokerRelayRoute)
 app.route('/api/git', gitRoute)

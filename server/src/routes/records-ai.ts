@@ -16,11 +16,13 @@
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
  *        (refresh: read; update and log_meeting: act — Codex's read tokens cannot write)
  *   POST /plugins/:pluginId/create/:operation   a create of a record (create_deal; act) — never auto:
- *        409 APPROVAL_REQUIRED until a person approves (milestone 4)
+ *        it becomes an approval request (202) that a person approves
  *   GET  /plugins/:pluginId/operations/:operationId
+ *   GET  /approvals   GET /approvals/:approvalId   approval requests, read only (approvals.md)
  *
- * No undo, no 「もう一度作る」 and nothing it can approve for the AI: a person
- * does those (their app's screens). A create is never re-sent.
+ * No undo, no 「もう一度作る」 and nothing it can approve, send back or withdraw for
+ * the AI: a person does those (their app's screens; routes/approvals.ts, session
+ * only). A create is never re-sent.
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
@@ -31,7 +33,7 @@ import { noteRequestUser } from '../lib/request-log'
 import { refusal } from './respond'
 
 export const recordsAiRoute = new Hono()
-const { records, recordEngine, recordAiTokens, pluginOperations, decisions } = services
+const { records, recordEngine, recordAiTokens, pluginOperations, decisions, approvals } = services
 
 function holderOf(c: Context, needs: 'read' | 'act'): RecordTokenHolder | Response {
   const auth = recordAiTokens.authenticate(c.req.header('Authorization'))
@@ -50,7 +52,7 @@ async function jsonBody(c: Context): Promise<unknown> {
   try { return await c.req.json() } catch { return null }
 }
 
-function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 = 200) {
+function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 | 202 = 200) {
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, status)
 }
@@ -116,14 +118,30 @@ recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation'
   if (h.scope !== 'act' && services.plugins.operationKind(h.member.companyId, c.req.param('pluginId'), c.req.param('operation')) !== 'read') {
     return c.json({ error: 'この AI は読むことだけができます', code: 'READ_ONLY_TOKEN' }, 403)
   }
-  return answer(c, await pluginOperations.run(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c)))
+  // Needing approval: the request is made (202) — the AI asks, a person approves (routes/approvals.ts, session only).
+  const r = await approvals.runOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), await jsonBody(c))
+  const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
+  return answer(c, r, requested ? 202 : 200)
 })
 
-// A create of a record (create_deal; milestone 4): writes, so an act token only. Never auto: APPROVAL_REQUIRED.
+// Approval requests, read only: the AI lists and shows them (「承認待ちを見せて」); it has no way to approve.
+recordsAiRoute.get('/approvals', async (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, await approvals.list(h.member, { scope: c.req.query('scope'), state: c.req.query('state') }))
+})
+
+recordsAiRoute.get('/approvals/:approvalId', async (c) => {
+  const h = holderOf(c, 'read')
+  return h instanceof Response ? h : answer(c, await approvals.get(h.member, c.req.param('approvalId')))
+})
+
+// A create of a record (create_deal; milestone 4): writes, so an act token only. Never auto: an approval request (202).
 recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
-  return answer(c, await pluginOperations.createRecord(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), await jsonBody(c)))
+  const r = await approvals.createOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), await jsonBody(c))
+  const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
+  return answer(c, r, requested ? 202 : 200)
 })
 
 recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {

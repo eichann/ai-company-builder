@@ -236,14 +236,15 @@ describe('the AI updates a deal, a person writes the previous value back', () =>
     expect(patches()).toBe(n + 1)
   })
 
-  it('a prior field, stage, or a mix with them writes nothing at all', async () => {
+  it('a prior field, stage, or a mix with them writes nothing at all (an approval request is made instead; approvals.md)', async () => {
     const id = recordOf('1000000003')
     const n = patches()
     const mixed = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { next_step: '見積の再提出', amount: 2600000 }))
-    expect(mixed).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['amount'] } })
+    expect(mixed).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { state: 'pending' } } } })
+    expect(mixed.body.data.approval.changes.map((c: Json) => c.field)).toEqual(['next_step', 'amount'])
     // Stage: written only after an approval (milestone 4), never directly.
     const stage = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' }))
-    expect(stage).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
+    expect(stage).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { state: 'pending' } } } })
     const off = await person('op-other', 'POST', `/records/${id}/operations/update_deal`, update(id, { assignee: 'op-member' }))
     expect(off).toMatchObject({ status: 400, body: { code: 'FIELD_NOT_WRITABLE', fields: ['assignee'] } })
     expect(patches()).toBe(n)
@@ -422,11 +423,11 @@ describe('creates (milestone 4): log_meeting on a deal', () => {
   const age = (operationId: string) => db.prepare('UPDATE plugin_operations SET created_at = ? WHERE company_id = ? AND id = ?')
     .run(new Date(Date.now() - 2 * 60_000).toISOString(), CO, operationId)
 
-  it('approval by default: 409 APPROVAL_REQUIRED and nothing sent', async () => {
+  it('approval by default: an approval request (202) and nothing sent', async () => {
     const id = recordOf('1000000001')
     const n = meetingPosts()
     const r = await ai(await tokenFor('op-member'), 'POST', `/records/${id}/operations/log_meeting`, meeting('初回商談'))
-    expect(r).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(r).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { state: 'pending' } } } })
     expect(meetingPosts()).toBe(n)
   })
 
@@ -530,8 +531,8 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
 
   it('never runs without approval: the person\'s route, the AI\'s, a read token, a forged policy', async () => {
     const n = dealPosts()
-    expect(await person('op-member', 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
-    expect(await ai(await tokenFor('op-member'), 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(await person('op-member', 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { state: 'pending' } } } })
+    expect(await ai(await tokenFor('op-member'), 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 202, body: { data: { outcome: 'approval-requested', approval: { state: 'pending' } } } })
     const codex = await call({ user: 'op-member', method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId: 'c', agent: 'codex', scope: 'act' } })
     expect(await ai(codex.body.data.token, 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 403, body: { code: 'READ_ONLY_TOKEN' } })
     // Someone who cannot read where the deal would go.
@@ -545,7 +546,8 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
       return { ok: true, plugin: { ...r.plugin, manifest: { ...r.plugin.manifest, operations }, mapping: { ...r.plugin.mapping, policy: { ...r.plugin.mapping.policy, create_deal: 'auto' } } } }
     })
     try {
-      expect(await person('op-member', 'POST', '/create/create_deal', NEW_DEAL)).toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED' } })
+      expect(await services.pluginOperations.createRecord({ companyId: CO, userId: 'op-member', role: 'member' }, { kind: 'human' }, 'sample-hub', 'create_deal', NEW_DEAL))
+        .toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
     } finally { spy.mockRestore() }
     expect(dealPosts()).toBe(n)
   })
@@ -619,9 +621,10 @@ describe('stage by approval (milestone 4): the approval seam for updates', () =>
 
   it('a stage change is APPROVAL_REQUIRED (no longer "not writable"); prepareApproval fixes the raw values before and after', async () => {
     const id = recordOf('1000000010')
+    await person('op-member', 'POST', `/records/${id}/operations/refresh_deal`, {})
     const n = patches()
-    expect(await person('op-member', 'POST', `/records/${id}/operations/update_deal`, update(id, { stage: 'final' })))
-      .toMatchObject({ status: 409, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
+    expect(await services.pluginOperations.run(member, { kind: 'human' }, 'sample-hub', id, 'update_deal', update(id, { stage: 'final' })))
+      .toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED', fields: ['stage'] } })
     const prepared = await prepare({ stage: 'final' })
     expect(prepared).toMatchObject({
       approver: 'self',
