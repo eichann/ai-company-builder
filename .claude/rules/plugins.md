@@ -328,7 +328,7 @@ POST /plugins/:pluginId/mapping/check    { text? } 「HubSpot に聞いて確か
 - Tables (company handle `plugins`, `adapters/sqlite/plugins.ts`): `plugin_installs` (version,
   fingerprint, enabled, `key_id`, mapping version in force), `plugin_mappings` (every version's
   YAML), `plugin_history` (install / change / enable / disable / mapping / restore; JSON without
-  any secret). Triggers (`db/index.ts` `migratePluginTables`): `key_id` must be a **company key
+  any secret). Triggers (`db/schema/plugins.ts` `migratePluginTables`): `key_id` must be a **company key
   of the same company** (another company's key or a member's own key throws), a mapping only
   under its own company's install, no row moves to another company
   (`tests/unit/company-data.test.ts`).

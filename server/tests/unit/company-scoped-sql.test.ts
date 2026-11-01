@@ -30,7 +30,7 @@ const SRC = resolve(__dirname, '../../src')
 const CONTROL_PLANE_TABLES: Record<string, string> = {
   companies: 'the registry of companies itself: a row is a company (its id is the company condition)',
   memberships: 'who belongs where: the sign-in check looks a user up across companies before a company is chosen',
-  ssh_keys: 'per user, unused since R1 (still created by db/index.ts)',
+  ssh_keys: 'per user, unused since R1 (still created by db/schema/company.ts)',
 }
 
 /** Better Auth's tables in auth.sqlite: accounts and sessions, shared by every company by design. */
@@ -58,9 +58,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   departments: ['adapters/sqlite/departments.ts'],
   invitations: ['adapters/sqlite/invitations.ts'],
   scopes: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts'],
-  // db/index.ts: the company_id backfill of rows from before the column (MIGRATION below).
-  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts', 'db/index.ts'],
-  department_managers: ['adapters/sqlite/permission-store.ts', 'db/index.ts'],
+  // db/schema/permissions.ts: the company_id backfill of rows from before the column (MIGRATION below).
+  scope_rules: ['adapters/sqlite/permission-store.ts', 'adapters/private-folders.ts', 'db/schema/permissions.ts'],
+  department_managers: ['adapters/sqlite/permission-store.ts', 'db/schema/permissions.ts'],
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
@@ -125,7 +125,7 @@ const UNSCOPED: Record<string, Array<[sql: string, reason: string]>> = {
     ['SELECT * FROM broker_tokens WHERE token_hash = ?', BY_TOKEN],
     ['DELETE FROM broker_tokens WHERE expires_at < ?', 'server-wide cleanup of expired tokens (no row is read); to become per company'],
   ],
-  'db/index.ts': [
+  'db/schema/permissions.ts': [
     ['DELETE FROM scope_rules WHERE company_id IS NULL AND scope_id NOT IN (SELECT id FROM scopes)', MIGRATION],
     ['UPDATE scope_rules SET company_id = (SELECT s.company_id FROM scopes s WHERE s.id = scope_rules.scope_id) WHERE company_id IS NULL', MIGRATION],
     ['DELETE FROM department_managers WHERE company_id IS NULL AND department_id NOT IN (SELECT id FROM departments)', MIGRATION],
@@ -174,9 +174,9 @@ function hasCompanyCondition(sql: string): boolean {
   return /\bcompany_id\s*=\s*\?|\bcompany_id\s+IN\s*\(/i.test(sql)
 }
 
-/** The application schema: table → its columns (CREATE TABLE in db/index.ts, plus ALTER TABLE … ADD COLUMN). */
+/** The application schema: table → its columns (CREATE TABLE in db/index.ts and db/schema/*.ts, plus ALTER TABLE … ADD COLUMN). */
 function schema(): Map<string, Set<string>> {
-  const source = readFileSync(join(SRC, 'db/index.ts'), 'utf8')
+  const source = [join(SRC, 'db/index.ts'), ...tsFiles(join(SRC, 'db/schema'))].map(f => readFileSync(f, 'utf8')).join('\n')
   const tables = new Map<string, Set<string>>()
   for (const m of source.matchAll(/CREATE TABLE IF NOT EXISTS (\w+) \(([\s\S]*?)\n\s*\);/g)) {
     const cols = m[2].split('\n').map(l => /^\s*(\w+)\s+[A-Z]/.exec(l)?.[1]).filter((c): c is string => !!c && !/^(PRIMARY|UNIQUE|FOREIGN|CHECK)$/.test(c))

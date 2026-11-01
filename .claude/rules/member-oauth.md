@@ -52,7 +52,7 @@ API calls (Google: `google-connector.md`, `services/google-connector.ts` registe
 ## Adding a provider
 
 Add it to `CONNECTOR_PROVIDERS` (`ports/connectors.ts`) **and** to the `provider IN (...)` CHECK
-of `connector_grants` / `oauth_pending` (`db/index.ts`, with a rebuild like
+of `connector_grants` / `oauth_pending` (`db/schema/connectors.ts`, with a rebuild like
 `migrateConnectorProviders`), add the purpose to nothing else (it is derived), write its
 descriptor and register it, and list its callback URL (`oauthCallbackPath`) for the admin.
 `slack` is already allowed by the schema; nothing registers it yet.

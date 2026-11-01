@@ -32,7 +32,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
 
 ## Server
 
-- Tables (`db/index.ts`, additive): `agent_stops` (id, company, `user_id` NULL = everyone,
+- Tables (`db/schema/agents.ts`, additive): `agent_stops` (id, company, `user_id` NULL = everyone,
   `tool` NULL = the whole AI, reason ≤ 500, stopped at/by, released at/by; never deleted — the
   released rows are the history) and `agent_stop_clients` (company, member → the build of the
   app that last said it follows the stop, when).

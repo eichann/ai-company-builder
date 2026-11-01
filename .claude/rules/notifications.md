@@ -27,12 +27,12 @@ a plugin can never draw a notice (§2-2).
 
 ## Server
 
-- Tables (`db/index.ts`, behind the company handle `notifications`, `ports/notifications.ts`):
+- Tables (`db/schema/notifications.ts`, behind the company handle `notifications`, `ports/notifications.ts`):
   `notifications` (company, id, member, kind, record id, record version, ledger action, actor id
   + kind, `dedupe_key`, created, read) and `notification_settings` (company, member, kinds JSON).
   **No text, title, note or value is stored**: the text is built when the member reads.
 - Written at the engine's existing notify points: the engine's `notify(companyId, userIds,
-  change?)` now carries the ledger entry (`RecordChange`, `services/record-engine.ts`: engine
+  change?)` now carries the ledger entry (`RecordChange`, `services/record-engine/types.ts`: engine
   create / act / undo, the service writer, the external writer). `composition.ts`
   `notifyRecords` sends the `records` signal as before and hands the entry to
   `services/notifications.ts` `recordChange`, which writes one notice per named member — **never

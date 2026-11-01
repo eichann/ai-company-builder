@@ -1,0 +1,141 @@
+/** Creating a record that lives on the server (records.md "The state engine"). */
+import { SERVICE_OWNED_TYPES } from '../../../shared/core/core-types'
+import { findPrivateScope } from '../../../shared/core/permissions'
+import { aiTurnStates } from '../../../shared/core/record-types'
+import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
+import { fileLinkPath, newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
+import type { RecordSummary } from '../../../shared/types/records'
+import type { RecordLinkRow } from '../../ports/records'
+import type { Member } from '../access'
+import { ok, refuse, type Outcome } from '../outcome'
+import { currentTypes } from '../record-index'
+import { RECORDS_DISABLED } from '../records'
+import type { EngineContext } from './context'
+import { interfaceLinkMisses, interfaceLinkRefusal } from './links'
+import { ASSIGNEE_CANNOT_READ, bad, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, TYPE_CREATED_BY_SERVICE } from './refusals'
+import type { ActorInput } from './types'
+import { checkValue, provenance } from './values'
+
+export function creating(ctx: EngineContext) {
+  const { deps, companyData, transactions, clock, open, canRead, placeFolder, tell, summaryOf } = ctx
+  return {
+    /**
+     * A record that lives on the server (types with storage `server` or
+     * `either`; a company's own file-backed type is created by writing its file).
+     */
+    create(member: Member, actor: ActorInput, body: unknown): Outcome<{ record: RecordSummary; entry: LedgerEntry }> {
+      const opened = open(member)
+      if (!opened) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
+      const { records, reader } = opened
+      const b = body as Record<string, unknown> | null
+      if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
+      if (typeof b.type !== 'string') return bad('type is required')
+      const def = currentTypes(records).get(b.type)?.definition
+      if (!def) return bad('Unknown type', 'TYPE_UNKNOWN')
+      if (SERVICE_OWNED_TYPES.includes(def.name)) return bad(TYPE_CREATED_BY_SERVICE.error, TYPE_CREATED_BY_SERVICE.code)
+      if (def.storage === 'file') return bad('Records of this type are files: create the file', 'FILE_RECORD')
+      if (typeof b.title !== 'string' || b.title.trim() === '' || b.title.length > 200) return bad('title: 1–200 characters')
+      if (b.summary !== undefined && (typeof b.summary !== 'string' || b.summary.length > 300)) return bad('summary: up to 300 characters')
+      // `personal: true` = owner-only (「持ち主だけ」): the creator alone sees it, never with a folder.
+      if (b.personal !== undefined && typeof b.personal !== 'boolean') return bad('personal must be true or false')
+      const personalOwner = b.personal === true ? member.userId : null
+      // A business plugin's types (deal, customer) are the place other records take their readers
+      // from (approvals, minutes, sent mail): never owner-only — also when a company extends one.
+      if (personalOwner !== null && records.typeVersions().some(t => t.name === def.name && t.source === 'plugin')) {
+        return bad('この種類の記録は自分用にはできません', 'PERSONAL_NOT_FOR_TYPE')
+      }
+      if (personalOwner !== null && b.folder !== undefined && b.folder !== null) {
+        return bad('自分用の記録には部署を指定できません。部署に出すときは「部署に出す」を使ってください', 'PERSONAL_WITH_FOLDER')
+      }
+      let folder: string | null = null
+      if (b.folder !== undefined && b.folder !== null) {
+        const f = placeFolder(member, def.name, b.folder, reader)
+        if (typeof f !== 'string') return f
+        folder = f
+      }
+      const isMember = (id: string) => deps.isMember(member.companyId, id)
+      const fields: Record<string, LedgerValue> = {}
+      const rawFields = (b.fields ?? {}) as Record<string, unknown>
+      if (typeof rawFields !== 'object' || rawFields === null || Array.isArray(rawFields)) return bad('fields must be an object')
+      for (const [name, value] of Object.entries(rawFields)) {
+        const f = def.fields[name]
+        if (!f || f.source !== 'server') return bad(`${name} is not a server field of ${def.name}`)
+        const v = checkValue(f.kind, value, f.options, isMember)
+        if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
+        fields[name] = v
+      }
+      if (typeof fields.assignee === 'string' && !canRead(member.companyId, fields.assignee, { id: '', type: def.name, scopeId: null, path: null, folder, personalOwner })) {
+        return bad(ASSIGNEE_CANNOT_READ, 'ASSIGNEE_CANNOT_READ')
+      }
+      // The state it starts in: `initial`, or one the type lists in `create_states` (task: `preparing`, the AI's turn).
+      let initial = def.initial
+      if (b.state !== undefined && b.state !== null && b.state !== def.initial) {
+        if (typeof b.state !== 'string' || !(def.createStates ?? []).includes(b.state)) {
+          return bad(`state: ${[def.initial, ...(def.createStates ?? [])].filter(Boolean).join(' / ')}`, 'BAD_STATE')
+        }
+        initial = b.state
+      }
+      if (def.implements.includes('request')) {
+        fields.requested_by ??= member.userId
+        fields.next_actor ??= fields.assignee ?? null
+      }
+      const links: RecordLinkRow[] = []
+      const rawLinks = (b.links ?? {}) as Record<string, unknown>
+      if (typeof rawLinks !== 'object' || rawLinks === null || Array.isArray(rawLinks)) return bad('links must be an object')
+      const id = newRecordId(def.name, deps.ids.newToken().slice(0, 16))
+      for (const [name, value] of Object.entries(rawLinks)) {
+        const l = def.links[name]
+        if (!l) return bad(`${name} is not a link of ${def.name}`)
+        const targets = Array.isArray(value) ? value : [value]
+        if (targets.length > 50) return bad('At most 50 targets per link')
+        for (const t of targets) {
+          if (l.target === 'file') {
+            const p = typeof t === 'string' ? fileLinkPath(t) : null
+            if (!p) return bad(`${name}: a company path`)
+            // As linking later: a file the member reads, never inside a private folder (the record is outside every one).
+            if (!reader.file(p) || findPrivateScope(companyData.forCompany(member.companyId).scopes.listWithRules(), p)) {
+              return bad(FILE_NOT_LINKABLE.error, FILE_NOT_LINKABLE.code)
+            }
+            links.push({ sourceId: id, name, position: links.length, targetId: null, targetPath: p })
+          } else {
+            if (typeof t !== 'string' || !RECORD_ID_RE.test(t)) return bad(`${name}: a record id`)
+            // A live record the member reads: someone else's owner-only record, a private one and a
+            // missing one get the same answer (none of them is named or confirmed). An interface link
+            // is answered by its own check below (BAD_LINK, also one answer for missing / unreadable /
+            // of another kind), so each link has exactly one refusal for an unseen target.
+            if (!l.targetIsInterface && !records.byIds([t]).some(r => reader.record(r))) {
+              return bad(LINK_TARGET_NOT_FOUND.error, LINK_TARGET_NOT_FOUND.code)
+            }
+            links.push({ sourceId: id, name, position: links.length, targetId: t, targetPath: null })
+          }
+        }
+        if (interfaceLinkMisses(records, l, targets as string[], r => reader.record(r)).length > 0) {
+          const r = interfaceLinkRefusal(name, l)
+          return refuse('bad-request', r.error, { code: r.code })
+        }
+      }
+      const at = clock.now()
+      const changes: LedgerChange[] = [
+        { field: 'state', before: null, after: initial },
+        ...Object.entries(fields).filter(([, v]) => v !== null).map(([field, after]) => ({ field, before: null, after })),
+      ]
+      const entry: LedgerEntry = {
+        recordId: id, version: 1, action: 'create', fromState: null, toState: initial, actorId: member.userId, actorKind: actor.kind,
+        actorSource: actor.source ?? null, at, note: '', changes, attachments: [], decision: null, isDecision: false,
+        typeVersion: def.version, reversesVersion: null, ...provenance(actor),
+      }
+      transactions.run(() => {
+        records.upsert({
+          id, type: def.name, typeVersion: def.version, scopeId: null, path: null, folder, personalOwner,
+          title: b.title as string, summary: typeof b.summary === 'string' ? b.summary : '', createdAt: at, updatedAt: at, removedAt: null,
+        })
+        records.replaceLinks(id, links)
+        if (!records.writeState({ recordId: id, state: initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
+        records.appendLedger(entry)
+      })
+      // While it is the AI's turn nobody is told: the person hears when the AI hands it over.
+      if (initial === null || !aiTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
+      return ok({ record: summaryOf(records, id), entry })
+    },
+  }
+}
