@@ -1267,3 +1267,12 @@ A type's action may name `role:<name>` in `who` (`ROLE_REF_RE`); the engine meet
 one resolution of role holders (`plugin-roles.md`), a delegate standing in for an absent holder.
 The `approval` core type is **version 5**: `approver_rule` gains `role`, with `approver_role` naming
 it (additive). Details: `plugin-roles.md`, `approvals.md`.
+
+## Incoming messages (来た連絡, stage 3 B2: `inbox.md`)
+
+The inbox writes `interaction` v5 (implements `request` and `outside_event`; 確認待ち / 部署の番 /
+やることにしなかった) and `reply_request` v1 (返事のお願い: service-owned, the one type whose AI may
+end it — `ai_close`); task v8 adds the `interaction` link. Unlike every earlier service record,
+an individual's mail is **owner-only**: the service writer's `personalOwner` (with `state` and
+`quiet`) — so "Service-written records are never owner-only" above holds for every service but
+the inbox. Details, routes and tests: `inbox.md`.

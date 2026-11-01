@@ -465,6 +465,17 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/identities/proposals/:proposalId/reject', w => ({ path: `${C(w)}/identities/proposals/no-such-proposal/reject` }), [404, 404, 404, 404, 404, 401]),
   r('POST /api/records-ai/identities/proposals', () => ({ path: '/api/records-ai/identities/proposals', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/identities/records/:recordId', () => ({ path: '/api/records-ai/identities/records/customer-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // Messages that came in (来た連絡, inbox.md): settings read by any member, changed by owners/admins;
+  // everything else is the caller's own (status, set-aside list) or what they can read (department, claim).
+  r('GET /api/companies/:companyId/inbox-settings', w => ({ path: `${C(w)}/inbox-settings` }), MEMBERS),
+  r('PUT /api/companies/:companyId/inbox-settings', w => ({ path: `${C(w)}/inbox-settings`, body: { multipleTo: 'nobody' } }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/inbox/status', w => ({ path: `${C(w)}/inbox/status` }), MEMBERS),
+  r('POST /api/companies/:companyId/inbox/backfill', w => ({ path: `${C(w)}/inbox/backfill`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/inbox/set-aside', w => ({ path: `${C(w)}/inbox/set-aside` }), MEMBERS),
+  r('GET /api/companies/:companyId/inbox/department', w => ({ path: `${C(w)}/inbox/department` }), MEMBERS),
+  r('POST /api/companies/:companyId/inbox/items/:recordId/claim', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/claim`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/inbox/items/:recordId', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/inbox/items/:recordId/judgement', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/judgement', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // lane B ▲
   // lane C ▼
   // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
@@ -588,6 +599,8 @@ const CROSS: CrossRow[] = [
   // company's real proposal, decided by this company's owner, is missing there: tests/unit/identities.test.ts.
   x('POST /api/companies/:companyId/identities/proposals/:proposalId/approve', (w, id) => ({ path: `${C(w)}/identities/proposals/${id}/approve` }), () => 'identity-proposal-other'),
   x('POST /api/companies/:companyId/identities/proposals/:proposalId/reject', (w, id) => ({ path: `${C(w)}/identities/proposals/${id}/reject` }), () => 'identity-proposal-other'),
+  // Another company's record is missing here (its own interactions: tests/unit/inbox.test.ts "companies apart").
+  x('POST /api/companies/:companyId/inbox/items/:recordId/claim', (w, id) => ({ path: `${C(w)}/inbox/items/${id}/claim`, body: { expectedVersion: 1 } }), w => w.other.record, 'interaction-nosuch01'),
   // lane B ▲
   // lane C ▼
   x('GET /api/companies/:companyId/plugins/:pluginId/package/:version', (w, id) => ({ path: `${C(w)}/plugins/${id}/package/0.1.0` }), w => w.other.plugin, 'no-such-plugin'),
@@ -639,6 +652,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   // lane A ▲
   // lane B ▼
   'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',
+  'GET /api/records-ai/inbox/items/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
+  'POST /api/records-ai/inbox/items/:recordId/judgement': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
   // lane B ▲
   // lane C ▼
   // lane C ▲

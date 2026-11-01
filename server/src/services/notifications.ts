@@ -24,7 +24,7 @@ import { DEFAULT_COMPANY_TIME_ZONE } from '../../shared/core/calendar'
 import type { LedgerEntry, LedgerValue } from '../../shared/core/record-ledger'
 import { aiTurnStates, type TypeDefinition } from '../../shared/core/record-types'
 import { addDays, isBusinessDay, nextBusinessDay } from '../../shared/core/business-days'
-import { acceptanceOf, CLOCK_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
+import { acceptanceOf, CLOCK_ACTOR, INBOX_ACTIONS, INBOX_ACTOR, INTAKE_UNSURE_STATE, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { AccountDirectory } from '../ports/accounts'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
@@ -155,6 +155,9 @@ export function noticeKind(userId: string, change: RecordChange, final: Readonly
   const stateChanged = entry.fromState !== entry.toState
   // The server clock moved a wait that is over to the follow-up's turn (on by default).
   if (entry.action === WAIT_OVER_ACTION && entry.actorId === CLOCK_ACTOR.id) return 'wait_over'
+  // The inbox (inbox.md): their reply came; a message's owner is asked to decide (確認待ち).
+  if (entry.action === INBOX_ACTIONS.replyArrived && entry.actorId === INBOX_ACTOR.id) return 'reply_arrived'
+  if (type === 'interaction' && stateChanged && entry.toState === INTAKE_UNSURE_STATE) return 'intake_unsure'
   if (type === 'approval' && stateChanged && entry.fromState !== null && str(fields.requested_by) === userId) return 'approval_result'
   // What the member asked was accepted (引き受ける, or accepted by itself on a change): the assignee's turn now.
   const acceptance = acceptanceOf(type)
@@ -374,6 +377,10 @@ export function createNotificationService(deps: NotificationServiceDeps) {
         const due = row.dedupeKey?.split(':').slice(2).join(':') ?? ''
         return `${t}が期限（${dueText(due)}）を過ぎています`
       }
+      case 'reply_arrived':
+        return `${t}に相手から返事が来ました。AI が終わりの条件と照らし合わせます`
+      case 'intake_unsure':
+        return `${t}は誰が受け持つか決めきれませんでした。自分の担当にするか、やることにしないかを決めてください`
       case 'ai_turn_stuck':
         return `${t}の AI の番が 24 時間以上進んでいません。担当の人のアプリが閉じているかもしれません`
       case 'wait_over': {

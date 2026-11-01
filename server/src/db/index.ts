@@ -25,6 +25,7 @@ import { slackSchema } from './schema/slack'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
+import { inboxSchema } from './schema/inbox'
 // lane B ▲
 // lane C ▼
 import { pluginRoleSchema } from './schema/plugin-roles'
@@ -82,6 +83,7 @@ const SCHEMA = [
   // lane A ▲
   // lane B ▼
   identitySchema,
+  inboxSchema,
   // lane B ▲
   // lane C ▼
   pluginRoleSchema,

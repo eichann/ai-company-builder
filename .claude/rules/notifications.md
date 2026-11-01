@@ -55,7 +55,7 @@ a plugin can never draw a notice (§2-2).
   `records.md` "Acceptance"), `acceptance_waiting` (the server clock, below), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
-  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below),
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `reply_arrived` (the inbox: their reply came to a 返事待ち, to its assignee) and `intake_unsure` (an interaction entered 確認待ち, to its owner; `inbox.md`, both on by default),
   `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above), `others` (everything else: handed
   to you — also the AI's 「用意ができた」 / 「先に渡す」 and 「自分で進める」 of task v5 —, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the

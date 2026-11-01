@@ -43,6 +43,20 @@ export interface ServiceCreateInput {
   links?: Record<string, string[]>
   actor: ServiceActor
   note?: string
+  /**
+   * Owner-only (「持ち主だけ」): the one member who may read it — the inbox's
+   * record of someone's own mail (inbox.md). Not with `folder`; every person
+   * named must be that member (no one else can read it).
+   */
+  personalOwner?: string
+  /**
+   * Start in this state instead of the type's initial one: only a state the
+   * initial one may move to along `SERVICE_TRANSITIONS` (as if created, then
+   * moved) — the inbox's 確認待ち / 部署の番 / やることにしなかった.
+   */
+  state?: string
+  /** Tell nobody (signal the app only): a record made in the AI's turn waits for the AI, not a person. */
+  quiet?: boolean
 }
 
 /** A state change (checked against `SERVICE_TRANSITIONS`) and/or field change of a service-owned record. */
@@ -66,6 +80,8 @@ export interface ServiceTransitionInput {
   decisionReason?: string
   /** Also tell these members (besides the assignee and next actor). */
   notify?: string[]
+  /** Tell nobody (signal the app only). */
+  quiet?: boolean
 }
 
 export type ServiceWriteFailure =
@@ -115,9 +131,10 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     return { values }
   }
 
-  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange) {
+  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange, quiet = false) {
     const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
-    if (to.length > 0) { try { deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
+    // Quiet: the `records` signal only (the app refetches), no notice.
+    if (to.length > 0) { try { if (quiet) deps.notify(companyId, to); else deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
   }
 
   /** Everything `create` checks, without writing: the prepared rows, or why not. */
@@ -137,6 +154,12 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       folder = normalizeRepoPath(input.folder)
       if (folder === null || findPrivateScope(scopes, folder)) return fail('bad-place')
     }
+    const personalOwner = input.personalOwner ?? null
+    if (personalOwner !== null && (folder !== null || !deps.isMember(companyId, personalOwner))) return fail('bad-place')
+    const state = input.state ?? def.initial
+    if (input.state !== undefined && input.state !== def.initial && (!def.states.includes(input.state) || !serviceTransitionAllowed(def.name, def.initial, input.state))) {
+      return fail('transition-not-allowed')
+    }
     const checked = checkFields(companyId, def, input.fields)
     if (!('values' in checked)) return checked
     const values = checked.values
@@ -146,8 +169,8 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const id = input.id ?? newRecordId(def.name, deps.ids.newToken().slice(0, 16))
     if (!RECORD_ID_RE.test(id) || !id.startsWith(`${def.name}-`)) return fail('bad-value', 'id')
-    // Service records are never owner-only (records.md "Owner-only records").
-    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner: null }
+    // Owner-only only when the calling service says whose (records.md "Owner-only records": the inbox).
+    const place: RecordAccessRow = { id, type: def.name, scopeId: null, path: null, folder, personalOwner }
     if (!readersOk(companyId, place, values, def)) return fail('assignee-cannot-read', ASSIGNEE_CANNOT_READ)
     const links: RecordLinkRow[] = []
     for (const [name, targets] of Object.entries(input.links ?? {})) {
@@ -161,7 +184,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     }
     const existing = records.find(id)
     if (existing && (existing.type !== def.name || records.states([id]).length > 0)) return fail('exists')
-    return { ok: true as const, records, def, id, title, summary, folder, values, links }
+    return { ok: true as const, records, def, id, title, summary, folder, personalOwner, state, values, links }
   }
 
   return {
@@ -174,13 +197,13 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     create(companyId: string, input: ServiceCreateInput): ServiceWriteResult {
       const p = prepare(companyId, input)
       if (!p.ok) return p
-      const { records, def, id, values, links } = p
+      const { records, def, id, values, links, state } = p
       const at = deps.clock.now()
       const entry: LedgerEntry = {
-        recordId: id, version: 1, action: 'create', fromState: null, toState: def.initial, actorId: input.actor.id, actorKind: input.actor.kind,
+        recordId: id, version: 1, action: 'create', fromState: null, toState: state, actorId: input.actor.id, actorKind: input.actor.kind,
         actorSource: input.actor.source, at, note: input.note ?? '',
         changes: [
-          { field: 'state', before: null, after: def.initial },
+          { field: 'state', before: null, after: state },
           ...Object.entries(values).filter(([, v]) => v !== null).map(([field, after]) => ({ field, before: null, after })),
         ],
         attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
@@ -192,11 +215,11 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
       try {
         written = deps.transactions.run(() => {
           records.upsert({
-            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder, personalOwner: null,
+            id, type: def.name, typeVersion: existing?.typeVersion ?? def.version, scopeId: null, path: null, folder: p.folder, personalOwner: p.personalOwner,
             title: p.title, summary: p.summary, createdAt: existing?.createdAt ?? at, updatedAt: at, removedAt: null,
           })
           records.replaceLinks(id, links)
-          if (!records.writeState({ recordId: id, state: def.initial, fields: JSON.stringify(values), version: 1, updatedAt: at }, 0)) throw new Error('exists')
+          if (!records.writeState({ recordId: id, state, fields: JSON.stringify(values), version: 1, updatedAt: at }, 0)) throw new Error('exists')
           records.appendLedger(entry)
           return true
         })
@@ -204,7 +227,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         written = false
       }
       if (!written) return fail('exists')
-      tell(companyId, input.actor.id, [values.assignee, values.next_actor], { type: def.name, entry, fields: values })
+      tell(companyId, input.actor.id, [values.assignee, values.next_actor], { type: def.name, entry, fields: values }, input.quiet)
       return { ok: true, record: recordSummaries(records, records.byIds([id])).get(id) as RecordSummary, entry }
     },
 
@@ -272,7 +295,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         return true
       })
       if (!written) return fail('stale')
-      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next })
+      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next }, input.quiet)
       return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
     },
   }

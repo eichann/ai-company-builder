@@ -44,6 +44,7 @@ import type { TaskSettingsRepository } from './task-settings'
 // lane A ▲
 // lane B ▼
 import type { IdentityRepository } from './identities'
+import type { InboxRepository } from './inbox'
 // lane B ▲
 // lane C ▼
 import type { PluginRoleRepository } from './plugin-roles'
@@ -84,6 +85,8 @@ export interface CompanyData {
   // lane B ▼
   /** Matching people and companies (名寄せ): identities, proposals, history (ports/identities.ts, identity.md). */
   readonly identities: IdentityRepository
+  /** The inbox (来た連絡): settings, messages seen, connections and unchecked gaps (ports/inbox.ts, inbox.md). */
+  readonly inbox: InboxRepository
   // lane B ▲
   // lane C ▼
   /** Business roles (役割): the company's assignments, まとまり overrides, history (ports/plugin-roles.ts, plugin-roles.md). */
