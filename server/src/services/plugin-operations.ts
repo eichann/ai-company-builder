@@ -85,7 +85,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
   const { companyData, clock, plugins, connector, importer } = deps
   const serialised = createSerialiser()
   const checks = createOperationChecks(deps)
-  const { readable, valuesOf, precheckFor, recordChecks, newRecordChecks, opFor } = checks
+  const { readable, valuesOf, precheckFor, recordChecks, newRecordChecks, opFor, approvalStepRefusal } = checks
   const records = createOperationRecords({ ...deps, valuesOf })
   const { newRow, view, answerFor } = records
   const sending = createOperationSending({ ...deps, valuesOf, newRow, answerFor })
@@ -104,7 +104,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     if (!noted.ok) return noted.refusal
     const policy = createPolicy(plugin, operation, op)
     if (policy === 'off') return operationOff()
-    if (policy !== 'auto') return approvalRequired()
+    if (policy !== 'auto') return (await approvalStepRefusal(member, actor, plugin.pluginId)) ?? approvalRequired()
     const precheck = precheckFor(member, actor, plugin, op.who, recordId, place, p => createPolicy(p, operation, op) === 'auto')
     const account = await importer.verifyAccount(member.companyId, plugin, precheck)
     if (!account.ok || account.accountId !== link.accountId) return conflict('HubSpot のアカウントを確かめられないか、この記録のものと違います', 'ACCOUNT_CHANGED', { reason: account.ok ? 'other-account' : account.reason })
@@ -148,7 +148,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       const names = Object.keys(asked)
       const policy = notAuto(plugin, operation, names)
       if (policy.off.length > 0) return refuse('bad-request', `書き戻さない欄です：${policy.off.join('、')}（何も変えていません）`, { code: 'FIELD_NOT_WRITABLE', fields: policy.off })
-      if (policy.prior.length > 0) return approvalRequired(policy.prior)
+      if (policy.prior.length > 0) return (await approvalStepRefusal(member, actor, pluginId)) ?? approvalRequired(policy.prior)
       const pkg = { manifest: plugin.manifest, types: plugin.types }
       const translated = acbToExternal(pkg, plugin.mapping, op.object, asked)
       if (!translated.ok) return refuse('bad-request', '書き戻せない値があります（何も変えていません）', { code: 'BAD_VALUE', errors: translated.errors })
@@ -207,7 +207,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
       if (!noted.ok) return noted.refusal
       const policy = createPolicy(plugin, operation, op)
       if (policy === 'off') return operationOff()
-      if (policy !== 'auto') return approvalRequired()
+      if (policy !== 'auto') return (await approvalStepRefusal(member, actor, pluginId)) ?? approvalRequired()
       // Not reached while createPolicy holds (a create of a record is never auto); kept as the one send path.
       const precheck = precheckFor(member, actor, plugin, op.who, null, place, p => createPolicy(p, operation, op) === 'auto')
       return sendNewRecord(member, actor, plugin, operation, op, input, precheck, { note: noted.note, approvedBy: null })

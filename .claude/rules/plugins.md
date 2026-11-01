@@ -256,7 +256,10 @@ upgrade:                                 # where work pinned to an older version
   `field_policy_defaults` (`validatePluginPackage`) and the company mapping's `policy`
   (`parsePluginMapping`) — and held to `prior` at run time (`effectiveFieldPolicy`, also for a
   field read from the same outside property). A type's action may not name it in `args` (so no
-  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`).
+  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`). **Not
+  blocked: the external writer** (`createExternalRecordWriter`, imports and confirmed writes):
+  the outside system is the source of truth for money, so a mirrored amount is created and
+  updated freely — never extend the money block to it (`record-money-field.test.ts` fails).
   **One place** (`plugin-declaration.ts`): `moneyField` (the field) and `asksFirst` /
   `priorFieldWriters` (the operation), joined by `writeAsksFirst`, which `effectiveFieldPolicy`
   uses. Tests: `tests/unit/plugin-contract-v2.test.ts` "a field that holds money",
@@ -854,10 +857,14 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   operator stop, the package and the connector apply), only when the step's `tools` include
   `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external`,
   `moves_money` or creates a record — never `auto`, never `ok_from`, never direct) only when they also include
-  `approvals`: it can only become an approval request (202), never be sent. A money field
-  (`money: true`) written by an operation that does not ask first is held per field instead
-  (`effectiveFieldPolicy` → `prior`): the direct call answers `APPROVAL_REQUIRED` with nothing
-  sent, and only an approval request writes it — in a step and in a consultation alike.
+  `approvals`: it can only become an approval request (202), never be sent.
+- **Approval requests, per field** (`approvalStepRefusal`, coordinator decision 2026-11-02): an
+  operation that does not ask first may still write something whose policy is `prior` — a money
+  field (`money: true`), any field or create the declaration or the company keeps `prior`. Inside
+  a step's run that write becomes an approval request only when the step's `tools` include
+  `approvals`; otherwise the direct call and the request (`prepareApproval`, checked first) both
+  get the same `NOT_IN_STEP`, nothing asked or sent. A consultation or a core step: the direct
+  call answers `APPROVAL_REQUIRED` and the request is made, as before.
 - **Connector roles** (`createPluginRunGate` in `plugin-ai-tools.ts`, wired in
   `composition/plugins.ts`; routes call `connectorRoleRefusal(c, h, role)` from
   `routes/record-ai-auth.ts` before using a role): only the roles the step's `connector_roles`
@@ -880,7 +887,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   `usePinnedSteps` / `runStepOf`); a stopped or missing pinned version refuses every call.
 - Test: `tests/integration/plugin-run-gate.test.ts` (a step without `plugin_operations`, another
   plugin's / not installed here, asks first without `approvals` then only a request, money
-  (`moves_money`) never direct and only a request in a step, the tool list per step, `role:` in an
+  (`moves_money`) never direct and only a request in a step, a `prior` write of an operation that
+  does not ask first only with the step's `approvals`, the tool list per step, `role:` in an
   operation's `who` (company / まとまり / delegate), the step's
   roles only, the switch and the operator stop, a consultation and a core step unchanged) —
   mutation-checked.

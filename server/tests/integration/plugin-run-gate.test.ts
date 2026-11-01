@@ -18,6 +18,9 @@
  * - an operation that moves money (`moves_money`) asks first like one reaching
  *   outside: never direct, in a step only with `approvals` and then only a
  *   request;
+ * - a write whose policy is `prior` (a money field, any prior field or create)
+ *   of an operation that does not ask first becomes a request in a step only
+ *   with the step's `approvals`; otherwise the same `NOT_IN_STEP`;
  * - the AI's tool list of a step's run is that step's operations only;
  * - `role:<name>` in an operation's `who` is held through C3's assignment (the
  *   company's, a まとまり's override, an absent holder's delegate).
@@ -309,6 +312,27 @@ describe('an operation that moves money asks first, like one reaching outside', 
     const approvals = approvalCount()
     const asked = await services.approvals.request(member, aiIn(runOf('sample-sales__ask')), 'sample-sales', recordOf('1000000001'), 'update_deal', body())
     expect(asked, JSON.stringify(asked)).toMatchObject({ ok: true, value: { outcome: 'approval-requested' } })
+    expect(approvalCount()).toBe(approvals + 1)
+    expect(fake.requests.slice(before).filter(q => q.method !== 'GET' && !q.path.includes('/search'))).toEqual([])
+  })
+})
+
+describe("a write whose policy is prior becomes a request in a step's run only with the step's approvals", () => {
+  // log_meeting does not ask first (internal, no money), but its policy is `prior` (as a money field's write is).
+  const meeting = { title: '打合せ（株式会社ゲート）', at: '2026-11-05T15:00:00+09:00' }
+  const direct = (runId: string | null) => services.pluginOperations.run(member, aiIn(runId), 'sample-sales', recordOf('1000000001'), 'log_meeting', meeting)
+  const ask = (runId: string | null) => services.approvals.request(member, aiIn(runId), 'sample-sales', recordOf('1000000001'), 'log_meeting', meeting)
+
+  it("without approvals: the gate's one answer, nothing asked or sent; with them (or in a consultation) a request", async () => {
+    const before = outsideCalls()
+    const approvals = approvalCount()
+    const work = runOf('sample-sales__work')
+    expect(await direct(work)).toEqual(NOT_IN_STEP)
+    expect(await ask(work)).toEqual(NOT_IN_STEP)
+    expect(approvalCount()).toBe(approvals)
+    expect(await direct(null)).toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
+    const inStep = await ask(runOf('sample-sales__ask'))
+    expect(inStep, JSON.stringify(inStep)).toMatchObject({ ok: true, value: { outcome: 'approval-requested' } })
     expect(approvalCount()).toBe(approvals + 1)
     expect(fake.requests.slice(before).filter(q => q.method !== 'GET' && !q.path.includes('/search'))).toEqual([])
   })

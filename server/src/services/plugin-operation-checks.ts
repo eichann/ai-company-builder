@@ -205,19 +205,45 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
    * allows, while the plugin runs. A consultation or a core step: null.
    */
   async function stepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, operation: string) {
+    const bound = await boundStep(member, actor, pluginId)
+    if (bound === null) return null
+    return bound && stepAllowsOperation(bound.step, bound.manifest, operation) ? null : notInStep()
+  }
+
+  /**
+   * The step a run-bound AI works in, for `pluginId`: null = not a business
+   * plugin's step (a consultation, a core step); false = refused (another
+   * plugin's, not running, the pinned version stopped).
+   */
+  async function boundStep(
+    member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string,
+  ): Promise<{ step: PluginStep; manifest: PluginManifest } | null | false> {
     if (actor.kind !== 'ai') return null
     const run = boundStepOf(companyData.forCompany(member.companyId), member.userId, actor)
     if (run === null) return null
-    if (run === 'missing') return notInStep()
+    if (run === 'missing') return false
     const bound = parsePluginRunStep(run.step)
     if (!bound) return null
-    if (bound.pluginId !== pluginId) return notInStep()
+    if (bound.pluginId !== pluginId) return false
     const active = await plugins.active(member.companyId, pluginId)
     const installed = active.ok ? stepOf(active.plugin.manifest, bound.step) : null
-    if (!active.ok || !installed) return notInStep()
+    if (!active.ok || !installed) return false
     // The work's pinned version narrows the step (C5); its stop refuses everything.
     const step = runStepOf ? await runStepOf(member.companyId, run) : installed
-    return step && stepAllowsOperation(step, active.plugin.manifest, operation) ? null : notInStep()
+    return step ? { step, manifest: active.plugin.manifest } : false
+  }
+
+  /**
+   * The gate for an approval request (C4, per field): inside a step's run, a
+   * write that needs a person's approval — a money field, any field or create
+   * whose policy is `prior` — becomes a request only when the step declares
+   * `approvals`; otherwise the gate's one answer (`NOT_IN_STEP`). A
+   * consultation or a core step: null.
+   */
+  async function approvalStepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string) {
+    const bound = await boundStep(member, actor, pluginId)
+    if (bound === null) return null
+    return bound && bound.step.tools.includes('approvals') ? null : notInStep()
   }
 
   /** The checks a record operation gets before its own work: (row, plugin, op, link) or the refusal. */
@@ -274,7 +300,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, approvalStepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

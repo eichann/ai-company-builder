@@ -23,7 +23,7 @@ import { RECORDS_DISABLED } from './records'
 
 export function createOperationApprovals(
   deps: Pick<PluginOperationDeps, 'companyData' | 'plugins' | 'importer' | 'roleOf' | 'aiStopped'> & {
-    checks: Pick<OperationChecks, 'recordChecks' | 'newRecordChecks' | 'readable' | 'folderReadable' | 'valuesOf' | 'mayRun' | 'mayRunAt' | 'precheckFor'>
+    checks: Pick<OperationChecks, 'recordChecks' | 'newRecordChecks' | 'readable' | 'folderReadable' | 'valuesOf' | 'mayRun' | 'mayRunAt' | 'precheckFor' | 'approvalStepRefusal'>
     records: Pick<OperationRecords, 'newRow' | 'view'>
     sending: Pick<OperationSending, 'readOutside' | 'sendAndSettle' | 'sendCreate' | 'sendNewRecord'>
     serialised: Serialised
@@ -44,6 +44,9 @@ export function createOperationApprovals(
     async prepareApproval(
       member: Member, actor: OperationActor, pluginId: string, recordId: string | null, operation: string, input: unknown,
     ): Promise<Outcome<{ payload: PluginApprovalPayload; approver: ApproverSpec; folder: string | null }>> {
+      // Inside a step's run a request needs the step's `approvals` (C4), checked before anything else.
+      const gate = await checks.approvalStepRefusal(member, actor, pluginId)
+      if (gate) return gate
       const b = isObj(input) ? input : null
       if (!b) return refuse('bad-request', 'The input must be an object')
       const basis = isObj(b.basis) ? b.basis : {}
