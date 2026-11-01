@@ -13,6 +13,7 @@ import type {
   RecordAccessRow, RecordCandidateFilter, RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository,
   RecordRow, RecordStateRow, RecordTypeRow,
 } from '../../ports/records'
+import { MIGRATION_ACTOR, OUTSIDE_TIME_ACTION } from '../../../shared/core/core-types'
 import { CONTENT_REF_PREFIX } from '../../../shared/core/record-contents'
 import { sqliteContentStore } from './record-contents'
 
@@ -101,6 +102,41 @@ export function migrateCompanyCoreInterfaceLinks(conn: Database.Database, compan
     `).run(companyId, companyId)
     conn.prepare(`DELETE FROM record_types WHERE company_id = ? AND name = 'minutes' AND source = 'core'`).run(companyId)
     return { records, links }
+  })()
+}
+
+/**
+ * Meeting version 2 (records.md "Outside time"): every meeting whose server values have
+ * `meeting_at` but no `occurred_at` gets it, as a new ledger entry (action
+ * OUTSIDE_TIME_ACTION, the server's migration actor) with a compare-and-set on the
+ * version — the ledger stays the record's history and replays to the same values.
+ * Idempotent: a meeting carried over (or written by the version 2 intake) is skipped.
+ */
+export function migrateCompanyOutsideTimes(conn: Database.Database, companyId: string, at: string): number {
+  return conn.transaction(() => {
+    const rows = conn.prepare(`
+      SELECT s.record_id, s.state, s.version, json_extract(s.fields, '$.meeting_at') AS meeting_at FROM record_state s
+      JOIN records r ON r.company_id = s.company_id AND r.id = s.record_id
+      WHERE s.company_id = ? AND r.type = 'meeting' AND json_valid(s.fields)
+        AND json_type(s.fields, '$.meeting_at') = 'text' AND json_type(s.fields, '$.occurred_at') IS NULL
+    `).all(companyId) as Array<{ record_id: string; state: string | null; version: number; meeting_at: string }>
+    const write = conn.prepare(`
+      UPDATE record_state SET fields = json_set(fields, '$.occurred_at', ?), version = version + 1, updated_at = ?
+      WHERE company_id = ? AND record_id = ? AND version = ?
+    `)
+    const entry = conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at,
+        note, changes, attachments, is_decision, type_version) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '', ?, '[]', 0, 2)`)
+    // The record now holds what version 2 asks (the index row says which version it was made under).
+    const version2 = conn.prepare(`UPDATE records SET type_version = 2 WHERE company_id = ? AND id = ? AND (type_version IS NULL OR type_version < 2)`)
+    let moved = 0
+    for (const r of rows) {
+      if (write.run(r.meeting_at, at, companyId, r.record_id, r.version).changes !== 1) continue
+      version2.run(companyId, r.record_id)
+      entry.run(companyId, r.record_id, r.version + 1, OUTSIDE_TIME_ACTION, r.state, r.state, MIGRATION_ACTOR.id, MIGRATION_ACTOR.kind,
+        MIGRATION_ACTOR.source, at, JSON.stringify([{ field: 'occurred_at', before: null, after: r.meeting_at }]))
+      moved++
+    }
+    return moved
   })()
 }
 

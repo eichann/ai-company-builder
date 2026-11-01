@@ -291,6 +291,11 @@ describe('discovery', () => {
     expect(f.external_count).toBe(2)
     expect(f.doc_version).toBe('notes:7,transcript:7')
     expect(rows[0]).toMatchObject({ state: 'received', folder: '営業部', title: '研修導入のご相談（株式会社サンプル）' })
+    // The common outside time (records.md "Outside time"): when the meeting happened, apart from when ACB learned of it.
+    expect(typeof f.occurred_at === 'string' && f.occurred_at.length > 0).toBe(true)
+    expect(f.occurred_at).toBe(f.meeting_at)
+    const learned = db.prepare("SELECT at FROM record_ledger WHERE company_id = ? AND record_id = ? AND action = 'create'").get(CO, rows[0].id) as { at: string }
+    expect(learned.at).not.toBe(f.occurred_at)
   })
 
   it('two open deal candidates: nothing is linked; the text names both and a person chooses', async () => {

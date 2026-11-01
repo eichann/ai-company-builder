@@ -99,7 +99,8 @@ state, fields, version } | null, candidates: [{ id, title, typeLabel }], instruc
 ## What is stored, and what never
 
 Stored (the record, server only, folder = the minutes folder): title = the event's title, fields
-`meeting_at`, `assignee`, `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
+`meeting_at` and `occurred_at` (the same start time; `occurred_at` is the common outside time,
+`records.md` "Outside time"), `assignee`, `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
 `source_ref` (JSON of Google ids only: conference, event, documents), `doc_version`
 (`notes:7,transcript:7`), `summary_text` (the AI's ≤ 300 at the end); links `bundle`, `counterpart`.
 Ledger actor of the creation: external `google` (note: which member's calendar).

@@ -2,7 +2,7 @@ import Database from 'better-sqlite3'
 import fs from 'fs'
 import { seedPermissionScopes } from '../adapters/sqlite/permission-store'
 import { migrateCompanyContents } from '../adapters/sqlite/record-contents'
-import { migrateCompanyCoreInterfaceLinks } from '../adapters/sqlite/records'
+import { migrateCompanyCoreInterfaceLinks, migrateCompanyOutsideTimes } from '../adapters/sqlite/records'
 import { APP_DB_PATH, DATA_DIR } from '../lib/config'
 import { agentSchema, migrateAgentEventSandbox } from './schema/agents'
 import { aiRunSchema, migrateAiRunColumns } from './schema/ai-runs'
@@ -85,6 +85,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateRecordTypeSources(conn)
   // Core types link to interfaces, `minutes` became `meeting` (records.md "Core interfaces").
   migrateCoreInterfaceLinks(conn)
+  // Meeting version 2: the common outside time (records.md "Outside time").
+  migrateOutsideTimes(conn)
   migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)
   migrateRecordContents(conn)
@@ -138,6 +140,18 @@ export function migrateCoreInterfaceLinks(conn: Database.Database): void {
   for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
     const { records, links } = migrateCompanyCoreInterfaceLinks(conn, id)
     if ((records > 0 || links > 0) && conn === sqlite) console.log(`[records] core interfaces: ${records} meeting(s), ${links} link(s) carried over in company ${id}`)
+  }
+}
+
+/**
+ * Every company's meetings get `occurred_at` from `meeting_at` (adapters/sqlite/records.ts
+ * `migrateCompanyOutsideTimes`): one ledger entry each, idempotent.
+ */
+export function migrateOutsideTimes(conn: Database.Database): void {
+  const at = new Date().toISOString()
+  for (const { id } of conn.prepare('SELECT id FROM companies').all() as Array<{ id: string }>) {
+    const moved = migrateCompanyOutsideTimes(conn, id, at)
+    if (moved > 0 && conn === sqlite) console.log(`[records] outside time: ${moved} meeting(s) carried over in company ${id}`)
   }
 }
 

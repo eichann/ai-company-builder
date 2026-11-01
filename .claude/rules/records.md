@@ -59,6 +59,7 @@ paths:
   - "shared/core/record-turns.ts"
   - "server/tests/unit/record-turn-opens.test.ts"
   - "client/tests/record-views-opened.test.ts"
+  - "server/tests/unit/record-outside-time.test.ts"
 ---
 
 # Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
@@ -103,7 +104,8 @@ engine the day it is turned on.
   server; `bundle` (まとまり) needs `owner` (person) and `purpose` (text) on the server and final
   states; `counterpart` (相手) needs `counterpart_kind` (choice offering company and person),
   `domain` and `email` (text) on the server; `prepared` (AI が用意したもの) needs `requested_by` and
-  `assignee` (person) — `outbound_message` and `approval` implement it; `interfaceProblems`), `storage`
+  `assignee` (person) — `outbound_message` and `approval` implement it; `outside_event` (外で起きたこと)
+  needs `occurred_at` (datetime) on the server — "Outside time"; `interfaceProblems`), `storage`
   (`file` / `server` / `either`). Any other key is an error — there is no place for an
   expression, computed field, cascade, timer or outside send. `args` name server fields of the
   same kind (an action sets them; nothing is computed).
@@ -317,7 +319,8 @@ has, and core types link to them instead of to `deal` / `customer`:
   the keys later 名寄せ uses — either may be empty).
 
 The set is fixed and small (`INTERFACES`, `shared/core/record-types.ts`): with `request` and
-`prepared` (turns, not things) these four are all there is. **No plugin or company type defines an
+`prepared` (turns, not things) and `outside_event` (when a thing happened outside, "Outside time")
+these five are all there is. **No plugin or company type defines an
 interface** (no key for it; an unknown name in `implements` or `interface:` is a parser error) and
 there is no inheritance — an interface is only a promise of a few required fields, which the
 parser checks (`interfaceProblems`) wherever a definition is read: core, a plugin package on the
@@ -355,6 +358,34 @@ and a guest but not a まとまり; unreadable / another company's / missing get
 migration, once, per company), `record-types.test.ts` (each interface's fields, choice options,
 final states; no interface of one's own), `record-service-types.test.ts` (a decision's `bundle`
 takes any まとまり) — mutation-checked.
+
+### Outside time (owner decision 2026-11-01 「流れを測れる記録」)
+
+Something that happened outside ACB (a mail or call received, a meeting) has two times: when it
+happened there and when ACB learned of it. One field holds the first for every such type: the
+interface **`outside_event`** (外で起きたこと) requires `occurred_at` (datetime, server). When ACB
+learned of it is the record's `create` entry's `at` (always there). Core: `interaction` version 4
+(implements it; `occurred_at` was there from version 1), `meeting` version 2 (adds `occurred_at`;
+`meeting_at` stays, the intake writes both — `services/minutes.ts`, which also stores the core
+types before writing, so a company not indexed since the update gets version 2 first). A business
+plugin's or a company's type of incoming things may claim it (the parser checks the field); the
+corporate-sales types (deal, customer) are not outside events and are unchanged.
+`outbound_message` is not one (ACB made it; `sent_at` stays) — the mail's `interaction` receipt
+carries `occurred_at` = the send time.
+
+**Migration** (additive, no breaking change: both versions only add over the old ones): at startup
+(`db/index.ts` `migrateOutsideTimes` → `adapters/sqlite/records.ts` `migrateCompanyOutsideTimes`),
+every meeting with `meeting_at` and no `occurred_at` gets it as a **ledger entry** (action
+`carry_outside_time` = `OUTSIDE_TIME_ACTION`, actor `MIGRATION_ACTOR` `acb:migration` — cause
+`system`; compare-and-set on the version; the index row's `type_version` becomes 2), so the ledger
+still replays to the stored values. Idempotent, per company. The app's 経緯 shows it as
+「外で起きた日時を共通の欄に写しました」.
+
+Tests: `server/tests/unit/record-outside-time.test.ts` (which core types claim it; a type claiming it
+without the field refused; the new versions additive; the carry-over once, per company, as an entry
+that replays, leaving others alone), `server/tests/integration/minutes.test.ts` (the intake writes
+`occurred_at`, apart from the create time), `core-types-interfaces.test.ts` (the set) —
+mutation-checked.
 
 ### Links to an interface (stage 2 S1, owner decision 2026-11-01: 取り組みを最初から)
 
@@ -529,7 +560,8 @@ undoable approval tier, decision), wait, set_due, complete (requested_by / revie
 stating whose OK it was — never AI; attach, decision, notifies the requester and the OK-giver),
 cancel (note required, decision), reopen (requested_by / ok_by / admin)) and
 `interaction` (やりとり: server only, no body — summary, channel, `counterpart_text`, pointer to the
-original; version 3 links `bundle` and `counterpart`, "Core interfaces"; outbound mail records one per sent mail, `outbound-mail.md`). Task version 6
+original; version 3 links `bundle` and `counterpart`, "Core interfaces"; version 4 implements
+`outside_event`, "Outside time"; outbound mail records one per sent mail, `outbound-mail.md`). Task version 6
 drops the `customer` link and adds `counterpart`. Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
 own `.acb/types/task.md` (higher version, additive only; a company file still saying `storage:
@@ -541,7 +573,8 @@ copied into `next_actor`; only for types implementing `request`).
 
 Milestone 4 adds four (people by id in person fields):
 
-- `meeting` (会議, server; was `minutes`): internal and external meetings — `meeting_at`, `assignee`
+- `meeting` (会議, server; was `minutes`): internal and external meetings — `meeting_at` (and, version
+  2, `occurred_at` — the same time, the common outside time: "Outside time"), `assignee`
   (organizer or first discoverer), `attendees` (text: JSON array of member ids — no person-list
   kind exists), `external_count`, `source_ref` (opaque pointer to its minutes documents, no text),
   `doc_version`, `summary_text` (long_text; ≤ 300 is the intake's rule); links `bundle`,
