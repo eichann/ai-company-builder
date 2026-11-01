@@ -51,6 +51,7 @@ import { inboxRoute } from './routes/inbox'
 import { recordsAiInboxRoute } from './routes/records-ai-inbox'
 // lane B ▲
 // lane C ▼
+import { pluginStepsRoute } from './routes/plugin-steps'
 // lane C ▲
 import { requestLog } from './lib/request-log'
 import { services } from './composition'
@@ -173,4 +174,5 @@ app.route('/api/companies/:companyId', inboxRoute)
 app.route('/api/records-ai/inbox', recordsAiInboxRoute)
 // lane B ▲
 // lane C ▼
+app.route('/api/companies/:companyId', pluginStepsRoute)
 // lane C ▲

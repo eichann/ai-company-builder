@@ -47,6 +47,7 @@ import type { IdentityRepository } from './identities'
 import type { InboxRepository } from './inbox'
 // lane B ▲
 // lane C ▼
+import type { PluginStepRepository } from './plugin-steps'
 import type { PluginRoleRepository } from './plugin-roles'
 // lane C ▲
 export interface CompanyData {
@@ -89,6 +90,8 @@ export interface CompanyData {
   readonly inbox: InboxRepository
   // lane B ▲
   // lane C ▼
+  /** A business plugin's steps: each work's pinned procedure, the company's Skill per step (ports/plugin-steps.ts, plugin-steps.md). */
+  readonly pluginSteps: PluginStepRepository
   /** Business roles (役割): the company's assignments, まとまり overrides, history (ports/plugin-roles.ts, plugin-roles.md). */
   readonly pluginRoles: PluginRoleRepository
   // lane C ▲

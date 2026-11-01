@@ -9,7 +9,7 @@ import type { PluginAiField, PluginAiOperation, PluginAiTools } from '../../shar
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
-import { parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf } from './plugin-operation-checks'
+import { parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf, type RunStepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -24,7 +24,7 @@ import type { PluginShelf } from './plugin-shelf'
  * it through `routes/record-ai-auth.ts` `connectorRoleRefusal` before an AI
  * route uses a role.
  */
-export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'> & { shelf: Pick<PluginShelf, 'find' | 'isStopped'> }) {
+export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'> & { shelf: Pick<PluginShelf, 'find' | 'isStopped'>; runStepOf?: RunStepOf }) {
   const { companyData, shelf } = deps
   return {
     async allowsConnectorRole(member: Member, runId: string | null, role: string): Promise<boolean> {
@@ -38,8 +38,11 @@ export function createPluginRunGate(deps: Pick<PluginServiceDeps, 'companyData'>
       if (!install?.enabled) return false
       const manifest = shelf.find(member.companyId, bound.pluginId, install.version)?.pkg.manifest
       if (!manifest || manifest.role !== 'business' || await shelf.isStopped(bound.pluginId, install.version)) return false
-      const step = stepOf(manifest, bound.step)
-      return step !== null && stepAllowsConnectorRole(step, role)
+      const installed = stepOf(manifest, bound.step)
+      if (!installed) return false
+      // The work's pinned version narrows the step (C5); its stop refuses everything.
+      const step = deps.runStepOf ? await deps.runStepOf(member.companyId, run) : installed
+      return step !== null && step !== false && stepAllowsConnectorRole(step, role)
     },
   }
 }

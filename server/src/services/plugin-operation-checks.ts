@@ -100,10 +100,20 @@ export const placeOf = (row: RecordRow) => row.path ?? row.folder ?? ''
  */
 export type OperationRoleHolds = (companyId: string, pluginId: string, recordId: string | null, role: string, userId: string) => boolean
 
+/**
+ * The step a run may use (plan C5, services/plugin-steps.ts `stepOfRun`): the
+ * installed step narrowed by the work's pinned version; false when the pinned
+ * version may not run now (the operator stopped it, it is gone). Bound once by
+ * the plugins lane; until then the installed step decides alone.
+ */
+export type RunStepOf = (companyId: string, run: { step: string; procedure: string | null }) => Promise<PluginStep | null | false>
+
 export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyData' | 'plugins' | 'roleOf' | 'managedFolders' | 'aiStopped'>) {
   const { companyData, plugins } = deps
   let roleHolds: OperationRoleHolds | null = null
   const useRoles = (r: OperationRoleHolds) => { roleHolds = r }
+  let runStepOf: RunStepOf | null = null
+  const usePinnedSteps = (f: RunStepOf) => { runStepOf = f }
 
   function readable(member: Member, recordId: string | null): RecordRow | null {
     if (recordId === null) return null
@@ -183,8 +193,11 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     if (!bound) return null
     if (bound.pluginId !== pluginId) return notInStep()
     const active = await plugins.active(member.companyId, pluginId)
-    const step = active.ok ? stepOf(active.plugin.manifest, bound.step) : null
-    return active.ok && step && stepAllowsOperation(step, active.plugin.manifest, operation) ? null : notInStep()
+    const installed = active.ok ? stepOf(active.plugin.manifest, bound.step) : null
+    if (!active.ok || !installed) return notInStep()
+    // The work's pinned version narrows the step (C5); its stop refuses everything.
+    const step = runStepOf ? await runStepOf(member.companyId, run) : installed
+    return step && stepAllowsOperation(step, active.plugin.manifest, operation) ? null : notInStep()
   }
 
   /** The checks a record operation gets before its own work: (row, plugin, op, link) or the refusal. */
@@ -241,7 +254,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor, useRoles }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor, useRoles, usePinnedSteps }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

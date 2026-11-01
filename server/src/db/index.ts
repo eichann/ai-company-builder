@@ -29,6 +29,7 @@ import { identitySchema } from './schema/identities'
 import { inboxSchema, migrateInboxMessageSourceRef } from './schema/inbox'
 // lane B ▲
 // lane C ▼
+import { pluginStepSchema } from './schema/plugin-steps'
 import { pluginRoleSchema } from './schema/plugin-roles'
 // lane C ▲
 // The migrations tests run on their own against older databases.
@@ -87,6 +88,7 @@ const SCHEMA = [
   inboxSchema,
   // lane B ▲
   // lane C ▼
+  pluginStepSchema,
   pluginRoleSchema,
   // lane C ▲
 ]
