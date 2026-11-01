@@ -348,7 +348,7 @@ export function createCompanyService(deps: CompanyServiceDeps) {
         scopesOf(companyId).removeManagerFromCompany(targetUserId)
         scopesOf(companyId).deleteUserRules(targetUserId)
         // They belong to no department of it any more (tasks.md "Department membership").
-        companyData.forCompany(companyId).tasks.removeMember(targetUserId)
+        companyData.forCompany(companyId).tasks.removeMember(targetUserId, actor.userId, clock.now())
       })
       return ok(undefined)
     },

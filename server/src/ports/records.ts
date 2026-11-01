@@ -122,6 +122,16 @@ export interface RecordAiTokenRow {
   runGeneration?: number | null
 }
 
+/** The first time a turn's holder (or their delegate) opened a record in the app. */
+export interface RecordTurnOpenRow {
+  recordId: string
+  /** The ledger version that began the turn. */
+  turnVersion: number
+  holderId: string
+  openedBy: string
+  openedAt: string
+}
+
 export interface RecordRepository {
   settings(): RecordSettingsRow
   setEnabled(enabled: boolean, by: string, at: string): void
@@ -170,6 +180,15 @@ export interface RecordRepository {
   /** The record's ledger, oldest first. */
   ledger(recordId: string): LedgerEntry[]
   appendLedger(entry: LedgerEntry): void
+
+  /**
+   * 「番の人が最初に開いた」 (records.md "Whose turn it was"): keep the first
+   * opening of the record's turn that began at `turnVersion`; false when that
+   * turn already has one (nothing changes).
+   */
+  noteTurnOpened(row: RecordTurnOpenRow): boolean
+  /** The record's first openings, one per turn, oldest turn first. */
+  turnOpens(recordId: string): RecordTurnOpenRow[]
 
   /** Live records matching the filter, with only the access columns (bounded by `limit`). */
   candidates(filter: RecordCandidateFilter, limit: number): RecordAccessRow[]

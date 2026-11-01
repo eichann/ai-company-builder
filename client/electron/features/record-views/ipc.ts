@@ -1,7 +1,10 @@
 // What the app shows of records (milestone 5 U8, records.md "The app's views"), read with
 // the member's session (it stays here):
 //   recordViews:search   検索: records whose title or summary holds the words
-//   recordViews:card     the read-only card a record opens in (fields, 経緯, つながっているもの)
+//   recordViews:card     the read-only card a record opens in (fields, 経緯, つながっているもの);
+//                        opening it also tells the server (POST …/opened), which keeps the first
+//                        opening of the turn when the record waits for this member (records.md
+//                        "Whose turn it was") — nothing is shown or kept here
 //   recordViews:forFile  「つながっているもの」 of an open file
 // The server answers only what the member may read (counts included); nothing is added here.
 
@@ -93,6 +96,8 @@ export function createRecordViewsApi(deps: RecordViewsDeps) {
       ])
       if (item?.status === 404) return { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' }
       if (item?.status !== 200) return failure(item)
+      // Not awaited: the card never waits for it, and a failure changes nothing on screen.
+      void call(companyId, 'POST', `/records/item/${id}/opened`, {})
       const detail = item.json?.data as RecordDetail
       const def = defs.get(detail.record.type)
       const entries = history?.status === 200 ? (history.json?.data as { entries?: LedgerEntry[] } | undefined)?.entries ?? [] : []

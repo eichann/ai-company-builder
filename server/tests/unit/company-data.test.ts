@@ -258,7 +258,7 @@ describe('company handle: task settings and department membership', () => {
     expect(a.departmentMemberIds('b-hr')).toEqual([])
     a.replaceDepartmentMembers('b-hr', [], 'u', TS)
     a.replaceDepartmentMembers('b-hr', ['intruder'], 'u', TS)
-    a.removeMember('u1')
+    a.removeMember('u1', 'u', TS)
     expect(a.departmentIdsOf('u1')).toEqual([])
     expect(b.departmentMemberIds('b-hr')).toEqual(['u1', 'u2'])
     expect(b.departmentIdsOf('u1')).toEqual(['b-hr'])

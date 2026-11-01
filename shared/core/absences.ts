@@ -80,6 +80,24 @@ export function delegation(periods: readonly AbsencePeriod[], day: string): Dele
   }
 }
 
+/** A period as stored, with when the company learned of it and (if so) when it was taken back. */
+export interface AbsenceRecord extends AbsencePeriod {
+  setAt: string
+  removedAt?: string | null
+}
+
+/**
+ * Who acted for whom at a past moment (records.md "Whose turn it was"): the
+ * delegation of `day` (the company-time day of `at`) built from the periods
+ * the company knew at `at` — set at or before it, not removed by then.
+ * Absence periods are history (never deleted, a removal only marks them), so
+ * this answers the same for a past moment whatever was changed afterwards.
+ * ISO timestamps compare as text.
+ */
+export function delegationAsOf(records: readonly AbsenceRecord[], day: string, at: string): Delegation {
+  return delegation(records.filter(r => r.setAt <= at && (r.removedAt == null || r.removedAt > at)), day)
+}
+
 /** The longest absence one period may cover (days). */
 export const ABSENCE_MAX_DAYS = 366
 /** Absences a member may have that have not ended yet. */

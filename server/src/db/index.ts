@@ -16,7 +16,7 @@ import { outboundMailSchema } from './schema/outbound-mail'
 import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permissions'
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
-import { taskSchema } from './schema/tasks'
+import { migrateMemberAbsenceHistory, taskSchema } from './schema/tasks'
 
 // The migrations tests run on their own against older databases.
 export { migrateInvitationClaims } from './schema/company'
@@ -26,6 +26,7 @@ export { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecor
 export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
+export { migrateMemberAbsenceHistory } from './schema/tasks'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -88,6 +89,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateFixedPayloads(conn)
   migrateRecordContents(conn)
   migrateNotificationsForUser(conn)
+  // Absences are history: removed periods are marked, never deleted (records.md "Whose turn it was").
+  migrateMemberAbsenceHistory(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
 

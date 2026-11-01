@@ -15,7 +15,10 @@
  * - the absentee's notice also reaches the delegate, marked;
  * - another company's absence changes nothing here;
  * - who may set an absence: the member, their department's manager, owners /
- *   admins — nobody else.
+ *   admins — nobody else;
+ * - absences are history (records.md "Whose turn it was"): removing one early
+ *   or removing a member marks it, so who covered at a past moment is still
+ *   answered as it was then; a stored period cannot be rewritten.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -215,6 +218,47 @@ describe('no chains', () => {
     expect(absences.coverOf('a', 'u-alice')).toEqual({ kind: 'stopped', delegateId: 'u-bob', reason: 'delegate-absent' })
     notices.sweep('a', 500)
     expect(ok(notices.list(m('u-carol'))).items.map(i => i.text)).toEqual(['Aliceさんも代わりの人も不在のため、「請求書を確かめる」を受け持つ人がいません'])
+  })
+})
+
+describe('whose turn it was: absences are history', () => {
+  const at = (hoursAfterNow: number) => new Date(NOW + hoursAfterNow * 3_600_000).toISOString()
+
+  it('a period taken back early still answers who covered before it was taken back', () => {
+    const before = at(-1)
+    ok(away('u-alice', 'u-bob'))
+    const id = ok(absences.view(m('u-alice'))).absences[0].id
+    expect(absences.coverAt('a', 'u-alice', at(1))).toEqual({ kind: 'delegate', delegateId: 'u-bob' })
+    nowMs = NOW + 2 * 3_600_000
+    ok(absences.remove(m('u-alice'), id))
+    // Today's answer changed; the past did not.
+    expect(absences.coverOf('a', 'u-alice')).toBeNull()
+    expect(absences.coverAt('a', 'u-alice', at(1))).toEqual({ kind: 'delegate', delegateId: 'u-bob' })
+    expect(absences.coverAt('a', 'u-alice', at(3))).toBeNull()
+    // Before the company knew of it, nobody covered (set at 10:00 for the whole day).
+    expect(absences.coverAt('a', 'u-alice', before)).toBeNull()
+    // Removed periods never come back into today's lists or block a new one.
+    expect(ok(absences.view(m('u-alice'))).absences).toEqual([])
+    ok(away('u-alice', 'u-carol'))
+    expect(absences.coverAt('a', 'u-alice', at(3))).toEqual({ kind: 'delegate', delegateId: 'u-carol' })
+    expect(absences.coverAt('a', 'u-alice', at(1))).toEqual({ kind: 'delegate', delegateId: 'u-bob' })
+  })
+
+  it('a member leaving stops the absences they had or covered, kept as history', () => {
+    ok(away('u-alice', 'u-bob'))
+    source.forCompany('a').tasks.removeMember('u-bob', 'u-owner', at(2))
+    expect(absences.coverOf('a', 'u-alice')).toBeNull()
+    expect(absences.coverAt('a', 'u-alice', at(1))).toEqual({ kind: 'delegate', delegateId: 'u-bob' })
+  })
+
+  it('a stored period cannot be rewritten or brought back', () => {
+    ok(away('u-alice', 'u-bob'))
+    const id = ok(absences.view(m('u-alice'))).absences[0].id
+    expect(() => conn.prepare("UPDATE member_absences SET until_day = '2026-11-09' WHERE id = ?").run(id)).toThrow(/history/)
+    expect(() => conn.prepare("UPDATE member_absences SET delegate_id = 'u-carol' WHERE id = ?").run(id)).toThrow(/history/)
+    ok(absences.remove(m('u-alice'), id))
+    expect(() => conn.prepare('UPDATE member_absences SET removed_at = NULL WHERE id = ?').run(id)).toThrow(/history/)
+    expect(absences.remove(m('u-alice'), id)).toMatchObject({ ok: false, body: { code: 'ABSENCE_NOT_FOUND' } })
   })
 })
 

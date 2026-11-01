@@ -20,6 +20,8 @@
  *   POST    /records/item/:recordId/file-links/remove { path, link?, expectedVersion, note? } remove that link
  *   POST    /records/item/:recordId/share             { folder, expectedVersion, note? } the owner shows their
  *                                                     owner-only record to a folder's readers (session only)
+ *   POST    /records/item/:recordId/opened            the app opened the record: the first opening of the
+ *                                                     turn by its holder is kept (session only, records.md)
  *   GET     /records/item/:recordId/history           the ledger
  *   GET     /records/item/:recordId/versions/:version the server values at that version
  *   POST    /me/record-tokens     any member: a record token for their AI (one chat turn;
@@ -164,6 +166,12 @@ recordsRoute.post('/records/item/:recordId/file-links/remove', async (c) => {
 })
 
 // Owner-only → a folder's readers (records.md "Owner-only records"): the person's own step, so no AI route.
+recordsRoute.post('/records/item/:recordId/opened', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, records.opened(member, c.req.param('recordId')))
+})
+
 recordsRoute.post('/records/item/:recordId/share', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
