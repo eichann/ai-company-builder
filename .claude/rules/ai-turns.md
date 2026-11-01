@@ -88,6 +88,11 @@ the fallback (removing it is S11).
 
 The execution state lives on the server; the AI still runs only here.
 
+- **Absence** (`records.md` "Absence and the delegate"): during an absence the server lets the
+  delegate's app claim the absentee's AI turns (`aiTurnOf` counts whom the member covers; the run
+  uses the delegate's token and permissions, the ledger records `onBehalfOf`). The app's queue
+  (`minutes:notices`) does not list the absentee's items yet — not yet wired in the runner.
+
 - **Claim**: `aiTurns:claim` first asks `POST /ai-run-claims { recordId, step:
   AI_TURN_KIND_STEPS[kind], deviceId, conversationId }` (session). `deviceId` = this app instance
   (`app-<uuid>` per launch, `main.ts`). Another PC holding it, or a run waiting for a person or for

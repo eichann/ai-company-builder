@@ -68,9 +68,15 @@ export function stateLine(v: ApprovalView, names: Record<string, string>): strin
   }
 }
 
+/** Who decided: 「Aさん」, or as a delegate 「Aさん（代わりに承認・本来は Bさん）」. */
+export function outcomeByText(outcome: Pick<NonNullable<ApprovalView['outcome']>, 'by' | 'onBehalfOf'>, names: Record<string, string>): string {
+  const by = `${nameOf(names, outcome.by)}さん`
+  return outcome.onBehalfOf ? `${by}（代わりに承認・本来は ${nameOf(names, outcome.onBehalfOf)}さん）` : by
+}
+
 /** The ids a view names (for the names lookup). */
 export function namedMembers(v: ApprovalView): string[] {
-  return [...new Set([v.requestedBy, v.approver, v.outcome?.by].filter((x): x is string => typeof x === 'string' && x.length > 0))]
+  return [...new Set([v.requestedBy, v.approver, v.outcome?.by, v.outcome?.onBehalfOf].filter((x): x is string => typeof x === 'string' && x.length > 0))]
 }
 
 /** What the AI is told when its request became an approval request (it must not claim the change happened). */

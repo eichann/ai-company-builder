@@ -185,6 +185,8 @@ GET  /api/config                                  setup state (no auth)
                               GET|POST /agent-stops, DELETE /agent-stops/:stopId,
                               GET /me/events (SSE push channel)               agent-stops.ts
                                                                 (緊急停止: agent-stop.md)
+                              GET|POST /absences, DELETE /absences/:absenceId
+                                                                (代わりの人: records.md)   absences.ts
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
                               PUT /broker/services/:service (+ /own-keys, /read-only, /default-key),

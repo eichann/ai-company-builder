@@ -2,6 +2,8 @@
  * Notices and each member's notice kinds (notifications.md).
  * Part of the one schema run by db/index.ts initDatabase (tables before every migration).
  */
+import type Database from 'better-sqlite3'
+
 export const notificationSchema = `
     -- Notices (知らせ, stage 2 S5, .claude/rules/notifications.md), behind the
     -- company handle (ports/notifications.ts): per company × member, no text
@@ -33,3 +35,13 @@ export const notificationSchema = `
       PRIMARY KEY (company_id, user_id)
     );
 `
+
+/**
+ * A notice a delegate gets for an absent member, or a stop told to a department
+ * manager (records.md "Absence and the delegate"): the absent member's id.
+ * Additive and nullable.
+ */
+export function migrateNotificationsForUser(conn: Database.Database): void {
+  const cols = new Set((conn.prepare(`PRAGMA table_info(notifications)`).all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('for_user_id')) conn.exec(`ALTER TABLE notifications ADD COLUMN for_user_id TEXT`)
+}

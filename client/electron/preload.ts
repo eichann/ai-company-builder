@@ -16,6 +16,7 @@ import type { PermissionMode } from '../shared/permission-mode'
 import type { CreatePrivateFolderRequest } from '../shared/private-folder-ui'
 import type { GoogleFeature } from '../shared/google'
 import type { MailDraftEdit } from '../shared/outbound-mail'
+import type { AbsenceAddInput } from '../shared/absences'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
@@ -135,6 +136,9 @@ const api: ElectronAPI = {
   approveApproval: (companyId: string, approvalId: string, hash: string, reason: string) => invoke('approvals:approve', companyId, approvalId, hash, reason),
   sendBackApproval: (companyId: string, approvalId: string, reason: string) => invoke('approvals:sendBack', companyId, approvalId, reason),
   withdrawApproval: (companyId: string, approvalId: string) => invoke('approvals:withdraw', companyId, approvalId),
+  getAbsences: (companyId: string) => invoke('absences:get', companyId),
+  addAbsence: (companyId: string, input: AbsenceAddInput) => invoke('absences:add', companyId, input),
+  removeAbsence: (companyId: string, absenceId: string) => invoke('absences:remove', companyId, absenceId),
   recreatePluginOperation: (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string) =>
     invoke('pluginOperations:recreate', companyId, pluginId, operationId, confirm, conversationId),
   getCalendarToday: (companyId: string) => invoke('calendar:today', companyId),

@@ -13,7 +13,9 @@
  *   request, not a manager of another department;
  * - used once: two approvals at the same moment → one PATCH;
  * - precedents and their count only from what the viewer may read;
- * - another company's request id is the same 404 and nothing changes (CROSS).
+ * - another company's request id is the same 404 and nothing changes (CROSS);
+ * - an absent approver's delegate approves only during the absence and only
+ *   what they read themselves; the ledger and the card say 代わりに (本来は X).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
@@ -357,5 +359,35 @@ describe('another company (CROSS)', () => {
     expect(await there(`${approval.id}/send-back`, 'POST', { reason: 'x' })).toEqual(missing)
     expect(await there(`${approval.id}/withdraw`, 'POST')).toEqual(missing)
     expect(stateOf(approval.id)).toMatchObject({ state: 'pending', version: 1 })
+  })
+})
+
+describe('the approver is absent (代わりの人, records.md "Absence and the delegate")', () => {
+  it('the delegate approves with their own login only during the absence and only what they read; the ledger says 代わりに', async () => {
+    const today = services.absences.view(owner, 'ap-boss').value.today as string
+    const absent = (delegateId: string) => services.absences.create(owner, { userId: 'ap-boss', from: today, until: today, delegateId }).value.absence.id as string
+    const { approval } = await aiAsksAmount('1000000001', 2100000)
+    const body = { hash: approval.hash, reason: '部長不在のため代わりに確認' }
+    // Not absent: the dev manager has no part in it.
+    expect((await person('ap-boss2', 'POST', `/${approval.id}/approve`, body)).status).toBe(404)
+    // A delegate who cannot read 営業部 still cannot: the same 404.
+    let id = absent('ap-reader')
+    expect((await person('ap-reader', 'POST', `/${approval.id}/approve`, body)).status).toBe(404)
+    expect(services.absences.remove(owner, id).ok).toBe(true)
+
+    id = absent('ap-boss2')
+    try {
+      expect((await person('ap-boss2', 'GET', '?scope=to-me')).body.data.approvals.map((a: Json) => a.id)).toContain(approval.id)
+      const r = await person('ap-boss2', 'POST', `/${approval.id}/approve`, body)
+      expect(r.status).toBe(200)
+      expect(r.body.data.approval).toMatchObject({ state: 'approved', outcome: { by: 'ap-boss2', onBehalfOf: 'ap-boss' } })
+      const entry = services.recordEngine.history(owner, approval.id).value.entries.at(-1)
+      expect(entry).toMatchObject({ action: 'approve', actorId: 'ap-boss2', actorKind: 'human', onBehalfOf: 'ap-boss' })
+    } finally {
+      expect(services.absences.remove(owner, id).ok).toBe(true)
+    }
+    // Over: the dev manager is no part of the next one.
+    const next = await aiAsksAmount('1000000001', 2200000)
+    expect((await person('ap-boss2', 'POST', `/${next.approval.id}/approve`, { hash: next.approval.hash, reason: '確認' })).status).toBe(404)
   })
 })

@@ -21,6 +21,11 @@ export interface RecordEngineDeps {
    * keep only kind, record, version and actor — never a value — and push nothing but a version.
    */
   notify: (companyId: string, userIds: string[], change?: RecordChange) => void
+  /**
+   * The absent members this member covers today (代わりの人, services/absences.ts,
+   * the one resolution point): `who` may then also be met as one of them. None without it.
+   */
+  actsFor?: (companyId: string, userId: string) => string[]
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */

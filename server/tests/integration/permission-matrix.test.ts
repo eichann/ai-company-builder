@@ -111,6 +111,8 @@ interface World {
     approval: string
     /** A mail draft of the other company's member (outbound-mail.md). */
     outboundMail: string
+    /** An absence of the other company's member (代わりの人). */
+    absence: string
     /** An execution run of the other company's member, with an operation of unknown result (records.md "Execution runs"). */
     aiRun: string
   }
@@ -239,6 +241,14 @@ const MATRIX: Row[] = [
   // Task settings (tasks.md): every member reads, owner/admin change
   r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  // Absence and the delegate (代わりの人): the member, owner/admin, managers of a department the member belongs to.
+  r('GET /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences` }), MEMBERS, 'the caller\'s own'),
+  r('GET /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences`, query: `userId=${USER.member}` }), [200, 200, 200, 403, 404, 401],
+    'the member\'s: the manager is not a manager of a department the member belongs to'),
+  r('POST /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences`, body: {} }), [400, 400, 400, 400, 404, 401], 'the caller\'s own'),
+  r('POST /api/companies/:companyId/absences', w => ({ path: `${C(w)}/absences`, body: { userId: USER.member } }), [400, 400, 400, 403, 404, 401],
+    'the member\'s: the manager is not a manager of a department the member belongs to'),
+  r('DELETE /api/companies/:companyId/absences/:absenceId', w => ({ path: `${C(w)}/absences/no-such-absence` }), [404, 404, 404, 404, 404, 401]),
   // Execution runs of 「AI の番」 (records.md "Execution runs"): every member, their own runs only
   r('GET /api/companies/:companyId/ai-runs', w => ({ path: `${C(w)}/ai-runs` }), MEMBERS),
   r('POST /api/companies/:companyId/ai-run-claims', w => ({ path: `${C(w)}/ai-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -509,6 +519,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/outbound/:messageId/discard', (w, id) => ({ path: `${C(w)}/outbound/${id}/discard`, body: {} }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
 
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
+  x('DELETE /api/companies/:companyId/absences/:absenceId', (w, id) => ({ path: `${C(w)}/absences/${id}` }), w => w.other.absence),
 ]
 
 /**
@@ -720,6 +731,9 @@ async function seed(): Promise<World> {
   db.prepare("INSERT INTO outbound_mails (company_id, message_id, author_id, from_email, minutes_id, deal_id, created_at) VALUES (?, 'outbound_message-other00000001', ?, 'other@example.com', NULL, 'deal-other001', ?)")
     .run(other, otherMember, expires)
 
+  // An absence of the other company's member, current until far ahead.
+  db.prepare("INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, 'absence-other-1', ?, '2000-01-01', '2100-12-31', ?, ?, ?)")
+    .run(other, otherMember, USER.outsider, USER.outsider, expires)
   // An execution run of the other company's member, waiting for reconciliation (rows as services/ai-runs.ts writes them).
   db.prepare(`INSERT INTO ai_runs (company_id, id, record_id, step, user_id, state, generation, created_at, updated_at)
     VALUES (?, 'run-other-1', 'deal-other001', 'task-prep', ?, 'waiting_reconcile', 1, ?, ?)`).run(other, otherMember, expires, expires)
@@ -754,6 +768,7 @@ async function seed(): Promise<World> {
       googleGrant: otherMember,
       approval: 'approval-other001',
       outboundMail: 'outbound_message-other00000001',
+      absence: 'absence-other-1',
       aiRun: 'run-other-1',
     },
   }

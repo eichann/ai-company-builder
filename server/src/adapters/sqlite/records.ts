@@ -31,7 +31,7 @@ type LedgerRow = {
   record_id: string; version: number; action: string; from_state: string | null; to_state: string | null; actor_id: string
   actor_kind: LedgerEntry['actorKind']; actor_source: string | null; at: string; note: string; changes: string; attachments: string
   decision: string | null; is_decision: number; type_version: number | null; reverses_version: number | null
-  proposed_by: string | null; conversation_id: string | null; receipt: string | null; run_id: string | null
+  proposed_by: string | null; conversation_id: string | null; receipt: string | null; on_behalf_of: string | null; run_id: string | null
 }
 const toLedger = (r: LedgerRow): LedgerEntry => ({
   recordId: r.record_id, version: r.version, action: r.action, fromState: r.from_state, toState: r.to_state, actorId: r.actor_id,
@@ -40,6 +40,7 @@ const toLedger = (r: LedgerRow): LedgerEntry => ({
   proposedBy: r.proposed_by === 'ai' ? 'ai' : null, conversationId: r.conversation_id,
   receipt: r.receipt ? JSON.parse(r.receipt) as ExternalReceipt : null,
   runId: r.run_id,
+  ...(r.on_behalf_of ? { onBehalfOf: r.on_behalf_of } : {}),
 })
 
 /** Where the content id starts in a reference (`acb-content:<id>:…`, 1-based for substr). */
@@ -251,7 +252,7 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
 
     ledger(recordId) {
       const entries = (conn.prepare(`SELECT record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note, changes, attachments,
-          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, run_id FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
+          decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id FROM record_ledger WHERE company_id = ? AND record_id = ? ORDER BY version`)
         .all(companyId, recordId) as LedgerRow[]).map(toLedger)
       return contents.resolveEntries(recordId, contents.typeOfRecord(recordId), entries)
     },
@@ -260,10 +261,10 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
       const b = contents.batch(entry.recordId, type)
       const e = contents.storeEntry(b, type, entry)
       conn.prepare(`INSERT INTO record_ledger (company_id, record_id, version, action, from_state, to_state, actor_id, actor_kind, actor_source, at, note,
-          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+          changes, attachments, decision, is_decision, type_version, reverses_version, proposed_by, conversation_id, receipt, on_behalf_of, run_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
         .run(companyId, e.recordId, e.version, e.action, e.fromState, e.toState, e.actorId, e.actorKind, e.actorSource, e.at, e.note,
           JSON.stringify(e.changes), JSON.stringify(e.attachments), e.decision ? JSON.stringify(e.decision) : null, e.isDecision ? 1 : 0,
-          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.runId ?? null)
+          e.typeVersion, e.reversesVersion, e.proposedBy, e.conversationId, e.receipt ? JSON.stringify(e.receipt) : null, e.onBehalfOf ?? null, e.runId ?? null)
       b.flush(e.at)
     },
 

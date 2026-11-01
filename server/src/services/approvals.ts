@@ -97,6 +97,8 @@ export interface ApprovalDeps {
   /** Owners and admins of the company (member ids). */
   admins: (companyId: string) => string[]
   managedFolders: (companyId: string, userId: string) => string[]
+  /** The absent members this member covers today (services/absences.ts); none without it. */
+  actsFor?: (companyId: string, userId: string) => string[]
   /** The plugin as installed (labels, mapping) even while stopped; null when unknown. Display only. */
   plugin: (companyId: string, pluginId: string) => Promise<ActivePlugin | null>
 }
@@ -161,14 +163,32 @@ export function createApprovalService(deps: ApprovalDeps) {
     return role !== null && recordReader({ companyId, userId, role }, handle.scopes.listWithRules()).record(row)
   }
 
-  /** Whether `member` qualifies to approve this request, by the server's own data. */
-  function qualifies(member: Member, a: Loaded): boolean {
-    return mayApprove(a.rule, {
+  /**
+   * Whether `member` qualifies to approve this request, by the server's own
+   * data — themselves, or as the delegate of an absent member who would
+   * (records.md "Absence and the delegate"; `actsFor` is the one resolution
+   * point): the absentee's request (`self`), their department (`dept_manager`)
+   * or a request asked of them; never the absentee's admin role. `onBehalfOf`
+   * names that absentee (the ledger's 「代わりに承認（本来は X）」).
+   */
+  function standing(member: Member, a: Loaded): { ok: boolean; onBehalfOf: string | null } {
+    const own = mayApprove(a.rule, {
       isRequester: a.requestedBy === member.userId,
       isDeptManager: managesFolder(member.companyId, member.userId, a.row.folder),
       isAdmin: FULL_ACCESS_ROLES.has(member.role),
     })
+    if (own) return { ok: true, onBehalfOf: null }
+    for (const absentee of deps.actsFor?.(member.companyId, member.userId) ?? []) {
+      const asThem = a.fields.assignee === absentee || mayApprove(a.rule, {
+        isRequester: a.requestedBy === absentee,
+        isDeptManager: managesFolder(member.companyId, absentee, a.row.folder),
+        isAdmin: false,
+      })
+      if (asThem) return { ok: true, onBehalfOf: absentee }
+    }
+    return { ok: false, onBehalfOf: null }
   }
+  const qualifies = (member: Member, a: Loaded): boolean => standing(member, a).ok
 
   function parse(companyId: string, handle: CompanyData, row: RecordRow): Loaded | null {
     const s = handle.records.states([row.id])[0]
@@ -338,7 +358,7 @@ export function createApprovalService(deps: ApprovalDeps) {
       hash: fp.hash, version: fp.version, createdAt: a.row.createdAt,
       viewerMayApprove: pending && qualifies(viewer, a), viewerIsRequester: a.requestedBy === viewer.userId,
       outcome: pending || !last || last.version === 1 ? null : {
-        at: last.at, by: last.actorId, note: last.note || null, resultOperationId: str(a.fields.result_operation_id),
+        at: last.at, by: last.actorId, onBehalfOf: last.onBehalfOf ?? null, note: last.note || null, resultOperationId: str(a.fields.result_operation_id),
       },
     }
   }
@@ -504,7 +524,8 @@ export function createApprovalService(deps: ApprovalDeps) {
         const a = load(member, id)
         if (!a) return notFound()
         const b = isObj(body) ? body : {}
-        if (!qualifies(member, a)) return refuse('forbidden', 'この承認のお願いを承認できるのは、決められた人だけです', { code: 'NOT_APPROVER' })
+        const stand = standing(member, a)
+        if (!stand.ok) return refuse('forbidden', 'この承認のお願いを承認できるのは、決められた人だけです', { code: 'NOT_APPROVER' })
         const reasonProblem = approvalReasonProblem(b.reason)
         if (reasonProblem) return refuse('bad-request', reasonProblem, { code: 'REASON_REQUIRED' })
         const reason = (b.reason as string).normalize('NFC')
@@ -519,7 +540,7 @@ export function createApprovalService(deps: ApprovalDeps) {
           userId: a.requestedBy, actorKind: first?.actorKind === 'ai' ? 'ai' as const : 'human' as const,
           conversationId: first?.conversationId ?? null, source: first?.actorSource ?? null,
         }
-        const actor = { id: member.userId, kind: 'human' as const, source: null }
+        const actor = { id: member.userId, kind: 'human' as const, source: null, onBehalfOf: stand.onBehalfOf }
         const result = await operations.executeApproved(member, requestedFor, payload, reason)
 
         const settle = (to: ApprovalState, fields: Record<string, LedgerValue>, note: string, decision: boolean) => writer.transition(member.companyId, {
@@ -569,14 +590,15 @@ export function createApprovalService(deps: ApprovalDeps) {
         const a = load(member, id)
         if (!a) return notFound()
         const b = isObj(body) ? body : {}
-        if (!qualifies(member, a)) return refuse('forbidden', 'この承認のお願いを差し戻せるのは、決められた人だけです', { code: 'NOT_APPROVER' })
+        const stand = standing(member, a)
+        if (!stand.ok) return refuse('forbidden', 'この承認のお願いを差し戻せるのは、決められた人だけです', { code: 'NOT_APPROVER' })
         const reasonProblem = approvalReasonProblem(b.reason)
         if (reasonProblem) return refuse('bad-request', reasonProblem, { code: 'REASON_REQUIRED' })
         if (a.state !== 'pending') return refuse('conflict', 'このお願いはもう決まっています', { code: 'NOT_PENDING', state: a.state })
         const note = (b.reason as string).normalize('NFC')
         const input = {
           recordId: a.row.id, action: 'send_back', expectedVersion: a.version, to: 'sent_back',
-          actor: { id: member.userId, kind: 'human' as const, source: null }, note, decisionReason: note, notify: [a.requestedBy],
+          actor: { id: member.userId, kind: 'human' as const, source: null, onBehalfOf: stand.onBehalfOf }, note, decisionReason: note, notify: [a.requestedBy],
         }
         let t = writer.transition(member.companyId, { ...input, fields: { next_actor: a.requestedBy } })
         // A requester who can no longer read it is told, but the turn is not handed to them.

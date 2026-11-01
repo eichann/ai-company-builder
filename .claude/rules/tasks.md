@@ -68,6 +68,9 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   ≤ 1000). Check order: who → department exists → body. A member removed from the company is
   removed from every department of it (`services/companies.ts` `removeMember`).
 - Starts empty for every department: nobody belongs until an admin or manager says so.
+- Absences (代わりの人, `records.md` "Absence and the delegate") are stored next to it
+  (`member_absences`, same repository) and use it: a department's managers set the absences of
+  the people who belong to it.
 
 ## Admin console
 
@@ -75,7 +78,8 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 plain questions in Japanese, no builder words (型・プラグイン・つなぎ先). Owners/admins answer the
 company questions (one save for all, with a sticky bar; the reply card shows today's example
 due date from `replyTarget`); everyone on the page sees who belongs to each department and gets
-「所属する人を変える」 where the server says `canEdit`. Managers set membership here rather than in
+「所属する人を変える」 where the server says `canEdit`; there, each member also gets
+「不在・代わりの人」 (their absences, the delegate, add / remove; `/absences` with `userId`). Managers set membership here rather than in
 the desktop app: the admin console already serves managers (permissions, private folders), so it
 was the smaller change. Test: `admin/tests/task-list.test.tsx`.
 

@@ -22,6 +22,8 @@ export interface ServiceActor {
   source: string | null
   conversationId?: string | null
   proposedBy?: 'ai' | null
+  /** The absent member a delegate stood in for (「代わりに（本来は X）」); the calling service decides it. */
+  onBehalfOf?: string | null
   /** The AI's execution run (S10b), from its token. */
   runId?: string | null
 }
@@ -260,6 +262,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         decision: isDecision ? { reason: input.decisionReason as string, materials: [], policyVersion: null, precedents: [], supersedes: null } : null,
         isDecision, typeVersion: row.typeVersion, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
+        ...(input.actor.onBehalfOf ? { onBehalfOf: input.actor.onBehalfOf } : {}),
         runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
       }
       const written = deps.transactions.run(() => {

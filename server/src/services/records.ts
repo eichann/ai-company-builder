@@ -47,6 +47,8 @@ export interface RecordServiceDeps {
    * it (tests that read no repository) file links carry no `broken`.
    */
   recordFiles?: Pick<RecordFileSource, 'existing'>
+  /** Whom this member covers today (代わりの人, services/absences.ts); nobody without it. */
+  actsFor?: (companyId: string, userId: string) => string[]
 }
 
 /**
@@ -248,8 +250,57 @@ function neighbours(records: RecordRepository, reader: RecordReader, from: Recor
   return [...found.values()]
 }
 
+function parseFields(raw: string | undefined): Record<string, Scalar> {
+  try { return raw ? JSON.parse(raw) as Record<string, Scalar> : {} } catch { return {} }
+}
+
+/**
+ * Records of every type implementing `request` that wait for one of
+ * `userIds` — `next_actor` is them, or nobody is next and they are the
+ * `assignee` — in a state that is neither final nor the AI's turn, with whom
+ * each waits for. No read check here: the caller applies its reader. A record
+ * of an earlier connection (`old`) waits for nobody.
+ */
+export function waitingFor(records: RecordRepository, userIds: string[], old: ReadonlySet<string>): Array<{ row: RecordAccessRow; userId: string }> {
+  const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
+  if (types.length === 0 || userIds.length === 0) return []
+  const names = types.map(([n]) => n)
+  // Not final, and not the AI's turn (a task being prepared reaches the person when the AI hands it over).
+  const finalOf = new Map(types.map(([n, t]) => [n, new Set([...t.definition.final, ...aiTurnStates(t.definition)])]))
+  const next = records.candidates({ types: names, fields: [{ name: 'next_actor', values: userIds }] }, MAX_CANDIDATES)
+  const assigned = records.candidates({
+    types: names, fields: [{ name: 'assignee', values: userIds }, { name: 'next_actor', values: [null] }],
+  }, MAX_CANDIDATES)
+  const seen = new Set<string>()
+  const rows = [...next, ...assigned].filter(r => !seen.has(r.id) && (seen.add(r.id), true) && !old.has(r.id))
+  const states = new Map(records.states(rows.map(r => r.id)).map(s => [s.recordId, s]))
+  const out: Array<{ row: RecordAccessRow; userId: string }> = []
+  for (const row of rows) {
+    const s = states.get(row.id)
+    if (finalOf.get(row.type)?.has(s?.state ?? '')) continue
+    const fields = parseFields(s?.fields)
+    const who = typeof fields.next_actor === 'string' ? fields.next_actor : fields.assignee
+    if (typeof who === 'string' && userIds.includes(who)) out.push({ row, userId: who })
+  }
+  return out
+}
+
 export function createRecordService(deps: RecordServiceDeps) {
   const { companyData, clock, indexer } = deps
+  /** Whom the member covers today (services/absences.ts, the one resolution point); none without it. */
+  const actsFor = (member: Member): string[] => deps.actsFor?.(member.companyId, member.userId) ?? []
+
+  /** A turn list's answer: the first 200, those of an absentee marked `actingFor`. */
+  function turnAnswer(records: RecordRepository, member: Member, waiting: Array<{ row: RecordAccessRow; userId: string }>): RecordQueryResult {
+    const page = waiting.slice(0, 200)
+    const byId = recordSummaries(records, records.byIds(page.map(w => w.row.id)))
+    const out: RecordSummary[] = []
+    for (const w of page) {
+      const sum = byId.get(w.row.id)
+      if (sum) out.push(w.userId === member.userId ? sum : { ...sum, actingFor: w.userId })
+    }
+    return { total: waiting.length, records: out }
+  }
   const handleOf = (member: Member) => companyData.forCompany(member.companyId)
   /** Records of an earlier connection of an outside system (plugins.md "Connections"). */
   const oldConnectionIds = (member: Member): Set<string> => new Set(handleOf(member).plugins.oldConnectionRecordIds())
@@ -412,29 +463,16 @@ export function createRecordService(deps: RecordServiceDeps) {
      * wait for the member — `next_actor` is them, or nobody is next and they
      * are the `assignee` — in a state that is not final. The type does not
      * matter: a new kind of request appears here without changing this.
+     * During an absence, the absentee's items also wait for their delegate
+     * (`actsFor`, the one resolution point; marked `actingFor`), read with the
+     * delegate's own reader.
      */
     myTurn(member: Member): Outcome<RecordQueryResult> {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
-      const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
-      if (types.length === 0) return ok({ total: 0, records: [] })
-      const names = types.map(([n]) => n)
-      // Not final, and not the AI's turn (a task being prepared reaches the person when the AI hands it over).
-      const finalOf = new Map(types.map(([n, t]) => [n, new Set([...t.definition.final, ...aiTurnStates(t.definition)])]))
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
-      const mine = records.candidates({ types: names, fields: [{ name: 'next_actor', values: [member.userId] }] }, MAX_CANDIDATES)
-      const assigned = records.candidates({
-        types: names, fields: [{ name: 'assignee', values: [member.userId] }, { name: 'next_actor', values: [null] }],
-      }, MAX_CANDIDATES)
-      const seen = new Set<string>()
-      // A record of an earlier connection waits for nobody: it is no longer used.
-      const old = oldConnectionIds(member)
-      const visible = [...mine, ...assigned].filter(r => !seen.has(r.id) && (seen.add(r.id), true) && !old.has(r.id) && reader.record(r))
-      const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s.state]))
-      const waiting = visible.filter(r => !finalOf.get(r.type)?.has(states.get(r.id) ?? ''))
-      const page = waiting.slice(0, 200)
-      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
-      return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
+      const waiting = waitingFor(records, [member.userId, ...actsFor(member)], oldConnectionIds(member)).filter(w => reader.record(w.row))
+      return ok(turnAnswer(records, member, waiting))
     },
 
     /**
@@ -442,7 +480,9 @@ export function createRecordService(deps: RecordServiceDeps) {
      * state has an action only the AI may do (`who` exactly `[ai]`), for which
      * the member is the `assignee` or `next_actor`, readable by them. Nothing
      * new in the type format and no type named here: a state with an AI-only
-     * action left is the AI's turn.
+     * action left is the AI's turn. During an absence the absentee's AI turns
+     * are the delegate's too (they run on the delegate's PC, S10), read with
+     * the delegate's own reader.
      */
     aiTurn(member: Member): Outcome<RecordQueryResult> {
       const records = handleOf(member).records
@@ -454,22 +494,27 @@ export function createRecordService(deps: RecordServiceDeps) {
       }
       if (aiStates.size === 0) return ok({ total: 0, records: [] })
       const names = [...aiStates.keys()]
+      const ids = [member.userId, ...actsFor(member)]
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       const seen = new Set<string>()
       const visible = ['assignee', 'next_actor']
-        .flatMap(field => records.candidates({ types: names, fields: [{ name: field, values: [member.userId] }] }, MAX_CANDIDATES))
+        .flatMap(field => records.candidates({ types: names, fields: [{ name: field, values: ids }] }, MAX_CANDIDATES))
         .filter(r => !seen.has(r.id) && (seen.add(r.id), true) && reader.record(r))
-      const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s.state]))
-      const waiting = visible.filter(r => aiStates.get(r.type)?.has(states.get(r.id) ?? ''))
-      const page = waiting.slice(0, 200)
-      const byId = recordSummaries(records, records.byIds(page.map(r => r.id)))
-      return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
+      const states = new Map(records.states(visible.map(r => r.id)).map(s => [s.recordId, s]))
+      const waiting = visible.filter(r => aiStates.get(r.type)?.has(states.get(r.id)?.state ?? '')).map(row => {
+        const fields = parseFields(states.get(row.id)?.fields)
+        const people = [fields.assignee, fields.next_actor]
+        const userId = people.includes(member.userId) ? member.userId : people.find((v): v is string => typeof v === 'string' && ids.includes(v)) ?? member.userId
+        return { row, userId }
+      })
+      return ok(turnAnswer(records, member, waiting))
     },
 
     /**
      * Whether one record is in the member's 「AI の番」 now (the rule of `aiTurn`
      * above, for one record): what an execution run may be claimed for
-     * (services/ai-runs.ts). Unreadable = not found.
+     * (services/ai-runs.ts) — by the delegate's app too during an absence.
+     * Unreadable = not found.
      */
     aiTurnOf(member: Member, recordId: string): 'yes' | 'not-ai-turn' | 'not-found' | 'disabled' {
       const records = handleOf(member).records
@@ -481,7 +526,9 @@ export function createRecordService(deps: RecordServiceDeps) {
       const state = records.states([row.id])[0]
       if (!def || !state) return 'not-ai-turn'
       const fields = JSON.parse(state.fields) as Record<string, unknown>
-      const mine = fields.assignee === member.userId || fields.next_actor === member.userId
+      // The member's own, or an absent member's they cover today (records.md "Absence and the delegate").
+      const ids = [member.userId, ...actsFor(member)]
+      const mine = ids.includes(fields.assignee as string) || ids.includes(fields.next_actor as string)
       return mine && aiTurnStates(def).has(state.state ?? '') ? 'yes' : 'not-ai-turn'
     },
 

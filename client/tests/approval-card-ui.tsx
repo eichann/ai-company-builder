@@ -36,7 +36,7 @@ function Preview() {
     getApproval: async () => ({ success: true, approval: view, names }),
     approveApproval: async (_companyId, _id, hash, reason) => {
       setSent(JSON.stringify({ hash, reason }))
-      return { success: true, approval: { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', note: reason, resultOperationId: 'op-1' } }, names }
+      return { success: true, approval: { ...view, state: 'approved', viewerMayApprove: false, outcome: { at: '2026-11-05T07:05:00.000Z', by: 'u-abe', onBehalfOf: null, note: reason, resultOperationId: 'op-1' } }, names }
     },
   })
   const ref: ApprovalCardRef = { id: 'card-1', companyId: 'co-preview', conversationId: 'conv-1', approvalId: view.id, origin: approver ? 'shown' : 'requested', at: '2026-11-05T06:41:00.000Z' }

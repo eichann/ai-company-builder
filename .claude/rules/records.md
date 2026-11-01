@@ -40,6 +40,14 @@ paths:
   - "server/src/services/record-contents.ts"
   - "server/src/cli/erase-content.ts"
   - "server/tests/unit/record-contents.test.ts"
+  - "shared/core/absences.ts"
+  - "shared/types/absences.ts"
+  - "server/src/services/absences.ts"
+  - "server/src/routes/absences.ts"
+  - "server/tests/unit/absences.test.ts"
+  - "client/electron/features/absences/**"
+  - "client/src/features/absences/**"
+  - "client/shared/absences.ts"
   - "shared/core/ai-runs.ts"
   - "shared/types/ai-runs.ts"
   - "server/src/services/ai-runs.ts"
@@ -942,6 +950,50 @@ AI-turn state (task `preparing`, "Task version 5"), readable by them. Types are 
 null = every non-final state), where the member is `assignee` or `next_actor`, readable by them
 (design q16: no new type syntax). Takes no object id (no `CROSS` row).
 
+Both lists also hold what waits for a member the caller covers today ("Absence and the
+delegate", below), marked `actingFor: <absentee>`, read with the caller's own reader.
+
+## Absence and the delegate (代わりの人, stage 2 S4, owner decision 2026-11-01 §9-2 / 棚卸し §3-③)
+
+A member has absence periods (whole days `from`..`until` in company time, `member_absences`
+behind the handle `tasks`, `ports/task-settings.ts`), each with **one** delegate. During it the
+absentee's turn, the approvals they may approve and their notices also reach the delegate. **Only
+"whose list it appears in" changes**: the delegate acts with their own login and is checked with
+their own permissions — what they cannot read stays unreadable (owner-only records of the absentee
+included) and stops with 「権限が足りない」, the department manager told. Never the absentee's
+mailbox, never their role.
+
+- **One resolution point**: `shared/core/absences.ts` `delegation(periods, day)` → `actsFor(user)`
+  / `coverOf(absentee)`, built per company and day by `services/absences.ts` (`actsFor`,
+  `coverOf`, `managersOf`). composition.ts injects `actsFor` / `coverOf` into 「あなたの番」 and
+  「AI の番」 (`services/records.ts`), the engine's `who` (`record-engine/act.ts`), approvals'
+  `qualifies` (`approvals.md`) and the notices (`notifications.md`). Nothing else decides it; the
+  AI-turn runner (S10) runs what `ai-turn` gives the delegate's app, and an execution run may be
+  claimed by the delegate (`aiTurnOf`, "Execution runs") — their token, their permissions.
+- **The engine's `who`**: the member first; failing that, for each absentee they cover, `mayAct`
+  as that absentee with role `member` (a value naming them, `dept_manager` of their department —
+  never their admin role). The entry keeps `actorId` = the delegate and **`onBehalfOf`** = the
+  absentee (`record_ledger.on_behalf_of`, additive) — 「代わりに（本来は X）」. Every read check
+  (the record, links, attachments, materials) stays the delegate's. Plugin operations
+  (`plugin-operation-checks.ts`) do not take a delegate yet.
+- **No chains**: a delegate who is absent too covers nobody (`coverOf` → `stopped`,
+  `delegate-absent`), and a period naming a delegate already absent on one of its days is refused
+  (409 `DELEGATE_ABSENT`). The stop is told to the managers (notices `delegate_stopped`).
+- **API** (`routes/absences.ts`, contract `shared/types/absences.ts`): `GET /absences?userId=`
+  (absences not yet ended, `covering` = whom the caller covers today, `today`), `POST /absences`
+  `{ userId?, from, until, delegateId }` → 201 `{ absence, delegateCannotRead }`, `DELETE
+  /absences/:absenceId`. Who: the member, owners / admins, and managers of a department the member
+  **belongs to** (所属, `tasks.md`); anyone else 403. Check order who → body → rules: dates
+  (`parseAbsenceInput`: real dates, not ended, ≤ 366 days), delegate not self and a member of this
+  company (another company's id = nobody, 400 `DELEGATE_NOT_MEMBER`), no overlap with the member's
+  own periods (409 `ABSENCE_OVERLAP`), ≤ 20 open. `delegateCannotRead` counts the absentee's
+  waiting items the delegate cannot read — only those the setter may read (no count of the
+  unreadable). Removing a member removes their absences and those they cover.
+- **UI**: the app's settings 「不在と代わりの人」 (own absences; `client/src/features/absences/`, IPC
+  `absences:get|add|remove` with the session in main); department managers set their members'
+  in the admin console (task-list page, 「不在・代わりの人」; `tasks.md`). The approval card shows
+  「Aさん（代わりに承認・本来は Bさん）」.
+
 ## Decisions (`services/decisions.ts`, design §3-3)
 
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
@@ -982,6 +1034,9 @@ folder, key, links — each mutation-checked),
 where the type lets it, unreadable and private-folder files refused alike without a place,
 cross-company; due with a time, the requester told — each mutation-checked),
 `server/tests/unit/record-task-ok.test.ts` (completing on someone's OK, above),
+`server/tests/unit/absences.test.ts` (the delegate only during the absence, the ledger's
+`onBehalfOf`, the delegate's own reader incl. owner-only records, the manager told, no chains,
+cross-company, who sets — each mutation-checked),
 `server/tests/unit/record-task-v5.test.ts` (task version 5 and the query's additions, above),
 `server/tests/unit/record-contents.test.ts` (the content store, above),
 `server/tests/unit/record-tags-bundle.test.ts` (tags and links to an interface, above),

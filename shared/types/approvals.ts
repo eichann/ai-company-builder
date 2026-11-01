@@ -86,7 +86,8 @@ export interface ApprovalView {
   /** The viewer asked for it (may withdraw while pending or sent back). */
   viewerIsRequester: boolean
   /** How it ended (state other than pending). */
-  outcome: { at: string; by: string; note: string | null; resultOperationId: string | null } | null
+  /** `onBehalfOf`: the person decided as the delegate of this absent member (「代わりに承認（本来は X）」). */
+  outcome: { at: string; by: string; onBehalfOf: string | null; note: string | null; resultOperationId: string | null } | null
 }
 
 export interface ApprovalListItem {

@@ -6,7 +6,7 @@
  * (trigger in db/index.ts), and a department's rows go with it (ON DELETE CASCADE).
  */
 import type Database from 'better-sqlite3'
-import type { TaskSettingsRepository } from '../../ports/task-settings'
+import type { StoredAbsence, TaskSettingsRepository } from '../../ports/task-settings'
 
 export function sqliteTaskSettingsRepository(conn: Database.Database, companyId: string): TaskSettingsRepository {
   return {
@@ -47,6 +47,22 @@ export function sqliteTaskSettingsRepository(conn: Database.Database, companyId:
     },
     removeMember(userId) {
       conn.prepare('DELETE FROM department_members WHERE company_id = ? AND user_id = ?').run(companyId, userId)
+      conn.prepare('DELETE FROM member_absences WHERE company_id = ? AND (user_id = ? OR delegate_id = ?)').run(companyId, userId, userId)
+    },
+    absencesFrom(day) {
+      return (conn.prepare(`
+        SELECT id, user_id, from_day, until_day, delegate_id, set_by, set_at FROM member_absences
+        WHERE company_id = ? AND until_day >= ? ORDER BY from_day, until_day, id
+      `).all(companyId, day) as Array<{ id: string; user_id: string; from_day: string; until_day: string; delegate_id: string; set_by: string; set_at: string }>)
+        .map((r): StoredAbsence => ({ id: r.id, userId: r.user_id, from: r.from_day, until: r.until_day, delegateId: r.delegate_id, setBy: r.set_by, setAt: r.set_at }))
+    },
+    addAbsence(a) {
+      conn.prepare(`
+        INSERT INTO member_absences (company_id, id, user_id, from_day, until_day, delegate_id, set_by, set_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(companyId, a.id, a.userId, a.from, a.until, a.delegateId, a.setBy, a.setAt)
+    },
+    removeAbsence(id) {
+      return conn.prepare('DELETE FROM member_absences WHERE company_id = ? AND id = ?').run(companyId, id).changes > 0
     },
   }
 }

@@ -38,7 +38,8 @@ choice), `skills`, `files`, `editor`, `doc-review` (the Markdown review of a doc
 file's 「つながっているもの」), `settings`, `auth` (server address, sign-in, session),
 `company` (choosing a company and setting its folder up: the company selector), `tasks` (やること;
 so far only `api.ts` with 「今日の予定」, `calendar.md`; the file tree's 「やることにつなぐ…」 will come from the task plugin, `records.md`),
-`notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`). Only create what you need; add a feature
+`notifications` (the title bar's 「あなたの番」 and bell, `notifications.md`), `absences` (the settings'
+「不在と代わりの人」, shown by `settings`; `records.md` "Absence and the delegate"). Only create what you need; add a feature
 folder when the code has no home among these.
 
 Naming: `doc-review` is the review of a Markdown document (sidecar `*.review.*.json` files). Do

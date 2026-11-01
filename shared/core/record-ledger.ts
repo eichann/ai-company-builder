@@ -82,6 +82,13 @@ export interface LedgerEntry {
    */
   receipt?: ExternalReceipt | null
   /**
+   * 「代わりに（本来は X）」 (absence and the delegate, stage 2 S4): the absent
+   * member the actor stood in for — set only when the actor could do it only
+   * as that member's delegate. Absent / null otherwise.
+   */
+  onBehalfOf?: string | null
+
+  /**
    * The execution run (S10b, `shared/core/ai-runs.ts`) the AI acted in: set
    * when the AI's record token was bound to a run — an automated run under the
    * member's authority, not a consultation the member was typing in. Absent /

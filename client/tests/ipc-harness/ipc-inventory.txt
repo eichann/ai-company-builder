@@ -14,6 +14,9 @@ contract.events sparse:progress
 contract.events tool-approval-request
 contract.events voice:event
 contract.events writeAccess:changed
+contract.invoke absences:add
+contract.invoke absences:get
+contract.invoke absences:remove
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
 contract.invoke aiTurns:claim
@@ -249,6 +252,7 @@ contract.type EditorBackupResult.error = error?: string
 contract.type EditorBackupResult.skipped = skipped?: 'missing' | 'outside-company' | 'internal'
 contract.type EditorBackupResult.success = success: boolean
 contract.type ElectronAPI = export interface ElectronAPI { }
+contract.type ElectronAPI.addAbsence = addAbsence: Invoke<'absences:add'>
 contract.type ElectronAPI.addOutboundMailRecipient = addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
 contract.type ElectronAPI.answerCloseRequest = answerCloseRequest: Invoke<'app:closeResponse'>
 contract.type ElectronAPI.approveApproval = approveApproval: Invoke<'approvals:approve'>
@@ -275,6 +279,7 @@ contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
 contract.type ElectronAPI.folderSizes = folderSizes: Invoke<'git:folderSizes'>
+contract.type ElectronAPI.getAbsences = getAbsences: Invoke<'absences:get'>
 contract.type ElectronAPI.getAgentEnvPassthrough = getAgentEnvPassthrough: Invoke<'config:getAgentEnvPassthrough'>
 contract.type ElectronAPI.getAgentInteractions = getAgentInteractions: Invoke<'agent-interaction:list'>
 contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getApiKeyStatus'>
@@ -359,6 +364,7 @@ contract.type ElectronAPI.readFileBinary = readFileBinary: Invoke<'fs:readFileBi
 contract.type ElectronAPI.reconcilePluginOperation = reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
 contract.type ElectronAPI.recreatePluginOperation = recreatePluginOperation: Invoke<'pluginOperations:recreate'>
 contract.type ElectronAPI.registerAllowedRoot = registerAllowedRoot: Invoke<'fs:registerAllowedRoot'>
+contract.type ElectronAPI.removeAbsence = removeAbsence: Invoke<'absences:remove'>
 contract.type ElectronAPI.renameItem = renameItem: Invoke<'fs:rename'>
 contract.type ElectronAPI.reportChatWindowStatus = reportChatWindowStatus: Invoke<'chatWindow:reportStatus'>
 contract.type ElectronAPI.reservedPathRefusal = reservedPathRefusal: Invoke<'privateFolders:reservedPathRefusal'>
@@ -509,6 +515,9 @@ contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request'
 contract.type IpcEventChannels.'voice:event' = 'voice:event': [event: VoiceEvent]
 contract.type IpcEventChannels.'writeAccess:changed' = 'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
 contract.type IpcInvokeChannels = export interface IpcInvokeChannels { }
+contract.type IpcInvokeChannels.'absences:add' = 'absences:add': { args: [companyId: string, input: AbsenceAddInput]; result: AbsenceAddResult }
+contract.type IpcInvokeChannels.'absences:get' = 'absences:get': { args: [companyId: string]; result: AbsencesResult }
+contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
 contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
@@ -723,6 +732,9 @@ contract.type ToolInfo.hasPackageJson = hasPackageJson: boolean
 contract.type ToolInfo.name = name: string
 contract.type ToolInfo.path = path: string
 contract.type ToolInfo.startCommand = startCommand?: string
+main.handle absences:add @ features/absences/ipc.ts (companyId, input)
+main.handle absences:get @ features/absences/ipc.ts (companyId)
+main.handle absences:remove @ features/absences/ipc.ts (companyId, absenceId)
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
 main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId)
@@ -882,6 +894,8 @@ main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
 main.send voice:event @ voice-input.ts
 main.send writeAccess:changed @ main.ts
+preload addAbsence -> invoke absences:add($0, $1)
+preload addAbsence : (companyId: string, input: AbsenceAddInput) => Promise<AbsenceAddResult>
 preload addOutboundMailRecipient -> invoke outboundMail:addRecipient($0, $1, $2, $3)
 preload addOutboundMailRecipient : (companyId: string, messageId: string, email: string, name?: string | undefined) => Promise<OutboundMailResult>
 preload answerCloseRequest -> invoke app:closeResponse($0)
@@ -934,6 +948,8 @@ preload focusChatWindow -> invoke chatWindow:focus($0)
 preload focusChatWindow : (sessionId: string) => Promise<boolean>
 preload folderSizes -> invoke git:folderSizes($0, $1, $2, $3)
 preload folderSizes : (repoPath: string, companyId: string, folder: string, measure: string[]) => Promise<FolderSizesResponse>
+preload getAbsences -> invoke absences:get($0)
+preload getAbsences : (companyId: string) => Promise<AbsencesResult>
 preload getAgentEnvPassthrough -> invoke config:getAgentEnvPassthrough()
 preload getAgentEnvPassthrough : () => Promise<string[]>
 preload getAgentInteractions -> invoke agent-interaction:list()
@@ -1102,6 +1118,8 @@ preload recreatePluginOperation -> invoke pluginOperations:recreate($0, $1, $2, 
 preload recreatePluginOperation : (companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string | undefined) => Promise<PluginOperationResult>
 preload registerAllowedRoot -> invoke fs:registerAllowedRoot($0)
 preload registerAllowedRoot : (path: string) => Promise<{ success: boolean; }>
+preload removeAbsence -> invoke absences:remove($0, $1)
+preload removeAbsence : (companyId: string, absenceId: string) => Promise<AbsenceRemoveResult>
 preload renameItem -> invoke fs:rename($0, $1)
 preload renameItem : (oldPath: string, newPath: string) => Promise<FileOpResult & { newPath?: string | undefined; }>
 preload reportChatWindowStatus -> invoke chatWindow:reportStatus($0)

@@ -1,6 +1,6 @@
 import { memo, useState } from 'react'
 import { ArrowRight, CheckCircle, Clock, Robot, Warning, XCircle } from '@phosphor-icons/react'
-import { nameOf, percentText, stateLine, type ApprovalCardRef } from '../../../../shared/approvals'
+import { outcomeByText, percentText, stateLine, type ApprovalCardRef } from '../../../../shared/approvals'
 import { APPROVE_HASH_NOTE, type ApprovalView } from '../../../../../shared/types/approvals'
 import { approveApproval, getApproval, sendBackApproval, withdrawApproval, type ApprovalOutbound } from '../api'
 import { putApproval } from '../approvalStore'
@@ -120,7 +120,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       </div>}
       {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
       <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>
-      {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-zinc-400">{nameOf(names, view.outcome.by)}さん・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
+      {!pending && view.state !== 'sent_back' && view.outcome && <p className="mt-0.5 text-[11px] text-gray-500 dark:text-zinc-400">{outcomeByText(view.outcome, names)}・{view.outcome.at.slice(0, 16).replace('T', ' ')}</p>}
       {message && <div role="alert" className={`mt-2 rounded-lg border px-2 py-1.5 text-xs ${TONE_CLASS[message.tone]}`}>{message.text}</div>}
       {canAnswer && <div className="mt-2">
         <label className="block text-xs text-gray-600 dark:text-zinc-300">

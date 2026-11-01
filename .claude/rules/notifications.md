@@ -39,12 +39,22 @@ a plugin can never draw a notice (§2-2).
   the entry's actor, and only a member who can read the record now** (an owner-only record's
   notice reaches its owner alone, owners/admins included; `records.md`) — and pushes `{ kind: 'notifications', version }` to those who have that
   kind on. A failure there is logged and never fails the engine's write.
+- **Absence** (`records.md` "Absence and the delegate"; `coverOf` / `managersOf` injected): a
+  notice to a member who is absent today is also written for their delegate (`for_user_id` =
+  the absentee, additive; the text starts 「（Xさんの代わり）」) when the delegate can read the
+  record. When the delegate cannot, or is absent too (no chains), and the entry now waits for the
+  absentee, the managers of the absentee's departments who can read it get `delegate_stopped`
+  (once per record × absentee × reason: 「Xさんの不在中、代わりの人が「…」を見られないため止まって
+  います（権限が足りない）」 / 「Xさんも代わりの人も不在のため、「…」を受け持つ人がいません」). The
+  server clock's `sweep` runs the same check over today's absences (an absence that began, a
+  delegate who became absent), and so does adding an absence that has begun.
 - Kinds (`shared/types/notifications.ts`, `noticeKind`; generic over types — final states and the
   `request` fields decide, plus the core `approval` type):
   `approval_result` (an approval's state changed, to its requester), `ok_completed` (completed on
   your OK), `request_done` (what you asked reached a final state), `request_returned` (what you
   asked came back to your turn — task v5 「受けられない」 — counted as its result), `due_changed`
-  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below), `others` (everything else: handed
+  (`due` changed on what you asked), `overdue`, `ai_turn_stuck`, `wait_over` (the server clock, below),
+  `delegate_stopped` (an absentee's item reaches nobody, to the department manager; above), `others` (everything else: handed
   to you — also the AI's 「用意ができた」 / 「先に渡す」 and 「自分で進める」 of task v5 —, sent back,
   cancelled…). While a task is the AI's (`preparing`) nobody is told on create (engine rule); the
   assignee hears at the hand-over. **Defaults (E-25)**: all on except `others` (CC and others' affairs). A
@@ -146,6 +156,8 @@ carry on. The app never acts on the signal itself: it only asks the server again
 cross-company; the push is kind + version only, to the told members, never the actor; gone when
 access is lost; read state shared by two service instances = two PCs; default kinds and switches;
 overdue once, the next business morning, only for the requester; stuck AI turn after 24 h),
+`server/tests/unit/absences.test.ts` (the delegate's copy only when they can read; the stops to
+the manager; no chains),
 `server/tests/unit/server-clock.test.ts` (nothing moves before its time; a second run does
 nothing more; the AI's turn only with 自動で進める; an owner-only record's notices only to its
 owner; another company untouched and still run when one fails; one company's backlog capped per

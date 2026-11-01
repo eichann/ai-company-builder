@@ -6,7 +6,7 @@ import { CalendarBlank, ChatCircleText, ListChecks, LockSimple, Robot, Trash, Us
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
-import { DepartmentMembersDialog } from '@/components/departments/department-members-dialog'
+import { DepartmentMembersDialog, MemberAbsenceDialog } from '@/components/departments/department-members-dialog'
 import { Button } from '@/components/ui/button'
 import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
@@ -16,6 +16,7 @@ import {
   departmentsApi,
   taskSettingsApi,
   type Department,
+  type DepartmentMember,
   type DepartmentMembersView,
   type Member,
   type TaskSettings,
@@ -426,6 +427,7 @@ function MembershipCard({ departments, error, onRetry }: { departments: Departme
     return Object.fromEntries(ids.map((id, i) => [id, views[i]])) as Record<string, DepartmentMembersView>
   })
   const [editing, setEditing] = useState<Department | null>(null)
+  const [absent, setAbsent] = useState<DepartmentMember | null>(null)
 
   const nameOf = (m: { name: string | null; email: string | null; userId: string }) => m.name || m.email || '名前未設定'
 
@@ -463,9 +465,29 @@ function MembershipCard({ departments, error, onRetry }: { departments: Departme
               <li key={dep.id} className="flex flex-wrap items-center gap-3 px-5 py-3">
                 <div className="min-w-0 flex-1">
                   <p className="font-medium">{dep.name}</p>
-                  <p className="text-sm text-muted-foreground">
-                    {people.length === 0 ? 'まだだれも所属していません' : people.map(nameOf).join('、')}
-                  </p>
+                  {people.length === 0 || !view?.canEdit ? (
+                    <p className="text-sm text-muted-foreground">
+                      {people.length === 0 ? 'まだだれも所属していません' : people.map(nameOf).join('、')}
+                    </p>
+                  ) : (
+                    <ul aria-label={`${dep.name}に所属する人`} className="mt-1 space-y-1">
+                      {people.map((p) => (
+                        <li key={p.userId} className="flex items-center gap-2 text-sm">
+                          <span className="min-w-0 truncate text-muted-foreground">{nameOf(p)}</span>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-xs"
+                            aria-label={`${nameOf(p)}さんの不在・代わりの人`}
+                            onClick={() => setAbsent(p)}
+                            disabled={!members.data}
+                          >
+                            不在・代わりの人
+                          </Button>
+                        </li>
+                      ))}
+                    </ul>
+                  )}
                 </div>
                 {view?.canEdit && (
                   <Button variant="outline" size="sm" onClick={() => setEditing(dep)} disabled={!members.data}>
@@ -488,6 +510,13 @@ function MembershipCard({ departments, error, onRetry }: { departments: Departme
           const id = editing?.id
           if (id) membership.setData((prev) => ({ ...(prev ?? {}), [id]: view }))
         }}
+      />
+      <MemberAbsenceDialog
+        open={absent !== null}
+        onOpenChange={(o) => !o && setAbsent(null)}
+        companyId={companyId}
+        member={absent}
+        members={(members.data ?? []) as Member[]}
       />
     </Card>
   )

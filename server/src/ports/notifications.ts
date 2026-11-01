@@ -20,6 +20,12 @@ export interface NotificationRow {
   dedupeKey: string | null
   createdAt: string
   readAt: string | null
+  /**
+   * The absent member this notice is for (records.md "Absence and the delegate"):
+   * set on a delegate's copy of the absentee's notice, and on a stop told to a
+   * department manager. Absent / null otherwise.
+   */
+  forUserId?: string | null
 }
 
 export interface NotificationRepository {
