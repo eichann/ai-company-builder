@@ -131,8 +131,12 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
 - The API-key mode's key is never in any env: main passes it in-process (`createAnthropic`), and
   it rests encrypted in `config.json` (`anthropicApiKeyEncrypted`, Electron `safeStorage` through
   the shell's `SecretBox`; `services/api-key-store.ts`). A plain `anthropicApiKey` from an older
-  version is encrypted on first access and removed. No OS encryption (Linux `basic_text`, no
-  keyring) → saving a key is refused with a message, never stored in plain text. The renderer
+  version is encrypted on first access and removed; when that fails (no OS encryption, the
+  write fails) the plain key is **not used** (API-key mode answers as with no key), one tagged
+  `[api-key]` warning without the value is logged, the status carries `storedInPlainText` and the
+  settings screen asks to save the key again; the move is retried on every access. No OS
+  encryption (Linux `basic_text`, no keyring) → saving a key is refused with a message, never
+  stored in plain text. The renderer
   gets only `config:getApiKeyStatus` (`set`, `last4`, flags), never the key; never log the key or
   its length. Tests: `tests/api-key-store.test.ts`, `tests/ipc-app.test.ts`.
 

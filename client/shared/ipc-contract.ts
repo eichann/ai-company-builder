@@ -155,7 +155,7 @@ export interface ApiKeyStatus {
   last4?: string
   /** False: this computer cannot encrypt it (no keychain), so a new key cannot be saved. */
   encryptionAvailable: boolean
-  /** A key from an older version still in plain text (encryption unavailable here). */
+  /** A key from an older version left in plain text that could not be encrypted here: not used; save it again. */
   storedInPlainText?: boolean
   /** A stored key this computer cannot decrypt (copied settings, reset keychain): enter it again. */
   unreadable?: boolean
