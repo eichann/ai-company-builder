@@ -1,6 +1,7 @@
 ---
 paths:
   - "shared/core/plugins.ts"
+  - "shared/core/plugin-*.ts"
   - "shared/core/upstream-path.ts"
   - "server/tests/unit/plugins.test.ts"
   - "server/tests/fixtures/plugins/**"
@@ -10,6 +11,11 @@ paths:
   - "server/src/adapters/sqlite/plugins.ts"
   - "server/src/services/plugin-shelf.ts"
   - "server/src/services/plugins.ts"
+  - "server/src/services/plugin-service-common.ts"
+  - "server/src/services/plugin-evaluation.ts"
+  - "server/src/services/plugin-views.ts"
+  - "server/src/services/plugin-relay-scope.ts"
+  - "server/src/services/plugin-ai-tools.ts"
   - "server/src/routes/plugins.ts"
   - "server/tests/unit/plugin-shelf.test.ts"
   - "server/tests/integration/plugins.test.ts"
@@ -24,6 +30,7 @@ paths:
   - "server/tests/fakes/hubspot/**"
   - "server/tests/fakes/google/**"
   - "server/src/services/plugin-operations.ts"
+  - "server/src/services/plugin-operation-*.ts"
   - "server/src/services/plugin-mapping-check.ts"
   - "server/tests/integration/plugin-mapping-check.test.ts"
   - "admin/src/app/companies/*/integrations/**"
@@ -120,7 +127,11 @@ The dependency points one way: **business → connector**. (#372's first cut had
   people's code off the server (0.15) and the line between the AGPL core and paid plugins clear
   (0.17).
 - Shape and rules: `shared/core/plugins.ts` (`parsePluginManifest`, `validatePluginPackage`,
-  `parsePluginMapping`, `combineUse`). YAML is the strict `yaml-lite` subset. Keys English,
+  `parsePluginMapping`, `combineUse`) — the one entry point every package imports; the rules live
+  in one module each (`plugin-declaration.ts` the parsed shape, `plugin-declaration-rules.ts`
+  forbidden keys / type names / path templates, `plugin-manifest.ts` with
+  `plugin-connector-declaration.ts` / `plugin-business-declaration.ts`, `plugin-package.ts`,
+  `plugin-mapping.ts`, `plugin-policies.ts`, `plugin-values.ts`). YAML is the strict `yaml-lite` subset. Keys English,
   `label`s Japanese.
 - **Unknown keys make the whole package unusable**, anywhere (top level, object, endpoint,
   operation, mapping). Keys someone might reach for get a specific reason
@@ -293,6 +304,11 @@ The dependency points one way: **business → connector**. (#372's first cut had
   checked when it runs. Old connector shapes are refused with the reason ("Two roles").
 
 ## A company's install, mapping and history (P4, `services/plugins.ts`)
+
+Code: `services/plugins.ts` (install, on / off, read scope, mappings; composes the rest),
+`plugin-evaluation.ts` (`active()`'s checks, an install's `problem`), `plugin-views.ts` (the
+admin page's answers), `plugin-relay-scope.ts` (`relayPolicy`, the read scope), `plugin-ai-tools.ts`
+(P7), `plugin-service-common.ts` (words, `ActivePlugin`, `storeBusinessTypes`).
 
 Owner/admin only (others 403, non-members 404); routes (`routes/plugins.ts`, contract
 `shared/types/plugins.ts`) under `/api/companies/:companyId`:
@@ -484,6 +500,12 @@ plugin's switch:
 
 ## Typed operations (P6, `services/plugin-operations.ts`)
 
+Code: `services/plugin-operations.ts` composes the service (run, create, similar deals, reconcile,
+recreate) from `plugin-operation-checks.ts` (the checks and the precheck before every send),
+`-inputs.ts` (bodies), `-records.ts` (the operation record and its view), `-sending.ts` (send,
+settle, reconcile — never re-sent), `-undo.ts`, `-approvals.ts` (the approval seam) and
+`-common.ts` (words, refusals, the one per-object serialiser every part shares).
+
 ```
 POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation   a person (session)
 POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation             their AI (record token)
@@ -610,7 +632,7 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 
 ## The approval seam (milestone 4 G5; the approvals service builds on it)
 
-`services/plugin-operations.ts` exports, for `services/approvals.ts` (G6) only — no route here:
+`services/plugin-operations.ts` exports (built in `plugin-operation-approvals.ts`), for `services/approvals.ts` (G6) only — no route here:
 
 - `prepareApproval(member, actor, pluginId, recordId | null, operation, input) → Outcome<{ payload:
   PluginApprovalPayload; approver: ApproverRule; folder }>`: every check of a direct run (record
