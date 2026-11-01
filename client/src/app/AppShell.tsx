@@ -51,7 +51,9 @@ import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
-import { listShownFor } from '../features/tasks/model'
+import { companyPathOf, listShownFor } from '../features/tasks/model'
+import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
+import { linkFileToTask } from '../features/tasks/api'
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
@@ -85,6 +87,8 @@ export function AppShell() {
   const notices = useNotices(currentCompany?.id)
   // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
   const taskList = useTaskList(currentCompany?.id)
+  // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
+  const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -248,6 +252,7 @@ export function AppShell() {
     return <RecordRow record={record} />
   }
 
+  const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
@@ -305,6 +310,7 @@ export function AppShell() {
           onSelectOpenFile={selectOpenFile}
           onCloseFile={handleCloseFile}
           onPrivateFolderCreated={handlePrivateFolderCreated}
+          onLinkToTask={tasksShown && rootPath ? path => setLinkingFile(companyPathOf(path, rootPath)) : undefined}
           navigation={<PlaceNavigation canBack={places.canBack} canForward={places.canForward} onBack={places.back} onForward={places.forward} />}
           overlay={places.recordId && currentCompany && rootPath
             ? recordCard(places.recordId)
@@ -318,11 +324,12 @@ export function AppShell() {
     {
       // Shown for the departments the company setting names (tasks-ui.md); records off → no tab.
       id: 'tasks', title: 'やること', icon: ListChecks, mount: 'once-opened', className: 'flex',
-      visible: !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds),
+      visible: tasksShown,
       badgeCount: taskList.data?.items.filter(i => i.turn === 'mine' || i.turn === 'acceptance').length ?? null,
       render: () => currentCompany && rootPath ? (
         <TaskListPanel
           companyId={currentCompany.id}
+          rootPath={rootPath}
           list={taskList}
           aiTurns={aiTurnItems}
           renderCard={recordCard}
@@ -423,6 +430,19 @@ export function AppShell() {
         )}
       />
 
+      {linkingFile && currentCompany && (
+        <LinkToTaskDialog
+          key={linkingFile}
+          companyPath={linkingFile}
+          items={taskList.data?.items ?? []}
+          onLink={async task => {
+            const r = await linkFileToTask(currentCompany.id, task.id, linkingFile, task.version)
+            taskList.reload()
+            return r.success ? null : r.error
+          }}
+          onClose={() => setLinkingFile(null)}
+        />
+      )}
       <AppDialogs
         rootPath={rootPath || ''}
         departments={departments}

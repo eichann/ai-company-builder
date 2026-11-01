@@ -53,7 +53,8 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `records.md` "Absence and the delegate"), `ai-turns`
   (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
   window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). `tasks`
-  (tasks:list / create / act: the task list, read and changed with the session; `tasks-ui.md`).
+  (tasks:list / create / act / card / linkFile / unlinkFile / retryRun / reconcile: the task list and card, read and
+  changed with the session; `tasks-ui.md`).
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
   `wire<Feature>(ipc?, deps)` creates the feature's services from injected ports, registers its
   IPC and its quit hooks (`AppLifecycle` in `features/ports.ts`), and returns what other features

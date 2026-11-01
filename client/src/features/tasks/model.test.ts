@@ -5,7 +5,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import type { TaskListItem } from '../../../shared/tasks'
-import { companyNow, dueText, dueWhen, listEvents, listSections, listShownFor, filterByTag } from './model'
+import { companyNow, companyPathOf, dueText, dueWhen, listEvents, listSections, listShownFor, filterByTag } from './model'
 
 // Thursday 2026-11-05 15:45 in Japan (06:45 UTC).
 const NOW = companyNow(Date.parse('2026-11-05T06:45:00.000Z'))
@@ -75,4 +75,11 @@ test('the list shows only for the departments the company setting names (null = 
   assert.equal(listShownFor('d2', ['d2']), true)
   assert.equal(listShownFor(null, []), false)
   assert.equal(listShownFor(null, ['d2']), true)
+})
+
+test('a dragged path is named inside the company folder; one outside it (or the folder itself) is not linked', () => {
+  assert.equal(companyPathOf('/Users/me/会社/営業/見積.xlsx', '/Users/me/会社'), '営業/見積.xlsx')
+  assert.equal(companyPathOf('/Users/me/会社/営業/見積.xlsx', '/Users/me/会社/'), '営業/見積.xlsx')
+  assert.equal(companyPathOf('/Users/me/会社2/x.md', '/Users/me/会社'), null)
+  assert.equal(companyPathOf('/Users/me/会社', '/Users/me/会社'), null)
 })

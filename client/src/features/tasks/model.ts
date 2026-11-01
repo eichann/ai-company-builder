@@ -4,6 +4,7 @@
 import type { CalendarEvent } from '../../../shared/calendar'
 import type { TaskListItem } from '../../../shared/tasks'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
+import { isPathWithin, normalizePathSeparators } from '../../shared/lib/path'
 
 export type ListMode = 'turn' | 'date'
 
@@ -170,4 +171,16 @@ export function postponeChoices(now: CompanyNow): Array<{ label: string; due: st
   out.push({ label: 'あしたの朝', due: `${addDays(now.date, 1)}T09:00` })
   out.push({ label: '来週の月曜', due: `${addDays(now.date, ((8 - now.weekday) % 7) || 7)}T09:00` })
   return out
+}
+
+/** A local path inside the company folder as the server names it (`営業/見積.xlsx`); null outside it or the folder itself. */
+export function companyPathOf(path: string, rootPath: string): string | null {
+  const p = normalizePathSeparators(path)
+  const root = normalizePathSeparators(rootPath).replace(/\/+$/, '')
+  return root && isPathWithin(p, root) && p !== root ? p.slice(root.length + 1) : null
+}
+
+/** The open tasks a file may be linked to from the list (finished ones and other kinds are not offered). */
+export function linkableTasks(items: readonly TaskListItem[]): TaskListItem[] {
+  return items.filter(i => i.type === 'task' && i.turn !== 'done')
 }

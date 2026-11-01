@@ -6,6 +6,7 @@
 //
 // window.__acbCalls  every write the tree asked for, as [method, ...args]
 // window.__acbSelected  the paths onSelectFile received, in order
+// ?tasks=off  the company shows no task list: no 「やることにつなぐ…」
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
@@ -110,6 +111,7 @@ useAuthStore.setState({ user: { id: 'u_me', email: 'yamada@example.com', name: '
 
 function Preview() {
   const [open, setOpen] = useState<string | null>(null)
+  const [linking, setLinking] = useState('')
   return (
     <main className="flex h-screen bg-white dark:bg-zinc-950">
       <div className="w-72">
@@ -118,11 +120,13 @@ function Preview() {
           departmentFolder="営業部"
           selectedFilePath={open}
           onSelectFile={p => { selected.push(p); setOpen(p) }}
+          onLinkToTask={new URLSearchParams(location.search).get('tasks') === 'off' ? undefined : p => setLinking(p)}
         />
       </div>
       <div className="flex-1 p-8 text-sm text-gray-500 dark:text-zinc-400">
         表示確認用の人工データです（営業部、「機密」は非公開フォルダ）。
         <output aria-label="開いているファイル" className="block mt-4">{open ?? ''}</output>
+        <output aria-label="やることにつなぐファイル" className="block mt-2">{linking}</output>
       </div>
     </main>
   )

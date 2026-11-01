@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { CheckCircle, Circle, CircleNotch, Clock, LockSimple, Robot, VideoCamera, Warning } from '@phosphor-icons/react'
 import type { AiTurnItemView } from '../../../../shared/ai-turns'
 import type { TaskListItem } from '../../../../shared/tasks'
 import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
+import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 
 const CHIP = 'shrink-0 rounded px-1 text-[10px]'
 
@@ -18,10 +20,13 @@ interface RowProps {
   onAccept: (() => void) | null
   onRetry: (() => void) | null
   onHand: (() => void) | null
+  /** A file dragged from the file tree onto it (absolute paths); null: it takes no files. */
+  onDropFiles: ((paths: string[]) => void) | null
 }
 
 /** One item of the list: what it is, when it is due, whose turn, its まとまり and tags. */
-export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand }: RowProps) {
+export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand, onDropFiles }: RowProps) {
+  const [over, setOver] = useState(false)
   const done = item.turn === 'done'
   const when = dueWhen(item.due, now)
   const sub: string[] = []
@@ -34,7 +39,10 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
   return (
     <div
       data-testid="task-row"
-      className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${active ? 'bg-accent/10 dark:bg-accent/20' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
+      className={`group flex items-start gap-2 rounded-lg px-2.5 py-1.5 ${over ? 'outline-dashed outline-2 outline-accent' : ''} ${active ? 'bg-accent/10 dark:bg-accent/20' : 'hover:bg-gray-100 dark:hover:bg-zinc-800'}`}
+      onDragOver={onDropFiles ? e => { if (isFileTreeDrag(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setOver(true) } } : undefined}
+      onDragLeave={onDropFiles ? () => setOver(false) : undefined}
+      onDrop={onDropFiles ? e => { setOver(false); const paths = draggedFilePaths(e.dataTransfer); if (paths.length > 0) { e.preventDefault(); onDropFiles(paths) } } : undefined}
     >
       <span className="mt-[2px] shrink-0">
         {done ? <CheckCircle size={15} weight="fill" className="text-emerald-500" aria-label="終わった" />

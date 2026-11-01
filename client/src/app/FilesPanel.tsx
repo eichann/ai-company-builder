@@ -27,6 +27,8 @@ interface Props {
   overlay?: ReactNode
   /** Beside the active file. */
   aside?: ReactNode
+  /** 「やることにつなぐ…」 in the tree's menu (absent where the company shows no task list). */
+  onLinkToTask?: (path: string) => void
 }
 
 /** The ファイル tab: the file tree (files) and the open files (editor), split by the layout tree. */
@@ -48,6 +50,7 @@ export function FilesPanel(props: Props) {
           onSelectFile={props.onOpenFile}
           onDoubleClickFile={props.onPinFile}
           onPrivateFolderCreated={props.onPrivateFolderCreated}
+          onLinkToTask={props.onLinkToTask}
         />
       ) : (
         <TabbedEditorPanel

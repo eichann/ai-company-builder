@@ -81,9 +81,13 @@ freeze the window on a 15k-file company. Measurements and the dropped chokidar d
   `useTreeSelection.ts` (⌘ / shift selection, the right-click menu's snapshot),
   `useFileOperations.ts` (new / rename / delete / copy path, their dialogs, the reserved-name and
   private-root refusals), `useTreeDragDrop.ts` (moves, the private-edge confirm, Finder drops:
-  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The core menu has no
-  「やることにつなぐ…」: that entry will be contributed by the task plugin through a plugin UI
-  insertion point for this menu (milestone 5; `records.md` "Linking files later").
+  allowed types, 20 MB, a free name), `contextMenuItems.tsx`, `components/FileTreeHeader.tsx`. The menu's
+  「やることにつなぐ…」 is the core's (owner decision 2026-11-01: the task list is the core's, so
+  linking is too): it shows only when the panel gets `onLinkToTask` — `AppShell` passes it while
+  the task list shows for the department on screen — and opens the task feature's chooser
+  (`tasks-ui.md` "Linking files"). The tree's drag data (`src/shared/lib/dragTypes.ts`,
+  `application/x-file-paths`) also links a file dropped on a task row or the task card. The
+  plugin insertion point for this menu (milestone 5) stays for other plugins.
 - The not-downloaded department prompt is an overlay (the tree stays mounted;
   `download-choices.md`); the "folder exists" check is keyed per folder (`src/shared/lib/folderExists.ts`,
   used by `src/features/workspace/hooks/useDepartmentAvailability.ts`); left tabs stay mounted

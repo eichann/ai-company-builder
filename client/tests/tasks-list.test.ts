@@ -84,3 +84,20 @@ test('records off for the company: no list, not an error', async () => {
   const h = harness({ '/api/me': { status: 200, body: { data: { id: ME } } }, 'GET /api/companies/co1/records/my-turn': { status: 404, body: { code: 'RECORDS_DISABLED' } } })
   assert.deepEqual(await h.api.list('co1'), { success: true, data: { available: false, listDepartmentIds: null, items: [] } })
 })
+
+test('linking a file sends only a path inside the company folder; taking it away uses the remove route', async () => {
+  const h = harness({
+    'POST /api/companies/co1/records/item/task-abc123/file-links': { status: 200, body: { data: { changed: true } } },
+    'POST /api/companies/co1/records/item/task-abc123/file-links/remove': { status: 200, body: { data: { changed: true } } },
+  })
+  for (const bad of ['/Users/me/会社/見積.xlsx', '../見積.xlsx', '営業/../../x', 'C:/x', '']) {
+    assert.equal((await h.api.linkFile('co1', 'task-abc123', bad, 3, false)).success, false, bad)
+  }
+  assert.equal(h.requests.length, 0)
+  assert.equal((await h.api.linkFile('co1', 'task-abc123', '営業/見積.xlsx', 3, false)).success, true)
+  assert.equal((await h.api.linkFile('co1', 'task-abc123', '営業/見積.xlsx', 4, true)).success, true)
+  assert.deepEqual(h.requests.map(r => [r.url.replace('https://acb.test/api/companies/co1', ''), r.body]), [
+    ['/records/item/task-abc123/file-links', { path: '営業/見積.xlsx', expectedVersion: 3 }],
+    ['/records/item/task-abc123/file-links/remove', { path: '営業/見積.xlsx', expectedVersion: 4 }],
+  ])
+})

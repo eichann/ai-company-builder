@@ -15,6 +15,10 @@ export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask'>
 /** One task's card. */
 export type TaskCardReads = ElectronPort<'getTaskCard'>
+/** Linking a company file to a task, or taking the link away (the server checks both sides). */
+export type TaskFileWrites = ElectronPort<'linkFileToTask' | 'unlinkFileFromTask'>
+/** The company's file names on this computer (downloaded folders only), for 「＋ファイルをつなぐ」. */
+export type CompanyFileReads = ElectronPort<'gitListFiles'>
 /** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
 export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
 
@@ -57,4 +61,18 @@ export function retryTaskRun(companyId: string, runId: string, writes: TaskRunWr
 
 export function reconcileTaskRun(companyId: string, runId: string, key: string, done: boolean, writes: TaskRunWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.reconcileTaskRun(companyId, runId, key, done)
+}
+
+/** `companyPath`: inside the company folder (`営業/見積.xlsx`), never a local path. */
+export function linkFileToTask(companyId: string, recordId: string, companyPath: string, expectedVersion: number, writes: TaskFileWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.linkFileToTask(companyId, recordId, companyPath, expectedVersion)
+}
+
+export function unlinkFileFromTask(companyId: string, recordId: string, companyPath: string, expectedVersion: number, writes: TaskFileWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.unlinkFileFromTask(companyId, recordId, companyPath, expectedVersion)
+}
+
+/** Company-relative paths of the files on this computer. */
+export function listCompanyFiles(rootPath: string, reads: CompanyFileReads = window.electronAPI) {
+  return reads.gitListFiles(rootPath, '')
 }

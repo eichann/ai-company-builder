@@ -47,6 +47,9 @@ installElectronAPI({
     show('acted', `${input.action}@${input.expectedVersion}${input.note ? `:${input.note}` : ''}${input.ok ? `:ok=${input.ok.by ?? ''}/${input.ok.note ?? ''}` : ''}${input.args?.due ? `:due=${String(input.args.due)}` : ''}`)
     return { success: true, recordId }
   },
+  linkFileToTask: async (_c, recordId, companyPath, version) => { show('acted', `link ${companyPath}@${version}`); return { success: true, recordId } },
+  unlinkFileFromTask: async (_c, recordId, companyPath, version) => { show('acted', `unlink ${companyPath}@${version}`); return { success: true, recordId } },
+  gitListFiles: async () => ({ success: true, files: ['営業/見積書_v2.xlsx', '営業/提案書.md', '経理/請求書.xlsx'] }),
   reconcileTaskRun: async (_c, runId, key, isDone) => { show('acted', `reconcile ${runId} ${key} ${isDone}`); return { success: true, recordId: '' } },
 })
 
@@ -54,7 +57,7 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
-      <TaskCard companyId="co-preview" rootPath="/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>} />
+      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>} />
     </main>
   )
 }
