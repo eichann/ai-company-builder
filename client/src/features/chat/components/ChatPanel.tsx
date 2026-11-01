@@ -87,7 +87,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
 
   // chat.newConsultation / chat.insertText for this pane wait here until the active tab can take them.
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
-  useCommandHandler('chat.newConsultation', ({ message }) => setInputRequest({ kind: 'newConsultation', message }), { target: paneId })
+  useCommandHandler('chat.newConsultation', ({ message, title, minutesId }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
 

@@ -19,6 +19,7 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
+import { putSampleHub } from '../helpers/plugin-packages'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
@@ -77,6 +78,10 @@ const TYPES: Record<string, string> = {
   AgentStops: 'AgentStopView',
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
+  Google: 'GoogleAdminView',
+  MinutesFolder: 'MinutesFolderSetting',
+  Plugins: '{ plugins: PluginListItem[] }',
+  Plugin: 'PluginDetail',
   Invitations: 'Invitation[]',
   CreatedInvitation: 'CreatedInvitation',
   InvitationValidate: '{ companyName: string; role: Role; expiresAt: string }',
@@ -99,6 +104,17 @@ const TYPES: Record<string, string> = {
 const KNOWN_MISMATCHES: Array<{ id: string; describe: string; error: RegExp }> = []
 
 const CO = 'acco'
+/** A mapping for the sample-hub fixture: one field written automatically. */
+const CONTRACT_MAPPING = `
+deal:
+  visible_to_folder: 営業部
+  fields:
+    title:     { from: dealname, write: false }
+    next_step: { from: hs_next_step, write: true }
+    amount:    { from: amount, write: true }
+policy:
+  next_step: auto
+`
 const base = `/api/companies/${CO}`
 const USERS = { owner: 'ac-owner', admin: 'ac-admin', member: 'ac-member', newbie: 'ac-newbie' } as const
 
@@ -152,6 +168,10 @@ beforeAll(async () => {
   const kekDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-kek-'))
   writeFileSync(join(kekDir, 'kek'), randomBytes(32).toString('base64'), { mode: 0o600 })
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
+  // The plugin shelf (「つなぎ先」): one HubSpot-shaped package, also before the composition root loads.
+  const shelfDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-shelf-'))
+  putSampleHub(shelfDir)
+  process.env.PLUGINS_DIR = shelfDir
   shapes = loadTypeShapes(
     `import type * as A from ${JSON.stringify(ADMIN_API.replace(/\.ts$/, ''))}\n`
     + `type Role = A.Role\n`
@@ -204,6 +224,9 @@ beforeAll(async () => {
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
+  const { pluginsRoute } = await import('../../src/routes/plugins')
+  const { googleRoute } = await import('../../src/routes/google')
+  await (await import('../../src/composition')).services.pluginShelf.load()
   // The same mounts as src/app.ts.
   app = new Hono()
   app.route('/api/me', meRoute)
@@ -216,6 +239,9 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
+  app.route('/api/companies/:companyId', pluginsRoute)
+  app.route('/api/companies/:companyId', googleRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api', invitationsRoute)
 
   // A push rejection for the overview / history.
@@ -346,6 +372,36 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/stop-all`)
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
+  })
+
+  it('つなぎ先 → Google', async () => {
+    await expectShape('Google', USERS.owner, 'GET', `${base}/google`)
+    await expectShape('Google', USERS.owner, 'PUT', `${base}/google/client`, { clientId: '123456789012-contract.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-contract-0000', domain: 'example.com' })
+    await expectShape('Google', USERS.owner, 'PUT', `${base}/google/enabled`, { enabled: false })
+    // A member's permission as the callback stores it (the admin stops it).
+    const { db } = await import('../../src/db')
+    db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)
+      VALUES (?, ?, 'google', 'g-contract', 'm@example.com', '[]', NULL, 'revoked', ?, ?)`).run(CO, USERS.member, new Date().toISOString(), new Date().toISOString())
+    const view = await expectShape('Google', USERS.owner, 'DELETE', `${base}/google/grants/${USERS.member}`)
+    expect(view.grants.map((g: Loose) => g.userId)).toEqual([USERS.member])
+    expect(JSON.stringify(view)).not.toContain('GOCSPX-NOT-REAL-contract-0000')
+    await expectShape('MinutesFolder', USERS.owner, 'GET', `${base}/google/minutes-folder`)
+    const chosen = await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: '営業部' })
+    expect(chosen.folder).toBe('営業部')
+    await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: null })
+  })
+
+  it('つなぎ先 (connector plugins)', async () => {
+    await expectShape('Plugins', USERS.owner, 'GET', `${base}/plugins`)
+    // A business plugin and the connector it uses, each on its own (owner decision 2026-11-01).
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales`, { version: '0.1.0', keyId: null })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales/enabled`, { enabled: true })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub`, { version: '0.1.0', keyId: null })
+    await expectShape('Plugin', USERS.owner, 'GET', `${base}/plugins/sample-hub`)
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
+    await expectShape('Plugin', USERS.owner, 'POST', `${base}/plugins/sample-sales/mapping/restore`, { version: 1 })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/enabled`, { enabled: false })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/read-scope`, { departmentIds: [], userIds: [USERS.owner] })
   })
 
   it('invitations', async () => {
@@ -494,6 +550,37 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT member_keys_allowed FROM broker_settings WHERE company_id = ?', CO).member_keys_allowed).toBe(1)
     await A.keyBrokerApi.remove(CO, id)
     expect(row('SELECT id FROM broker_keys WHERE id = ?', id)).toBeUndefined()
+  })
+
+  it('つなぎ先 → Google: the client, the domain and the switch reach the server as chosen; an empty secret keeps the stored one', async () => {
+    await A.googleApi.saveClient(CO, { clientId: '123456789012-builder.apps.googleusercontent.com', clientSecret: 'GOCSPX-NOT-REAL-builder-4444', domain: 'Example.CO.JP' })
+    expect(row('SELECT client_id, secret_last4, domain FROM google_oauth_clients WHERE company_id = ?', CO))
+      .toEqual({ client_id: '123456789012-builder.apps.googleusercontent.com', secret_last4: '4444', domain: 'example.co.jp' })
+    await A.googleApi.saveClient(CO, { clientId: '123456789012-builder.apps.googleusercontent.com', domain: 'example.co.jp' })
+    expect(row('SELECT secret_last4 FROM google_oauth_clients WHERE company_id = ?', CO).secret_last4).toBe('4444')
+    await A.googleApi.setEnabled(CO, false)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.googleApi.setEnabled(CO, true)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+  })
+
+  it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {
+    await A.pluginsApi.install(CO, 'sample-sales', '0.1.0', null)
+    await A.pluginsApi.setEnabled(CO, 'sample-sales', true)
+    await A.pluginsApi.install(CO, 'sample-hub', '0.1.0', null)
+    expect(row('SELECT version, key_id FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub')).toEqual({ version: '0.1.0', key_id: null })
+    const text = CONTRACT_MAPPING.replace('amount:    { from: amount, write: true }', 'amount:    { from: amount, write: false }')
+    const saved = await A.pluginsApi.saveMapping(CO, 'sample-sales', text, ['next_step'])
+    expect(row('SELECT text FROM plugin_mappings WHERE company_id = ? AND plugin_id = ? AND version = ?', CO, 'sample-sales', saved.mapping!.version).text).toBe(text)
+    expect(row('SELECT acknowledged_by FROM plugin_policy_acks WHERE company_id = ? AND plugin_id = ? AND field = ?', CO, 'sample-sales', 'next_step').acknowledged_by).toBe(USERS.owner)
+    const restored = await A.pluginsApi.restoreMapping(CO, 'sample-sales', saved.mapping!.version - 1)
+    expect(restored.mapping!.version).toBe(saved.mapping!.version + 1)
+    // 「HubSpot に聞いて確かめる」 and the import reach their routes (no key chosen: refused before anything is sent).
+    await expect(A.pluginsApi.checkMapping(CO, 'sample-sales', text)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY', body: { problem: 'no-key' } })
+    await expect(A.pluginsApi.import(CO, 'sample-sales')).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_ACTIVE' })
+    await expect(A.pluginsApi.setEnabled(CO, 'sample-hub', true)).rejects.toMatchObject({ status: 409, code: 'PLUGIN_NOT_READY' })
+    expect((await A.pluginsApi.setReadScope(CO, 'sample-hub', { departmentIds: [], userIds: [USERS.owner] })).readScope).toEqual({ departmentIds: [], userIds: [USERS.owner] })
+    expect(row('SELECT enabled FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub').enabled).toBe(0)
   })
 
   it('an invitation gets the role and expiry the admin chose', async () => {

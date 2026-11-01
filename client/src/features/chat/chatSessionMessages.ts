@@ -3,6 +3,10 @@ import { referenceFromTool, type ConsultationReference } from '../../../shared/c
 import type { ChatSession } from '../../../shared/chat-history'
 import type { GenerateTitleRequest } from '../../../shared/chat-server-api'
 import { REVIEW_PART_TYPE, readReviewRecord, type ReviewRecord } from '../../../shared/review-request'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard, type PluginOperationCard } from '../../../shared/plugin-operations'
+import { APPROVAL_PART_TYPE, readApprovalCardRef, type ApprovalCardRef } from '../../../shared/approvals'
+import { MINUTES_DEAL_CHOICE_PART_TYPE, readMinutesDealChoiceCard, type MinutesDealChoiceCard } from '../../../shared/minutes-app'
+import { MAIL_DRAFT_PART_TYPE, readMailDraftCard, type MailDraftCard } from '../../../shared/outbound-mail'
 import { restoreTextWithChoices, storedChoiceFromPart, storedSteerFromPart, type StoredChoicePrompt, type StoredSteer } from './choiceHistory'
 
 // Conversion between the chat's live messages (AI SDK UIMessage) and the
@@ -21,7 +25,33 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
   const choicePrompts: StoredChoicePrompt[] = []
   const steerInstructions: StoredSteer[] = []
   const reviewRequests: ReviewRecord[] = []
+  const pluginOperations: PluginOperationCard[] = []
+  const approvals: ApprovalCardRef[] = []
+  const minutesDealChoices: MinutesDealChoiceCard[] = []
+  // The app's cards, in the order the tools produced them (restored in that order).
+  const cardOrder: string[] = []
+  const mailDrafts: MailDraftCard[] = []
   for (const part of msg.parts) {
+    if (part.type === APPROVAL_PART_TYPE) {
+      const ref = readApprovalCardRef((part as { data?: unknown }).data)
+      if (ref && !approvals.some(a => a.id === ref.id)) { approvals.push(ref); cardOrder.push(`approval-${ref.id}`) }
+      continue
+    }
+    if (part.type === PLUGIN_OPERATION_PART_TYPE) {
+      const card = readPluginOperationCard((part as { data?: unknown }).data)
+      if (card && !pluginOperations.some(c => c.id === card.id)) { pluginOperations.push(card); cardOrder.push(`plugin-op-${card.id}`) }
+      continue
+    }
+    if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
+      const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
+      if (card && !minutesDealChoices.some(c => c.id === card.id)) { minutesDealChoices.push(card); cardOrder.push(`minutes-deal-${card.id}`) }
+      continue
+    }
+    if (part.type === MAIL_DRAFT_PART_TYPE) {
+      const card = readMailDraftCard((part as { data?: unknown }).data)
+      if (card && !mailDrafts.some(c => c.id === card.id)) { mailDrafts.push(card); cardOrder.push(`mail-draft-${card.id}`) }
+      continue
+    }
     if (part.type === REVIEW_PART_TYPE) {
       const review = readReviewRecord((part as { data?: unknown }).data)
       if (review && !reviewRequests.some(r => r.id === review.id)) reviewRequests.push(review)
@@ -58,6 +88,11 @@ export function uiMessageToSessionMessage(msg: UIMessage, timestamp: Date): Sess
     ...(choicePrompts.length ? { choicePrompts } : {}),
     ...(steerInstructions.length ? { steerInstructions } : {}),
     ...(reviewRequests.length ? { reviewRequests } : {}),
+    ...(pluginOperations.length ? { pluginOperations } : {}),
+    ...(approvals.length ? { approvals } : {}),
+    ...(minutesDealChoices.length ? { minutesDealChoices } : {}),
+    ...(cardOrder.length > 1 ? { cardOrder } : {}),
+    ...(mailDrafts.length ? { mailDrafts } : {}),
   }
 }
 
@@ -91,6 +126,24 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
   // Answered (or closed) choice prompts come back collapsed, with the member's answer, where they were asked.
   parts.push(...restoreTextWithChoices(msg.content, msg.choicePrompts, msg.steerInstructions))
   for (const ref of msg.consultationReferences || []) parts.push({ type: 'data-consultation-reference', data: ref })
+  const cards: UIMessage['parts'] = []
+  for (const stored of msg.pluginOperations || []) {
+    const card = readPluginOperationCard(stored)
+    if (card) cards.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card })
+  }
+  for (const stored of msg.approvals || []) {
+    const ref = readApprovalCardRef(stored)
+    if (ref) cards.push({ type: APPROVAL_PART_TYPE, id: `approval-${ref.id}`, data: ref })
+  }
+  for (const stored of msg.minutesDealChoices || []) {
+    const card = readMinutesDealChoiceCard(stored)
+    if (card) cards.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card })
+  }
+  for (const stored of msg.mailDrafts || []) {
+    const card = readMailDraftCard(stored)
+    if (card) cards.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card })
+  }
+  parts.push(...inCardOrder(cards, msg.cardOrder))
   for (const review of msg.reviewRequests || []) {
     const record = readReviewRecord(review)
     if (record) parts.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record })
@@ -100,6 +153,16 @@ export function sessionMessageToUIMessage(msg: SessionMessage): UIMessage {
     role: msg.role as 'user' | 'assistant',
     parts,
   }
+}
+
+/** Cards in their stored order (`cardOrder`); a card it does not name keeps its place after the named ones. */
+export function inCardOrder(cards: UIMessage['parts'], order: string[] | undefined): UIMessage['parts'] {
+  if (!Array.isArray(order) || order.length === 0) return cards
+  const rank = (part: UIMessage['parts'][number]) => {
+    const i = order.indexOf((part as { id?: string }).id ?? '')
+    return i === -1 ? order.length : i
+  }
+  return cards.map((part, i) => ({ part, i })).sort((a, b) => rank(a.part) - rank(b.part) || a.i - b.i).map(x => x.part)
 }
 
 /** The plain text of a message (its text parts). */

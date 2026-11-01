@@ -25,6 +25,14 @@ import { useAgentProgress } from '../agentStatusStore'
 import { STEER_PART_TYPE, readSteerRecord } from '../../../../shared/steer'
 import { REVIEW_PART_TYPE, REVIEW_TOOL_ID, readReviewRecord } from '../../../../shared/review-request'
 import { ReviewRequestCard } from './ReviewRequestCard'
+import { PLUGIN_OPERATION_PART_TYPE, readPluginOperationCard } from '../../../../shared/plugin-operations'
+import { MAIL_DRAFT_PART_TYPE, readMailDraftCard } from '../../../../shared/outbound-mail'
+import { MailDraftCard } from './MailDraftCard'
+import { PluginOperationCard } from './PluginOperationCard'
+import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
+import { ApprovalCard } from './ApprovalCard'
+import { MINUTES_DEAL_CHOICE_PART_TYPE, readMinutesDealChoiceCard } from '../../../../shared/minutes-app'
+import { MinutesDealChoiceCard } from './MinutesDealChoiceCard'
 import { SteerInstructionView } from './SteerInstruction'
 import { BrokerKeyNeededCard } from './BrokerKeyNeededCard'
 import { brokerKeyNeedsOf } from '../brokerKeyNeeds'
@@ -321,6 +329,22 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
         if (part.type === REVIEW_PART_TYPE) {
           const record = readReviewRecord((part as { data?: unknown }).data)
           return record ? <ReviewRequestCard key={item.key} record={record} /> : null
+        }
+        if (part.type === PLUGIN_OPERATION_PART_TYPE) {
+          const card = readPluginOperationCard((part as { data?: unknown }).data)
+          return card ? <PluginOperationCard key={item.key} card={card} /> : null
+        }
+        if (part.type === APPROVAL_PART_TYPE) {
+          const ref = readApprovalCardRef((part as { data?: unknown }).data)
+          return ref ? <ApprovalCard key={item.key} card={ref} /> : null
+        }
+        if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
+          const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
+          return card ? <MinutesDealChoiceCard key={item.key} card={card} /> : null
+        }
+        if (part.type === MAIL_DRAFT_PART_TYPE) {
+          const card = readMailDraftCard((part as { data?: unknown }).data)
+          return card ? <MailDraftCard key={item.key} card={card} /> : null
         }
         if (part.type === STEER_PART_TYPE) {
           const record = readSteerRecord((part as { data?: unknown }).data)

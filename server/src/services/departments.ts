@@ -187,6 +187,10 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
           if (body.folder !== undefined && body.folder.trim() !== oldFolder) {
             scopesOf(companyId).moveScopeSubtree(oldFolder, body.folder.trim())
             scopesOf(companyId).ensureDepartmentScope(existing.id, body.folder.trim(), userId)
+            // Records go with it (records.md "Links to files"): server records' readers' folder
+            // (else they would take the old path's rules), links to files under it, the minutes
+            // folder. No private folder is inside (refused above), so nothing private moves.
+            companyData.forCompany(companyId).records.moveFolder(oldFolder, body.folder.trim())
           }
         })
       }

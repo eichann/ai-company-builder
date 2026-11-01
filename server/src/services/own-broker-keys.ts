@@ -142,6 +142,8 @@ export function createOwnBrokerKeyService(deps: OwnBrokerKeyDeps) {
       if (!isObject(body)) return refuse('bad-request', 'Body must be a JSON object')
       const secret = checkBrokerSecret(body.secret)
       if ('error' in secret) return refuse('bad-request', secret.error)
+      const practice = deps.keyBroker.practiceSecretRefusal(service, secret.value)
+      if (practice) return practice
       let displayName: string | undefined
       if (body.displayName !== undefined) {
         const name = parseBrokerDisplayName(body.displayName)

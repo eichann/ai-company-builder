@@ -118,6 +118,8 @@ test('push channel: the session goes in a header, and an event can only cause a 
   stream.send(`event: open\ndata: {"kind":"open","url":"file:///etc/passwd"}\n\n`)
   stream.send(`event: policy\ndata: {"kind":"policy","version":"${V2}","command":"open -a Calculator"}\n\n`)
   stream.send(`event: exec\ndata: {"kind":"exec","version":"${V2}"}\n\n`)
+  // A records event (the company map) never refetches the policy.
+  stream.send(`event: records\ndata: {"kind":"records","version":"${V2}"}\n\n`)
   await tick(); await tick()
 
   assert.deepEqual(refreshed, [['co', V1]])

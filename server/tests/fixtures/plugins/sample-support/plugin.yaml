@@ -1,0 +1,16 @@
+# The business plugin using the help-desk connector (sample-desk): it owns the
+# ticket type and its recommended mapping. Made for one company, like its
+# connector (§8-4).
+id: sample-support
+label: 見本の問い合わせ対応
+version: 1.0.0
+kind: company
+contract: 1
+available_to: [company-desk-only]
+types: [ticket]
+connector: sample-desk >= 2.3.1
+objects:
+  ticket: { record_type: ticket }
+operations:
+  refresh_ticket:
+    who: [viewer]

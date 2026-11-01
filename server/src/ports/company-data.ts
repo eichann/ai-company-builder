@@ -23,10 +23,15 @@
  * in tests/unit/company-scoped-sql.test.ts, which fails on any new statement
  * that touches a company's rows without a company condition.
  */
+import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
+import type { FixedPayloadRepository } from './fixed-payloads'
 import type { InvitationRepository } from './invitations'
 import type { OrphanedScopeReader } from './orphaned-scopes'
+import type { OutboundMailRepository } from './outbound-mail'
+import type { PluginRepository } from './plugins'
 import type { PrivateFolderRepository } from './private-folders'
+import type { RecordRepository } from './records'
 import type { ScopeRepository } from './scopes'
 
 export interface CompanyData {
@@ -39,6 +44,16 @@ export interface CompanyData {
   readonly privateFolders: PrivateFolderRepository
   /** Rules whose folder disappeared from the shared branch (git + orphaned_scopes). */
   readonly orphanedScopes: OrphanedScopeReader
+  /** The company map of the light ontology: switch, types, record index, links, state (ports/records.ts). */
+  readonly records: RecordRepository
+  /** Connector plugins: installs, mapping versions, history (ports/plugins.ts). */
+  readonly plugins: PluginRepository
+  /** The Google connection: the OAuth client, members' grants, pending starts (ports/connectors.ts). */
+  readonly connectors: ConnectorRepository
+  /** Outbound mail: drafts, their recipients per version, typed addresses, send attempts (ports/outbound-mail.ts). */
+  readonly outbound: OutboundMailRepository
+  /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */
+  readonly fixedPayloads: FixedPayloadRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

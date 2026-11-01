@@ -51,7 +51,10 @@ export interface BrokerServiceInfo {
   service: string
   label: string
   category: BrokerServiceCategory
-  /** Where the relay sends this service's requests unless the key says otherwise. */
+  /**
+   * The only hosts a key for this service may name (`builtinHostsOutside`):
+   * a built-in service's key never goes anywhere else.
+   */
   defaultHosts: readonly string[]
   /**
    * How the real key travels upstream: `Authorization: Bearer`, `x-api-key`
@@ -64,9 +67,16 @@ export interface BrokerServiceInfo {
    * once when a key is registered or replaced): GET this path on the first
    * default host, with these extra headers, no body. `rejected` lists the
    * answers that mean "this key does not work" (the key is then not saved);
-   * any other non-2xx answer is "could not tell".
+   * any other non-2xx answer is "could not tell", except `limited`: answers
+   * that mean "the key works but lacks a permission" (saved, said so).
    */
-  check: { path: string; headers: Readonly<Record<string, string>>; rejected: readonly number[] }
+  check: { path: string; headers: Readonly<Record<string, string>>; rejected: readonly number[]; limited?: readonly number[] }
+  /**
+   * POST paths that only read (a CRM's search), allowed while the company keeps
+   * the service's relay read-only (`brokerRelayReadOnlyAllows`). Matched
+   * against the decoded path the client sent.
+   */
+  readOnlyPosts?: readonly RegExp[]
 }
 
 export type BrokerCredentialHeader = 'authorization' | 'x-api-key' | 'x-goog-api-key'
@@ -87,10 +97,52 @@ export const BUILTIN_BROKER_SERVICES: readonly BrokerServiceInfo[] = [
     service: 'anthropic', label: 'Anthropic（Claude API）', category: 'tool', defaultHosts: ['api.anthropic.com'], credential: 'x-api-key',
     check: { path: '/v1/models', headers: { 'anthropic-version': '2023-06-01' }, rejected: [401] },
   },
+  // HubSpot (milestone 3): a service key (`pat-…`) as `Authorization: Bearer`. The check reads deals
+  // (the dated API, current version 2026-03; the v3 paths are unsupported from 2027-09): 401 = invalid,
+  // 403 = valid but missing scopes (a key made without crm.objects.deals.read). Search is a POST that
+  // only reads, both as v3 and dated paths.
+  {
+    service: 'hubspot', label: 'HubSpot', category: 'system', defaultHosts: ['api.hubapi.com'], credential: 'authorization',
+    check: { path: '/crm/objects/2026-03/deals', headers: {}, rejected: [401], limited: [403] },
+    readOnlyPosts: [/^\/crm\/v3\/objects\/[a-z0-9_-]+\/search$/, /^\/crm\/objects\/\d{4}-\d{2}\/[a-z0-9_-]+\/search$/],
+  },
 ]
 
 export function builtinBrokerService(service: string): BrokerServiceInfo | undefined {
   return BUILTIN_BROKER_SERVICES.find(s => s.service === service)
+}
+
+/**
+ * The hosts a key for a built-in service names outside that service's own
+ * hosts (empty: fine, also for any non-built-in service). A key for a
+ * built-in service may go only to its service's hosts — a HubSpot key must
+ * never reach Gemini's host (staging, 2026-11: one did, through the admin
+ * form). The server refuses such a key on create / update, and the relay
+ * refuses to use one saved before this rule.
+ */
+export function builtinHostsOutside(service: string, hosts: readonly string[]): string[] {
+  const builtin = builtinBrokerService(service)
+  if (!builtin) return []
+  return hosts.filter(h => !builtin.defaultHosts.includes(h))
+}
+
+/** The plain-Japanese refusal for `builtinHostsOutside` (hosts only, never a key). */
+export function builtinHostsMessage(service: string): string {
+  const builtin = builtinBrokerService(service)
+  if (!builtin) return ''
+  return `${builtin.label} の鍵は ${builtin.defaultHosts.join('、')} にだけ送れます。送り先を ${builtin.defaultHosts.join('、')} にしてください。`
+}
+
+/**
+ * While a company keeps a service's relay read-only (milestone 3: on for
+ * HubSpot once its plugin is on — writes go only through the plugin's typed
+ * operations), only GET / HEAD pass, plus the POST paths the built-in service
+ * names as read-only (search). `path` is the decoded path the client sent.
+ */
+export function brokerRelayReadOnlyAllows(service: BrokerServiceInfo | null, method: string, path: string): boolean {
+  const m = method.toUpperCase()
+  if (m === 'GET' || m === 'HEAD') return true
+  return m === 'POST' && !!service?.readOnlyPosts?.some(re => re.test(path))
 }
 
 export const BROKER_LIMITS = {
@@ -392,15 +444,17 @@ export function ownKeysSwitchSetting(
  * - `rejected`: the service said the key does not work (it is not saved);
  * - `unreachable`: the server could not reach the service (saved);
  * - `unconfirmed`: an answer that tells neither (rate limit, a restricted key; saved);
+ * - `limited`: the service knows the key but it lacks a permission the check needs (saved);
  * - `not-checkable`: no check request is known for the service (saved).
  */
-export type BrokerKeyCheckResult = 'valid' | 'rejected' | 'unreachable' | 'unconfirmed' | 'not-checkable'
-export const BROKER_KEY_CHECK_RESULTS: readonly BrokerKeyCheckResult[] = ['valid', 'rejected', 'unreachable', 'unconfirmed', 'not-checkable']
+export type BrokerKeyCheckResult = 'valid' | 'rejected' | 'unreachable' | 'unconfirmed' | 'limited' | 'not-checkable'
+export const BROKER_KEY_CHECK_RESULTS: readonly BrokerKeyCheckResult[] = ['valid', 'rejected', 'unreachable', 'unconfirmed', 'limited', 'not-checkable']
 
 /** What a check answer means. */
-export function brokerKeyCheckOutcome(status: number, rejected: readonly number[]): BrokerKeyCheckResult {
+export function brokerKeyCheckOutcome(status: number, rejected: readonly number[], limited: readonly number[] = []): BrokerKeyCheckResult {
   if (status >= 200 && status < 300) return 'valid'
   if (rejected.includes(status)) return 'rejected'
+  if (limited.includes(status)) return 'limited'
   return 'unconfirmed'
 }
 
@@ -447,6 +501,20 @@ export function clampBrokerTokenTtl(minutes: number): number {
  * SDK's "missing API key". Not a secret.
  */
 export const BROKER_NO_KEY_PLACEHOLDER = 'acb_tok_none'
+
+/**
+ * Keys of a practice copy of a service (staging's fake HubSpot): made-up
+ * values with this prefix. While a service's connections go to its practice
+ * copy, only such keys may be registered for it, and nothing else is sent
+ * there (milestone 3 review §5.8: a real secret never reaches the fake).
+ */
+export const PRACTICE_KEY_PREFIX = 'pat-fake-'
+
+/** The value is a practice key (`Bearer ` / `Token token=` style wrappers allowed around it). */
+export function isPracticeSecret(value: string): boolean {
+  const v = value.trim().replace(/^(?:Bearer|Token(?:\s+token=)?)\s*/i, '').trim()
+  return v.startsWith(PRACTICE_KEY_PREFIX)
+}
 
 /** The shape of a token value (prefix + 64 hex characters). Anything else is refused before a lookup. */
 export function looksLikeBrokerToken(value: unknown): value is string {

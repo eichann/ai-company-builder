@@ -229,7 +229,13 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
 - A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
-  text).
+  text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
+  `data-plugin-operation` parts; `plugins.md` "The app"), `minutesDealChoices`
+  (「どの案件の議事録ですか？」, `minutes.md` "The app"), `mailDrafts` (the mail card, `data-mail-draft`,
+  `outbound-mail.md`). The app's cards come back after the text in
+  the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
+  more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
+  `minutesId` (and its title, not generated).
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail
@@ -251,6 +257,10 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   (`hooks/useChatAutoScroll.ts`). The browser's scroll anchoring also moves the view (down) when
   the reply grows; counting that as reading stopped the follow under load. Test:
   `tests/ui/chat-panel.spec.ts` 「a streaming reply follows the bottom …」.
+- The scrolling list (`MessageList`) is `relative`, the containing block of anything absolutely
+  positioned inside it (Tailwind `sr-only`, overlays). Without it a card's `sr-only` text was
+  laid out against the page ~10 000 px down and the whole window painted shifted (staging,
+  milestone 3). Test: `tests/ui/chat-panel.spec.ts` 「a card with screen-reader-only text …」.
 - Markdown renders per top-level block (`markdownBlocks.ts`: split only at blank lines outside
   fences before a non-indented, non-list line; a reply with link/footnote definitions stays one
   block), so streaming re-parses only the last block; an unclosed fence shows plain until it

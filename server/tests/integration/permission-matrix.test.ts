@@ -100,6 +100,17 @@ interface World {
     relayService: string
     token: string
     invitation: string
+    record: string
+    recordToken: string
+    /** A plugin package available only to the other company, installed there. */
+    plugin: string
+    /** An operation record (操作の控え) of the other company. */
+    operation: string
+    googleGrant: string
+    /** An approval request of the other company. */
+    approval: string
+    /** A mail draft of the other company's member (outbound-mail.md). */
+    outboundMail: string
   }
 }
 
@@ -224,6 +235,42 @@ const MATRIX: Row[] = [
   r('DELETE /api/companies/:companyId/agent-stops/:stopId', w => ({ path: `${C(w)}/agent-stops/no-such-stop` }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/events', w => ({ path: `${C(w)}/me/events` }), MEMBERS),
 
+  // The company map (light ontology 4-2; records.md). On for this company (seed).
+  r('GET /api/companies/:companyId/records/settings', w => ({ path: `${C(w)}/records/settings` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/records/settings', w => ({ path: `${C(w)}/records/settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/records/problems', w => ({ path: `${C(w)}/records/problems` }), [200, 200, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/records/reindex', w => ({ path: `${C(w)}/records/reindex`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/records/types', w => ({ path: `${C(w)}/records/types` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/query', w => ({ path: `${C(w)}/records/query`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/records/item/:recordId', w => ({ path: `${C(w)}/records/item/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/records/my-turn', w => ({ path: `${C(w)}/records/my-turn` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/item', w => ({ path: `${C(w)}/records/item`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  // 「AI の番」 and decisions (milestone 4): any member; no object id in the URL (a linked record id
+  // in the body is looked up behind the company handle: tests/unit/record-service-types.test.ts).
+  r('GET /api/companies/:companyId/records/ai-turn', w => ({ path: `${C(w)}/records/ai-turn` }), MEMBERS),
+  r('POST /api/companies/:companyId/records/decisions', w => ({ path: `${C(w)}/records/decisions`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/records-ai/ai-turn', () => ({ path: '/api/records-ai/ai-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/decisions', () => ({ path: '/api/records-ai/decisions', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/companies/:companyId/records/item/:recordId/actions/:action', w => ({ path: `${C(w)}/records/item/deal-nosuch01/actions/start`, body: { expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/undo', w => ({ path: `${C(w)}/records/item/deal-nosuch01/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/records/item/:recordId/history', w => ({ path: `${C(w)}/records/item/deal-nosuch01/history` }), [404, 404, 404, 404, 404, 401]),
+  // Linking a file later: any member who reads the record and the file (a missing record → 404 for all).
+  r('POST /api/companies/:companyId/records/item/:recordId/file-links', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', w => ({ path: `${C(w)}/records/item/deal-nosuch01/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 0 } }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/item/:recordId/file-links', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', w => ({ path: `${C(w)}/me/record-tokens/no-such-token` }), [404, 404, 404, 404, 404, 401]),
+  // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
+  r('GET /api/records-ai/types', () => ({ path: '/api/records-ai/types' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/my-turn', () => ({ path: '/api/records-ai/my-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/query', () => ({ path: '/api/records-ai/query', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/item/:recordId', () => ({ path: '/api/records-ai/item/deal-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/item/:recordId/history', () => ({ path: '/api/records-ai/item/deal-nosuch01/history' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/item', () => ({ path: '/api/records-ai/item', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/item/:recordId/actions/:action', () => ({ path: '/api/records-ai/item/deal-nosuch01/actions/start', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/companies/:companyId/records/item/:recordId/versions/:version', w => ({ path: `${C(w)}/records/item/deal-nosuch01/versions/1` }), [404, 404, 404, 404, 404, 401]),
+
   // Key broker (「API キー」)
   r('GET /api/companies/:companyId/broker', w => ({ path: `${C(w)}/broker` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/broker/keys', w => ({ path: `${C(w)}/broker/keys`, body: {} }), [400, 400, 403, 403, 404, 401]),
@@ -232,6 +279,7 @@ const MATRIX: Row[] = [
   r('DELETE /api/companies/:companyId/broker/keys/:keyId', w => ({ path: `${C(w)}/broker/keys/no-such-key` }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/services/:service', w => ({ path: `${C(w)}/broker/services/gemini`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/services/:service/own-keys', w => ({ path: `${C(w)}/broker/services/gemini/own-keys`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/broker/services/:service/read-only', w => ({ path: `${C(w)}/broker/services/hubspot/read-only`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/relay-services/:service', w => ({ path: `${C(w)}/broker/relay-services/matrix-svc`, body: {} }), [400, 400, 403, 403, 404, 401]),
   r('DELETE /api/companies/:companyId/broker/relay-services/:service', w => ({ path: `${C(w)}/broker/relay-services/no-such-service` }), [404, 404, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/broker/settings', w => ({ path: `${C(w)}/broker/settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
@@ -261,6 +309,75 @@ const MATRIX: Row[] = [
   r('POST /api/git-http/:company/scopes/:repo/git-upload-pack', w => ({ path: `/api/git-http/${w.co}/scopes/${w.privateScope}.git/git-upload-pack` }), [415, 415, 404, 415, 404, 401]),
   r('POST /api/git-http/:company/scopes/:repo/git-receive-pack', w => ({ path: `/api/git-http/${w.co}/scopes/${w.privateScope}.git/git-receive-pack` }), [415, 415, 404, 403, 404, 401]),
   r('GET /api/git-http/:company/scopes/:repo/HEAD', w => ({ path: `/api/git-http/${w.co}/scopes/${w.privateScope}.git/HEAD` }), [200, 200, 404, 200, 404, 401]),
+
+  // Connector plugins (plugins.md): owners and admins; an unknown plugin is 404 after the role check.
+  r('GET /api/companies/:companyId/plugins', w => ({ path: `${C(w)}/plugins` }), [200, 200, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/plugins/:pluginId', w => ({ path: `${C(w)}/plugins/no-such-plugin` }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId', w => ({ path: `${C(w)}/plugins/no-such-plugin`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/enabled', w => ({ path: `${C(w)}/plugins/no-such-plugin/enabled`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/mapping', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/read-scope', w => ({ path: `${C(w)}/plugins/no-such-plugin/read-scope`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/restore`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', w => ({ path: `${C(w)}/plugins/no-such-plugin/mapping/check`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/import', w => ({ path: `${C(w)}/plugins/no-such-plugin/import`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal`, body: {} }), [404, 404, 404, 404, 404, 401],
+    'any member: the record (it does not exist), the operation\'s who and the field policies decide'),
+  r('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/undo`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/plugins', () => ({ path: '/api/records-ai/plugins' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // Approval requests (approvals.md): any member reads what concerns them; approving is a session's, never the AI's.
+  r('GET /api/companies/:companyId/approvals', w => ({ path: `${C(w)}/approvals`, query: 'scope=everyone' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/approvals/:approvalId', w => ({ path: `${C(w)}/approvals/approval-nosuch001` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/approve', w => ({ path: `${C(w)}/approvals/approval-nosuch001/approve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/send-back', w => ({ path: `${C(w)}/approvals/approval-nosuch001/send-back`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/approvals/:approvalId/withdraw', w => ({ path: `${C(w)}/approvals/approval-nosuch001/withdraw`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/approvals', () => ({ path: '/api/records-ai/approvals' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/approvals/:approvalId', () => ({ path: '/api/records-ai/approvals/approval-nosuch001' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', w => ({ path: `${C(w)}/plugins/no-such-plugin/create/create_deal`, body: {} }), [409, 409, 409, 409, 404, 401],
+    'any member: the plugin (not running here), the operation\'s who and its policy decide; never auto (milestone 4)'),
+  r('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', w => ({ path: `${C(w)}/plugins/no-such-plugin/operations/no-such-op/recreate`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/plugins/:pluginId/create/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/create/create_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation', () => ({ path: '/api/records-ai/plugins/no-such-plugin/records/deal-nosuch01/operations/update_deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/plugins/:pluginId/operations/:operationId', () => ({ path: '/api/records-ai/plugins/no-such-plugin/operations/no-such-op' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', w => ({ path: `${C(w)}/plugins/no-such-plugin/connection/renew`, body: {} }), [404, 404, 403, 403, 404, 401]),
+
+  // Outbound mail (outbound-mail.md): any member drafts; a draft is its author's only (404 for
+  // everyone else, like a missing one). Sending, typed addresses, resolve and discard: the
+  // session routes only — the AI's routes have none of them.
+  r('POST /api/companies/:companyId/outbound-recipients', w => ({ path: `${C(w)}/outbound-recipients`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('POST /api/companies/:companyId/outbound', w => ({ path: `${C(w)}/outbound`, body: 'x' }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/outbound/:messageId', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001` }), [404, 404, 404, 404, 404, 401]),
+  r('PUT /api/companies/:companyId/outbound/:messageId', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/companies/:companyId/outbound/:messageId/recipients', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/recipients` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/recipients', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/recipients`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/send', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/send`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/resolve', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/resolve`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/outbound/:messageId/discard', w => ({ path: `${C(w)}/outbound/outbound_message-nosuch0000000001/discard`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/records-ai/outbound-recipients', () => ({ path: '/api/records-ai/outbound-recipients', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/outbound', () => ({ path: '/api/records-ai/outbound', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('PUT /api/records-ai/outbound/:messageId', () => ({ path: '/api/records-ai/outbound/outbound_message-nosuch0000000001', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+
+  // The Google connection (google-connector.md): the client and members' grants are owner/admin;
+  // a member's own permission is any member's; Google's return to the server is public.
+  r('GET /api/companies/:companyId/google', w => ({ path: `${C(w)}/google` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/client', w => ({ path: `${C(w)}/google/client`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/enabled', w => ({ path: `${C(w)}/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/google/grants/:userId', w => ({ path: `${C(w)}/google/grants/pm-nobody` }), [404, 404, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/google/connect', w => ({ path: `${C(w)}/me/google/connect`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('DELETE /api/companies/:companyId/me/google', w => ({ path: `${C(w)}/me/google` }), MEMBERS, 'nothing to stop: answers the member\'s own (empty) state'),
+  // The minutes intake (minutes.md): the folder is owner/admin; a member checks their own calendar
+  // (no folder chosen here: nothing is read) and reads minutes they are the assignee or an attendee of.
+  r('GET /api/companies/:companyId/google/minutes-folder', w => ({ path: `${C(w)}/google/minutes-folder` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/google/minutes-folder', w => ({ path: `${C(w)}/google/minutes-folder`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  r('POST /api/companies/:companyId/me/minutes/check', w => ({ path: `${C(w)}/me/minutes/check`, body: {} }), MEMBERS, 'no minutes folder is chosen: the answer says so and nothing is read'),
+  r('GET /api/companies/:companyId/me/minutes/item/:recordId/text', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/text` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/deal`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/oauth/google/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
 
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),
@@ -312,6 +429,48 @@ const CROSS: CrossRow[] = [
   x('DELETE /api/companies/:companyId/broker/relay-services/:service', (w, id) => ({ path: `${C(w)}/broker/relay-services/${id}` }), w => w.other.relayService, 'nosuchservice'),
   x('DELETE /api/companies/:companyId/me/broker-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/broker-tokens/${id}` }), w => w.other.token),
 
+  x('GET /api/companies/:companyId/records/item/:recordId', (w, id) => ({ path: `${C(w)}/records/item/${id}` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/actions/:action', (w, id) => ({ path: `${C(w)}/records/item/${id}/actions/start`, body: { expectedVersion: 0 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/undo', (w, id) => ({ path: `${C(w)}/records/item/${id}/undo`, body: { version: 1, expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/records/item/:recordId/history', (w, id) => ({ path: `${C(w)}/records/item/${id}/history` }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/file-links', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
+
+  x('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/record-tokens/${id}` }), w => w.other.recordToken),
+
+  // A package listed only for the other company (available_to) is a plugin that does not exist here.
+  x('GET /api/companies/:companyId/plugins/:pluginId', (w, id) => ({ path: `${C(w)}/plugins/${id}` }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId', (w, id) => ({ path: `${C(w)}/plugins/${id}`, body: { version: '0.1.0', keyId: null } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/enabled', (w, id) => ({ path: `${C(w)}/plugins/${id}/enabled`, body: { enabled: true } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/mapping', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping`, body: { text: 'deal: {}' } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/read-scope', (w, id) => ({ path: `${C(w)}/plugins/${id}/read-scope`, body: { userIds: [] } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/import', (w, id) => ({ path: `${C(w)}/plugins/${id}/import`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/records/:recordId/operations/:operation', (w, id) => ({ path: `${C(w)}/plugins/other-sales/records/${id}/operations/update_deal`, body: { expectedVersion: 1, fields: { next_step: '乗っ取り' } } }), w => w.other.record, 'deal-nosuch01'),
+  x('GET /api/companies/:companyId/plugins/:pluginId/operations/:operationId', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}` }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/undo', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/undo`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/reconcile', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/reconcile`, body: {} }), w => w.other.operation, 'no-such-op'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', (w, id) => ({ path: `${C(w)}/plugins/${id}/create/create_deal`, body: { title: '乗っ取り', fields: {} } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
+  x('GET /api/companies/:companyId/me/minutes/item/:recordId/text', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/text` }), w => w.other.record, 'minutes-nosuch01'),
+  x('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/deal`, body: { dealId: id } }), w => w.other.record, 'minutes-nosuch01'),
+  x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
+  x('POST /api/companies/:companyId/plugins/:pluginId/mapping/check', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/check`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
+
+  x('GET /api/companies/:companyId/approvals/:approvalId', (w, id) => ({ path: `${C(w)}/approvals/${id}` }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/approve', (w, id) => ({ path: `${C(w)}/approvals/${id}/approve`, body: { hash: `sha256:${'0'.repeat(64)}`, reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/send-back', (w, id) => ({ path: `${C(w)}/approvals/${id}/send-back`, body: { reason: '乗っ取り' } }), w => w.other.approval, 'approval-nosuch001'),
+  x('POST /api/companies/:companyId/approvals/:approvalId/withdraw', (w, id) => ({ path: `${C(w)}/approvals/${id}/withdraw`, body: {} }), w => w.other.approval, 'approval-nosuch001'),
+  x('GET /api/companies/:companyId/outbound/:messageId', (w, id) => ({ path: `${C(w)}/outbound/${id}` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('PUT /api/companies/:companyId/outbound/:messageId', (w, id) => ({ path: `${C(w)}/outbound/${id}`, body: { expectedVersion: 1, body: '乗っ取り' } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('GET /api/companies/:companyId/outbound/:messageId/recipients', (w, id) => ({ path: `${C(w)}/outbound/${id}/recipients` }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/recipients', (w, id) => ({ path: `${C(w)}/outbound/${id}/recipients`, body: { email: 'spy@attacker.example' } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/send', (w, id) => ({ path: `${C(w)}/outbound/${id}/send`, body: { hash: `sha256:${'0'.repeat(64)}` } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/resolve', (w, id) => ({ path: `${C(w)}/outbound/${id}/resolve`, body: { sent: true } }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+  x('POST /api/companies/:companyId/outbound/:messageId/discard', (w, id) => ({ path: `${C(w)}/outbound/${id}/discard`, body: {} }), w => w.other.outboundMail, 'outbound_message-nosuch0000000001'),
+
   x('DELETE /api/companies/:companyId/invitations/:invitationId', (w, id) => ({ path: `${C(w)}/invitations/${id}` }), w => w.other.invitation),
 ]
 
@@ -329,9 +488,23 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'DELETE /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
   'PUT /api/companies/:companyId/broker/services/:service': 'a service name: sets this company\'s own settings row for it',
   'PUT /api/companies/:companyId/broker/services/:service/own-keys': 'a service name: sets this company\'s own settings row for it',
+  'PUT /api/companies/:companyId/broker/services/:service/read-only': 'a service name: sets this company\'s own settings row for it',
   'PUT /api/companies/:companyId/broker/relay-services/:service': 'a service name this company defines for itself (creates its own row)',
   'PUT /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
   'DELETE /api/companies/:companyId/me/broker-keys/:service': 'a service name: the caller\'s own key in this company',
+  'GET /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
+  'PUT /api/records-ai/outbound/:messageId': 'the AI\'s routes: the company comes from the record token, never from the URL (outbound-mail.test.ts)',
+  'GET /api/records-ai/item/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: tests/integration/record-tokens.test.ts)',
+  'GET /api/records-ai/item/:recordId/history': 'the AI\'s routes: the company comes from the record token, never from the URL',
+  'POST /api/records-ai/item/:recordId/actions/:action': 'the AI\'s routes: the company comes from the record token, never from the URL (record-tokens.test.ts)',
+  'POST /api/records-ai/item/:recordId/file-links': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s record: record-tokens.test.ts)',
+  'POST /api/records-ai/item/:recordId/file-links/remove': 'the AI\'s routes: the company comes from the record token, never from the URL',
+  'POST /api/records-ai/plugins/:pluginId/records/:recordId/operations/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
+  'POST /api/records-ai/plugins/:pluginId/create/:operation': 'the AI\'s routes: the company comes from the record token, never from the URL (plugin-operations.test.ts)',
+  'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
+  'GET /api/records-ai/approvals/:approvalId': 'the AI\'s routes: the company comes from the record token, never from the URL (approvals.test.ts)',
+  'GET /api/records-ai/minutes/:recordId/text': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s minutes: tests/integration/minutes.test.ts)',
+  'POST /api/records-ai/minutes/:recordId/deal': 'the AI\'s routes: the company comes from the record token, never from the URL',
 }
 
 /** The parameters of a route that name something other than the company in the URL. */
@@ -347,6 +520,9 @@ function objectParams(path: string): string[] {
 let app: any
 let world: World
 let kekDir: string
+// The plugin shelf, read when the composition is first imported (in seed()).
+const shelfDir = mkdtempSync(join(tmpdir(), 'acb-matrix-shelf-'))
+process.env.PLUGINS_DIR = shelfDir
 
 function headersFor(role: Role): Record<string, string> {
   if (role === 'signedOut') return {}
@@ -458,6 +634,51 @@ async function seed(): Promise<World> {
   const otherToken = await call('outsider', 'POST', `${O}/me/broker-tokens`, { conversationId: 'conv-other', department: '営業部' })
   const otherInv = await call('outsider', 'POST', `${O}/invitations`, { role: 'member' })
 
+  // The company map, on in both companies (rows written directly: turning it on
+  // through the API would start an index run in the background), with a record in the other.
+  for (const c of [co, other]) {
+    db.prepare('INSERT INTO record_settings (company_id, enabled, updated_at, updated_by) VALUES (?, 1, ?, ?)').run(c, expires, USER.owner)
+  }
+  db.prepare("INSERT INTO records (company_id, id, type, path, title, created_at, updated_at) VALUES (?, 'deal-other001', 'deal', '営業部/商談.md', '他社の商談', ?, ?)")
+    .run(other, expires, expires)
+  db.prepare("INSERT INTO record_ai_tokens (id, company_id, user_id, token_hash, scope, agent, conversation_id, created_at, expires_at) VALUES ('rt-other-1', ?, ?, 'hash-other', 'act', 'claude', 'conv', ?, ?)")
+    .run(other, otherMember, expires, expires)
+
+  // The shelf: a connector and the business plugin using it, both only for the other company, installed there
+  // (the business plugin with its recommended mapping; owner decision 2026-11-01).
+  const { cpSync, readFileSync: readText } = await import('fs')
+  cpSync(join(__dirname, '../fixtures/plugins/sample-crm'), join(shelfDir, 'other-crm@0.1.0'), { recursive: true })
+  const manifest = join(shelfDir, 'other-crm@0.1.0/plugin.yaml')
+  writeFileSync(manifest, readText(manifest, 'utf8').replace('id: sample-crm', 'id: other-crm') + `\navailable_to: [${other}]\n`)
+  cpSync(join(__dirname, '../fixtures/plugins/sample-crm-sales'), join(shelfDir, 'other-sales@0.1.0'), { recursive: true })
+  const business = join(shelfDir, 'other-sales@0.1.0/plugin.yaml')
+  writeFileSync(business, readText(business, 'utf8').replace('id: sample-crm-sales', 'id: other-sales').replace('connector: sample-crm >=', 'connector: other-crm >=') + `available_to: [${other}]\n`)
+  await services.pluginShelf.load()
+  const otherOwner = { companyId: other, userId: USER.outsider, role: 'owner' }
+  if (!(await services.plugins.install(otherOwner, 'other-crm', { version: '0.1.0', keyId: null })).ok) throw new Error('connector')
+  const installed = await services.plugins.install(otherOwner, 'other-sales', { version: '0.1.0', keyId: null })
+  if (!installed.ok) throw new Error(`plugin: ${JSON.stringify(installed)}`)
+  db.prepare(`INSERT INTO plugin_operations (company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object,
+    external_id, record_id, actor_id, actor_kind, state, fields, written, previous, created_at, updated_at)
+    VALUES (?, 'op-other-1', 'other-sales', 'update_deal', '0.1.0', 'f', 1, 'c', '1', 'deal', '1', 'deal-other001', ?, 'human', 'applied', '{}', '{}', '{}', ?, ?)`)
+    .run(other, USER.outsider, expires, expires)
+  // An approval request of the other company, waiting for its owner.
+  db.prepare("INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES (?, 'approval-other001', 'approval', '金額の変更', ?, ?)").run(other, expires, expires)
+  db.prepare("INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, 'approval-other001', 'pending', ?, 1, ?)")
+    .run(other, JSON.stringify({ requested_by: USER.outsider, assignee: USER.outsider, next_actor: USER.outsider, approver_rule: 'self' }), expires)
+
+  // A Google permission of the other company's member (a row as the callback writes it, token cleared).
+  db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason, created_at, updated_at)
+    VALUES (?, ?, 'google', 'g-other-1', 'other@example.com', '[]', NULL, 'stopped', 'admin', ?, ?)`).run(other, otherMember, expires, expires)
+
+  // A mail draft of the other company's member (rows as services/outbound-mail.ts writes them).
+  db.prepare("INSERT INTO records (company_id, id, type, path, title, created_at, updated_at) VALUES (?, 'outbound_message-other00000001', 'outbound_message', NULL, '他社のメール', ?, ?)")
+    .run(other, expires, expires)
+  db.prepare("INSERT INTO record_state (company_id, record_id, state, fields, version, updated_at) VALUES (?, 'outbound_message-other00000001', 'draft', ?, 1, ?)")
+    .run(other, JSON.stringify({ requested_by: otherMember, assignee: otherMember, payload_version: 1, payload_hash: `sha256:${'0'.repeat(64)}` }), expires)
+  db.prepare("INSERT INTO outbound_mails (company_id, message_id, author_id, from_email, minutes_id, deal_id, created_at) VALUES (?, 'outbound_message-other00000001', ?, 'other@example.com', NULL, 'deal-other001', ?)")
+    .run(other, otherMember, expires)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -479,6 +700,13 @@ async function seed(): Promise<World> {
       relayService: 'crm',
       token: otherToken.tokenId,
       invitation: otherInv.id,
+      record: 'deal-other001',
+      recordToken: 'rt-other-1',
+      plugin: 'other-sales',
+      operation: 'op-other-1',
+      googleGrant: otherMember,
+      approval: 'approval-other001',
+      outboundMail: 'outbound_message-other00000001',
     },
   }
 }
@@ -522,6 +750,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   rmSync(kekDir, { recursive: true, force: true })
+  rmSync(shelfDir, { recursive: true, force: true })
   delete process.env.BROKER_KEK_FILE
 })
 

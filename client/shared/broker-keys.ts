@@ -38,6 +38,7 @@ export const KEY_CHECK_TEXT: Record<BrokerKeyCheckResult, string> = {
   rejected: 'この鍵は使えませんでした（発行元の画面で確かめてください）。',
   unreachable: '確かめられませんでした（通信できません）。鍵は保存しました。',
   unconfirmed: '確かめられませんでした（発行元から、はっきりした答えがありませんでした）。鍵は保存しました。',
+  limited: '鍵は使えますが、権限が足りないかもしれません（発行元の画面で、鍵の権限を確かめてください）。鍵は保存しました。',
   'not-checkable': 'この鍵は、実際に使うまで確かめられません。鍵は保存しました。',
 }
 

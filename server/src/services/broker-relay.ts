@@ -30,7 +30,9 @@ import {
   BROKER_NO_KEY_PLACEHOLDER,
   brokerNoKeyMessage,
   BROKER_TOKEN_PREFIX,
+  brokerRelayReadOnlyAllows,
   builtinBrokerService,
+  builtinHostsOutside,
   isValidBrokerServiceName,
   looksLikeBrokerToken,
   normalizeBrokerModel,
@@ -39,6 +41,7 @@ import {
   type BrokerRelayDefinition,
   type BrokerServiceInfo,
 } from '../../shared/core/key-broker'
+import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import type { AgentToolEvent, GuardReason, ToolDecision } from '../../shared/types/agent-events'
 import type { BrokerKeyRepository } from '../ports/key-broker'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
@@ -63,6 +66,26 @@ export interface BrokerRelayDeps {
   log?: Pick<Console, 'warn'>
   /** The emergency stop (M2, agent-stop.md): the whole AI of this company is stopped → every call is refused. */
   companyStopped?: (companyId: string) => boolean
+  /**
+   * A connection managed by a connector plugin (plugins.md "The relay and a
+   * managed connection"): null = not managed. Asked on every call.
+   */
+  managedConnection?: (companyId: string, userId: string, service: string) => ManagedRelayPolicy | null
+}
+
+/** What the relay may still do for a service whose connection a plugin manages. */
+export interface ManagedRelayPolicy {
+  /** The declared search paths (POSTs that only read), exact. */
+  searchPaths: string[]
+  /** The member is in the read scope of every connection that manages the service (an empty scope: nobody). */
+  mayRead: boolean
+  /** The plugins' connections (logged with each call). */
+  connectionIds: string[]
+}
+
+/** A path as a pattern for the log: outside ids (digits, long hex / uuid-like segments) become `{id}`. */
+export function relayPathPattern(path: string): string {
+  return path.split('/').map(seg => /^\d+$/.test(seg) || /^[0-9a-f-]{16,}$/i.test(seg) || /@/.test(seg) ? '{id}' : seg).join('/')
 }
 
 export interface RelayRequest {
@@ -94,6 +117,8 @@ interface CallMeta {
   grant?: BrokerGrant
   host?: string
   path?: string
+  /** A plugin-managed service: its connection(s), for the log. */
+  connection?: string
   model?: string
   bytesIn: number
   /** The request reached the provider (counted for the caps). */
@@ -104,7 +129,8 @@ interface CallMeta {
 export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
-  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP'
+  | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
+  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
@@ -112,6 +138,9 @@ const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; g
   ACB_STOPPED: { decision: 'stopped' },
   ACB_BAD_PATH: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_DESTINATION_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_READ_ONLY: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_MANAGED_BY_PLUGIN: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
+  ACB_READ_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_REDIRECT_REFUSED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_PRIVATE_ADDRESS: { decision: 'guard-denied', guardReason: 'internal-address' },
   ACB_OVER_CAP: { decision: 'guard-denied', guardReason: 'over-cap' },
@@ -124,6 +153,8 @@ const DROP_REQUEST = new Set([
   ...CREDENTIAL_HEADERS, 'host', 'connection', 'keep-alive', 'proxy-authorization', 'proxy-connection', 'te', 'trailer',
   'transfer-encoding', 'upgrade', 'cookie', 'forwarded', 'via', 'x-real-ip', 'accept-encoding', 'origin', 'referer',
 ])
+/** Headers some APIs read as the real method (refused while a service is read-only). */
+const METHOD_OVERRIDE_HEADERS = new Set(['x-http-method-override', 'x-http-method', 'x-method-override'])
 /** Never answered (hop-by-hop, cookies of the provider). */
 const DROP_RESPONSE = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'set-cookie', 'alt-svc'])
 /** JSON bodies are read (model check, K5 record) up to this size; larger JSON is refused. */
@@ -195,17 +226,6 @@ interface RelayTarget {
   label: string
   builtin: BrokerServiceInfo | null
   relay: BrokerRelayDefinition | null
-}
-
-/** The upstream path, checked: '/'-rooted, no `.` / `..` segments, no encoded '/' or '\', no control characters. */
-function checkPath(raw: string): { path: string; decoded: string } | null {
-  if (!raw.startsWith('/') || raw.includes('//') || raw.includes('\\') || /%(2f|5c|00)/i.test(raw)) return null
-  // eslint-disable-next-line no-control-regex
-  if (/[\u0000- \u007f]/.test(raw)) return null
-  let decoded: string
-  try { decoded = raw.split('/').map(decodeURIComponent).join('/') } catch { return null }
-  if (decoded.split('/').some(s => s === '.' || s === '..')) return null
-  return { path: raw, decoded }
 }
 
 /** The model a request names: Gemini in the path, OpenAI / Anthropic in the JSON body. */
@@ -307,6 +327,7 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
               kind: 'broker', service: req.service,
               ...(meta.host ? { host: meta.host } : {}),
               ...(meta.path ? { path: meta.path.slice(0, 200) } : {}),
+              ...(meta.connection ? { connection: meta.connection.slice(0, 100) } : {}),
               ...(meta.model ? { model: meta.model.slice(0, 100) } : {}),
               status: answer.status, bytesIn: meta.bytesIn, bytesOut,
               ...(tokensIn !== undefined ? { tokensIn } : {}),
@@ -404,9 +425,14 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       }
 
       // 2. Where it may go: the key's destinations (a generic service: its one host, always).
-      const path = checkPath(rawPath)
+      const path = checkUpstreamPath(rawPath)
       if (!path || path.path.includes(token)) return jsonError(400, 'ACB_BAD_PATH', '宛先のパスの書き方が正しくありません。', grant)
       const { pathPrefixes, models } = grant.destinations
+      // A built-in service's key saved with another service's host (before the server refused that):
+      // never used, so a HubSpot key cannot reach Gemini's host. The admin page marks it to fix.
+      if (builtin && builtinHostsOutside(builtin.service, grant.destinations.hosts).length > 0) {
+        return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', `この ${builtin.label} の鍵は送り先の設定が正しくないため使えません。管理者に「API キー」の画面で鍵の設定を直してもらってください。`, grant)
+      }
       const hosts = relay ? grant.destinations.hosts.filter(h => h === relay.host) : grant.destinations.hosts
       const host = relay || !builtin ? hosts[0] : hosts.includes(builtin.defaultHosts[0]) ? builtin.defaultHosts[0] : hosts[0]
       const basePath = relay?.basePath ?? ''
@@ -415,6 +441,28 @@ export function createBrokerRelay(deps: BrokerRelayDeps) {
       meta.path = path.decoded
       if (pathPrefixes.length > 0 && !pathPrefixes.some(p => path.decoded.startsWith(p))) {
         return jsonError(403, 'ACB_DESTINATION_NOT_ALLOWED', 'この鍵では、この宛先（パス）は使えません。', grant)
+      }
+      // 2a. A connection managed by a connector plugin (once turned on, for good): writes go only through
+      // the plugin's typed operations; reads only by members in the connection's read scope (an
+      // admin's list of departments / members; empty = nobody), and searches only on the declared
+      // paths. Checked on every call, so an old token or consultation cannot write either, and
+      // turning the plugin off does not bring writes back. Logged with the connection and the path
+      // as a pattern (never a body or the key).
+      const managed = deps.managedConnection?.(grant.companyId, grant.userId, req.service) ?? null
+      if (managed) {
+        meta.path = relayPathPattern(path.decoded)
+        meta.connection = managed.connectionIds[0]
+        const reads = (req.method === 'GET' || req.method === 'HEAD' || (req.method === 'POST' && managed.searchPaths.includes(path.decoded)))
+          && !req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n))
+        if (!reads) return jsonError(403, 'ACB_MANAGED_BY_PLUGIN', `${target.label} の書き換えは、ACB のプラグインの決まった操作からだけ行えます（ここからは読むだけです）。`, grant)
+        if (!managed.mayRead) return jsonError(403, 'ACB_READ_NOT_ALLOWED', `${target.label} は、管理者が決めた「中継で読める人」だけがここから読めます。`, grant)
+      }
+      // 2b. The company keeps this service read-only (HubSpot once its plugin is on: writes go only through
+      // the plugin's typed operations, which never pass here): only reads are forwarded.
+      // A method-override header would let a "GET" write on some APIs: refused while read-only.
+      if (keyBroker.relayReadOnly(grant.companyId, req.service)
+        && (!brokerRelayReadOnlyAllows(builtin, req.method, path.decoded) || req.headers.some(([n]) => METHOD_OVERRIDE_HEADERS.has(n)))) {
+        return jsonError(403, 'ACB_READ_ONLY', `${target.label} は、ここからは読むだけです（書き換えは ACB の決まった操作から行います）。`, grant)
       }
 
       // 3. The body: JSON is read (model check, the record), anything else streams, both bounded.
@@ -577,6 +625,7 @@ export class UsageScanner {
 function upstreamFailure(reason: UpstreamFailure, grant: BrokerGrant): RelayAnswer {
   switch (reason) {
     case 'private-address': return jsonError(403, 'ACB_PRIVATE_ADDRESS', '宛先が社内のアドレスを指しているため、送りませんでした。必要なら管理者に「社内の宛先（例外）」を頼んでください。', grant)
+    case 'practice-real-secret': return jsonError(502, 'ACB_UPSTREAM_UNREACHABLE', '練習用の送り先には本物の鍵を送れないため、送りませんでした。', grant)
     case 'timeout': return jsonError(504, 'ACB_UPSTREAM_TIMEOUT', '送り先からの返事が時間内に来ませんでした。', grant)
     default: return jsonError(502, 'ACB_UPSTREAM_UNREACHABLE', '送り先につながりませんでした。時間をおいてもう一度お試しください。', grant)
   }

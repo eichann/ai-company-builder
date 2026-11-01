@@ -25,6 +25,8 @@ export interface AgentPushChannelDeps {
   cookies: () => string[]
   /** Refetch this company's policy (`version`: the one the server announced). The channel's only effect. */
   refresh: (companyId: string, version?: string) => void
+  /** A `records` event: something of the company map concerning this member changed (refetch only). */
+  onRecords?: (companyId: string) => void
   fetch?: typeof fetch
   log?: Pick<Console, 'log' | 'warn'>
   random?: () => number
@@ -67,6 +69,12 @@ export function createAgentPushChannel(deps: AgentPushChannelDeps) {
   const safeRefresh = (companyId: string, version?: string) => {
     try { deps.refresh(companyId, version) } catch (error) {
       log.warn(`[push] ${companyId}: refresh failed (${error instanceof Error ? error.message : 'unknown'})`)
+    }
+  }
+
+  const safeRecords = (companyId: string) => {
+    try { deps.onRecords?.(companyId) } catch (error) {
+      log.warn(`[push] ${companyId}: records listener failed (${error instanceof Error ? error.message : 'unknown'})`)
     }
   }
 
@@ -137,7 +145,10 @@ export function createAgentPushChannel(deps: AgentPushChannelDeps) {
           if (item.type === 'event') {
             gotEvent = true
             w.attempt = 0
-            safeRefresh(w.companyId, item.event.version)
+            // Only a policy event refetches the policy; a records event (the company map,
+            // records.md) only tells the records view to refetch, when one listens.
+            if (item.event.kind === 'policy') safeRefresh(w.companyId, item.event.version)
+            else if (item.event.kind === 'records') safeRecords(w.companyId)
           } else if (item.type === 'dropped') {
             log.warn(`[push] ${w.companyId}: dropped an event that is not allowed (${item.name})`)
           }

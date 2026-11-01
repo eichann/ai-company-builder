@@ -25,6 +25,8 @@ paths:
   - "server/src/routes/broker-relay.ts"
   - "server/src/ports/upstream.ts"
   - "server/src/adapters/upstream-https.ts"
+  - "server/src/adapters/upstream-practice.ts"
+  - "server/tests/integration/broker-practice-upstream.test.ts"
   - "server/src/lib/net-ranges.ts"
   - "server/src/lib/request-log.ts"
   - "server/tests/integration/broker-relay*.test.ts"
@@ -104,7 +106,8 @@ up by the owner, 2026-10-30: right after the two dials).
   relay after it has validated a token — no route reaches it, and its result is never returned
   or logged. `vault.seal()` is the only way in.
 - Input rules are `shared/core/key-broker.ts`: service names `^[a-z0-9][a-z0-9_-]*$` (≤ 40),
-  built-in services (gemini, openai, anthropic with their hosts), destination hosts are exact
+  built-in services (gemini, openai, anthropic, hubspot with their hosts; a built-in key may
+  name only its service's hosts, `builtinHostsOutside`), destination hosts are exact
   (no wildcard, IP, `localhost`, `.local`, `.internal`), path prefixes, model ids,
   `checkBrokerSecret` (printable ASCII, 8–4096, never an `acb_tok_` token; its errors never
   quote the value), the audience (`parseBrokerAudience`, `upgradeBrokerAudience`,
@@ -119,7 +122,8 @@ up by the owner, 2026-10-30: right after the two dials).
 hosts or a generic service's host, required otherwise); `PUT /broker/keys/:keyId/secret`; `PATCH /broker/keys/:keyId`
 (an own key: `status` only); `DELETE /broker/keys/:keyId`; `PUT /broker/services/:service`
 `{ category, rule, ownKeyHosts }`; `PUT /broker/services/:service/own-keys { allowed }` (the one
-switch, below); `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
+switch, below); `PUT /broker/services/:service/read-only { readOnly }` (the relay only reads,
+below); `PUT /broker/settings` `{ memberKeysAllowed?, internalHosts? }` (the relay's internal-host exception, card 「社内の宛先（例外）」). Every change
 answers the whole view (`Cache-Control: no-store`) and writes `broker_history`
 (`BrokerChangeDetail`: create / replace (last4 before → after) / update (changed fields) /
 delete / service / settings; the GET carries the latest 50). Check order who → body → rules;
@@ -160,6 +164,24 @@ disable and delete still work). Audience departments must be the company's, peop
   service with keys only (no known host) → 400 `HOSTS_REQUIRED`: its hosts are typed in
   `PUT /broker/services/:service`. History action `service`, like the detailed form.
 
+- **A built-in service's key goes only to that service's hosts** (2026-11-01, after staging saved
+  a HubSpot key with Gemini's host through the admin form): `builtinHostsOutside` /
+  `builtinHostsMessage` (shared/core). `POST /broker/keys`, `PATCH /broker/keys/:keyId`
+  (destinations) and `PUT /broker/services/:service` (`ownKeyHosts`) refuse other hosts: 400
+  `{ code: 'HOSTS_NOT_FOR_SERVICE' }` 「HubSpot の鍵は api.hubapi.com にだけ送れます。…」 (hosts
+  only, never a key). A proxy in front of a provider is a generic service (K9), not a built-in
+  key with another host. A key saved before this rule is **never used by the relay** (403
+  `ACB_DESTINATION_NOT_ALLOWED` 「この <サービス> の鍵は送り先の設定が正しくないため使えません。…」,
+  nothing sent; the connector plugin already refuses it as `key-destination`); the admin page marks
+  its row (`misdirectedKeyText`) and 「設定を変更」 → 保存 rewrites its hosts to the service's.
+  In the key form the hosts of a built-in or generic service are read-only and derived from the
+  service the form names now — also a built-in name typed under 「その他」, the path that kept
+  Gemini's host (the form starts on the first service, Gemini, and only the list's change event
+  used to reset the hosts). Tests: `tests/integration/key-broker.test.ts` 「a built-in service's
+  key may name only that service's hosts」, `broker-relay.test.ts` 「a built-in key saved with
+  another service's host … is never used」, `admin/tests/key-broker.test.tsx` (その他 + hubspot,
+  list choice, the marked row and its edit) — each mutation-checked.
+
 ## Checking a key when it is saved (owner, 2026-10-31)
 
 `services/broker-key-check.ts`, called by `keyBroker.create` / `replaceSecret` and
@@ -167,22 +189,25 @@ disable and delete still work). Audience departments must be the company's, peop
 the service's fixed host, the key in the service's own header only, through the relay's
 `UpstreamClient` (https, the connection to the checked address, private addresses refused unless
 in `internalHosts`, 10 s). Built-in: `BrokerServiceInfo.check` — Gemini `GET /v1beta/models`,
-OpenAI `GET /v1/models`, Anthropic `GET /v1/models` + `anthropic-version: 2023-06-01` — on the
-built-in host, and only when the key's destinations include it (else `not-checkable`, nothing
-sent). Generic (K9): the definition's optional `checkPath` (a plain path, no query, put after
+OpenAI `GET /v1/models`, Anthropic `GET /v1/models` + `anthropic-version: 2023-06-01`, HubSpot
+`GET /crm/objects/2026-03/deals` (HubSpot's dated API; the design's v3 path is unsupported from
+2027-09) — on the built-in host, and only when the key's destinations include it (else `not-checkable`, nothing
+sent — only a key saved before built-in keys were held to their hosts). Generic (K9): the definition's optional `checkPath` (a plain path, no query, put after
 `basePath`); none → `not-checkable`. Only the status is read (the body is drained and dropped).
 Result (`BrokerKeyCheckResult`): 2xx → `valid`; the service's `rejected` statuses (Gemini 400 /
 401 / 403 — its answer to an invalid key is 400 API_KEY_INVALID; OpenAI and Anthropic 401 only,
-since a restricted OpenAI project key may lack the models permission and still chat; generic
-401 / 403) → **`rejected`: not saved**, 400 `{ code: 'KEY_REJECTED' }` (a replaced key stays
-the old one, no history row); a network failure → `unreachable`, anything else →
-`unconfirmed`; both saved. The answer of the save carries `check: { service, result }`
+since a restricted OpenAI project key may lack the models permission and still chat; HubSpot
+401; generic 401 / 403) → **`rejected`: not saved**, 400 `{ code: 'KEY_REJECTED' }` (a replaced key stays
+the old one, no history row); a network failure → `unreachable`; the service's `limited`
+statuses (HubSpot 403: a service key without `crm.objects.deals.read`) → `limited`
+「鍵は使えますが、権限が足りないかもしれません…」; anything else → `unconfirmed`; all saved. The answer of the save carries `check: { service, result }`
 (`BrokerView.check`, `MyBrokerKeys.check`) and the history's create / replace detail `check`.
 Logged: `[broker] key check <service>: <result or failure> (status n)`, never the key.
 `BROKER_KEY_CHECK=off` (`lib/config.ts`, compose; the server tests' `tests/setup.ts`) saves
 without a check and answers no `check`. The words say no more than validity:
 「鍵が有効なことを確かめました」 / 「この鍵は使えませんでした（発行元の画面で確かめてください）」 /
-「確かめられませんでした（通信できません）」 / 「この鍵は、実際に使うまで確かめられません」.
+「確かめられませんでした（通信できません）」 / 「鍵は使えますが、権限が足りないかもしれません…」 /
+「この鍵は、実際に使うまで確かめられません」 (an older app shows no sentence for `limited`).
 
 ## Short-lived tokens (K3)
 
@@ -208,6 +233,13 @@ without a check and answers no `check`. The words say no more than validity:
   are still in the service's `ownKeyHosts`), so disabling a key, changing who may use it, the
   rule, or removing the member stops the token at once. The grant names the key, its
   destinations, caps and 「非公開」 flag; the relay then calls `vault.reveal(companyId, keyId)`.
+  **Several company keys the member may use**: the one a connector plugin's connection uses for
+  the service (`connectionKeyId`, from `plugins.connectionKeyId`: the managed install's `keyId`),
+  else the first registered. So the relay and the connector send the same key. Staging,
+  2026-11-01: 検証A社 had an older practice key (`pat-fake-…`, 全社・全員) and the real key the
+  connection uses; the relay took the older one and the real HubSpot answered every call with 400
+  「Invalid request」 (its answer to a malformed `pat-` key) while the connector worked. Test:
+  `tests/integration/plugins.test.ts` 「the relay uses the key of the connection」 (mutation-checked).
 
 ## The relay (K4)
 
@@ -225,8 +257,9 @@ the sign-in.
    only and is what the app's chat turns into a 「自分の鍵」 card, `findBrokerNoKeyServices`) / 503
    `ACB_BROKER_OFF`. Error bodies are
    `{ type: 'error', error: { type, code, status, message } }` (read by all three SDKs).
-2. **Destinations**: the host is the built-in host when the key allows it, else the key's first
-   host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
+2. **Destinations**: a built-in key naming any host outside its service's → 403
+   `ACB_DESTINATION_NOT_ALLOWED`, nothing sent (above); the host is the built-in host when the
+   key allows it, else the key's first host. The raw path must start with `/`, have no `//`, `\`, `%2f`, `%5c`, `%00`, control
    characters or `.`/`..` segments (400 `ACB_BAD_PATH`); the URL parser has already resolved
    `%2e%2e`. Key path prefixes and models are enforced (403 `ACB_DESTINATION_NOT_ALLOWED`); the
    model comes from the path (`/models/<m>`, Gemini) or the JSON body's `model`.
@@ -253,6 +286,56 @@ the sign-in.
    key are dropped; error bodies (≥ 400, ≤ 1 MB) have the key and the token replaced by
    `[hidden]`. `set-cookie`, `alt-svc` and hop-by-hop headers are dropped.
 - WebSocket (Gemini Live, OpenAI Realtime) is not relayed in stage 1.
+
+## HubSpot and the read-only relay (milestone 3, P3)
+
+- **`hubspot` is a built-in service** (`shared/core/key-broker.ts`): host `api.hubapi.com`,
+  `Authorization: Bearer <service key>` (HubSpot's service keys, `pat-…`), category `system` (a
+  company key; rule 「会社の鍵だけ」 by default). Milestone 3 uses only the **company key**: the
+  plugin's connector (P5) reads it with `vault.reveal` like the relay. HubSpot has no SDK
+  variables, so scripts get only `ACB_HUBSPOT_API_KEY` / `ACB_HUBSPOT_BASE_URL` (K6).
+- **Read-only switch** (per company and service, `broker_services.read_only`, additive column in
+  `migrateBrokerSettings`, default off): `PUT /broker/services/:service/read-only { readOnly }`
+  (owner/admin; built-in or registered generic services, else 404; history action `read-only`;
+  the view's service carries `readOnly`). While on, the relay forwards only `GET` / `HEAD` and the
+  POST paths the built-in service names as reads (`readOnlyPosts`: HubSpot's search,
+  `/crm/v3/objects/<object>/search` and `/crm/objects/<YYYY-MM>/<object>/search`;
+  `brokerRelayReadOnlyAllows`), and refuses any request with a method-override header
+  (`x-http-method-override`, `x-http-method`, `x-method-override`): 403 `ACB_READ_ONLY`
+  「<サービス> は、ここからは読むだけです…」, nothing sent, recorded as guard-denied
+  `destination-not-allowed`. Checked after the destination (the URL parser has resolved `..`
+  first). A service a connector plugin manages is stricter still and checked first (no writes at
+  all, declared searches only, reads only for members in the connection's **read scope** — an
+  admin's list of departments / members, empty = nobody —, each read logged with the connection
+  and the path as a pattern; the switch cannot be turned off: `plugins.md` "The relay and a
+  managed connection"). **Turned on for the plugin's
+  service when a company turns a plugin on** (P4,
+  `services/plugins.ts` `setEnabled`; owner 0.21: writes to HubSpot go only through the plugin's typed operations, which never pass
+  through the relay). Test: `tests/integration/broker-relay.test.ts` 「read-only switch」
+  (mutation-checked: the guard, the method-override check, the POST allow-list).
+- **Practice HubSpot (staging only)**: `lib/config.ts` `practiceUpstreamsFrom` /
+  `PRACTICE_UPSTREAMS` — `ACB_FAKE_HUBSPOT_URL` (`http(s)://127.0.0.1 | [::1] | localhost |
+  host.docker.internal[:port]`, nothing more) takes effect only with `ACB_ALLOW_FAKE_UPSTREAMS=1`,
+  `NODE_ENV` not `production` and `PUBLIC_URL` (default `http://localhost:3001`) on this machine;
+  otherwise `ignored` with the reason in the startup log. **Per service**: each variable
+  redirects only its own service (`ACB_FAKE_GOOGLE_URL` the Google connection's hosts,
+  `google-connector.md`), so the practice Google alone leaves HubSpot real — its keys need no
+  `pat-fake-` prefix and go out the real way (test 「per service: the practice Google alone leaves
+  HubSpot real」). **Server-wide, never per company** (a
+  company that could move a service's destination could send its key elsewhere). On:
+  `adapters/upstream-practice.ts` wraps the way out (`composition.ts`) so connections for
+  `api.hubapi.com` — the key check and the relay — go to the practice server (plain HTTP allowed
+  for that one target, no address check); the request still names `api.hubapi.com`, so
+  destinations and redirect rules are unchanged; every other host goes out as before. The
+  startup log says `Key broker: 練習用の HubSpot につながっています — …`, the view's service
+  carries `practice: true` and the admin page shows 「練習用の HubSpot につながっています」. The
+  production compose file passes neither variable (`deployment.md`). **No real secret on the
+  practice copy** (review §5.8): while on, only practice keys (`pat-fake-…`) can be registered
+  for the redirected service (400 `REAL_KEY_ON_PRACTICE`, company and own keys), and the practice
+  way out refuses to send any other credential (`plugins.md` "Connections"). Test:
+  `tests/integration/broker-practice-upstream.test.ts` (production, no / wrong marker, public
+  URL, a target off this machine, with a path or a user → the real way out; on → check and relay
+  reach the practice server, other services do not; each gate mutation-checked).
 
 ## Generic services (K9): a header-type API without code
 
@@ -332,7 +415,10 @@ who uses it).
   `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
   reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
   「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
-  the history; resuming is per key. Tokens are not revoked, so the AI gets the "stopped" answer
+  the history; resuming is per key. It also stops every member's **Google permission** in the
+  company at once (`onStopAll` → `googleConnector.stopAll`: grants `stopped`, the sealed refresh
+  tokens cleared, revoked at Google in the background); a member resumes with 「Google で許可」
+  (`google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
   (revoking would answer "token expired").
   A company-wide stop of the whole AI (M2, `agent-stop.md`) also refuses every relay call with
   `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。…」 until it is released.
@@ -481,7 +567,7 @@ only, the host fixed for every key, base path, the key only in the configured he
 the token / cookies / hop-by-hop / the client's copy of the header never forwarded, a real-looking
 key refused unforwarded, redirects, record / stop-all / caps, own keys, no host change or removal
 while keys exist, the additive migration, **no key in any answer, log line or table**),
-`tests/integration/broker-key-check.test.ts` (the check goes only to the fixed host — not sent
+`tests/integration/broker-key-check.test.ts` (HubSpot's check, 401 not saved / 403 `limited`; the check goes only to the fixed host — not sent
 when the key may not go there or a generic service has no check path —, GET without a body, the
 key only in the service's header; a refused key is not saved and a replaced one stays; network
 failure / unclear answer saved with that result; off → nothing sent; the marker; **no key in any

@@ -15,6 +15,8 @@ import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { ChatWindowsChange } from '../shared/chat-windows'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { commands, runCommand } from '../src/shared/commands/commands'
+import { MinutesNotices } from '../src/features/minutes/components/MinutesNotices'
+import type { MinutesNotice } from '../shared/minutes-app'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -32,6 +34,8 @@ import { commands, runCommand } from '../src/shared/commands/commands'
 //   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
 //   ?storage=keep  keep localStorage across reloads (remembered folded groups)
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
+//   ?minutes=1     「議事録が届きました」 above the chat (one received minutes record);
+//                  the deal choice card's links are recorded in __acbChat.minutesLinks
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -114,7 +118,10 @@ const interactionsClosed = emitter<AgentInteractionRequest>()
 // 「別ウィンドウで開く」: main's window registry, faked (opening reports the window like main does).
 const windowChanges = emitter<ChatWindowsChange>()
 const windowCalls = { opened: [] as string[], focused: [] as string[] }
+const minutesLinks: Array<[string, string, string]> = []
+const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
 installElectronAPI({
+  linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
     windowChanges.emit({ windows: [{ companyId: 'preview-company', sessionId, status: { state: 'idle', line: '' } }] })
@@ -229,6 +236,8 @@ const control = {
   windows: windowCalls,
   /** What main tells the main window about the other windows (statuses, one that closed). */
   windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
+  /** 「どの案件の議事録ですか？」: what the card asked main to link (company, minutes, deal). */
+  minutesLinks,
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
   answered(id: string, response: AgentInteractionResponse) {
@@ -296,9 +305,12 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" /></section>
       <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
     </div>
-  : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
-      <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-        <ChatPanel departmentPath="/tmp/acb-preview" />
+  : <div className="h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
+      {params.get('minutes') === '1' && <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} />}
+      <div className="min-h-0 flex-1 flex justify-end">
+        <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
+          <ChatPanel departmentPath="/tmp/acb-preview" />
+        </div>
       </div>
     </div>,
 )

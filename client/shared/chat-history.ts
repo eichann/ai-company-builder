@@ -2,6 +2,10 @@ import type { AgentSession } from './agent'
 import type { ChoicePromptRecord } from './choice-prompt'
 import type { SteerRecord } from './steer'
 import type { ReviewRecord } from './review-request'
+import type { PluginOperationCard } from './plugin-operations'
+import type { ApprovalCardRef } from './approvals'
+import type { MinutesDealChoiceCard } from './minutes-app'
+import type { MailDraftCard } from './outbound-mail'
 export interface ChatSession {
   id: string
   companyId: string
@@ -21,6 +25,16 @@ export interface ChatSession {
     steerInstructions?: Array<SteerRecord & { at?: number; seq?: number }>
     /** 「確認をお願いします」 requests in this reply (review-request.ts); shown after its text. */
     reviewRequests?: ReviewRecord[]
+    /** Outside systems' writes (HubSpot) in this reply, with 「変更前の値を書き戻す」 (plugin-operations.ts); shown after its text. */
+    pluginOperations?: PluginOperationCard[]
+    /** Approval requests made or shown in this reply (approvals.ts): a reference; the card reads the request from the server. */
+    approvals?: ApprovalCardRef[]
+    /** 「どの案件の議事録ですか？」 cards in this reply (minutes-app.ts). */
+    minutesDealChoices?: MinutesDealChoiceCard[]
+    /** The app's cards in the order the tools produced them (part ids), when a reply has two or more. */
+    cardOrder?: string[]
+    /** Mail drafts the AI made in this reply, drawn by the app with 「確かめて送る」 (outbound-mail.ts); shown after its text. */
+    mailDrafts?: MailDraftCard[]
   }>
   createdAt: string
   updatedAt: string
@@ -33,6 +47,8 @@ export interface ChatSession {
   writerId?: string
   writeSequence?: number
   revision?: number
+  /** The minutes record this consultation was started from (「<件名> のあと」, minutes-app.ts). */
+  minutesId?: string
 }
 
 export type ChatMetadataPatch = Partial<Pick<ChatSession,

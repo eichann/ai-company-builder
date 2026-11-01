@@ -91,7 +91,14 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   another company's object id finds, changes and deletes nothing. Behind it: `departments`,
   `invitations`, `scopes` (permission scopes, rules, department managers:
   `adapters/sqlite/scopes.ts` over `permission-store.ts`), `privateFolders`
-  (`adapters/private-folders.ts`) and `orphanedScopes` (`adapters/orphaned-scopes.ts`).
+  (`adapters/private-folders.ts`), `orphanedScopes` (`adapters/orphaned-scopes.ts`) and `records`
+  (the company map of the light ontology, `adapters/sqlite/records.ts`, `records.md`) and
+  `plugins` (connector plugins' installs, mapping versions, history, `adapters/sqlite/plugins.ts`,
+  `plugins.md`; triggers keep a mapping under its own company's install and an install's key a
+  company key of the same company) and `connectors` (the Google connection: OAuth client,
+  members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`)
+  and `outbound` (mail drafts, their recipients per version, typed addresses, send attempts,
+  `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`).
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -173,18 +180,59 @@ GET  /api/config                                  setup state (no auth)
                                                                 (緊急停止: agent-stop.md)
                               GET /broker, POST /broker/keys,
                               PUT /broker/keys/:keyId/secret, PATCH|DELETE /broker/keys/:keyId,
-                              PUT /broker/services/:service (+ /own-keys),
+                              PUT /broker/services/:service (+ /own-keys, /read-only),
                               PUT|DELETE /broker/relay-services/:service,
                               PUT /broker/settings, POST /broker/stop-all,
                               POST /me/broker-tokens, DELETE /me/broker-tokens/:tokenId,
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+                              GET|PUT /records/settings, GET /records/problems,
+                              POST /records/reindex, GET /records/types,
+                              POST /records/query, GET /records/item/:recordId,
+                              GET /records/my-turn, POST /records/item,
+                              POST /records/item/:recordId/actions/:action,
+                              POST /records/item/:recordId/file-links (+ /remove),
+                              POST …/undo, GET …/history, GET …/versions/:version,
+                              POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
+                              GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
+                              PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
+                              POST …/connection/renew,
+                              POST …/records/:recordId/operations/:operation,
+                              GET …/operations/:operationId (+ POST /undo, /reconcile)  plugins.ts
+                                                                (つなぎ先のプラグイン: plugins.md)
+                              GET /google, PUT /google/client, PUT /google/enabled,
+                              DELETE /google/grants/:userId,
+                              GET|DELETE /me/google, POST /me/google/connect    google.ts
+                                                                (Google: google-connector.md)
+                              POST /outbound-recipients, POST /outbound,
+                              GET|PUT /outbound/:messageId, GET|POST …/recipients,
+                              POST …/send, POST …/resolve, POST …/discard  outbound-mail.ts
+                                                                (送るメール: outbound-mail.md)
+/api/oauth                    GET /google/callback — public: Google sends the browser back;
+                              the state finds the company (google-connector.md)  oauth.ts
+                              GET|PUT /google/minutes-folder, POST /me/minutes/check,
+                              GET /me/minutes/item/:recordId/text,
+                              POST /me/minutes/item/:recordId/deal               minutes.ts
+                                                                (議事録の取り込み: minutes.md)
+/api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
+                              POST /item, POST /item/:recordId/actions/:action,
+                              POST /item/:recordId/file-links (+ /remove),
+                              GET /minutes/:recordId/text, POST /minutes/:recordId/deal,
+                              POST /plugins/:pluginId/records/:recordId/operations/:operation,
+                              GET /plugins/:pluginId/operations/:operationId,
+                              POST /outbound-recipients, POST /outbound, GET|PUT /outbound/:messageId
+                              (drafts only: no send) — the AI's
+                              routes (record token instead of a session; records.md) records-ai.ts
+                                                                (company map: records.md)
 /api/broker                   GET|POST|PUT|PATCH|DELETE /:service/* — the key broker's relay
                               (token instead of a session; key-broker.md)      broker-relay.ts
 /api/git                      GET /repos/:companyId → { companyId, httpsUrl }  git.ts
 /api/git-http                 smart HTTP for /<companyId>.git and
                               /<companyId>/scopes/<scopeId>.git               git-http.ts
+/api/companies/:companyId     GET /approvals, GET /approvals/:approvalId,
+                              POST /approvals/:approvalId/approve | send-back | withdraw
+                              (session only; approvals.md)                    approvals.ts
 /api                          GET|POST /companies/:companyId/invitations,
                               DELETE …/invitations/:id, GET /invitations/:token,
                               POST /invitations/:token/accept                 invitations.ts
@@ -259,7 +307,8 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   tip read, author/committer "AI Company Builder"), then a push from the bare repo to itself with
   `internalGitEnv()` — receive-pack runs the pre-receive checker (`push-check.md`). A member's
   push in between (the ref update loses) → the edit is redone on the new tip, up to 5 times.
-  Then the DB is updated. Why: the old working clone (`data/workdirs/<companyId>`: pull,
+  Then the DB is updated (a rename moves the department's scopes and its records — server
+  records' folder, links to files under it: `records.md` "Links to files"). Why: the old working clone (`data/workdirs/<companyId>`: pull,
   `git mv`, `git add -A`) took 119 s for a 1 MB rename in a 13 GB company; now ~1 s, mostly the
   checker's start-up (`tests/integration/department-commits.test.ts`).
 - A target name is taken when a root entry (folder or file) has the same `nameKey` (NFC, A–Z
@@ -317,7 +366,7 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
   columns added later get an idempotent check-then-`ALTER TABLE` (e.g. `migrateInvitationClaims`).
 - Paths: `lib/config.ts` is the one place reading `DATA_DIR` (default `<cwd>/data`), `REPOS_DIR`
   (`<DATA_DIR>/repos`), the key broker's `BROKER_KEK_FILE` (outside `DATA_DIR`,
-  `key-broker.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
+  `key-broker.md`), the plugin shelf's `PLUGINS_DIR` (outside `DATA_DIR`, `plugins.md`), `COMPANY_CREATION_POLICY` and `OPERATOR_USER_IDS` (read per call). `<DATA_DIR>/workdirs` (the old working clones) is no longer used; a
   leftover one can be deleted.
 - Imports from `shared/` go through the `server/shared` symlink (`/app/shared` in the image):
   `import … from '../../shared/types'`, `'../../shared/core/permissions'`.
@@ -327,6 +376,43 @@ in `server/src` outside an allow-list (today only startup-time `configureBareRep
 `cd server && npx vitest run tests/<path>` for what you touched; `tests/unit`, `tests/integration`
 (real git-http and hooks), `tests/security` (auth guards, path traversal,
 no-exec-sync). CI runs the whole suite on ubuntu ("Server tests").
+
+- **Fake HubSpot** (`tests/fakes/hubspot/`, milestone 3 P2): an in-memory Hono app answering the
+  CRM calls the HubSpot plugin makes in HubSpot's documented shapes (v3 and dated
+  `/crm/<api>/<YYYY-MM>/…` paths; deals get / list / search / update, deal properties and
+  pipelines, companies, owners, notes with the 214 note → deal association, account details
+  with a `portalId` per fake — another fake is another account; milestone 4: deals create /
+  archive, meetings create / get / search / archive with the 212 meeting → deal association,
+  contacts and deal → contact associations, the unique-value custom property
+  `acb_operation_id` on deals and meetings — a duplicate is 409 `CONFLICT`, `?idProperty=`
+  finds it at once while search misses new objects for `searchIndexDelayMs` —, and the
+  meeting scopes as a setting, `meetingScopes`, because HubSpot does not document them),
+  `pat-fake-…` keys
+  with per-key scopes (403 `MISSING_SCOPES`), read-only values (400), rate limits (429) and
+  faults (delay, 500, a write applied whose answer never arrives, a change made "in HubSpot").
+  Tests pass `createFakeHubSpot().app` in; staging runs `pnpm fake:hubspot` (127.0.0.1:4010,
+  `/__fake/*` control routes, refuses `NODE_ENV=production`). Never in the image (the Dockerfile
+  copies `src/` and `shared/` only) and never imported from `src/` (`layering.test.ts`). Test:
+  `tests/unit/fake-hubspot.test.ts`.
+- **Fake Google** (`tests/fakes/google/`, milestone 4 G2): the same kind of app for the Google
+  connector — OAuth 2.0 (`/o/oauth2/v2/auth` with a chosen "signed-in" account, deny, or
+  withheld scopes; `state` and an S256 PKCE challenge required; `/token` for code + verifier
+  and refresh; `/revoke`; `/oauth2/v3/userinfo`), Calendar v3 events, Meet v2 conference
+  records / smartNotes / transcripts (`docsDestination`), Drive v3 file metadata
+  (`version`, `modifiedTime`) and text export (BOM + CRLF, 10 MB → 403
+  `exportSizeLimitExceeded`; with only `drive.meet.readonly` a file Meet did not create is 404),
+  and Gmail `messages.send` (stored decoded in `fake.sent`; a From that is not the token's account
+  is refused). Google's paths on one origin, so a practice redirect maps Google's hosts by path
+  (the table is in `fake-google.ts`). Practice values: secrets `fake-google-secret-…`, tokens
+  `ya29.fake-…` / `1//fake-…`; scopes enforced per token (403 `PERMISSION_DENIED`). Faults:
+  delay, 500 / 429, a send stored whose answer never arrives, revoked access (`invalid_grant`),
+  oldest refresh token dropped past the per-account limit, an event or a minutes document
+  changed. Seed (`seed.ts`, `GOOGLE_SEED`): `sato@div.example` with a sales meeting
+  (`suzuki@` / `yamaguchi@a-corp.example`, the fake HubSpot's deal 1000000001 contacts), an
+  internal-only meeting and a follow-up whose notes hold an instruction-like line. Staging runs
+  `pnpm fake:google` (127.0.0.1:4011, `/__fake/*`, refuses `NODE_ENV=production`). Same rules
+  as the fake HubSpot (not in the image, not imported from `src/`). Test:
+  `tests/unit/fake-google.test.ts`.
 
 - Who reaches a company repository over git HTTP (members with a live session; others 401 /
   403 / 404 on info/refs, upload-pack and receive-pack, repository unchanged; only the two smart

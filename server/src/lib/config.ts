@@ -15,6 +15,7 @@
  * Nothing uses it any more; a leftover one can be deleted.
  */
 import { join } from 'path'
+import { GOOGLE_HOSTS } from '../../shared/core/google'
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
@@ -32,6 +33,16 @@ export const AUTH_DB_PATH = join(DATA_DIR, 'auth.sqlite')
  * (.claude/rules/key-broker.md). Never generated automatically.
  */
 export const BROKER_KEK_FILE = process.env.BROKER_KEK_FILE?.trim() || null
+
+/**
+ * The plugin shelf (「プラグインの棚」, milestone 3, `.claude/rules/plugins.md`):
+ * a folder of connector plugin packages, one `<id>@<version>/` folder each,
+ * put there by the operator (div). Read at startup. Unset → an empty shelf.
+ * Outside DATA_DIR (it is the server's software, not a company's data). A
+ * file `stopped` in it lists packages stopped for every company (one `id` or
+ * `id@version` per line), read on every plugin call.
+ */
+export const PLUGINS_DIR = process.env.PLUGINS_DIR?.trim() || null
 
 /** Lifetime of a broker token in minutes (clamped to 15–60 by shared/core/key-broker.ts; default 30). */
 export const BROKER_TOKEN_TTL_MINUTES = Number(process.env.BROKER_TOKEN_TTL_MINUTES) || 30
@@ -78,4 +89,87 @@ export function operatorUserIds(): ReadonlySet<string> {
 /** A company's bare repository; the id is reduced to [A-Za-z0-9_-]. */
 export function companyRepoPath(companyId: string): string {
   return join(REPOS_DIR, `${companyId.replace(/[^a-zA-Z0-9_-]/g, '')}.git`)
+}
+
+/**
+ * Practice upstreams (staging only): requests for a service go to a practice
+ * copy on this machine instead of the real one — per service, each switched
+ * on by its own variable, so one practice service never redirects another:
+ *   ACB_FAKE_HUBSPOT_URL  the key broker's HubSpot (relay, key check, connector) → `pnpm fake:hubspot`
+ *   ACB_FAKE_GOOGLE_URL   every Google host of the Google connection → `pnpm fake:google`
+ *                         (google-connector.md; the browser's sign-in page too)
+ * Server-wide, never per company: a company able to change where a service
+ * goes could make the server send its key to another company's or an
+ * internal address.
+ *
+ * Effective only when ALL hold, so one stray variable cannot switch it on in
+ * production:
+ *   ACB_ALLOW_FAKE_UPSTREAMS=1   the explicit staging marker
+ *   NODE_ENV is not `production`
+ *   PUBLIC_URL (default http://localhost:3001) is on this machine (localhost / loopback)
+ *   each URL: http(s)://<127.0.0.1 | [::1] | localhost | host.docker.internal>[:port], nothing more
+ * Anything set but not effective is reported (`ignored`) and changes nothing.
+ * The production compose file passes none of these variables.
+ */
+export interface PracticeUpstream {
+  service: string
+  /** The real host the service's requests name (they keep naming it; only the connection moves). */
+  host: string
+  target: { protocol: 'http:' | 'https:'; hostname: string; port: number }
+}
+
+export type PracticeUpstreams =
+  | { state: 'off' }
+  | { state: 'ignored'; reason: string }
+  | { state: 'on'; upstreams: PracticeUpstream[] }
+
+const PRACTICE_TARGET_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost', 'host.docker.internal'])
+const LOCAL_PUBLIC_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost'])
+
+/** Each practice variable → the service it redirects and the real hosts it covers. */
+const PRACTICE_VARIABLES: Array<{ variable: string; service: string; hosts: readonly string[] }> = [
+  { variable: 'ACB_FAKE_HUBSPOT_URL', service: 'hubspot', hosts: ['api.hubapi.com'] },
+  { variable: 'ACB_FAKE_GOOGLE_URL', service: 'google', hosts: GOOGLE_HOSTS },
+]
+
+export function practiceUpstreamsFrom(env: Readonly<Record<string, string | undefined>>): PracticeUpstreams {
+  const set = PRACTICE_VARIABLES.filter(v => env[v.variable]?.trim())
+  if (set.length === 0) return { state: 'off' }
+  if (env.ACB_ALLOW_FAKE_UPSTREAMS?.trim() !== '1') return { state: 'ignored', reason: 'ACB_ALLOW_FAKE_UPSTREAMS=1 is not set' }
+  if (env.NODE_ENV?.trim().toLowerCase() === 'production') return { state: 'ignored', reason: 'NODE_ENV is production' }
+  let publicHost: string
+  try {
+    publicHost = new URL(env.PUBLIC_URL?.trim() || 'http://localhost:3001').hostname.toLowerCase()
+  } catch {
+    return { state: 'ignored', reason: 'PUBLIC_URL is not a URL' }
+  }
+  if (!LOCAL_PUBLIC_HOSTS.has(publicHost)) return { state: 'ignored', reason: 'PUBLIC_URL is not on this machine' }
+  const upstreams: PracticeUpstream[] = []
+  for (const v of set) {
+    let url: URL
+    try {
+      url = new URL(env[v.variable]!.trim())
+    } catch {
+      return { state: 'ignored', reason: `${v.variable} is not a URL` }
+    }
+    if ((url.protocol !== 'http:' && url.protocol !== 'https:') || !PRACTICE_TARGET_HOSTS.has(url.hostname.toLowerCase())
+      || url.username || url.password || url.search || url.hash || url.pathname !== '/') {
+      return { state: 'ignored', reason: `${v.variable} must be http(s)://127.0.0.1, localhost or host.docker.internal with a port only` }
+    }
+    const port = url.port ? Number(url.port) : url.protocol === 'https:' ? 443 : 80
+    const target = { protocol: url.protocol as 'http:' | 'https:', hostname: url.hostname.toLowerCase(), port }
+    for (const host of v.hosts) upstreams.push({ service: v.service, host, target: { ...target } })
+  }
+  return { state: 'on', upstreams }
+}
+
+/** This server's practice upstreams (read once at startup; `src/index.ts` logs the state). */
+export const PRACTICE_UPSTREAMS = practiceUpstreamsFrom(process.env)
+
+/**
+ * The address browsers reach this server at (Google's redirect URI is built
+ * from it). Read per call; default http://localhost:3001, no trailing slash.
+ */
+export function publicUrl(): string {
+  return (process.env.PUBLIC_URL?.trim() || 'http://localhost:3001').replace(/\/+$/, '')
 }

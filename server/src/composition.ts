@@ -23,11 +23,14 @@ import { sqliteTransactions } from './adapters/sqlite/transactions'
 import { betterAuthAccountDirectory } from './adapters/accounts'
 import { localRepoStore } from './adapters/git-repo-store'
 import { companyFileViews } from './adapters/company-files'
+import { gitRecordFileSource, gitRecordFileWriter } from './adapters/record-files'
 import { processCompanyLock, randomIds, sha256TokenDigest, systemClock } from './adapters/system'
 import { loadKekFile } from './adapters/kek-file'
 import { localSecretCipher } from './adapters/local-secret-cipher'
 import { httpsUpstream } from './adapters/upstream-https'
-import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, operatorUserIds } from './lib/config'
+import { practiceUpstream } from './adapters/upstream-practice'
+import { diskPluginShelf } from './adapters/plugin-shelf'
+import { BROKER_DAY_UTC_OFFSET_MINUTES, BROKER_KEK_FILE, BROKER_KEY_CHECK, BROKER_MAX_REQUEST_MB, BROKER_TOKEN_TTL_MINUTES, BROKER_UPSTREAM_TIMEOUT_SECONDS, COMPANY_CREATION_POLICY, DATA_DIR, PLUGINS_DIR, PRACTICE_UPSTREAMS, operatorUserIds, publicUrl, type PracticeUpstreams } from './lib/config'
 import type { BrokerCipherState } from './ports/key-broker'
 import type { UpstreamClient } from './ports/upstream'
 import { createAccessPolicy } from './services/access'
@@ -52,6 +55,27 @@ import { createBrokerTokenService } from './services/broker-tokens'
 import { createOwnBrokerKeyService } from './services/own-broker-keys'
 import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
+import { createRecordIndexer } from './services/record-index'
+import { createRecordService } from './services/records'
+import { createRecordEngine } from './services/record-engine'
+import { createRecordAiTokenService } from './services/record-ai-tokens'
+import { createPluginShelf } from './services/plugin-shelf'
+import { createPluginService } from './services/plugins'
+import { createPluginConnector } from './services/plugin-connector'
+import { createPluginImportService } from './services/plugin-import'
+import { createPluginOperationService } from './services/plugin-operations'
+import { createPluginMappingCheckService } from './services/plugin-mapping-check'
+import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
+import { createDecisionService } from './services/decisions'
+import { createGoogleMeetings } from './services/google-meetings'
+import { createMinutesService } from './services/minutes'
+import { createOutboundMailService } from './services/outbound-mail'
+import { createFixedPayloads } from './services/fixed-payloads'
+import { createGoogleClient } from './services/google-client'
+import { createGoogleConnector } from './services/google-connector'
+import { createApprovalService } from './services/approvals'
+import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
 
 /**
  * The key broker's cipher: envelope encryption under the KEK file named by
@@ -81,11 +105,25 @@ function companyCreationPolicyFromEnv(): CompanyCreationPolicy {
   return parsed.policy
 }
 
+/** A broker key row's destination hosts (JSON of BrokerDestinations); none when unreadable. */
+function keyHosts(destinations: string): string[] {
+  try {
+    const hosts = (JSON.parse(destinations) as { hosts?: unknown }).hosts
+    return Array.isArray(hosts) ? hosts.filter((h): h is string => typeof h === 'string') : []
+  } catch {
+    return []
+  }
+}
+
 export interface ServiceOptions {
   /** The relay's way out (tests: a fake upstream). */
   upstream?: UpstreamClient
   /** Check keys once when they are saved (default: BROKER_KEY_CHECK). */
   keyCheck?: boolean
+  /** Staging's practice upstreams (default: PRACTICE_UPSTREAMS from the environment, lib/config.ts). */
+  practiceUpstreams?: PracticeUpstreams
+  /** The plugin shelf's folder (default: PLUGINS_DIR). */
+  pluginsDir?: string | null
 }
 
 export function createServices(conn: Database.Database, brokerCipher: BrokerCipherState = brokerCipherFromEnv(), options: ServiceOptions = {}) {
@@ -114,12 +152,21 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const permissionViews = createPermissionViewService({ ...repos, ...shared })
   const brokerVault = createBrokerVault({ ...repos, brokerCipher })
-  const upstream = options.upstream ?? httpsUpstream()
+  // Staging only: HubSpot's connections may go to the fake HubSpot (never in production: lib/config.ts).
+  const practice = options.practiceUpstreams ?? PRACTICE_UPSTREAMS
+  const practiceList = practice.state === 'on' ? practice.upstreams : []
+  const upstream = practiceUpstream(options.upstream ?? httpsUpstream(), practiceList)
   // The key check needs the company's generic services and exceptions (keyBroker); keyBroker asks it before saving.
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
+    // Only the key broker's services (the Google connection checks its own practice values).
+    practiceServices: practiceList.filter(u => u.service !== 'google').map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
+    // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
+    managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
+    // 「すべての鍵を止める」 stops members' Google permissions too (bound below).
+    onStopAll: (companyId, by) => { void googleConnector.stopAll(companyId, by) },
   })
   keyCheck = createBrokerKeyCheck({ upstream, keyBroker, enabled: options.keyCheck ?? BROKER_KEY_CHECK })
   const agentEvents = createAgentEventService({ ...repos, ...shared, yieldNow: () => new Promise<void>(resolve => setImmediate(resolve)) })
@@ -134,10 +181,208 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const agentPolicy = createAgentPolicyService({ agentSandbox, agentStops, digest: sha256TokenDigest, push })
   const brokerTokens = createBrokerTokenService({
     ...repos, ...shared, brokerVault, keyBroker, tokenDigest: sha256TokenDigest, ttlMinutes: BROKER_TOKEN_TTL_MINUTES,
+    // With several company keys, the one a plugin's connection uses (bound below).
+    connectionKeyId: (companyId, service) => plugins.connectionKeyId(companyId, service),
+  })
+
+  // The company map (light ontology 4-2): indexed from pushes, off per company by default.
+  const recordFiles = gitRecordFileSource()
+  const recordIndexer = createRecordIndexer({ ...shared, recordFiles })
+
+  const access = createAccessPolicy(repos.memberships)
+  // The state engine (4-3): the only writer of record_state / record_ledger.
+  const recordEngine = createRecordEngine({
+    ...shared,
+    files: gitRecordFileWriter(),
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+
+  // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
+  // decisions): handed to those services only, never to a route (records.md "Service writer").
+  const serviceRecords = createServiceRecordWriter({
+    ...shared,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const decisions = createDecisionService({
+    ...shared,
+    writer: serviceRecords,
+    tokenDigest: sha256TokenDigest,
+  })
+
+  // Connector plugins (milestone 3): the shelf is shared and read only; installs are behind the company handle.
+  const pluginShelf = createPluginShelf(diskPluginShelf(options.pluginsDir !== undefined ? options.pluginsDir : PLUGINS_DIR))
+  const plugins = createPluginService({
+    ...shared,
+    shelf: pluginShelf,
+    companyKey: (companyId, keyId) => {
+      const row = repos.brokerKeys.find(companyId, keyId)
+      return row ? { scope: row.scope, service: row.service, status: row.status, hosts: keyHosts(row.destinations) } : null
+    },
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    relayReadOnly: (member, service) => { keyBroker.setReadOnly(member, service, { readOnly: true }) },
+  })
+
+  // The connector (P5): the only part that talks to an outside system for a plugin; the engine's
+  // external entry is handed to the plugin services only (never to a route).
+  const pluginConnector = createPluginConnector({
+    upstream,
+    reveal: (companyId, keyId) => brokerVault.reveal(companyId, keyId),
+    credential: (companyId, service) => {
+      const builtin = builtinBrokerService(service)
+      if (builtin) return { header: builtin.credential, value: key => builtin.credential === 'authorization' ? `Bearer ${key}` : key }
+      const relay = keyBroker.relayService(companyId, service)
+      return relay ? { header: relay.header, value: key => relayCredentialValue(relay.format, key) } : null
+    },
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+    nowMs: () => shared.clock.nowMs(),
+  })
+  const externalRecords = createExternalRecordWriter({
+    ...shared,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  const pluginImport = createPluginImportService({
+    ...shared, plugins, connector: pluginConnector, writer: externalRecords,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+  })
+
+  const pluginOperations = createPluginOperationService({
+    ...shared, plugins, connector: pluginConnector, writer: externalRecords, importer: pluginImport,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    aiStopped: companyId => agentStops.companyStopped(companyId),
+  })
+
+  // Approval requests with fixed content (milestone 4 G6, approvals.md): the service writer and the
+  // operations' approval seam are handed to it only; its routes take a session (no AI route approves).
+  const fixedPayloads = createFixedPayloads(shared)
+  const approvals = createApprovalService({
+    ...shared,
+    writer: serviceRecords,
+    fixed: fixedPayloads,
+    operations: pluginOperations,
+    decisions,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    admins: companyId => repos.memberships.listByCompany(companyId).filter(m => m.role === 'owner' || m.role === 'admin').map(m => m.user_id),
+    managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
+    plugin: async (companyId, pluginId) => {
+      const r = await plugins.active(companyId, pluginId, { collectingFacts: true })
+      return r.ok ? r.plugin : null
+    },
+  })
+
+  // 「HubSpot に聞いて確かめる」 (P8): the outside property list, read through the connector.
+  const pluginMappingCheck = createPluginMappingCheckService({
+    ...shared, plugins, connector: pluginConnector,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+  })
+
+  // The Google connection (milestone 4 G3, google-connector.md): google-client.ts is the one
+  // place that talks to Google; on staging every Google host may go to the fake Google.
+  const practiceGoogle = practiceList.find(u => u.service === 'google' && u.host === GOOGLE_AUTHORIZE_HOST)
+  const googleClient = createGoogleClient({
+    companyData: shared.companyData,
+    brokerVault,
+    upstream,
+    clock: shared.clock,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+    record: (companyId, userId, e) => {
+      try {
+        agentEvents.recordServerEvent(companyId, userId, {
+          agent: 'script',
+          tool: `google:${e.operation.slice(0, 60)}`,
+          category: 'broker',
+          target: { kind: 'broker', service: 'google', host: e.host, path: e.operation.slice(0, 200), ...(e.status !== null ? { status: e.status } : {}) },
+          decision: 'auto-allowed',
+          outcome: e.ok ? 'ok' : 'error',
+        })
+      } catch {
+        console.warn('[google] a call could not be recorded')
+      }
+    },
+    practiceGoogle: practiceGoogle !== undefined,
+    authorizeOrigin: practiceGoogle
+      ? `${practiceGoogle.target.protocol}//${practiceGoogle.target.hostname === 'host.docker.internal' ? 'localhost' : practiceGoogle.target.hostname}:${practiceGoogle.target.port}`
+      : `https://${GOOGLE_AUTHORIZE_HOST}`,
+    sleep: ms => new Promise(resolve => setTimeout(resolve, ms)),
+  })
+  const googleConnector = createGoogleConnector({
+    ...shared,
+    brokerVault,
+    google: googleClient,
+    tokenDigest: sha256TokenDigest,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    redirectUri: () => `${publicUrl()}${GOOGLE_CALLBACK_PATH}`,
+    practiceGoogle: practiceGoogle !== undefined,
+    operatorStopped: () => pluginShelf.isStopped('google', ''),
+  })
+
+  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
+  // with the member's own permission; makes `minutes` records through the service writer.
+  const minutes = createMinutesService({
+    ...shared,
+    writer: serviceRecords,
+    meetings: createGoogleMeetings((companyId, userId, req) => googleClient.request(companyId, userId, req)),
+    tokenDigest: sha256TokenDigest,
+    members: companyId => {
+      const rows = repos.memberships.listByCompany(companyId)
+      const accounts = shared.accounts.byIds(rows.map(m => m.user_id))
+      return rows.flatMap(m => {
+        const a = accounts.get(m.user_id)
+        return a ? [{ userId: m.user_id, email: a.email, name: a.name ?? '', role: m.role }] : []
+      })
+    },
+  })
+
+  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
+  // permission; the AI drafts only (records-ai routes have no send).
+  const outboundMail = createOutboundMailService({
+    ...shared,
+    writer: serviceRecords,
+    payloads: fixedPayloads,
+    digest: text => sha256TokenDigest.digest(text),
+    members: companyId => {
+      const ids = repos.memberships.listByCompany(companyId).map(m => m.user_id)
+      const accounts = shared.accounts.byIds(ids)
+      return ids.flatMap(userId => {
+        const a = accounts.get(userId)
+        return a?.email ? [{ userId, email: a.email, name: a.name }] : []
+      })
+    },
+    // The meeting's attendees, re-read from Google now (minutes.md); unreadable → null (nothing offered).
+    meetingAttendees: async (companyId, userId, minutesId) => {
+      const role = access.memberOf(companyId, userId)?.role
+      if (!role) return null
+      const r = await minutes.meetingAttendees(companyId, userId, role, minutesId)
+      return r.ok ? r.value : null
+    },
+    dealContacts: (member, dealId) => pluginImport.dealContacts(member, dealId),
+    gmailSend: (companyId, userId, raw) => googleClient.request(companyId, userId, {
+      api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
+    }),
+    companyIds: () => repos.companies.allIds(),
   })
 
   return {
-    access: createAccessPolicy(repos.memberships),
+    access,
+    outboundMail,
+    googleClient,
+    googleConnector,
+    minutes,
+    pluginShelf,
+    plugins,
+    pluginImport,
+    pluginOperations,
+    pluginMappingCheck,
+    approvals,
+    fixedPayloads,
     companies: createCompanyService({ ...repos, ...shared, repoStore,
       creationPolicy: companyCreationPolicyFromEnv(),
       isOperator: userId => operatorUserIds().has(userId),
@@ -172,6 +417,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       maxRequestBytes: BROKER_MAX_REQUEST_MB * 1024 * 1024,
       headersTimeoutMs: BROKER_UPSTREAM_TIMEOUT_SECONDS * 1000,
       companyStopped: agentStops.companyStopped,
+      managedConnection: (companyId, userId, service) => plugins.relayPolicy(companyId, userId, service),
     }),
     ownBrokerKeys: createOwnBrokerKeyService({ ...repos, ...shared, brokerVault, keyBroker }),
     clientActivity: createClientActivityService({ ...repos, ...shared }),
@@ -179,6 +425,12 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
+    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
+    recordEngine,
+    decisions,
+    recordAiTokens: createRecordAiTokenService({
+      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,
+    }),
     accounts: shared.accounts,
     repoStore,
   }

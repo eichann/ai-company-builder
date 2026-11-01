@@ -31,6 +31,10 @@ export interface Findings {
   /** Instruction files (CLAUDE.md, AGENTS.md ...) the pusher may not change. */
   instructions: string
   autorun: string
+  /** Type definitions (.acb/types/) the pusher may not change. */
+  recordTypes: string
+  /** "path<TAB>reason": type definitions changed in a way that removes or renames something. */
+  typeChanges: string
   writeDenied: string
   secrets: string
   gitlinks: string
@@ -38,7 +42,7 @@ export interface Findings {
 }
 
 export function emptyFindings(): Findings {
-  return { personal: '', localOnly: '', reserved: '', protected: '', instructions: '', autorun: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
+  return { personal: '', localOnly: '', reserved: '', protected: '', instructions: '', autorun: '', recordTypes: '', typeChanges: '', writeDenied: '', secrets: '', gitlinks: '', winpaths: '' }
 }
 
 class Out {
@@ -122,7 +126,7 @@ export function renderReport(f: Findings): Buffer | null {
     rejected = true
   }
 
-  if (f.protected || f.instructions || f.autorun) {
+  if (f.protected || f.instructions || f.autorun || f.recordTypes || f.typeChanges) {
     o.line()
     o.line(SEP)
     o.line('[PROTECTED_CONFIG] 管理者だけが変更できるファイルが含まれています')
@@ -154,6 +158,27 @@ export function renderReport(f: Findings): Buffer | null {
         seen.add(p)
         o.raw(`  - ${p}`)
         o.raw(`      ${utf8Bytes('（')}${r}${utf8Bytes('）')}`)
+      }
+    }
+    if (f.recordTypes) {
+      o.line()
+      o.line('以下は、会社の記録（タスクなど）の形を決める定義のファイル(.acb/types)です。')
+      o.line('会社のオーナー・管理者だけが追加・変更・削除できます:')
+      o.list(f.recordTypes)
+    }
+    if (f.typeChanges) {
+      o.line()
+      o.line('以下の定義のファイルは、項目・状態・操作などを消したり名前を変えたりしています。')
+      o.line('いまは足す変更だけができます（オーナー・管理者も同じです）:')
+      const seen = new Set<string>()
+      for (const l of nonEmptyLines(f.typeChanges)) {
+        const t = l.indexOf('\t')
+        const p = t >= 0 ? l.slice(0, t) : l
+        const r = t >= 0 ? l.slice(t + 1) : ''
+        if (seen.has(p)) continue
+        seen.add(p)
+        o.raw(`  - ${p}`)
+        if (r) o.raw(`      ${utf8Bytes('（')}${r}${utf8Bytes('）')}`)
       }
     }
     o.line()

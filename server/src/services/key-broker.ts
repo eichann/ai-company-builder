@@ -27,7 +27,11 @@ import {
   NO_BROKER_CAPS,
   brokerSecretLast4,
   builtinBrokerService,
+  builtinHostsMessage,
+  builtinHostsOutside,
   checkBrokerSecret,
+  isPracticeSecret,
+  PRACTICE_KEY_PREFIX,
   companyKeyEligibility,
   defaultBrokerRule,
   isValidBrokerServiceName,
@@ -93,6 +97,15 @@ export interface KeyBrokerDeps {
   brokerDay?: () => string
   /** The one check of a key being saved (default: none). */
   checkKey?: BrokerKeyChecker
+  /** Services this server sends to a practice copy (staging only, `lib/config.ts`); default none. */
+  practiceServices?: readonly string[]
+  /** A connector plugin manages the service for this company: the read-only switch cannot be turned off (plugins.md). */
+  managedByPlugin?: (companyId: string, service: string) => boolean
+  /**
+   * 「すべての鍵を止める」 also stops what else holds a member's credentials (the Google
+   * connection's grants: google-connector.md). Called after the keys were disabled.
+   */
+  onStopAll?: (companyId: string, by: string) => void
 }
 
 const has = <T extends string>(list: readonly T[], v: unknown): v is T => (list as readonly unknown[]).includes(v)
@@ -138,6 +151,16 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   const checkKey: BrokerKeyChecker = deps.checkKey ?? (async () => null)
 
   /**
+   * Staging (practice upstreams): while the service's connections go to its
+   * practice copy, a value that is not a practice key is refused — a real
+   * secret is never registered there, so never sent there (review §5.8).
+   */
+  function practiceSecretRefusal(service: string, secret: string) {
+    if (!deps.practiceServices?.includes(service) || isPracticeSecret(secret)) return null
+    return refuse('bad-request', `練習用の${builtinBrokerService(service)?.label ?? service}につながっている間は、本物の鍵を登録できません（${PRACTICE_KEY_PREFIX}… の練習用の鍵だけです）`, { code: 'REAL_KEY_ON_PRACTICE' })
+  }
+
+  /**
    * The department a consultation is in, from the folder the app sent
    * (compared as NFC with A–Z folded); null when none or not a department.
    */
@@ -160,6 +183,12 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
   function relayHostsError(relay: BrokerRelayDefinition | null, hosts: string[], what: string): string | null {
     if (!relay || hosts.every(h => h === relay.host)) return null
     return `${what}: this service's requests go to ${relay.host} only`
+  }
+
+  /** A built-in service's keys go to its own hosts only (a HubSpot key never to Gemini's host). */
+  function builtinHostsRefusal(service: string, hosts: readonly string[]) {
+    if (builtinHostsOutside(service, hosts).length === 0) return null
+    return refuse('bad-request', builtinHostsMessage(service), { code: 'HOSTS_NOT_FOR_SERVICE' })
   }
 
   function serviceSettingOf(stored: StoredBrokerService | undefined, service: string): BrokerServiceSetting {
@@ -230,6 +259,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         ...setting,
         defaultHosts: builtin ? [...builtin.defaultHosts] : relay ? [relay.host] : [],
         relay,
+        readOnly: stored.get(service)?.readOnly ?? false,
+        practice: deps.practiceServices?.includes(service) ?? false,
         companyKeys: rows.filter(r => r.service === service && r.scope === 'company').length,
         userKeys: rows.filter(r => r.service === service && r.scope === 'user').length,
         updatedAt: stored.get(service)?.updatedAt ?? null,
@@ -281,11 +312,13 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
     const at = clock.now()
     brokerKeys.saveService(member.companyId, {
       service, category: after.category, rule: after.rule, ownKeyHosts: JSON.stringify(after.ownKeyHosts),
-      relay: stored?.relay ?? null, updatedAt: at, updatedBy: member.userId,
+      relay: stored?.relay ?? null, readOnly: stored?.readOnly ?? false, updatedAt: at, updatedBy: member.userId,
     }, changeRow(member, at, null, { action: 'service', service, before, after }))
   }
 
   return {
+    practiceSecretRefusal,
+
     /** GET …/broker */
     get(member: Member): Outcome<BrokerView> {
       const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
@@ -304,6 +337,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in name) return refuse('bad-request', name.error)
       const secret = checkBrokerSecret(body.secret)
       if ('error' in secret) return refuse('bad-request', secret.error)
+      const practice = practiceSecretRefusal(service, secret.value)
+      if (practice) return practice
       const builtin = builtinBrokerService(service)
       const relay = builtin ? null : relayOf(serviceSettings(member.companyId).get(service))
       const defaultHosts = builtin ? builtin.defaultHosts : relay ? [relay.host] : null
@@ -313,6 +348,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in destinations) return refuse('bad-request', destinations.error)
       const hostsError = relayHostsError(relay, destinations.value.hosts, 'destinations.hosts')
       if (hostsError) return refuse('bad-request', hostsError)
+      const builtinHosts = builtinHostsRefusal(service, destinations.value.hosts)
+      if (builtinHosts) return builtinHosts
       const audience = parseBrokerAudience(body.audience)
       if ('error' in audience) return refuse('bad-request', audience.error)
       const caps = parseBrokerCaps(body.caps)
@@ -360,6 +397,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if ('error' in secret) return refuse('bad-request', secret.error)
       const existing = brokerKeys.find(member.companyId, keyId)
       if (!existing) return refuse('not-found', 'API key not found')
+      const practice = practiceSecretRefusal(existing.service, secret.value)
+      if (practice) return practice
       if (!brokerVault.status().enabled) return refuse('unavailable', BROKER_OFF_ERROR, { code: 'BROKER_OFF' })
       const check = await checkKey(member.companyId, existing.service, secret.value, decoded(existing).destinations.hosts)
       if (check === 'rejected') return refuse('bad-request', KEY_REJECTED_ERROR, { code: 'KEY_REJECTED' })
@@ -397,6 +436,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         if ('error' in v) return refuse('bad-request', v.error)
         const hostsError = relayHostsError(relayOf(serviceSettings(member.companyId).get(row.service)), v.value.hosts, 'destinations.hosts')
         if (hostsError) return refuse('bad-request', hostsError)
+        const builtinHosts = builtinHostsRefusal(row.service, v.value.hosts)
+        if (builtinHosts) return builtinHosts
         after.destinations = v.value
       }
       if (body.audience !== undefined) {
@@ -458,6 +499,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
           action: 'update', service: row.service, displayName: row.displayName, before: { status: 'active' }, after: { status: 'disabled' },
         }))
       }
+      deps.onStopAll?.(member.companyId, member.userId)
       return ok(view(member.companyId))
     },
 
@@ -485,6 +527,8 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       const stored = serviceSettings(member.companyId).get(service)
       const hostsError = relayHostsError(relayOf(stored), hosts.value, 'ownKeyHosts')
       if (hostsError) return refuse('bad-request', hostsError)
+      const builtinHosts = builtinHostsRefusal(service, hosts.value)
+      if (builtinHosts) return builtinHosts
       saveServiceSetting(member, service, stored, { category: body.category, rule: body.rule, ownKeyHosts: hosts.value })
       return ok(view(member.companyId))
     },
@@ -512,6 +556,39 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
       if (!next) return refuse('bad-request', 'This service has no known destination: set its own-key hosts with PUT …/broker/services/:service', { code: 'HOSTS_REQUIRED' })
       saveServiceSetting(member, service, stored, { category: current.category, ...next })
       return ok(view(member.companyId))
+    },
+
+    /**
+     * PUT …/broker/services/:service/read-only { readOnly } — the relay
+     * forwards only reads for the service (GET / HEAD and the built-in
+     * service's read-only POSTs, `brokerRelayReadOnlyAllows`). Milestone 3:
+     * turned on for HubSpot when its plugin is on (P4), so writes go only
+     * through the plugin's typed operations. History action `read-only`.
+     */
+    setReadOnly(member: Member, service: string, body: unknown): Outcome<BrokerView> {
+      const allowed = requireFullAccess(member, KEY_BROKER_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isValidBrokerServiceName(service)) return refuse('bad-request', 'service must be a lower-case ASCII name (a-z, 0-9, -, _)')
+      if (!isObject(body) || typeof body.readOnly !== 'boolean') return refuse('bad-request', 'readOnly must be true or false')
+      const stored = serviceSettings(member.companyId).get(service)
+      if (!builtinBrokerService(service) && !relayOf(stored)) return refuse('not-found', 'Unknown service')
+      const before = stored?.readOnly ?? false
+      if (!body.readOnly && deps.managedByPlugin?.(member.companyId, service)) {
+        return refuse('conflict', 'つなぎ先のプラグインが管理しているため、読むだけのままです（書き換えはプラグインの決まった操作からだけ行います）', { code: 'MANAGED_BY_PLUGIN' })
+      }
+      if (before === body.readOnly) return ok(view(member.companyId))
+      const setting = serviceSettingOf(stored, service)
+      const at = clock.now()
+      brokerKeys.saveService(member.companyId, {
+        service, category: setting.category, rule: setting.rule, ownKeyHosts: JSON.stringify(setting.ownKeyHosts),
+        relay: stored?.relay ?? null, readOnly: body.readOnly, updatedAt: at, updatedBy: member.userId,
+      }, changeRow(member, at, null, { action: 'read-only', service, before, after: body.readOnly }))
+      return ok(view(member.companyId))
+    },
+
+    /** The relay forwards only reads for this service (the company's switch). */
+    relayReadOnly(companyId: string, service: string): boolean {
+      return serviceSettings(companyId).get(service)?.readOnly ?? false
     },
 
     /**
@@ -553,6 +630,7 @@ export function createKeyBrokerService(deps: KeyBrokerDeps) {
         // Own keys may go only to the service's host.
         ownKeyHosts: JSON.stringify((setting?.ownKeyHosts ?? []).filter(h => h === after.host)),
         relay: JSON.stringify(after),
+        readOnly: stored?.readOnly ?? false,
         updatedAt: at,
         updatedBy: member.userId,
       }, changeRow(member, at, null, { action: 'relay-service', service, before, after }))

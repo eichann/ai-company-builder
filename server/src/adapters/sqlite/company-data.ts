@@ -3,8 +3,13 @@ import type { CompanyData, CompanyDataSource } from '../../ports/company-data'
 import { gitOrphanedScopeReader } from '../orphaned-scopes'
 import { sqlitePrivateFolderRepository } from '../private-folders'
 import { sqliteCompanyRowsExport } from './company-archive'
+import { sqliteConnectorRepository } from './connectors'
 import { sqliteDepartmentRepository } from './departments'
+import { sqliteFixedPayloadRepository } from './fixed-payloads'
 import { sqliteInvitationRepository } from './invitations'
+import { sqliteOutboundMailRepository } from './outbound-mail'
+import { sqlitePluginRepository } from './plugins'
+import { sqliteRecordRepository } from './records'
 import { sqliteScopeRepository } from './scopes'
 
 /**
@@ -23,6 +28,11 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         scopes: sqliteScopeRepository(conn, companyId),
         privateFolders: sqlitePrivateFolderRepository(conn, companyId),
         orphanedScopes: gitOrphanedScopeReader(conn, companyId),
+        records: sqliteRecordRepository(conn, companyId),
+        plugins: sqlitePluginRepository(conn, companyId),
+        connectors: sqliteConnectorRepository(conn, companyId),
+        outbound: sqliteOutboundMailRepository(conn, companyId),
+        fixedPayloads: sqliteFixedPayloadRepository(conn, companyId),
         archive: sqliteCompanyRowsExport(conn, companyId),
       }
       return Object.freeze(handle)

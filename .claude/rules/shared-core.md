@@ -33,13 +33,25 @@ server, push checker and admin alike. `server/tests/unit/core-purity.test.ts` en
 | `write-access.ts` | `evaluateWrite` (the app's answer from `GET /me/write-access`), `foldScopePaths` (the push check's A–Z-folded pass) |
 | `client-version.ts` | desktop-app build identity: `parseClientVersion`, `compareClientVersions` (the server's version gates re-export them from `server/src/lib/client-version.ts`), `ClientBuild` / `clientBuildOf` / `parseClientBuild` / `compareClientBuilds` (the API's parsed build; the admin members page ranks with them) |
 | `agent-sandbox.ts` | the company's AI sandbox setting (「AI の囲い」): `AgentSandboxSettings`, the default host list, `normalizeSandboxDomain` / `normalizeDeniedReadPath` / `parseAgentSandboxSettings` (`agent-sandbox.md`) |
-| `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
+| `yaml-lite.ts` | the strict YAML subset of type definitions and record files (`parseYamlLite`, `splitFrontmatter`) (`records.md`) |
+| `record-types.ts` | type definitions (`.acb/types/<name>.md`): `parseTypeFile`, `compareTypeDefinitions` (breaking changes, versions), `INTERFACES`; the push checker uses it too |
+| `records.ts` | record files (`id` / `type` / `links` frontmatter): `parseRecordFile`, title / summary, `RECORD_ID_RE`, `newRecordId`, `appendHistoryLine` |
+| `record-ledger.ts` | the state engine's ledger entry shape and `replayRecordState` (a record at version N) |
+| `core-types.ts` | the core types `task` and `interaction`, in the definition format |
+| `key-broker.ts` | the API key broker (「API キー」): key scopes, service categories and rules, built-in services (+ how each sends its key; HubSpot's read-only POSTs, `brokerRelayReadOnlyAllows`), destination / audience (two dials: `companyKeyUsable`, `upgradeBrokerAudience`) / caps / secret validation, `chooseBrokerKeySource`, token shape and TTL bounds (`key-broker.md`) |
+| `fixed-content.ts` | `canonicalJson` (sorted keys, NFC, nothing trimmed): what the server hashes (`sha256:…`) to fix approved / sent content; the app only echoes a hash |
+| `approvals.ts` | approval requests: `ApproverRule`, `mayApprove`, `approvalReasonProblem`, `ApprovalPayload` |
+| `mail.ts` | outgoing mail: `VerifiedRecipient` sources, `normalizeEmail` (no header / recipient injection), `mailContentProblems`, `mailContentCanonical`, `countLinks` |
+| `minutes.ts` | minutes handed to the AI as outside text (`MINUTES_TEXT_HEADER`), `quoteAppearsIn` |
+| `instruction-like.ts` | `findInstructionLikeText` / `INSTRUCTION_LIKE_WORDS`: instruction-like phrases in outside text (web pages, minutes) — a flag, never a filter (`web-research.md`, `minutes.md`) |
+| `upstream-path.ts` | `checkUpstreamPath`: the one rule for a path sent to an outside service (the relay's `ACB_BAD_PATH`, plugin declarations) |
+| `plugins.ts` | connector plugins: the declaration (`parsePluginManifest`), the package (`validatePluginPackage`), the mapping (`parsePluginMapping`), field policies (external never auto; `PRIOR_ONLY_FIELDS`, `approverFor`), creates, value translation both ways, `available_to` (`plugins.md`) |
 
 The admin console's permission preview (`admin/src/lib/edit-access.ts` `previewAccess`) evaluates
 the draft with `resolveAccess` itself, the deciding place as the one scope with rules — no copy.
 
 `shared/types/` holds API contracts (`private-folders.ts`, `company-files.ts`, `agent-events.ts`,
-`index.ts`).
+`records.ts`, `plugins.ts`, `index.ts`).
 `shared/package.json` is `"type": "module"` so tsx sees named exports.
 
 ## Naming rules (`names.ts`)

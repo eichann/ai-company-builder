@@ -1,0 +1,5 @@
+ticket:
+  fields:
+    title:    { from: subject }
+    priority: { from: prio, values: { P1: high, P2: normal, P3: normal } }
+    opened:   { from: created_at }

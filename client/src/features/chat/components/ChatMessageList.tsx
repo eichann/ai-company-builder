@@ -321,8 +321,11 @@ export const MessageList = memo(function MessageList({
     setAnchorId(earlierAnchor(messages, start))
   }
 
+  // `relative`: the list is the containing block of anything absolutely positioned in it (a
+  // card's `sr-only` text). Without it such an element was laid out against the page at the
+  // list's unscrolled offset and the whole window painted shifted (tests/ui/chat-panel.spec.ts).
   return (
-    <div ref={containerRef} className="flex-1 overflow-auto px-4 py-6 space-y-6">
+    <div ref={containerRef} className="relative flex-1 overflow-auto px-4 py-6 space-y-6">
       {start > 0 && (
         <div className="flex justify-center">
           <button

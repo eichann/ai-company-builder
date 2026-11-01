@@ -77,6 +77,23 @@ export function protectedPaths(changedLines: string[]): string[] {
 }
 
 /**
+ * The company's type definitions (light ontology 4-1, `.claude/rules/records.md`):
+ * `.acb/types/` at the repository root, and a file or symlink named `.acb`
+ * there (it would put another folder in its place). They decide what every
+ * record is and what the state engine lets anyone do with it, so only owners
+ * and admins add, change or delete them (owner decision 0.23-3).
+ * Case-insensitive like the agent config above.
+ */
+export const RECORD_TYPES_RE = /^\.acb\/types(\/|$)|^\.acb$/i
+
+export function recordTypePaths(changedLines: string[]): string[] {
+  return sortUnique(changedLines.filter(l => RECORD_TYPES_RE.test(l)))
+}
+
+/** A definition file the index reads (`.acb/types/<name>.md`, exact spelling). */
+export const RECORD_TYPE_FILE_RE = /^\.acb\/types\/[^/]+\.md$/
+
+/**
  * Instruction files Claude Code (CLAUDE.md, CLAUDE.local.md) and Codex
  * (AGENTS.md, and AGENTS.override.md, which Codex reads in its place) load into every chat in or below their folder, at any depth,
  * case-insensitive. Whoever writes one steers every teammate's AI there (a

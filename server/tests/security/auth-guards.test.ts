@@ -30,6 +30,7 @@ const ROUTES_DIR = join(__dirname, '../../src/routes')
 /** `<file> <METHOD> <path>` → why it needs no session. */
 const PUBLIC_ENDPOINTS: Record<string, string> = {
   'invitations.ts GET /invitations/:token': 'the sign-up page validates an invitation link before an account exists',
+  'oauth.ts GET /google/callback': 'Google sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company) is the proof',
 }
 
 interface Endpoint { file: string; method: string; path: string; app: Hono }

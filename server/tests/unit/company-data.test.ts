@@ -168,3 +168,78 @@ describe('company handle: private folders', () => {
     expect(conn.prepare(`SELECT id FROM scope_rules WHERE scope_id = 's-b'`).all()).toEqual([{ id: 'ru-b' }])
   })
 })
+
+describe('company handle: connector plugins', () => {
+  const brokerKey = (companyId: string, id: string, scope = 'company') => conn.prepare(`
+    INSERT INTO broker_keys (id, company_id, scope, owner_user_id, service, display_name, last4, cipher_scheme, ciphertext, nonce, tag,
+      wrapped_key, kek_id, destinations, audience, caps, allow_private_content, status, created_at, created_by, updated_at, updated_by, secret_updated_at)
+    VALUES (?, ?, ?, ?, 'hubspot', 'k', 'abcd', 's', x'00', x'00', x'00', x'00', 'local:0', '{}', '{}', '{}', 0, 'active', ?, 'u', ?, 'u', ?)
+  `).run(id, companyId, scope, scope === 'user' ? 'u' : null, TS, TS, TS)
+  const install = (keyId: string | null) => ({
+    pluginId: 'sample-crm', version: '0.1.0', fingerprint: 'f', service: 'hubspot', connectionId: 'conn-1', accountId: null,
+    enabled: true, managedSince: TS, keyId, mappingVersion: 0, updatedAt: TS, updatedBy: 'u',
+  })
+  const h = (id: string) => ({ id, pluginId: 'sample-crm', action: 'install', at: TS, by: 'u', change: '{}' })
+
+  it('reads and writes only its own company’s installs, mappings and history', () => {
+    brokerKey('b', 'key-b')
+    const b = source.forCompany('b').plugins
+    b.saveInstall(install('key-b'), h('h-b'))
+    b.addMapping({ pluginId: 'sample-crm', version: 1, text: 'deal: {}', createdAt: TS, createdBy: 'u' }, h('h-b2'))
+    const a = source.forCompany('a').plugins
+    expect(a.install('sample-crm')).toBeNull()
+    expect(a.installs()).toEqual([])
+    expect(a.mapping('sample-crm', 1)).toBeNull()
+    expect(a.mappingVersions('sample-crm')).toEqual([])
+    expect(a.history('sample-crm', 50)).toEqual([])
+    // A mapping under another company's install is refused (insert trigger), and B's install is untouched.
+    expect(() => a.addMapping({ pluginId: 'sample-crm', version: 2, text: 'x', createdAt: TS, createdBy: 'u' }, h('h-a'))).toThrow(/install of the same company/)
+    expect(b.install('sample-crm')).toMatchObject({ mappingVersion: 1, keyId: 'key-b' })
+  })
+
+  it('an install can use only a company key of its own company', () => {
+    brokerKey('b', 'key-b')
+    brokerKey('a', 'own-a', 'user')
+    const a = source.forCompany('a').plugins
+    expect(() => a.saveInstall(install('key-b'), h('h1'))).toThrow(/company key of the same company/)
+    expect(() => a.saveInstall(install('own-a'), h('h2'))).toThrow(/company key of the same company/)
+    brokerKey('a', 'key-a')
+    a.saveInstall(install('key-a'), h('h3'))
+    expect(() => a.saveInstall(install('key-b'), h('h4'))).toThrow(/company key of the same company/)
+    expect(a.install('sample-crm')?.keyId).toBe('key-a')
+    expect(() => conn.prepare(`UPDATE plugin_installs SET company_id = 'b' WHERE company_id = 'a'`).run()).toThrow(/never move/)
+  })
+
+  it('an operation record belongs to a record of its own company, and keeps what it wrote and what it replaced', () => {
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('b', 'deal-b00009', 'deal', 'B', ?, ?)`).run(TS, TS)
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('a', 'deal-a00009', 'deal', 'A', ?, ?)`).run(TS, TS)
+    const op = (recordId: string) => ({
+      id: 'op-1', pluginId: 'p', operation: 'update_deal', pluginVersion: '0.1.0', fingerprint: 'f', mappingVersion: 1, connectionId: 'c', accountId: '1',
+      object: 'deal', externalId: '1', recordId, actorId: 'u', actorKind: 'human' as const, actorSource: null, conversationId: null, state: 'pending' as const,
+      fields: '{}', written: '{"x":"1"}', previous: '{"x":"0"}', reason: null, undoOf: null, undoneBy: null, recordVersion: null, createdAt: TS, updatedAt: TS,
+    })
+    const a = source.forCompany('a').plugins
+    expect(() => a.insertOperation(op('deal-b00009'))).toThrow(/record of the same company/)
+    a.insertOperation(op('deal-a00009'))
+    expect(source.forCompany('b').plugins.operation('op-1')).toBeNull()
+    expect(() => conn.prepare(`UPDATE plugin_operations SET previous = '{"x":"9"}' WHERE id = 'op-1'`).run()).toThrow(/keeps its company/)
+    a.updateOperation('op-1', { state: 'applied' }, TS)
+    expect(a.operation('op-1')).toMatchObject({ state: 'applied', previous: '{"x":"0"}' })
+  })
+
+  it('an outside object links only to a record of its own company, and links are found per company, connection and account', () => {
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('b', 'deal-b00001', 'deal', 'B', ?, ?)`).run(TS, TS)
+    conn.prepare(`INSERT INTO records (company_id, id, type, title, created_at, updated_at) VALUES ('a', 'deal-a00001', 'deal', 'A', ?, ?)`).run(TS, TS)
+    const link = (recordId: string, accountId = '9001') => ({
+      pluginId: 'sample-crm', connectionId: 'conn-1', accountId, object: 'deal', externalId: '42', recordId, externalUpdatedAt: null, seenAt: TS,
+    })
+    const a = source.forCompany('a').plugins
+    expect(() => a.saveLink(link('deal-b00001'))).toThrow(/record of the same company/)
+    a.saveLink(link('deal-a00001'))
+    expect(a.link('conn-1', '9001', 'deal', '42')?.recordId).toBe('deal-a00001')
+    expect(a.link('conn-1', '9002', 'deal', '42')).toBeNull()
+    expect(a.link('conn-2', '9001', 'deal', '42')).toBeNull()
+    expect(source.forCompany('b').plugins.link('conn-1', '9001', 'deal', '42')).toBeNull()
+    expect(source.forCompany('b').plugins.linkOfRecord('deal-a00001')).toBeNull()
+  })
+})

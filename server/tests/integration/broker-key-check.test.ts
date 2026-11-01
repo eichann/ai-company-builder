@@ -134,15 +134,39 @@ describe('checking a key when it is saved', () => {
     expect(sent.at(-1)!.headers.authorization).toBe(`Bearer ${FAKE_GOOD}`)
   })
 
-  it('a key that may not go to the built-in host is not sent there (not checkable)', async () => {
+  it('HubSpot: GET the dated deals list on api.hubapi.com, Bearer only; 401 not saved, 403 (missing scopes) saved as "limited"', async () => {
+    reply = byKey(401)
+    const before = db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n
+    expect(await keep(services.keyBroker.create(owner, { service: 'hubspot', displayName: 'H', secret: FAKE_BAD, audience: everyone })))
+      .toMatchObject({ ok: false, body: { code: 'KEY_REJECTED' } })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n).toBe(before)
+    expect(sent.at(-1)).toMatchObject({ host: 'api.hubapi.com', method: 'GET', path: '/crm/objects/2026-03/deals', hasBody: false })
+    expect(Object.entries(sent.at(-1)!.headers).filter(([, v]) => v.includes(FAKE_BAD))).toEqual([['authorization', `Bearer ${FAKE_BAD}`]])
+
+    reply = () => 403
+    const limited = await keep(services.keyBroker.create(owner, { service: 'hubspot', displayName: 'H', secret: FAKE_GOOD, audience: everyone }))
+    expect(limited.value.check).toEqual({ service: 'hubspot', result: 'limited' })
+    expect(db.prepare("SELECT COUNT(*) AS n FROM broker_keys WHERE service = 'hubspot'").get().n).toBe(before + 1)
+  })
+
+  it('a key that may not go to the built-in host is not sent there: refused on create, not checkable when an older one is replaced', async () => {
     reply = () => 200
     const before = sent.length
     const r = await keep(services.keyBroker.create(owner, {
       service: 'openai', displayName: 'O-proxy', secret: FAKE_GOOD, audience: everyone,
       destinations: { hosts: ['openai-proxy.example.com'], pathPrefixes: [], models: [] },
     }))
-    expect(r.value.check).toEqual({ service: 'openai', result: 'not-checkable' })
+    expect(r).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'HOSTS_NOT_FOR_SERVICE' } })
     expect(sent.length).toBe(before)
+    // A key saved before the server refused other hosts: replacing its value sends nothing there.
+    const saved = await keep(services.keyBroker.create(owner, { service: 'openai', displayName: 'O-old', secret: FAKE_GOOD, audience: everyone }))
+    expect(saved.ok).toBe(true)
+    const id = db.prepare("SELECT id FROM broker_keys WHERE display_name = 'O-old'").get().id
+    db.prepare('UPDATE broker_keys SET destinations = ? WHERE id = ?').run(JSON.stringify({ hosts: ['openai-proxy.example.com'], pathPrefixes: [], models: [] }), id)
+    const sentBefore = sent.length
+    const replaced = await keep(services.keyBroker.replaceSecret(owner, id, { secret: FAKE_GOOD }))
+    expect(replaced.value.check).toEqual({ service: 'openai', result: 'not-checkable' })
+    expect(sent.length).toBe(sentBefore)
   })
 
   it('own keys: Anthropic GET /v1/models with anthropic-version; a refused key is not registered', async () => {

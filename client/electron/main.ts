@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url'
 import { startChatServer } from './chat-server'
 import { createMessageBoxSyncDialog } from './sync/message-box-dialog'
 import { createCompanyFilesApi } from './company-files/api'
+import { createRecordsApi } from './records/api'
 import { BUILD_INFO, installServerFetchIdentity } from './client-identity'
 import { createWriteAccessStore } from './write-access-store'
 import { AllowedRoots } from './allowed-roots'
@@ -40,6 +41,12 @@ import { registerCompanySetupIpc } from './features/company-setup/ipc'
 import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
+import { registerGoogleIpc } from './features/google/ipc'
+import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
+import { registerApprovalsIpc } from './features/approvals/ipc'
+import { createMinutesChecker } from './features/minutes/checker'
+import { registerMinutesIpc } from './features/minutes/ipc'
+import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import type { StoppableTurns } from './services/agent-stop'
@@ -177,7 +184,19 @@ console.log(`[client-identity] build ${BUILD_INFO.version} (built ${BUILD_INFO.b
 const session = createSession()
 
 // The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
-const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle })
+// Set once 「議事録が届きました」 exists (below): a records signal only makes it ask the server again.
+let recordsSignal: (companyId: string) => void = () => {}
+const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle, onRecords: companyId => recordsSignal(companyId) })
+// 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
+const minutes = createMinutesChecker({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  onChanged: companyId => appWindow.send('minutes:changed', { companyId }),
+  watchSignals: companyId => agentControl.watchSignals(companyId),
+})
+recordsSignal = companyId => minutes.recordsSignal(companyId)
+lifecycle.beforeQuit(() => minutes.stop())
+registerMinutesIpc(ipc, minutes)
 
 // Local chat history and hand-off memos (features/chat-history).
 const chatHistory = wireChatHistory(ipc, {
@@ -200,9 +219,18 @@ const writeAccessStore = createWriteAccessStore({
 })
 // The key broker's tokens, the member's own keys and skills' tools (features/broker).
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
+// 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
+registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+// The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
+registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The chat's approval card: approving is the person's own act, with the session (no AI route approves).
+registerApprovalsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+// The chat's mail card: drafts edited and sent by the person, with the session (outbound-mail.md).
+registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
+const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 
 registerAuthIpc(ipc, {
   session,
@@ -212,6 +240,7 @@ registerAuthIpc(ipc, {
     agentControl.signedOut()
     brokerTokens.clear()
     companyFilesApi.clear()
+    minutes.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },
@@ -288,6 +317,7 @@ app.whenReady().then(async () => {
       writeAccess: writeAccessStore,
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
+      records: recordsApi,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,

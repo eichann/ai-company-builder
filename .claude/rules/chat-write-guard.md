@@ -56,6 +56,12 @@ the safety net. Full text: `docs/architecture/chat-and-agents.md` (internal).
 - AI instruction files (`CLAUDE.md`, `CLAUDE.local.md`, `AGENTS.md`, `AGENTS.override.md`) are refused unless the
   member may change them (owner/admin; a manager inside their department), mirroring the push
   checker (`mayChangeInstructionFile`).
+- The company map (`records.md`): `.acb/types/` (type definitions) only for owners/admins
+  (unknown authority never blocks; the push checker's rule), guard reason `type-definition`; and
+  `decideRecordEdit` refuses Write / Edit / MultiEdit (and the api-key mode's writeFile) that put
+  state & co. into a record file's frontmatter or change an existing record's id / type
+  (`recordFileEditProblem`), guard reason `record-file` — the AI changes records only through
+  its record tools. Tests: `client/tests/records-tools.test.ts`.
 - External repositories go to `.workspace/` (never shared): Bash `git clone` / `gh repo clone`
   and a new `git init` whose target resolves inside the company folder outside `.workspace/<x>`
   are refused (`checkGitClone`; re-initialising the company folder itself is allowed), with a

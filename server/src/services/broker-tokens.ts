@@ -51,6 +51,13 @@ export interface BrokerTokenDeps {
   ids: IdGenerator
   /** The server's token lifetime (BROKER_TOKEN_TTL_MINUTES), clamped to 15–60. */
   ttlMinutes: number
+  /**
+   * The company key a connector plugin's connection uses for the service
+   * (plugins.md), or null: with several company keys the member may use, the
+   * relay uses that one — the same key as the connector, not whichever was
+   * registered first (staging: an old practice key went to the real HubSpot).
+   */
+  connectionKeyId?: (companyId: string, service: string) => string | null
 }
 
 /** What the relay may do with a validated token (no key value: that is `vault.reveal(companyId, keyId)`). */
@@ -107,8 +114,10 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
     const setting = keyBroker.serviceSetting(companyId, service)
     const departmentId = keyBroker.departmentIdOfFolder(companyId, department)
     const live = (r: BrokerKeyRow) => includeStopped || r.status === 'active'
-    const company = rows.find(r => r.scope === 'company' && r.service === service && live(r)
-      && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId)) ?? null
+    const usable = rows.filter(r => r.scope === 'company' && r.service === service && live(r)
+      && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId))
+    const connectionKey = usable.length > 1 ? deps.connectionKeyId?.(companyId, service) ?? null : null
+    const company = usable.find(r => r.id === connectionKey) ?? usable[0] ?? null
     const own = keyBroker.memberKeysAllowed(companyId)
       ? rows.find(r => r.scope === 'user' && r.ownerUserId === userId && r.service === service && live(r)
         && parseJson<BrokerDestinations>(r.destinations, { hosts: [], pathPrefixes: [], models: [] }).hosts.every(h => setting.ownKeyHosts.includes(h))) ?? null

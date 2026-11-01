@@ -60,12 +60,20 @@ export function KeyForm({
   const [serviceChoice, setServiceChoice] = useState(editing ? editing.service : services[0]?.service ?? OTHER)
   const [customService, setCustomService] = useState('')
   const service = serviceChoice === OTHER ? customService.trim() : serviceChoice
-  const builtin = services.find((s) => s.service === service && (s.builtin || s.relay))
+  const known = services.find((s) => s.service === service)
   /** A registered service (K9): its keys go to its one host, nowhere else. */
-  const relay = services.find((s) => s.service === service)?.relay ?? null
+  const relay = known?.relay ?? null
+  /**
+   * Where the key goes when the service decides it: a built-in service's own
+   * hosts or a registered service's one host — derived from the service the
+   * form names now (also a built-in name typed under その他), never a field
+   * that keeps what an earlier choice put there. The server refuses anything
+   * else; null = typed hosts (a service the server does not know).
+   */
+  const fixedHosts: readonly string[] | null = relay ? [relay.host] : known?.builtin ? known.defaultHosts : null
   const [displayName, setDisplayName] = useState(editing?.displayName ?? '')
   const [secret, setSecret] = useState('')
-  const [hosts, setHosts] = useState((editing?.destinations.hosts ?? builtin?.defaultHosts ?? []).join('\n'))
+  const [hosts, setHosts] = useState(fixedHosts ? '' : (editing?.destinations.hosts ?? []).join('\n'))
   const [paths, setPaths] = useState((editing?.destinations.pathPrefixes ?? []).join('\n'))
   const [models, setModels] = useState((editing?.destinations.models ?? []).join('\n'))
   const [allDepartments, setAllDepartments] = useState(editing?.audience.allDepartments ?? true)
@@ -82,20 +90,15 @@ export function KeyForm({
   )
   const [allowPrivate, setAllowPrivate] = useState(editing?.allowPrivateContent ?? false)
 
-  const chooseService = (value: string) => {
-    setServiceChoice(value)
-    const s = services.find((x) => x.service === value && (x.builtin || x.relay))
-    if (!editing && s) setHosts(s.defaultHosts.join('\n'))
-  }
-
   // Shown: what is written wrongly. Not shown, but blocking: what is still missing.
   const errors: string[] = []
   if (service && !isValidBrokerServiceName(service)) errors.push('サービス名は半角の小文字・数字・「-」「_」で書いてください')
   const secretCheck = editing || !secret ? null : checkBrokerSecret(secret)
   if (secretCheck && 'error' in secretCheck) errors.push('キーは8文字以上、空白なしで貼り付けてください')
-  const badHosts = invalidHosts(relay ? relay.host : hosts)
+  const hostsText = fixedHosts ? fixedHosts.join('\n') : hosts
+  const badHosts = invalidHosts(hostsText)
   if (badHosts.length) errors.push(`送り先に使えない書き方があります: ${badHosts.join('、')}（「*」・IP アドレス・localhost・https:// やパスは書けません）`)
-  const missing = !service || !displayName.trim() || (!editing && !secret.trim()) || hostsOf(relay ? relay.host : hosts).length === 0
+  const missing = !service || !displayName.trim() || (!editing && !secret.trim()) || hostsOf(hostsText).length === 0
     || (!allDepartments && departmentIds.length === 0)
   const badPaths = invalidPathPrefixes(paths)
   if (badPaths.length) errors.push(`パスに使えない書き方があります: ${badPaths.join('、')}`)
@@ -111,7 +114,7 @@ export function KeyForm({
       service,
       displayName: displayName.trim(),
       secret: secret.trim(),
-      destinations: { hosts: relay ? [relay.host] : hostsOf(hosts), pathPrefixes: pathPrefixesOf(paths), models: modelsOf(models) },
+      destinations: { hosts: fixedHosts ? [...fixedHosts] : hostsOf(hosts), pathPrefixes: pathPrefixesOf(paths), models: modelsOf(models) },
       audience: {
         allDepartments,
         departmentIds: allDepartments ? [] : departmentIds,
@@ -142,7 +145,7 @@ export function KeyForm({
             className="h-9 rounded-md border bg-transparent px-2 text-sm"
             value={serviceChoice}
             disabled={!!editing}
-            onChange={(e) => chooseService(e.target.value)}
+            onChange={(e) => setServiceChoice(e.target.value)}
           >
             {services.map((s) => (
               <option key={s.service} value={s.service}>
@@ -152,7 +155,7 @@ export function KeyForm({
             {!editing && <option value={OTHER}>その他（名前を入力）</option>}
           </select>
           {serviceChoice === OTHER && (
-            <Input aria-label="サービス名" placeholder="例: hubspot" value={customService} onChange={(e) => setCustomService(e.target.value)} />
+            <Input aria-label="サービス名" placeholder="例: my-crm" value={customService} onChange={(e) => setCustomService(e.target.value)} />
           )}
         </div>
         <div className="grid gap-2">
@@ -178,11 +181,13 @@ export function KeyForm({
 
       <fieldset className="grid gap-2">
         <legend className="mb-1 text-sm font-medium">送ってよい宛先</legend>
-        <Textarea aria-label="送ってよいホスト" className="min-h-16 font-mono" readOnly={!!relay} value={relay ? relay.host : hosts} onChange={(e) => setHosts(e.target.value)} />
+        <Textarea aria-label="送ってよいホスト" className="min-h-16 font-mono" readOnly={!!fixedHosts} value={hostsText} onChange={(e) => setHosts(e.target.value)} />
         <p className="text-xs text-muted-foreground">
           {relay
             ? `このサービスの送り先は、登録したときの ${relay.host} に決まっています（「登録したサービス」で変えられます）。`
-            : '1行に1つ、ホスト名をそのまま書きます（例: generativelanguage.googleapis.com）。'}
+            : fixedHosts
+              ? `このサービスの送り先は ${fixedHosts.join('、')} に決まっています。`
+              : '1行に1つ、ホスト名をそのまま書きます（例: api.example.com）。'}
         </p>
         <div className="grid gap-2 sm:grid-cols-2">
           <Textarea aria-label="使ってよいパス" placeholder="パスを絞る場合（例: /v1beta/models/）" className="min-h-16 font-mono" value={paths} onChange={(e) => setPaths(e.target.value)} />

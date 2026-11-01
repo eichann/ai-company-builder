@@ -115,6 +115,14 @@ Deletions are always allowed except where noted (they are how something gets uns
   already recover from. In a scope repo the path is judged as `<scopePath>/<path>`. Why: these
   files steer every teammate's AI in that folder. `CLAUDE.local.md` is protected the same way
   because once committed it loads for everyone.
+- **Type definitions** (`.acb/types/` at the repository root, or a file / symlink named `.acb`
+  there; case-insensitive): owner/admin only, in their own sub-list of `[PROTECTED_CONFIG]`
+  (existing client recovery). For everyone, owner/admin included, a net change to an
+  `.acb/types/<name>.md` that removes or renames something (`compareTypeDefinitions`,
+  `shared/core/record-types.ts`) is refused in a further sub-list, a reason line under each path;
+  only definitions that parse before and after are compared, a read failure rejects them. Not run
+  in private folders' repositories. Why and the rest: `records.md`. Test:
+  `tests/integration/records.test.ts`.
 - **`.personal/`** (`[PERSONAL_PATH]`, everyone incl. owner/admin): adding or modifying a file
   inside a directory named `.personal` at any depth. Exceptions: the `.gitignore` directly inside
   a `.personal/` (the server writes it), and deletions. Test: `personal-path-hook.test.ts`.

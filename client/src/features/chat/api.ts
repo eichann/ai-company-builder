@@ -227,6 +227,63 @@ export function onFileRequestedFromChatWindow(callback: Args<'onFileRequestedFro
   return files.onFileRequestedFromChatWindow(callback)
 }
 
+/**
+ * The person's own actions on it, with their session (never the AI's token):
+ * 「変更前の値を書き戻す」 writes to the outside system (HubSpot); reconciling reads it again.
+ */
+export type PluginOperationOutbound = ElectronPort<'undoPluginOperation' | 'reconcilePluginOperation' | 'recreatePluginOperation'>
+
+/** The approval card: reading a request and the person's own acts on it, with their session (never the AI's). */
+export type ApprovalOutbound = ElectronPort<'getApproval' | 'approveApproval' | 'sendBackApproval' | 'withdrawApproval'>
+
+export function getApproval(companyId: string, approvalId: string, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.getApproval(companyId, approvalId)
+}
+
+export function approveApproval(companyId: string, approvalId: string, hash: string, reason: string, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.approveApproval(companyId, approvalId, hash, reason)
+}
+
+export function sendBackApproval(companyId: string, approvalId: string, reason: string, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.sendBackApproval(companyId, approvalId, reason)
+}
+
+export function withdrawApproval(companyId: string, approvalId: string, outbound: ApprovalOutbound = window.electronAPI) {
+  return outbound.withdrawApproval(companyId, approvalId)
+}
+
+export function undoPluginOperation(companyId: string, pluginId: string, operationId: string, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.undoPluginOperation(companyId, pluginId, operationId, conversationId)
+}
+
+export function reconcilePluginOperation(companyId: string, pluginId: string, operationId: string, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.reconcilePluginOperation(companyId, pluginId, operationId)
+}
+
+/** 「もう一度作る」: without `confirm` the server answers the warning the person then confirms. */
+export function recreatePluginOperation(companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId: string | undefined, outbound: PluginOperationOutbound = window.electronAPI) {
+  return outbound.recreatePluginOperation(companyId, pluginId, operationId, confirm, conversationId)
+}
+
+/** 「どの案件の議事録ですか？」: the person links the minutes to a deal with their session (nothing goes to HubSpot). */
+export type MinutesDealWrites = ElectronPort<'linkMinutesDeal'>
+
+export function linkMinutesDeal(companyId: string, minutesId: string, dealId: string, writes: MinutesDealWrites = window.electronAPI) {
+  return writes.linkMinutesDeal(companyId, minutesId, dealId)
+}
+
+/**
+ * The mail card's own actions (outbound-mail.md): the person edits, sends (with the hash of the
+ * version shown), settles an unknown send or discards — through main, with their session. Sending
+ * reaches outside the company; 「メールを送る許可」 opens Google's page in the member's browser.
+ */
+export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle'>
+
+/** The port the mail card uses (preview pages pass their own). */
+export function mailOutbound(): MailOutbound {
+  return window.electronAPI
+}
+
 /** Asking the company server which services the member may use and their own keys (last 4 only): the chat's "no key" card. */
 export type OwnKeyStatusReads = ElectronPort<'listOwnBrokerKeys'>
 

@@ -286,7 +286,7 @@ describe('generic relay services (K9)', () => {
 
   it('each call is recorded as broker:<service> without key or token; stop-all and caps apply', async () => {
     const token = tokenFor(['crm'])
-    reply = () => ({ status: 200, body: '{"usage":{"input_tokens":999}}' })
+    reply = () => ({ status: 200, body: '{"usage":{"input_tokens":987654321}}' })
     await relay('GET', '/crm/deals', { headers: { authorization: `Token token=${token}` } })
     const row = db.prepare("SELECT * FROM agent_events WHERE company_id = ? AND tool = 'broker:crm' ORDER BY rowid DESC LIMIT 1").get(CO)
     expect(row).toBeTruthy()
@@ -297,7 +297,7 @@ describe('generic relay services (K9)', () => {
     expect(text).not.toContain(FAKE_CRM)
     expect(text).not.toContain(token)
     // A generic service's body is not read for AI token counts.
-    expect(text).not.toContain('999')
+    expect(text).not.toContain('987654321')
 
     expect((await adminCall('gr-owner', 'POST', '/broker/stop-all')).status).toBe(200)
     const stopped = await relay('GET', '/crm/deals', { headers: { authorization: `Token token=${token}` } })

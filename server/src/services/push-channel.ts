@@ -69,6 +69,21 @@ export function createPushChannel(options: PushChannelOptions = {}) {
       }
     },
 
+    /**
+     * Tell these members of this company that something concerning them
+     * changed (kind `records`; the version is only a fresh value). Others —
+     * and every other company — hear nothing.
+     */
+    notify(companyId: string, userIds: string[], event: PushEvent): void {
+      const members = byCompany.get(companyId)
+      if (!members) return
+      for (const userId of new Set(userIds)) {
+        for (const subscriber of [...(members.get(userId) ?? [])]) {
+          try { subscriber.send({ kind: event.kind, version: event.version }) } catch { /* that connection is going away */ }
+        }
+      }
+    },
+
     /** Open connections (diagnostics, tests). */
     count: () => total,
   }

@@ -7,6 +7,7 @@ import {
 import { COMPANY_FILES_SERVER } from '../electron/company-files/tools'
 import { CODEX_CHOICE_SERVER } from '../shared/choice-prompt'
 import { REVIEW_SERVER } from '../electron/review/tools'
+import { RECORDS_SERVER } from '../electron/records/tools'
 import { parseAgentToolEvent } from '../../shared/types/agent-events'
 import { createAgentEventRecorder, formatAgentEvent } from '../electron/services/agent-events'
 
@@ -41,6 +42,7 @@ test('the app MCP server list matches the servers the app starts', () => {
   assert.ok(APP_MCP_SERVERS.includes(CODEX_CHOICE_SERVER))
   assert.ok(APP_MCP_SERVERS.includes('acb_consultations'))
   assert.ok(APP_MCP_SERVERS.includes(REVIEW_SERVER))
+  assert.ok(APP_MCP_SERVERS.includes(RECORDS_SERVER))
 })
 
 test('paths: company-relative NFC; outside only says so, with the kind of secret place', () => {

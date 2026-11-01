@@ -1,7 +1,12 @@
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
+import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
 import { createReviewTools, REVIEW_INSTRUCTIONS } from './review/tools'
 import { REVIEW_PART_TYPE } from '../shared/review-request'
+import { PLUGIN_OPERATION_PART_TYPE, type PluginOperationCard } from '../shared/plugin-operations'
+import { APPROVAL_PART_TYPE, type ApprovalCardRef } from '../shared/approvals'
+import { MINUTES_DEAL_CHOICE_PART_TYPE, type MinutesDealChoiceCard } from '../shared/minutes-app'
+import { MAIL_DRAFT_PART_TYPE, type MailDraftCard } from '../shared/outbound-mail'
 import type { WebResearchTools } from './web-research/tools'
 import { recoverSessionModel } from './agents/recovery'
 import type { HandoffRecovery } from '../shared/handoff'
@@ -46,6 +51,8 @@ export interface ChatServerConfig extends AgentHost {
    * and the system-prompt paragraph that tells the AI when to use them.
    */
   createCompanyFiles?: (companyId: string, companyRoot: string | undefined, signal: AbortSignal) => { tools: CompanyFileTools; instructions: string } | undefined
+  /** The company map's typed tools for one turn (records/tools.ts), or null when the company map is off / unreachable. */
+  createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onDealChoice?: (card: MinutesDealChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
    * 「Web で調べる」 for this turn (web-research/tools.ts): the member's own
    * agent as a separate Web reader, limited per conversation. Given only to
@@ -295,6 +302,21 @@ export async function startChatServer(config: ChatServerConfig) {
       ? createReviewTools(companyRootPath || workingDirectory, record => injector.push({ type: REVIEW_PART_TYPE, id: `review-${record.id}`, data: record }))
       : undefined
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
+    // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
+    // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
+    const records = connection.ownsConversation && can.recordsMcp && companyId
+      ? await Promise.resolve(config.createRecordTools?.({
+        companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions,
+        onOperationCard: card => injector.push({ type: PLUGIN_OPERATION_PART_TYPE, id: `plugin-op-${card.id}`, data: card }),
+        // An approval request made or shown: the app's own card (approvals.ts), never the AI's text.
+        onApprovalCard: card => injector.push({ type: APPROVAL_PART_TYPE, id: `approval-${card.id}`, data: card }),
+        // 「どの案件の議事録ですか？」: the app's own card (minutes-app.ts), never the AI's text.
+        onDealChoice: card => injector.push({ type: MINUTES_DEAL_CHOICE_PART_TYPE, id: `minutes-deal-${card.id}`, data: card }),
+        // A mail draft (mail_draft_*) becomes the app-drawn card with 「確かめて送る」 (outbound-mail.ts).
+        onMailDraft: card => injector.push({ type: MAIL_DRAFT_PART_TYPE, id: `mail-draft-${card.id}`, data: card }),
+      }, c.req.raw.signal)).catch(() => null) ?? undefined
+      : undefined
+    if (records) finalSystemPrompt = (finalSystemPrompt || '') + records.instructions
     const askUser = connection.ownsConversation && can.choicePrompts
       ? createAskUser(config.requestInteraction, appSessionId, authMode, injector) : undefined
     // Steering and next-prompt suggestions ride on the running turn.
@@ -336,7 +358,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })
@@ -439,6 +461,8 @@ export async function startChatServer(config: ChatServerConfig) {
       running.signal.removeEventListener('abort', abortRelease)
       running.end()
       turn?.end(outcome)
+      // The turn's record token ends with it.
+      void records?.close()
       config.onChatActivity?.(activityToken, false)
     }
     function abortRelease() { release('failed') }

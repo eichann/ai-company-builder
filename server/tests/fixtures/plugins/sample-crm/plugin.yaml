@@ -1,0 +1,73 @@
+# A fictional CRM shaped like HubSpot, for the public repository's tests
+# (owner decision §6-6: the real HubSpot package lives in acb-plugins).
+# A connector only: sample-crm-sales uses it.
+id: sample-crm
+label: 見本の CRM
+version: 0.1.0
+kind: official
+contract: 1
+service: sample-crm
+base_url: https://api.sample-crm.example
+account_info: { method: GET, path: "/account-info/v3/details" }
+scopes:
+  - crm.objects.deals.read
+  - crm.objects.deals.write
+operation_scopes:
+  add_note: [crm.objects.notes.write]
+  log_meeting: [crm.objects.deals.write]
+
+objects:
+  deal:
+    auto_properties: [stage_probability]
+    get:    { method: GET,   path: "/crm/objects/2026-03/deals/{id}" }
+    search: { method: POST,  path: "/crm/objects/2026-03/deals/search" }
+    update: { method: PATCH, path: "/crm/objects/2026-03/deals/{id}" }
+    create: { method: POST,  path: "/crm/objects/2026-03/deals" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/deals/{id}" }
+    properties_list: { method: GET, path: "/crm/properties/2026-03/deals" }
+    stages_list:     { method: GET, path: "/crm/pipelines/2026-03/deals" }
+  meeting:
+    create:  { method: POST,   path: "/crm/objects/2026-03/meetings" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/meetings/{id}" }
+  note:
+    create:  { method: POST,   path: "/crm/objects/2026-03/notes" }
+    archive: { method: DELETE, path: "/crm/objects/2026-03/notes/{id}" }
+
+operations:
+  refresh_deal:
+    label: 最新を取る
+    kind: read
+    object: deal
+  update_deal:
+    label: 取引の項目を書き戻す
+    kind: update
+    object: deal
+    reaches: internal
+    undo: restore_previous
+  add_note:
+    label: 取引にメモを残す
+    kind: create
+    object: note
+    attach_to: deal
+    reaches: internal
+    undo: archive
+    content: { body: hs_note_body, at: hs_timestamp }
+    association_type: 214
+    correlation_property: acb_operation_id
+  log_meeting:
+    label: 商談の記録を残す
+    kind: create
+    object: meeting
+    attach_to: deal
+    reaches: internal
+    undo: archive
+    content: { title: hs_meeting_title, body: hs_meeting_body, at: hs_timestamp }
+    association_type: 212
+    correlation_property: acb_operation_id
+  create_deal:
+    label: 取引を新しく作る
+    kind: create
+    object: deal
+    reaches: internal
+    undo: archive
+    correlation_property: acb_operation_id

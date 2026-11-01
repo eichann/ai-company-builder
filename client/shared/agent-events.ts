@@ -51,11 +51,11 @@ export type TurnStopReason = 'stopped-by-admin' | 'app-quit'
 
 /**
  * MCP servers the app itself provides (acb_consultations, acb_company_files,
- * acb_review, acb_ask): category 'app-tool'. Pinned against the electron constants in
+ * acb_review, acb_ask, acb_records): category 'app-tool'. Pinned against the electron constants in
  * tests/agent-events.test.ts. The app's web research (`acb_web`) is not one
  * of them: it reaches the web, so it is 'web'.
  */
-export const APP_MCP_SERVERS: readonly string[] = ['acb_consultations', 'acb_company_files', REVIEW_SERVER, CODEX_CHOICE_SERVER]
+export const APP_MCP_SERVERS: readonly string[] = ['acb_consultations', 'acb_company_files', REVIEW_SERVER, CODEX_CHOICE_SERVER, 'acb_records']
 
 /**
  * Tool names → category. Claude Code's own names; Codex calls are reported

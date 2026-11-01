@@ -86,10 +86,15 @@ export interface AgentStopRequest {
 // other kind, any extra field, and anything larger than PUSH_EVENT_MAX_BYTES.
 // ----------------------------------------------------------------------------
 
-export const PUSH_EVENT_KINDS = ['policy'] as const
+export const PUSH_EVENT_KINDS = ['policy', 'records'] as const
 export type PushEventKind = typeof PUSH_EVENT_KINDS[number]
 
-/** `policy`: the member's AI policy (stop + sandbox) is now at `version`; refetch it if yours differs. */
+/**
+ * `policy`: the member's AI policy (stop + sandbox) is now at `version`; refetch it if yours differs.
+ * `records`: something of the company map that concerns this member changed (an action named
+ * them, or it is now their turn — `.claude/rules/records.md`); refetch 「あなたの番」. `version`
+ * is only a fresh value: it says nothing about what changed.
+ */
 export interface PushEvent {
   kind: PushEventKind
   version: string

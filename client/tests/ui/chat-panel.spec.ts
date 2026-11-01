@@ -386,6 +386,42 @@ test.describe('a long restored conversation', () => {
     await chat(page, c => c.finish())
   })
 
+  // Staging, milestone 3: a HubSpot card arriving live at the end of a long
+  // consultation collapsed the whole window (only the input left at the top).
+  // The card's screen-reader-only 「から」 is absolutely positioned; with no
+  // positioned ancestor inside the message list it was laid out against the
+  // page at the list's unscrolled position (~10 000 px down), and the screen
+  // was painted shifted after it. Everything in the list stays inside it.
+  test('a card with screen-reader-only text that arrives live stays inside the message list', async ({ page }) => {
+    await openPreview(page, 'chat-header', { history: 'long', turn: 'manual' })
+    await expect(userQuestions(page).last()).toHaveText(/^質問120: /, { timeout: 15_000 })
+    await send(page, '確度を A にして')
+    await turnStarted(page)
+    await chat(page, c => {
+      c.send({ type: 'data-plugin-operation', id: 'plugin-op-c1', data: {
+        id: 'c1', companyId: 'preview-company', conversationId: null, pluginId: 'hubspot', systemLabel: 'HubSpot',
+        recordId: 'deal-1', recordTitle: '株式会社サンプル 研修導入', outcome: 'applied', message: 'HubSpot を更新しました。',
+        operationId: 'op-1', fields: [{ field: 'confidence', label: '確度', before: 'b', after: 'a' }],
+        reason: '商談が前向きだったため', byAi: true, undoable: true, at: '2026-11-01T00:00:00.000Z',
+      } })
+    })
+    const card = page.getByRole('group', { name: 'HubSpot を更新しました' }).locator('visible=true')
+    await expect(card).toContainText('株式会社サンプル 研修導入')
+    // The AI's answer follows the card, as in a real turn; the list follows the bottom.
+    await chat(page, c => { c.send({ type: 'text-start', id: 't1' }); c.text('t1', '更新しました。'); c.send({ type: 'text-end', id: 't1' }); c.finish() })
+    await expect(page.getByText('更新しました。', { exact: true }).locator('visible=true')).toBeVisible()
+    // The end of the turn (status, suggestion request) lays the list out again: measure after it.
+    await expect.poll(() => paths(page)).toContain('/api/prompt-suggestion/long-history')
+    await page.waitForTimeout(500)
+    const offset = await card.evaluate(el => {
+      const hidden = [...el.querySelectorAll('span')].find(span => span.textContent === 'から')!
+      return hidden.getBoundingClientRect().top - el.getBoundingClientRect().top
+    })
+    const height = (await card.boundingBox())!.height
+    expect(offset, 'the hidden text is laid out inside its card').toBeGreaterThanOrEqual(0)
+    expect(offset, 'the hidden text is laid out inside its card').toBeLessThanOrEqual(height)
+  })
+
   test('both restored tabs are listed; switching keeps each tab\'s draft, keeps the other tab mounted and reopens at the latest message', async ({ page }) => {
     await openPreview(page, 'chat-header', { history: 'long' })
     const sidebar = page.getByRole('complementary', { name: 'AIへの相談' })

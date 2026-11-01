@@ -4,6 +4,7 @@
 // The company .env holds secret values, so it has ports of its own, and even
 // those never read a value back: only per name whether it is set.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
+import type { GoogleFeature } from '../../../shared/google'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
@@ -94,6 +95,23 @@ export function saveOwnKey(companyId: string, service: string, secret: string, d
 
 export function deleteOwnKey(companyId: string, service: string, outbound: OwnKeyOutbound = window.electronAPI) {
   return outbound.deleteOwnBrokerKey(companyId, service)
+}
+
+/** Asking the company server about the member's Google permission (no token ever reaches the app). */
+export type GoogleReads = ElectronPort<'getGoogleStatus'>
+/** 「Google で許可」 (main opens Google's page in the browser) and 「許可をやめる」. */
+export type GoogleOutbound = ElectronPort<'connectGoogle' | 'disconnectGoogle'>
+
+export function getGoogleStatus(companyId: string, reads: GoogleReads = window.electronAPI) {
+  return reads.getGoogleStatus(companyId)
+}
+
+export function connectGoogle(companyId: string, features: GoogleFeature[], outbound: GoogleOutbound = window.electronAPI) {
+  return outbound.connectGoogle(companyId, features)
+}
+
+export function disconnectGoogle(companyId: string, outbound: GoogleOutbound = window.electronAPI) {
+  return outbound.disconnectGoogle(companyId)
 }
 
 /** Sends the .env key `name` to the server as one's own key; the .env loses it only once the server kept it. */

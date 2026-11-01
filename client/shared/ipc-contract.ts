@@ -33,6 +33,11 @@ import type { EnvVarStatus } from './env-file'
 import type { AutoSyncMode, AutoSyncRendererState, AutoSyncResult } from './auto-sync'
 import type { CreatePrivateFolderRequest, CreatePrivateFolderResult, MyPrivateFolder, PrivateFolderCreateContext } from './private-folder-ui'
 import type { OwnKeyMoveResult, OwnKeysResult } from './broker-keys'
+import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './google'
+import type { PluginOperationResult } from './plugin-operations'
+import type { ApprovalResult } from './approvals'
+import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -447,6 +452,42 @@ export interface IpcInvokeChannels {
   'brokerKeys:delete': { args: [companyId: string, service: string]; result: OwnKeysResult }
   /** Moves a built-in service's key from the company folder's .env to the server (removed locally only after the server kept it). */
   'brokerKeys:moveFromEnv': { args: [companyId: string, rootPath: string, name: string]; result: OwnKeyMoveResult }
+  // The Google connection (「Google で許可」): the app holds no token; the sign-in URL stays in main.
+  'google:status': { args: [companyId: string]; result: GoogleStatusResult }
+  /** Opens Google's sign-in page in the system browser (the URL never comes back). */
+  'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
+  /** 「許可をやめる」 (revoked at Google too). */
+  'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
+  // The chat card of an outside system's write (HubSpot): the person's own actions, with their session.
+  /** 「変更前の値を書き戻す」 (a person's action; the consultation is informational provenance). */
+  'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
+  'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
+  // The chat's approval card (承認のお願い): read and act with the member's session (no AI route approves).
+  'approvals:get': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「承認」: the reason and the hash of the content the card shows. */
+  'approvals:approve': { args: [companyId: string, approvalId: string, hash: string, reason: string]; result: ApprovalResult }
+  'approvals:sendBack': { args: [companyId: string, approvalId: string, reason: string]; result: ApprovalResult }
+  'approvals:withdraw': { args: [companyId: string, approvalId: string]; result: ApprovalResult }
+  /** 「もう一度作る」 for a create HubSpot did not show (a person only); without `confirm` the server answers its warning. */
+  'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
+  // 「議事録が届きました」 (minutes): checked with the member's session in main; the app never holds minutes text.
+  /** The company the member works in now (null: none); starts the 10-minute check while Google may read minutes. */
+  'minutes:watch': { args: [companyId: string | null]; result: void }
+  /** 「議事録を確かめる」. */
+  'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
+  'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
+  /** 「今は読まない」. */
+  'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
+  /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
+  'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
+  'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+  'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
+  'outboundMail:update': { args: [companyId: string, messageId: string, edit: MailDraftEdit, conversationId?: string]; result: OutboundMailResult }
+  'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
+  'outboundMail:send': { args: [companyId: string, messageId: string, hash: string]; result: OutboundMailResult }
+  'outboundMail:resolve': { args: [companyId: string, messageId: string, sent: boolean]; result: OutboundMailResult }
+  'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'git:preview': { args: [repoPath: string]; result: GitPreviewResult }
   'git:generateSummary': { args: [repoPath: string]; result: { success: boolean; summary: string | null } }
   'git:revertFile': { args: [repoPath: string, filePath: string, fileStatus: GitFileStatus]; result: SimpleResult }
@@ -550,6 +591,8 @@ export interface IpcEventChannels {
   // One batch per ~100 ms from the company watcher.
   'fs:changes': [changes: FileChangeEvent[]]
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
+  /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
+  'minutes:changed': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -711,6 +754,33 @@ export interface ElectronAPI {
   saveOwnBrokerKey: Invoke<'brokerKeys:save'>
   deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
   moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
+  // The Google connection (設定 → Google): the member's view only, never a token or the sign-in URL.
+  getGoogleStatus: Invoke<'google:status'>
+  connectGoogle: Invoke<'google:connect'>
+  disconnectGoogle: Invoke<'google:disconnect'>
+  // The chat card of an outside system's write: the person's own actions (never the AI's).
+  undoPluginOperation: Invoke<'pluginOperations:undo'>
+  reconcilePluginOperation: Invoke<'pluginOperations:reconcile'>
+  // The chat's approval card: the person's own acts (never the AI's).
+  getApproval: Invoke<'approvals:get'>
+  approveApproval: Invoke<'approvals:approve'>
+  sendBackApproval: Invoke<'approvals:sendBack'>
+  withdrawApproval: Invoke<'approvals:withdraw'>
+  recreatePluginOperation: Invoke<'pluginOperations:recreate'>
+  // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the deal choice.
+  watchMinutes: Invoke<'minutes:watch'>
+  checkMinutes: Invoke<'minutes:check'>
+  getMinutesNotices: Invoke<'minutes:notices'>
+  skipMinutes: Invoke<'minutes:skip'>
+  linkMinutesDeal: Invoke<'minutes:linkDeal'>
+  onMinutesChanged: Subscribe<'minutes:changed'>
+  getOutboundMail: Invoke<'outboundMail:get'>
+  getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
+  updateOutboundMail: Invoke<'outboundMail:update'>
+  addOutboundMailRecipient: Invoke<'outboundMail:addRecipient'>
+  sendOutboundMail: Invoke<'outboundMail:send'>
+  resolveOutboundMail: Invoke<'outboundMail:resolve'>
+  discardOutboundMail: Invoke<'outboundMail:discard'>
   gitPreview: Invoke<'git:preview'>
   gitGenerateSummary: Invoke<'git:generateSummary'>
   gitRevertFile: Invoke<'git:revertFile'>

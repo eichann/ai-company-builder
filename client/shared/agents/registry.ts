@@ -63,6 +63,14 @@ export interface AgentCapabilities {
   readonly imageInput: boolean
   /** Read-only company files over MCP (company-files/tools.ts). */
   readonly companyFilesMcp: boolean
+  /** The company map's tools over MCP (records/tools.ts): look up records, 「あなたの番」. */
+  readonly recordsMcp: boolean
+  /**
+   * The company map's state-changing tools (run a type's actions, create a
+   * task). Claude Code only for now (owner decision 0.3-3: Codex reads and
+   * writes text only). The server records them as the AI's (records.md).
+   */
+  readonly recordActions: boolean
   /** Consultation reference tools (consultations/tools.ts). */
   readonly references: boolean
   /** Writes into read-only / not-downloaded folders are refused up front (write-guard.ts). */
@@ -195,6 +203,8 @@ const CLAUDE_CODE: AgentDescriptor<ClaudeModelId> = {
     rateLimits: true,
     imageInput: true,
     companyFilesMcp: true,
+    recordsMcp: true,
+    recordActions: true,
     references: true,
     writeGuard: true,
     privateReadGuard: true,
@@ -264,6 +274,8 @@ const CODEX: AgentDescriptor = {
     rateLimits: true,
     imageInput: true,
     companyFilesMcp: true,
+    recordsMcp: true,
+    recordActions: false,
     references: true,
     writeGuard: false,
     privateReadGuard: false,
@@ -304,6 +316,8 @@ const API_KEY: AgentDescriptor = {
     rateLimits: false,
     imageInput: true,
     companyFilesMcp: false,
+    recordsMcp: false,
+    recordActions: false,
     references: false,
     writeGuard: true,
     privateReadGuard: false,

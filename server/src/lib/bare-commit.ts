@@ -96,6 +96,56 @@ async function revParse(bareRepo: string, ref: string, timeoutMs: number): Promi
 }
 
 /**
+ * Replace (or add) the file at `path` (segments under the root) and return
+ * the new root entries: the trees along the path are rewritten, every other
+ * subtree is reused as it is.
+ */
+async function withFile(bareRepo: string, entries: TreeEntry[], segments: string[], blob: string, mode: string, timeoutMs: number): Promise<TreeEntry[]> {
+  const [name, ...rest] = segments
+  const others = entries.filter(e => e.name !== name)
+  if (rest.length === 0) return [...others, { mode, type: 'blob', oid: blob, name }]
+  const dir = entries.find(e => e.name === name && e.type === 'tree')
+  const childEntries = dir ? await readTree(bareRepo, dir.oid, timeoutMs) : []
+  const child = await writeTree(bareRepo, await withFile(bareRepo, childEntries, rest, blob, mode, timeoutMs), timeoutMs)
+  return [...others, { mode: '040000', type: 'tree', oid: child, name }]
+}
+
+/**
+ * Edit one text file of the shared branch (the state engine's history line,
+ * `.claude/rules/records.md`) and publish it as one commit, like
+ * commitRootEdit: pushed to itself through the push checker, redone on a new
+ * tip when a member pushed in between. `edit` gets the current text (null:
+ * no such file) and returns the new one, or null to change nothing. Returns
+ * whether a commit was made.
+ */
+export async function commitFileEdit(
+  bareRepo: string,
+  path: string,
+  options: CommitRootEditOptions,
+  edit: (current: string | null) => string | null,
+): Promise<boolean> {
+  const segments = path.split('/').filter(Boolean)
+  if (segments.length === 0 || segments.some(s => s === '.' || s === '..')) throw new Error('commitFileEdit: bad path')
+  const local = options.timeouts.local
+  return commitRootEdit(bareRepo, options, async (entries) => {
+    let level = entries
+    let file: TreeEntry | undefined
+    for (let i = 0; i < segments.length; i++) {
+      const found = level.find(e => e.name === segments[i])
+      if (i === segments.length - 1) { file = found?.type === 'blob' ? found : undefined; break }
+      if (!found || found.type !== 'tree') break
+      level = await readTree(bareRepo, found.oid, local)
+    }
+    if (file && file.mode === '120000') return { result: false } // a symlink: never written through
+    const current = file ? await gitAsync(['-C', bareRepo, 'cat-file', 'blob', file.oid], { timeoutMs: local }) : null
+    const next = edit(current)
+    if (next === null || next === current) return { result: false }
+    const blob = await writeBlob(bareRepo, next, local)
+    return { entries: await withFile(bareRepo, entries, segments, blob, file?.mode ?? '100644', local), result: true }
+  })
+}
+
+/**
  * Edit the root tree of the shared branch (main, or master in a repository
  * from before the name was pinned; main in an empty repository) and publish
  * the result as one commit whose parent is the tip the edit saw. `edit` is

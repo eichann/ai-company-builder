@@ -482,6 +482,8 @@ function trackActivity(
           // Deferred (setImmediate) and asynchronous: never delays the push.
           const member = services.access.memberOf(companyId, userId)
           if (member) services.companyScopes.scheduleOrphanCheck(member)
+          // The company map (records.md): index what the push changed, off the request.
+          if (member) services.records.afterPush(member)
         } else {
           // Rejected (or unproven): record any pre-receive hook sections it
           // printed. Deferred and non-throwing — see services/push-rejections.ts.
