@@ -60,7 +60,8 @@ async function folder(path: string, what: string): Promise<string[]> {
   return (await readdir(path)).sort()
 }
 
-async function readPackage(root: string, dir: string): Promise<PluginPackageFiles> {
+/** A package folder read with every rule; `bytes` is every file read (`signature.yaml` included). */
+async function readPackage(root: string, dir: string): Promise<{ package: PluginPackageFiles; bytes: Array<{ path: string; bytes: Uint8Array }> }> {
   const base = join(root, dir)
   /** v1's files (path, text), in the order v1 always hashed them. */
   const v1: Array<[string, string]> = []
@@ -129,8 +130,11 @@ async function readPackage(root: string, dir: string): Promise<PluginPackageFile
   const hash = createHash('sha256')
   for (const [path, t] of v1) hash.update(path).update('\0').update(t).update('\0')
   return {
-    dir, manifest, types, mapping, steps, ui, signature,
-    fingerprint: hash.digest('hex'), fingerprintV2: pluginFingerprintV2(all, sha256Hex),
+    package: {
+      dir, manifest, types, mapping, steps, ui, signature,
+      fingerprint: hash.digest('hex'), fingerprintV2: pluginFingerprintV2(all, sha256Hex),
+    },
+    bytes: all,
   }
 }
 
@@ -149,7 +153,7 @@ export function diskPluginShelf(root: string | null): PluginShelfSource {
           const st = await lstat(join(root, dir))
           if (!st.isDirectory()) throw new ShelfProblem('not a package folder')
           if (!PACKAGE_DIR_RE.test(dir)) throw new ShelfProblem('the folder name must be <id>@<version>')
-          packages.push(await readPackage(root, dir))
+          packages.push((await readPackage(root, dir)).package)
         } catch (err) {
           problems.push({ dir, reason: err instanceof ShelfProblem ? err.message : 'the package cannot be read' })
         }
@@ -164,6 +168,17 @@ export function diskPluginShelf(root: string | null): PluginShelfSource {
       } catch (err) {
         // No file: nothing stopped. A file that exists but cannot be read stops everything (fail closed).
         return (err as NodeJS.ErrnoException).code === 'ENOENT' ? [] : ['*']
+      }
+    },
+    async files(dir) {
+      if (!root || !PACKAGE_DIR_RE.test(dir)) return null
+      try {
+        const st = await lstat(join(root, dir))
+        if (!st.isDirectory()) return null
+        const read = await readPackage(root, dir)
+        return { files: read.bytes, fingerprintV2: read.package.fingerprintV2 }
+      } catch {
+        return null
       }
     },
   }

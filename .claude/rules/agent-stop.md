@@ -43,7 +43,7 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   releasing a released stop changes nothing). Every stop / release announces on the push channel.
 - `GET /me/agent-policy` (`routes/agent-sandbox.ts`, `services/agent-policy.ts`) now carries
   `stop: { all, tools }`, merged for the caller (everyone's stops and their own); the version
-  (ETag) hashes sandbox + stop, so a stop changes it. Sandbox changes announce too.
+  (ETag) hashes sandbox + stop (+ `plugins`, plan C2), so a stop changes it. Sandbox and plugin changes announce too.
 - **The key broker** (owner decision 2026-10-31): while a company-wide stop of the whole AI is
   in force (`user_id` NULL, `tool` NULL; `agentStops.companyStopped`), the relay refuses every
   call of that company server-side — so old or modified apps cannot get around it — with 403

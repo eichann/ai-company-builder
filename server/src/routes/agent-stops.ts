@@ -94,6 +94,7 @@ agentStopsRoute.get('/me/events', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   noteStopSupport(c, member)
+  const current = (await agentPolicy.policyFor(member)).version
 
   const encoder = new TextEncoder()
   let controller: ReadableStreamDefaultController<Uint8Array> | undefined
@@ -132,7 +133,7 @@ agentStopsRoute.get('/me/events', async (c) => {
   })
   // The current version first: an app that missed an announcement while
   // disconnected learns it at once.
-  write(frame({ kind: 'policy', version: agentPolicy.policyFor(member).version }))
+  write(frame({ kind: 'policy', version: current }))
   timers.heartbeat = setInterval(() => {
     // A member removed from the company stops hearing anything.
     if (!access.memberOf(member.companyId, member.userId)) { end(); return }

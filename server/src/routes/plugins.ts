@@ -16,6 +16,9 @@
  *   POST /plugins/:pluginId/import             bring the outside objects into the company map (one run per company)
  *   POST /plugins/:pluginId/connection/renew   the outside account changed on purpose: a new connection
  *
+ * Handing packages to the app (plan C2; any member, services/plugin-distribution.ts):
+ *   GET  /plugins/:pluginId/package/:version   a version the member's agent policy lists now: its files (base64)
+ *
  * Typed operations (P6; any member — the record, the operation's `who` and the
  * field policies decide; the member's AI uses routes/records-ai.ts):
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   { expectedVersion, fields, note?, basis?, conversationId?, proposedBy? } / {}
@@ -38,7 +41,7 @@ import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
 
 export const pluginsRoute = new Hono()
-const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals } = services
+const { access, plugins, pluginImport, pluginOperations, pluginMappingCheck, approvals, agentPolicy, pluginDistribution } = services
 /** A call with the member's session is the member's own (their AI calls with a record token: records-ai.ts). */
 const HUMAN = { kind: 'human' } as const
 
@@ -85,13 +88,25 @@ pluginsRoute.get('/plugins/:pluginId', async (c) => {
 pluginsRoute.put('/plugins/:pluginId', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await plugins.install(member, c.req.param('pluginId'), await jsonBody(c)))
+  const result = await plugins.install(member, c.req.param('pluginId'), await jsonBody(c))
+  // Another version changes what the members' apps keep (their agent policy, plan C2).
+  if (result.ok) agentPolicy.announce(member.companyId)
+  return answer(c, result)
 })
 
 pluginsRoute.put('/plugins/:pluginId/enabled', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, await plugins.setEnabled(member, c.req.param('pluginId'), await jsonBody(c)))
+  const result = await plugins.setEnabled(member, c.req.param('pluginId'), await jsonBody(c))
+  if (result.ok) agentPolicy.announce(member.companyId)
+  return answer(c, result)
+})
+
+// Any member: a package their app keeps (plan C2; only a version their agent policy lists now).
+pluginsRoute.get('/plugins/:pluginId/package/:version', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await pluginDistribution.packageFor(member, c.req.param('pluginId'), c.req.param('version')))
 })
 
 pluginsRoute.put('/plugins/:pluginId/read-scope', async (c) => {

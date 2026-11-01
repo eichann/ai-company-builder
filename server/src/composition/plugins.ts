@@ -9,12 +9,21 @@
  * call line in composition.ts.
  */
 import type Database from 'better-sqlite3'
+import type { CompanyDataSource } from '../ports/company-data'
+import type { AgentPolicyService } from '../services/agent-policy'
+import { createPluginDistribution } from '../services/plugin-distribution'
+import type { PluginShelf } from '../services/plugin-shelf'
 
 export interface PluginsLaneDeps {
   conn: Database.Database
+  companyData: CompanyDataSource
+  pluginShelf: PluginShelf
+  agentPolicy: Pick<AgentPolicyService, 'usePlugins'>
 }
 
 export function wirePluginsLane(deps: PluginsLaneDeps) {
-  void deps // nothing wired yet
-  return {}
+  // C2 「配る道」: the packages the members' apps keep, listed in their agent policy.
+  const pluginDistribution = createPluginDistribution({ companyData: deps.companyData, shelf: deps.pluginShelf })
+  deps.agentPolicy.usePlugins(pluginDistribution)
+  return { pluginDistribution }
 }

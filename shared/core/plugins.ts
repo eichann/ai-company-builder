@@ -94,3 +94,5 @@ export {
 } from './plugin-mapping'
 export { approverFor, effectiveFieldPolicy, effectiveOperationPolicy } from './plugin-policies'
 export { acbToExternal, externalToAcb, type AcbValue, type ExternalProperties } from './plugin-values'
+export { companyExtensionConflicts } from './plugin-type-upgrade'
+export { PLUGIN_PACKAGE_DIR_RE, isPluginPackagePath } from './plugin-package-paths'

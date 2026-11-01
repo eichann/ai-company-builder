@@ -69,7 +69,7 @@ agentSandboxRoute.get('/me/agent-policy', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   noteStopSupport(c, member)
-  const data = agentPolicy.policyFor(member)
+  const data = await agentPolicy.policyFor(member)
   const etag = `"${data.version}"`
   c.header('ETag', etag)
   c.header('Cache-Control', 'private, no-cache')
