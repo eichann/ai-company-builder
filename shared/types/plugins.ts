@@ -4,7 +4,7 @@
  * versions and history. Owner/admin only (the admin page 「つなぎ先」, P8).
  * No answer ever holds a key value: an install names the key by id.
  */
-import type { FieldPolicy, OperationKind, OperationReach, PluginKind, PluginRole, UndoKind } from '../core/plugins'
+import type { FieldPolicy, OperationKind, OperationReach, PluginKind, PluginRole, PluginStepProcedurePin, PluginStepStart, UndoKind } from '../core/plugins'
 
 /** Why a company's plugin cannot run now (each kill switch and each missing piece). */
 export type PluginProblem =
@@ -279,6 +279,49 @@ export interface DistributedPlugin {
   /** Fingerprint v2 (shared/core/plugin-fingerprint.ts): what the app checks the files against. */
   fingerprint: string
   use: 'current' | 'pinned'
+}
+
+/**
+ * A business plugin's step as it applies to a record (plan C5,
+ * plugin-steps.md): the step's ceiling — its `tools` and `connector_roles`,
+ * never more whichever procedure runs.
+ */
+export interface PluginStepView {
+  pluginId: string
+  step: string
+  label: string
+  start: PluginStepStart
+  /** The plugin procedure's file in the package (`steps/<name>.md`), of the version the work runs. */
+  procedure: string
+  tools: string[]
+  connectorRoles: string[]
+}
+
+/** GET …/me/plugin-steps/records/:recordId: a step at the record's state, with the work's pin (null before its first run). */
+export interface PluginStepOnRecord extends PluginStepView {
+  pin: PluginStepProcedurePin | null
+}
+
+/** GET …/me/plugin-step-turns: one record waiting at a `start: ai_turn` step (the member's 「AI の番」). */
+export interface PluginStepTurn extends PluginStepView {
+  recordId: string
+  /** The record's version now. */
+  version: number
+}
+
+/**
+ * POST …/me/plugin-steps/records/:recordId/:pluginId/:step/start (a
+ * `start: person` step): the work's pinned procedure and the step's ceiling.
+ */
+export interface PluginStepStartView extends PluginStepView {
+  recordId: string
+  version: number
+  pin: PluginStepProcedurePin
+}
+
+/** GET / PUT …/plugins/:pluginId/step-skills (owner/admin): the company's Skill per overridable step. */
+export interface PluginStepSkillsView {
+  steps: Array<{ step: string; label: string; overridable: boolean; skill: string | null }>
 }
 
 /**

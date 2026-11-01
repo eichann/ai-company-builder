@@ -14,6 +14,7 @@
  *
  * Pure (shared/core): the server decides with it, the app shows its words.
  */
+import type { PluginStepProcedurePin } from './plugin-declaration'
 
 /** How long a claim lasts without renewal (the app renews about every minute while running). */
 export const AI_RUN_CLAIM_TTL_MS = 5 * 60_000
@@ -86,12 +87,33 @@ export const DEVICE_ID_RE = /^[A-Za-z0-9_-]{8,100}$/
  * app build that ran it (`X-ACB-Client-Version`: version + commit — the step's definition and
  * first message are that build's code); `plugins` the business / connector plugins turned on
  * for the company then, with their versions (read by the server, not reported by the app).
- * No company Skill: an unattended step loads none (ai-turns.md, `settingSources: []`).
+ * A business plugin's step (`<pluginId>__<step>`, plan C5) also carries `pin`: what the work
+ * is pinned to at its first run — the plugin's procedure at a version + fingerprint, or the
+ * company Skill used instead with its tree id (plugin-steps.md "Pinned per work"). Read by the
+ * server at the claim, never taken from the app. Other steps load no company Skill.
  */
 export interface AiRunProcedure {
   step: string
   app: string | null
   plugins: Array<{ id: string; version: string }>
+  /** A business plugin's step: the procedure the work is pinned to. Absent on other steps. */
+  pin?: PluginStepProcedurePin
+}
+
+const HEX_ID_RE = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/
+
+/** A stored pin read back (null when not one). */
+export function parseProcedurePin(v: unknown): PluginStepProcedurePin | null {
+  if (typeof v !== 'object' || v === null) return null
+  const p = v as Record<string, unknown>
+  const str = (x: unknown, max: number) => typeof x === 'string' && x.length > 0 && x.length <= max
+  if (p.source === 'plugin' && str(p.pluginId, 40) && str(p.version, 20) && str(p.fingerprint, 100)) {
+    return { source: 'plugin', pluginId: p.pluginId as string, version: p.version as string, fingerprint: p.fingerprint as string }
+  }
+  if (p.source === 'company_skill' && str(p.skill, 64) && typeof p.fingerprint === 'string' && HEX_ID_RE.test(p.fingerprint)) {
+    return { source: 'company_skill', skill: p.skill as string, fingerprint: p.fingerprint }
+  }
+  return null
 }
 
 /** A stored procedure read back (null when absent or not one). */
@@ -100,10 +122,12 @@ export function parseAiRunProcedure(raw: string | null | undefined): AiRunProced
   try {
     const v = JSON.parse(raw) as Partial<AiRunProcedure>
     if (typeof v?.step !== 'string' || !Array.isArray(v.plugins)) return null
+    const pin = parseProcedurePin(v.pin)
     return {
       step: v.step,
       app: typeof v.app === 'string' ? v.app : null,
       plugins: v.plugins.filter((p): p is { id: string; version: string } => typeof p?.id === 'string' && typeof p?.version === 'string'),
+      ...(pin ? { pin } : {}),
     }
   } catch {
     return null

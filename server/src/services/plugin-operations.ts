@@ -319,6 +319,7 @@ export function createPluginOperationService(deps: PluginOperationDeps) {
     executeApproved: approvals.executeApproved,
     /** Business roles in an operation's `who` (plan C3): bound once by the plugins lane. */
     useRoles: checks.useRoles,
+    usePinnedSteps: checks.usePinnedSteps,
   }
   return service
 }

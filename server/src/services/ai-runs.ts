@@ -27,6 +27,7 @@ import {
   DEVICE_ID_RE, FAILURE_CODE_RE, OPERATION_KEY_RE, failureDestination, parseAiRunProcedure, retryDelayMs, type AiRunFailureClass, type AiRunProcedure,
 } from '../../shared/core/ai-runs'
 import { parseClientVersion } from '../../shared/core/client-version'
+import type { PluginStepProcedurePin } from '../../shared/core/plugins'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { AiRunView } from '../../shared/types/ai-runs'
 import type { AiRunOperationRow, AiRunRepository, AiRunRow } from '../ports/ai-runs'
@@ -53,6 +54,18 @@ export interface AiRunDeps {
    * still 「読んでいる」 → 「届いた」), recorded as caused by the run, not by the member.
    */
   afterFailedRun?: (member: Member, run: { id: string; recordId: string; step: string }) => void
+}
+
+/**
+ * A business plugin's steps as runs (plan C5, services/plugin-steps.ts; bound
+ * once by the plugins lane): a run named `<pluginId>__<step>` is claimable
+ * when the record is at the step for the member (instead of a type's AI-only
+ * action), and its claim carries the procedure the work is pinned to.
+ */
+export interface PluginStepRuns {
+  isPluginStep(step: string): boolean
+  turnOf(member: Member, recordId: string, step: string): AiTurnCheck
+  pinForRun(member: Member, recordId: string, step: string): Promise<Outcome<PluginStepProcedurePin>>
 }
 
 /** Who sends an outside operation within a run: the holder of a run-bound record token. */
@@ -112,6 +125,7 @@ function outcomeOf(answer: KeyedAnswer): { state: 'done' | 'unknown' | 'none'; r
 
 export function createAiRunService(deps: AiRunDeps) {
   const { companyData, clock, ids, transactions } = deps
+  let pluginSteps: PluginStepRuns | null = null
   const repo = (companyId: string): AiRunRepository => companyData.forCompany(companyId).aiRuns
   const nowIso = (ms: number) => new Date(ms).toISOString()
 
@@ -136,10 +150,10 @@ export function createAiRunService(deps: AiRunDeps) {
    * sent the claim (its X-ACB-Client-Version, kept only when it parses) and the plugins turned
    * on for the company now — read here, never taken from the app.
    */
-  function procedureOf(companyId: string, step: string, appBuild: string | null | undefined): AiRunProcedure {
+  function procedureOf(companyId: string, step: string, appBuild: string | null | undefined, pin: PluginStepProcedurePin | null): AiRunProcedure {
     const plugins = companyData.forCompany(companyId).plugins.installs()
       .filter(i => i.enabled).map(i => ({ id: i.pluginId, version: i.version })).sort((a, b) => a.id.localeCompare(b.id))
-    return { step, app: parseClientVersion(appBuild)?.raw.slice(0, 120) ?? null, plugins }
+    return { step, app: parseClientVersion(appBuild)?.raw.slice(0, 120) ?? null, plugins, ...(pin ? { pin } : {}) }
   }
 
   /** The member's own run (anyone else's, another company's or a missing one: the same 404). */
@@ -173,8 +187,16 @@ export function createAiRunService(deps: AiRunDeps) {
   }
 
   return {
-    /** POST …/ai-run-claims — one app instance wins; a re-claim raises the generation. */
-    claim(member: Member, body: unknown, appBuild?: string | null): Outcome<{ run: AiRunView; created: boolean }> {
+    /** Bound once by the plugins lane (composition/plugins.ts): runs of business plugins' steps. */
+    usePluginSteps(r: PluginStepRuns) { pluginSteps = r },
+
+    /**
+     * POST …/ai-run-claims — one app instance wins; a re-claim raises the generation.
+     * A business plugin's step (`<pluginId>__<step>`, plan C5) is claimable at
+     * its state and runs the procedure its work is pinned to (pinned at the
+     * first claim); without the plugins lane bound it is never claimable.
+     */
+    async claim(member: Member, body: unknown, appBuild?: string | null): Promise<Outcome<{ run: AiRunView; created: boolean }>> {
       if (!isObj(body)) return refuse('bad-request', 'Body must be a JSON object')
       const { recordId, step, deviceId, conversationId, pluginVersion, stepsVersion } = body
       if (typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId)) return refuse('bad-request', 'recordId is a record id')
@@ -184,10 +206,20 @@ export function createAiRunService(deps: AiRunDeps) {
       for (const v of [pluginVersion, stepsVersion]) {
         if (v !== undefined && !shortText(v, 60)) return refuse('bad-request', 'pluginVersion / stepsVersion are short texts')
       }
-      const turn = deps.aiTurnOf(member, recordId)
+      // A plugin step's name (`<pluginId>__<step>`) is never a core step's: unbound, it is nobody's turn.
+      const steps = step.includes('__') ? pluginSteps : null
+      if (step.includes('__') && !steps?.isPluginStep(step)) return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
+      const turn = steps ? steps.turnOf(member, recordId, step) : deps.aiTurnOf(member, recordId)
       if (turn === 'disabled') return refuse('not-found', 'この会社では記録の機能が有効になっていません', { code: 'RECORDS_DISABLED' })
       if (turn === 'not-found') return refuse('not-found', '記録が見つかりません', { code: 'RECORD_NOT_FOUND' })
       if (turn === 'not-ai-turn') return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
+      // The procedure the work runs: pinned at its first run (the operator's stop refuses here).
+      let pin: PluginStepProcedurePin | null = null
+      if (steps) {
+        const pinned = await steps.pinForRun(member, recordId, step)
+        if (!pinned.ok) return pinned
+        pin = pinned.value
+      }
 
       const r = repo(member.companyId)
       const nowMs = clock.nowMs()
@@ -195,7 +227,7 @@ export function createAiRunService(deps: AiRunDeps) {
       const expires = nowIso(nowMs + AI_RUN_CLAIM_TTL_MS)
       const versions = {
         pluginVersion: (pluginVersion as string | undefined) ?? null, stepsVersion: (stepsVersion as string | undefined) ?? null,
-        procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild)),
+        procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild, pin)),
       }
       return transactions.run((): Outcome<{ run: AiRunView; created: boolean }> => {
         const open = r.openRun(recordId, step)

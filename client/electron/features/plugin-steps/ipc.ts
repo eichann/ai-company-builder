@@ -9,13 +9,13 @@
 import type { IpcRegistrar } from '../../ipc/registrar'
 import type { PathGuard } from '../ports'
 import {
-  parsePluginStepsOn, parseProcedurePin, pluginStepConsultationTitle, pluginStepPersonMessage, type PluginProcedurePin, type PluginStepButton,
+  parsePluginStepsOn, parseProcedurePin, pluginStepConsultationTitle, pluginStepPersonMessage, type PluginStepProcedurePin, type PluginStepButton,
 } from '../../../shared/ai-turn-steps/plugin'
 
 export interface PluginStepsIpcDeps {
   baseUrl: () => string
   cookies: () => string[]
-  readProcedure: (companyId: string, pin: PluginProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
+  readProcedure: (companyId: string, pin: PluginStepProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
   paths: PathGuard
   fetch?: typeof fetch
 }

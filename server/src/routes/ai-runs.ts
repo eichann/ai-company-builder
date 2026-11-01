@@ -57,7 +57,7 @@ aiRunsRoute.post('/ai-run-claims', async (c) => {
   const m = await memberOf(c)
   if (m instanceof Response) return m
   // The app build that claims (the header every app request carries): part of the run's procedure.
-  const r = aiRuns.claim(m, await jsonBody(c), c.req.header('X-ACB-Client-Version') ?? null)
+  const r = await aiRuns.claim(m, await jsonBody(c), c.req.header('X-ACB-Client-Version') ?? null)
   return answer(c, r, r.ok && r.value.created ? 201 : 200)
 })
 

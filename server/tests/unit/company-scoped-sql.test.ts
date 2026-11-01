@@ -128,6 +128,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   inbox_gaps: ['adapters/sqlite/inbox.ts'],
   // lane B ▲
   // lane C ▼
+  // A plugin step's pins and the company's Skill per step (plugin-steps.md).
+  plugin_step_pins: ['adapters/sqlite/plugin-steps.ts'],
+  plugin_step_skills: ['adapters/sqlite/plugin-steps.ts'],
   // Business roles (plugin-roles.md).
   plugin_role_assignments: ['adapters/sqlite/plugin-roles.ts'],
   plugin_role_overrides: ['adapters/sqlite/plugin-roles.ts'],
@@ -145,6 +148,7 @@ const HANDLE_FACTORIES = [
   'sqliteInboxRepository',
   // lane B ▲
   // lane C ▼
+  'sqlitePluginStepRepository',
   'sqlitePluginRoleRepository',
   // lane C ▲
 ]

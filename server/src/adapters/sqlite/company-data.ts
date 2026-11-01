@@ -25,6 +25,7 @@ import { sqliteIdentityRepository } from './identities'
 import { sqliteInboxRepository } from './inbox'
 // lane B ▲
 // lane C ▼
+import { sqlitePluginStepRepository } from './plugin-steps'
 import { sqlitePluginRoleRepository } from './plugin-roles'
 // lane C ▲
 /**
@@ -61,6 +62,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         inbox: sqliteInboxRepository(conn, companyId),
         // lane B ▲
         // lane C ▼
+        pluginSteps: sqlitePluginStepRepository(conn, companyId),
         pluginRoles: sqlitePluginRoleRepository(conn, companyId),
         // lane C ▲
         archive: sqliteCompanyRowsExport(conn, companyId),

@@ -563,7 +563,7 @@ contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
 contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
-contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': { args: [companyId: string]; result: PluginStepTurn[] }
+contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
 contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
 contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
 contract.type IpcInvokeChannels.'aiTurns:settle' = 'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
@@ -1157,7 +1157,7 @@ preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
 preload listPersonSteps -> invoke pluginSteps:onRecord($0, $1)
 preload listPersonSteps : (companyId: string, recordId: string) => Promise<PluginStepButton[]>
 preload listPluginStepTurns -> invoke aiTurns:pluginTurns($0)
-preload listPluginStepTurns : (companyId: string) => Promise<PluginStepTurn[]>
+preload listPluginStepTurns : (companyId: string) => Promise<QueuedPluginStep[]>
 preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)

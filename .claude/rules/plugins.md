@@ -233,14 +233,15 @@ upgrade:                                 # where work pinned to an older version
   step or at the top and a `scripts/` folder are refused.
 - **Procedure** (coordinator, 2026-11-02): `default` is a file under `steps/`, always present;
   `overridable: true` lets a company map the step to one of its Skills (`.claude/skills/<name>/`;
-  div's `sales-proposal-v1` for 「提案書を用意する」) — the company setting is a later item and is
-  checked with `companySkillOverrideProblem`. The declaration never names a company Skill. **The
+  div's `sales-proposal-v1` for 「提案書を用意する」) — the company setting is `PUT
+  /plugins/:pluginId/step-skills/:step` (C5, `plugin-steps.md`), checked with
+  `companySkillOverrideProblem`. The declaration never names a company Skill. **The
   step's `tools` and `connector_roles` stay the ceiling** whichever procedure runs
   (`stepToolsFor`: what a Skill asks for is cut to the step's list).
 - **Pinned per work** (owner decision 2026-11-01 night): a work's step runs with what was pinned at
   its first run — the plugin procedure at version + fingerprint, or the company Skill by its
   content fingerprint (the one #403 records in consultations): `PluginStepProcedurePin`, stored by
-  C5. Work moves to a newer version only at `upgrade.at` points, from `upgrade.from` on. An
+  C5 (`plugin_step_pins`, `plugin-steps.md`). Work moves to a newer version only at `upgrade.at` points, from `upgrade.from` on. An
   emergency stop of a version stops pinned work too.
 - **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
   or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
@@ -304,7 +305,7 @@ Company fields are never dropped. Test: `tests/integration/plugin-distribution.t
   `services/plugin-distribution.ts` `pluginsFor`: every **contract-2 business plugin the company
   turned on** whose package may be used now — on the shelf for this company, not stopped by the
   operator, the fingerprint (v2) the company chose — as `current`, plus older versions some work is
-  pinned to as `pinned` (§5-9; the `pinnedVersions` dependency, which C5 binds with its stored pins:
+  pinned to as `pinned` (§5-9; the `pinnedVersions` dependency, bound to C5's stored pins of open work, `plugin-steps.md`:
   listed only while on the shelf with the pinned fingerprint). **The operator's stop overrides
   pins** and turning the plugin off lists nothing. Contract-1 packages and connectors have nothing
   for the app. The list is in the policy's version (ETag), so a change reaches the apps by the push
@@ -856,7 +857,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   create of a record not made yet: the company's), through `pluginRoles.holdsForPlugin`, bound
   with `pluginOperations.useRoles` in `composition/plugins.ts`; a delegate (`actsFor`) stands in
   for an absent holder. Unbound or unassigned: nobody.
-- Not yet: the step is read from the installed version (C5 pins it).
+- The step is the installed version's, narrowed by the run's pinned version (C5, `plugin-steps.md`:
+  `usePinnedSteps` / `runStepOf`); a stopped or missing pinned version refuses every call.
 - Test: `tests/integration/plugin-run-gate.test.ts` (a step without `plugin_operations`, another
   plugin's / not installed here, asks first without `approvals` then only a request, money
   (`moves_money`) never direct and only a request in a step, the tool list per step, `role:` in an

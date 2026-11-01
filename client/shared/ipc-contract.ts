@@ -53,7 +53,7 @@ import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slac
 // lane B ▼
 // lane B ▲
 // lane C ▼
-import type { PluginStepButton, PluginStepStartResult, PluginStepTurn } from './ai-turn-steps/plugin'
+import type { PluginStepButton, PluginStepStartResult, QueuedPluginStep } from './ai-turn-steps/plugin'
 // lane C ▲
 
 // ---------------------------------------------------------------------------
@@ -650,7 +650,7 @@ export interface IpcInvokeChannels {
   // lane B ▲
   // lane C ▼
   /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
-  'aiTurns:pluginTurns': { args: [companyId: string]; result: PluginStepTurn[] }
+  'aiTurns:pluginTurns': { args: [companyId: string]; result: QueuedPluginStep[] }
   /** The `start: person` steps at a record's state (its card's buttons). */
   'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
   /** A person starts a step: the server pins the work's procedure; main answers the consultation's first message. */

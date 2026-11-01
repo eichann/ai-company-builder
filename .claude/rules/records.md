@@ -1278,3 +1278,10 @@ end it — `ai_close`); task v8 adds the `interaction` link. Unlike every earlie
 an individual's mail is **owner-only**: the service writer's `personalOwner` (with `state` and
 `quiet`) — so "Service-written records are never owner-only" above holds for every service but
 the inbox. Details, routes and tests: `inbox.md`.
+
+## A plugin step's procedure on the ledger (plan C5)
+
+A run of a business plugin's step (`<pluginId>__<step>`) adds `pin` to its `procedure`: the plugin
+version + fingerprint, or the company Skill + tree id, the work is pinned to — so its ledger
+entries say which procedure (or Skill) made them, copied as in "Which procedure" above. Details:
+`plugin-steps.md`.
