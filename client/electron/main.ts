@@ -88,6 +88,7 @@ let closeChatWindowsWithMain = () => {}
 // The main window; closing it first lets the renderer save every open tab.
 const mainWindowHost = createMainWindowHost({
   webPreferences: appPages.webPreferences,
+  page: appPages.page,
   load: win => appPages.load(win),
   askClose: window => window.send('app:closeRequested'),
   docbaseCookie: () => config.load().docbaseCookie,
@@ -129,6 +130,7 @@ app.on('activate', () => {
 // 「別ウィンドウで開く」: consultations in windows of their own (features/chat-windows).
 const chatWindowShell = createChatWindowHost({
   webPreferences: appPages.webPreferences,
+  page: appPages.page,
   load: win => appPages.load(win, { window: 'chat' }),
   bounds: {
     load: () => config.load().chatWindowBounds,
