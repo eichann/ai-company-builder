@@ -13,7 +13,10 @@
  *   limit and "stop after N failures in a row"; sending and approving are
  *   always pressed by a person;
  * - business days: weekends and Japanese public holidays are off, plus the
- *   company's own holidays (business-days.ts).
+ *   company's own holidays (business-days.ts);
+ * - 引き受け (stage 2, owner decision 2026-11-01): when a request is accepted
+ *   by itself and when it waits for the assignee's 「引き受ける」
+ *   (`AcceptanceSettings`; asking someone in another department waits).
  *
  * Times are Japan time (UTC+9, no daylight saving): the reply 目安 is about
  * the company's working day, not the server's clock zone.
@@ -41,6 +44,21 @@ export interface AutoRunSettings {
   stopAfterFailures: number
 }
 
+/**
+ * When a request someone else is asked to do counts as accepted by itself
+ * (records.md "Acceptance"). Each switch on = that case needs no 「引き受ける」;
+ * anything none of them covers — asking someone in another department —
+ * waits in 「引き受け待ち」. A task for oneself (and an owner-only one) never waits.
+ */
+export interface AcceptanceSettings {
+  /** The asker and the assignee belong to a common department (所属, tasks.md). */
+  sameDepartment: boolean
+  /** The asker manages a department the assignee belongs to. */
+  managerToMember: boolean
+  /** The AI made it as homework of a meeting the assignee attended (the task links that meeting). */
+  meetingHomework: boolean
+}
+
 export interface CompanyHoliday {
   /** `YYYY-MM-DD` (Japan). */
   date: string
@@ -53,6 +71,7 @@ export interface TaskSettings {
   taskListDepartmentIds: string[] | null
   reply: ReplySettings
   autoRun: AutoRunSettings
+  acceptance: AcceptanceSettings
   /** The company's own days off, by date. */
   companyHolidays: CompanyHoliday[]
 }
@@ -72,6 +91,8 @@ export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   reply: Object.freeze({ rule: 'next-business-day', sameDayCutoff: '17:00' }) as ReplySettings,
   // 自動で進める is on unless the company turns it off (owner decision 2026-11-01).
   autoRun: Object.freeze({ enabled: true, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
+  // Owner decision 2026-11-01: only asking someone in another department waits for 「引き受ける」.
+  acceptance: Object.freeze({ sameDepartment: true, managerToMember: true, meetingHomework: true }) as AcceptanceSettings,
   companyHolidays: [],
 }) as TaskSettings
 
@@ -81,6 +102,7 @@ export function defaultTaskSettings(): TaskSettings {
     taskListDepartmentIds: null,
     reply: { ...DEFAULT_TASK_SETTINGS.reply },
     autoRun: { ...DEFAULT_TASK_SETTINGS.autoRun },
+    acceptance: { ...DEFAULT_TASK_SETTINGS.acceptance },
     companyHolidays: [],
   }
 }
@@ -124,6 +146,14 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
     return { error: `autoRun.stopAfterFailures must be an integer ${L.stopAfterFailures.min}–${L.stopAfterFailures.max}` }
   }
 
+  // Added after the first release of the page: a document saved before it (or an older admin
+  // console's PUT) has none and takes the defaults rather than failing as a whole.
+  const acc = input.acceptance === undefined ? { ...DEFAULT_TASK_SETTINGS.acceptance } : input.acceptance
+  if (!isObject(acc)) return { error: 'acceptance must be an object' }
+  for (const k of ['sameDepartment', 'managerToMember', 'meetingHomework'] as const) {
+    if (typeof acc[k] !== 'boolean') return { error: `acceptance.${k} must be true or false` }
+  }
+
   const holidays = input.companyHolidays
   if (!Array.isArray(holidays)) return { error: 'companyHolidays must be an array' }
   if (holidays.length > L.holidays) return { error: `At most ${L.holidays} company holidays` }
@@ -146,6 +176,7 @@ export function parseTaskSettings(input: unknown): { value: TaskSettings } | { e
       taskListDepartmentIds,
       reply: { rule: reply.rule as ReplyRule, sameDayCutoff: reply.sameDayCutoff },
       autoRun: { enabled: auto.enabled, dailyLimit: auto.dailyLimit, stopAfterFailures: auto.stopAfterFailures },
+      acceptance: { sameDepartment: acc.sameDepartment as boolean, managerToMember: acc.managerToMember as boolean, meetingHomework: acc.meetingHomework as boolean },
       companyHolidays,
     },
   }

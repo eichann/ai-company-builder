@@ -34,6 +34,7 @@ paths:
   - "server/tests/integration/records.test.ts"
   - "server/tests/integration/record-links.test.ts"
   - "server/tests/unit/push-channel.test.ts"
+  - "server/src/services/task-acceptance.ts"
   - "shared/core/record-contents.ts"
   - "server/src/adapters/sqlite/record-contents.ts"
   - "server/src/ports/record-contents.ts"
@@ -453,6 +454,47 @@ Additive over version 4 (tasks indexed under 4 keep their `typeVersion` and run 
   `take_over` is a person's, never the AI's; the query's additions never
   return or count an unreadable record; a version 4 task keeps working — mutation-checked).
 
+### Acceptance (引き受け, task version 7, owner decision 2026-11-01)
+
+「頼んだ」 and 「引き受けた」 are told apart. Version 7 adds state `awaiting_acceptance`
+(引き受け待ち), field `accepted_by` (person: who accepted), link `meeting` (もとの会議: the meeting a
+task is homework of) and action `accept` (引き受ける: from `awaiting_acceptance` to `todo`, `who:
+[assignee]` — never the AI, never the requester —, `hand_to` the assignee, `notify` the requester);
+`decline`, `assign` and `cancel` also start from `awaiting_acceptance`. Additive: tasks indexed
+under version 6 keep it and never wait (`since: 7`).
+
+- **The rule** (`ACCEPTANCE` in `shared/core/core-types.ts`, applied by
+  `services/record-engine/acceptance.ts` in the generic create and in every action — the service
+  and external writers never touch it): when a create or an action would leave the task in a
+  working state (todo / in_progress / review / waiting) or in 引き受け待ち with an assignee other
+  than `accepted_by`, then (1) an owner-only task, (2) a **person** acting as the assignee —
+  themselves, or their delegate during the absence (`onBehalfOf`, the one `actsFor` point:
+  "Absence and the delegate") — or (3) the asker being the assignee accepts it at once
+  (`accepted_by` = the assignee); else (4) the company's setting decides
+  (`deps.autoAccepts` → `services/task-acceptance.ts`, `tasks.md` "Acceptance"): accepted, or the
+  state becomes `awaiting_acceptance` with `next_actor` = the assignee (their 「あなたの番」). The
+  asker is the actor when the action changed the assignee (create: the creator — a
+  `requested_by` in the body never makes it the assignee's own), else `requested_by`. The AI
+  acting for the assignee (their own AI's `finish_prep`) is **not** accepting. Entering
+  `declined` forgets `accepted_by` (a `reopen` asks again); an `assign` from `declined` asks the
+  new assignee like a new request (to `todo` or 引き受け待ち — before version 7 it stayed `declined`).
+- `accepted_by` is the engine's: a create naming it → 400 `BAD_VALUE`; no action has it as an
+  argument. Undo reverses it with the state like any field.
+- Homework: the AI's minutes instructions (`client/electron/records/tools.ts`,
+  `client/shared/minutes-app.ts`) put the meeting in `links.meeting`; the setting's homework case
+  reads that meeting's `attendees`.
+- The requester hears `request_accepted`; still waiting a business day later →
+  `acceptance_waiting` (`notifications.md`). Screens: state label 「引き受け待ち」
+  (`client/shared/record-views.ts`); the requester's line 「〇〇さんに頼んだ・引き受け待ち」 comes with
+  the task list (S7b).
+- Test: `server/tests/unit/record-task-acceptance.test.ts` (only the assignee — or their delegate
+  only during the absence — accepts, never the requester or any AI; the AI's hand-over is not an
+  acceptance; each automatic case follows its setting and is off when it is off; reassigning asks
+  by the reassigner's departments; `accepted_by` on create refused; own and owner-only tasks never
+  wait; another company's departments, settings and ids decide nothing; the business-day
+  reminder once — mutation-checked; the owner-only branch is also covered by "the asker is the
+  assignee", so removing it alone changes nothing).
+
 ### Reading (`services/records.ts`, `services/record-access.ts`; contract `shared/types/records.ts`)
 
 ```
@@ -562,7 +604,7 @@ cancel (note required, decision), reopen (requested_by / ok_by / admin)) and
 `interaction` (やりとり: server only, no body — summary, channel, `counterpart_text`, pointer to the
 original; version 3 links `bundle` and `counterpart`, "Core interfaces"; version 4 implements
 `outside_event`, "Outside time"; outbound mail records one per sent mail, `outbound-mail.md`). Task version 6
-drops the `customer` link and adds `counterpart`. Stored per company with source `core` by every index run
+drops the `customer` link and adds `counterpart`; version 7 adds acceptance (引き受け待ち, "Acceptance"). Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
 own `.acb/types/task.md` (higher version, additive only; a company file still saying `storage:
 either` is now a breaking change against the core version 2 and is reported, the core definition
@@ -1147,6 +1189,7 @@ cross-company; due with a time, the requester told — each mutation-checked),
 `onBehalfOf`, the delegate's own reader incl. owner-only records, the manager told, no chains,
 cross-company, who sets — each mutation-checked),
 `server/tests/unit/record-task-v5.test.ts` (task version 5 and the query's additions, above),
+`server/tests/unit/record-task-acceptance.test.ts` (task version 7: acceptance, above),
 `server/tests/unit/record-contents.test.ts` (the content store, above),
 `server/tests/unit/record-tags-bundle.test.ts` (tags and links to an interface, above),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,

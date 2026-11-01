@@ -4,6 +4,7 @@ paths:
   - "shared/core/task-settings.ts"
   - "shared/types/task-settings.ts"
   - "server/src/services/task-settings.ts"
+  - "server/src/services/task-acceptance.ts"
   - "server/src/routes/task-settings.ts"
   - "server/src/ports/task-settings.ts"
   - "server/src/adapters/sqlite/task-settings.ts"
@@ -39,6 +40,15 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
   1–500), `stopAfterFailures` in a row (default 3, 1–20). Sending and approving are always pressed
   by a person whatever this says (approvals.md, outbound-mail.md); the runner (S10) enforces the
   limits.
+- `acceptance` (引き受け, owner decision 2026-11-01; `records.md` "Acceptance"): when a request
+  someone else is asked to do counts as accepted by itself — `sameDepartment` (the asker and the
+  assignee belong to a common department), `managerToMember` (the asker manages a department the
+  assignee belongs to), `meetingHomework` (the AI made it as homework of a meeting the assignee
+  attended: the task's `meeting` link); default all **on**, so only asking someone in another
+  department (or someone who belongs nowhere yet — membership starts empty) waits in 引き受け待ち.
+  Owner-only and one's own tasks never wait. `services/task-acceptance.ts` answers through the
+  company's handle only. A stored document (or an older admin console's `PUT`) without
+  `acceptance` takes these defaults rather than failing.
 - `companyHolidays`: the company's own days off (`{ date: YYYY-MM-DD, name }`, ≤ 400, years
   2000–2100), stored sorted.
 
@@ -76,7 +86,8 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 
 `/companies/[id]/task-list` (menu 「やることの一覧」, owner/admin and department managers):
 plain questions in Japanese, no builder words (型・プラグイン・つなぎ先). Owners/admins answer the
-company questions (one save for all, with a sticky bar; the reply card shows today's example
+company questions (one save for all, with a sticky bar; 「人に頼んだとき、相手が「引き受ける」を押すまで待ちますか？」 is one
+checkbox per automatic case; the reply card shows today's example
 due date from `replyTarget`); everyone on the page sees who belongs to each department and gets
 「所属する人を変える」 where the server says `canEdit`; there, each member also gets
 「不在・代わりの人」 (their absences, the delegate, add / remove; `/absences` with `userId`). Managers set membership here rather than in

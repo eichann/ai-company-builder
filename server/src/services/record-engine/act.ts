@@ -11,6 +11,8 @@ import type { Member } from '../access'
 import { ok, refuse, type Outcome } from '../outcome'
 import { currentTypes } from '../record-index'
 import { RECORD_NOT_FOUND, RECORDS_DISABLED } from '../records'
+import { acceptanceOf } from '../../../shared/core/core-types'
+import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
@@ -189,7 +191,21 @@ export function acting(ctx: EngineContext) {
       // The new values: the target state, the arguments copied into their fields, hand_to into next_actor.
       const nextFields: Record<string, LedgerValue> = { ...current.fields, ...args }
       if (action.handTo && def.implements.includes('request')) nextFields.next_actor = nextFields[action.handTo] ?? null
-      const nextState = action.to ?? current.state
+      let nextState = action.to ?? current.state
+      // Acceptance (records.md "Acceptance"): a new assignee — or the AI handing work over — may
+      // leave it 引き受け待ち; the assignee acting (「引き受ける」) accepts.
+      const acceptance = acceptanceOf(row.type)
+      if (acceptance) {
+        const originChange = linkChanges.find(l => l.name === acceptance.origin)
+        nextState = applyAcceptance(deps, {
+          companyId: member.companyId, type: row.type, typeVersion: row.typeVersion ?? 0, personal: row.personalOwner !== null,
+          state: nextState, fields: nextFields,
+          assigneeChanged: typeof args.assignee === 'string' && args.assignee !== (current.fields.assignee ?? null),
+          memberId: member.userId, actorKind: actor.kind, onBehalfOf,
+          originIds: originChange ? originChange.targets : records.linksFrom([row.id]).filter(l => l.name === acceptance.origin && l.targetId !== null).map(l => l.targetId as string),
+          records,
+        })
+      }
       // An OK statement belongs to the state change it was given for: written by that action,
       // cleared by any other state change (a reopen) so it never vouches for a later one.
       if (okStatement) {

@@ -2,7 +2,7 @@
 
 import { useState } from 'react'
 import { toast } from 'sonner'
-import { CalendarBlank, ChatCircleText, ListChecks, LockSimple, Robot, Trash, UsersThree } from '@phosphor-icons/react'
+import { CalendarBlank, ChatCircleText, Handshake, ListChecks, LockSimple, Robot, Trash, UsersThree } from '@phosphor-icons/react'
 
 import { RadioCard } from '@/components/app/radio-card'
 import { EmptyState, ErrorState, ListSkeleton, PageHeader } from '@/components/app/states'
@@ -128,6 +128,7 @@ function SettingsForm({
     <>
       <ReplyCard draft={draft} change={change} />
       <AutoRunCard draft={draft} change={change} />
+      <AcceptanceCard draft={draft} change={change} />
       <DepartmentsCard draft={draft} change={change} departments={departments} />
       <HolidaysCard draft={draft} change={change} />
 
@@ -273,6 +274,46 @@ function AutoRunCard({ draft, change }: CardProps) {
           </div>
         </div>
       )}
+    </Card>
+  )
+}
+
+const ACCEPTANCE_CASES: Array<{ key: keyof TaskSettings['acceptance']; label: string }> = [
+  { key: 'sameDepartment', label: '同じ部署に所属する人に頼んだとき' },
+  { key: 'managerToMember', label: '部署の責任者が、その部署に所属する人に頼んだとき' },
+  { key: 'meetingHomework', label: '会議の宿題を AI が作ったとき（担当がその会議に出ていた場合）' },
+]
+
+function AcceptanceCard({ draft, change }: CardProps) {
+  return (
+    <Card>
+      <CardHeader className="pb-4">
+        <CardTitle className="flex items-center gap-2">
+          <Handshake size={16} />
+          人に頼んだとき、相手が「引き受ける」を押すまで待ちますか？
+        </CardTitle>
+        <CardDescription>
+          チェックしたときは、頼んだ時点で引き受けたことにします。それ以外（ほかの部署の人に頼んだときなど）は「引き受け待ち」になり、相手が引き受けると相手の番になります。1 営業日たっても引き受けられていなければ、頼んだ人に知らせます。自分だけのやることは、いつも待ちません。
+        </CardDescription>
+      </CardHeader>
+      <fieldset className="border-t px-5 py-4">
+        <legend className="sr-only">頼んだ時点で引き受けたことにするとき</legend>
+        <ul className="grid gap-2">
+          {ACCEPTANCE_CASES.map((c) => (
+            <li key={c.key}>
+              <label className="flex items-center gap-2 text-sm">
+                <input
+                  type="checkbox"
+                  className="size-4 accent-brand"
+                  checked={draft.acceptance[c.key]}
+                  onChange={(e) => change((d) => { d.acceptance[c.key] = e.target.checked })}
+                />
+                {c.label}
+              </label>
+            </li>
+          ))}
+        </ul>
+      </fieldset>
     </Card>
   )
 }

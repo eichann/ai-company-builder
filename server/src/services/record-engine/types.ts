@@ -3,6 +3,7 @@ import type { Clock, IdGenerator } from '../../ports/clock'
 import type { CompanyDataSource } from '../../ports/company-data'
 import type { RecordFileWriter } from '../../ports/record-files'
 import type { Transactions } from '../../ports/transactions'
+import type { AcceptanceQuestion } from '../task-acceptance'
 
 export interface RecordEngineDeps {
   companyData: CompanyDataSource
@@ -26,6 +27,12 @@ export interface RecordEngineDeps {
    * the one resolution point): `who` may then also be met as one of them. None without it.
    */
   actsFor?: (companyId: string, userId: string) => string[]
+  /**
+   * Acceptance (引き受け, records.md "Acceptance"; services/task-acceptance.ts): is a request
+   * someone else was asked to do accepted by itself (the company's setting)? Without it every
+   * request is accepted at once (as before version 7 of the task type).
+   */
+  autoAccepts?: (companyId: string, q: AcceptanceQuestion) => boolean
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */
