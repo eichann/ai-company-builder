@@ -140,8 +140,9 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   Performance baselines (macOS), Universal bundled git (macOS), Server tests (ubuntu, vitest),
   Admin tests (ubuntu, vitest + jsdom).
 - `.github/workflows/docker-images.yml` builds and smoke-tests both images on PRs that touch the
-  Dockerfiles, compose files, manifests or lockfile (both Dockerfiles once went unbuildable on
-  main unnoticed). Nothing is pushed.
+  Dockerfiles, compose files, manifests, lockfile, `shared/`, the server's source or the admin's
+  source and build config (`admin/src`, `public`, `next.config.ts`, `tsconfig.json`, …) (both
+  Dockerfiles once went unbuildable on main unnoticed). Nothing is pushed.
 - The token is read-only and fork PRs must work without secrets; keep new jobs that way.
 
 ## Desktop app runtime (Electron)

@@ -26,6 +26,13 @@ on:
       # The api image bakes the server's code in (no source mount)
       - 'server/src/**'
       - 'server/tsconfig.json'
+      # The admin image runs `next build` on the admin's source and config
+      - 'admin/src/**'
+      - 'admin/public/**'
+      - 'admin/next.config.ts'
+      - 'admin/tsconfig.json'
+      - 'admin/postcss.config.mjs'
+      - 'admin/.dockerignore'
       - '.github/workflows/docker-images.yml'
   push:
     branches: [main]

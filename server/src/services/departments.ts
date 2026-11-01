@@ -213,14 +213,14 @@ export function createDepartmentService(deps: DepartmentServiceDeps) {
       return counts
     },
 
-    /** Files and folders in the department's folder on the shared branch (delete warning). */
+    /**
+     * Files and folders in the department's folder on the shared branch (delete warning).
+     * Throws when git cannot read them: "0 files, no folder" would tell the admin a
+     * full folder is empty right before they delete it.
+     */
     async stats(member: Member, existing: DepartmentRow): Promise<{ files: number; folders: number; exists: boolean }> {
-      try {
-        const counts = await repoStore.countFilesInFolder(member.companyId, existing.folder)
-        return counts ? { ...counts, exists: true } : { files: 0, folders: 0, exists: false }
-      } catch {
-        return { files: 0, folders: 0, exists: false }
-      }
+      const counts = await repoStore.countFilesInFolder(member.companyId, existing.folder)
+      return counts ? { ...counts, exists: true } : { files: 0, folders: 0, exists: false }
     },
 
     reorder(member: Member, items: Array<{ id: string; sortOrder: number }>): void {

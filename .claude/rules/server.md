@@ -301,6 +301,17 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
   sanitized requested slug or name (or `company`) + `-` + the first 8 characters of the new
   company's own id (the whole id in the unlikely case those collide). Existing slugs are never
   changed; nothing routes by slug. `tests/integration/company-slug.test.ts`.
+- Creating a company is all or nothing (2026-11, `services/companies.ts` `tryCreate`): the
+  repository and its seeded department folders first (async), then the company, owner
+  membership, default departments and permission scopes in one `transactions.run`. Any failure
+  rolls the rows back, removes the repository (`RepoStore.removeCompanyRepo`) and answers 503
+  `COMPANY_CREATION_FAILED` (Japanese `error`, shown as is by the admin console). Before, a
+  company without its repository, departments or scopes was created and reported as success.
+  `tests/integration/company-seeding.test.ts`.
+- `GET …/departments` and `GET …/departments/:id/stats` answer 500 when git cannot read them,
+  never `success: true` with `[]` / "0 files, no folder" (a broken company looked like one
+  without departments; a full folder looked empty in the delete warning).
+  `departments-list.test.ts`, `department-stats.test.ts`.
 - Rules follow the membership: removing a member deletes every rule naming them in that company
   (`deleteUserRules`, private folders included), so re-adding them starts from nothing; a
   promotion to owner/admin deletes them too. `everyone` rules are untouched, so nothing starts
@@ -356,8 +367,8 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   `adapters/git-repo-store.ts`) seeds the default department folders the same way (root commit;
   async, under the lock, before the 201). `gitAsync` with `timeoutMs` (adjustable with
   `setRepoGitTimeoutsForTests`): 60 s per local step, 300 s for the push, which kills git's whole
-  process group, hook included, and fails the change (a seeding failure still creates the
-  company).
+  process group, hook included, and fails the change (a seeding failure fails the whole
+  company creation, below).
 
 ## Request log
 

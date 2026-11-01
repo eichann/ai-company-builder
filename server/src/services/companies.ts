@@ -1,6 +1,6 @@
 /**
- * Companies and their members: creating a company (repository, rows, default
- * departments, permission scopes, seeded folders), renaming it, and who
+ * Companies and their members: creating a company (repository, seeded folders,
+ * rows, default departments, permission scopes — all or nothing), renaming it, and who
  * belongs to it with which role.
  *
  * Role rules (.claude/rules/server.md "Accounts and roles"): only owners grant owner/admin;
@@ -79,6 +79,16 @@ export const COMPANY_CREATION_FORBIDDEN = {
   error: '新しい会社を作れるのは、このサーバーの運用担当者だけです。会社に参加するには、その会社の管理者から届いた招待リンクを開いてください。',
 } as const
 
+/**
+ * POST /api/companies when a step of creating the company failed (repository,
+ * seeding, rows): nothing was kept. Japanese for the admin console, which
+ * shows it as it is (admin/src/lib/errors.ts).
+ */
+export const COMPANY_CREATION_FAILED = {
+  code: 'COMPANY_CREATION_FAILED',
+  error: '会社を作成できませんでした。途中までの内容は残していません。少し待ってから、もう一度お試しください。',
+} as const
+
 /** The refusal of POST /:id/members for an account that never accepted this company's invitation. */
 export const INVITATION_REQUIRED = {
   code: 'INVITATION_REQUIRED',
@@ -154,6 +164,50 @@ export function createCompanyService(deps: CompanyServiceDeps) {
     })
   }
 
+  /**
+   * Create a company owned by `ownerId` (the route checks `mayCreate` first),
+   * all or nothing: the repository with its seeded department folders, then
+   * the rows (company, owner membership, default departments, permission
+   * scopes) in one transaction. If any step fails, the rows are rolled back,
+   * the repository this call created is removed, and the answer is
+   * COMPANY_CREATION_FAILED — never a company without its repository,
+   * departments or scopes that only looked created (code review 2026-11).
+   *
+   * The repository comes first because seeding is asynchronous (a push
+   * through the checker, which reads no database rows) and a SQLite
+   * transaction must stay synchronous; nobody can reach the repository
+   * before the membership row exists.
+   */
+  async function tryCreate(ownerId: string, name: string, requestedSlug: unknown): Promise<Outcome<CompanyRow>> {
+    const id = ids.newId()
+    const slug = buildUniqueSlug(name, requestedSlug, id)
+    const timestamp = clock.now()
+
+    try {
+      // Filesystem = source of truth: the department folders exist before their rows
+      const repoPath = await repoStore.createCompanyRepo(id)
+      await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
+      transactions.run(() => {
+        companies.insert({ id, name: name.trim(), slug, ownerId, repoPath, createdAt: timestamp })
+        memberships.insert({ id: ids.newId(), userId: ownerId, companyId: id, role: 'owner', createdAt: timestamp })
+        initializeDefaultDepartments(id, ownerId)
+        // Company-wide `everyone: read + write` and one inheriting scope per department
+        scopesOf(id).ensureCompanyScope(ownerId)
+        scopesOf(id).syncCompanyScopes()
+      })
+    } catch (e) {
+      logError('companies', 'failed to create the company; nothing was kept', e, { company: id })
+      try {
+        await repoStore.removeCompanyRepo(id)
+      } catch (removeError) {
+        logError('companies', 'failed to remove the repository of a company that was not created', removeError, { company: id })
+      }
+      return refuse('unavailable', COMPANY_CREATION_FAILED.error, { code: COMPANY_CREATION_FAILED.code })
+    }
+
+    return ok(companies.findById(id)!)
+  }
+
   return {
     listForUser(userId: string): Array<CompanyRow & { role: string }> {
       return companies.listForUser(userId)
@@ -179,56 +233,13 @@ export function createCompanyService(deps: CompanyServiceDeps) {
       return refuse('forbidden', COMPANY_CREATION_FORBIDDEN.error, { code: COMPANY_CREATION_FORBIDDEN.code })
     },
 
-    /**
-     * Create a company owned by `ownerId` (the route checks `mayCreate` first). Each step after the rows is best
-     * effort, as it always was: a company without its repository, default
-     * departments, scopes or seeded folders is still created (startup seeding
-     * and the departments API repair the rest).
-     */
+    tryCreate,
+
+    /** tryCreate for callers without an HTTP answer (tests, scripts): throws when nothing was created. */
     async create(ownerId: string, name: string, requestedSlug: unknown): Promise<CompanyRow> {
-      const id = ids.newId()
-      const slug = buildUniqueSlug(name, requestedSlug, id)
-      const timestamp = clock.now()
-
-      let repoPath: string | null = null
-      try {
-        repoPath = await repoStore.createCompanyRepo(id)
-      } catch (e) {
-        logError('companies', 'failed to create the repository', e, { company: id })
-        // Continue without repo - can be created later
-      }
-
-      companies.insert({ id, name: name.trim(), slug, ownerId, repoPath, createdAt: timestamp })
-      memberships.insert({ id: ids.newId(), userId: ownerId, companyId: id, role: 'owner', createdAt: timestamp })
-
-      try {
-        initializeDefaultDepartments(id, ownerId)
-      } catch (e) {
-        logError('companies', 'failed to create the default departments', e, { company: id })
-        // Continue - company is created, departments can be added later
-      }
-
-      // Permission scopes: company-wide `everyone: read + write` (today's fully
-      // open behaviour) and one inheriting scope per department
-      try {
-        scopesOf(id).ensureCompanyScope(ownerId)
-        scopesOf(id).syncCompanyScopes()
-      } catch (e) {
-        logError('companies', 'failed to create the permission scopes', e, { company: id })
-        // Continue - startup seeding creates them on the next restart
-      }
-
-      // Seed the matching folders into the repo (filesystem = source of truth)
-      if (repoPath) {
-        try {
-          await repoStore.seedCompanyRepo(id, repoPath, DEFAULT_DEPARTMENTS.map(d => d.folder))
-        } catch (e) {
-          logError('companies', 'failed to seed the department folders', e, { company: id })
-          // Continue - folders can be created later via the departments API
-        }
-      }
-
-      return companies.findById(id)!
+      const created = await tryCreate(ownerId, name, requestedSlug)
+      if (!created.ok) throw new Error(`Company creation failed: ${created.body.error}`)
+      return created.value
     },
 
     /** Only the display name changes: the slug, repository and folders stay. */

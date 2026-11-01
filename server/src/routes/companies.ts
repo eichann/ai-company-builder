@@ -60,7 +60,10 @@ companiesRoute.post('/', async (c) => {
     return c.json({ error: 'Company name is required' }, 400)
   }
 
-  const company = await companies.create(user.id, name, body.slug)
+  // All or nothing: a failed step answers 503 COMPANY_CREATION_FAILED and keeps nothing
+  const created = await companies.tryCreate(user.id, name, body.slug)
+  if (!created.ok) return refusal(c, created)
+  const company = created.value
 
   return c.json({
     success: true,

@@ -14,11 +14,15 @@
  * (b) no synchronous child process runs, and timers keep firing while a
  *     slow pre-receive hook holds the push;
  * (c) a hook that never finishes is killed (with its children) at the
- *     timeout; the company is still created (201), as when seeding failed
- *     before, and nothing reached the shared branch.
+ *     timeout;
+ * (d) creating a company is all or nothing (code review 2026-11): when
+ *     seeding or any row fails, the answer is 503 COMPANY_CREATION_FAILED and
+ *     no company, membership, department or scope row and no repository is
+ *     left. Before, the company was created anyway (without its folders,
+ *     departments or scopes) and the creator was told it succeeded.
  */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest'
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'fs'
+import { existsSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import { tmpdir } from 'os'
 
@@ -77,7 +81,7 @@ vi.mock('../../src/lib/auth', () => ({
 
 import { execFileSync } from 'child_process'
 import { Hono } from 'hono'
-import { initDatabase } from '../../src/db'
+import { db, initDatabase } from '../../src/db'
 import { companiesRoute } from '../../src/routes/companies'
 import { setRepoGitTimeoutsForTests } from '../../src/adapters/git-repo-store'
 import { departmentsRoute } from '../../src/routes/departments'
@@ -109,7 +113,29 @@ async function createCompany(name: string) {
     body: JSON.stringify({ name }),
     headers: { 'Content-Type': 'application/json' },
   })
-  return { status: res.status, body: await res.json() as { success: boolean; data: { id: string; role: string; name: string; repoPath: string | null } } }
+  return { status: res.status, body: await res.json() as { success: boolean; code?: string; error?: string; data: { id: string; role: string; name: string; repoPath: string | null } } }
+}
+
+const count = (sql: string, ...args: unknown[]) => (db.prepare(sql).get(...args) as { n: number }).n
+
+/** Rows and repositories that exist now, to compare before and after a failed creation. */
+function footprint() {
+  return {
+    companies: count('SELECT COUNT(*) AS n FROM companies'),
+    memberships: count("SELECT COUNT(*) AS n FROM memberships WHERE user_id = 'cs-owner'"),
+    departments: count('SELECT COUNT(*) AS n FROM departments'),
+    scopes: count('SELECT COUNT(*) AS n FROM scopes'),
+    repos: readdirSync(REPOS_DIR).filter(name => name.endsWith('.git')).sort(),
+  }
+}
+
+/** A failed creation: 503 with the Japanese explanation, and nothing kept. */
+function expectNothingKept(result: Awaited<ReturnType<typeof createCompany>>, before: ReturnType<typeof footprint>) {
+  expect(result.status).toBe(503)
+  expect(result.body.success).toBeUndefined()
+  expect(result.body.code).toBe('COMPANY_CREATION_FAILED')
+  expect(result.body.error).toMatch(/会社を作成できませんでした/)
+  expect(footprint()).toEqual(before)
 }
 
 /** Runs `fn` while a 10 ms ticker measures the longest stall of the event loop. */
@@ -203,11 +229,12 @@ describe('company creation seeds the department folders asynchronously', () => {
     expect(bareGit(result.body.data.id, ['ls-tree', '--name-only', '-z', 'main']).split('\0')).toContain('総務')
   })
 
-  it('kills a hung push at the timeout and still creates the company, as when seeding failed before', async () => {
+  it('kills a hung push at the timeout and keeps nothing of the company', async () => {
     const pidFile = join(scratch, 'hook.pid')
     usePreReceiveHook(`echo $$ > '${pidFile}'\nsleep 600`)
     const restore = setRepoGitTimeoutsForTests({ local: 60_000, push: 15_000 })
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const before = footprint()
     try {
       const started = Date.now()
       const { result, maxGapMs } = await measureStall(() => createCompany('Hung Hook Co'))
@@ -215,15 +242,11 @@ describe('company creation seeds the department folders asynchronously', () => {
       expect(elapsed).toBeGreaterThanOrEqual(15_000)
       expect(elapsed).toBeLessThan(60_000)
       expect(maxGapMs).toBeLessThan(1000)
-      expect(result.status).toBe(201)
-      expect(result.body.data.role).toBe('owner')
+      expectNothingKept(result, before)
 
-      const failure = errors.mock.calls.map(call => String(call[0])).find(line => line.startsWith('[companies] failed to seed the department folders:'))
+      const failure = errors.mock.calls.map(call => String(call[0])).find(line => line.startsWith('[companies] failed to create the company; nothing was kept:'))
       expect(failure).toBeDefined()
       expect(failure).toContain('GitTimeoutError')
-
-      // Nothing reached the shared branch
-      expect(() => bareGit(result.body.data.id, ['rev-parse', '--verify', '--quiet', 'refs/heads/main'])).toThrow()
 
       // The hook (a grandchild of git push) was killed with it
       const hookPid = Number(readFileSync(pidFile, 'utf8').trim())
@@ -234,5 +257,55 @@ describe('company creation seeds the department folders asynchronously', () => {
       errors.mockRestore()
       restore()
     }
+  })
+
+  it('a rejected seed push keeps no company row and no repository', async () => {
+    usePreReceiveHook('exit 1')
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const before = footprint()
+    try {
+      expectNothingKept(await createCompany('Rejected Seed Co'), before)
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it('a repository that cannot be created keeps no company row', async () => {
+    // REPOS_DIR is a file for a moment: mkdir / git init fail
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const reposBackup = `${REPOS_DIR}.held`
+    const before = footprint()
+    renameSync(REPOS_DIR, reposBackup)
+    writeFileSync(REPOS_DIR, '')
+    try {
+      const result = await createCompany('No Repo Co')
+      rmSync(REPOS_DIR)
+      renameSync(reposBackup, REPOS_DIR)
+      expectNothingKept(result, before)
+    } finally {
+      if (existsSync(reposBackup)) {
+        rmSync(REPOS_DIR, { force: true })
+        renameSync(reposBackup, REPOS_DIR)
+      }
+      errors.mockRestore()
+    }
+  })
+
+  it('a row that cannot be written rolls back the company, its membership and departments, and removes the repository', async () => {
+    // The last step of the transaction (the permission scopes) fails
+    db.exec("CREATE TEMP TRIGGER fail_scope_insert BEFORE INSERT ON scopes BEGIN SELECT RAISE(ABORT, 'scope insert refused for the test'); END")
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const before = footprint()
+    try {
+      expectNothingKept(await createCompany('Rolled Back Co'), before)
+    } finally {
+      db.exec('DROP TRIGGER IF EXISTS fail_scope_insert')
+      errors.mockRestore()
+    }
+    // Creating works again once the rows can be written
+    const again = await createCompany('After Rollback Co')
+    expect(again.status).toBe(201)
+    expect(count('SELECT COUNT(*) AS n FROM departments WHERE company_id = ?', again.body.data.id)).toBe(6)
+    expect(existsSync(join(REPOS_DIR, `${again.body.data.id}.git`))).toBe(true)
   })
 })

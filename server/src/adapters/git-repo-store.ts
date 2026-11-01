@@ -9,7 +9,7 @@
  * of the process that also serves every member's git-http traffic.
  */
 import { existsSync } from 'fs'
-import { mkdir } from 'fs/promises'
+import { mkdir, rm } from 'fs/promises'
 import { join } from 'path'
 import type { RepoStore } from '../ports/repo-store'
 import { initBareRepo } from '../lib/git-server'
@@ -55,6 +55,12 @@ async function createCompanyRepo(companyId: string): Promise<string> {
     await initBareRepo(repoPath)
   }
   return repoPath
+}
+
+// Undo of a failed company creation (services/companies.ts tryCreate): under
+// the company lock, so a seeding push still finishing is not cut short.
+function removeCompanyRepo(companyId: string): Promise<void> {
+  return withCompanyLock(companyId, () => rm(companyRepoPath(companyId), { recursive: true, force: true }))
 }
 
 // A department folder's tree: `.gitkeep` and the `.personal` workspace whose
@@ -188,6 +194,7 @@ export function localRepoStore(): RepoStore {
   return {
     createCompanyRepo,
     seedCompanyRepo,
+    removeCompanyRepo,
     companyRepoExists: companyId => existsSync(companyRepoPath(companyId)),
     listRootFolders: listFoldersFromRepo,
     countFilesInFolder: countFilesInRepoFolder,
