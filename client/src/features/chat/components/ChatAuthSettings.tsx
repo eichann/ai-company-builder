@@ -190,7 +190,7 @@ export function AuthSettings({ authMode: initialAuthMode, claudeCodeAvailable, c
               <p className="text-xs text-amber-400">保存されているキーをこのコンピューターでは読み取れません。もう一度入力してください。</p>
             )}
             {apiKeyStatus?.storedInPlainText && (
-              <p className="text-xs text-amber-400">このコンピューターではキーを暗号化できないため、以前のバージョンで保存したキーが暗号化されないまま残っています。</p>
+              <p className="text-xs text-amber-400">以前のバージョンで保存したキーを安全な形に移せなかったため、このキーは使っていません。キーをもう一度入力して保存し直してください。</p>
             )}
             {apiKeyStatus && !apiKeyStatus.encryptionAvailable && (
               <p role="alert" className="text-xs text-amber-400">このコンピューターでは APIキーを安全に保存する仕組み（キーチェーン）が使えないため、新しいキーは保存できません。</p>
