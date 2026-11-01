@@ -289,7 +289,8 @@ export function createInboxService(deps: InboxDeps) {
 
     const decision = routeIncoming(settings, {
       from, to, cc, reporterId, bulk: msg.bulk === true, automated: msg.automated === true, spam: msg.spam === true,
-      internalDomains: companyDomains(settings, members.map(m => m.email)),
+      // 社内どうし is mail's rule: a colleague's Slack DM or mention to the member is what chat intake is for.
+      internalDomains: msg.channel === 'email' ? companyDomains(settings, members.map(m => m.email)) : [],
     })
     if (decision.kind === 'skip') return 'skipped'
 

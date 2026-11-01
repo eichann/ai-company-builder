@@ -41,7 +41,8 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   reporter, in To or in CC; otherwise it is routed as new: never told to someone it did not reach).
 - **Routing a new message** (`shared/core/intake-settings.ts` `routeIncoming`, in this order):
   spam → nothing; internal (sender is a member, or of the company's domains — the settings'
-  plus the members' own, never free mail) → nothing (`excludeInternal`); a member in To → **that
+  plus the members' own, never free mail; mail only — a colleague's Slack DM or mention is what
+  chat intake is for) → nothing (`excludeInternal`); a member in To → **that
   member's own record** (`personal_owner`, 持ち主だけ: nobody else, owners and admins neither),
   the first member in To when several (`multipleTo: unsure` → 確認待ち), newsletters / automatic
   mail → `excluded` (`excludeBulk`: 「やることにしなかった一覧」); a shared address in To or CC
@@ -131,8 +132,11 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
 
 ## Not yet
 
-- Wiring: A1 registers Gmail's `InboxSource` and passes `roles` to `wireInboxLane`; the server
-  clock calls `inbox.pollCompany`; A3 calls `receive` from Slack events and `connect`.
+- Wired: `roles` = lane A's `connectorRoles`; Slack's signals (`connectorsLane.onSlackSignal`)
+  become chat messages through `slackSignalMessage` (`composition/inbox.ts`: ids
+  `<channel>:<ts>`, the thread root as reference, no text). Not yet: an `InboxSource` over lane
+  A's `mailReader` (it lists header facts newest first; the inbox needs Message-ID / References
+  and `outgoing`), the server clock calling `inbox.pollCompany`, and `connect` on a grant.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (B4/A4), follow-up (B5).
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no

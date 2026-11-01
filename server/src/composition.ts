@@ -493,6 +493,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     conn, ...shared, memberships: repos.memberships, serviceRecords,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
     taskSettings: companyId => taskSettings.settingsOf(companyId),
+    roles: connectorsLane.connectorRoles,
+    onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
   })
   // lane C ▼
   const pluginsLane = wirePluginsLane({

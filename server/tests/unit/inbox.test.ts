@@ -37,6 +37,7 @@ import { createInboxService, type InboxService } from '../../src/services/inbox'
 import { createConnectorRoles } from '../../src/services/connector-roles'
 import { noticeKind } from '../../src/services/notifications'
 import { recordReader } from '../../src/services/record-access'
+import { slackSignalMessage } from '../../src/composition/inbox'
 import type { Member } from '../../src/services/access'
 import { defaultTaskSettings } from '../../../shared/core/task-settings'
 import { coreTypeDefinitions } from '../../../shared/core/core-types'
@@ -428,5 +429,18 @@ describe('companies apart', () => {
     expect(stateOf(row.id).state).toBe('excluded')
     expect(interactions('b')).toHaveLength(1)
     expect(stateOf(interactions('b')[0].id, 'b').state).toBe('received')
+  })
+})
+
+describe('Slack signals (A3 → the inbox)', () => {
+  it('a colleague\'s DM is the member\'s own chat message (chat is not 社内どうし); a thread reply joins it', () => {
+    const sig = { companyId: 'a', userId: 'u-alice', kind: 'dm' as const, channelId: 'D1', ts: '1793581200.000100', threadTs: null, senderSlackUserId: 'U-BOB', external: false }
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('created')
+    const [row] = interactions()
+    expect(row.personalOwner).toBe('u-alice')
+    expect(fieldsOf(row.id)).toMatchObject({ channel: 'chat', source_ref: 'slack:D1:1793581200.000100', occurred_at: '2026-11-02T01:00:00.000Z' })
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage({ ...sig, ts: '1793581260.000200', threadTs: sig.ts }))).toBe('continued')
+    expect(inbox.receive('a', 'u-alice', slackSignalMessage(sig))).toBe('duplicate')
+    expect(interactions()).toHaveLength(1)
   })
 })

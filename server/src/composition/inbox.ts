@@ -17,6 +17,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { createIdentityService } from '../services/identities'
 import { createInboxService, type InboxDeps } from '../services/inbox'
+import type { SlackSignal } from '../services/slack-events'
 import type { ServiceRecordWriter } from '../services/record-engine'
 
 export interface InboxLaneDeps {
@@ -31,8 +32,26 @@ export interface InboxLaneDeps {
   serviceRecords: ServiceRecordWriter
   roleOf: (companyId: string, userId: string) => string | null
   taskSettings: (companyId: string) => TaskSettings
-  /** Role resolution (connector-roles.md), once lane A creates it. */
+  /** Role resolution (connector-roles.md), from lane A. */
   roles?: InboxDeps['roles']
+  /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
+  onSlackSignal?: (listen: (signal: SlackSignal) => void) => void
+}
+
+/** A Slack signal as the inbox's message (chat): ids and pointers only. */
+export function slackSignalMessage(s: SlackSignal) {
+  return {
+    channel: 'chat' as const,
+    messageId: `${s.channelId}:${s.ts}`,
+    references: s.threadTs && s.threadTs !== s.ts ? [`${s.channelId}:${s.threadTs}`] : [],
+    threadRef: `slack:${s.channelId}:${s.threadTs ?? s.ts}`,
+    sourceRef: `slack:${s.channelId}:${s.ts}`,
+    occurredAt: new Date(Math.floor(Number(s.ts) * 1000)).toISOString(),
+    subject: null,
+    from: { address: `slack:${s.senderSlackUserId ?? 'unknown'}` },
+    to: [{ address: `slack-member:${s.userId}`, memberId: s.userId }],
+    cc: [],
+  }
 }
 
 export function wireInboxLane(deps: InboxLaneDeps) {
@@ -56,6 +75,10 @@ export function wireInboxLane(deps: InboxLaneDeps) {
     },
     taskSettings: deps.taskSettings,
     roles: deps.roles,
+  })
+  // Slack's events (A3): each signal is one incoming chat message for that member.
+  deps.onSlackSignal?.(signal => {
+    try { inbox.receive(signal.companyId, signal.userId, slackSignalMessage(signal)) } catch { /* never fails Slack's answer */ }
   })
   return { identities, inbox }
 }
