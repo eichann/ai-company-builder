@@ -500,6 +500,8 @@ export interface IpcInvokeChannels {
   'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   /** 「もう一度」 on a run held for a person. */
+  /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
+  'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
   /** What the member found in the outside system about an operation whose result was unknown. */
   'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
@@ -865,6 +867,7 @@ export interface ElectronAPI {
   getBundleChoices: Invoke<'tasks:bundles'>
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   retryTaskRun: Invoke<'tasks:retryRun'>
+  shareTask: Invoke<'tasks:share'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>

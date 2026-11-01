@@ -155,6 +155,13 @@ carry on. The app never acts on the signal itself: it only asks the server again
   named 「承認のお願い：…」, due shown), the bell shows an unread dot and the list, 「すべて既読にする」,
   「知らせの設定」 (one checkbox per kind, `NOTIFICATION_KIND_LABELS`). Opening a notice marks only
   that notice read.
+- **Meetings where the department shows no task list** (`tasks-ui.md` "Minutes and AI turns"):
+  `TitleBarNotices` takes `meetings` (AppShell, only while the task list is hidden) — a まとまり to
+  choose and received minutes with the automatic runner's state, in a 「会議」 part at the top of
+  「あなたの番」 and of the bell, each with its buttons. Those waiting for the member
+  (`needsPerson`: a まとまり to choose; minutes the AI is not reading or about to read) add to the
+  count and keep the bell's dot. Nothing is stored or sent for them: they come from the list main
+  already read.
 - Opening an item runs `record.open` (`commands.md`): the record's card in the editor area, the
   same as a search hit. The consultation a record belongs to opens from there once S12 links them.
 

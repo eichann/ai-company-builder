@@ -11,14 +11,17 @@
  *   and a signal for a company not on screen asks nothing;
  * - a Mac notification only for an item new in 「あなたの番」 (the first look
  *   notifies nothing), approval requests in their own words;
- * - sign-out forgets everything.
+ * - sign-out forgets everything;
+ * - for a department without the task list, its meetings reach the title bar: a まとまり to
+ *   choose and received minutes, counted as the member's only when the AI will not read them.
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { createSseParser } from '../shared/agent-stop'
 import { createAgentPushChannel } from '../electron/services/agent-push-channel'
 import { createNotificationsWatcher } from '../electron/features/notifications/watcher'
-import { NO_NOTICES } from '../shared/notifications-app'
+import { meetingTurns, NO_NOTICES } from '../shared/notifications-app'
+import type { TaskListItem } from '../shared/tasks'
 
 const V1 = 'a'.repeat(32)
 const tick = () => new Promise<void>(resolve => setImmediate(resolve))
@@ -126,4 +129,30 @@ test('records off: no title bar parts; refusals of bad input', async () => {
   assert.equal(watcher.state('co').available, false)
   assert.deepEqual(await watcher.markRead('co', ['bad id!']), { success: false, error: '入力が正しくありません。' })
   assert.deepEqual(await watcher.markRead('../x', 'all'), { success: false, error: '入力が正しくありません。' })
+})
+
+test('a department without the task list still gets its meetings: a まとまり to choose and received minutes, waiting only when the AI will not read them', () => {
+  const item = (id: string, over: Partial<TaskListItem>): TaskListItem => ({
+    id, type: 'meeting', typeLabel: '会議', title: id, state: 'received', stateLabel: null, version: 2, due: null, tags: [], turn: 'ai',
+    waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null, ...over,
+  })
+  const items = [
+    item('meeting-read01', { state: 'read', turn: 'mine', needsBundle: true }),
+    item('meeting-new001', {}),
+    item('meeting-new002', {}),
+    item('meeting-new003', {}),
+    item('task-prep0001', { type: 'task', typeLabel: 'タスク', state: 'preparing' }),
+    item('task-mine0001', { type: 'task', typeLabel: 'タスク', state: 'todo', turn: 'mine' }),
+  ]
+  const turns = meetingTurns(items, [
+    { recordId: 'meeting-new001', state: 'running', reason: '', canRetry: false, canHand: false },
+    { recordId: 'meeting-new002', state: 'failed', reason: '議事録が空でした', canRetry: true, canHand: false },
+  ])
+  assert.deepEqual(turns.map(t => [t.id, t.kind, t.needsPerson, t.text]), [
+    ['meeting-read01', 'bundle', true, 'どのまとまり（案件など）の会議か選んでください'],
+    ['meeting-new001', 'minutes', false, 'AI が読み取っています'],
+    ['meeting-new002', 'minutes', true, 'AI が読み取れませんでした：議事録が空でした'],
+    // Nothing heard from the runner (another window, the setting off): never silent.
+    ['meeting-new003', 'minutes', true, '議事録が届きました'],
+  ])
 })

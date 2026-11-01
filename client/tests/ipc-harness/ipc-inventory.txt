@@ -159,6 +159,7 @@ contract.invoke tasks:linkFile
 contract.invoke tasks:list
 contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
+contract.invoke tasks:share
 contract.invoke tasks:unlinkFile
 contract.invoke tool-approval-response
 contract.invoke tools:start
@@ -411,6 +412,7 @@ contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
 contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFeature'>
 contract.type ElectronAPI.settleAiTurn = settleAiTurn: Invoke<'aiTurns:settle'>
+contract.type ElectronAPI.shareTask = shareTask: Invoke<'tasks:share'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
 contract.type ElectronAPI.signUp = signUp: Invoke<'auth:signUp'>
@@ -686,6 +688,7 @@ contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [co
 contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId: string]; result: TaskListResult }
 contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
@@ -916,6 +919,7 @@ main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, company
 main.handle tasks:list @ features/tasks/ipc.ts (companyId)
 main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
+main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
@@ -1238,6 +1242,8 @@ preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)
 preload setSlackFeature : (companyId: string, feature: "read" | "reply" | "notices", on: boolean) => Promise<SlackStatusResult>
 preload settleAiTurn -> invoke aiTurns:settle($0, $1)
 preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
+preload shareTask -> invoke tasks:share($0, $1, $2, $3)
+preload shareTask : (companyId: string, recordId: string, folder: string, expectedVersion: number) => Promise<TaskWriteResult>
 preload signIn -> invoke auth:signIn($0, $1)
 preload signIn : (email: string, password: string) => Promise<AuthResult>
 preload signOut -> invoke auth:signOut()
