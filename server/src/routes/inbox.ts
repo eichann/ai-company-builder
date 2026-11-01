@@ -14,72 +14,50 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const inboxRoute = new Hono()
-const { access, inbox } = services
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
-
-async function memberOf(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
+const { inbox } = services
 
 function answer<T>(c: Context, r: Outcome<T>) {
   if (!r.ok) return refusal(c, r)
   return c.json({ success: true, data: r.value }, 200)
 }
 
-inboxRoute.get('/inbox-settings', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
+inboxRoute.get('/inbox-settings', companyMember, async (c) => {
+  const m = c.var.member
   return c.json({ success: true, data: inbox.view(m) })
 })
 
-inboxRoute.put('/inbox-settings', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
-  return answer(c, inbox.update(m, await jsonBody(c)))
+inboxRoute.put('/inbox-settings', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, inbox.update(m, c.var.body))
 })
 
-inboxRoute.get('/inbox/status', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
+inboxRoute.get('/inbox/status', companyMember, async (c) => {
+  const m = c.var.member
   return c.json({ success: true, data: inbox.status(m) })
 })
 
-inboxRoute.post('/inbox/backfill', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
-  return answer(c, inbox.backfill(m, await jsonBody(c)))
+inboxRoute.post('/inbox/backfill', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, inbox.backfill(m, c.var.body))
 })
 
-inboxRoute.get('/inbox/set-aside', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
+inboxRoute.get('/inbox/set-aside', companyMember, async (c) => {
+  const m = c.var.member
   return answer(c, inbox.setAside(m))
 })
 
-inboxRoute.get('/inbox/department', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
+inboxRoute.get('/inbox/department', companyMember, async (c) => {
+  const m = c.var.member
   return answer(c, inbox.department(m))
 })
 
-inboxRoute.post('/inbox/items/:recordId/claim', async (c) => {
-  const m = await memberOf(c)
-  if (m instanceof Response) return m
-  return answer(c, inbox.claim(m, c.req.param('recordId'), await jsonBody(c)))
+inboxRoute.post('/inbox/items/:recordId/claim', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, inbox.claim(m, c.req.param('recordId'), c.var.body))
 })

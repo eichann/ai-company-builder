@@ -31,37 +31,95 @@
  * `c.req.json()` and `c.req.param('companyId')` in routes outside this file.
  */
 import { createMiddleware } from 'hono/factory'
+import type { Context } from 'hono'
 import type { z } from 'zod'
 import { getUserFromRequest, type AuthUser } from '../lib/auth'
 import { services } from '../composition'
-import { NOT_MEMBER_ERROR, type Member } from '../services/access'
+import { hasFullAccess, NOT_MEMBER_ERROR, type Member } from '../services/access'
+import type { RecordTokenHolder } from '../services/record-ai-tokens'
 import { tagged } from './guard-tags'
+import { holderOf } from './record-ai-auth'
 
-export { guardKind, publicRoute } from './guard-tags'
+export { guardKind, ownCredential, publicRoute } from './guard-tags'
 
 export type SignedInEnv = { Variables: { user: AuthUser } }
 export type CompanyEnv = { Variables: { user: AuthUser; member: Member } }
 
 const unauthorized = { error: 'Unauthorized' }
 
-export const companyMember = tagged('company', createMiddleware<CompanyEnv>(async (c, next) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json(unauthorized, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = services.access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: NOT_MEMBER_ERROR }, 404)
-  c.set('user', user)
-  c.set('member', member)
-  await next()
-}))
+function memberGuard(notMember: (c: Context) => Response, role?: { error: string }) {
+  return tagged('company', createMiddleware<CompanyEnv>(async (c, next) => {
+    const user = await getUserFromRequest(c.req.raw)
+    if (!user) return c.json(unauthorized, 401)
+    const companyId = c.req.param('companyId')
+    if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
+    const member = services.access.memberOf(companyId, user.id)
+    if (role) {
+      // Endpoints that never told a non-member from a member without the role: one 403 for both.
+      if (!member || !hasFullAccess(member.role)) return c.json({ error: role.error }, 403)
+    } else if (!member) {
+      return notMember(c)
+    }
+    c.set('user', user)
+    c.set('member', member)
+    await next()
+  }))
+}
 
-export const signedIn = tagged('signed-in', createMiddleware<SignedInEnv>(async (c, next) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json(unauthorized, 401)
-  c.set('user', user)
-  await next()
-}))
+const notMemberAnswer = (c: Context) => c.json({ error: NOT_MEMBER_ERROR }, 404)
+
+export const companyMember = memberGuard(notMemberAnswer)
+
+/**
+ * `companyMember` whose non-member answer is the endpoint's own 404 body (one
+ * that has always read differently, e.g. /api/git's `Repository not found`),
+ * the same for every company id.
+ */
+export function companyMemberNotFound(body: Record<string, unknown>) {
+  return memberGuard((c) => c.json(body, 404))
+}
+
+/**
+ * Owners and admins of `:companyId` only; anyone else signed in (a member with
+ * another role or a non-member alike) gets 403 `{ error }`, the endpoint's own
+ * text. For endpoints that always answered that way.
+ */
+export function companyAdmin(error: string) {
+  return memberGuard(notMemberAnswer, { error })
+}
+
+/** A session only. `error` is the endpoint's own 401 text when it always had one. */
+export function signedInOr(error: string) {
+  return tagged('signed-in', createMiddleware<SignedInEnv>(async (c, next) => {
+    const user = await getUserFromRequest(c.req.raw)
+    if (!user) return c.json({ error }, 401)
+    c.set('user', user)
+    await next()
+  }))
+}
+
+export const signedIn = signedInOr('Unauthorized')
+
+export type RecordTokenEnv = { Variables: { holder: RecordTokenHolder } }
+
+/**
+ * The member's AI on /api/records-ai (records.md "Who is acting"): a record
+ * token, never a session (401 without one; 403 `READ_ONLY_TOKEN` for `act`
+ * with a read token). The handler reads `c.var.holder` (member, scope, run).
+ */
+function recordToken(needs: 'read' | 'act') {
+  return tagged('record-token', createMiddleware<RecordTokenEnv>(async (c, next) => {
+    const holder = holderOf(c, needs)
+    if (holder instanceof Response) return holder
+    c.set('holder', holder)
+    await next()
+  }))
+}
+
+/** A record token of either scope (a read token or an act token). */
+export const aiReads = recordToken('read')
+/** An act record token only. */
+export const aiActs = recordToken('act')
 
 const INVALID_BODY = 'Invalid request body'
 

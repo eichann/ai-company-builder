@@ -8,8 +8,7 @@
  * member's clone does not already have (every member has every tree).
  */
 import { Hono } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
-import { services } from '../composition'
+import { companyMember } from './guards'
 import { folderSizes } from '../lib/folder-sizes'
 import { logError } from '../lib/error-log'
 
@@ -23,12 +22,8 @@ function validFolder(p: string): boolean {
   return !p.split('/').some(seg => seg === '.' || seg === '..')
 }
 
-folderSizesRoute.get('/', async (c) => {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  if (!services.access.memberOf(companyId, user.id)) return c.json({ error: 'Company not found or access denied' }, 404)
+folderSizesRoute.get('/', companyMember, async (c) => {
+  const { companyId } = c.var.member
 
   const folder = c.req.query('path') ?? ''
   const measure = c.req.queries('measure') ?? []

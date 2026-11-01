@@ -15,6 +15,7 @@
  */
 import { Hono } from 'hono'
 import { services } from '../composition'
+import { publicRoute } from './guards'
 
 export const oauthRoute = new Hono()
 
@@ -29,7 +30,7 @@ main{background:#fff;border-radius:12px;padding:32px 28px;max-width:480px;box-sh
 <body><main><h1>${escapeHtml(heading)}</h1><p>${escapeHtml(message)}</p></main></body></html>`
 }
 
-oauthRoute.get('/:provider/callback', async (c) => {
+oauthRoute.get('/:provider/callback', publicRoute('the provider sends the browser back without a session; the single-use state is the proof'), async (c) => {
   const result = await services.memberOAuth.callback(c.req.param('provider'), {
     state: c.req.query('state'),
     code: c.req.query('code'),

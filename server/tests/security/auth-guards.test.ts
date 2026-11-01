@@ -48,23 +48,7 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
  */
 const NOT_YET_GUARDED = new Set([
   'ai-runs.ts',
-  'broker-relay.ts',
-  'companies.ts',
-  'company-files.ts',
-  'departments.ts',
-  'folder-sizes.ts',
-  'git-http.ts',
-  'git.ts',
-  'google-drive.ts',
   'google.ts',
-  'inbox.ts',
-  'invitations.ts',
-  'oauth.ts',
-  'permission-rules.ts',
-  'private-folders.ts',
-  'records-ai-identities.ts',
-  'records-ai-inbox.ts',
-  'records-ai.ts',
   'slack-connection.ts',
 ])
 

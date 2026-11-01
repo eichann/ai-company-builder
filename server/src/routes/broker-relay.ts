@@ -14,6 +14,7 @@ import type { Context } from 'hono'
 import { Readable } from 'stream'
 import { services } from '../composition'
 import type { BrokerRelay } from '../services/broker-relay'
+import { ownCredential } from './guard-tags'
 
 function publicBase(c: Context): string {
   const proto = c.req.header('x-forwarded-proto') || new URL(c.req.url).protocol.replace(':', '')
@@ -23,7 +24,7 @@ function publicBase(c: Context): string {
 /** The relay's routes over one relay service (tests hand one with a fake upstream). */
 export function brokerRelayRoutes(brokerRelay: BrokerRelay): Hono {
   const route = new Hono()
-  route.on(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/:service/*', async (c) => relayOnce(c, brokerRelay))
+  route.on(['GET', 'POST', 'PUT', 'PATCH', 'DELETE'], '/:service/*', ownCredential('a key-broker token (key-broker.md)'), async (c) => relayOnce(c, brokerRelay))
   return route
 }
 
