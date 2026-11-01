@@ -30,7 +30,7 @@ import { checkUpstreamPath } from '../../shared/core/upstream-path'
 import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { ConnectorGrantRow } from '../ports/connectors'
+import type { ConnectorGrantRow, ConnectorRepository } from '../ports/connectors'
 import type { Clock } from '../ports/clock'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { BrokerVault } from './broker-vault'
@@ -229,12 +229,14 @@ export function createGoogleClient(deps: GoogleClientDeps) {
   }
 
   /**
-   * A scope the call needs: granted, and its feature not turned off by the
-   * member (member-oauth.md "Feature toggles": refused like a scope not granted).
+   * A scope the call needs: granted, its feature not turned off for the company
+   * by the admin (answered like the company switch, `off`), nor by the member
+   * (member-oauth.md "Feature toggles": refused like a scope not granted).
    */
-  function scopeStop(grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
+  function scopeStop(connectors: ConnectorRepository, grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
     if (!grant.scopes.includes(scope)) return 'scope-not-granted'
     const feature = googleFeatureOfScope(scope)
+    if (feature !== null && connectors.client()?.featuresOff.includes(feature)) return 'off'
     if (feature !== null && grant.featuresOff.includes(feature)) return 'feature-off'
     return null
   }
@@ -367,7 +369,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       const grant = connectors.grant('google', userId)
       const stop = grantStop(grant)
       if (stop) return { ok: false, reason: stop }
-      const scoped = scopeStop(grant!, GOOGLE_SCOPE.driveFile)
+      const scoped = scopeStop(connectors, grant!, GOOGLE_SCOPE.driveFile)
       if (scoped) return { ok: false, reason: scoped }
       const stored = connectors.refreshToken('google', userId)
       if (!stored || stored.grantId !== grant!.grantId) return { ok: false, reason: 'grant-revoked' }
@@ -417,7 +419,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const grant = connectors.grant('google', userId)
         const stop = grantStop(grant)
         if (stop) return notSent(stop)
-        const scoped = scopeStop(grant!, req.scope)
+        const scoped = scopeStop(connectors, grant!, req.scope)
         if (scoped) return notSent(scoped)
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)

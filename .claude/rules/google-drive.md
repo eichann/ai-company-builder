@@ -38,7 +38,9 @@ seams: `routes/record-ai-auth.ts` (record-token auth + S10b's `keyedWrite`, shar
 
 ## Scopes
 
-Feature `drive` = `drive.file` (`GOOGLE_FEATURE_SCOPES`); asked **when first used**: the first
+Feature `drive` = `drive.file` (`GOOGLE_FEATURE_SCOPES`); offered by the company only once the
+Picker is registered, then asked with the other features in 「仕事の道具をつなぐ」's one consent, or
+**when first used**: the first
 `drive_pick_*` opens 「Google で許可」 in the system browser with `features: ['drive']` (the
 already-granted features are added by the server) and waits ≤ 2 minutes for the grant.
 `GOOGLE_NEVER_SCOPES` lists what ACB never asks or stores (`drive`, `drive.readonly`, …; test).

@@ -22,6 +22,7 @@ import { ApiError, googleApi, type GoogleAdminView, type GoogleFeature, type Goo
 import { copyText } from '@/lib/clipboard'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
+import { GOOGLE_FEATURES } from '../../../../../../shared/core/google'
 import { useQuery } from '@/lib/use-query'
 
 import { MinutesFolderSection } from './minutes-folder'
@@ -182,6 +183,17 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
     }
   }
 
+  async function setFeature(feature: GoogleFeature, on: boolean) {
+    setBusy(true)
+    try {
+      onView(await googleApi.setFeature(companyId, feature, on))
+    } catch (err) {
+      toast.error(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   async function stop(grant: GoogleGrantSummary) {
     try {
       onView(await googleApi.stopGrant(companyId, grant.userId))
@@ -242,6 +254,28 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
           <p className="text-xs text-muted-foreground">最後の変更: {formatDateTime(view.updatedAt)}（{nameOf(view.updatedBy ?? '')}）</p>
         )}
       </section>
+
+      {view.configured && (
+        <section className="space-y-2" data-testid="google-company-features">
+          <h3 className="text-sm font-medium">会社で使うもの</h3>
+          <p className="text-xs text-muted-foreground">
+            メンバーはアプリの「仕事の道具をつなぐ」で、ここでオンのものを一度にまとめて許可します。オフにしたものは誰にも許可を求めず、すでに許可した人の分も次から使いません。
+          </p>
+          <ul className="space-y-1">
+            {GOOGLE_FEATURES.map((f) => {
+              const on = !view.featuresOff.includes(f)
+              const needsPicker = f === 'drive' && on && !view.picker.configured
+              return (
+                <li key={f} className="flex flex-wrap items-center gap-2 text-sm">
+                  <span className="min-w-56">{GOOGLE_FEATURE_TEXT[f]}</span>
+                  <span className="text-muted-foreground">{on ? (needsPicker ? 'オン（下の「ファイル選び」を設定すると使えます）' : 'オン') : 'オフ'}</span>
+                  <Button variant="outline" size="sm" disabled={busy} onClick={() => setFeature(f, !on)}>{on ? 'オフにする' : 'オンにする'}</Button>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
 
       <section className="space-y-2">
         <h3 className="text-sm font-medium">メンバーの許可（読むもの・送るもの）</h3>

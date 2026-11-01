@@ -54,6 +54,7 @@ export function googleErrorText(status: number, body: unknown): string {
       ? GOOGLE_UNAVAILABLE_TEXT[b.reason as GoogleUnavailableReason]
       : 'いまは Google とつなげません。管理者に確かめてください。'
   }
+  if (b.code === 'GOOGLE_FEATURE_COMPANY_OFF') return 'この機能は会社で使っていません。管理者に確かめてください。'
   if (status === 401) return 'サインインし直してから、もう一度お試しください。'
   if (status === 404) return 'このサーバーは Google との連携にまだ対応していません。'
   return `うまくいきませんでした（サーバーの応答 ${status}）。`

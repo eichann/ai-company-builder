@@ -13,7 +13,7 @@
  * company's Workspace domain is accepted — anything else stores nothing.
  */
 import {
-  googleFeaturesOf, googleFeaturesOff, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
+  googleCompanyFeatures, googleFeaturesOf, googleFeaturesOff, googleFeaturesToAsk, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
   checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
 import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
@@ -81,6 +81,13 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
     return null
   }
 
+  /** What the company offers its members now (google-connector.md "One consent"). */
+  function companyFeaturesOf(connectors: ConnectorRepository): GoogleFeature[] {
+    const client = connectors.client()
+    if (!client) return []
+    return googleCompanyFeatures({ featuresOff: client.featuresOff, pickerConfigured: connectors.picker() !== null })
+  }
+
   async function view(companyId: string): Promise<GoogleAdminView> {
     const connectors = connectorsOf(companyId)
     const client = connectors.client()
@@ -121,6 +128,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         try { detail = JSON.parse(h.change) as Record<string, unknown> } catch { /* unreadable: shown empty */ }
         return { id: h.id, action: h.action as GoogleChangeAction, at: h.at, by: h.by, byName: people.get(h.by)?.name ?? null, userId: h.userId, detail }
       }),
+      featuresOff: googleFeaturesOff(client?.featuresOff ?? []),
+      companyFeatures: companyFeaturesOf(connectors),
     }
   }
 
@@ -139,6 +148,8 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       featuresOff: grant?.status === 'active' ? googleFeaturesOff(grant.featuresOff).filter(f => googleFeaturesOf(grant.scopes).includes(f)) : [],
       domain: client?.domain ?? null,
       practice: deps.practiceGoogle,
+      companyFeatures: reason === null ? companyFeaturesOf(connectors) : [],
+      seen: googleFeaturesOff(connectors.setupSeen('google', member.userId)),
     }
   }
 
@@ -251,6 +262,30 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
     },
 
     /**
+     * PUT …/google/features { feature, on } (owner/admin): turns one feature off / on for the
+     * whole company. Off: never asked of members again, and the Google client refuses its
+     * calls from the next one (members' grants keep the scope until they re-consent or stop).
+     */
+    async setCompanyFeature(member: Member, body: unknown): Promise<Outcome<GoogleAdminView>> {
+      const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
+      if (!allowed.ok) return allowed
+      if (!isObject(body) || !isGoogleFeature(body.feature) || typeof body.on !== 'boolean') {
+        return refuse('bad-request', `feature must be one of: ${GOOGLE_FEATURES.join(', ')}; on must be true or false`)
+      }
+      const connectors = connectorsOf(member.companyId)
+      const client = connectors.client()
+      if (!client) return refuse('not-found', 'Google の登録がまだありません。', { code: 'NOT_CONFIGURED' })
+      const feature = body.feature
+      const off = !body.on
+      if (client.featuresOff.includes(feature) !== off) {
+        const next = GOOGLE_FEATURES.filter(f => (f === feature ? off : client.featuresOff.includes(f)))
+        connectors.setClientFeaturesOff(next, clock.now(), member.userId, change('features', member.userId, null, { feature, on: body.on }))
+      }
+      google.forgetCompany(member.companyId)
+      return ok(await view(member.companyId))
+    },
+
+    /**
      * PUT …/google/picker { apiKey?, appId } (owner/admin): Google Picker's API key and the
      * Cloud project number (google-drive.md). `apiKey` left out keeps the stored one;
      * `appId: null` removes both (Drive picking stops from the next call).
@@ -297,10 +332,15 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       return ok(await myView(member))
     },
 
-    /** POST …/me/google/connect { features } → the URL the member's browser opens. */
+    /**
+     * POST …/me/google/connect { features } | { all: true } → the URL the member's browser
+     * opens. `all` asks every feature the company offers in one consent (「仕事の道具をつなぐ」)
+     * and marks them seen; a feature the company turned off is never asked.
+     */
     async connect(member: Member, body: unknown): Promise<Outcome<GoogleConnectStart>> {
-      if (!isObject(body) || !Array.isArray(body.features) || body.features.length === 0 || !body.features.every(isGoogleFeature)) {
-        return refuse('bad-request', `features must list one or more of: ${GOOGLE_FEATURES.join(', ')}`)
+      const all = isObject(body) && body.all === true
+      if (!all && (!isObject(body) || !Array.isArray(body.features) || body.features.length === 0 || !body.features.every(isGoogleFeature))) {
+        return refuse('bad-request', `features must list one or more of: ${GOOGLE_FEATURES.join(', ')} (or all: true)`)
       }
       const reason = await unavailableReason(member.companyId)
       if (reason) return refuse('conflict', 'いまは Google とつなげません。管理者に確かめてください。', { code: 'GOOGLE_UNAVAILABLE', reason })
@@ -311,10 +351,18 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       const account = accounts.byIds([member.userId]).get(member.userId)
       const grant = connectors.grant('google', member.userId)
       const active = grant?.status === 'active'
-      // Ask for what the member already allowed too (incremental: Google merges them).
-      const features = new Set<GoogleFeature>(body.features as GoogleFeature[])
-      if (active) for (const f of googleFeaturesOf(grant!.scopes)) features.add(f)
-      const scopes = googleScopesFor([...features])
+      const offered = companyFeaturesOf(connectors)
+      const requested = all ? offered : (body as { features: GoogleFeature[] }).features
+      if (requested.length === 0 || requested.some(f => !offered.includes(f))) {
+        return refuse('conflict', 'この機能は会社で使っていません。管理者に確かめてください。', { code: 'GOOGLE_FEATURE_COMPANY_OFF' })
+      }
+      // Ask for what the member already allowed too (incremental: Google merges them), but
+      // nothing the company turned off.
+      const features = googleFeaturesToAsk(requested, offered, active ? googleFeaturesOf(grant!.scopes) : [])
+      const scopes = googleScopesFor(features)
+      // Shown once: whatever the member allows or declines on Google's page, the screen
+      // does not come back for these (never a loop).
+      if (all) connectors.addSetupSeen('google', member.userId, offered, clock.now())
       return ok(await memberOAuth.start('google', member, scopes, p => ({
         client_id: client.clientId,
         redirect_uri: p.redirectUri,
@@ -348,6 +396,16 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       }
       const r = memberOAuth.setFeatureOff('google', member, body.feature, !body.on)
       if (!r.ok) return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
+      return ok(await myView(member))
+    },
+
+    /**
+     * PUT …/me/google/seen (「あとで」 on 「仕事の道具をつなぐ」): the features the company
+     * offers now are marked shown; the screen comes back only for ones added later.
+     */
+    async markSeen(member: Member): Promise<Outcome<MyGoogle>> {
+      const connectors = connectorsOf(member.companyId)
+      if (await unavailableReason(member.companyId) === null) connectors.addSetupSeen('google', member.userId, companyFeaturesOf(connectors), clock.now())
       return ok(await myView(member))
     },
 

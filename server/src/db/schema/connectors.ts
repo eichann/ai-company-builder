@@ -125,6 +125,18 @@ export const connectorSchema = `
       PRIMARY KEY (company_id, role)
     );
 
+    -- 「仕事の道具をつなぐ」 (google-connector.md): which of a provider's features the
+    -- app already showed the member (connected, declined on the provider's page or
+    -- 「あとで」), so the screen comes back only for features the company adds later.
+    CREATE TABLE IF NOT EXISTS connector_setup_seen (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      seen TEXT NOT NULL DEFAULT '[]',
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, provider)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_connector_history_company ON connector_history(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_oauth_pending_expires ON oauth_pending(company_id, expires_at);
 `
@@ -139,6 +151,16 @@ export function migrateGooglePicker(conn: Database.Database): void {
   const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('picker_api_key')) conn.exec('ALTER TABLE google_oauth_clients ADD COLUMN picker_api_key TEXT')
   if (!cols.has('picker_app_id')) conn.exec('ALTER TABLE google_oauth_clients ADD COLUMN picker_app_id TEXT')
+}
+
+/**
+ * The Google features the admin turned off for the whole company (JSON list;
+ * owner decision 2026-11-02): never asked of members, refused from the next
+ * call. Added after the table shipped; default `[]` keeps every feature on.
+ */
+export function migrateGoogleCompanyFeatures(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(google_oauth_clients)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('features_off')) conn.exec("ALTER TABLE google_oauth_clients ADD COLUMN features_off TEXT NOT NULL DEFAULT '[]'")
 }
 
 /**

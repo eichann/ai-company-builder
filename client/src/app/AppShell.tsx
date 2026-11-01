@@ -496,6 +496,7 @@ export function AppShell() {
         />
       )}
       <AppDialogs
+        companyId={currentCompany?.id}
         rootPath={rootPath || ''}
         departments={departments}
         selectedDeptId={selectedDeptId}

@@ -333,6 +333,9 @@ const api: ElectronAPI = {
   connectSlack: (companyId: string, features: SlackFeature[]) => invoke('slack:connect', companyId, features),
   disconnectSlack: (companyId: string) => invoke('slack:disconnect', companyId),
   setSlackFeature: (companyId: string, feature: SlackFeature, on: boolean) => invoke('slack:setFeature', companyId, feature, on),
+  connectGoogleAll: (companyId: string) => invoke('google:connectAll', companyId),
+  markGoogleSeen: (companyId: string) => invoke('google:markSeen', companyId),
+  markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),
   // lane A ▲
   // lane B ▼
   // lane B ▲

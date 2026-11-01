@@ -110,7 +110,9 @@ contract.invoke git:sparseSetExclusions
 contract.invoke git:sparseUncommittedChanges
 contract.invoke git:sync
 contract.invoke google:connect
+contract.invoke google:connectAll
 contract.invoke google:disconnect
+contract.invoke google:markSeen
 contract.invoke google:status
 contract.invoke handoff:complete
 contract.invoke handoff:get
@@ -149,6 +151,7 @@ contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
 contract.invoke slack:connect
 contract.invoke slack:disconnect
+contract.invoke slack:markSeen
 contract.invoke slack:setFeature
 contract.invoke slack:status
 contract.invoke tasks:act
@@ -280,6 +283,7 @@ contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
+contract.type ElectronAPI.connectGoogleAll = connectGoogleAll: Invoke<'google:connectAll'>
 contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
@@ -355,7 +359,9 @@ contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
+contract.type ElectronAPI.markGoogleSeen = markGoogleSeen: Invoke<'google:markSeen'>
 contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
+contract.type ElectronAPI.markSlackSeen = markSlackSeen: Invoke<'slack:markSeen'>
 contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
 contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
@@ -639,7 +645,9 @@ contract.type IpcInvokeChannels.'git:sparseSetExclusions' = 'git:sparseSetExclus
 contract.type IpcInvokeChannels.'git:sparseUncommittedChanges' = 'git:sparseUncommittedChanges': { args: [repoPath: string, folders: string[]]; result: SparseUncommittedChangesResult }
 contract.type IpcInvokeChannels.'git:sync' = 'git:sync': { args: [repoPath: string, companyId: string, commitMessage: string]; result: GitResult }
 contract.type IpcInvokeChannels.'google:connect' = 'google:connect': { args: [companyId: string, features: GoogleFeature[]]; result: GoogleConnectResult }
+contract.type IpcInvokeChannels.'google:connectAll' = 'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
 contract.type IpcInvokeChannels.'google:disconnect' = 'google:disconnect': { args: [companyId: string]; result: GoogleStatusResult }
+contract.type IpcInvokeChannels.'google:markSeen' = 'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'google:status' = 'google:status': { args: [companyId: string]; result: GoogleStatusResult }
 contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args: [company: string, id: string, receipt: HandoffCompletion]; result: void }
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
@@ -678,6 +686,7 @@ contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [ro
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
 contract.type IpcInvokeChannels.'slack:connect' = 'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
 contract.type IpcInvokeChannels.'slack:disconnect' = 'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:markSeen' = 'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'slack:setFeature' = 'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'slack:status' = 'slack:status': { args: [companyId: string]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
@@ -870,7 +879,9 @@ main.handle git:sparseSetExclusions @ features/download-choices/ipc.ts (repoPath
 main.handle git:sparseUncommittedChanges @ features/download-choices/ipc.ts (repoPath: string, folders: string[])
 main.handle git:sync @ features/sync/ipc.ts (repoPath: string, companyId: string, commitMessage: string)
 main.handle google:connect @ features/google/ipc.ts (companyId: string, features: GoogleFeature[])
+main.handle google:connectAll @ features/google/ipc.ts (companyId: string)
 main.handle google:disconnect @ features/google/ipc.ts (companyId: string)
+main.handle google:markSeen @ features/google/ipc.ts (companyId: string)
 main.handle google:status @ features/google/ipc.ts (companyId: string)
 main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id: string, receipt: HandoffCompletion)
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
@@ -909,6 +920,7 @@ main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRela
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
 main.handle slack:connect @ features/slack/ipc.ts (companyId: string, features: SlackFeature[])
 main.handle slack:disconnect @ features/slack/ipc.ts (companyId: string)
+main.handle slack:markSeen @ features/slack/ipc.ts (companyId: string)
 main.handle slack:setFeature @ features/slack/ipc.ts (companyId: string, feature: SlackFeature, on: boolean)
 main.handle slack:status @ features/slack/ipc.ts (companyId: string)
 main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
@@ -978,6 +990,8 @@ preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
 preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox")[]) => Promise<GoogleConnectResult>
+preload connectGoogleAll -> invoke google:connectAll($0)
+preload connectGoogleAll : (companyId: string) => Promise<GoogleConnectResult>
 preload connectSlack -> invoke slack:connect($0, $1)
 preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
@@ -1128,8 +1142,12 @@ preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)
 preload makeSkillPrivate : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult & { code?: "already_shared" | undefined; }>
+preload markGoogleSeen -> invoke google:markSeen($0)
+preload markGoogleSeen : (companyId: string) => Promise<GoogleStatusResult>
 preload markNotificationsRead -> invoke notifications:markRead($0, $1)
 preload markNotificationsRead : (companyId: string, ids: string[] | "all") => Promise<NoticesActionResult>
+preload markSlackSeen -> invoke slack:markSeen($0)
+preload markSlackSeen : (companyId: string) => Promise<SlackStatusResult>
 preload moveEnvKeyToServer -> invoke brokerKeys:moveFromEnv($0, $1, $2)
 preload moveEnvKeyToServer : (companyId: string, rootPath: string, name: string) => Promise<OwnKeyMoveResult>
 preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)

@@ -3,10 +3,10 @@
  * which Google permissions (scopes) each ACB feature asks for, the hosts each
  * Google API lives on, and the input rules of the admin's registration.
  *
- * Owner decisions (design §5-2, §9 q8/q10): ask only for what a feature
- * needs, when it is first needed (minutes first, `gmail.send` when mail is
- * first used, `drive.file` when Drive is first used, `gmail.readonly` when
- * 受信を読む is first used); never `drive`, `drive.readonly`, `gmail.compose`,
+ * Owner decisions (design §5-2, §9 q8/q10; 2026-11-02 「仕事の道具をつなぐ」):
+ * ask only for the features the company turned on, all of them in one consent
+ * (`googleFeaturesToAsk`); a feature the company turns on later is asked once
+ * more (or when first used); never `drive`, `drive.readonly`, `gmail.compose`,
  * `gmail.metadata`, `gmail.modify` or domain-wide delegation
  * (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox`
  * feature (owner decision 2026-11-01, spec §7-1: the member can turn it off).
@@ -113,6 +113,27 @@ export function googleFeatureOfScope(scope: string): GoogleFeature | null {
 /** A member's list of turned-off features as stored → the known features only (unknown entries are ignored). */
 export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
   return GOOGLE_FEATURES.filter(f => raw.includes(f))
+}
+
+// ---------------------------------------------------------------------------
+// What the company offers its members (owner decision 2026-11-02, 「仕事の道具をつなぐ」).
+
+/**
+ * The features a company offers: every feature the admin did not turn off
+ * (`google_oauth_clients.features_off`), and Drive only once Google Picker is
+ * registered (without it Drive cannot be used, so `drive.file` is not asked).
+ */
+export function googleCompanyFeatures(company: { featuresOff: readonly string[]; pickerConfigured: boolean }): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => !company.featuresOff.includes(f) && (f !== 'drive' || company.pickerConfigured))
+}
+
+/**
+ * What one consent asks for: the requested features the company offers, plus
+ * those already granted that the company still offers (Google merges them).
+ * Never a feature the company turned off (least privilege at company level).
+ */
+export function googleFeaturesToAsk(requested: readonly GoogleFeature[], companyFeatures: readonly GoogleFeature[], granted: readonly GoogleFeature[]): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => companyFeatures.includes(f) && (requested.includes(f) || granted.includes(f)))
 }
 
 // ---------------------------------------------------------------------------

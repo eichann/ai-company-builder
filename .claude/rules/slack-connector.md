@@ -82,7 +82,9 @@ counts only when all its scopes are granted (`slackFeaturesOf`).
   `PUT /slack/app`, `PUT /slack/enabled`, `DELETE /slack/grants/:userId`; any member
   `GET /me/slack`, `POST /me/slack/connect { features }`, `PUT /me/slack/features { feature, on }`
   (`features_off`, `member-oauth.md`; 409 `SLACK_NOT_CONNECTED` / `SLACK_FEATURE_NOT_GRANTED`),
-  `DELETE /me/slack`. Errors other than the role check are Japanese.
+  `PUT /me/slack/seen` (「仕事の道具をつなぐ」 showed Slack: `SLACK_SETUP_FEATURES` marked seen,
+  `MySlack.seen`; google-connector.md "One consent"), `DELETE /me/slack`. Errors other than the
+  role check are Japanese.
 - Owner/admin: `adminView`, `saveApp { teamId, clientId, clientSecret?, signingSecret?,
   botToken? }` (secrets required the first time, kept when left out; a bot token is checked
   with `auth.test` and must be of the app's workspace, else `BOT_TOKEN_REJECTED`, nothing saved;

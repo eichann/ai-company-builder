@@ -636,6 +636,11 @@ export interface IpcInvokeChannels {
   'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
   /** The member turns an allowed feature off / on (大事な知らせを DM で受け取る). */
   'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
+  // 「仕事の道具をつなぐ」 (google-connector.md "One consent"): one Google consent for what the
+  // company offers (the sign-in URL stays in main), and 「あとで」 per service.
+  'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
+  'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
+  'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -946,6 +951,9 @@ export interface ElectronAPI {
   connectSlack: Invoke<'slack:connect'>
   disconnectSlack: Invoke<'slack:disconnect'>
   setSlackFeature: Invoke<'slack:setFeature'>
+  connectGoogleAll: Invoke<'google:connectAll'>
+  markGoogleSeen: Invoke<'google:markSeen'>
+  markSlackSeen: Invoke<'slack:markSeen'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

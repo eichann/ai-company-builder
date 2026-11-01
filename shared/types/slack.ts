@@ -67,4 +67,6 @@ export interface MySlack {
   features: SlackFeature[]
   featuresOff: SlackFeature[]
   practice: boolean
+  /** Shown to the member on 「仕事の道具をつなぐ」 already (connected, declined or 「あとで」). */
+  seen: SlackFeature[]
 }

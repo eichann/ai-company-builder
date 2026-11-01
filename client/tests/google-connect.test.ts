@@ -81,3 +81,16 @@ test('受信を読む is offered only to a connected member without it, and a fe
   assert.deepEqual(off.allowed, ['予定と議事録を読む', '受信を読む（オフにしています）'])
   assert.equal(googleSectionView({ ...base, connected: false, status: null, features: [], featuresOff: [] }).canAddInbox, false)
 })
+
+test('「Google でつなぐ」 (connectAll) asks for { all } and opens only the sign-in page; 「あとで」 is a PUT of /seen', async () => {
+  const h = harness({ status: 200, body: { success: true, data: { authorizeUrl: GOOGLE_URL, expiresAt: '2026-11-01T00:10:00Z' } } })
+  assert.deepEqual(await h.api.connectAll('co1'), { success: true })
+  assert.deepEqual(h.opened, [GOOGLE_URL])
+  assert.deepEqual(h.requests.map(r => [r.method, r.url, r.body]), [['POST', 'https://acb.test/api/companies/co1/me/google/connect', { all: true }]])
+  const lookalike = harness({ status: 200, body: { data: { authorizeUrl: 'https://accounts.google.com.evil.example/o/oauth2/v2/auth' } } })
+  assert.equal((await lookalike.api.connectAll('co1')).success, false)
+  assert.deepEqual(lookalike.opened, [])
+  const seen = harness({ status: 200, body: { success: true, data: { available: true, features: [], seen: ['minutes'] } } })
+  assert.equal((await seen.api.markSeen('co1')).success, true)
+  assert.deepEqual(seen.requests.map(r => [r.method, r.url]), [['PUT', 'https://acb.test/api/companies/co1/me/google/seen']])
+})

@@ -7,11 +7,12 @@ import { AutoSyncSettings } from './AutoSyncSettings'
 import { OwnKeysSection } from './OwnKeysSection'
 import { GoogleSection } from './GoogleSection'
 import { SlackSection } from './SlackSection'
+import { ConnectToolsScreen } from './ConnectToolsScreen'
 import { AbsenceSection } from '../../absences/components/AbsenceSection'
 import { LegacyKeysNote, MoveEnvKeysCard } from './MoveEnvKeysCard'
 import { Button, Callout, Card, SectionHeader, SubHeading } from '../../../shared/ui/primitives'
 import { useState, useEffect, useCallback, useRef, type ReactNode } from 'react'
-import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch } from '@phosphor-icons/react'
+import { X, Eye, EyeSlash, Plus, Trash, ArrowCounterClockwise, Code, Key, Check, FileX, CloudArrowDown, ArrowsClockwise, Microphone, SpinnerGap, Lightbulb, ShieldCheck, Info, LockKey, GoogleLogo, SlackLogo, UserSwitch, PlugsConnected } from '@phosphor-icons/react'
 import { useAppStore } from '../../../stores/appStore'
 import { useDepartments } from '../../../shared/hooks/useDepartments'
 import { AGENT_LOG_NOTICE_TEXT, SANDBOX_NOTICE_TEXT } from '../../../shared/lib/agentLogNotice'
@@ -36,7 +37,7 @@ interface SettingsPanelProps {
   focusService?: string
 }
 
-export type TabType = 'sync' | 'autosync' | 'gitignore' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
+export type TabType = 'sync' | 'autosync' | 'gitignore' | 'tools' | 'ownkeys' | 'google' | 'slack' | 'apikeys' | 'advanced' | 'aienv' | 'voice' | 'suggestions' | 'absences'
 
 const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; icon: ReactNode }> }> = [
   {
@@ -50,6 +51,7 @@ const NAV: Array<{ group: string; items: Array<{ id: TabType; label: string; ico
   {
     group: 'AI と連携',
     items: [
+      { id: 'tools', label: '仕事の道具をつなぐ', icon: <PlugsConnected size={16} /> },
       { id: 'ownkeys', label: '自分の鍵', icon: <LockKey size={16} /> },
       { id: 'google', label: 'Google', icon: <GoogleLogo size={16} /> },
       { id: 'slack', label: 'Slack', icon: <SlackLogo size={16} /> },
@@ -350,6 +352,8 @@ export function SettingsPanel({ onClose, initialTab = 'sync', focusService }: Se
               </div>
             ) : activeTab === 'ownkeys' ? (
               <OwnKeysSection companyId={currentCompany.id} focusService={focusService} />
+            ) : activeTab === 'tools' ? (
+              <ConnectToolsScreen key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'google' ? (
               <GoogleSection key={currentCompany.id} companyId={currentCompany.id} />
             ) : activeTab === 'slack' ? (
