@@ -31,6 +31,7 @@ import { GoogleSection } from './google'
 import { SlackSection } from './slack'
 import { ReadScopeSection } from './read-scope'
 import { RolesSection } from './roles'
+import { StepSkillsSection } from './step-skills'
 import {
   ApiError,
   companiesApi,
@@ -347,6 +348,9 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
 
         {/* 役割 (plan C3): who holds the business's roles in this company. */}
         {install && business && <RolesSection pluginId={item.id} members={members} nameOf={nameOf} />}
+
+        {/* 手順を会社のスキルで (plan C5): an overridable step run with one of the company's Skills. */}
+        {install && business && <StepSkillsSection pluginId={item.id} />}
 
         {/* On / off */}
         {install && (
