@@ -230,6 +230,10 @@ export function createAiRunService(deps: AiRunDeps) {
         procedure: JSON.stringify(procedureOf(member.companyId, step, appBuild, pin)),
       }
       return transactions.run((): Outcome<{ run: AiRunView; created: boolean }> => {
+        // One run per record (ai-turns.md "One claim per record"): another step's live claim on the same
+        // record — a core step and a business plugin's, say — refuses this one. The answer names neither
+        // that run nor its step (it may be another member's).
+        if (r.liveOtherStep(recordId, step, at)) return refuse('conflict', RUN_CLAIMED.error, { code: RUN_CLAIMED.code })
         const open = r.openRun(recordId, step)
         if (!open) {
           const run: AiRunRow = {

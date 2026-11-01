@@ -151,7 +151,8 @@ The execution state lives on the server; the AI still runs only here.
   <the record's step>, deviceId, conversationId }` (session; the request's
   `X-ACB-Client-Version` names the build, which the server keeps as the run's procedure with the
   plugins on then — `records.md` "Which procedure"). `deviceId` = this app instance
-  (`app-<uuid>` per launch, `main.ts`). Another PC holding it, or a run waiting for a person or for
+  (`app-<uuid>` per launch, `main.ts`). Another PC holding it, another step of the record holding
+  a live claim ("One claim per record" below), or a run waiting for a person or for
   reconciliation → `taken` (the record's action is not run). Then `start_reading` as before; if it
   does not start, the run is finished as temporary (given back for later).
 - **The run binds the consultation's tokens**: the claim puts `{ runId, generation }` in the run
@@ -280,7 +281,12 @@ ceiling, the first message).
   in 準備中 is that consultation's to prepare, never this step's.
 - **One claim per record**: a record a business plugin's `ai_turn` step lists (`GET
   /me/plugin-step-turns`) is queued only as that plugin step, never also as a core step
-  (`aiTurnQueue`); main's claim already prefers the plugin turn.
+  (`aiTurnQueue`); main's claim already prefers the plugin turn. The server enforces it (the
+  authority; the queue is for the experience): `POST /ai-run-claims` refuses while another step of
+  the same record holds a live claim (running, lease not expired — `liveOtherStep`,
+  `services/ai-runs.ts`), with the plain 409 `RUN_CLAIMED` that names neither that run nor its
+  step; once that lease expired the other step may claim. Test: `ai-runs.test.ts` "one run per
+  record" (mutation-checked).
 - **The run** (no start mark, `claim.from: preparing`; settle `todo` → done, `cancelled` →
   closed, still 準備中 → given back): `task_wait_read` (`electron/features/ai-turns/task-wait-tools.ts`,
   provider under lane C: the task's 待っているもの, 見込み, 期限 and links — `interaction`,

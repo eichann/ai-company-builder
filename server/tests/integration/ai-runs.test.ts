@@ -120,6 +120,23 @@ describe('claiming a record’s AI step', () => {
   })
 })
 
+describe('one run per record', () => {
+  it('a live claim of one step refuses another step of the same record, naming neither; once that claim expired, the other step may run', async () => {
+    const id = await preparingTask('ひとつの記録に二つの手順')
+    expect((await claim('u-bob', id, 'device-aaaa')).status).toBe(201)
+    const core = (deviceId: string) => session('u-bob', 'POST', '/ai-run-claims', { recordId: id, step: 'task-other', deviceId, conversationId: `conv-${deviceId}` })
+    // The same PC or another: refused while the first claim lives (a plugin's step goes through the same check).
+    for (const answer of [await core('device-aaaa'), await core('device-bbbb')]) {
+      expect(answer).toMatchObject({ status: 409, body: { code: 'RUN_CLAIMED' } })
+      expect(answer.body).not.toHaveProperty('run')
+      expect(JSON.stringify(answer.body)).not.toContain('task-prep')
+    }
+    expect((db.prepare('SELECT COUNT(*) AS n FROM ai_runs WHERE company_id = ? AND record_id = ?').get(CO, id) as { n: number }).n).toBe(1)
+    later(6 * MINUTE)
+    expect((await core('device-bbbb')).status).toBe(201)
+  })
+})
+
 describe('a task whose wait is over (the PC\'s task-wait-over step)', () => {
   it('only a task the clock put in 準備中 is listed as such and claimable by that step; one a consultation made in 準備中 is not', async () => {
     const made = await preparingTask('相談で作った下ごしらえ')
