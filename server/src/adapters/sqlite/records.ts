@@ -126,11 +126,12 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
     },
     moveFolder(from, to) {
       // At or under `from` without LIKE (folder names may hold _ and %).
-      const under = (col: string) => `(${col} = @from OR substr(${col}, 1, length(@from) + 1) = @from || '/')`
-      const moved = (col: string) => `@to || substr(${col}, length(@from) + 1)`
-      conn.prepare(`UPDATE records SET folder = ${moved('folder')} WHERE company_id = @company AND ${under('folder')}`).run({ company: companyId, from, to })
-      conn.prepare(`UPDATE record_links SET target_path = ${moved('target_path')} WHERE company_id = @company AND target_id IS NULL AND ${under('target_path')}`).run({ company: companyId, from, to })
-      conn.prepare('UPDATE record_settings SET minutes_folder = @to WHERE company_id = @company AND minutes_folder = @from').run({ company: companyId, from, to })
+      const params = { old: from, new: to }
+      conn.prepare("UPDATE records SET folder = @new || substr(folder, length(@old) + 1) WHERE company_id = ? AND (folder = @old OR substr(folder, 1, length(@old) + 1) = @old || '/')")
+        .run(companyId, params)
+      conn.prepare("UPDATE record_links SET target_path = @new || substr(target_path, length(@old) + 1) WHERE company_id = ? AND target_id IS NULL AND (target_path = @old OR substr(target_path, 1, length(@old) + 1) = @old || '/')")
+        .run(companyId, params)
+      conn.prepare('UPDATE record_settings SET minutes_folder = @new WHERE company_id = ? AND minutes_folder = @old').run(companyId, params)
     },
     replaceLinks(sourceId, links) {
       conn.prepare('DELETE FROM record_links WHERE company_id = ? AND source_id = ?').run(companyId, sourceId)
