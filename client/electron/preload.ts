@@ -20,7 +20,7 @@ import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { contextBridge, ipcRenderer } = require('electron')
+const { contextBridge, ipcRenderer, webUtils } = require('electron')
 
 const invoke = <C extends InvokeChannel>(channel: C, ...args: InvokeArgs<C>): Promise<InvokeResult<C>> =>
   ipcRenderer.invoke(channel, ...args)
@@ -86,6 +86,7 @@ const api: ElectronAPI = {
   renameItem: (oldPath: string, newPath: string) => invoke('fs:rename', oldPath, newPath),
   moveItem: (sourcePath: string, destPath: string) => invoke('fs:move', sourcePath, destPath),
   moveFromExternal: (sourcePath: string, destPath: string) => invoke('fs:moveFromExternal', sourcePath, destPath),
+  getPathForFile: (file: File) => webUtils.getPathForFile(file),
   copyItem: (sourcePath: string, destPath: string) => invoke('fs:copy', sourcePath, destPath),
   getStats: (path: string) => invoke('fs:stat', path),
 

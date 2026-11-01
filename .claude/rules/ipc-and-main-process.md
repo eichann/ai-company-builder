@@ -9,6 +9,7 @@ paths:
   - "client/electron/ipc/**"
   - "client/electron/allowed-roots.ts"
   - "client/electron/external-url.ts"
+  - "client/electron/permission-policy.ts"
   - "client/electron/local-file-protocol.ts"
   - "client/electron/git-search.ts"
   - "client/shared/ipc-contract.ts"
@@ -78,6 +79,17 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
   `index.html`); consultation windows also deny popups and navigation. Test:
   `tests/ipc-chat-windows.test.ts`.
+- **Web permissions are default deny.** Electron grants every Chromium permission request
+  (camera / microphone, notifications, clipboard, USB, …) when no handler is set.
+  `guardEverySession` (`electron-adapter.ts`, called from `main.ts` before ready) installs a
+  request and a check handler on the default session and every session created later:
+  `permission-policy.ts` allows only `clipboard-sanitized-write` (navigator.clipboard.writeText)
+  and `fullscreen`, and only for the app's own page (the packaged `dist/index.html`, or the Vite
+  dev server's origin); everything else, and any other page (another file://, a web site, `blob:`
+  frames), is refused (logged with the permission's name only). The microphone is not a web
+  permission here: voice input records in its native helper and asks macOS itself
+  (`voice-input.ts`, `systemPreferences.askForMediaAccess`). A new web feature that needs a
+  permission adds it to `APP_PAGE_PERMISSIONS`. Test: `tests/ipc-permissions.test.ts`.
 - **Sender checks.** Handlers that look at who sent them accept exactly the windows they are for,
   never "any window": `chatWindow:open` / `focus` / `list` / `closeAll` only the main window;
   `chatWindow:getContext` / `reportStatus` / `openFile` only a registered consultation window, and

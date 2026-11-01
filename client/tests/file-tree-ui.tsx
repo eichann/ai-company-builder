@@ -79,9 +79,6 @@ const move = (from: string, to: string) => {
   return { success: true }
 }
 
-// Electron gives a dropped File its path on disk; Chromium does not.
-Object.defineProperty(File.prototype, 'path', { get(this: File) { return `/Users/demo/Downloads/${this.name}` } })
-
 installElectronAPI({
   sparseGetExclusions: async () => ({ success: true, excluded: [] }),
   readDirectoryTree: async (dir, max) => tree(dir, 0, max ?? 1),
@@ -101,6 +98,8 @@ installElectronAPI({
     return { success: true }
   },
   moveFromExternal: async (from, to) => { calls.push(['moveFromExternal', from, to]); add(to, false); return { success: true } },
+  // Electron's preload tells a dropped File's place on disk (webUtils.getPathForFile); Chromium does not.
+  getPathForFile: file => `/Users/demo/Downloads/${file.name}`,
   // A name a private folder this member cannot read already uses (the server knows).
   reservedPathRefusal: async p => (split(p)[1] === '人事評価' ? '「人事評価」という名前は使えません。別の名前にしてください。' : null),
   getMyPrivateFolders: async () => ({ success: true, folders: FOLDERS }),

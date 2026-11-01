@@ -5,9 +5,10 @@
 
 import path from 'path'
 import { pathToFileURL } from 'url'
-import { app, BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, shell, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
+import { allowPermission, type AppPage } from './permission-policy'
 import type { DesktopShell, WindowPort } from './features/ports'
 import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
@@ -200,6 +201,10 @@ export function createAppPages(appDir: string) {
         plugins: true,
       }
     },
+    /** Where the page comes from: what counts as the app's own page for web permissions (permission-policy.ts). */
+    page(): AppPage {
+      return { file: pathToFileURL(path.join(appDir, '../dist/index.html')).href, devServerUrl: process.env.VITE_DEV_SERVER_URL || undefined }
+    },
     load(win: BrowserWindow, query?: Record<string, string>) {
       if (process.env.VITE_DEV_SERVER_URL) {
         const url = new URL(process.env.VITE_DEV_SERVER_URL)
@@ -298,6 +303,31 @@ export function createMessageBoxHost(getWindow: () => BrowserWindow | null): Mes
       return win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options)
     },
   }
+}
+
+/**
+ * Web permissions (camera / microphone, notifications, clipboard, …) on one
+ * session: only what the app's own page uses, nothing for any other page
+ * (permission-policy.ts). Without a handler Electron grants every request.
+ */
+export function denyUnexpectedPermissions(ses: Session, page: AppPage): void {
+  ses.setPermissionRequestHandler((_webContents, permission, callback, details) => {
+    const allowed = allowPermission(permission, details.requestingUrl, page)
+    // The permission's name only: the URL may name a file of the company folder.
+    if (!allowed) console.warn(`[permissions] refused a request for ${permission}`)
+    callback(allowed)
+  })
+  ses.setPermissionCheckHandler((_webContents, permission, requestingOrigin, details) =>
+    allowPermission(permission, details.requestingUrl ?? requestingOrigin, page))
+}
+
+/**
+ * Every session gets `denyUnexpectedPermissions`: the default one once the app
+ * is ready, and each one created later (a partition). Call before app ready.
+ */
+export function guardEverySession(page: AppPage): void {
+  app.on('session-created', ses => denyUnexpectedPermissions(ses, page))
+  void app.whenReady().then(() => denyUnexpectedPermissions(session.defaultSession, page))
 }
 
 /** Register the local-file:// scheme (must run before app.whenReady()). */

@@ -184,6 +184,30 @@ export const safeStorage = {
   },
 }
 
+type PermissionRequestHandler = (webContents: unknown, permission: string, callback: (granted: boolean) => void, details: { requestingUrl?: string; isMainFrame: boolean }) => void
+type PermissionCheckHandler = (webContents: unknown, permission: string, requestingOrigin: string, details: { requestingUrl?: string; isMainFrame: boolean }) => boolean
+
+/** An Electron session: records the permission handlers main installs. */
+export class FakeSession {
+  requestHandler: PermissionRequestHandler | null = null
+  checkHandler: PermissionCheckHandler | null = null
+  setPermissionRequestHandler(handler: PermissionRequestHandler | null): void { this.requestHandler = handler }
+  setPermissionCheckHandler(handler: PermissionCheckHandler | null): void { this.checkHandler = handler }
+  /** What a page at `requestingUrl` is answered when it asks for `permission`. */
+  request(permission: string, requestingUrl: string): Promise<boolean> {
+    const handler = this.requestHandler
+    if (!handler) return Promise.resolve(true) // Electron's default: granted
+    return new Promise(resolve => handler(null, permission, resolve, { requestingUrl, isMainFrame: true }))
+  }
+  check(permission: string, requestingUrl: string): boolean {
+    return this.checkHandler ? this.checkHandler(null, permission, new URL(requestingUrl).origin, { requestingUrl, isMainFrame: true }) : true
+  }
+}
+
+export const session = {
+  defaultSession: new FakeSession(),
+}
+
 export const systemPreferences = {
   getMediaAccessStatus: () => 'granted',
   askForMediaAccess: async () => true,
@@ -214,5 +238,5 @@ export const ipcRenderer = {
 }
 
 export default {
-  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, systemPreferences, contextBridge, ipcRenderer, screen,
+  app, BrowserWindow, ipcMain, dialog, shell, net, protocol, nativeImage, session, systemPreferences, contextBridge, ipcRenderer, screen,
 }

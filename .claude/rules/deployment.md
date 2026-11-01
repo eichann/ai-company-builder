@@ -142,6 +142,22 @@ DATA_DIR=/tmp/acb-scratch node --import tsx src/cli/company-archive.ts restore <
   main unnoticed). Nothing is pushed.
 - The token is read-only and fork PRs must work without secrets; keep new jobs that way.
 
+## Desktop app runtime (Electron)
+
+- Electron 45 (supported until 2027-04-27 per releases.electronjs.org/schedule; the Electron
+  team supports the latest three stable majors, so plan the next bump before then) with
+  electron-builder 26. Electron 45 runs on **macOS 13 (Ventura) or later** (Electron 44 dropped
+  macOS 12); Windows 10+. Voice input additionally needs macOS 26 (`voice-input.ts`).
+- Since Electron 42 the `electron` package downloads its binary on first use (`npx electron`,
+  `require('electron')`, `pnpm dev`), not in `postinstall`; `npx install-electron` fetches it
+  ahead of time, and `ELECTRON_SKIP_BINARY_DOWNLOAD` no longer exists. The package wants Node
+  22.12+ for that download; CI never launches Electron and stays on Node 20. A checkout's binary
+  lands in `node_modules/.pnpm/electron@<version>/node_modules/electron/dist/`.
+- Electron 45's sandboxed preload has no Node shims (`Buffer`, `events`, `timers`, `url`,
+  `setImmediate`): `preload.ts` may require only `electron`. `safeStorage`'s synchronous
+  methods (`secretBox` in `electron-adapter.ts`) are deprecated in 45 and removed in 46: move to
+  the async ones before that bump.
+
 ## Universal bundled git (macOS app)
 
 electron-builder's `beforePack` hook (`client/scripts/universal-git.mjs`) downloads both darwin
