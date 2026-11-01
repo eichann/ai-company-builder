@@ -2,12 +2,13 @@
 // Preview page for the title bar's 「あなたの番 N」 and bell (features/notifications): the real hook
 // and component over a fake main process that keeps the read state like the server does (the
 // read answer comes back through `notifications:changed`). What was opened shows in `#opened`,
-// the ids marked read in `#read`.
+// the ids marked read in `#read`. `?meetings=1`: a department without the task list, whose meetings
+// (a まとまり to choose, received minutes) the title bar carries; their buttons write `#opened`.
 import { useState } from 'react'
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
-import { TitleBarNotices } from '../src/features/notifications/components/TitleBarNotices'
+import { TitleBarNotices, type MeetingTurnRow } from '../src/features/notifications/components/TitleBarNotices'
 import { useNotices } from '../src/features/notifications/hooks/useNotices'
 import type { NoticesState } from '../shared/notifications-app'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
@@ -31,6 +32,7 @@ let state: NoticesState = {
   },
 }
 const readIds: string[] = []
+const withMeetings = new URLSearchParams(location.search).get('meetings') === '1'
 
 function Preview() {
   const [opened, setOpened] = useState('')
@@ -50,10 +52,15 @@ function Preview() {
     },
   })
   const notices = useNotices('co-preview')
+  const meetings: MeetingTurnRow[] = withMeetings ? [
+    { id: 'meeting-read01', title: 'A社 定例', kind: 'bundle', text: 'どのまとまり（案件など）の会議か選んでください', needsPerson: true, ai: null, actions: [{ label: 'まとまりを選ぶ', run: () => setOpened('choose meeting-read01') }] },
+    { id: 'meeting-new001', title: 'B社 打合せ', kind: 'minutes', text: 'AI が読み取っています', needsPerson: false, ai: null, actions: [] },
+    { id: 'meeting-new002', title: 'C社 商談', kind: 'minutes', text: 'AI が読み取れませんでした：議事録が空でした', needsPerson: true, ai: null, actions: [{ label: '自分で読み取る', run: () => setOpened('read meeting-new002') }] },
+  ] : []
   return (
     <main className="min-h-screen bg-white p-8 text-gray-900">
       <p className="mb-4 text-xs text-gray-500">表示確認用の人工データ。</p>
-      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} /></header>
+      <header className="flex justify-end"><TitleBarNotices companyId="co-preview" state={notices} meetings={meetings} onOpen={t => setOpened(`${t.recordId}|${t.title}`)} /></header>
       <pre id="opened">{opened}</pre>
       <pre id="read">{read}</pre>
     </main>

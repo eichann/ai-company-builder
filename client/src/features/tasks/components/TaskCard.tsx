@@ -5,11 +5,12 @@ import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { TaskActInput } from '../../../../shared/tasks'
 import { RecordMarks, RecordRow } from '../../records/components/RecordRows'
 import { groupByKind, kindTitle } from '../../records/model'
-import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, unlinkFileFromTask } from '../api'
+import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, shareTaskToFolder, unlinkFileFromTask } from '../api'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 import { useTaskCard } from '../hooks/useTaskCard'
 import { companyNow, companyPathOf, dueText, dueWhen } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
+import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { TaskActions } from './TaskActions'
 import { TaskFiles } from './TaskFiles'
 
@@ -22,6 +23,8 @@ interface Props {
   renderPrepared: (record: RecordViewSummary) => ReactNode
   /** The task's source (the original mail or Slack thread), drawn by the screen (`app/recordSource.tsx`). */
   renderSource: (record: RecordViewSummary) => ReactNode
+  /** The departments the member can write to, offered by 「部署に出す」 on an owner-only task. */
+  shareFolders?: ShareFolder[]
   /** The member changed something (the list reads again). */
   onChanged?: () => void
 }
@@ -36,7 +39,7 @@ function when(at: string): string {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, onChanged }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onChanged }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -66,7 +69,11 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
   })
-  return <CardBody card={result.card} rootPath={rootPath} busy={busy} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
+  const share = (folder: string) => change(async () => {
+    const r = await shareTaskToFolder(companyId, recordId, folder, version)
+    return r.success ? null : r.error
+  })
+  return <CardBody card={result.card} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -83,9 +90,12 @@ interface BodyProps {
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
   onLinkFile: (companyPath: string) => Promise<string | null>
   onUnlinkFile: (companyPath: string) => Promise<string | null>
+  /** Offered only for an owner-only task (empty otherwise). */
+  shareFolders: ShareFolder[]
+  onShare: (folder: string) => Promise<string | null>
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -125,6 +135,7 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, o
             </p>
           )}
           {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300">{card.purpose}</p>}
+          <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
           {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[12.5px] text-emerald-800 dark:text-emerald-300"><CheckCircle size={14} weight="fill" />{card.okLine}</p>}
         </header>
 

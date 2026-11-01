@@ -11,6 +11,8 @@
 //   tasks:linkFile / tasks:unlinkFile   a company file or folder linked to a task, or the link
 //                 taken away (records.md "Linking files later": the server checks the member reads
 //                 both, and refuses a private folder's file for a task outside it)
+//   tasks:share   「部署に出す」: the member's owner-only task shown to a department folder's readers
+//                 (records.md "Owner-only records"; the server checks the owner and the folder)
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
@@ -186,6 +188,13 @@ export function createTasksApi(deps: TasksDeps) {
       return a?.status === 200 ? { success: true, recordId } : failure(remove ? 'unlink file' : 'link file', a)
     },
 
+    async share(companyId: string, recordId: string, folder: string, expectedVersion: number): Promise<TaskWriteResult> {
+      const path = typeof folder === 'string' ? fileLinkPath(folder.normalize('NFC')) : null
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/share`, { folder: path, expectedVersion })
+      return a?.status === 200 ? { success: true, recordId } : failure('share', a)
+    },
+
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/retry`, {})
@@ -295,6 +304,8 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
   ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
+  ipc.handle('tasks:share', (_event, companyId, recordId, folder, expectedVersion) =>
+    api.share(typeof companyId === 'string' ? companyId : '', recordId, folder, expectedVersion))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
   ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

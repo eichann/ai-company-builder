@@ -94,7 +94,12 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
 
 1. Header: state, 「自分だけ」, tags, due (期限切れ in red), 目的; a task done on someone's OK says
    so — 「佐藤さんが阿部さんの了承を得たとして完了にしました（電話で）」 (`okWords`: an OK is never
-   called an approval), in the header and in 経緯.
+   called an approval), in the header and in 経緯. An owner-only task offers **「部署に出す」**
+   (`ShareToDepartment.tsx`): the member picks one of the departments they can write to
+   (`shareFolders`, composed by AppShell from the departments and `useWriteAccess`), is told it
+   cannot be made 「自分だけ」 again, and `tasks:share` → `POST …/share { folder, expectedVersion }`
+   (`records.md` "Owner-only records"; main sends only a `fileLinkPath`-checked company folder; the
+   server checks the owner and the folder). A task already shared offers nothing.
 2. **AI が用意したもの**: `prep_summary` and each `prepared` link drawn by the screen with the
    consultation's own cards (`renderPrepared`): a mail draft through `PreparedMailCard` (chat
    feature: reads the draft now, so the latest version is checked and sent — the person sends), an
@@ -149,7 +154,12 @@ readable by the member, never a private folder's file for a task outside it (one
   detail was read — becomes `needsBundle` (「どのまとまり（案件など）の会議か選んでください」) with
   「まとまりを選ぶ」: `BundleChooser` lists the unfinished まとまり the member reads (`tasks:bundles`,
   final states of each type left out) and links the chosen one (`minutes:linkBundle`; nothing goes
-  outside). The minutes first message tells the AI, when none is linked, to leave the まとまり's
+  outside).
+- **A department without the list** (`tasksShown` false): the same meetings reach the title bar
+  instead (`notifications.md` "The app"): `meetingTurns` (`client/shared/notifications-app.ts`)
+  picks the `needsBundle` items and the received meetings in 「AI の番」 from the list AppShell already
+  reads, with the runner's state; AppShell gives each its buttons (まとまりを選ぶ → `BundleChooser`,
+  自分で読み取る / 今は読まない, もう一度 / 人に渡す). The minutes first message tells the AI, when none is linked, to leave the まとまり's
   fields and the meeting log and finish the rest.
 
 ## Tests
@@ -165,7 +175,10 @@ place does not allow never offered; the OK in words; prepared apart from links; 
 offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts` (also 「＋ファイルをつなぐ」,
 「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
 shows); `tasks-list.test.ts` also: only a company path reaches the server; a meeting read without a まとまり
-asks once, only when its link was read as missing and the company has まとまり. `tests/ui/ai-turns.spec.ts`
+asks once, only when its link was read as missing and the company has まとまり; 「部署に出す」 sends only a
+company folder (`tasks-list.test.ts`) and is offered only on an owner-only task (`task-card.spec.ts`);
+a department without the list gets its meetings in the title bar (`notifications.test.ts`,
+`title-bar-notices.spec.ts`). `tests/ui/ai-turns.spec.ts`
 and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list left of the
 consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
 the real `AppShell`): with the consultation open the やること tab fills the left side from the tab

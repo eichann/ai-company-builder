@@ -2,7 +2,8 @@
 // AI prepared is on top; the assignee completes only by naming whose OK (start first, then
 // complete with it, each at its version); 受けられない needs a reason; 延ばす sends a new due; a
 // run with an unknown outside result is settled by the member; the completed card states the OK
-// in words; the 自分だけ and 例外（この件だけ） marks show; the source slot shows what the screen gives
+// in words; the 自分だけ and 例外（この件だけ） marks show; 「部署に出す」 is offered only on an
+// owner-only task and sends the chosen department at the version shown; the source slot shows what the screen gives
 // and stays hidden without it.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
@@ -81,4 +82,22 @@ test('the source slot shows what the screen gives for the task, and nothing with
   await expect(card.getByRole('region', { name: 'AI が用意したもの' })).toBeVisible()
   await expect(card.getByRole('region', { name: '元のやりとり' })).toHaveCount(0)
   expectNoPageErrors(plain)
+})
+
+test('「部署に出す」 on an owner-only task sends the chosen department; a shared task does not offer it', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  await page.getByRole('button', { name: '部署に出す' }).click()
+  const form = page.getByRole('group', { name: '部署に出す' })
+  const submit = form.getByRole('button', { name: 'この部署に出す' })
+  await expect(submit).toBeDisabled()
+  await form.getByLabel('出す先の部署').selectOption({ label: '経理部' })
+  await expect(form).toContainText('「経理部」を見られる人みんなに見えるようになります。あとから「自分だけ」には戻せません。')
+  await submit.click()
+  await expect(page.locator('#acted')).toHaveText('share 経理@3')
+  expectNoPageErrors(state)
+
+  const sharedState = await openPreview(page, 'task-card', { shared: '1' })
+  await expect(page.getByTestId('task-card')).toContainText('A社 見積書')
+  await expect(page.getByRole('button', { name: '部署に出す' })).toHaveCount(0)
+  expectNoPageErrors(sharedState)
 })

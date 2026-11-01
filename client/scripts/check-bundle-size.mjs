@@ -7,6 +7,9 @@
 // The renderer JS was ~1.92 MiB (2,012,203 bytes) on 2026-10-23 after #154.
 // The budget leaves ~15% for growth; raise it deliberately, in the PR that
 // needs it, rather than by habit.
+// 2026-11-02: 2.2 → 2.3 MiB. Stage 2's task list, card, notices and AI turns (#404–#429) brought it
+// to 2,303,266 bytes (99.8%); 「部署に出す」 and the title bar's meetings (#427) passed it. Nothing in
+// the renderer is lazy-loaded yet; splitting the task list out is the next lever before raising again.
 //
 // Usage: node scripts/check-bundle-size.mjs [distDir] [--budget-mib N]
 import fs from 'node:fs'
@@ -14,7 +17,7 @@ import path from 'node:path'
 
 const args = process.argv.slice(2)
 const flag = args.indexOf('--budget-mib')
-const budgetMiB = flag >= 0 ? Number(args[flag + 1]) : 2.2
+const budgetMiB = flag >= 0 ? Number(args[flag + 1]) : 2.3
 const dist = args.find((a, i) => !a.startsWith('--') && (flag < 0 || i !== flag + 1)) ?? 'dist'
 const assets = path.join(dist, 'assets')
 

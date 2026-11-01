@@ -12,6 +12,7 @@ import { useAppStore } from '../stores/appStore'
 import { useSkills } from '../features/skills/hooks/useSkills'
 import { useSparseCheckout } from '../shared/hooks/useSparseCheckout'
 import { useDepartments } from '../shared/hooks/useDepartments'
+import { useWriteAccess } from '../shared/hooks/useWriteAccess'
 import { usePrivateFolderStore } from '../features/files/hooks/usePrivateFolders'
 import { isChatInputRecentlyActive } from '../shared/lib/chatInputActivity'
 import { tabDepartmentLabels } from '../features/editor/editorTabs'
@@ -49,14 +50,16 @@ import { skipMinutes } from '../features/minutes/api'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices } from '../features/notifications/hooks/useNotices'
-import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
+import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
+import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
 import { companyPathOf, listShownFor } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
-import { linkFileToTask } from '../features/tasks/api'
+import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
+import { BundleChooser } from '../features/tasks/components/BundleChooser'
 import { TaskCard } from '../features/tasks/components/TaskCard'
 import { PreparedMailCard } from '../features/chat/components/PreparedMailCard'
 import { ApprovalCard } from '../features/chat/components/ApprovalCard'
@@ -96,6 +99,9 @@ export function AppShell() {
     () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [] }),
     [minutes.available, minutes.notices, taskList.data],
   )
+  const { isReadOnly } = useWriteAccess()
+  // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list).
+  const [choosingBundle, setChoosingBundle] = useState<{ id: string; title: string } | null>(null)
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
@@ -261,12 +267,14 @@ export function AppShell() {
     return <RecordRow record={record} />
   }
 
+  // 「部署に出す」 offers the departments the member can write to (the server checks again).
+  const shareFolders = rootPath ? departments.filter(d => d.folder && !isReadOnly(`${rootPath}/${d.folder}`)).map(d => ({ folder: d.folder, name: d.name })) : []
   const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} onChanged={taskList.reload} />
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onChanged={taskList.reload} />
     }
     const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
     // An approval request also gets its own card on top: approving or sending back is the person's press.
@@ -275,6 +283,18 @@ export function AppShell() {
     }
     return readOnly
   }
+  // A department without the task list: its meetings (received minutes, a まとまり to choose) wait in the title bar.
+  const titleBarMeetings: MeetingTurnRow[] = tasksShown || !currentCompany ? [] : meetingTurns(taskList.data?.items ?? [], aiTurnItems?.items ?? []).map(m => {
+    const actions: MeetingTurnRow['actions'] = []
+    if (m.kind === 'bundle') actions.push({ label: 'まとまりを選ぶ', run: () => setChoosingBundle({ id: m.id, title: m.title }) })
+    if (m.kind === 'minutes' && m.ai?.state !== 'running' && minutes.available) {
+      actions.push({ label: '自分で読み取る', run: () => { const notice = minutes.notices.find(n => n.id === m.id); if (notice) startMinutesReading(notice) } })
+      actions.push({ label: '今は読まない', run: () => void skipMinutes(currentCompany.id, m.id).then(() => taskList.reload()) })
+    }
+    if (m.ai?.canRetry) actions.push({ label: 'もう一度', run: () => aiTurnItems?.retry(m.id) })
+    if (m.ai?.canHand) actions.push({ label: '人に渡す', run: () => aiTurnItems?.handOver(m.id) })
+    return { ...m, actions }
+  })
   // The left panel's tabs, registered like an extension's tab will be (features/workspace/leftPanels.ts).
   const leftPanels: LeftPanel[] = [
     {
@@ -381,6 +401,7 @@ export function AppShell() {
           <TitleBarNotices
             companyId={currentCompany.id}
             state={notices}
+            meetings={titleBarMeetings}
             onOpen={target => { void runCommand('record.open', { recordId: target.recordId }).catch(() => {}) }}
           />
         ) : undefined}
@@ -450,6 +471,17 @@ export function AppShell() {
         )}
       />
 
+      {choosingBundle && currentCompany && (
+        <BundleChooser
+          companyId={currentCompany.id} meetingTitle={choosingBundle.title}
+          onChoose={async b => {
+            const r = await linkMeetingBundle(currentCompany.id, choosingBundle.id, b.id)
+            taskList.reload()
+            return r?.success ? null : (r?.error ?? 'できませんでした。')
+          }}
+          onClose={() => setChoosingBundle(null)}
+        />
+      )}
       {linkingFile && currentCompany && (
         <LinkToTaskDialog
           key={linkingFile}

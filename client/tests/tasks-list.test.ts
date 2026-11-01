@@ -102,6 +102,25 @@ test('linking a file sends only a path inside the company folder; taking it away
   ])
 })
 
+test('「部署に出す」 sends only a company folder at the version shown; the server\'s refusal comes back in its words', async () => {
+  const h = harness({
+    'POST /api/companies/co1/records/item/task-abc123/share': { status: 200, body: { data: { record: { id: 'task-abc123' } } } },
+    'POST /api/companies/co1/records/item/task-old123/share': { status: 409, body: { code: 'NOT_PERSONAL', error: 'もう部署に出ています。' } },
+  })
+  for (const bad of ['/Users/me/会社/営業', '../営業', '営業/../../x', '']) {
+    assert.equal((await h.api.share('co1', 'task-abc123', bad, 3)).success, false, bad)
+  }
+  assert.equal((await h.api.share('co1', '../task-abc123', '営業', 3)).success, false)
+  assert.equal(h.requests.length, 0)
+  assert.deepEqual(await h.api.share('co1', 'task-abc123', '営業', 3), { success: true, recordId: 'task-abc123' })
+  assert.deepEqual(h.requests.map(r => [r.url.replace('https://acb.test/api/companies/co1', ''), r.body]), [
+    ['/records/item/task-abc123/share', { folder: '営業', expectedVersion: 3 }],
+  ])
+  const refused = await h.api.share('co1', 'task-old123', '営業', 2)
+  assert.equal(refused.success, false)
+  assert.equal(!refused.success && refused.error, 'もう部署に出ています。')
+})
+
 test('a meeting read without a まとまり waits in あなたの番 to be chosen, once', () => {
   const meeting: RecordSummary = { ...rec('meeting-00aa11', 'read', { assignee: ME }), type: 'meeting' }
   const items = classifyTasks(src({ meetingsWithoutBundle: [meeting], doneToday: [meeting] }))

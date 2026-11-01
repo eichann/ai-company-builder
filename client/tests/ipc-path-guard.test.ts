@@ -102,6 +102,7 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'git:setupCompanyRemote': { selectedPaths: 'department folder names to download' },
   'git:folderSizes': { folder: 'a repository folder sent to the server' },
   'tasks:linkFile': { companyPath: 'a company-relative path sent to the server (records.md "Linking files later"); nothing local is read or written' },
+  'tasks:share': { folder: 'a company-relative department folder sent to the server (records.md "Owner-only records"); nothing local is read or written' },
   'tasks:unlinkFile': { companyPath: 'a company-relative path sent to the server; nothing local is read or written' },
   'git:sparseUncommittedChanges': { folders: 'repository folders (git pathspecs)' },
   'privateFolders:createContext': { parentPath: 'a company-relative folder sent to the server' },

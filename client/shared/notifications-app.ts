@@ -5,6 +5,8 @@
  * draws a notice.
  */
 import type { NotificationItem, NotificationKind, NotificationList } from '../../shared/types/notifications'
+import type { AiTurnItemView } from './ai-turns'
+import { MEETING_NEEDS_BUNDLE_TEXT, type TaskListItem } from './tasks'
 
 /** One record waiting for the member (「あなたの番」: `GET /records/my-turn`). */
 export interface TurnItem {
@@ -62,6 +64,46 @@ export function desktopNoticeFor(item: TurnItem): { title: string; body: string 
   return item.type === 'approval'
     ? { title: '承認のお願いが来ました', body: item.title }
     : { title: 'あなたの番に新しく来ました', body: item.title }
+}
+
+/**
+ * What the task list would show about meetings, for a department that does not show the list
+ * (tasks-ui.md "Minutes and AI turns"): the title bar carries it instead, so nothing waits
+ * unseen. `minutes`: a received meeting in 「AI の番」, with where the AI stands; `bundle`:
+ * 「どのまとまりの会議ですか？」. `needsPerson`: it waits for the member (counted in 「あなたの番」,
+ * the bell's dot) — a まとまり to choose, or minutes the AI will not read by itself (stopped,
+ * handed over, cannot start here, or nothing heard from the runner).
+ */
+export interface MeetingTurn {
+  id: string
+  title: string
+  kind: 'minutes' | 'bundle'
+  /** In plain Japanese: what it is and where it stands. */
+  text: string
+  needsPerson: boolean
+  ai: AiTurnItemView | null
+}
+
+const AI_WORDS: Record<AiTurnItemView['state'], string> = {
+  running: 'AI が読み取っています',
+  waiting: 'AI が読み取る予定です',
+  'not-allowed': 'AI では読み取れません',
+  failed: 'AI が読み取れませんでした',
+  handed: 'あなたに渡されました',
+}
+
+export function meetingTurns(items: readonly TaskListItem[], ai: readonly AiTurnItemView[]): MeetingTurn[] {
+  const out: MeetingTurn[] = []
+  for (const i of items) {
+    if (i.needsBundle) {
+      out.push({ id: i.id, title: i.title, kind: 'bundle', text: MEETING_NEEDS_BUNDLE_TEXT, needsPerson: true, ai: null })
+    } else if (i.type === 'meeting' && i.turn === 'ai') {
+      const view = ai.find(a => a.recordId === i.id) ?? null
+      const words = view ? (view.reason ? `${AI_WORDS[view.state]}：${view.reason}` : AI_WORDS[view.state]) : '議事録が届きました'
+      out.push({ id: i.id, title: i.title, kind: 'minutes', text: words, needsPerson: !view || (view.state !== 'running' && view.state !== 'waiting'), ai: view })
+    }
+  }
+  return out
 }
 
 export type { NotificationItem, NotificationKind, NotificationList }

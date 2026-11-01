@@ -22,6 +22,8 @@ export type CompanyFileReads = ElectronPort<'gitListFiles'>
 /** 「どのまとまりの会議ですか？」: the まとまり to choose from, and linking the chosen one (nothing goes outside). */
 export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
 export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle'>
+/** 「部署に出す」: the member's owner-only task shown to a department's readers (the server checks owner and folder). */
+export type TaskShareWrites = ElectronPort<'shareTask'>
 /** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
 export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
 
@@ -86,4 +88,9 @@ export function getBundleChoices(companyId: string, reads: MeetingBundleReads = 
 
 export function linkMeetingBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleWrites = window.electronAPI) {
   return writes.linkMinutesBundle(companyId, meetingId, bundleId)
+}
+
+/** `folder`: a department folder as the company names it (`営業`). Never undone. */
+export function shareTaskToFolder(companyId: string, recordId: string, folder: string, expectedVersion: number, writes: TaskShareWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.shareTask(companyId, recordId, folder, expectedVersion)
 }
