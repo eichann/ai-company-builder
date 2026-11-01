@@ -79,7 +79,7 @@ test('every ACB tool a turn can get has a plain-Japanese label (records, plugins
   const names = specs.map(s => s.name)
   // The fixture reaches each family, so a family without labels cannot slip through.
   for (const expected of ['records_create', 'decisions_record', 'mail_draft_create', 'mail_recipients', 'minutes_read', 'approvals_show', 'task__start',
-    'corporate-sales__refresh_deal', 'corporate-sales__update_deal', 'corporate-sales__log_meeting', 'corporate-sales__create_deal', 'drive_read', 'drive_put']) {
+    'corporate-sales__refresh_deal', 'corporate-sales__update_deal', 'corporate-sales__log_meeting', 'corporate-sales__create_deal', 'drive_read', 'drive_put', 'inbox_read', 'inbox_judge']) {
     assert.ok(names.includes(expected), `fixture misses ${expected}`)
   }
   for (const spec of specs) assertPlain(spec.name, spec.display)

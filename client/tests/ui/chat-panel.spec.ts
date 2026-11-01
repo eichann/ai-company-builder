@@ -46,7 +46,7 @@ test.describe('a running turn', () => {
     await expect(header.getByRole('button', { name: '利用上限: 5時間 24%、1週間 66%' })).toBeVisible()
     await expect(header.getByRole('combobox').first()).toBeEnabled()
     await send(page, '見積書を作って')
-    await expect(page.getByRole('button', { name: /^サブエージェント 過去の見積書と価格表を調べる ツール 4件（実行中 1）/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^手分けした作業 過去の見積書と価格表を調べる 作業 4 件（作業中 1）/ })).toBeVisible()
     const progress = '価格表の10月改定分と過去の見積書の単価を照らし合わせています'
     await expect(page.getByTitle(progress)).toBeVisible()
     // The conversation list shows the same line under 「AIが作業中」.
@@ -62,7 +62,7 @@ test.describe('a running turn', () => {
     await expect(header.getByRole('button', { name: '利用上限: 1週間 60%' })).toBeVisible()
     await expect(header.getByRole('combobox', { name: 'Codexモデル' })).toHaveValue('gpt-5.5-codex')
     await send(page, '見積書を作って')
-    await expect(page.getByRole('button', { name: /^サブエージェント 過去の見積書と価格表を調べる/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: /^手分けした作業 過去の見積書と価格表を調べる/ })).toBeVisible()
     await expect(header.getByRole('combobox', { name: 'Codexモデル' })).toBeDisabled()
     // The progress event arrives 300 ms after the rows; give it time to (not) show.
     await page.waitForTimeout(800)
@@ -91,6 +91,34 @@ test.describe('a running turn', () => {
       'the first paragraph was not re-mounted while the reply streamed').toBe(true)
     await chat(page, c => { c.send({ type: 'text-end', id: 't1' }); c.finish() })
     await expect(page.getByRole('button', { name: '停止' })).toHaveCount(0)
+  })
+
+  test('tool rows read in plain Japanese: the app\'s labels, repeated calls counted, a member\'s own tool muted, no raw ids', async ({ page }) => {
+    await openPreview(page, 'chat-header', { turn: 'manual' })
+    await send(page, '決まったことを残して')
+    await turnStarted(page)
+    await chat(page, c => {
+      const decided = { acb: { display: { label: '決めたことを残しました', running: '決めたことを残しています', many: '決めたことを {n} 件残しました', detail: '研修対象を営業部全体に' } } }
+      const calls = [
+        { id: 'd1', toolName: 'mcp__acb_records__decisions_record', providerMetadata: decided },
+        { id: 'd2', toolName: 'mcp__acb_records__decisions_record', providerMetadata: decided },
+        { id: 'r1', toolName: 'Read', input: { file_path: '/tmp/acb-preview/営業部/提案書.md' } },
+        { id: 'x1', toolName: 'mcp__my_crm__find_customer' },
+      ]
+      for (const call of calls) {
+        c.send({ type: 'tool-input-available', toolCallId: call.id, toolName: call.toolName, dynamic: true, providerExecuted: true, input: call.input ?? {}, ...(call.providerMetadata ? { providerMetadata: call.providerMetadata } : {}) })
+        c.send({ type: 'tool-output-available', toolCallId: call.id, dynamic: true, providerExecuted: true, output: 'ok' })
+      }
+      c.finish()
+    })
+    const grouped = page.getByRole('button', { name: '決めたことを 2 件残しました' })
+    await expect(grouped).toBeVisible()
+    // Without the main process's line (no company folder known here): the file name only, never the absolute path.
+    await expect(page.getByRole('button', { name: /^ファイルを読みました\s*提案書\.md$/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: '道具を使いました（my_crm・find_customer）' })).toBeVisible()
+    await grouped.click()
+    await expect(page.getByRole('button', { name: /^決めたことを残しました\s*研修対象を営業部全体に/ })).toHaveCount(2)
+    await expect(page.getByText(/mcp__/)).toHaveCount(0)
   })
 })
 
