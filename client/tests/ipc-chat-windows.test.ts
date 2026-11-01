@@ -45,7 +45,8 @@ test('a consultation window gets the main window\'s hardened web preferences, lo
   // Same page as the main window (its CSP), told to show only the chat.
   assert.equal(win.webContents.loaded, BrowserWindow.all[0].webContents.loaded)
   assert.deepEqual(win.webContents.loadOptions, { query: { window: 'chat' } })
-  assert.deepEqual(win.webContents.windowOpenHandler?.(), { action: 'deny' })
+  assert.deepEqual(win.webContents.windowOpenHandler?.({ url: 'javascript:alert(1)' }), { action: 'deny' })
+  assert.equal(win.webContents.navigate('https://example.com/'), true)
   win.close()
 })
 
