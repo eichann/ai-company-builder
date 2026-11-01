@@ -9,7 +9,8 @@ export function useRecordThread(companyId: string, recordId: string, reads?: Thr
   // A read with nothing to listen to goes through useIpcEvent: the renderer's effect count is capped.
   const once = useCallback((listener: (payload: undefined) => void) => { listener(undefined) }, [])
   useIpcEvent(once, () => {
-    void getRecordThread(companyId, recordId, reads).then(setResult, () => setResult({ success: false, none: false, offline: true, error: '表示できませんでした。' }))
+    // No answer at all (a setup without the channel) is no 連絡: the slot stays empty.
+    void getRecordThread(companyId, recordId, reads).then(r => setResult(r ?? { success: false, none: true }), () => setResult({ success: false, none: false, offline: true, error: '表示できませんでした。' }))
   })
   return result
 }
