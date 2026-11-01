@@ -126,6 +126,26 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
    (`RecordMarks`, also on the generic card and every record row).
 
+## Consulting about a task (S12, owner decision 2026-11-01: 「一覧から相談する」)
+
+- 「相談する」 on the card (next to the title) and on a list row (on hover) run `chat.consultAbout`
+  (`commands.md`; composed by AppShell, `consultAbout`). The chat pane opens the member's most
+  recent consultation whose main topic is the task (`topicRecordId` in the history and its
+  summary: this PC's consultations, the member's own); without one it starts 「<title> の相談」
+  with `topicRecordId` set.
+- The AI gets the task through its record tools, not pasted text: the first message (the
+  member's, composed by `taskConsultFirstMessage`, `client/shared/task-consult.ts`) names the task
+  by id and asks it to read it with `records_get` (state, whose turn, due, links, what the AI
+  prepared) and `records_history`, then wait. An agent without the record tools (`recordsMcp`:
+  the API key) is only told what the consultation is about. What the AI then does in it is
+  recorded by the ledger with the consultation (provenance), as for any consultation.
+- Not yet: a change to the task while its consultation exists as one new card in that
+  consultation (batched) — the second part of S12.
+- Tests: `client/tests/task-consult.test.ts` (the latest one about that task; found after a
+  restart; the first message names the id, never the contents), `tests/ui/chat-panel.spec.ts`
+  (「相談する」 starts one with the topic, then opens it instead), `task-card.spec.ts`,
+  `tasks-list.spec.ts` (the buttons).
+
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 
 Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /

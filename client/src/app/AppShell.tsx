@@ -269,12 +269,14 @@ export function AppShell() {
 
   // 「部署に出す」 offers the departments the member can write to (the server checks again).
   const shareFolders = rootPath ? departments.filter(d => d.folder && !isReadOnly(`${rootPath}/${d.folder}`)).map(d => ({ folder: d.folder, name: d.name })) : []
+  // 「相談する」 on a task: the chat opens the member's latest consultation about it, else starts one.
+  const consultAbout = (task: { id: string; title: string }) => { void runCommand('chat.consultAbout', { recordId: task.id, title: task.title }).catch(() => {}) }
   const tasksShown = !!taskList.data?.available && listShownFor(isCompanyWide ? null : selectedDeptId, taskList.data.listDepartmentIds)
   // A record's card: a task opens with its actions (its id starts with its type), anything else read only.
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onChanged={taskList.reload} />
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onConsult={consultAbout} onChanged={taskList.reload} />
     }
     const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
     // An approval request also gets its own card on top: approving or sending back is the person's press.
@@ -362,6 +364,7 @@ export function AppShell() {
           list={taskList}
           aiTurns={aiTurnItems}
           renderCard={recordCard}
+          onConsult={consultAbout}
           meetingActions={minutes.available ? {
             read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },

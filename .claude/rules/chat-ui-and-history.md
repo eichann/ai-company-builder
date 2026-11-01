@@ -236,7 +236,9 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `outbound-mail.md`). The app's cards come back after the text in
   the order the tools produced them (`cardOrder`: their part ids, stored when a reply has two or
   more; `inCardOrder` in `chatSessionMessages.ts`). A conversation started from minutes keeps
-  `minutesId` (and its title, not generated).
+  `minutesId` (and its title, not generated). One started by 「相談する」 keeps `topicRecordId`
+  (its main topic, 主な話題), also in its summary, so the next 「相談する」 finds it
+  (`tasks-ui.md` "Consulting about a task").
 - Autosave every 4 s (unload and leaving a tab still flush synchronously); it skips building the
   session when nothing changed; converted messages are cached per UIMessage object.
 - Attached images: the AI gets the full image; bubble and history keep a ≤ 320 px WebP thumbnail

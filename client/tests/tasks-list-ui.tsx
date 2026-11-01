@@ -74,7 +74,8 @@ function Preview() {
     <main className="flex h-screen flex-col bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
       <div className="flex min-h-0 flex-1">
-        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" list={list} aiTurns={null} renderCard={id => <div data-testid="card">カード：{id}</div>} />
+        <TaskListPanel companyId="co-preview" rootPath="/Users/me/company" list={list} aiTurns={null} renderCard={id => <div data-testid="card">カード：{id}</div>}
+          onConsult={t => { acted.push(`consult ${t.id}`); document.getElementById('acted')!.textContent = acted.join(',') }} />
       </div>
     </main>
   )

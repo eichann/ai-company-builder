@@ -98,3 +98,13 @@ test('a meeting read without a まとまり asks in あなたの番; choosing li
   await expect(mine).not.toContainText('C社 打ち合わせ')
   expectNoPageErrors(state)
 })
+
+test('a task row\'s 「相談する」 asks for a consultation about that task, not opening its card', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const row = page.getByTestId('task-row').filter({ hasText: 'お礼メールを確かめて送る' })
+  await row.hover()
+  await row.getByRole('button', { name: '相談する' }).click()
+  await expect(page.locator('#acted')).toHaveText('consult task-mine01')
+  await expect(page.getByTestId('card')).toHaveCount(0)
+  expectNoPageErrors(state)
+})

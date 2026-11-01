@@ -1,5 +1,5 @@
 import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
-import { CheckCircle, CircleNotch, Clock, LinkSimple, Robot, Sparkle, Warning } from '@phosphor-icons/react'
+import { ChatCircleDots, CheckCircle, CircleNotch, Clock, LinkSimple, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { TaskActInput } from '../../../../shared/tasks'
@@ -25,6 +25,8 @@ interface Props {
   renderSource: (record: RecordViewSummary) => ReactNode
   /** The departments the member can write to, offered by 「部署に出す」 on an owner-only task. */
   shareFolders?: ShareFolder[]
+  /** 「相談する」: the member's latest consultation about this task, else a new one (AppShell: `chat.consultAbout`). */
+  onConsult?: (record: { id: string; title: string }) => void
   /** The member changed something (the list reads again). */
   onChanged?: () => void
 }
@@ -39,7 +41,7 @@ function when(at: string): string {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onChanged }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onConsult, onChanged }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -73,7 +75,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
     return r.success ? null : r.error
   })
-  return <CardBody card={result.card} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
+  return <CardBody card={result.card} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -93,9 +95,10 @@ interface BodyProps {
   /** Offered only for an owner-only task (empty otherwise). */
   shareFolders: ShareFolder[]
   onShare: (folder: string) => Promise<string | null>
+  onConsult?: (record: { id: string; title: string }) => void
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -128,7 +131,15 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, o
             <RecordMarks record={record} />
             {card.tags.map(t => <span key={t} className="rounded bg-gray-100 px-1 text-[10px] dark:bg-zinc-800">#{t}</span>)}
           </div>
-          <h1 className="text-xl font-bold leading-snug">{record.title}</h1>
+          <div className="flex items-start gap-2">
+            <h1 className="min-w-0 flex-1 text-xl font-bold leading-snug">{record.title}</h1>
+            {onConsult && (
+              <button type="button" onClick={() => onConsult({ id: record.id, title: record.title })} title="このやることについて AI に相談します（前の相談があれば、それを開きます）"
+                className="mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-md border border-gray-300 px-2 py-0.5 text-[12px] text-gray-700 hover:border-accent hover:text-accent dark:border-zinc-600 dark:text-zinc-200">
+                <ChatCircleDots size={13} />相談する
+              </button>
+            )}
+          </div>
           {card.due && (
             <p className={`flex items-center gap-1 text-[13px] ${dueSoon === 'overdue' ? 'text-red-600 dark:text-red-400' : 'text-gray-600 dark:text-zinc-300'}`}>
               <Clock size={13} />{dueSoon === 'overdue' ? '期限切れ ' : '期限 '}{dueText(card.due, now)}

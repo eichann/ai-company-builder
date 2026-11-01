@@ -162,7 +162,7 @@ installElectronAPI({
   getCodexStatus: async () => ({ available: true, authenticated: true, models: [{ id: 'gpt-5.5-codex', label: 'GPT-5.5-Codex', efforts: ['low', 'medium', 'high'], defaultEffort: 'medium', isDefault: true }] }) as CodexStatus,
   getChatSessionSummaries: async () => manyHistory ? Array.from({ length: 30 }, (_, i) => ({ id: `closed-${i}`, companyId: 'preview-company', title: `終わった相談 ${i + 1}`, messageCount: 2, sent: true, preview: '以上です。', createdAt: new Date(now - (i + 1) * 3_600_000).toISOString(), updatedAt: new Date(now - (i + 1) * 3_600_000).toISOString() })) as never
     : longHistory ? [{ id: 'long-history', companyId: 'preview-company', title: '長い相談（240件）', messageCount: 240, preview: '以上です。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never
-    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
+    : editHistory ? [{ id: 'edit-history', companyId: 'preview-company', title: '見積書の相談', topicRecordId: 'task-0000ed', messageCount: 4, preview: '単価を10月版にしました。', createdAt: new Date(now).toISOString(), updatedAt: new Date(now).toISOString() }] as never : [],
   searchChatSessions: async () => [],
   getChatSession: async (_company: string, id: string) => longHistory && id === 'long-history' ? longSession() as ChatSession
     : editHistory && id === 'edit-history' ? editSession() as ChatSession : null,

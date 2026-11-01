@@ -101,3 +101,10 @@ test('「部署に出す」 on an owner-only task sends the chosen department; a
   await expect(page.getByRole('button', { name: '部署に出す' })).toHaveCount(0)
   expectNoPageErrors(sharedState)
 })
+
+test('「相談する」 on the card asks for a consultation about this task', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  await page.getByRole('button', { name: '相談する' }).click()
+  await expect(page.locator('#acted')).toHaveText('consult task-0000aa')
+  expectNoPageErrors(state)
+})
