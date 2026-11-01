@@ -994,14 +994,20 @@ export const googleApi = {
 }
 
 // The minutes folder (「つなぎ先」→「Google」, milestone 4 G7, minutes.md): the department folder
-// minutes records go to; never a private folder. Shape from shared/types/minutes.ts.
+// meeting records go to (never a private folder), and which meetings are read. Shapes from
+// shared/types/minutes.ts and shared/core/minutes.ts.
 export type { MinutesFolderSetting } from '../../../shared/types/minutes'
+export type { MeetingIntake } from '../../../shared/core/minutes'
 
 import type { MinutesFolderSetting } from '../../../shared/types/minutes'
+import type { MeetingIntake } from '../../../shared/core/minutes'
 
 export const minutesApi = {
   folder: (companyId: string) => getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`),
   /** `null`: no folder (nothing is read until one is chosen). */
   setFolder: (companyId: string, folder: string | null) =>
     getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`, { method: 'PUT', body: { folder } }),
+  /** Which meetings are read: `external` (only with someone from outside; the default) or `all`. */
+  setMeetings: (companyId: string, meetings: MeetingIntake) =>
+    getData<MinutesFolderSetting>(`/api/companies/${enc(companyId)}/google/minutes-folder`, { method: 'PUT', body: { meetings } }),
 }

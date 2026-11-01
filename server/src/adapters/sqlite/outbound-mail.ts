@@ -23,7 +23,7 @@ const MAIL_COLUMNS = 'message_id, author_id, from_email, minutes_id, deal_id, cr
 const SEND_COLUMNS = 'id, message_id, version, hash, by_user, started_at, outcome, reason, provider_message_id, finished_at'
 
 const toMail = (r: MailRow): OutboundMailRow => ({
-  messageId: r.message_id, authorId: r.author_id, fromEmail: r.from_email, minutesId: r.minutes_id, dealId: r.deal_id,
+  messageId: r.message_id, authorId: r.author_id, fromEmail: r.from_email, meetingId: r.minutes_id, bundleId: r.deal_id,
   createdAt: r.created_at, finishedAt: r.finished_at, bodyDeletedAt: r.body_deleted_at,
 })
 const SOURCES: readonly string[] = ['calendar', 'hubspot', 'member', 'typed']
@@ -50,7 +50,7 @@ export function sqliteOutboundMailRepository(conn: Database.Database, companyId:
   return {
     insertMail(row) {
       conn.prepare(`INSERT INTO outbound_mails (company_id, ${MAIL_COLUMNS}) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`)
-        .run(companyId, row.messageId, row.authorId, row.fromEmail, row.minutesId, row.dealId, row.createdAt, row.finishedAt, row.bodyDeletedAt)
+        .run(companyId, row.messageId, row.authorId, row.fromEmail, row.meetingId, row.bundleId, row.createdAt, row.finishedAt, row.bodyDeletedAt)
     },
     mail(messageId) {
       const r = conn.prepare(`SELECT ${MAIL_COLUMNS} FROM outbound_mails WHERE company_id = ? AND message_id = ?`).get(companyId, messageId) as MailRow | undefined

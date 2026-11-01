@@ -30,19 +30,19 @@ test('「読み取る」 starts a consultation 「<件名> のあと」 linked t
   const saved = await chat(page, c => c.requests.find(r => r.path === 'flushChatSession')?.body)
   expect(saved?.minutesId).toBe(MINUTES_ID)
   expect(saved?.title).toBe(`A社 商談 のあと（${day()}）`)
-  expect(JSON.stringify(saved?.messages)).toContain(`minutes_read で議事録 ${MINUTES_ID}`)
+  expect(JSON.stringify(saved?.messages)).toContain(`minutes_read で会議 ${MINUTES_ID} の議事録`)
   await expect(page.getByText(`A社 商談 のあと（${day()}）`).first()).toBeVisible()
 
-  // The minutes tool found two candidate deals: the app's card, in the reply.
+  // The minutes tool found two candidate まとまり (deals): the app's card, in the reply.
   await expect.poll(() => chat(page, c => c.open())).toBe(true)
   await chat(page, c => c.send({ type: 'data-minutes-deal-choice', id: 'minutes-deal-card-1', data: {
     id: 'card-1', companyId: 'preview-company', minutesId: 'minutes-0a1b2c3d4e5f60718293a4b5', meetingTitle: 'A社 商談',
     candidates: [{ id: 'deal-aaaaaa01', title: '研修導入' }, { id: 'deal-bbbbbb02', title: '追加導入' }],
   } }))
-  const card = page.getByRole('group', { name: 'どの案件の議事録ですか？' })
+  const card = page.getByRole('group', { name: 'どのまとまりの会議ですか？' })
   await expect(card).toBeVisible()
   await card.getByRole('radio', { name: '追加導入' }).check()
-  await card.getByRole('button', { name: 'この案件にする' }).click()
+  await card.getByRole('button', { name: 'これにする' }).click()
   await expect(card.getByRole('status')).toContainText('「追加導入」につなぎました')
   expect(await chat(page, c => c.minutesLinks)).toEqual([['preview-company', MINUTES_ID, 'deal-bbbbbb02']])
   await chat(page, c => c.finish())

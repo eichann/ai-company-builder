@@ -279,7 +279,8 @@ describe('approving', () => {
     const [by, actor, body] = decided.mock.calls[0] as Json[]
     expect(actor).toEqual({ kind: 'human' })
     expect(by.userId).toBe(won.operation.approvedBy)
-    expect(body).toMatchObject({ folder: '営業部', important: true, title: '金額の変更を承認', links: { approval: approval.id, deal } })
+    // The deal is a まとまり (implements bundle): the decision links it as one, never by the type's name.
+    expect(body).toMatchObject({ folder: '営業部', important: true, title: '金額の変更を承認', links: { approval: approval.id, bundle: deal } })
     expect(body.title).not.toContain('サンプル')
     decided.mockRestore()
   })
@@ -329,7 +330,7 @@ describe('precedents and materials', () => {
     db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'ap-r5', 'ap-s-secret', 'user', 'ap-member', 0, 0, ?)`).run(CO, ts())
     db.prepare(`INSERT INTO scope_rules (company_id, id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, 'ap-r6', 'ap-s-secret', 'user', 'ap-boss', 1, 1, ?)`).run(CO, ts())
     const deal7 = recordOf('1000000007')
-    const old7 = (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'about' AND target_id = ?").all(CO, deal7) as Json[]).map(r => r.source_id)
+    const old7 = (db.prepare("SELECT source_id FROM record_links WHERE company_id = ? AND name = 'bundle' AND target_id = ?").all(CO, deal7) as Json[]).map(r => r.source_id)
     const moveTo = (ids: string[], folder: string) => { for (const id of ids) db.prepare('UPDATE records SET folder = ? WHERE company_id = ? AND id = ?').run(folder, CO, id) }
     const seen = async (user: string) => (await person(user, 'GET', `/${approval.id}`)).body.data.approval.precedents
     // Only the deal it was about moves there: the member no longer sees (or counts) that precedent.

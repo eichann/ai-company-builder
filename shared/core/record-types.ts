@@ -202,14 +202,40 @@ export const OK_FIELDS = { by: 'ok_by', note: 'ok_note' } as const
 export const ACTION_ACTORS = ['ai', 'dept_manager', 'admin', 'anyone'] as const
 
 /**
- * Interfaces (4-4): fields a type must have, all server-sourced, to be
- * treated as one kind of thing across types. `request` = 「依頼」, what
- * 「あなたの番」 collects regardless of the type. `bundle` = 「まとまり」
- * (owner decision 2026-11-01): what tasks are gathered under — a core
- * 取り組み, or a business plugin's 案件 / 企画 — with whose it is and what for;
- * a link may target it (`interface: bundle`) instead of one type.
+ * What an interface asks of a type that claims it (`implements`): server
+ * fields of these kinds, a choice field offering at least these options, and
+ * — `finishes` — final states (whether one is finished must be answerable).
+ * Nothing else: an interface is a promise of a few required fields, not a
+ * parent type (no inheritance, no shared actions).
  */
-export const INTERFACES: Record<string, { label: string; fields: Record<string, FieldKind> }> = {
+export interface InterfaceDef {
+  label: string
+  fields: Record<string, FieldKind>
+  /** Choice fields among `fields`: the options the type must offer (it may offer more). */
+  options?: Record<string, readonly string[]>
+  /** The type must name final states (「終わったかどうか」). */
+  finishes?: true
+}
+
+/**
+ * Interfaces (4-4): the fixed, small set of kinds of thing the core works
+ * with across types. **Only the core defines them** — a plugin or a company's
+ * own type may implement one, never add one (the parser refuses an unknown
+ * name), so 「型の型」 never becomes a source of ambiguity (owner decision
+ * 2026-11-01 night). Core types link to an interface, never to a business
+ * plugin's type by name (`shared/core/core-types.ts`).
+ *
+ * - `request` = 「依頼」, what 「あなたの番」 collects regardless of the type.
+ * - `prepared` = 「AI が用意したもの」, what a person checks and presses.
+ * - `bundle` = 「まとまり」: what work is gathered under — a core 取り組み, a
+ *   business plugin's 案件 or 企画 — with whose it is (`owner`), what for
+ *   (`purpose`) and whether it is finished (final states).
+ * - `counterpart` = 「相手」: who the company deals with outside — a 顧客, a
+ *   guest, a 受講企業, an applicant. Its display name is the record's title;
+ *   `counterpart_kind` says company or person; `domain` / `email` are the keys
+ *   later matching (名寄せ) uses (either may be empty).
+ */
+export const INTERFACES: Record<string, InterfaceDef> = {
   request: {
     label: '依頼',
     fields: { requested_by: 'person', assignee: 'person', next_actor: 'person', waiting_on: 'text', due: 'date' },
@@ -217,16 +243,40 @@ export const INTERFACES: Record<string, { label: string; fields: Record<string, 
   bundle: {
     label: 'まとまり',
     fields: { owner: 'person', purpose: 'text' },
+    finishes: true,
+  },
+  counterpart: {
+    label: '相手',
+    fields: { counterpart_kind: 'choice', domain: 'text', email: 'text' },
+    options: { counterpart_kind: ['company', 'person'] },
   },
   /**
    * 「AI が用意したもの」 (stage 2 S2): what an AI made for a person to check
-   * and act on — a mail draft (`outbound_message`), an approval request — that
+   * and act on — a draft to send (`outbound_message`), an approval request — that
    * a task links under `prepared`. Who made it and whose it is to act on.
    */
   prepared: {
     label: 'AI が用意したもの',
     fields: { requested_by: 'person', assignee: 'person' },
   },
+}
+
+/**
+ * Why a definition does not keep the promise of interface `name` (empty =
+ * it does): the parser's check of `implements`.
+ */
+export function interfaceProblems(name: string, def: Pick<TypeDefinition, 'fields' | 'final'>): string[] {
+  const i = Object.prototype.hasOwnProperty.call(INTERFACES, name) ? INTERFACES[name] : undefined
+  if (!i) return [`共通の型「${name}」はありません`]
+  const out: string[] = []
+  for (const [fname, kind] of Object.entries(i.fields)) {
+    const f = def.fields[fname]
+    if (!f || f.kind !== kind || f.source !== 'server') { out.push(`共通の型「${name}」には欄「${fname}」（kind: ${kind}, source: server）が要ります`); continue }
+    const need = i.options?.[fname]
+    if (need && !need.every(o => f.options?.includes(o))) out.push(`共通の型「${name}」の欄「${fname}」には選択肢 ${need.join(' / ')} が要ります`)
+  }
+  if (i.finishes && def.final.length === 0) out.push(`共通の型「${name}」には final（終わった状態）が要ります`)
+  return out
 }
 
 /**
@@ -376,10 +426,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
     for (const i of implementsRaw) {
       if (typeof i !== 'string' || !Object.prototype.hasOwnProperty.call(INTERFACES, i)) { err(`共通の型「${String(i)}」はありません`); continue }
       implementsList.push(i)
-      for (const [fname, kind] of Object.entries(INTERFACES[i].fields)) {
-        const f = fields[fname]
-        if (!f || f.kind !== kind || f.source !== 'server') err(`共通の型「${i}」には欄「${fname}」（kind: ${kind}, source: server）が要ります`)
-      }
+      for (const problem of interfaceProblems(i, { fields, final })) err(problem)
     }
   }
 

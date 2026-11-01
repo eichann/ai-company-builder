@@ -7,7 +7,31 @@
  * that are off stay off); this module holds the small shared pieces.
  */
 
-/** The record's summary of a minutes record (characters). */
+/** The record type of a meeting (会議); its minutes (議事録) are its content, read where they are. */
+export const MEETING_TYPE = 'meeting'
+
+/**
+ * Which meetings the intake reads (a company setting, owner decision
+ * 2026-11-01 night): `external` — only meetings with someone from outside the
+ * company (the default, and the rule before the setting existed: internal
+ * meetings such as HR talks are never read, not even their Meet record) —
+ * or `all` meetings.
+ */
+export const MEETING_INTAKE_CHOICES = ['external', 'all'] as const
+export type MeetingIntake = typeof MEETING_INTAKE_CHOICES[number]
+export const DEFAULT_MEETING_INTAKE: MeetingIntake = 'external'
+
+/** The stored value as a choice (anything else, null included, is the default). */
+export function meetingIntakeOf(raw: unknown): MeetingIntake {
+  return (MEETING_INTAKE_CHOICES as readonly unknown[]).includes(raw) ? raw as MeetingIntake : DEFAULT_MEETING_INTAKE
+}
+
+/** Is a meeting with this many outside attendees read under the setting? */
+export function meetingIsRead(intake: MeetingIntake, externalAttendees: number): boolean {
+  return intake === 'all' || externalAttendees > 0
+}
+
+/** The record's summary of a meeting's minutes (characters). */
 export const MINUTES_SUMMARY_MAX = 300
 /** Longest minutes text handed to the AI (characters); the rest is cut with a notice. */
 export const MINUTES_TEXT_MAX = 60_000

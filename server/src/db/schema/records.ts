@@ -163,6 +163,8 @@ export function migrateRecordLedgerProvenance(conn: Database.Database): void {
   if (!settings.has('minutes_folder')) conn.exec(`ALTER TABLE record_settings ADD COLUMN minutes_folder TEXT`)
   // The content store (records.md): 1 once the company's older rows were moved into it.
   if (!settings.has('content_store')) conn.exec(`ALTER TABLE record_settings ADD COLUMN content_store INTEGER`)
+  // Which meetings the intake reads (minutes.md "Which meetings"): null = the default, 'external'.
+  if (!settings.has('meeting_intake')) conn.exec(`ALTER TABLE record_settings ADD COLUMN meeting_intake TEXT`)
 }
 
 /**

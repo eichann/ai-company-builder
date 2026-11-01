@@ -5,9 +5,10 @@
  * - **Verified recipients only.** A draft names its recipients by an opaque
  *   `ref`; a ref resolves only to an address found, fresh, in one of the
  *   draft's sources: the meeting's calendar attendees outside the company's
- *   domain (`meetingAttendees`), the HubSpot contacts of the deal (a declared
- *   read through the plugin connector, for members in its read scope who may
- *   read the deal), ACB members (CC), and addresses a person typed on the
+ *   domain (`meetingAttendees`), the outside system's contacts of the まとまり
+ *   (a 案件's HubSpot contacts: a declared read through the plugin connector,
+ *   for members in its read scope who may read it), ACB members (CC), and
+ *   addresses a person typed on the
  *   screen for this draft (「あなたが入力」, session only). An address the AI
  *   wrote that is in none of these is never offered: the AI passes refs only.
  * - **Versions.** Every change is a new version: its canonical content
@@ -33,6 +34,7 @@ import {
   type RecipientSource,
 } from '../../shared/core/mail'
 import { GOOGLE_SCOPE, sameEmail } from '../../shared/core/google'
+import { MEETING_TYPE } from '../../shared/core/minutes'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { MailRecipientsView, MailRecipientView, MailSendAnswer, OutboundMailState, OutboundMailView } from '../../shared/types/outbound-mail'
@@ -48,6 +50,7 @@ import type { Member } from './access'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader } from './record-access'
 import type { ActorInput, ServiceRecordWriter, ServiceWriteFailed } from './record-engine'
+import { currentTypes } from './record-index'
 import { RECORDS_DISABLED } from './records'
 
 /** How long a sent / discarded mail's body stays on the server (§9 q9). */
@@ -80,9 +83,9 @@ export interface OutboundMailDeps {
   /** The company's members with their ACB email and display name. */
   members: (companyId: string) => Array<{ userId: string; email: string; name: string | null }>
   /** The meeting's calendar attendees, re-read from Google now; null when they cannot be read (minutes, G7). */
-  meetingAttendees: (companyId: string, userId: string, minutesId: string) => Promise<Array<{ email: string; name: string | null; organizer: boolean }> | null>
-  /** The deal's HubSpot contacts, read now through the plugin connector (plugin-import.ts `dealContacts`). */
-  dealContacts: (member: Member, dealId: string) => Promise<{ ok: true; contacts: Array<{ email: string | null; name: string | null }> } | { ok: false; reason: string }>
+  meetingAttendees: (companyId: string, userId: string, meetingId: string) => Promise<Array<{ email: string; name: string | null; organizer: boolean }> | null>
+  /** The まとまり's contacts in its outside system, read now through the plugin connector (plugin-import.ts `recordContacts`). */
+  bundleContacts: (member: Member, bundleId: string) => Promise<{ ok: true; contacts: Array<{ email: string | null; name: string | null }> } | { ok: false; reason: string }>
   /** Gmail `users.messages.send` with the member's own grant; never retried. */
   gmailSend: (companyId: string, userId: string, raw: string) => Promise<MailSendResult>
   /** Every company (the retention run opens each one's handle). */
@@ -121,19 +124,26 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
   }
 
   const refOf = (scope: string, source: RecipientSource, email: string) => `r${deps.digest(`${scope}\n${source}\n${email}`).slice(0, 24)}`
-  const contextScope = (userId: string, minutesId: string | null, dealId: string | null) => `${userId}|${minutesId ?? ''}|${dealId ?? ''}`
+  const contextScope = (userId: string, meetingId: string | null, bundleId: string | null) => `${userId}|${meetingId ?? ''}|${bundleId ?? ''}`
 
   function enabled(companyId: string): Refusal | null {
     return companyData.forCompany(companyId).records.settings().enabled
       ? null : refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
   }
 
-  /** A record of `type` the member may read, or null. */
-  function readable(member: Member, id: unknown, type: string): RecordRow | null {
-    if (typeof id !== 'string' || !RECORD_ID_RE.test(id) || !id.startsWith(`${type}-`)) return null
+  /**
+   * A record the member may read, of `kind`: a meeting (type `meeting`) or a まとまり
+   * (any type implementing `bundle`), or null.
+   */
+  function readable(member: Member, id: unknown, kind: 'meeting' | 'bundle'): RecordRow | null {
+    if (typeof id !== 'string' || !RECORD_ID_RE.test(id)) return null
     const handle = companyData.forCompany(member.companyId)
     const row = handle.records.byIds([id])[0]
-    if (!row || row.removedAt !== null || row.type !== type) return null
+    if (!row || row.removedAt !== null) return null
+    const fits = kind === 'meeting'
+      ? row.type === MEETING_TYPE
+      : currentTypes(handle.records).get(row.type)?.definition.implements.includes('bundle') === true
+    if (!fits) return null
     return recordReader(member, handle.scopes.listWithRules()).record(row) ? row : null
   }
 
@@ -148,10 +158,10 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
    * in `need` (default all). A source that cannot be read is reported and offers nothing.
    */
   async function collect(
-    member: Member, ctx: { minutesId: string | null; dealId: string | null; messageId: string | null; from: string },
+    member: Member, ctx: { meetingId: string | null; bundleId: string | null; messageId: string | null; from: string },
     need: ReadonlySet<RecipientSource> | null = null,
   ): Promise<{ recipients: OutboundRecipientRow[]; unreadable: RecipientSource[] }> {
-    const scope = contextScope(member.userId, ctx.minutesId, ctx.dealId)
+    const scope = contextScope(member.userId, ctx.meetingId, ctx.bundleId)
     const out: OutboundRecipientRow[] = []
     const unreadable: RecipientSource[] = []
     const seen = new Set<string>()
@@ -162,18 +172,18 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       out.push({ ref: refOf(refScope, source, email), email, name: name ? name.normalize('NFC').slice(0, 100) : null, source })
     }
     const wants = (s: RecipientSource) => need === null || need.has(s)
-    if (ctx.minutesId && wants('calendar')) {
+    if (ctx.meetingId && wants('calendar')) {
       let attendees: Awaited<ReturnType<OutboundMailDeps['meetingAttendees']>> = null
-      try { attendees = await deps.meetingAttendees(member.companyId, member.userId, ctx.minutesId) } catch (err) { logError('outbound-mail', 'calendar attendees could not be read', err) }
+      try { attendees = await deps.meetingAttendees(member.companyId, member.userId, ctx.meetingId) } catch (err) { logError('outbound-mail', 'calendar attendees could not be read', err) }
       if (attendees === null) unreadable.push('calendar')
       else {
         const internal = internalDomains(member.companyId, ctx.from)
         for (const a of attendees) if (normalizeEmail(a.email) && isExternalAddress(normalizeEmail(a.email)!, internal)) add('calendar', a.email, a.name)
       }
     }
-    if (ctx.dealId && wants('hubspot')) {
-      let r: Awaited<ReturnType<OutboundMailDeps['dealContacts']>>
-      try { r = await deps.dealContacts(member, ctx.dealId) } catch (err) { logError('outbound-mail', 'deal contacts could not be read', err); r = { ok: false, reason: 'error' } }
+    if (ctx.bundleId && wants('hubspot')) {
+      let r: Awaited<ReturnType<OutboundMailDeps['bundleContacts']>>
+      try { r = await deps.bundleContacts(member, ctx.bundleId) } catch (err) { logError('outbound-mail', 'contacts could not be read', err); r = { ok: false, reason: 'error' } }
       if (!r.ok) unreadable.push('hubspot')
       else for (const c of r.contacts) add('hubspot', c.email, c.name)
     }
@@ -222,8 +232,8 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       body,
       bodyDeleted: body === null,
       linkCount: body === null ? 0 : countLinks(body),
-      minutesId: mail.minutesId,
-      dealId: mail.dealId,
+      meetingId: mail.meetingId,
+      bundleId: mail.bundleId,
       sentAt: typeof fields.sent_at === 'string' ? fields.sent_at : null,
       providerMessageId: typeof fields.provider_message_id === 'string' ? fields.provider_message_id : null,
       lastChangedBy: v.actorKind,
@@ -255,24 +265,24 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return me ? normalizeEmail(me.email) : null
   }
 
-  /** The draft context from a request: minutes and/or deal the member may read (a minutes' deal is taken along). */
-  function contextOf(member: Member, body: Record<string, unknown>): { minutesId: string | null; dealId: string | null; minutes: RecordRow | null; deal: RecordRow | null } | Refusal {
-    const minutes = body.minutesId === undefined || body.minutesId === null ? null : readable(member, body.minutesId, 'minutes')
-    if ((body.minutesId !== undefined && body.minutesId !== null) && !minutes) return refuse('not-found', '議事録が見つかりません', { code: 'RECORD_NOT_FOUND' })
-    let deal = body.dealId === undefined || body.dealId === null ? null : readable(member, body.dealId, 'deal')
-    if ((body.dealId !== undefined && body.dealId !== null) && !deal) return refuse('not-found', '案件が見つかりません', { code: 'RECORD_NOT_FOUND' })
-    if (!deal && minutes) {
-      const linked = companyData.forCompany(member.companyId).records.linksFrom([minutes.id]).find(l => l.name === 'deal')
-      deal = linked?.targetId ? readable(member, linked.targetId, 'deal') : null
+  /** The draft context from a request: a meeting and/or a まとまり the member may read (a meeting's まとまり is taken along). */
+  function contextOf(member: Member, body: Record<string, unknown>): { meetingId: string | null; bundleId: string | null; meeting: RecordRow | null; bundle: RecordRow | null } | Refusal {
+    const meeting = body.meetingId === undefined || body.meetingId === null ? null : readable(member, body.meetingId, 'meeting')
+    if ((body.meetingId !== undefined && body.meetingId !== null) && !meeting) return refuse('not-found', '会議が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    let bundle = body.bundleId === undefined || body.bundleId === null ? null : readable(member, body.bundleId, 'bundle')
+    if ((body.bundleId !== undefined && body.bundleId !== null) && !bundle) return refuse('not-found', 'まとまり（案件など）が見つかりません', { code: 'RECORD_NOT_FOUND' })
+    if (!bundle && meeting) {
+      const linked = companyData.forCompany(member.companyId).records.linksFrom([meeting.id]).find(l => l.name === 'bundle')
+      bundle = linked?.targetId ? readable(member, linked.targetId, 'bundle') : null
     }
-    if (!minutes && !deal) return bad('minutesId or dealId: the minutes or deal the mail is about', 'MAIL_CONTEXT_REQUIRED')
-    return { minutesId: minutes?.id ?? null, dealId: deal?.id ?? null, minutes, deal }
+    if (!meeting && !bundle) return bad('meetingId or bundleId: the meeting or まとまり the mail is about', 'MAIL_CONTEXT_REQUIRED')
+    return { meetingId: meeting?.id ?? null, bundleId: bundle?.id ?? null, meeting, bundle }
   }
 
   /** Resolve refs: from `known` first (kept from the current version), else from fresh sources (read once, lazily). */
   async function resolveRefs(
     member: Member, refs: { to: string[]; cc: string[] }, known: OutboundRecipientRow[],
-    ctx: { minutesId: string | null; dealId: string | null; messageId: string | null; from: string },
+    ctx: { meetingId: string | null; bundleId: string | null; messageId: string | null; from: string },
   ): Promise<{ to: OutboundRecipientRow[]; cc: OutboundRecipientRow[] } | Refusal> {
     const byRef = new Map(known.map(r => [r.ref, r]))
     if ([...refs.to, ...refs.cc].some(r => !byRef.has(r))) {
@@ -334,7 +344,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     // 3. Every recipient is still at its source right now.
     const all = [...v.to, ...v.cc]
     const need = new Set(all.map(r => r.source))
-    const fresh = await collect(member, { minutesId: d.mail.minutesId, dealId: d.mail.dealId, messageId: d.mail.messageId, from: d.mail.fromEmail }, need)
+    const fresh = await collect(member, { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail }, need)
     if (all.some(r => fresh.unreadable.includes(r.source))) return refuse('conflict', UNVERIFIABLE, { code: 'RECIPIENTS_UNVERIFIABLE' })
     const now = new Set(fresh.recipients.map(r => `${r.ref}|${r.email}`))
     const gone = all.filter(r => !now.has(`${r.ref}|${r.email}`)).map(r => r.ref)
@@ -380,7 +390,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return view ? ok({ outcome: 'unknown', draft: view, message: MAIL_UNKNOWN_TEXT }) : notFound()
   }
 
-  /** The record → sent, the retention clock, and the deal's 「やりとり」 (design §1-6 step 19). */
+  /** The record → sent, the retention clock, and the 「やりとり」 on its まとまり (design §1-6 step 19). */
   function finishSent(member: Member, mail: OutboundMailRow, recordVersion: number, at: string, gmailId: string | null, recipients: string[], actor: { id: string; kind: 'human'; source: null }): Outcome<MailSendAnswer> {
     const handle = companyData.forCompany(member.companyId)
     const moved = writer.transition(member.companyId, {
@@ -394,17 +404,26 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
     return view ? ok({ outcome: 'sent', draft: view }) : notFound()
   }
 
+  /** The まとまり's 相手 (the first record it links to whose type implements `counterpart`), as a link of the interaction. */
+  function counterpartLink(companyId: string, bundleId: string): { counterpart?: string[] } {
+    const records = companyData.forCompany(companyId).records
+    const types = currentTypes(records)
+    const targets = records.linksFrom([bundleId]).map(l => l.targetId).filter((t): t is string => !!t)
+    const found = records.byIds(targets).find(r => r.removedAt === null && types.get(r.type)?.definition.implements.includes('counterpart'))
+    return found ? { counterpart: [found.id] } : {}
+  }
+
   function recordInteraction(member: Member, mail: OutboundMailRow, at: string, gmailId: string | null, recipients: string[]) {
     const handle = companyData.forCompany(member.companyId)
-    const deal = mail.dealId ? handle.records.byIds([mail.dealId])[0] : undefined
+    const bundle = mail.bundleId ? handle.records.byIds([mail.bundleId])[0] : undefined
     const subjectField = handle.records.states([mail.messageId])[0]
     let subject = ''
     try { subject = String((JSON.parse(subjectField?.fields ?? '{}') as { subject?: unknown }).subject ?? '') } catch { subject = '' }
     const domains = [...new Set(recipients.map(emailDomain))].join(', ').slice(0, 500)
     const made = writer.create(member.companyId, {
-      type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), folder: deal?.folder ?? null,
-      fields: { occurred_at: at, channel: 'email', counterpart: domains, source_ref: gmailId ? `gmail:${gmailId}` : null, needs_reply: false },
-      links: mail.dealId ? { deal: [mail.dealId] } : {},
+      type: 'interaction', title: titleOf(subject), summary: subject.slice(0, 300), folder: bundle?.folder ?? null,
+      fields: { occurred_at: at, channel: 'email', counterpart_text: domains, source_ref: gmailId ? `gmail:${gmailId}` : null, needs_reply: false },
+      links: bundle ? { bundle: [bundle.id], ...counterpartLink(member.companyId, bundle.id) } : {},
       actor: { id: member.userId, kind: 'human', source: null },
     })
     if (!made.ok) logError('outbound-mail', 'interaction not recorded', undefined, { message: mail.messageId, reason: made.reason })
@@ -419,7 +438,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if ('ok' in ctx) return ctx
       const from = fromOf(member)
       if (!from) return notFound()
-      const got = await collect(member, { minutesId: ctx.minutesId, dealId: ctx.dealId, messageId: null, from })
+      const got = await collect(member, { meetingId: ctx.meetingId, bundleId: ctx.bundleId, messageId: null, from })
       const sent = new Set(companyData.forCompany(member.companyId).outbound.sentDomains())
       const internal = internalDomains(member.companyId, from)
       return ok({
@@ -434,7 +453,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (off) return off
       const d = ownDraft(member, messageId)
       if (!d) return notFound()
-      const got = await collect(member, { minutesId: d.mail.minutesId, dealId: d.mail.dealId, messageId: d.mail.messageId, from: d.mail.fromEmail })
+      const got = await collect(member, { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail })
       const sent = new Set(companyData.forCompany(member.companyId).outbound.sentDomains())
       const internal = internalDomains(member.companyId, d.mail.fromEmail)
       return ok({
@@ -456,7 +475,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       if (!Array.isArray(cc)) return cc
       const from = fromOf(member)
       if (!from) return notFound()
-      const resolved = await resolveRefs(member, { to, cc }, [], { minutesId: ctx.minutesId, dealId: ctx.dealId, messageId: null, from })
+      const resolved = await resolveRefs(member, { to, cc }, [], { meetingId: ctx.meetingId, bundleId: ctx.bundleId, messageId: null, from })
       if ('ok' in resolved) return resolved
       const checked = contentCheck(from, resolved.to, resolved.cc, body.subject, body.body)
       if ('ok' in checked) return checked
@@ -464,16 +483,16 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       const at = deps.clock.now()
       const handle = companyData.forCompany(member.companyId)
       // The content (its hash goes into the record), the record and the rows: all or nothing.
-      const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, minutesId: ctx.minutesId, dealId: ctx.dealId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
+      const mail: OutboundMailRow = { messageId, authorId: member.userId, fromEmail: from, meetingId: ctx.meetingId, bundleId: ctx.bundleId, createdAt: at, finishedAt: null, bodyDeletedAt: null }
       const made = tryWrite(() => {
         const fixed = deps.payloads.fix(member.companyId, KIND, messageId, checked.canonical)
         if (!fixed || fixed.version !== 1) throw new WriteFailed({ ok: false, reason: 'exists' })
         const hash = fixed.hash
         const r = writer.create(member.companyId, {
         type: 'outbound_message', id: messageId, title: titleOf(checked.subject),
-        folder: ctx.deal?.folder ?? ctx.minutes?.folder ?? null,
+        folder: ctx.bundle?.folder ?? ctx.meeting?.folder ?? null,
         fields: { requested_by: member.userId, assignee: member.userId, subject: checked.subject, payload_hash: hash, payload_version: 1, channel: 'email' },
-        links: { ...(ctx.dealId ? { about: [ctx.dealId] } : {}), ...(ctx.minutesId ? { minutes: [ctx.minutesId] } : {}) },
+        links: { ...(ctx.bundleId ? { bundle: [ctx.bundleId] } : {}), ...(ctx.meetingId ? { meeting: [ctx.meetingId] } : {}) },
         actor: { id: member.userId, ...actor, source: actor.source ?? null },
         })
         if (!r.ok) throw new WriteFailed(r)
@@ -517,7 +536,7 @@ export function createOutboundMailService(deps: OutboundMailDeps) {
       try { old = JSON.parse(payload.canonical) as typeof old } catch { return notFound() }
       const resolved = await resolveRefs(member, { to: toRefs ?? current.to.map(r => r.ref), cc: ccRefs ?? current.cc.map(r => r.ref) },
         [...current.to, ...current.cc, ...handle.outbound.typedRecipients(d.mail.messageId)],
-        { minutesId: d.mail.minutesId, dealId: d.mail.dealId, messageId: d.mail.messageId, from: d.mail.fromEmail })
+        { meetingId: d.mail.meetingId, bundleId: d.mail.bundleId, messageId: d.mail.messageId, from: d.mail.fromEmail })
       if ('ok' in resolved) return resolved
       const checked = contentCheck(d.mail.fromEmail, resolved.to, resolved.cc, body.subject ?? old.subject, body.body ?? old.body)
       if ('ok' in checked) return checked

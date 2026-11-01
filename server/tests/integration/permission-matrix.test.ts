@@ -394,9 +394,9 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/google/minutes-folder', w => ({ path: `${C(w)}/google/minutes-folder`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/me/minutes/check', w => ({ path: `${C(w)}/me/minutes/check`, body: {} }), MEMBERS, 'no minutes folder is chosen: the answer says so and nothing is read'),
   r('GET /api/companies/:companyId/me/minutes/item/:recordId/text', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/text` }), [404, 404, 404, 404, 404, 401]),
-  r('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/deal`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/minutes/item/:recordId/bundle', w => ({ path: `${C(w)}/me/minutes/item/meeting-nosuch01/bundle`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
-  r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('POST /api/records-ai/minutes/:recordId/bundle', () => ({ path: '/api/records-ai/minutes/meeting-nosuch01/bundle', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // The member's own notices (notifications.md): any member, their own only (no user id in the path).
   r('GET /api/companies/:companyId/me/notifications', w => ({ path: `${C(w)}/me/notifications` }), MEMBERS),
   r('POST /api/companies/:companyId/me/notifications/read', w => ({ path: `${C(w)}/me/notifications/read`, body: {} }), [400, 400, 400, 400, 404, 401]),
@@ -490,7 +490,7 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/plugins/:pluginId/create/:operation', (w, id) => ({ path: `${C(w)}/plugins/${id}/create/create_deal`, body: { title: '乗っ取り', fields: {} } }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreate', (w, id) => ({ path: `${C(w)}/plugins/other-sales/operations/${id}/recreate`, body: { confirm: true } }), w => w.other.operation, 'no-such-op'),
   x('GET /api/companies/:companyId/me/minutes/item/:recordId/text', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/text` }), w => w.other.record, 'minutes-nosuch01'),
-  x('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/deal`, body: { dealId: id } }), w => w.other.record, 'minutes-nosuch01'),
+  x('POST /api/companies/:companyId/me/minutes/item/:recordId/bundle', (w, id) => ({ path: `${C(w)}/me/minutes/item/${id}/bundle`, body: { bundleId: id } }), w => w.other.record, 'meeting-nosuch01'),
   x('DELETE /api/companies/:companyId/google/grants/:userId', (w, id) => ({ path: `${C(w)}/google/grants/${id}` }), w => w.other.googleGrant, 'pm-nobody'),
   x('POST /api/companies/:companyId/plugins/:pluginId/connection/renew', (w, id) => ({ path: `${C(w)}/plugins/${id}/connection/renew`, body: {} }), w => w.other.plugin, 'no-such-plugin'),
   x('POST /api/companies/:companyId/plugins/:pluginId/mapping/restore', (w, id) => ({ path: `${C(w)}/plugins/${id}/mapping/restore`, body: { version: 1 } }), w => w.other.plugin, 'no-such-plugin'),
@@ -543,7 +543,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/plugins/:pluginId/operations/:operationId': 'the AI\'s routes: the company comes from the record token, never from the URL',
   'GET /api/records-ai/approvals/:approvalId': 'the AI\'s routes: the company comes from the record token, never from the URL (approvals.test.ts)',
   'GET /api/records-ai/minutes/:recordId/text': 'the AI\'s routes: the company comes from the record token, never from the URL (another company\'s minutes: tests/integration/minutes.test.ts)',
-  'POST /api/records-ai/minutes/:recordId/deal': 'the AI\'s routes: the company comes from the record token, never from the URL',
+  'POST /api/records-ai/minutes/:recordId/bundle': 'the AI\'s routes: the company comes from the record token, never from the URL',
 }
 
 /** The parameters of a route that name something other than the company in the URL. */

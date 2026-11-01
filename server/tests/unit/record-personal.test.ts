@@ -48,7 +48,7 @@ function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
 
 const DEAL_TYPE = '---\nlabel: 案件\nversion: 1\nstorage: server\nstates: [open]\n---\n'
 /** A company's own bundle type (implements `bundle`; task v5 links one with `set_bundle`). */
-const EFFORT_TYPE = '---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\n  purpose: { label: 目的, kind: text, source: server }\nstates: [active, done]\n---\n'
+const EFFORT_TYPE = '---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\n  purpose: { label: 目的, kind: text, source: server }\nstates: [active, done]\nfinal: [done]\n---\n'
 
 function company(id: string) {
   conn.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, id, 'u-owner', TS, TS)

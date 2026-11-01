@@ -12,7 +12,9 @@
  *   same 404 as a missing one;
  * - the minutes folder: owner/admin only; a private folder (or one inside it) is refused with the
  *   same words as any other wrong place, never naming it;
- * - exactly one open deal candidate is linked; two are not (a person / the AI chooses);
+ * - exactly one open まとまり candidate (a deal) is linked with its 相手; two are not (a person / the AI chooses);
+ * - which meetings are read is the company's setting (owner/admin): by default only those with
+ *   someone from outside; `all` reads internal ones too;
  * - Google stopped (the company switch) or no permission → nothing is read; records off → 404.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -103,7 +105,7 @@ async function call(user: string | null, method: string, path: string, body?: un
 const C = (co = CO) => `/api/companies/${co}`
 const check = (user: string) => call(user, 'POST', `${C()}/me/minutes/check`, {})
 const textOf = (user: string, id: string, co = CO) => call(user, 'GET', `${C(co)}/me/minutes/item/${id}/text`)
-const minutesRows = () => withRecordText(db, CO, db.prepare("SELECT r.id, r.title, r.folder, s.state, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'minutes' ORDER BY r.created_at").all(CO) as Json[])
+const minutesRows = () => withRecordText(db, CO, db.prepare("SELECT r.id, r.title, r.folder, s.state, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'meeting' ORDER BY r.created_at").all(CO) as Json[])
 const linkOf = (id: string, name: string) => (db.prepare('SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = ?').get(CO, id, name) as Json)?.target_id ?? null
 const dealIdOf = (title: string) => (withRecordText(db, CO, db.prepare("SELECT id, title FROM records WHERE company_id = ? AND type = 'deal'").all(CO) as Json[]).find(r => r.title === title) as Json).id as string
 /** The time the member's app asks at (the fake Google's meetings are on 2026-11-05 and 11-12). */
@@ -291,24 +293,28 @@ describe('discovery', () => {
   })
 
   it('two open deal candidates: nothing is linked; the text names both and a person chooses', async () => {
-    expect(linkOf(salesId, 'deal')).toBeNull()
+    expect(linkOf(salesId, 'bundle')).toBeNull()
     const t = await textOf('mn-sato', salesId)
     expect(t.status, t.text).toBe(200)
-    expect(t.body.data.deal).toBeNull()
+    expect(t.body.data.bundle).toBeNull()
     expect(t.body.data.candidates.map((c: Json) => c.title).sort()).toEqual(['生成AI研修 2期（株式会社サンプル）', '研修導入（株式会社サンプル）'])
-    // Only the assignee or an admin chooses.
+    expect(t.body.data.candidates.map((c: Json) => c.typeLabel)).toEqual(['案件', '案件'])
+    // Only the assignee or an admin chooses; only a まとまり (not the 顧客, a 相手).
     const deal = dealIdOf('研修導入（株式会社サンプル）')
-    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${salesId}/deal`, { dealId: deal })).status).toBe(403)
-    const linked = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/deal`, { dealId: deal })
+    expect((await call('mn-tanaka', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })).status).toBe(403)
+    const customerId = (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'customer'").get(CO) as Json).id as string
+    const notBundle = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: customerId })
+    expect([notBundle.status, notBundle.body.code]).toEqual([400, 'BAD_LINK'])
+    const linked = await call('mn-sato', 'POST', `${C()}/me/minutes/item/${salesId}/bundle`, { bundleId: deal })
     expect(linked.status, linked.text).toBe(200)
-    expect(linkOf(salesId, 'deal')).toBe(deal)
-    expect(linkOf(salesId, 'customer')).toBeTruthy()
+    expect(linkOf(salesId, 'bundle')).toBe(deal)
+    expect(linkOf(salesId, 'counterpart')).toBeTruthy()
     const t2 = await textOf('mn-sato', salesId)
-    expect(t2.body.data.deal).toMatchObject({ id: deal, title: '研修導入（株式会社サンプル）', fields: { amount: 1200000 } })
+    expect(t2.body.data.bundle).toMatchObject({ id: deal, type: 'deal', typeLabel: '案件', title: '研修導入（株式会社サンプル）', fields: { amount: 1200000 } })
     expect(t2.body.data.candidates).toEqual([])
   })
 
-  it('exactly one open deal candidate is linked (with its customer)', async () => {
+  it('exactly one open deal candidate is linked (with its 相手, the customer)', async () => {
     // The follow-up meeting is renamed so its title names one of the two deals.
     google.changeEvent(GOOGLE_SEED.followUpEvent, { summary: '研修導入（株式会社サンプル） 2回目' })
     at('2026-11-13T09:00:00+09:00')
@@ -316,8 +322,8 @@ describe('discovery', () => {
     expect(r.status, r.text).toBe(200)
     expect(r.body.data.created).toHaveLength(1)
     const id = r.body.data.created[0]
-    expect(linkOf(id, 'deal')).toBe(dealIdOf('研修導入（株式会社サンプル）'))
-    expect(linkOf(id, 'customer')).toBeTruthy()
+    expect(linkOf(id, 'bundle')).toBe(dealIdOf('研修導入（株式会社サンプル）'))
+    expect(linkOf(id, 'counterpart')).toBeTruthy()
   })
 })
 
@@ -353,9 +359,9 @@ describe('the text', () => {
     expect(yamada.text).not.toContain('見積')
     // Another company's minutes record, asked for in this company's URL.
     db.prepare('INSERT INTO records (company_id, id, type, path, folder, title, summary, created_at, updated_at) VALUES (?, ?, ?, NULL, NULL, ?, ?, ?, ?)')
-      .run(OTHER, 'minutes-other0000001', 'minutes', '他社の会議', '', ts(), ts())
-    const other = await textOf('mn-sato', 'minutes-other0000001')
-    const missing = await textOf('mn-sato', 'minutes-nosuch000001')
+      .run(OTHER, 'meeting-other0000001', 'meeting', '他社の会議', '', ts(), ts())
+    const other = await textOf('mn-sato', 'meeting-other0000001')
+    const missing = await textOf('mn-sato', 'meeting-nosuch000001')
     expect(other.status).toBe(404)
     expect(other.body).toEqual(missing.body)
   })
@@ -419,5 +425,32 @@ describe('for the thank-you mail (G8)', () => {
     expect(external).toEqual([GOOGLE_SEED.customerSuzuki, GOOGLE_SEED.customerYamaguchi])
     expect(r.value.find((a: Json) => a.email === GOOGLE_SEED.member)).toMatchObject({ organizer: true, external: false })
     expect((await services.minutes.meetingAttendees(CO, 'mn-yamada', 'member', salesId)).ok).toBe(false)
+  })
+})
+
+describe('which meetings are read (a company setting)', () => {
+  it('only owners/admins change it; the default reads only meetings with someone from outside; `all` reads internal ones too', async () => {
+    const got = await call('mn-owner', 'GET', `${C()}/google/minutes-folder`)
+    expect(got.body.data.meetings).toBe('external')
+    expect((await call('mn-sato', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'all' })).status).toBe(403)
+    expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'some' })).status).toBe(400)
+    // Still the default: the internal meeting is not read (not even its Meet record).
+    at('2026-11-06T09:00:00+09:00')
+    google.requests.length = 0
+    const before = await check('mn-tanaka')
+    expect(before.body.data).toMatchObject({ internalOnly: 1, created: [] })
+    expect(google.requests.filter(q => q.path === '/v2/conferenceRecords')).toHaveLength(1)
+
+    const set = await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'all' })
+    expect(set.status, set.text).toBe(200)
+    // Changing which meetings are read leaves the folder as it was.
+    expect(set.body.data).toMatchObject({ meetings: 'all', folder: '営業部' })
+    const after = await check('mn-tanaka')
+    expect(after.status, after.text).toBe(200)
+    expect(after.body.data).toMatchObject({ internalOnly: 0, meetings: 2 })
+    expect(after.body.data.created).toHaveLength(1)
+    const internal = minutesRows().find(r => r.id === after.body.data.created[0]) as Json
+    expect(JSON.parse(internal.fields).external_count).toBe(0)
+    expect((await call('mn-owner', 'PUT', `${C()}/google/minutes-folder`, { meetings: 'external' })).status).toBe(200)
   })
 })

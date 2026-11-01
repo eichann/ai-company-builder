@@ -11,17 +11,21 @@ paths:
   - "client/electron/features/minutes/**"
   - "client/src/features/minutes/**"
   - "client/shared/minutes-app.ts"
-  - "client/src/features/chat/components/MinutesDealChoiceCard.tsx"
+  - "client/src/features/chat/components/MinutesBundleChoiceCard.tsx"
   - "client/tests/minutes-app.test.ts"
   - "client/tests/ui/minutes.spec.ts"
 ---
 
 # Minutes intake (milestone 4 G7)
 
-After a sales meeting, Google Meet saves notes (Gemini) and a transcript in the organizer's Drive.
-ACB notices them when the member's app asks, keeps a `minutes` record (server only, no text), and
-hands the text — marked as outside text — to the member's normal consultation AI, which makes
-the outputs with the typed tools. Design: 節目4 §1-2, §3-1, §3-7, §9 q5/q14/q15 and the owner's
+After a meeting, Google Meet saves notes (Gemini) and a transcript in the organizer's Drive.
+ACB notices them when the member's app asks, keeps a `meeting` record (会議, server only, no text —
+the 議事録 is the meeting's content, read where it is; the type was called `minutes` before the
+core interfaces, records.md "Core interfaces"), and hands the text — marked as outside text — to
+the member's normal consultation AI, which makes the outputs with the typed tools.
+Meetings stay their own type (not an `interaction`); the "AI reads what arrived and turns it into
+tasks / decisions" pipeline (the AI turn, `minutes_read`-style outside text, the まとまり choice) is
+what stage 3's mail / Slack intake reuses. Design: 節目4 §1-2, §3-1, §3-7, §9 q5/q14/q15 and the owner's
 §11: **no separate tool-less reader AI**; the safety is in the server's gates (approval for prior
 fields, a person presses send, fields that are off stay off), not in AI-side extra layers. Google
 access itself: `google-connector.md` (G3).
@@ -34,32 +38,36 @@ access itself: `google-connector.md` (G3).
    applies from the next call). Steps (`services/minutes.ts` `check`, Google calls in
    `services/google-meetings.ts`):
    - calendar events of the last 3 days → now (`singleEvents`, by start time, ≤ 4 pages);
-   - keep events with a Meet conference (`conferenceData` `hangoutsMeet`) and **at least one
-     attendee outside the company's Google domain** (the G3 client's `domain`, `isExternalAddress`).
-     Internal-only meetings are never read further — not even their Meet record (design §1-2;
-     HR meetings and the like);
+   - keep events with a Meet conference (`conferenceData` `hangoutsMeet`) that **the company's
+     setting reads** ("Which meetings" below; default: at least one attendee outside the company's
+     Google domain — the G3 client's `domain`, `isExternalAddress`). A meeting the setting does not
+     read is never read further — not even its Meet record (design §1-2; HR meetings and the like);
    - the conference record by meeting code near the event's time; its smart notes and transcripts
      with `FILE_GENERATED` and `docsDestination.document`; each document's Drive `version`;
-   - one record per **conference**: id `minutes-<sha256("minutes:" + conference id)[:24]>`, so two
-     members (or two calls at once) make one record (`exists` → counted `existing`);
+   - one record per **conference**: id `meeting-<sha256("minutes:" + conference id)[:24]>`, so two
+     members (or two calls at once) make one record (`exists` → counted `existing`); a record made
+     before the rename keeps its `minutes-<same hash>` id and counts as existing;
    - assignee (q15): the organizer when they are a member who can read the minutes folder, else
      the member who found it; attendees = members whose ACB email is on the event.
    Answer `MinutesCheckResult`: `{ checked, reason?, message?, meetings, internalOnly, created:
    [ids], existing, waiting, stale: [ids] }` — counts and ids only, never text. `stale`: the
    member's own records in `reading` for > 30 minutes; the app runs the type's `retry` on them.
-2. **Deal** (mechanical, design §1-2 step 3): open deals readable by the assignee whose customer's
-   `domain` (a server field of the imported `customer` type) is an outside attendee's domain;
-   when several, those whose title appears in the meeting title (or the reverse) if any. With no
-   domain match, title matches only. **Exactly one** → linked (`deal`, and the deal's `customer`);
-   0 or ≥ 2 → not linked; `candidates` in the text answer; a person or their AI chooses with
-   `POST …/minutes/…/deal { dealId, expectedVersion? }` (assignee or owner/admin; the service
-   writer's `links`, ledger `link_deal`). Nothing is written to HubSpot by this.
+2. **まとまり** (mechanical, design §1-2 step 3; whatever its type — the core names no business
+   type): unfinished records of any type implementing `bundle` (a 案件, a 企画…) readable by the
+   assignee that link to a 相手 (a record of a type implementing `counterpart`) whose `domain` is an
+   outside attendee's domain; when several, those whose title appears in the meeting title (or the
+   reverse) if any. With no domain match, title matches only. **Exactly one** → linked (`bundle`,
+   and that まとまり's 相手 as `counterpart`); 0 or ≥ 2 → not linked; `candidates` (with each
+   one's `typeLabel`) in the text answer; a person or their AI chooses with
+   `POST …/minutes/…/bundle { bundleId, expectedVersion? }` (assignee or owner/admin; only a
+   まとまり the member reads — anything else, missing or unreadable, one 400 `BAD_LINK`; the service
+   writer's `links`, ledger `link_bundle`). Nothing is written to the outside system by this.
 3. **Reading** — the AI (tool `minutes_read`) or the app reads the text (below), runs
-   `minutes__start_reading`, makes the outputs with the existing tools (`records_create` task —
-   assignee = attending member ids, due within a year —, `decisions_record` linking minutes /
-   deal, the business plugin's `…__update_deal` (the first message names tools by that ending; `plugins.md` "Two roles") — prior fields become approval requests (G6) —, the HubSpot
+   `meeting__start_reading`, makes the outputs with the existing tools (`records_create` task —
+   assignee = attending member ids, due within a year —, `decisions_record` linking meeting /
+   bundle, the business plugin's `…__update_deal` (the first message names tools by that ending; `plugins.md` "Two roles") — prior fields become approval requests (G6) —, the HubSpot
    meeting tool (G5), the mail draft (G8)), each citing the minutes text it rests on, then
-   `minutes__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
+   `meeting__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote
    check (`quoteAppearsIn`) is not wired (owner §11: optional).
 
@@ -68,10 +76,10 @@ access itself: `google-connector.md` (G3).
 `GET /api/records-ai/minutes/:recordId/text` (record token, read or act) and the session twin
 `GET /api/companies/:id/me/minutes/item/:recordId/text` → `MinutesText`: `{ header:
 MINUTES_TEXT_HEADER, text, footer, truncated, docVersion, meeting: { title, at }, folder (the minutes folder: where its decisions go), attendees:
-[{ memberId, displayName }], externalAttendees (count only), deal: { id, title, state, fields,
-version } | null, candidates: [{ id, title }], instructionLike: [{ label, words }] }`.
+[{ memberId, displayName }], externalAttendees (count only), bundle: { id, type, typeLabel, title,
+state, fields, version } | null, candidates: [{ id, title, typeLabel }], instructionLike: [{ label, words }] }`.
 
-- Only for a minutes record the member may read (else the same 404 as a missing record — another
+- Only for a meeting record the member may read (else the same 404 as a missing record — another
   company's id included) **and** where the member is the assignee or an attendee (else 403
   `MINUTES_NOT_YOURS`).
 - Read **now** from Google with the requesting member's own grant: notes first, then the
@@ -88,7 +96,7 @@ version } | null, candidates: [{ id, title }], instructionLike: [{ label, words 
 Stored (the record, server only, folder = the minutes folder): title = the event's title, fields
 `meeting_at`, `assignee`, `attendees` (JSON of member ids, ≤ 500 characters), `external_count`,
 `source_ref` (JSON of Google ids only: conference, event, documents), `doc_version`
-(`notes:7,transcript:7`), `summary_text` (the AI's ≤ 300 at the end); links `deal`, `customer`.
+(`notes:7,transcript:7`), `summary_text` (the AI's ≤ 300 at the end); links `bundle`, `counterpart`.
 Ledger actor of the creation: external `google` (note: which member's calendar).
 **Never** stored, logged or answered elsewhere: the notes / transcript text, attendees' email
 addresses and names (they are read again from the calendar when needed), Google's tokens.
@@ -106,9 +114,17 @@ usable folders. No folder (or one that stopped being usable) → `check` answers
 
 ## For the thank-you mail (G8)
 
-`services.minutes.meetingAttendees(companyId, userId, role, minutesId)` → `[{ email, name,
+`services.minutes.meetingAttendees(companyId, userId, role, meetingId)` → `[{ email, name,
 organizer, external }]`, read now from the calendar with that member's grant, for the assignee
 or an attendee who may read the record: the "calendar attendee" source of verified recipients.
+
+## Which meetings (a company setting, owner decision 2026-11-01 night)
+
+`GET|PUT /google/minutes-folder` also carries `meetings`: `external` (the default, null stored =
+default: only meetings with someone from outside — today's rule) or `all` (internal meetings
+too). PUT takes `{ folder?, meetings? }` (at least one; another value → 400); owner/admin only
+(`record_settings.meeting_intake`, additive column; `shared/core/minutes.ts` `meetingIsRead`). Admin
+console: 「議事録の置き場所」 → 「読む会議」.
 
 ## Switches
 
@@ -127,7 +143,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   `GET /me/google`: **without an active grant that includes `minutes`, nothing about minutes is
   asked or shown** (no error either). With it: `POST /me/minutes/check`, then each `stale` id is
   put back with the type's `retry` at its current version, then the notices are read from
-  `GET /records/ai-turn` (type `minutes`, state `received`: id, title, `meeting_at`, version —
+  `GET /records/ai-turn` (type `meeting`, state `received`: id, title, `meeting_at`, version —
   never text). Main sends `minutes:changed { companyId }` when they change; the renderer re-reads
   `minutes:notices`.
 - **The records signal** (push channel, `agent-stop.md`): `wireAgentControl`'s `onRecords` →
@@ -152,11 +168,12 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the record's id and title only — **the app never has the minutes text**. An agent without
   record actions (registry `recordActions` false: Codex) gets 「議事録の読み取りは Claude Code の相談で
   できます」 and nothing starts.
-- **「どの案件の議事録ですか？」** (`MinutesDealChoiceCard.tsx`): when `minutes_read` answers no
-  linked deal and 0 or ≥ 2 candidates, the record tool (main) puts the app's card into the reply
-  (data part `data-minutes-deal-choice`, `dealChoiceFor`; stored as `minutesDealChoices`) and tells
-  the AI not to write to the deal until the member chooses. Choosing calls `minutes:linkDeal` →
-  `POST /me/minutes/item/:id/deal { dealId }` with the session; nothing goes to HubSpot.
+- **「どのまとまりの会議ですか？」** (`MinutesBundleChoiceCard.tsx`): when `minutes_read` answers no
+  linked まとまり and 0 or ≥ 2 candidates, the record tool (main) puts the app's card into the reply
+  (data part `data-minutes-deal-choice` and the stored key `minutesDealChoices`, kept as named
+  before for saved consultations; `bundleChoiceFor`) and tells the AI not to write to it until the
+  member chooses. Choosing calls `minutes:linkBundle` → `POST /me/minutes/item/:id/bundle
+  { bundleId }` with the session; nothing goes to the outside system.
 - The consultation's other cards are the core-drawn ones (operation, approval, mail); they render
   in the order the tools produced them, also after a restart (`cardOrder`, `chat-ui-and-history.md`).
 - Not yet: the consultation does not move to the minutes folder's department (the record's folder
@@ -167,7 +184,9 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 
 `server/tests/integration/minutes.test.ts` against the fake Google and the fake HubSpot (practice
 redirect): an internal-only meeting creates nothing and its Meet record is never looked up; one
-record for two members, organizer assignee; two candidates not linked, one linked; the text only
+record for two members, organizer assignee; two candidates not linked, one linked with its 相手,
+only a まとまり can be chosen (a 顧客 is refused); which meetings are read (owner/admin only, default
+external, `all` reads the internal one); the text only
 for the assignee / attendees, another company's record = missing; no minutes text in any table,
 log line or other answer; the folder refusal never naming the place; stale reading; Google
 stopped / not connected; records off; `meetingAttendees` — each mutation-checked.
@@ -175,9 +194,9 @@ stopped / not connected; records off; `meetingAttendees` — each mutation-check
 below the text), `client/tests/web-research.test.ts` (the addressed-to-AI flag).
 `client/tests/minutes-app.test.ts` (no minutes call without the grant — start, tick, signal; the
 check's session calls and stale `retry`; a records signal only re-asks, for the watched company;
-skip / deal link with the session; the first message names the id and carries no text; the deal
+skip / まとまり link with the session; the first message names the id and carries no text; the まとまり
 choice card only for 0 / ≥ 2 candidates; cards restored in order), `client/tests/ui/minutes.spec.ts`
-(「読み取る」 starts the titled consultation with `minutesId`; the card links the chosen deal;
+(「読み取る」 starts the titled consultation with `minutesId`; the card links the chosen まとまり;
 Codex starts nothing), `client/tests/plugin-tools.test.ts` (「もう一度作る」 with the session, the
 server's warning before `confirm`). Permission
 matrix rows + `CROSS` for the session routes with a record id.

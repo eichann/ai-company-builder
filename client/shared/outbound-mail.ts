@@ -84,7 +84,7 @@ export function readMailDraft(data: unknown): OutboundMailView | undefined {
     id: d.id, state: d.state as OutboundMailState, version: d.version, hash: d.hash, from: d.from,
     to: to as MailRecipientView[], cc: cc as MailRecipientView[], subject: d.subject, body, bodyDeleted: body === null,
     linkCount: typeof d.linkCount === 'number' ? d.linkCount : 0,
-    minutesId: nul(d.minutesId, 80), dealId: nul(d.dealId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),
+    meetingId: nul(d.meetingId, 80), bundleId: nul(d.bundleId, 80), sentAt: nul(d.sentAt, 40), providerMessageId: nul(d.providerMessageId, 100),
     lastChangedBy: d.lastChangedBy === 'ai' ? 'ai' : 'human', updatedAt: typeof d.updatedAt === 'string' ? d.updatedAt.slice(0, 40) : '',
   }
 }

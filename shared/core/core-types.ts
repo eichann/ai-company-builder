@@ -30,25 +30,35 @@
  * `declined` (not final: it is the requester's turn). The AI never
  * completes or declines.
  *
+ * Version 6 (core interfaces, owner decision 2026-11-01 night): the `customer`
+ * link is gone — a task reaches its customer through its `bundle` — and a
+ * task with no bundle may name its `counterpart` (相手) instead.
+ *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
- * original (0.23-2). Defined now; used from stage 8.
+ * original (0.23-2). Version 3 links `bundle` and `counterpart`.
  *
- * Milestone 4 (after a sales meeting): `minutes` (議事録), `approval`
- * (承認のお願い), `outbound_message` (送るメール) and `decision` (決めたこと).
- * Their records are made only by the server's own services
+ * Milestone 4 (after a sales meeting): `meeting` (会議 — version 1 of what was
+ * the `minutes` type; the 議事録 is the meeting's content, read where it is),
+ * `approval` (承認のお願い), `outbound_message` (送るもの) and `decision`
+ * (決めたこと). Their records are made only by the server's own services
  * (`SERVICE_OWNED_TYPES`); `approval` and `outbound_message` change state only
  * through those services too (`SERVICE_STATE_TYPES`, `SERVICE_TRANSITIONS`),
  * because approving checks a content hash and runs an operation, and sending
- * reaches outside. Links to `deal` / `customer` name types a business plugin owns (a
- * link's target type is a label: nothing requires it to exist).
+ * reaches outside.
+ *
+ * **The core never names a business plugin's type** (owner decision
+ * 2026-11-01 night): what work belongs to links to the `bundle` interface
+ * (まとまり: a 案件, a 企画, a 取り組み), whom it is with to the `counterpart`
+ * interface (相手: a 顧客, a guest, an applicant). A link target that is a type
+ * is always a core type (`server/tests/unit/core-types-interfaces.test.ts`).
  */
 import { parseTypeFile, type TypeDefinition } from './record-types'
 
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 5
+version: 6
 implements: [request]
 storage: server
 fields:
@@ -66,10 +76,10 @@ fields:
   wait_until:   { label: 返事・届く見込み, kind: date, source: server }
   prep_summary: { label: AIが用意したこと, kind: long_text, source: server }
 links:
-  customer:     { label: 顧客, target: customer, cardinality: one, inverse: tasks }
   files:        { label: 関係するファイル, target: file, cardinality: many }
   related:      { label: 関係するタスク, target: task, cardinality: many }
   bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: tasks }
+  counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: tasks }
   prepared:     { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: tasks }
 states: [todo, in_progress, review, waiting, done, cancelled, preparing, declined]
 initial: todo
@@ -97,21 +107,22 @@ actions:
 
 ACB に最初からある「依頼」の形。記録はサーバーだけが持ちます（ファイルにはしません）。見積や計画などの中身はふつうのファイルに書き、「関係するファイル」でつなぎます。
 「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、AI が理由を添えて「先に渡す」で早めに渡します。担当と頼んだ人は「自分で進める」でいつでも引き取れます。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
+お客さまなどの相手は「まとまり」（案件など）からたどります。まとまりに入らないタスクだけ、「相手」を直接つなぎます。
 `,
   interaction: `---
 label: やりとり
-version: 2
+version: 3
 storage: server
 fields:
   occurred_at:  { label: いつ, kind: datetime, source: server }
   channel:      { label: 経路, kind: choice, options: [email, slack, line, phone, meeting, other], source: server }
-  counterpart:  { label: 相手, kind: text, source: server }
+  counterpart_text: { label: 相手（書いてあるまま）, kind: text, source: server }
   source_ref:   { label: 元への目印, kind: text, source: server }
   needs_reply:  { label: 返事が要る, kind: boolean, source: server }
 links:
-  customer:     { label: 顧客, target: customer, cardinality: one, inverse: interactions }
+  counterpart:  { label: 相手, interface: counterpart, cardinality: one, inverse: interactions }
   tasks:        { label: 関係するタスク, target: task, cardinality: many }
-  deal:         { label: 案件, target: deal, cardinality: one, inverse: interactions }
+  bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: interactions }
 states: [received, handled]
 initial: received
 final: [handled]
@@ -122,39 +133,39 @@ actions:
 
 外から来たもの（メール・Slack など）の受付票。本文は持たず、要約と元への目印だけを持ちます。
 `,
-  minutes: `---
-label: 議事録
+  meeting: `---
+label: 会議
 version: 1
 storage: server
 fields:
   meeting_at:     { label: 会議の日時, kind: datetime, source: server }
   assignee:       { label: 担当, kind: person, source: server }
   attendees:      { label: 出席したメンバー, kind: text, source: server }
-  external_count: { label: 外の参加者の数, kind: number, source: server }
-  source_ref:     { label: 元への目印, kind: text, source: server }
-  doc_version:    { label: 文書の版, kind: text, source: server }
+  external_count: { label: 社外の参加者の数, kind: number, source: server }
+  source_ref:     { label: 議事録への目印, kind: text, source: server }
+  doc_version:    { label: 議事録の版, kind: text, source: server }
   summary_text:   { label: 要約, kind: long_text, source: server }
 links:
-  deal:           { label: 案件, target: deal, cardinality: one, inverse: minutes }
-  customer:       { label: 顧客, target: customer, cardinality: one, inverse: minutes }
+  bundle:         { label: まとまり, interface: bundle, cardinality: one, inverse: meetings }
+  counterpart:    { label: 相手, interface: counterpart, cardinality: one, inverse: meetings }
 states: [received, reading, read, skipped, failed]
 initial: received
 final: [read, skipped]
 actions:
-  start_reading:  { label: 読み始める, from: [received], to: reading, who: [ai] }
-  finish_reading: { label: 読み終える, from: [reading], to: read, who: [ai], args: { summary_text: long_text } }
-  fail_reading:   { label: 読めなかった, from: [reading], to: failed, who: [ai], note: optional }
+  start_reading:  { label: 議事録を読み始める, from: [received], to: reading, who: [ai] }
+  finish_reading: { label: 議事録を読み終える, from: [reading], to: read, who: [ai], args: { summary_text: long_text } }
+  fail_reading:   { label: 議事録を読めなかった, from: [reading], to: failed, who: [ai], note: optional }
   retry:          { label: もう一度読む, from: [reading, failed], to: received, who: [assignee, admin], note: optional }
   skip:           { label: 読まない, from: [received, failed], to: skipped, who: [assignee, admin], note: optional }
 ---
-# 議事録
+# 会議
 
-会議の議事録が届いたことの記録。本文は持たず（元の文書に置いたまま）、元への目印と要約だけを持ちます。
-「届いた」は AI の番です（AI だけができる操作が残っている状態）。
+社内・社外の会議の記録（日時・出席したメンバー・社外の参加者の数）。議事録は会議の中身で、元の文書に置いたまま（本文は持たず、議事録への目印と要約だけを持ちます）。
+「届いた」は AI の番です（AI が議事録を読んで、タスクや決めたことにします）。どの会議を読むかは会社の設定で決まります（最初は社外の人が出た会議だけ）。
 `,
   approval: `---
 label: 承認のお願い
-version: 3
+version: 4
 implements: [request, prepared]
 storage: server
 fields:
@@ -170,8 +181,8 @@ fields:
   reason:              { label: 理由, kind: long_text, source: server }
   result_operation_id: { label: 操作の控え, kind: text, source: server }
 links:
-  about:               { label: 対象, target: deal, cardinality: one, inverse: approvals }
-  minutes:             { label: 議事録, target: minutes, cardinality: one, inverse: approvals }
+  bundle:              { label: まとまり, interface: bundle, cardinality: one, inverse: approvals }
+  meeting:             { label: 会議, target: meeting, cardinality: one, inverse: approvals }
 states: [pending, approved, sent_back, stale, withdrawn, failed]
 initial: pending
 final: [approved, stale, withdrawn, failed]
@@ -181,8 +192,8 @@ final: [approved, stale, withdrawn, failed]
 固定した中身（内容の印つき）を承認する人に確かめてもらう依頼。承認・差し戻しは人だけが、承認の画面からします（AI はできません）。
 `,
   outbound_message: `---
-label: 送るメール
-version: 2
+label: 送るもの
+version: 3
 implements: [prepared]
 storage: server
 fields:
@@ -193,21 +204,21 @@ fields:
   payload_version:     { label: 中身の版, kind: number, source: server }
   sent_at:             { label: 送った日時, kind: datetime, source: server }
   provider_message_id: { label: 送った先での番号, kind: text, source: server }
-  channel:             { label: 経路, kind: choice, options: [email], source: server }
+  channel:             { label: 経路, kind: choice, options: [email, slack], option_labels: { email: メール, slack: Slack }, source: server }
 links:
-  about:               { label: 案件, target: deal, cardinality: one, inverse: messages }
-  minutes:             { label: 議事録, target: minutes, cardinality: one, inverse: messages }
+  bundle:              { label: まとまり, interface: bundle, cardinality: one, inverse: messages }
+  meeting:             { label: 会議, target: meeting, cardinality: one, inverse: messages }
 states: [draft, sent, unknown, discarded]
 initial: draft
 final: [sent, discarded]
 ---
-# 送るメール
+# 送るもの
 
-社外に送るメールの下書き。送るのは作った人本人だけで、送る画面から行います（AI は送れません）。
+社外に送るもの（メール、のちに Slack の返事）の下書き。送るのは作った人本人だけで、送る画面から行います（AI は送れません）。
 `,
   decision: `---
 label: 決めたこと
-version: 2
+version: 3
 storage: server
 fields:
   title:       { label: 件名, kind: text, source: file }
@@ -219,8 +230,8 @@ fields:
   owner:       { label: 確かめる人, kind: person, source: server }
   source_key:  { label: 元の項目の目印, kind: text, source: server }
 links:
-  deal:        { label: 案件, target: deal, cardinality: one, inverse: decisions }
-  minutes:     { label: 議事録, target: minutes, cardinality: one, inverse: decisions }
+  bundle:      { label: まとまり, interface: bundle, cardinality: one, inverse: decisions }
+  meeting:     { label: 会議, target: meeting, cardinality: one, inverse: decisions }
   approval:    { label: 承認のお願い, target: approval, cardinality: one, inverse: decisions }
 states: [unconfirmed, confirmed, retracted]
 initial: unconfirmed
@@ -236,12 +247,12 @@ actions:
 }
 
 /**
- * Core types whose records only the server's own services create (minutes
+ * Core types whose records only the server's own services create (meeting
  * intake, approvals, outbound mail, decisions): the generic create
  * (`POST /records/item`, the AI's `records_create`) refuses them with
  * `TYPE_CREATED_BY_SERVICE`.
  */
-export const SERVICE_OWNED_TYPES: readonly string[] = ['minutes', 'approval', 'outbound_message', 'decision']
+export const SERVICE_OWNED_TYPES: readonly string[] = ['meeting', 'approval', 'outbound_message', 'decision']
 
 /**
  * Of those, the types whose state only those services change: no action or
@@ -254,7 +265,7 @@ export const SERVICE_STATE_TYPES: readonly string[] = ['approval', 'outbound_mes
 /**
  * Types the service writer may also create, besides the service-owned ones:
  * receipts of what a service did outside (a sent mail becomes an `interaction`
- * on its deal, design §1-6 step 19). They stay creatable by the generic
+ * on its bundle, design §1-6 step 19). They stay creatable by the generic
  * routes too.
  */
 export const SERVICE_RECEIPT_TYPES: readonly string[] = ['interaction']
@@ -265,7 +276,7 @@ export const SERVICE_RECEIPT_TYPES: readonly string[] = ['interaction']
  * A change of fields that keeps the state is always allowed.
  */
 export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: readonly string[]; to: string }>>> = {
-  minutes: [
+  meeting: [
     { from: ['received'], to: 'reading' },
     { from: ['reading'], to: 'read' },
     { from: ['reading'], to: 'failed' },

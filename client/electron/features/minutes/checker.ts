@@ -30,8 +30,10 @@ export interface MinutesCheckerDeps {
 export const MINUTES_CHECK_INTERVAL_MS = 10 * 60_000
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
-const MINUTES = /^minutes-[0-9a-z]{6,32}$/
-const DEAL = /^deal-[0-9a-z]{6,32}$/
+/** A meeting record (`minutes-…` for one made before the type was renamed `meeting`). */
+const MINUTES = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
+/** A まとまり may be of any type (a 案件, a 企画…): any record id. */
+const RECORD = /^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/
 
 type Answer = { status: number; body: { data?: unknown; error?: unknown; code?: unknown } | null }
 
@@ -43,7 +45,7 @@ function memberText(body: Answer['body'], fallback: string): string {
 
 function noticeOf(r: unknown): MinutesNotice | null {
   const x = r as { id?: unknown; type?: unknown; title?: unknown; state?: unknown; version?: unknown; fields?: Record<string, unknown> } | null
-  if (!x || x.type !== 'minutes' || x.state !== 'received' || typeof x.id !== 'string' || !MINUTES.test(x.id)) return null
+  if (!x || x.type !== 'meeting' || x.state !== 'received' || typeof x.id !== 'string' || !MINUTES.test(x.id)) return null
   if (typeof x.title !== 'string' || typeof x.version !== 'number') return null
   const at = x.fields?.meeting_at
   return { id: x.id, title: x.title.slice(0, 200), meetingAt: typeof at === 'string' ? at : null, version: x.version }
@@ -91,7 +93,7 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     if (JSON.stringify(before) !== JSON.stringify(next)) deps.onChanged(companyId)
   }
 
-  /** Ask the server for the member's received minutes (「AI の番」 of type minutes). */
+  /** Ask the server for the member's received minutes (「AI の番」 of type meeting). */
   async function refresh(companyId: string): Promise<void> {
     const running = refreshing.get(companyId)
     if (running) { running.again = true; return }
@@ -206,14 +208,14 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
       return { success: true }
     },
 
-    /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
-    async linkDeal(companyId: string, minutesId: string, dealId: string): Promise<MinutesActionResult> {
-      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId) || !DEAL.test(dealId)) return { success: false, error: '入力が正しくありません。' }
-      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/deal`, { dealId })
+    /** 「どのまとまりの会議ですか？」: link the chosen まとまり (nothing is written to the outside system). */
+    async linkBundle(companyId: string, minutesId: string, bundleId: string): Promise<MinutesActionResult> {
+      if (!COMPANY.test(companyId) || !MINUTES.test(minutesId) || !RECORD.test(bundleId)) return { success: false, error: '入力が正しくありません。' }
+      const r = await call(companyId, 'POST', `/me/minutes/item/${encodeURIComponent(minutesId)}/bundle`, { bundleId })
       if (!r) return { success: false, error: MINUTES_OFFLINE_TEXT }
       if (r.status >= 300) {
-        log.warn(`[minutes] deal: answered ${r.status}`)
-        return { success: false, error: memberText(r.body, `案件につなげませんでした（サーバーの応答 ${r.status}）。`) }
+        log.warn(`[minutes] bundle: answered ${r.status}`)
+        return { success: false, error: memberText(r.body, `つなげませんでした（サーバーの応答 ${r.status}）。`) }
       }
       return { success: true }
     },

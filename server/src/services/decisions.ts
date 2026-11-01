@@ -10,13 +10,16 @@
  *   folder nor inside one, and never wider than a linked record's folder;
  *   every refusal of a place says the same words and never names it. The
  *   folder decides who may read the decision (those who can read it);
- * - an optional idempotency `key` (`minutes-…:decision:2`) records the same
+ * - links name a まとまり (`bundle`: any type implementing it), the meeting and
+ *   the approval request it came from — never a business plugin's type;
+ * - an optional idempotency `key` (`meeting-…:decision:2`) records the same
  *   item once: the id is derived from it and it is kept in the `source_key` field.
  */
 import { nameKey, normalizeRepoPath, isSameOrAncestorPath } from '../../shared/core/paths'
 import { findPrivateScope, resolveAccess, type PermissionRepository } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../shared/core/records'
+import { INTERFACES } from '../../shared/core/record-types'
 import type { RecordSummary } from '../../shared/types/records'
 import type { IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -26,6 +29,7 @@ import type { Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
 import { recordReader } from './record-access'
 import { ASSIGNEE_CANNOT_READ, type ActorInput, type ServiceRecordWriter } from './record-engine'
+import { currentTypes } from './record-index'
 import { RECORDS_DISABLED, recordSummaries } from './records'
 
 export interface DecisionServiceDeps {
@@ -65,7 +69,7 @@ export function createDecisionService(deps: DecisionServiceDeps) {
 
   return {
     /**
-     * Record a decision: `{ folder, title, why, source, links?: { deal?, minutes?, approval? },
+     * Record a decision: `{ folder, title, why, source, links?: { bundle?, meeting?, approval? },
      * important?, key? }`. The person's own call (session) or their AI's (record token, `actor.kind: ai`).
      */
     async record(member: Member, actor: ActorInput, body: unknown): Promise<Outcome<{ record: RecordSummary; created: boolean }>> {
@@ -88,17 +92,23 @@ export function createDecisionService(deps: DecisionServiceDeps) {
       if (key === null) return bad(`key: up to ${KEY_MAX} characters`)
       if (typeof b.folder !== 'string') return bad('folder: a department folder')
 
-      // Links: readable records of the type the link names.
+      // Links: readable records of the type the link names (`bundle`: of any type implementing it).
       const reader = recordReader(member, handle.scopes.listWithRules())
       const rawLinks = (b.links ?? {}) as Record<string, unknown>
-      if (typeof rawLinks !== 'object' || rawLinks === null || Array.isArray(rawLinks)) return bad('links: { deal?, minutes?, approval? }')
+      if (typeof rawLinks !== 'object' || rawLinks === null || Array.isArray(rawLinks)) return bad('links: { bundle?, meeting?, approval? }')
       const links: Record<string, string> = {}
       const linked: RecordRow[] = []
+      const types = currentTypes(records)
+      const fits = (name: string, type: string) => (name === 'bundle'
+        ? types.get(type)?.definition.implements.includes('bundle') === true
+        : type === name)
       for (const [name, value] of Object.entries(rawLinks)) {
-        if (!['deal', 'minutes', 'approval'].includes(name)) return bad(`links: ${name} is not a link of a decision`)
+        if (!['bundle', 'meeting', 'approval'].includes(name)) return bad(`links: ${name} is not a link of a decision`)
         if (value === undefined || value === null) continue
         const row = typeof value === 'string' && RECORD_ID_RE.test(value) ? records.byIds([value]).find(r => r.removedAt === null && reader.record(r)) : undefined
-        if (!row || row.type !== name) return bad(`links.${name}: a ${name} record you can read`, 'BAD_LINK')
+        if (!row || !fits(name, row.type)) {
+          return bad(`links.${name}: a ${name === 'bundle' ? `${INTERFACES.bundle.label} (bundle)` : name} record you can read`, 'BAD_LINK')
+        }
         links[name] = row.id
         linked.push(row)
       }
@@ -131,10 +141,10 @@ export function createDecisionService(deps: DecisionServiceDeps) {
         }
       }
 
-      const minutes = linked.find(r => r.type === 'minutes')
+      const meeting = links.meeting ? linked.find(r => r.id === links.meeting) : undefined
       let owner: LedgerValue = member.userId
-      if (minutes) {
-        try { owner = (JSON.parse(records.states([minutes.id])[0]?.fields ?? '{}') as Record<string, LedgerValue>).assignee ?? member.userId } catch { /* the member */ }
+      if (meeting) {
+        try { owner = (JSON.parse(records.states([meeting.id])[0]?.fields ?? '{}') as Record<string, LedgerValue>).assignee ?? member.userId } catch { /* the member */ }
       }
       const input = {
         // The summary is what text search reads: the start of why.

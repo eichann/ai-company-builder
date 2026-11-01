@@ -59,7 +59,7 @@ a plugin can never draw a notice (§2-2).
   from `timeZoneOf`, today `DEFAULT_COMPANY_TIME_ZONE` = Asia/Tokyo for every company, as
   `calendar.md`), once per due value (`overdue:<record>:<due>`); **stuck AI turn** (C-18) — same
   requester rule, the current state is an AI turn (`aiTurnStates`), and the record has not
-  changed for 24 h; once per version. Types without `requested_by` (minutes) give no stuck
+  changed for 24 h; once per version. Types without `requested_by` (meeting) give no stuck
   notice. Only a requester who can read the record now gets either (an owner-only record's
   requester is its owner).
 - `wait_over` (on by default): the clock moved a wait that is over to the follow-up's turn — to

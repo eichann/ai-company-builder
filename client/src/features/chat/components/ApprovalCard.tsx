@@ -101,7 +101,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
         {view.similar.length === 0 ? <p>見つかりませんでした</p> : <ul aria-label="似ているもの">{view.similar.map(x => <li key={x.recordId}>{x.title ?? '（件名なし）'}</li>)}</ul>}
       </div>}
       {view.basis.quote && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
-        <p className="text-gray-500 dark:text-zinc-400">理由（{view.basis.minutesTitle ? `議事録「${view.basis.minutesTitle}」` : '議事録'}の引用）</p>
+        <p className="text-gray-500 dark:text-zinc-400">理由（{view.basis.meetingTitle ? `会議「${view.basis.meetingTitle}」の議事録` : '議事録'}の引用）</p>
         <blockquote className="mt-0.5 border-l-2 border-gray-300 pl-2 dark:border-zinc-600">{view.basis.quote}</blockquote>
       </div>}
       <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
@@ -116,7 +116,7 @@ export const ApprovalCard = memo(function ApprovalCard({ card, outbound }: { car
       </div>
       {view.materials.length > 0 && <div className="mt-2 text-xs text-gray-700 dark:text-zinc-300">
         <p className="text-gray-500 dark:text-zinc-400">材料</p>
-        <ul aria-label="材料">{view.materials.map(m => <li key={m.recordId}>{m.kind === 'minutes' ? '議事録' : '記録'}「{m.title}」{m.version !== null ? `（お願いしたときの版 ${m.version}）` : ''}</li>)}</ul>
+        <ul aria-label="材料">{view.materials.map(m => <li key={m.recordId}>{m.kind === 'meeting' ? '会議' : '記録'}「{m.title}」{m.version !== null ? `（お願いしたときの版 ${m.version}）` : ''}</li>)}</ul>
       </div>}
       {view.proposedReason && <p className="mt-2 text-xs text-gray-500 dark:text-zinc-400">{view.requestedByAi ? 'AI のまとめ（参考）' : 'お願いした人のまとめ'}：{view.proposedReason}</p>}
       <p role="status" className="mt-2 text-xs text-gray-800 dark:text-zinc-200">{stateLine(view, names)}</p>

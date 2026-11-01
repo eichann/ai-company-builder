@@ -51,6 +51,7 @@ fields:
   owner:   { label: 持ち主, kind: person, source: server }
   purpose: { label: 目的, kind: text, source: server }
 states: [active, done]
+final: [done]
 ---
 `
 

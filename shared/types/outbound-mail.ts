@@ -4,7 +4,7 @@
  * (a person's session) and /api/records-ai (their AI's record token).
  *
  * Session (the member's own screens):
- *   POST /outbound-recipients               { minutesId?, dealId? } → MailRecipientsView
+ *   POST /outbound-recipients               { meetingId?, bundleId? } → MailRecipientsView
  *   POST /outbound                          MailDraftInput → 201 { draft: OutboundMailView }
  *   GET  /outbound/:messageId               → { draft: OutboundMailView }
  *   PUT  /outbound/:messageId               MailDraftChange → { draft }
@@ -52,8 +52,8 @@ export interface OutboundMailView {
   bodyDeleted: boolean
   /** Links in the body (「本文にリンクが N つあります」). */
   linkCount: number
-  minutesId: string | null
-  dealId: string | null
+  meetingId: string | null
+  bundleId: string | null
   sentAt: string | null
   /** Gmail's message id (only after a confirmed send). */
   providerMessageId: string | null
@@ -69,8 +69,10 @@ export interface MailRecipientsView {
 }
 
 export interface MailDraftInput {
-  minutesId?: string
-  dealId?: string
+  /** The meeting (会議) the mail is about. */
+  meetingId?: string
+  /** The まとまり (any type implementing `bundle`: a 案件…) it is about; a meeting's own is taken along. */
+  bundleId?: string
   toRefs: string[]
   ccRefs?: string[]
   subject: string

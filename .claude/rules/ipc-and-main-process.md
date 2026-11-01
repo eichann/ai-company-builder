@@ -43,7 +43,7 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   the windows themselves come from `electron-adapter.ts` `createChatWindowHost`),
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
-  (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
+  (minutes:watch / check / notices / skip / linkBundle and the event `minutes:changed`:
   「議事録が届きました」 checked with the session in main, `minutes.md` "The app"), `record-views`
   (recordViews:search / card / forFile: search hits, the record card and a file's
   「つながっているもの」, read with the session; `records.md` "The app's views"),

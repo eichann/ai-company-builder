@@ -1,7 +1,7 @@
 // 「AI の番」 run automatically (stage 2 S10, .claude/rules/ai-turns.md): main's
 // part. The run is a hidden consultation in the main window; here main only
 //   - claims the record before the AI starts: the type's first AI action
-//     (minutes: start_reading) with a record token of that consultation, at the
+//     (meeting: start_reading) with a record token of that consultation, at the
 //     version the app saw — the server's compare-and-set lets one PC win;
 //   - looks at the record after the turn and puts an unfinished one back to
 //     「AI の番」 (`retry`, the member's own action, with the session).

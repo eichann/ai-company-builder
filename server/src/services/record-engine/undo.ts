@@ -42,7 +42,7 @@ export function undoing(ctx: EngineContext) {
       const latest = ledger.length > 0 ? ledger[ledger.length - 1].version : 0
       if (b.expectedVersion !== latest) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT', { version: latest })
       const now = replayRecordState(ledger, latest)
-      // `links.<name>` changes (a file linked, the minutes' deal) are compared with and restored to
+      // `links.<name>` changes (a file linked, the meeting's まとまり) are compared with and restored to
       // the link rows themselves: a rename the indexer followed changed them without an entry.
       const def = currentTypes(records).get(row.type)?.definition
       const currentLinks = records.linksFrom([row.id])

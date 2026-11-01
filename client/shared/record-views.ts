@@ -9,19 +9,19 @@ import type { LedgerEntry } from '../../shared/core/record-ledger'
 import type { RecordFieldValue, RecordSummary } from '../../shared/types/records'
 
 /** The four kinds people see (design §7-2), plus anything else a company defined. */
-export type RecordKind = 'deal' | 'task' | 'decision' | 'interaction' | 'other'
+export type RecordKind = 'bundle' | 'task' | 'decision' | 'interaction' | 'other'
 
 export const RECORD_KIND_LABELS: Record<RecordKind, string> = {
-  deal: '案件', task: 'やること', decision: '決めたこと', interaction: 'やりとり', other: 'そのほか',
+  bundle: 'まとまり', task: 'やること', decision: '決めたこと', interaction: 'やりとり', other: 'そのほか',
 }
-export const RECORD_KIND_ORDER: RecordKind[] = ['deal', 'task', 'decision', 'interaction', 'other']
+export const RECORD_KIND_ORDER: RecordKind[] = ['bundle', 'task', 'decision', 'interaction', 'other']
 
 export const RECORD_VIEWS_OFFLINE_TEXT = 'サーバーにつながらないため、表示できません。'
 
 export interface RecordViewSummary {
   id: string
   type: string
-  /** The type's own label (タスク, 議事録…), shown small. */
+  /** The type's own label (タスク, 会議, 案件…), shown small. */
   typeLabel: string
   kind: RecordKind
   title: string
@@ -55,12 +55,15 @@ export type RecordCardResult =
   | { success: true; card: RecordCardView }
   | { success: false; offline: boolean; notFound?: boolean; error: string }
 
-/** The kind a type is shown as: the core types by name, a 「まとまり」 (bundle) as a 案件. */
+/**
+ * The kind a type is shown as: the core types by name, any type implementing `bundle`
+ * (a 案件, a 企画, a 取り組み) as a 「まとまり」 — the core never names a business type.
+ */
 export function recordKindOf(type: string, def?: Pick<TypeDefinition, 'implements'>): RecordKind {
   if (type === 'task' || type === 'approval') return 'task'
   if (type === 'decision') return 'decision'
-  if (type === 'interaction' || type === 'minutes' || type === 'outbound_message') return 'interaction'
-  if (type === 'deal' || def?.implements.includes('bundle')) return 'deal'
+  if (type === 'interaction' || type === 'meeting' || type === 'outbound_message') return 'interaction'
+  if (def?.implements.includes('bundle')) return 'bundle'
   return 'other'
 }
 

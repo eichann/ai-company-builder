@@ -3,7 +3,7 @@
 //   minutes:check     「議事録を確かめる」
 //   minutes:notices   the received minutes waiting for the member (no text, ever)
 //   minutes:skip      「今は読まない」 (the type's skip, with the session)
-//   minutes:linkDeal  「どの案件の議事録ですか？」 (the session; nothing is written to HubSpot)
+//   minutes:linkBundle  「どのまとまりの会議ですか？」 (the session; nothing is written outside)
 // Everything goes with the member's session, which stays in main.
 
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -20,6 +20,6 @@ export function registerMinutesIpc(ipc: IpcRegistrar, minutes: MinutesChecker): 
   ipc.handle('minutes:check', (_event, companyId) => str(companyId) ? minutes.checkNow(companyId) : invalid)
   ipc.handle('minutes:notices', (_event, companyId) => minutes.notices(str(companyId) ? companyId : ''))
   ipc.handle('minutes:skip', (_event, companyId, minutesId) => str(companyId) && str(minutesId) ? minutes.skip(companyId, minutesId) : invalid)
-  ipc.handle('minutes:linkDeal', (_event, companyId, minutesId, dealId) =>
-    str(companyId) && str(minutesId) && str(dealId) ? minutes.linkDeal(companyId, minutesId, dealId) : invalid)
+  ipc.handle('minutes:linkBundle', (_event, companyId, minutesId, bundleId) =>
+    str(companyId) && str(minutesId) && str(bundleId) ? minutes.linkBundle(companyId, minutesId, bundleId) : invalid)
 }

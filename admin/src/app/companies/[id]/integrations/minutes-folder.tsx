@@ -1,15 +1,16 @@
 'use client'
 
 // 「つなぎ先」→「Google」→「議事録の置き場所」 (milestone 4 G7, `.claude/rules/minutes.md`):
-// the department folder the minutes records (and the tasks and decisions made from them) go to.
+// the department folder the meeting records (and the tasks and decisions made from them) go to,
+// and which meetings are read (default: only those with someone from outside).
 // Only department folders that are not private are offered; until one is chosen, members'
-// apps read nothing. Words for non-engineers: 「議事録」「置き場所」.
+// apps read nothing. Words for non-engineers: 「会議」「議事録」「置き場所」.
 import { useState } from 'react'
 import { toast } from 'sonner'
 
 import { ErrorState, ListSkeleton } from '@/components/app/states'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { ApiError, minutesApi, type MinutesFolderSetting } from '@/lib/api'
+import { ApiError, minutesApi, type MeetingIntake, type MinutesFolderSetting } from '@/lib/api'
 import { describeError } from '@/lib/errors'
 import { useQuery } from '@/lib/use-query'
 
@@ -38,6 +39,19 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
     }
   }
 
+  async function chooseMeetings(value: string) {
+    if (value !== 'external' && value !== 'all') return
+    setBusy(true)
+    try {
+      setView(await minutesApi.setMeetings(companyId, value as MeetingIntake))
+      toast.success(value === 'all' ? '社内だけの会議の議事録も読むようにしました。' : '社外の人が参加した会議の議事録だけを読むようにしました。')
+    } catch (err) {
+      toast.error(explain(err))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <section className="space-y-2" data-testid="minutes-folder">
       <h3 className="text-sm font-medium">議事録の置き場所</h3>
@@ -59,8 +73,21 @@ export function MinutesFolderSection({ companyId }: { companyId: string }) {
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">
-            社外の人が参加した Meet の会議の議事録を、この部署の記録として受け取ります（社内だけの会議は読みません）。
+            Meet の会議の議事録を、この部署の記録として受け取ります。
             議事録から作る宿題や決めたことも、この部署に置かれます。非公開のフォルダは選べません。
+          </p>
+          <h3 className="pt-2 text-sm font-medium">読む会議</h3>
+          <Select value={data.meetings} onValueChange={chooseMeetings} disabled={busy}>
+            <SelectTrigger className="w-64" aria-label="読む会議">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="external">社外の人が参加した会議だけ（おすすめ）</SelectItem>
+              <SelectItem value="all">社内だけの会議も含めて、すべて</SelectItem>
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            「すべて」にすると、人事の面談など社内だけの会議の議事録も読み、出席したメンバーの宿題や決めたことにします。
           </p>
         </>
       ) : null}

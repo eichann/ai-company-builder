@@ -128,6 +128,9 @@ export interface RecordRepository {
   /** The company's minutes folder (milestone 4, minutes.md): a department folder, or null when not chosen. */
   minutesFolder(): string | null
   setMinutesFolder(folder: string | null, by: string, at: string): void
+  /** Which meetings the intake reads (minutes.md "Which meetings"): the stored value, null = the default. */
+  meetingIntake(): string | null
+  setMeetingIntake(value: string, by: string, at: string): void
 
   /** Every stored version of every type, oldest first per name. */
   typeVersions(): RecordTypeRow[]

@@ -55,7 +55,7 @@ export interface ServiceTransitionInput {
   fields?: Record<string, LedgerValue>
   /**
    * Links to replace: link name → record ids ([] removes). Kept in the ledger
-   * as `links.<name>` before / after (the minutes' deal, chosen by a person).
+   * as `links.<name>` before / after (the meeting's まとまり, chosen by a person).
    */
   links?: Record<string, string[]>
   actor: ServiceActor

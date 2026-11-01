@@ -31,8 +31,8 @@ import { MailDraftCard } from './MailDraftCard'
 import { PluginOperationCard } from './PluginOperationCard'
 import { APPROVAL_PART_TYPE, readApprovalCardRef } from '../../../../shared/approvals'
 import { ApprovalCard } from './ApprovalCard'
-import { MINUTES_DEAL_CHOICE_PART_TYPE, readMinutesDealChoiceCard } from '../../../../shared/minutes-app'
-import { MinutesDealChoiceCard } from './MinutesDealChoiceCard'
+import { MINUTES_BUNDLE_CHOICE_PART_TYPE, readMinutesBundleChoiceCard } from '../../../../shared/minutes-app'
+import { MinutesBundleChoiceCard } from './MinutesBundleChoiceCard'
 import { SteerInstructionView } from './SteerInstruction'
 import { BrokerKeyNeededCard } from './BrokerKeyNeededCard'
 import { brokerKeyNeedsOf } from '../brokerKeyNeeds'
@@ -338,9 +338,9 @@ export function AssistantMessageParts({ parts, isStreaming, markdown }: { parts:
           const ref = readApprovalCardRef((part as { data?: unknown }).data)
           return ref ? <ApprovalCard key={item.key} card={ref} /> : null
         }
-        if (part.type === MINUTES_DEAL_CHOICE_PART_TYPE) {
-          const card = readMinutesDealChoiceCard((part as { data?: unknown }).data)
-          return card ? <MinutesDealChoiceCard key={item.key} card={card} /> : null
+        if (part.type === MINUTES_BUNDLE_CHOICE_PART_TYPE) {
+          const card = readMinutesBundleChoiceCard((part as { data?: unknown }).data)
+          return card ? <MinutesBundleChoiceCard key={item.key} card={card} /> : null
         }
         if (part.type === MAIL_DRAFT_PART_TYPE) {
           const card = readMailDraftCard((part as { data?: unknown }).data)

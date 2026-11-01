@@ -221,14 +221,44 @@ describe('tags and links to an interface (stage 2 S1)', () => {
     expect(withLink('deal: { label: 案件, target: deal }').ok).toBe(true)
   })
 
-  it('the bundle interface needs an owner and a purpose on the server', () => {
-    const bundle = (fields: string) => parseTypeFile('effort', `---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n${fields}states: [active, done]\n---\n`)
+  it('the bundle interface needs an owner, a purpose on the server and final states', () => {
+    const bundle = (fields: string, final = 'final: [done]\n') => parseTypeFile('effort', `---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n${fields}states: [active, done]\n${final}---\n`)
     const owner = '  owner: { label: 持ち主, kind: person, source: server }\n'
     const purpose = '  purpose: { label: 目的, kind: text, source: server }\n'
     expect(bundle(owner + purpose).ok).toBe(true)
     expect(bundle(owner).ok).toBe(false)
     expect(bundle(purpose).ok).toBe(false)
     expect(bundle(owner + '  purpose: { label: 目的, kind: long_text, source: server }\n').ok).toBe(false)
+    // 「終わったかどうか」 must be answerable: a bundle without final states is refused.
+    const noFinal = bundle(owner + purpose, '')
+    expect(noFinal.ok).toBe(false)
+    if (!noFinal.ok) expect(noFinal.errors.join()).toContain('final')
+  })
+
+  it('the counterpart interface needs its kind (company / person) and the matching keys on the server', () => {
+    const counterpart = (fields: string) => parseTypeFile('guest', `---\nlabel: ゲスト\nversion: 1\nstorage: server\nimplements: [counterpart]\nfields:\n${fields}states: [active]\n---\n`)
+    const kind = '  counterpart_kind: { label: 会社か人か, kind: choice, options: [company, person, group], source: server }\n'
+    const domain = '  domain: { label: ドメイン, kind: text, source: server }\n'
+    const email = '  email: { label: メール, kind: text, source: server }\n'
+    expect(counterpart(kind + domain + email).ok).toBe(true)
+    expect(counterpart(domain + email).ok).toBe(false)
+    expect(counterpart(kind + email).ok).toBe(false)
+    expect(counterpart(kind + domain).ok).toBe(false)
+    // The choice must offer both company and person (more are allowed).
+    const onlyCompany = counterpart('  counterpart_kind: { label: 会社か人か, kind: choice, options: [company], source: server }\n' + domain + email)
+    expect(onlyCompany.ok).toBe(false)
+    if (!onlyCompany.ok) expect(onlyCompany.errors.join()).toContain('person')
+    // A file-sourced key is not a server field.
+    expect(counterpart(kind + '  domain: { label: ドメイン, kind: text, source: file }\n' + email).ok).toBe(false)
+  })
+
+  it('only the core defines interfaces: a type claiming or linking to an unknown one is refused', () => {
+    const claims = parseTypeFile('x', '---\nlabel: X\nversion: 1\nstorage: server\nimplements: [project]\nstates: [a]\n---\n')
+    expect(claims.ok).toBe(false)
+    const links = parseTypeFile('x', '---\nlabel: X\nversion: 1\nstorage: server\nlinks:\n  p: { label: P, interface: project }\nstates: [a]\n---\n')
+    expect(links.ok).toBe(false)
+    // There is no key for a type to declare an interface of its own.
+    expect(parseTypeFile('x', '---\nlabel: X\nversion: 1\nstorage: server\ninterfaces: { project: {} }\nstates: [a]\n---\n').ok).toBe(false)
   })
 
   it('adding tags or an interface link is not breaking; switching a link to or from an interface is', () => {

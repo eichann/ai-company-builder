@@ -90,13 +90,13 @@ test('tools come from the type definitions; a read token gets no state-changing 
 test('service-owned types: records_create never offers them, approvals / messages get no action tool, decisions go through decisions_record', async () => {
   const act = await createRecordTools((await fakeServer('act').api.openTurn('co', { conversationId: 'c', agent: 'claude-code', scope: 'act' }))!)
   const create = act!.specs.find(s => s.name === 'records_create')!
-  for (const type of ['minutes', 'approval', 'outbound_message', 'decision']) {
+  for (const type of ['meeting', 'approval', 'outbound_message', 'decision']) {
     assert.equal(create.schema.safeParse({ type, title: 'x' }).success, false, type)
   }
   assert.equal(create.schema.safeParse({ type: 'task', title: 'x' }).success, true)
   const names = act!.specs.map(s => s.name)
   assert.ok(!names.some(n => n.startsWith('approval__') || n.startsWith('outbound_message__')), names.join())
-  assert.ok(names.includes('minutes__start_reading') && names.includes('records_ai_turn') && names.includes('decisions_record'))
+  assert.ok(names.includes('meeting__start_reading') && names.includes('records_ai_turn') && names.includes('decisions_record'))
   const decision = act!.specs.find(s => s.name === 'decisions_record')!
   assert.deepEqual(decision.request({ folder: '営業部', title: 't', why: 'w', source: 's' }), { method: 'POST', path: '/decisions', body: { folder: '営業部', title: 't', why: 'w', source: 's' } })
   const read = await createRecordTools((await fakeServer('read').api.openTurn('co', { conversationId: 'c', agent: 'codex', scope: 'read' }))!)
@@ -195,7 +195,7 @@ test('minutes_read hands the minutes over as outside text: the header above, the
   const access = await api.openTurn('co', { conversationId: 'c1', agent: 'codex', scope: 'read' })
   const tools = await createRecordTools(access!)
   assert.ok(tools!.specs.some(s => s.name === 'minutes_read'))
-  assert.ok(!tools!.specs.some(s => s.name === 'minutes_link_deal'))
+  assert.ok(!tools!.specs.some(s => s.name === 'minutes_link_bundle'))
   const out = await tools!.execute('minutes_read', { id: 'minutes-abcdef123456' })
   assert.ok(out.startsWith(`${MINUTES_TEXT_HEADER}\n会議メモ`), out.slice(0, 80))
   const footerAt = out.indexOf(MINUTES_TEXT_FOOTER)

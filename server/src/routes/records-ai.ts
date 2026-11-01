@@ -16,7 +16,7 @@
  *   GET  /minutes/:recordId/text          the minutes as outside text (tool minutes_read; G7, minutes.md):
  *                                         the assignee or an attendee, read now from Google with
  *                                         the member's own permission; never stored or logged
- *   POST /minutes/:recordId/deal          (act) { dealId, expectedVersion? } — the assignee / an admin's AI
+ *   POST /minutes/:recordId/bundle        (act) { bundleId, expectedVersion? } — the assignee / an admin's AI
  *
  *   GET  /plugins                         the running plugins' operations this AI may call (tools, P7)
  *   POST /plugins/:pluginId/records/:recordId/operations/:operation   a plugin's typed operation
@@ -26,7 +26,7 @@
  *   GET  /plugins/:pluginId/operations/:operationId
  *   GET  /approvals   GET /approvals/:approvalId   approval requests, read only (approvals.md)
  *
- *   POST /outbound-recipients             verified mail recipients of a minutes / deal (read; tool mail_recipients)
+ *   POST /outbound-recipients             verified mail recipients of a meeting / まとまり (read; tool mail_recipients)
  *   POST /outbound                        a mail draft (act; mail_draft_create)
  *   GET  /outbound/:messageId             the member's own draft (read; mail_draft_show)
  *   PUT  /outbound/:messageId             a new version of it (act; mail_draft_update)
@@ -128,11 +128,11 @@ recordsAiRoute.get('/minutes/:recordId/text', async (c) => {
   return answer(c, await minutes.text(h.member, c.req.param('recordId')))
 })
 
-recordsAiRoute.post('/minutes/:recordId/deal', async (c) => {
+recordsAiRoute.post('/minutes/:recordId/bundle', async (c) => {
   const h = holderOf(c, 'act')
   if (h instanceof Response) return h
   const { kind, source, conversationId, runId } = aiActor(h)
-  return answer(c, minutes.linkDeal(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), await jsonBody(c)))
+  return answer(c, minutes.linkBundle(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), await jsonBody(c)))
 })
 
 recordsAiRoute.post('/query', async (c) => {

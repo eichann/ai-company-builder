@@ -50,6 +50,56 @@ function likeAnywhere(text: string): string {
   return `%${text.replace(/[\\%_]/g, m => `\\${m}`)}%`
 }
 
+/**
+ * The core types stop naming a business plugin's types (owner decision 2026-11-01
+ * night, records.md "Core interfaces"): links to `deal` / `customer` became links to
+ * the `bundle` / `counterpart` interfaces, the `minutes` type became `meeting`
+ * (会議), and the links named `minutes` / `about` were renamed. Production had no
+ * record data then; staging data is carried over at startup (db/index.ts, every
+ * company), idempotently — every statement matches only the old shape, so a second
+ * run changes nothing — in one transaction per company:
+ *
+ * - records of type `minutes` become `meeting` (version 1 of the new type); their
+ *   ids (`minutes-…`) stay, so the ledger, contents, notices and the app's
+ *   consultations that point at them stay valid;
+ * - link rows of core records are renamed: task / interaction / meeting
+ *   `customer` → `counterpart`, interaction / meeting / decision `deal` → `bundle`,
+ *   approval / outbound_message `about` → `bundle`, approval / outbound_message /
+ *   decision `minutes` → `meeting`;
+ * - an interaction's text field `counterpart` becomes `counterpart_text` (the
+ *   name `counterpart` is now its link);
+ * - the stored core definitions of `minutes` are dropped (the type no longer
+ *   exists; a company's own file definition, if any, is left alone).
+ *
+ * The ledger is history and is not rewritten: an old `links.deal` entry no longer
+ * matches a link of the type, so undoing it answers CHANGED_SINCE.
+ */
+export function migrateCompanyCoreInterfaceLinks(conn: Database.Database, companyId: string): { records: number; links: number } {
+  return conn.transaction(() => {
+    const records = conn.prepare(`UPDATE records SET type = 'meeting', type_version = 1 WHERE company_id = ? AND type = 'minutes'`).run(companyId).changes
+    const rename = conn.prepare(`
+      UPDATE record_links SET name = ?
+      WHERE company_id = ? AND name = ? AND source_id IN (
+        SELECT r.id FROM records r WHERE r.company_id = ? AND r.type IN (SELECT value FROM json_each(?)))
+    `)
+    const renames: Array<{ old: string; renamed: string; types: string[] }> = [
+      { old: 'customer', renamed: 'counterpart', types: ['task', 'interaction', 'meeting'] },
+      { old: 'deal', renamed: 'bundle', types: ['interaction', 'meeting', 'decision'] },
+      { old: 'about', renamed: 'bundle', types: ['approval', 'outbound_message'] },
+      { old: 'minutes', renamed: 'meeting', types: ['approval', 'outbound_message', 'decision'] },
+    ]
+    let links = 0
+    for (const r of renames) links += rename.run(r.renamed, companyId, r.old, companyId, JSON.stringify(r.types)).changes
+    conn.prepare(`
+      UPDATE record_state SET fields = json_set(json_remove(fields, '$.counterpart'), '$.counterpart_text', json_extract(fields, '$.counterpart'))
+      WHERE company_id = ? AND json_valid(fields) AND json_type(fields, '$.counterpart') IS NOT NULL AND record_id IN (
+        SELECT r.id FROM records r WHERE r.company_id = ? AND r.type = 'interaction')
+    `).run(companyId, companyId)
+    conn.prepare(`DELETE FROM record_types WHERE company_id = ? AND name = 'minutes' AND source = 'core'`).run(companyId)
+    return { records, links }
+  })()
+}
+
 export function sqliteRecordRepository(conn: Database.Database, companyId: string): RecordRepository {
   // Titles, summaries, content fields, notes and reasons live in the content store
   // (./record-contents.ts): stored as references on the way in, resolved on the way out.
@@ -80,6 +130,17 @@ export function sqliteRecordRepository(conn: Database.Database, companyId: strin
         INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, minutes_folder) VALUES (?, 0, ?, ?, ?)
         ON CONFLICT(company_id) DO UPDATE SET minutes_folder = excluded.minutes_folder, updated_at = excluded.updated_at, updated_by = excluded.updated_by
       `).run(companyId, at, by, folder)
+    },
+    meetingIntake() {
+      const r = conn.prepare('SELECT meeting_intake FROM record_settings WHERE company_id = ?').get(companyId) as { meeting_intake: string | null } | undefined
+      return r?.meeting_intake ?? null
+    },
+    setMeetingIntake(value, by, at) {
+      // A new row keeps the feature off (enabled 0); an existing row keeps its switch.
+      conn.prepare(`
+        INSERT INTO record_settings (company_id, enabled, updated_at, updated_by, meeting_intake) VALUES (?, 0, ?, ?, ?)
+        ON CONFLICT(company_id) DO UPDATE SET meeting_intake = excluded.meeting_intake, updated_at = excluded.updated_at, updated_by = excluded.updated_by
+      `).run(companyId, at, by, value)
     },
 
     typeVersions() {

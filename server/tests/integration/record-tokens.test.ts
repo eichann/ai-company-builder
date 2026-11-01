@@ -115,7 +115,7 @@ describe('what a record token can reach', () => {
 
   it('the AI cannot make an approval or any service-owned record through the generic create; a read token records no decision', async () => {
     const { token } = await tokenFor('u-bob', 'act')
-    for (const type of ['approval', 'outbound_message', 'minutes']) {
+    for (const type of ['approval', 'outbound_message', 'meeting']) {
       const r = await ai(token, 'POST', '/item', { type, title: '自分で承認のお願いを作る', fields: { assignee: 'u-bob' } })
       expect(r).toMatchObject({ status: 400, body: { code: 'TYPE_CREATED_BY_SERVICE' } })
     }

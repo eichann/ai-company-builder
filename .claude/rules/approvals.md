@@ -55,8 +55,10 @@ member) asked, and the core runs it. Approving is a person's act through their s
   by the service writer in **one transaction** (core types ensured first). Fields: requested_by =
   the member, assignee = next_actor = the approver, `approver_rule`, `operation`
   (`<plugin>.<operation>`), `payload_hash`, `payload_version`, `reason` = the AI's (or person's)
-  note as the proposed reason; links `about` = the record, `minutes` = the basis (must be a minutes
-  record the requester may read, else 400 `BAD_LINK`); folder = the record's. The ledger actor is
+  note as the proposed reason; links `bundle` = the record **when its type implements `bundle`**
+  (a 案件, a 企画; the core never names a business type — the record itself is always in the fixed
+  payload, `payload.record`), `meeting` = the basis (`basis.meetingId`: must be a meeting record the
+  requester may read, else 400 `BAD_LINK`); folder = the record's. The ledger actor is
   the person or the AI (the credential decides). Title: what changes (「金額の変更」), never a name.
 - **The approver is resolved by the server**: `self` → the requester; `dept_manager` → the
   managers of the department holding the folder, the first by id who can read it (any of them may
@@ -87,9 +89,10 @@ GET  /api/records-ai/approvals, /api/records-ai/approvals/:approvalId  record to
   records only; design §6-3).
 - **Precedents** (design N8, §3-8): earlier approved / sent-back requests of the same company and
   operation sharing a field, whose folder is in the same department; each must be readable by the
-  viewer, and so must its `about` record — **the count too** (an unreadable one is neither shown
+  viewer, and so must the record it was about (its fixed payload's `record`, whatever its type) —
+  **the count too** (an unreadable one is neither shown
   nor counted). Newest 5: date, before → after, outcome, reason, and the record's value now.
-- **Materials**: the record at the version the request was made on, the minutes — re-checked for
+- **Materials**: the record at the version the request was made on, the meeting (kind `meeting`) — re-checked for
   the viewer every time; an unreadable one is left out (as if it did not exist). Files at a commit
   are not attached yet.
 - No list screen (milestone 5): the chat's 「承認待ちを見せて」 uses the AI tools below.
@@ -115,7 +118,8 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
 - Outcome of `executeApproved`:
   - applied → `approved` (`result_operation_id`, the approver's reason as the decision reason,
     the requester told) and a **「決めたこと」** through the decisions service: important, decided
-    by the approver, links `approval` + `deal`, the department of the request's folder, title
+    by the approver, links `approval` + `bundle` (the record, when it is a まとまり) + `meeting`
+    (when the request had one), the department of the request's folder, title
     「<what changed>を承認」, why = the approver's reason, key `<approval id>:decision`. When the
     decisions service refuses (the place), the approval stands and only the refusal's code is
     logged.
@@ -153,7 +157,7 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   exists): `approvals_list { scope?, state? }` and `approvals_show { id }` (puts the card in the
   reply). An operation tool whose answer is `approval-requested` puts the card in the reply
   instead of an operation card, and tells the AI nothing was written and it cannot approve
-  (`approvalSummaryForAi`). The update and create tools take an optional `basis { minutesId?,
+  (`approvalSummaryForAi`). The update and create tools take an optional `basis { meetingId?,
   quote? }`.
 
 ## Not yet

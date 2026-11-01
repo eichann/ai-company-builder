@@ -301,7 +301,7 @@ describe('a connector is a shared part; a business plugin uses it (owner decisio
 
   it("a business plugin cannot own a core type's name (one owner per type name)", () => {
     expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, task]')).join()).toContain('型「task」は本体の型です')
-    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, minutes]')).join()).toContain('本体の型')
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, meeting]')).join()).toContain('本体の型')
   })
 })
 

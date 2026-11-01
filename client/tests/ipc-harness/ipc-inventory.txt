@@ -113,7 +113,7 @@ contract.invoke handoff:complete
 contract.invoke handoff:get
 contract.invoke handoff:update
 contract.invoke minutes:check
-contract.invoke minutes:linkDeal
+contract.invoke minutes:linkBundle
 contract.invoke minutes:notices
 contract.invoke minutes:skip
 contract.invoke minutes:watch
@@ -322,7 +322,7 @@ contract.type ElectronAPI.gitRevertFile = gitRevertFile: Invoke<'git:revertFile'
 contract.type ElectronAPI.gitSetupCompanyRemote = gitSetupCompanyRemote: Invoke<'git:setupCompanyRemote'>
 contract.type ElectronAPI.gitSync = gitSync: Invoke<'git:sync'>
 contract.type ElectronAPI.hasApiKey = hasApiKey: Invoke<'config:hasApiKey'>
-contract.type ElectronAPI.linkMinutesDeal = linkMinutesDeal: Invoke<'minutes:linkDeal'>
+contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
@@ -608,7 +608,7 @@ contract.type IpcInvokeChannels.'handoff:complete' = 'handoff:complete': { args:
 contract.type IpcInvokeChannels.'handoff:get' = 'handoff:get': { args: [company: string, id: string]; result: HandoffView }
 contract.type IpcInvokeChannels.'handoff:update' = 'handoff:update': { args: [company: string, id: string]; result: void }
 contract.type IpcInvokeChannels.'minutes:check' = 'minutes:check': { args: [companyId: string]; result: MinutesActionResult }
-contract.type IpcInvokeChannels.'minutes:linkDeal' = 'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+contract.type IpcInvokeChannels.'minutes:linkBundle' = 'minutes:linkBundle': { args: [companyId: string, minutesId: string, bundleId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
@@ -822,7 +822,7 @@ main.handle handoff:complete @ features/chat-history/ipc.ts (company: string, id
 main.handle handoff:get @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle handoff:update @ features/chat-history/ipc.ts (company: string, id: string)
 main.handle minutes:check @ features/minutes/ipc.ts (companyId)
-main.handle minutes:linkDeal @ features/minutes/ipc.ts (companyId, minutesId, dealId)
+main.handle minutes:linkBundle @ features/minutes/ipc.ts (companyId, minutesId, bundleId)
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
@@ -1028,8 +1028,8 @@ preload gitSync -> invoke git:sync($0, $1, $2)
 preload gitSync : (repoPath: string, companyId: string, commitMessage: string) => Promise<GitResult>
 preload hasApiKey -> invoke config:hasApiKey()
 preload hasApiKey : () => Promise<boolean>
-preload linkMinutesDeal -> invoke minutes:linkDeal($0, $1, $2)
-preload linkMinutesDeal : (companyId: string, minutesId: string, dealId: string) => Promise<MinutesActionResult>
+preload linkMinutesBundle -> invoke minutes:linkBundle($0, $1, $2)
+preload linkMinutesBundle : (companyId: string, minutesId: string, bundleId: string) => Promise<MinutesActionResult>
 preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)

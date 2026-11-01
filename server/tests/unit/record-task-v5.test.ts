@@ -50,7 +50,7 @@ const parse = (name: string, text: string): TypeDefinition => {
   if (!r.ok) throw new Error(r.errors.join(' / '))
   return r.definition
 }
-const EFFORT = '---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\n  purpose: { label: 目的, kind: text, source: server }\nstates: [active]\n---\n'
+const EFFORT = '---\nlabel: 取り組み\nversion: 1\nstorage: server\nimplements: [bundle]\nfields:\n  owner: { label: 持ち主, kind: person, source: server }\n  purpose: { label: 目的, kind: text, source: server }\nstates: [active, done]\nfinal: [done]\n---\n'
 
 function ok<T>(r: { ok: true; value: T } | { ok: false; body: unknown }): T {
   if (!r.ok) throw new Error(JSON.stringify(r.body))
@@ -228,11 +228,13 @@ describe('the query: ranges, sorting, finished since, by link', () => {
   })
 })
 
-describe('version 5 only adds to version 4', () => {
-  it('a task made under version 4 keeps working under version 5', async () => {
+describe('a task made under version 4 keeps working', () => {
+  it('a task made under version 4 keeps working under the core version in force', async () => {
     const v4 = parse('task', TASK_V4_TEXT)
     const v5 = parse('task', CORE_TYPE_FILES.task)
-    expect(compareTypeDefinitions(v4, v5)).toMatchObject({ breaking: [], versionProblem: null, changed: true })
+    // Version 5 only added; version 6 (core interfaces, owner decision 2026-11-01 night) also
+    // dropped the `customer` link — the one reshape, made before any production data existed.
+    expect(compareTypeDefinitions(v4, v5)).toMatchObject({ breaking: ['つながり「customer」を消す（名前を変える）'], versionProblem: null, changed: true })
     // Company c still on version 4 when the task was made.
     company('c')
     const records = source.forCompany('c').records
