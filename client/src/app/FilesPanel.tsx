@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react'
 import { FileTreePanel } from '../features/files/components/FileTreePanel'
+import type { FileMenuExtraItem } from '../features/files/contextMenuItems'
 import { TabbedEditorPanel } from '../features/editor/components/TabbedEditorPanel'
 import { SplitView } from '../features/workspace/components/SplitView'
 import { PANE_LIMITS, type SplitNode } from '../features/workspace/layoutTree'
@@ -29,6 +30,8 @@ interface Props {
   aside?: ReactNode
   /** 「やることにつなぐ…」 in the tree's menu (absent where the company shows no task list). */
   onLinkToTask?: (path: string) => void
+  /** Business plugins' items in the tree's menu (plugin-frame.md "The four slots"). */
+  extraMenuItems?: (entry: { path: string; isDirectory: boolean; notDownloaded?: boolean }) => FileMenuExtraItem[]
 }
 
 /** The ファイル tab: the file tree (files) and the open files (editor), split by the layout tree. */
@@ -51,6 +54,7 @@ export function FilesPanel(props: Props) {
           onDoubleClickFile={props.onPinFile}
           onPrivateFolderCreated={props.onPrivateFolderCreated}
           onLinkToTask={props.onLinkToTask}
+          extraMenuItems={props.extraMenuItems}
         />
       ) : (
         <TabbedEditorPanel

@@ -91,7 +91,7 @@ describe('plugin contract 2: the shapes of stages 4a / 4b', () => {
     expect(m.steps.read_minutes).toMatchObject({ for: { type: 'meeting', state: 'received' }, start: 'ai_turn', procedure: { overridable: false } })
     expect(m.ui).toEqual({
       bridge: 1, tab: { label: '案件', icon: 'Briefcase', entry: 'ui/index.html' }, peek: { implements: 'request', stateGroup: 'mine' },
-      recordSections: [{ type: 'deal', label: '提案の材料', entry: 'ui/deal.html' }],
+      recordSections: [{ type: 'deal', label: '提案の材料', entry: 'ui/deal.html' }], fileActions: [],
     })
     expect(m.upgrade).toEqual({ from: '0.1.0', at: [{ type: 'deal', state: 'open' }] })
     expect(Object.keys(m.settings)).toEqual(['approval_amount', 'reply_within', 'tone', 'cc_manager', 'amount_approver', 'mail_service'])
@@ -186,6 +186,25 @@ describe('plugin contract 2: the shapes of stages 4a / 4b', () => {
     expect(settingValueProblem(m.settings.amount_approver, 'admin', m.roles)).toBeNull()
     expect(settingValueProblem(m.settings.amount_approver, 'viewer', m.roles)).not.toBeNull()
     expect(settingValueProblem(m.settings.tone, 'rude', m.roles)).not.toBeNull()
+  })
+
+  it('reads file_actions (the file menu slot, 4b A6): the core\'s file kinds only, at most three, an entry of the package', () => {
+    const SECTION = '    - { type: deal, label: 提案の材料, entry: ui/deal.html }\n'
+    const withActions = (...lines: string[]) => flowWith([SECTION, `${SECTION}  file_actions:\n${lines.map(l => `    - ${l}\n`).join('')}`])
+    const ok = withActions('{ label: 案件の資料にする, entry: ui/index.html, kinds: [pdf, document] }', '{ label: フォルダを見る, entry: ui/deal.html, kinds: [folder] }')
+    expect(valid(ok).manifest.ui?.fileActions).toEqual([
+      { label: '案件の資料にする', entry: 'ui/index.html', kinds: ['pdf', 'document'] },
+      { label: 'フォルダを見る', entry: 'ui/deal.html', kinds: ['folder'] },
+    ])
+    const bad = (...lines: string[]) => errors(withActions(...lines))
+    expect(bad('{ label: x, entry: ui/index.html, kinds: [exe] }')).toMatch(/kinds の「exe」は知らない種類/)
+    expect(bad('{ label: x, entry: ui/index.html, kinds: [] }')).toMatch(/kinds（出すファイルの種類/)
+    expect(bad('{ label: x, entry: ui/index.html, kinds: [pdf], extensions: [pdf] }')).toMatch(/拡張子ではなく/)
+    expect(bad('{ label: x, entry: ui/index.html, kinds: [pdf], paths: [営業] }')).toMatch(/出す場所は書けません/)
+    expect(bad('{ label: x, entry: "https://evil.example/a.html", kinds: [pdf] }')).toMatch(/外の場所は書けません/)
+    expect(bad('{ label: x, entry: ui/missing.html, kinds: [pdf] }')).toMatch(/ui\/missing.html が包みにありません/)
+    expect(bad('{ entry: ui/index.html, kinds: [pdf] }')).toMatch(/label（メニューに出す名前/)
+    expect(bad(...Array.from({ length: 4 }, (_, i) => `{ label: a${i}, entry: ui/index.html, kinds: [file] }`))).toMatch(/file_actions は 3 つまで/)
   })
 
   it('checks steps, frames, roles and upgrade points against the types and the files', () => {

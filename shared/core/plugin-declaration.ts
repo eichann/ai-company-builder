@@ -283,8 +283,8 @@ export interface PluginStep {
 }
 
 /**
- * The plugin's screens (contract 2, design 節目5 §2; parsed and checked only —
- * nothing shows them before stage 4b). Frames talk to the core through one
+ * The plugin's screens (contract 2, design 節目5 §2; shown by the app's four
+ * slots, stage 4b A6, `plugin-frame.md`). Frames talk to the core through one
  * bridge of version `bridge`; the core draws the peek, approvals and sending.
  */
 export interface PluginUi {
@@ -295,6 +295,12 @@ export interface PluginUi {
   peek: { implements: string; stateGroup: string } | null
   /** A section inside a record card, its content the frame at `entry`. */
   recordSections: Array<{ type: string; label: string; entry: string }>
+  /**
+   * Items of the file list's right-click menu (drawn by the core): for files
+   * or folders of `kinds` (`plugin-file-kinds.ts`); choosing one opens the
+   * frame at `entry` with the chosen company path.
+   */
+  fileActions: Array<{ label: string; entry: string; kinds: string[] }>
 }
 
 /**

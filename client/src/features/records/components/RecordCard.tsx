@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import { CircleNotch, Clock, LinkSimple } from '@phosphor-icons/react'
 import type { RecordCardLink, RecordCardView } from '../../../../shared/record-views'
 import { useRecordCard } from '../hooks/useRecordCard'
@@ -9,6 +10,8 @@ interface Props {
   rootPath: string
   /** The caller keys this component by it. */
   recordId: string
+  /** Business plugins' sections for the record's type (plugin-frame.md "The four slots"), drawn by the screen. */
+  renderSections?: (record: { id: string; type: string }) => ReactNode
 }
 
 function when(at: string): string {
@@ -20,7 +23,7 @@ function when(at: string): string {
  * The one card every record opens in (design §7-3), read only: what it is, its fields, 経緯 and
  * 「つながっているもの」 to follow. Actions on a record come with its own screen (the task card).
  */
-export function RecordCard({ companyId, rootPath, recordId }: Props) {
+export function RecordCard({ companyId, rootPath, recordId, renderSections }: Props) {
   const result = useRecordCard(companyId, recordId)
   if (result === null) {
     return <div className="h-full flex items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -28,10 +31,10 @@ export function RecordCard({ companyId, rootPath, recordId }: Props) {
   if (!result.success) {
     return <div className="h-full flex items-center justify-center px-6 text-center text-sm text-gray-500 dark:text-zinc-400" role="alert">{result.error}</div>
   }
-  return <CardBody card={result.card} rootPath={rootPath} />
+  return <CardBody card={result.card} rootPath={rootPath} sections={renderSections?.(result.card.record)} />
 }
 
-function CardBody({ card, rootPath }: { card: RecordCardView; rootPath: string }) {
+function CardBody({ card, rootPath, sections }: { card: RecordCardView; rootPath: string; sections?: ReactNode }) {
   const { record } = card
   return (
     <div className="flex flex-wrap gap-x-6 gap-y-5 p-5 text-gray-900 dark:text-zinc-100" data-testid="record-card">
@@ -56,6 +59,7 @@ function CardBody({ card, rootPath }: { card: RecordCardView; rootPath: string }
             ))}
           </dl>
         )}
+        {sections}
         {card.history.length > 0 && (
           <section>
             <h2 className="flex items-center gap-1.5 text-[12px] font-semibold mb-2"><Clock size={13} className="text-accent" />経緯</h2>

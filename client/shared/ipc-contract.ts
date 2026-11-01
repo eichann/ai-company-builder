@@ -52,6 +52,7 @@ import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slac
 import type { RecordThreadResult } from './threads'
 import type { PluginBridgeAnswer } from './plugin-bridge-ops'
 import type { PluginPackageRef } from './plugin-bridge'
+import type { PluginScreensResult } from './plugin-screens'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -652,6 +653,8 @@ export interface IpcInvokeChannels {
   'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
   // One call a plugin's screen made on its bridge (plugin-frame.md): the host names the plugin, main adds the session.
   'plugins:bridge': { args: [companyId: string, plugin: PluginPackageRef, op: string, args: unknown]; result: PluginBridgeAnswer }
+  /** The screens of the plugins the company lists now and this app keeps, verified (A6, plugin-frame.md). */
+  'plugins:screens': { args: [companyId: string]; result: PluginScreensResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -702,6 +705,8 @@ export interface IpcEventChannels {
   'app:closeRequested': []
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  /** The plugin packages a company lists and this app keeps changed: ask `plugins:screens` again. */
+  'plugins:changed': [change: { companyId: string }]
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -974,6 +979,8 @@ export interface ElectronAPI {
   markSlackSeen: Invoke<'slack:markSeen'>
   getRecordThread: Invoke<'threads:get'>
   callPluginBridge: Invoke<'plugins:bridge'>
+  getPluginScreens: Invoke<'plugins:screens'>
+  onPluginsChanged: Subscribe<'plugins:changed'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

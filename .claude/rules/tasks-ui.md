@@ -40,6 +40,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   ほかの人の番・返事待ち with what it waits for; `declined` says who returned it) → AI の番 → what
   others hold (「田中さんの番」, 「田中さんに頼んだ・引き受け待ち」, 「AI が用意しています」) → today's
   done. `own` = the member asked it of themselves (requester and assignee).
+  Each item also carries the interfaces its type implements (`implements`, from `/records/types`):
+  a plugin's peek lists by them (`plugin-frame.md` "The four slots").
 - `tasks:create(companyId, { title, due?, tags? })`: the list's one line makes a task **only the
   member sees** (`personal: true`, assignee = the member; `records.md` "Owner-only records").
 - `tasks:act(companyId, recordId, { action, expectedVersion, note?, args?, links?, ok? })`: one

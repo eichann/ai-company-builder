@@ -1,0 +1,20 @@
+# A contract-2 business plugin with all four screen slots (stage 4b, plan A6, plugin-frame.md
+# "The four slots"), for the app's tests: the left tab, the peek over it, a record section and
+# a file action. Its screens only read their context and call the bridge.
+id: slots-sample
+label: 見本の番組企画
+version: 0.1.0
+kind: official
+contract: 2
+description: 4つの差し込み口の見本
+types: [program_plan]
+
+ui:
+  bridge: 1
+  tab: { label: 番組, icon: FilmSlate, entry: ui/index.html }
+  peek: { implements: request, state_group: mine }
+  record_sections:
+    - { type: program_plan, label: 構成, entry: ui/plan.html }
+    - { type: task, label: 番組のメモ, entry: ui/plan.html }
+  file_actions:
+    - { label: 企画の資料にする, entry: ui/attach.html, kinds: [pdf, markdown] }

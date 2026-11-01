@@ -23,6 +23,8 @@ export interface TaskListItem {
   type: string
   /** The type's own label (タスク, 承認のお願い, 会議…). */
   typeLabel: string
+  /** The interfaces its type implements (`request`…), when any: a plugin's peek lists by them (A6). */
+  implements?: string[]
   title: string
   state: string | null
   stateLabel: string | null
@@ -112,6 +114,8 @@ export interface TaskSources {
   /** Meetings of the member read lately whose まとまり nobody chose (none when the company has none). */
   meetingsWithoutBundle?: RecordSummary[]
   typeLabels: Record<string, string>
+  /** Type name → the interfaces it implements, for the types that do. */
+  typeImplements?: Record<string, string[]>
   /** Member id → display name. */
   people: Record<string, string>
   /** Record id → its まとまり, when it has one. */
@@ -151,6 +155,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
     seen.add(r.id)
     out.push({
       id: r.id, type: r.type, typeLabel: src.typeLabels[r.type] ?? r.type,
+      ...(src.typeImplements?.[r.type] ? { implements: src.typeImplements[r.type] } : {}),
       title: r.title || '（名前なし）', state: r.state, stateLabel: stateLabel(r.state), version: r.version,
       due: typeof r.fields.due === 'string' && r.fields.due ? r.fields.due : null,
       tags: parseTagsValue(r.fields.tags),

@@ -1,6 +1,6 @@
 import { useCallback, useRef } from 'react'
 import type { BridgeUiOpenArgs, PluginBridgeAnswer } from '../../../../shared/plugin-bridge-ops'
-import { pluginFrameUrl, type PluginPackageRef } from '../../../../shared/plugin-bridge'
+import { pluginFrameUrl, type BridgeFrameContext, type PluginPackageRef } from '../../../../shared/plugin-bridge'
 import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { callPluginBridge, type PluginBridgePort } from '../api'
 import { createBridgeHost, type BridgeHost } from '../bridge-host'
@@ -14,8 +14,12 @@ interface Props {
   title: string
   /** `ui.open`: the core app opens it (only what the person may open there). */
   onOpen: (target: BridgeUiOpenArgs) => PluginBridgeAnswer | Promise<PluginBridgeAnswer>
+  /** Where it is shown (A6's slots), handed in the hello; fixed for the frame's life. */
+  context?: BridgeFrameContext
   className?: string
   port?: PluginBridgePort
+  /** Preview pages only: where the `acb-plugin://` address is served (Chromium there cannot load the scheme). */
+  frameUrl?: (src: string) => string
 }
 
 /**
@@ -27,7 +31,8 @@ interface Props {
 export function PluginFrame(props: Props) {
   const src = pluginFrameUrl(props.plugin, props.entry)
   if (!src) return <div className={props.className} role="status">この画面は表示できません。</div>
-  return <PluginFrameView key={src} {...props} src={src} />
+  // A new place (another record, another file) is a new frame: its hello is handed once.
+  return <PluginFrameView key={`${src}#${JSON.stringify(props.context ?? null)}`} {...props} src={props.frameUrl ? props.frameUrl(src) : src} />
 }
 
 /**
@@ -36,8 +41,8 @@ export function PluginFrame(props: Props) {
  * opaque origin: no storage, cookies or the app's window), no popups, forms,
  * top navigation or downloads; `allow=""` grants no device or feature.
  */
-export function PluginFrameView({ companyId, plugin, title, onOpen, className, port, src }: Props & { src: string }) {
-  const latest = useLatestRef({ companyId, plugin, onOpen, port })
+export function PluginFrameView({ companyId, plugin, title, onOpen, context, className, port, src }: Props & { src: string }) {
+  const latest = useLatestRef({ companyId, plugin, onOpen, port, context })
   const host = useRef<BridgeHost | null>(null)
   const frame = useRef<HTMLIFrameElement | null>(null)
 
@@ -51,6 +56,7 @@ export function PluginFrameView({ companyId, plugin, title, onOpen, className, p
           return callPluginBridge(now.companyId, now.plugin, op, args, now.port)
         },
         open: target => latest.current.onOpen(target),
+        context: latest.current.context,
       })
       return
     }

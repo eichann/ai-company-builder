@@ -10,7 +10,7 @@ import { useAppStore } from '../../../stores/appStore'
 import { useAuthStore } from '../../../stores/authStore'
 import { detectReviewStatus, hasUnseenReviews } from '../../doc-review/model'
 import { reviewStatusOfListing, type FileEntry } from '../fileTreeModel'
-import { treeMenuItems } from '../contextMenuItems'
+import { treeMenuItems, type FileMenuExtraItem } from '../contextMenuItems'
 import { usePrivateFolders } from '../hooks/usePrivateFolders'
 import { useFileTreeModel, useVisibleRows } from '../hooks/useFileTreeModel'
 import { useNotDownloadedFolders } from '../hooks/useNotDownloadedFolders'
@@ -32,6 +32,8 @@ interface FileTreePanelProps {
   onPrivateFolderCreated?: () => void
   /** 「やることにつなぐ…」 in the right-click menu: the file or folder's absolute path. Absent: no item. */
   onLinkToTask?: (path: string) => void
+  /** Items business plugins add to a row's right-click menu (plugin-frame.md "The four slots"); the entry's absolute path. */
+  extraMenuItems?: (entry: { path: string; isDirectory: boolean; notDownloaded?: boolean }) => FileMenuExtraItem[]
 }
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
@@ -44,6 +46,7 @@ export function FileTreePanel({
   onDoubleClickFile,
   onPrivateFolderCreated,
   onLinkToTask,
+  extraMenuItems,
 }: FileTreePanelProps) {
   const { t } = useTranslation()
   const { isReadOnly } = useWriteAccess()
@@ -216,6 +219,7 @@ export function FileTreePanel({
               download: entry => { void notDownloaded.downloadFolder(entry) },
               closeContextMenu: menu.close,
               linkToTask: onLinkToTask ? entry => onLinkToTask(entry.path) : undefined,
+              extraItems: extraMenuItems,
             },
             t,
           )}

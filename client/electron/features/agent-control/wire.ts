@@ -23,9 +23,11 @@ export interface AgentControlDeps {
   onRecords?: (companyId: string) => void
   /** A `notifications` signal for a company (no content: the listener asks the server again). */
   onNotifications?: (companyId: string) => void
+  /** The plugin packages a company lists and this app keeps changed (its plugin screens change, A6). */
+  onPluginsChanged?: (companyId: string) => void
 }
 
-export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications }: AgentControlDeps) {
+export function wireAgentControl({ serverUrl, session, userDataDir, home, turns, lifecycle, onRecords, onNotifications, onPluginsChanged }: AgentControlDeps) {
   // The member's AI policy per company (「AI の囲い」 and the stop), read at each chat turn.
   // The stop part is also kept on disk per account (the emergency stop survives a restart offline).
   const policy = createAgentPolicyStore({
@@ -35,11 +37,12 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     dir: () => path.join(userDataDir(), 'agent-policy'),
   })
   // The business plugins' packages the policy lists (plan C2): fetched, verified and kept under
-  // <userData>/plugins; removed when no company lists them. Main only, no renderer channel yet.
+  // <userData>/plugins; removed when no company lists them. The renderer sees only their screens (A6).
   const pluginPackages = createPluginPackageStore({
     dir: () => path.join(userDataDir(), 'plugins'),
     userId: session.userId,
     fetchPackage: createPluginFetcher({ baseUrl: serverUrl, cookies: session.cookies }),
+    onChanged: onPluginsChanged,
   })
   policy.onPolicy((companyId, answer) => {
     if (answer.plugins) void pluginPackages.sync(companyId, answer.plugins)

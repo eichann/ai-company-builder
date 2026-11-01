@@ -119,7 +119,7 @@ function flowProblems(manifest: PluginManifest, owned: Record<string, TypeDefini
   const ui = manifest.ui
   if (!ui && uiFiles.length > 0) errors.push('画面（ui/）を置くときは、宣言に ui を書いてください')
   if (ui) {
-    const entries = [...(ui.tab ? [ui.tab.entry] : []), ...ui.recordSections.map(s => s.entry)]
+    const entries = [...(ui.tab ? [ui.tab.entry] : []), ...ui.recordSections.map(s => s.entry), ...ui.fileActions.map(a => a.entry)]
     for (const e of entries) if (e && !uiFiles.includes(e)) errors.push(`画面のファイル ${e} が包みにありません`)
     for (const s of ui.recordSections) if (!typeOf(s.type)) errors.push(`ui の record_sections: 型「${s.type}」は、このプラグインの types にも本体の型にもありません`)
   }

@@ -23,8 +23,10 @@ export interface LeftPanel {
   className?: string
   /** Its tab was clicked (the search panel focuses its box). */
   onOpen?: () => void
-  /** The content. An extension's panel will be the app's isolated frame, never the extension's own code. */
+  /** The content. An extension's panel is the app's isolated frame, never the extension's own code. */
   render: () => ReactNode
+  /** Shown while the pointer rests on (or the keyboard is on) the tab: a plugin's peek, drawn by the core. */
+  peek?: () => ReactNode
 }
 
 /** The panels that have a tab, in order. */

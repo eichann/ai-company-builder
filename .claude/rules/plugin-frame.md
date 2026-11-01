@@ -9,6 +9,12 @@ paths:
   - "server/tests/integration/plugin-bridge.test.ts"
   - "client/electron/features/plugins/bridge-ipc.ts"
   - "client/shared/plugin-bridge-ops.ts"
+  - "client/shared/plugin-screens.ts"
+  - "client/electron/features/plugins/screens.ts"
+  - "client/src/app/pluginSlots.tsx"
+  - "shared/core/plugin-file-kinds.ts"
+  - "client/tests/plugin-screens.test.ts"
+  - "client/tests/ui/plugin-slots.spec.ts"
 ---
 
 
@@ -114,6 +120,56 @@ is URL user-info (`acb-plugin://a@1.2.3/` has host `1.2.3`), and a dotted host r
   `allow-same-origin`).
 - `ipc-window-links.test.ts` (scheme privileges, frame navigation, popups),
   `ipc-permissions.test.ts` (a plugin page gets no permission).
+
+## The four slots (A6, design 節目5 §2-1 and §40)
+
+Where a plugin's screens appear. The core draws every slot's place, label, icon and menu; the
+plugin's own content only ever runs in `PluginFrame`. The slot parts load lazily
+(`components/LazyPluginSlots.tsx`, inside `<Suspense>`): the renderer bundle has a budget
+(`scripts/check-bundle-size.mjs`), so keep the declaration parser and frame code out of it. Styling follows the existing tabs and cards
+(the owner's visual pass comes later).
+
+- **Which plugins** (`plugins:screens`, `electron/features/plugins/screens.ts`, main window
+  only): the `current` versions the company's agent policy lists, each read from its kept
+  package's own `plugin.yaml` through the protocol's check (`protocol.ts` `declaration`: listed
+  for this company now, the **whole folder verified again** against its fingerprint) and
+  `screensOfPackage` (same file — the parser stays in main, `client/shared/plugin-screens.ts` is
+  types only: contract-2 business plugin, same id and version, `ui.bridge` this app speaks, every
+  entry a verified file). Turned off, stopped by the
+  operator (no longer listed — the store removes it), a pinned-only version, another company or a
+  folder that does not match → no slot. The store tells the renderer (`plugins:changed`) only when
+  what a company keeps changed (`store.ts` `onChanged`), so an equal policy never loops.
+- ① **Left tab** (`ui.tab`): a `LeftPanel` (`pluginTabId` = `plugin:<id>`, so an upgrade keeps the
+  chosen tab) after the core's tabs; the declared label, the icon from a short bundled list
+  (`pluginIcons.ts`, anything else the plugin mark); content = the frame at `entry`.
+- ② **Peek** (`ui.peek`): drawn by the core, never a frame (plugins.md: no `entry`) — on hovering
+  or focusing the plugin's tab, the member's task-list items whose type implements the declared
+  interface (`TaskListItem.implements`, from `/records/types`) in the group (`mine` = あなたの番 +
+  引き受け待ち, `waiting` = ほかの人の番・返事待ち, `ai_turn` = AI の番; `peekItems`). `mine`'s count is
+  the tab's badge. An item opens the record card (`record.open`).
+- ③ **Record card section** (`ui.record_sections`): in `RecordCard` and `TaskCard` for a record
+  of that type (`renderSections`, `recordSectionsFor`), after the fields; one frame per section.
+- ④ **File action** (`ui.file_actions`, syntax in plugins.md): items in the file tree's right-click
+  menu (`treeMenuItems` `extraItems`) for the declared file kinds (`fileActionsFor`; none on a
+  not-downloaded folder, outside the company folder, under `.git` / `.backups`); choosing one opens
+  the frame in a dialog. The path is the company-relative path of an entry in the member's own
+  tree — a private folder appears there only for its readers, so no name reaches a non-reader.
+- **Context in the hello** (`BridgeFrameContext`, handed once with the port): `{ slot: 'tab' }`,
+  `{ slot: 'record_section', recordId }` (only the id: the frame reads the record with
+  `records.get`, under B6's checks), `{ slot: 'file_action', path, isFolder }`. A frame is keyed
+  by its address and context: another record or file is a new frame.
+- `ui.open` from a frame: the core opens it where it always would (`record.open`, `file.open`
+  inside the company folder, `chat.consultAbout` for a record in the member's list, else its card).
+- A slot whose plugin is gone hides (the tab falls back to the first tab, sections vanish, the
+  file action dialog closes); a tab that cannot show its screen says so calmly
+  (`PluginCalmMessage`). Inside the frame, bridge refusals reach the plugin as answers.
+
+Tests: `client/src/features/plugins/model.test.ts` (slot selection, file kinds),
+`client/tests/plugin-screens.test.ts` (only verified, listed, current packages; a changed folder;
+no change → no event), `bridge-host.test.ts` (the hello's context),
+`client/tests/ui/plugin-slots.spec.ts` with the test package `client/tests/fixtures/plugins/slots-sample`
+(all four slots, the frame's context and bridge call, turning the plugin off), `tasks-list.test.ts`
+(`implements` on items), server `plugin-contract-v2.test.ts` (`file_actions` syntax).
 
 ## The server end (B6 「橋の関所」, `services/plugin-bridge.ts`)
 

@@ -31,6 +31,8 @@ export interface PluginStoreDeps {
   /** The signed-in account; nothing is kept without one. */
   userId: () => string | null
   fetchPackage: FetchPluginPackage
+  /** What this company lists and the app keeps changed (a package came, went or was replaced): its screens change (A6). */
+  onChanged?: (companyId: string) => void
   log?: Pick<Console, 'warn' | 'info'>
 }
 
@@ -95,7 +97,10 @@ export function createPluginPackageStore(deps: PluginStoreDeps) {
     if (!user) return
     const root = deps.dir()
     const index = readIndex()
-    index.listed[`${user}\0${companyId}`] = plugins.map(pluginPackageName)
+    const key = `${user}\0${companyId}`
+    const keptHere = () => (index.listed[key] ?? []).filter(n => index.kept[n] !== undefined).map(n => `${n}=${index.kept[n]}`).sort().join('\n')
+    const before = keptHere()
+    index.listed[key] = plugins.map(pluginPackageName)
 
     for (const entry of plugins) {
       const name = pluginPackageName(entry)
@@ -134,6 +139,7 @@ export function createPluginPackageStore(deps: PluginStoreDeps) {
       fs.rmSync(path.join(root, entry), { recursive: true, force: true })
     }
     writeIndex(index)
+    if (keptHere() !== before) deps.onChanged?.(companyId)
   }
 
   return {
@@ -144,6 +150,10 @@ export function createPluginPackageStore(deps: PluginStoreDeps) {
       })
       chain = next
       return next
+    },
+    /** Settles when the syncs started so far have finished. */
+    idle(): Promise<void> {
+      return chain
     },
     /**
      * The folder of a package this company lists now and the app keeps, or

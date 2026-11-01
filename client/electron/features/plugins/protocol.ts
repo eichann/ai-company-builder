@@ -33,8 +33,8 @@ import { parsePluginFrameUrl, pluginFrameCsp, pluginUiBase } from '../../../shar
 import { pluginPackageName } from '../../../shared/plugin-packages'
 
 export interface PluginFileSource {
-  /** A kept package listed for the signed-in account now, with the fingerprint it was kept with. */
-  keptPackage(pluginId: string, version: string): { folder: string; fingerprint: string } | null
+  /** A kept package listed for the signed-in account now (`companyId`: by that company), with the fingerprint it was kept with. */
+  keptPackage(pluginId: string, version: string, companyId?: string): { folder: string; fingerprint: string } | null
 }
 
 export interface PluginFileServerDeps {
@@ -124,35 +124,44 @@ export function createPluginFileServer(deps: PluginFileServerDeps) {
 
   const notFound = () => new Response('Not found', { status: 404, headers: { 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' } })
 
+  /**
+   * One file of a kept, verified package: the bytes just read, equal to the
+   * verified listing, or null (not kept / not listed / not verified / changed).
+   */
+  async function readVerified(ref: { id: string; version: string }, filePath: string, companyId?: string): Promise<Buffer | null> {
+    const kept = deps.packages.keptPackage(ref.id, ref.version, companyId)
+    if (!kept) return null
+    const name = pluginPackageName(ref)
+    const hashes = await verify(name, kept.folder, kept.fingerprint)
+    const expected = hashes?.get(filePath)
+    if (!expected) return null
+    const file = path.join(kept.folder, ...filePath.split('/'))
+    let bytes: Buffer
+    try {
+      // Not a link, and still inside the package's real folder.
+      const st = await fs.lstat(file)
+      if (!st.isFile()) return null
+      const [realFolder, realFile] = await Promise.all([fs.realpath(kept.folder), fs.realpath(file)])
+      if (!realFile.startsWith(realFolder + path.sep)) return null
+      bytes = await fs.readFile(file)
+    } catch {
+      return null
+    }
+    if (sha256Hex(bytes) !== expected) {
+      verified.delete(name)
+      log.warn(`[plugins] ${name}: a file changed after it was verified; not shown`)
+      return null
+    }
+    return bytes
+  }
+
   return {
     async serve(request: { url: string; method?: string }): Promise<Response> {
       if (request.method && request.method !== 'GET' && request.method !== 'HEAD') return new Response('Method not allowed', { status: 405 })
       const address = parsePluginFrameUrl(request.url)
       if (!address) return notFound()
-      const kept = deps.packages.keptPackage(address.id, address.version)
-      if (!kept) return notFound()
-      const name = pluginPackageName(address)
-      const hashes = await verify(name, kept.folder, kept.fingerprint)
-      const expected = hashes?.get(address.path)
-      if (!expected) return notFound()
-
-      const file = path.join(kept.folder, ...address.path.split('/'))
-      let bytes: Buffer
-      try {
-        // Not a link, and still inside the package's real folder.
-        const st = await fs.lstat(file)
-        if (!st.isFile()) return notFound()
-        const [realFolder, realFile] = await Promise.all([fs.realpath(kept.folder), fs.realpath(file)])
-        if (!realFile.startsWith(realFolder + path.sep)) return notFound()
-        bytes = await fs.readFile(file)
-      } catch {
-        return notFound()
-      }
-      if (sha256Hex(bytes) !== expected) {
-        verified.delete(name)
-        log.warn(`[plugins] ${name}: a file changed after it was verified; not shown`)
-        return notFound()
-      }
+      const bytes = await readVerified(address, address.path)
+      if (!bytes) return notFound()
       const ext = address.path.slice(address.path.lastIndexOf('.') + 1).toLowerCase()
       return new Response(request.method === 'HEAD' ? null : new Uint8Array(bytes), {
         status: 200,
@@ -165,6 +174,19 @@ export function createPluginFileServer(deps: PluginFileServerDeps) {
           'Access-Control-Allow-Origin': 'null',
         },
       })
+    },
+    /**
+     * A package's declaration and its file list, read through the same check
+     * as every served file (screens.ts, A6): null when the package is not kept
+     * for this company now or does not match its fingerprint.
+     */
+    async declaration(companyId: string, ref: { id: string; version: string }): Promise<{ manifest: string; files: Set<string> } | null> {
+      // The whole folder again (not only plugin.yaml): a slot is shown only for a package that matches now.
+      verified.delete(pluginPackageName(ref))
+      const bytes = await readVerified(ref, 'plugin.yaml', companyId)
+      if (!bytes) return null
+      const listing = verified.get(pluginPackageName(ref))
+      return listing ? { manifest: bytes.toString('utf8'), files: new Set(listing.hashes.keys()) } : null
     },
   }
 }
