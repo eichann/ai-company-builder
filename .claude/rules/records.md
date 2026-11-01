@@ -1261,3 +1261,10 @@ through the engine over HTTP with a real attached commit and the history line co
 the push checker for a company's own file type, a decision with no commit and an old decision
 file left an ordinary file),
 permission matrix rows + `CROSS`.
+
+## Business roles in `who` and approvals (plan C3)
+
+A type's action may name `role:<name>` in `who` (`ROLE_REF_RE`); the engine meets it through the
+one resolution of role holders (`plugin-roles.md`), a delegate standing in for an absent holder.
+The `approval` core type is **version 5**: `approver_rule` gains `role`, with `approver_role` naming
+it (additive). Details: `plugin-roles.md`, `approvals.md`.

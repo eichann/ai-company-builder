@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { GoogleSection } from './google'
 import { ReadScopeSection } from './read-scope'
+import { RolesSection } from './roles'
 import {
   ApiError,
   companiesApi,
@@ -339,6 +340,9 @@ function IntegrationDetail({ item, broker, nameOf, onChanged, departments, membe
             onSave={(scope) => run('読める人を保存しました', () => pluginsApi.setReadScope(companyId, item.id, scope))}
           />
         )}
+
+        {/* 役割 (plan C3): who holds the business's roles in this company. */}
+        {install && business && <RolesSection pluginId={item.id} members={members} nameOf={nameOf} />}
 
         {/* On / off */}
         {install && (

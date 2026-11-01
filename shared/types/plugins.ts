@@ -281,6 +281,20 @@ export interface DistributedPlugin {
   use: 'current' | 'pinned'
 }
 
+/**
+ * GET …/plugins/:pluginId/roles (owner/admin; plan C3, plugin-roles.md): the
+ * business plugin's declared roles with the company's assignment, the
+ * まとまり overrides and the history (member ids only).
+ */
+export interface PluginRolesView {
+  pluginId: string
+  label: string
+  roles: Array<{ name: string; label: string; description: string | null; userIds: string[] }>
+  /** A まとまり's own holders; `title` only when the viewer may read that record. */
+  overrides: Array<{ role: string; bundleId: string; title: string | null; userIds: string[] }>
+  history: Array<{ role: string; bundleId: string | null; action: 'assign' | 'override' | 'clear-override'; userIds: string[]; at: string; by: string }>
+}
+
 /** GET …/plugins/:pluginId/package/:version (any member, a listed version only): the package's files. */
 export interface PluginPackageDownload {
   id: string

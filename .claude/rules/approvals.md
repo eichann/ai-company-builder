@@ -53,7 +53,8 @@ member) asked, and the core runs it. Approving is a person's act through their s
 - `prepareApproval` (plugins.md "The approval seam") runs every check and reads HubSpot's raw
   values now; the payload's canonical text is stored as version 1 and the `approval` record created
   by the service writer in **one transaction** (core types ensured first). Fields: requested_by =
-  the member, assignee = next_actor = the approver, `approver_rule`, `operation`
+  the member, assignee = next_actor = the approver, `approver_rule` (+ `approver_role` for a
+  business role, approval version 5: `plugin-roles.md`), `operation`
   (`<plugin>.<operation>`), `payload_hash`, `payload_version`, `reason` = the AI's (or person's)
   note as the proposed reason; links `bundle` = the record **when its type implements `bundle`**
   (a 案件, a 企画; the core never names a business type — the record itself is always in the fixed
@@ -111,8 +112,9 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
 - Approve, in order: readable (else 404) → **qualifies** (`mayApprove` with requester / manager of
   the department holding the request's folder / owner-admin, from the server's data — or, as the
   delegate of an absent member they cover today (`actsFor`, `records.md` "Absence and the
-  delegate"), that member's request (`self`), department (`dept_manager`) or a request asked of
-  them, never their admin role; 403 `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
+  delegate"), that member's request (`self`), department (`dept_manager`), a role they hold
+  (`role`, plan C3) or a request asked of them, never their admin role; a `role` request is met by
+  its holders and owners / admins only, not by a department manager as such; 403 `NOT_APPROVER`) → `approvalReasonProblem` (400 `REASON_REQUIRED`) → pending (409 `NOT_PENDING`)
   → the hash is the newest version's (409 `CONTENT_CHANGED` 「内容が変わりました。もう一度確かめて
   ください」) → `executeApproved` (plugins.md). **Used once**: approve / send back / withdraw of one
   request are serialised in this server and every state change is a compare-and-set

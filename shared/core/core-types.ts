@@ -188,7 +188,7 @@ actions:
 `,
   approval: `---
 label: 承認のお願い
-version: 4
+version: 5
 implements: [request, prepared]
 storage: server
 fields:
@@ -197,7 +197,8 @@ fields:
   next_actor:          { label: 次に動く人, kind: person, source: server }
   waiting_on:          { label: 待っているもの, kind: text, source: server }
   due:                 { label: 期限, kind: date, source: server }
-  approver_rule:       { label: 承認する人の決まり, kind: choice, options: [self, dept_manager, admin], source: server }
+  approver_rule:       { label: 承認する人の決まり, kind: choice, options: [self, dept_manager, admin, role], source: server }
+  approver_role:       { label: 承認する役割, kind: text, source: server }
   operation:           { label: 操作, kind: text, source: server }
   payload_hash:        { label: 内容の印, kind: text, source: server }
   payload_version:     { label: 中身の版, kind: number, source: server }

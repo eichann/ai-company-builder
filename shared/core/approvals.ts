@@ -16,22 +16,40 @@ import { canonicalJson } from './fixed-content'
 export const APPROVER_RULES = ['self', 'dept_manager', 'admin'] as const
 export type ApproverRule = typeof APPROVER_RULES[number]
 
-const STRICTNESS: Record<ApproverRule, number> = { self: 0, dept_manager: 1, admin: 2 }
+/**
+ * Who approves, as a mapping's `approval_by` says it or a request carries it
+ * (plan C3): one of the core rules, or `role:<name>` — a role the business
+ * plugin declares, held by the members the company assigned
+ * (shared/core/plugin-roles.ts). Stored on the approval record as
+ * `approver_rule: role` + `approver_role: <name>` (approval version 5).
+ */
+export type ApproverSpec = ApproverRule | `role:${string}`
 
-/** The stricter of two rules (self < dept_manager < admin). */
-export function stricterApprover(a: ApproverRule, b: ApproverRule): ApproverRule {
-  return STRICTNESS[a] >= STRICTNESS[b] ? a : b
+const isRole = (s: ApproverSpec): s is `role:${string}` => s.startsWith('role:')
+/** self < dept_manager < a plugin role < admin. */
+const strictness = (s: ApproverSpec): number => (isRole(s) ? 2 : s === 'admin' ? 3 : s === 'dept_manager' ? 1 : 0)
+
+/**
+ * The stricter of two (self < dept_manager < a role < admin); two different
+ * roles in one request need an owner / admin (neither role holder alone).
+ */
+export function stricterApprover(a: ApproverSpec, b: ApproverSpec): ApproverSpec {
+  if (isRole(a) && isRole(b) && a !== b) return 'admin'
+  return strictness(a) >= strictness(b) ? a : b
 }
 
 /**
- * Whether a person qualifies to approve under `rule`. A stricter role also
- * qualifies for a looser rule (a department manager may approve a `self`
- * request of their department; an owner / admin anything). The caller must
- * already have established that this is a person (session), not an AI.
+ * Whether a person qualifies to approve under `rule`. An owner / admin
+ * qualifies for anything; a department manager for `dept_manager` and for a
+ * `self` request of their department; a role is met only by its holders
+ * (`holdsRole`, resolved by the server for the request's plugin and bundle),
+ * not by a department manager. The caller must already have established that
+ * this is a person (session), not an AI.
  */
-export function mayApprove(rule: ApproverRule, who: { isRequester: boolean; isDeptManager: boolean; isAdmin: boolean }): boolean {
+export function mayApprove(rule: ApproverSpec, who: { isRequester: boolean; isDeptManager: boolean; isAdmin: boolean; holdsRole?: boolean }): boolean {
   if (who.isAdmin) return true
   if (rule === 'admin') return false
+  if (isRole(rule)) return who.holdsRole === true
   if (who.isDeptManager) return true
   return rule === 'self' && who.isRequester
 }

@@ -241,9 +241,10 @@ upgrade:                                 # where work pinned to an older version
   content fingerprint (the one #403 records in consultations): `PluginStepProcedurePin`, stored by
   C5. Work moves to a newer version only at `upgrade.at` points, from `upgrade.from` on. An
   emergency stop of a version stops pinned work too.
-- **Roles**: declared names; `role:<name>` in a business operation's `who` only for a declared
-  role (refused on contract 1). Until C3 assigns people, a `role:` entry matches no one (the engine
-  compares it with no person field: fails closed).
+- **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
+  or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
+  C3's (`plugin-roles.md`): the engine's `who` and the approvers resolve them; an operation's
+  `who` still matches no one until C4 passes the resolver (fails closed).
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
   `preload` refused (the frame has no network and is given nothing).

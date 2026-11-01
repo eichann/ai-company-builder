@@ -291,6 +291,33 @@ describe('つなぎ先', () => {
   })
 })
 
+describe('役割 of a business (plan C3)', () => {
+  const roles = (userIds: string[]) => ok({
+    pluginId: 'corporate-sales', label: '法人営業',
+    roles: [{ name: 'sales_manager', label: '営業の責任者', description: '金額の承認をする人', userIds }],
+    overrides: [], history: [],
+  })
+  it('lists each role by its label, says plainly when nobody holds it, and saves exactly the chosen members', async () => {
+    const saves: Call[] = []
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins/corporate-sales/roles`]: { body: roles([]) },
+      [`PUT ${base}/plugins/corporate-sales/roles/sales_manager`]: (call) => {
+        saves.push(call)
+        return { body: roles((call.body as { userIds: string[] }).userIds) }
+      },
+    }, false, [salesItem])
+    renderInCompany(<IntegrationsPage />)
+    const section = await screen.findByRole('region', { name: '役割' })
+    const role = within(section).getByRole('group', { name: '営業の責任者' })
+    expect(within(role).getByText('まだ誰も選ばれていません。')).toBeInTheDocument()
+    await userEvent.click(within(role).getByRole('checkbox', { name: '田中 太郎' }))
+    await userEvent.click(within(role).getByRole('button', { name: '保存' }))
+    await waitFor(() => expect(saves).toHaveLength(1))
+    expect(saves[0].body).toEqual({ userIds: ['u_member'] })
+    for (const word of ['プラグイン', 'オントロジー', '型']) expect(section.textContent).not.toContain(word)
+  })
+})
+
 describe('つなぎ先 and the business using it, each on its own (owner decision 2026-11-01)', () => {
   it('a connector shows its key, readers and switch, no mapping or import, and names no business', async () => {
     const calls = stubApi(ownerCapabilities)

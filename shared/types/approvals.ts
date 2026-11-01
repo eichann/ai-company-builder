@@ -75,7 +75,9 @@ export interface ApprovalView {
   requestedByAi: boolean
   /** The person asked to approve (member id). */
   approver: string | null
-  approverRule: ApproverRule
+  /** `role` (plan C3): a business role's holders approve — `approverRole` names it, the label is the role's. */
+  approverRule: ApproverRule | 'role'
+  approverRole?: string | null
   approverRuleLabel: string
   /** The fixed content's hash and version: the approve button sends this hash back. */
   hash: string

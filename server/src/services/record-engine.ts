@@ -66,6 +66,8 @@ export function createRecordEngine(deps: RecordEngineDeps) {
     ...fileLinking(ctx),
     ...sharing(ctx),
     ...ledgerReading(ctx),
+    /** Bound once by the plugins lane (composition/plugins.ts): the business roles' holders for `role:<name>`. */
+    useRoles: ctx.useRoles,
   }
 }
 

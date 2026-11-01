@@ -452,6 +452,11 @@ const MATRIX: Row[] = [
   // lane C ▼
   // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
   r('GET /api/companies/:companyId/plugins/:pluginId/package/:version', w => ({ path: `${C(w)}/plugins/no-such-plugin/package/0.1.0` }), [404, 404, 404, 404, 404, 401]),
+  // Business roles (plan C3, plugin-roles.md): the company's assignment is owner/admin; a まとまり's override
+  // also its department's manager (the plugin and the まとまり are looked up first: 404 for everyone here).
+  r('GET /api/companies/:companyId/plugins/:pluginId/roles', w => ({ path: `${C(w)}/plugins/no-such-plugin/roles` }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/roles/:role', w => ({ path: `${C(w)}/plugins/no-such-plugin/roles/approver`, body: {} }), [404, 404, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/plugins/:pluginId/roles/:role/bundles/:recordId', w => ({ path: `${C(w)}/plugins/no-such-plugin/roles/approver/bundles/deal-nosuch01`, body: {} }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
 
@@ -567,6 +572,9 @@ const CROSS: CrossRow[] = [
   // lane B ▲
   // lane C ▼
   x('GET /api/companies/:companyId/plugins/:pluginId/package/:version', (w, id) => ({ path: `${C(w)}/plugins/${id}/package/0.1.0` }), w => w.other.plugin, 'no-such-plugin'),
+  x('GET /api/companies/:companyId/plugins/:pluginId/roles', (w, id) => ({ path: `${C(w)}/plugins/${id}/roles` }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/roles/:role', (w, id) => ({ path: `${C(w)}/plugins/${id}/roles/approver`, body: { userIds: [] } }), w => w.other.plugin, 'no-such-plugin'),
+  x('PUT /api/companies/:companyId/plugins/:pluginId/roles/:role/bundles/:recordId', (w, id) => ({ path: `${C(w)}/plugins/other-sales/roles/approver/bundles/${id}`, body: { userIds: [] } }), w => w.other.record, 'deal-nosuch01'),
   // lane C ▲
 ]
 

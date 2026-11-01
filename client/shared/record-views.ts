@@ -79,7 +79,7 @@ const STATE_LABELS: Record<string, string> = {
 export const stateLabel = (state: string | null): string | null => (state === null ? null : STATE_LABELS[state] ?? state)
 
 /** Fields kept for the machinery (hashes, outside ids, pointers): never on the card. */
-const HIDDEN_FIELDS = new Set(['source_ref', 'source_key', 'payload_hash', 'payload_version', 'result_operation_id', 'provider_message_id', 'doc_version', 'next_actor', 'attendees', 'approver_rule', 'operation'])
+const HIDDEN_FIELDS = new Set(['source_ref', 'source_key', 'payload_hash', 'payload_version', 'result_operation_id', 'provider_message_id', 'doc_version', 'next_actor', 'attendees', 'approver_rule', 'approver_role', 'operation'])
 
 export function summaryView(r: RecordSummary, def: TypeDefinition | undefined): RecordViewSummary {
   return {
