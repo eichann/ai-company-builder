@@ -66,12 +66,15 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
   incoming message of that DM within `DM_REPLY_WINDOW_MS` (3 days; `latestIncoming`), never
   another DM's or older. When the member's reply is seen: each open reply request moves as below
-  with the note 「メールで返信済み」/「チャット（Slack）で返信済み」 and its prepared
-  `outbound_message` drafts still in `draft` are **discarded** (never offered to send); an
+  with the note 「メールで返信済み」/「チャット（Slack）で返信済み」 and its reply drafts still in
+  `draft` — the prepared ones and the card's own replies to that 連絡 (`interaction` link) — are
+  **discarded** (never offered to send); an
   interaction not judged yet (`received`, or `unsure`) becomes `handled` (`needs_reply: false`).
   A judgement `reply` on a thread whose newest message is ours makes no reply request
   (`alreadyReplied: true`, handled). A reply ACB cannot see (the phone, another channel): the
-  assignee's 「もう返した」 (`replied_elsewhere`, reply_request v2).
+  assignee's 「もう返した」 (`replied_elsewhere`, reply_request v2), which discards the same drafts
+  (the engine's `afterAct` hook → `inbox.afterAct`, note 「ほかの経路で返信済み（もう返した）」), so
+  the card offers no second reply.
 - **The thread went on**: their reply (not `automated` / `bulk`: an automatic reply is no reply)
   moves each 返事待ち reply request to `checking` (ledger `reply_arrived`, the assignee told:
   notice `reply_arrived`); with no open reply request a `handled` interaction goes back to
@@ -213,7 +216,5 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (A4).
 - A task's own wait (`WAIT_OVER.task` → `preparing`) has no PC step yet: lane C covers it.
-- 「もう返した」 by the engine does not discard a prepared draft yet (the member's reply seen by
-  the inbox does).
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no
   assignee (nobody's turn); A4 may create them `handled`.

@@ -29,7 +29,7 @@
  *   next plain message in that DM within 3 days) ends what it answered: a
  *   draft made for it is discarded, an unjudged message is handled, the AI
  *   makes no 返事のお願い for an answered thread; a reply ACB cannot see is
- *   the person's 「もう返した」;
+ *   the person's 「もう返した」, which drops every reply draft to that 連絡 too;
  * - B5 追いかけ: past 返事の見込み (never before) the server clock puts a 返事待ち
  *   into the AI's turn to draft a nudge (自動で進める on; else the assignee's);
  *   their reply then sends it to the AI's check and drops the nudge's draft;
@@ -170,6 +170,7 @@ beforeEach(() => {
     companyData: source, transactions: sqliteTransactions(conn), clock, ids,
     files: { appendHistoryLine: async () => true, fileAtCommit: async () => true },
     managedFolders: () => [], isMember: (co, u) => roleOf(co, u) !== null, roleOf, notify: () => {},
+    afterAct: (co, change) => inbox.afterAct(co, change),
   })
   const fake: InboxSource = {
     async listSince(_co, userId, since) {
@@ -597,6 +598,33 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     const person = await engine.act(m('u-alice'), { id: 'u-alice', kind: 'human', source: null }, rr, 'replied_elsewhere', { expectedVersion: 1, note: '電話で返した' })
     expect(person.ok).toBe(true)
     expect(stateOf(rr).state).toBe('closed')
+  })
+
+  it('「もう返した」 drops the prepared draft and the card\'s own reply drafts to that 連絡, so no second reply can be sent; other 連絡\' drafts stay', async () => {
+    inbox.receive('a', 'u-alice', mail())
+    inbox.receive('a', 'u-alice', mail())
+    const [row, other] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    const draft = (interactionId: string, kind: 'ai' | 'human') => {
+      const d = serviceWriter.create('a', {
+        type: 'outbound_message', title: 'Re: お見積り', personalOwner: 'u-alice',
+        fields: { assignee: 'u-alice', requested_by: 'u-alice', channel: 'email' }, links: { interaction: [interactionId] },
+        actor: kind === 'ai' ? { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null } : { id: 'u-alice', kind: 'human', source: null },
+        note: '', quiet: true,
+      })
+      if (!d.ok) throw new Error(d.reason)
+      return d.record.id
+    }
+    const prepared = draft(row.id, 'ai')
+    const fromCard = draft(row.id, 'human')
+    const elsewhere = draft(other.id, 'human')
+    handle().records.replaceLinks(rr, [...handle().records.linksFrom([rr]), { sourceId: rr, name: 'prepared', position: 9, targetId: prepared, targetPath: null }])
+    const person = await engine.act(m('u-alice'), { id: 'u-alice', kind: 'human', source: null }, rr, 'replied_elsewhere', { expectedVersion: 1 })
+    expect(person.ok).toBe(true)
+    expect(stateOf(prepared).state).toBe('discarded')
+    expect(stateOf(fromCard).state).toBe('discarded')
+    expect(handle().records.ledger(fromCard).at(-1)?.note).toBe('ほかの経路で返信済み（もう返した）')
+    expect(stateOf(elsewhere).state).toBe('draft')
   })
 })
 

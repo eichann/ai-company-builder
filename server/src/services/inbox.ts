@@ -255,16 +255,25 @@ export function createInboxService(deps: InboxDeps) {
     }
   }
 
-  /** The 返事のお願い's prepared drafts still in 下書き: discarded (the reply went out elsewhere). */
-  function discardDrafts(companyId: string, handle: CompanyData, replyRequestId: string, channel: InboxChannel): void {
-    const ids = handle.records.linksFrom([replyRequestId]).filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string)
-    for (const row of handle.records.byIds(ids)) {
+  /**
+   * The 返事のお願い's prepared drafts still in 下書き — and, with `alsoThread`, every reply draft to its
+   * 連絡 (the card's own, outbound-mail.md "Replies") — discarded: the reply went out elsewhere, so
+   * none is offered to send a second time.
+   */
+  function discardDrafts(companyId: string, handle: CompanyData, replyRequestId: string, note: string, alsoThread = false): void {
+    const links = handle.records.linksFrom([replyRequestId])
+    const ids = new Set(links.filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string))
+    const interactionId = links.find(l => l.name === 'interaction' && l.targetId)?.targetId
+    if (alsoThread && interactionId) {
+      for (const r of handle.records.candidates({ types: ['outbound_message'], link: { name: 'interaction', id: interactionId } }, 50)) ids.add(r.id)
+    }
+    for (const row of handle.records.byIds([...ids])) {
       if (row.type !== 'outbound_message' || row.removedAt !== null) continue
       const cur = fieldsOf(handle, row.id)
       if (cur.state !== 'draft') continue
       logFailure('draft discarded', deps.writer.transition(companyId, {
         recordId: row.id, action: INBOX_ACTIONS.memberReplied, expectedVersion: cur.version, to: 'discarded',
-        actor: INBOX_ACTOR, note: REPLIED_THERE[channel], quiet: true,
+        actor: INBOX_ACTOR, note, quiet: true,
       }))
     }
   }
@@ -300,7 +309,7 @@ export function createInboxService(deps: InboxDeps) {
         })
         logFailure('member reply', moved)
         // The reply went out there: a draft made for it is never offered to send.
-        if (moved.ok) discardDrafts(companyId, handle, r.id, msg.channel)
+        if (moved.ok) discardDrafts(companyId, handle, r.id, REPLIED_THERE[msg.channel], true)
       }
       // Not judged yet (or 確認待ち): the member answered it themselves — nothing is left to do.
       const cur = fieldsOf(handle, interaction.id)
@@ -325,7 +334,7 @@ export function createInboxService(deps: InboxDeps) {
       })
       logFailure('reply arrived', moved)
       // A nudge drafted for it is no longer wanted: never offered to send.
-      if (moved.ok && r.state !== 'waiting_reply') discardDrafts(companyId, handle, r.id, msg.channel)
+      if (moved.ok && r.state !== 'waiting_reply') discardDrafts(companyId, handle, r.id, '相手から返事が来ました')
     }
     if (replies.length > 0) return
     // Nothing open about it: a handled interaction is the AI's to judge again.
@@ -478,6 +487,15 @@ export function createInboxService(deps: InboxDeps) {
     },
 
     receive,
+
+    /**
+     * The engine wrote an action (composition.ts `afterAct`): the person's 「もう返した」 (a reply ACB
+     * cannot see) drops every reply draft for that 返事のお願い, as a reply seen in the thread does.
+     */
+    afterAct(companyId: string, change: { type: string; entry: { recordId: string; action: string } }): void {
+      if (change.type !== 'reply_request' || change.entry.action !== 'replied_elsewhere') return
+      discardDrafts(companyId, handleOf(companyId), change.entry.recordId, 'ほかの経路で返信済み（もう返した）', true)
+    },
 
     /**
      * The member granted reading (the connector calls it). A first connection

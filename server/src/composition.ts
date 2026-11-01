@@ -249,6 +249,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     notify: notifyRecords,
     actsFor,
     autoAccepts: taskAcceptance.autoAccepts,
+    // 「もう返した」 drops the prepared reply drafts (inbox.md; lane B, built below; called after construction only).
+    afterAct: (companyId, change) => inboxLane.inbox.afterAct(companyId, change),
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,

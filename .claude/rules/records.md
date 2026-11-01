@@ -1288,3 +1288,9 @@ A run of a business plugin's step (`<pluginId>__<step>`) adds `pin` to its `proc
 version + fingerprint, or the company Skill + tree id, the work is pinned to — so its ledger
 entries say which procedure (or Skill) made them, copied as in "Which procedure" above. Details:
 `plugin-steps.md`.
+
+## The engine's `afterAct` (lane B)
+
+`RecordEngineDeps.afterAct(companyId, change)` runs after an action is committed (never throws
+into the engine; nothing is undone when it fails). One user: the inbox drops a 返事のお願い's reply
+drafts on the person's 「もう返した」 (`inbox.md`). Test: `server/tests/unit/inbox.test.ts`.
