@@ -26,6 +26,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -593,7 +594,7 @@ describe('creates (milestone 4): create_deal only through an approval', () => {
     // A record of the company map: server only (no file), linked like an import; its entry is the requester's, a decision with the approver's reason.
     const recordId = done.value.recordId
     expect(recordId).toBe(recordOf(made[0].id))
-    expect(db.prepare('SELECT path, folder, title FROM records WHERE company_id = ? AND id = ?').get(CO, recordId)).toEqual({ path: null, folder: '営業部', title: NEW_DEAL.title })
+    expect(withRecordText(db, CO, [db.prepare('SELECT id, path, folder, title FROM records WHERE company_id = ? AND id = ?').get(CO, recordId) as Json])[0]).toEqual({ id: recordId, path: null, folder: '営業部', title: NEW_DEAL.title })
     const entry = services.recordEngine.history(member, recordId).value.entries[0]
     expect(entry).toMatchObject({ actorId: 'op-member', actorKind: 'ai', isDecision: true, decision: { reason: '金額と時期を確認した' }, receipt: { kind: 'written', approvedBy: 'op-owner', operationId: done.value.id } })
     // 「作ったものを取り消す」: archived in HubSpot, only that deal.

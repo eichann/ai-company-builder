@@ -30,6 +30,7 @@ import { promisify } from 'util'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { fakeUpstream } from '../helpers/fake-upstream'
 import { PLUGIN_FIXTURES, enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -84,7 +85,7 @@ const commits = async () => {
   const { REPOS_DIR } = await import('../../src/lib/config')
   return (await git('git', ['rev-list', '--all', '--count'], { cwd: join(REPOS_DIR, `${CO}.git`) })).stdout.trim()
 }
-const deals = () => db.prepare("SELECT * FROM records WHERE company_id = ? AND type = 'deal' ORDER BY id").all(CO) as Json[]
+const deals = () => withRecordText(db, CO, db.prepare("SELECT * FROM records WHERE company_id = ? AND type = 'deal' ORDER BY id").all(CO) as Json[])
 const linkOf = (recordId: string) => db.prepare('SELECT * FROM plugin_external_links WHERE company_id = ? AND record_id = ?').get(CO, recordId) as Json
 const recordOf = (externalId: string) => (db.prepare("SELECT record_id FROM plugin_external_links WHERE company_id = ? AND object = 'deal' AND external_id = ? ORDER BY seen_at DESC").get(CO, externalId) as Json)?.record_id
 
@@ -162,7 +163,7 @@ describe('import from the outside system', () => {
     })
     expect(linkOf(sample.id)).toMatchObject({ account_id: '90000001', object: 'deal', external_id: '1000000001' })
     // The customer: a server-only record linked from the deal (name only).
-    const customer = db.prepare("SELECT r.* FROM record_links l JOIN records r ON r.company_id = l.company_id AND r.id = l.target_id WHERE l.company_id = ? AND l.source_id = ? AND l.name = 'customer'").get(CO, sample.id) as Json
+    const [customer] = withRecordText(db, CO, db.prepare("SELECT r.* FROM record_links l JOIN records r ON r.company_id = l.company_id AND r.id = l.target_id WHERE l.company_id = ? AND l.source_id = ? AND l.name = 'customer'").all(CO, sample.id) as Json[])
     expect(customer).toMatchObject({ type: 'customer', title: '株式会社サンプル', path: null })
   })
 
