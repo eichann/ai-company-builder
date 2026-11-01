@@ -420,7 +420,7 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
 
   it('つなぎ先 → つないでいるサービス', async () => {
     const view = await expectShape('CoreConnectors', USERS.owner, 'GET', `${base}/connectors`)
-    expect(view.connectors.map((c: Loose) => c.id)).toEqual(['google'])
+    expect(view.connectors.map((c: Loose) => c.id)).toEqual(['google', 'slack'])
     await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: 'google' })
     await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: null })
     await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connectors/google/enabled`, { enabled: true })

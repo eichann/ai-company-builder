@@ -4,7 +4,7 @@
  * makes, in the shapes of Slack's public reference pages, plus helpers that
  * play Slack's side of events (`signEvent`). Used by the server tests (passed
  * straight in through `tests/helpers/fake-upstream.ts`); a staging server
- * (`pnpm fake:slack`) comes with A3.
+ * (`pnpm fake:slack`, tests/fakes/slack/serve.ts) serves it on this machine.
  *
  * Test code only: under `server/tests/`, which the production image never
  * copies, and nothing in `server/src` may import it (layering test).

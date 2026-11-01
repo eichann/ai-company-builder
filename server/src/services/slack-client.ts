@@ -30,23 +30,23 @@ import type { HmacSigner, SlackDataSource } from '../ports/slack'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { BrokerVault, ConnectorSecretContext } from './broker-vault'
 import { grantSealContext } from './member-oauth'
+import { isPracticeSlackSecret, SLACK_FEATURES, SLACK_HOST, type SlackFeature } from '../../shared/core/slack'
 
-export const SLACK_HOST = 'slack.com'
+export { isSlackFeature, SLACK_FEATURES, SLACK_HOST, type SlackFeature } from '../../shared/core/slack'
 export const SLACK_AUTHORIZE_PATH = '/oauth/v2/authorize'
 
-/** The member features and the user scopes each needs (always with the identity scopes). */
-export const SLACK_FEATURES = ['read', 'reply'] as const
-export type SlackFeature = typeof SLACK_FEATURES[number]
+/** The user scopes each member feature needs (always with the identity scopes). */
 export const SLACK_IDENTITY_SCOPES = ['users:read', 'users:read.email'] as const
 export const SLACK_FEATURE_SCOPES: Record<SlackFeature, readonly string[]> = {
   /** 自分あての DM とメンションを読む (channels are read, never kept). */
   read: ['im:history', 'mpim:history', 'channels:history', 'groups:history'],
   /** 返事を送る (as the member). */
   reply: ['chat:write'],
+  /** 大事な知らせを Slack の DM で受け取る: sent by the company's bot, so nothing beyond who the member is. */
+  notices: [],
 }
 const ALLOWED_SCOPES = new Set<string>([...SLACK_IDENTITY_SCOPES, ...Object.values(SLACK_FEATURE_SCOPES).flat()])
 
-export const isSlackFeature = (v: unknown): v is SlackFeature => (SLACK_FEATURES as readonly unknown[]).includes(v)
 export function slackScopesFor(features: readonly SlackFeature[]): string[] {
   return [...new Set([...SLACK_IDENTITY_SCOPES, ...features.flatMap(f => SLACK_FEATURE_SCOPES[f])])]
 }
@@ -74,7 +74,7 @@ const BEFORE_SENDING: readonly UpstreamFailure[] = ['private-address', 'dns', 't
 
 export type SlackStopReason =
   | 'operator-stopped' | 'not-configured' | 'off' | 'vault-off' | 'not-member'
-  | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted' | 'no-bot' | 'bad-method'
+  | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted' | 'feature-off' | 'no-bot' | 'bad-method'
 
 export type SlackResult =
   | { ok: true; json: Record<string, unknown> }
@@ -114,8 +114,14 @@ export interface SlackClientDeps {
   operatorStopped(): Promise<boolean>
   /** One AI-action-log line per call (operation name, status; never content). */
   record(companyId: string, userId: string | null, e: { operation: string; host: string; status: number | null; ok: boolean }): void
-  /** Where the browser signs in (https://slack.com, or a practice Slack's origin later). */
+  /** Where the browser signs in (https://slack.com, or the practice Slack's origin). */
   authorizeOrigin: string
+  /**
+   * The practice Slack is on (staging, `ACB_FAKE_SLACK_URL`): a client secret
+   * that is not a practice value is never sent (also one saved before the
+   * redirect was on). Tokens are checked by the practice upstream itself.
+   */
+  practiceSlack?: boolean
 }
 
 const METHOD_RE = /^[a-z]+(\.[a-zA-Z]+)+$/
@@ -225,6 +231,7 @@ export function createSlackClient(deps: SlackClientDeps) {
       const app = appOf(companyId).app()!
       const secret = await openAppSecret(companyId, 'client-secret')
       if (!secret) return { ok: false, reason: 'not-configured' }
+      if (deps.practiceSlack && !isPracticeSlackSecret(secret)) return { ok: false, reason: 'practice-real-secret' }
       const answer = await post('oauth.v2.access', { code, client_id: app.clientId, client_secret: secret, redirect_uri: redirectUri }, null)
       if ('failure' in answer) return { ok: false, reason: answer.failure }
       const j = answer.json

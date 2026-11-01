@@ -1,10 +1,10 @@
 import type Database from 'better-sqlite3'
 
 /**
- * The Slack connection (stage 3 A2, slack-connector.md). Not yet part of the
- * one schema run by db/index.ts initDatabase: A3 adds `slackSchema` there
- * (below the lane A marker of S2). Idempotent, unnumbered; columns added later
- * get a check-then-ALTER like the other schema modules.
+ * The Slack connection (stage 3 A2, slack-connector.md), part of the one
+ * schema run by db/index.ts initDatabase (below the lane A marker).
+ * Idempotent, unnumbered; columns added later get a check-then-ALTER like the
+ * other schema modules.
  *
  * Members' grants live in connector_grants / oauth_pending (provider 'slack').
  * No message body is stored anywhere: only the event ids already received.
@@ -61,7 +61,7 @@ export const slackSchema = `
     );
 `
 
-/** Creates the Slack tables (idempotent): what initDatabase will run once A3 lists `slackSchema`; tests run it now. */
+/** Creates the Slack tables (idempotent; initDatabase runs `slackSchema` too). */
 export function initSlackSchema(conn: Database.Database): void {
   conn.exec(slackSchema)
 }

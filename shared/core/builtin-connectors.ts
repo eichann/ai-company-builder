@@ -11,6 +11,7 @@
  * and its own optional capabilities: things only this service has (Google
  * Drive), which a business plugin may use by name but the core app never asks
  * for. Google stays where its code is (plan §5-2); this is its declaration.
+ * Slack (A3) serves the chat role; its code is services/slack-*.ts.
  *
  * Pure: imports only shared/core.
  */
@@ -40,6 +41,15 @@ export const BUILTIN_CONNECTORS = {
       { role: 'meetings', operations: ['read'], capabilities: ['transcript', 'attendees'] },
     ],
     capabilities: [{ id: 'drive', label: 'Drive で選んだものを読む・置く' }],
+  },
+  slack: {
+    id: 'slack',
+    label: 'Slack',
+    summary: 'メンバーが自分で許可すると、自分あての DM とメンションを ACB が受け取り、本人が確かめた返事を送れます。大事な知らせを会社のボットが DM で届けます。',
+    servings: [
+      { role: 'chat', operations: ['receive', 'reply'], capabilities: [] },
+    ],
+    capabilities: [],
   },
 } as const satisfies Record<string, BuiltinConnector>
 

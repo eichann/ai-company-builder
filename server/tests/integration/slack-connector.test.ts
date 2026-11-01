@@ -148,7 +148,7 @@ describe('a member\'s 「Slack で許可」', () => {
     const page = await allow('c1', 'u1', 'U0ONE')
     expect(page.granted).toBe(true)
     expect(grantOf('c1', 'u1')).toMatchObject({ status: 'active', accountEmail: 'one@div.example' })
-    expect((await connector.my(member('c1', 'u1')))).toMatchObject({ ok: true, value: { connected: true, features: ['read', 'reply'] } })
+    expect((await connector.my(member('c1', 'u1')))).toMatchObject({ ok: true, value: { connected: true, features: ['read', 'reply', 'notices'] } })
     expect((await read('c1', 'u1')).ok).toBe(true)
   })
 

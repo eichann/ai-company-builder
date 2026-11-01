@@ -16,6 +16,7 @@
  */
 import { join } from 'path'
 import { GOOGLE_HOSTS } from '../../shared/core/google'
+import { SLACK_HOSTS } from '../../shared/core/slack'
 
 export const DATA_DIR = process.env.DATA_DIR || join(process.cwd(), 'data')
 export const REPOS_DIR = process.env.REPOS_DIR || join(DATA_DIR, 'repos')
@@ -98,6 +99,8 @@ export function companyRepoPath(companyId: string): string {
  *   ACB_FAKE_HUBSPOT_URL  the key broker's HubSpot (relay, key check, connector) → `pnpm fake:hubspot`
  *   ACB_FAKE_GOOGLE_URL   every Google host of the Google connection → `pnpm fake:google`
  *                         (google-connector.md; the browser's sign-in page too)
+ *   ACB_FAKE_SLACK_URL    slack.com (the Slack connection) → `pnpm fake:slack`
+ *                         (slack-connector.md; the browser's sign-in page too)
  * Server-wide, never per company: a company able to change where a service
  * goes could make the server send its key to another company's or an
  * internal address.
@@ -130,6 +133,7 @@ const LOCAL_PUBLIC_HOSTS = new Set(['127.0.0.1', '[::1]', 'localhost'])
 const PRACTICE_VARIABLES: Array<{ variable: string; service: string; hosts: readonly string[] }> = [
   { variable: 'ACB_FAKE_HUBSPOT_URL', service: 'hubspot', hosts: ['api.hubapi.com'] },
   { variable: 'ACB_FAKE_GOOGLE_URL', service: 'google', hosts: GOOGLE_HOSTS },
+  { variable: 'ACB_FAKE_SLACK_URL', service: 'slack', hosts: SLACK_HOSTS },
 ]
 
 export function practiceUpstreamsFrom(env: Readonly<Record<string, string | undefined>>): PracticeUpstreams {

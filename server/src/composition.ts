@@ -177,8 +177,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   let keyCheck: BrokerKeyCheckService | null = null
   const keyBroker = createKeyBrokerService({
     ...repos, ...shared, brokerVault, brokerDay: () => brokerDayOf(shared.clock.nowMs()),
-    // Only the key broker's services (the Google connection checks its own practice values).
-    practiceServices: practiceList.filter(u => u.service !== 'google').map(u => u.service),
+    // Only the key broker's services (the Google and Slack connections check their own practice values).
+    practiceServices: practiceList.filter(u => u.service !== 'google' && u.service !== 'slack').map(u => u.service),
     checkKey: (companyId, service, secret, hosts) => keyCheck!.check(companyId, service, secret, hosts),
     // A connection a plugin manages keeps the relay read-only (plugins.md); bound below.
     managedByPlugin: (companyId, service) => plugins.manages(companyId, service),
@@ -229,6 +229,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
     holidaysOf: companyId => taskSettings.settingsOf(companyId).companyHolidays.map(h => h.date),
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    // 大事な知らせを Slack の DM で (lane A, composition/connectors.ts): called after construction only.
+    outside: (companyId, rows) => connectorsLane.noticesOutside(companyId, rows),
   })
   /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
   const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
@@ -466,7 +468,26 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // under composition/ (.claude/rules/server.md "Lane markers"); each lane edits
   // only its own call, and the marker lines keep the three calls apart for git.
   // lane A ▼
-  const connectorsLane = wireConnectorsLane({ conn, core: coreConnectors })
+  const connectorsLane = wireConnectorsLane({
+    conn, core: coreConnectors, ...shared, brokerVault, upstream, practiceList, memberOAuth,
+    isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
+    operatorStopped: connectorId => pluginShelf.isStopped(connectorId, ''),
+    recordCall: (companyId, userId, e) => {
+      try {
+        agentEvents.recordServerEvent(companyId, userId ?? 'acb:slack-bot', {
+          agent: 'script',
+          tool: `slack:${e.operation.slice(0, 60)}`,
+          category: 'broker',
+          target: { kind: 'broker', service: 'slack', host: e.host, path: e.operation.slice(0, 200), ...(e.status !== null ? { status: e.status } : {}) },
+          decision: 'auto-allowed',
+          outcome: e.ok ? 'ok' : 'error',
+        })
+      } catch {
+        console.warn('[slack] a call could not be recorded')
+      }
+    },
+    publicUrl,
+  })
   // lane B ▼
   const inboxLane = wireInboxLane({ conn, ...shared })
   // lane C ▼
