@@ -161,4 +161,8 @@ offers reconciling only; run ids and keys never reshape the URL), `client/tests/
 「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
 shows); `tasks-list.test.ts` also: only a company path reaches the server; a meeting read without a まとまり
 asks once, only when its link was read as missing and the company has まとまり. `tests/ui/ai-turns.spec.ts`
-and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`).
+and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`, the list left of the
+consultation as on the main screen). `tests/ui/tasks-layout.spec.ts` (`skill-layout-ui.html?tasks=1`,
+the real `AppShell`): with the consultation open the やること tab fills the left side from the tab
+strip to the bottom, the consultation stays where it is for ファイル and 検索, and a card opens
+beside the list.
