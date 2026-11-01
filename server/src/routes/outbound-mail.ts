@@ -22,29 +22,14 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { selfReportedProvenance } from '../services/record-engine'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const outboundMailRoute = new Hono()
-const { access, outboundMail } = services
-
-async function member(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const m = access.memberOf(companyId, user.id)
-  if (!m) return c.json({ error: 'Company not found or access denied' }, 404)
-  return m
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
+const { outboundMail } = services
 
 function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 = 200) {
   if (!result.ok) return refusal(c, result)
@@ -54,51 +39,49 @@ function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 = 200) {
 /** A person's change, with the provenance their app reports (informational only). */
 const humanWith = (body: unknown) => ({ kind: 'human' as const, ...selfReportedProvenance(body) })
 
-outboundMailRoute.post('/outbound-recipients', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, await outboundMail.recipients(m, await jsonBody(c)))
+outboundMailRoute.post('/outbound-recipients', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, await outboundMail.recipients(m, c.var.body))
 })
 
-outboundMailRoute.post('/outbound', async (c) => {
-  const m = await member(c)
-  if (m instanceof Response) return m
-  const body = await jsonBody(c)
+outboundMailRoute.post('/outbound', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  const body = c.var.body
   return answer(c, await outboundMail.create(m, humanWith(body), body), 201)
 })
 
-outboundMailRoute.get('/outbound/:messageId', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, outboundMail.get(m, c.req.param('messageId')))
+outboundMailRoute.get('/outbound/:messageId', companyMember, async (c) => {
+  const m = c.var.member
+  return answer(c, outboundMail.get(m, c.req.param('messageId')))
 })
 
-outboundMailRoute.put('/outbound/:messageId', async (c) => {
-  const m = await member(c)
-  if (m instanceof Response) return m
-  const body = await jsonBody(c)
+outboundMailRoute.put('/outbound/:messageId', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  const body = c.var.body
   return answer(c, await outboundMail.update(m, humanWith(body), c.req.param('messageId'), body))
 })
 
-outboundMailRoute.get('/outbound/:messageId/recipients', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, await outboundMail.draftRecipients(m, c.req.param('messageId')))
+outboundMailRoute.get('/outbound/:messageId/recipients', companyMember, async (c) => {
+  const m = c.var.member
+  return answer(c, await outboundMail.draftRecipients(m, c.req.param('messageId')))
 })
 
-outboundMailRoute.post('/outbound/:messageId/recipients', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, outboundMail.addTyped(m, c.req.param('messageId'), await jsonBody(c)))
+outboundMailRoute.post('/outbound/:messageId/recipients', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, outboundMail.addTyped(m, c.req.param('messageId'), c.var.body))
 })
 
-outboundMailRoute.post('/outbound/:messageId/send', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, await outboundMail.send(m, c.req.param('messageId'), await jsonBody(c)))
+outboundMailRoute.post('/outbound/:messageId/send', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, await outboundMail.send(m, c.req.param('messageId'), c.var.body))
 })
 
-outboundMailRoute.post('/outbound/:messageId/resolve', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, outboundMail.resolve(m, c.req.param('messageId'), await jsonBody(c)))
+outboundMailRoute.post('/outbound/:messageId/resolve', companyMember, serviceBody, async (c) => {
+  const m = c.var.member
+  return answer(c, outboundMail.resolve(m, c.req.param('messageId'), c.var.body))
 })
 
-outboundMailRoute.post('/outbound/:messageId/discard', async (c) => {
-  const m = await member(c)
-  return m instanceof Response ? m : answer(c, outboundMail.discard(m, c.req.param('messageId')))
+outboundMailRoute.post('/outbound/:messageId/discard', companyMember, async (c) => {
+  const m = c.var.member
+  return answer(c, outboundMail.discard(m, c.req.param('messageId')))
 })

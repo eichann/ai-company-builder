@@ -6,7 +6,6 @@ import globals from 'globals';
 // tests/security/auth-guards.test.ts NOT_YET_GUARDED (server.md "Route guards").
 // One file per line, so lanes removing different files do not conflict.
 const NOT_YET_GUARDED = [
-  'agent-events.ts',
   'ai-runs.ts',
   'broker-relay.ts',
   'companies.ts',
@@ -17,19 +16,14 @@ const NOT_YET_GUARDED = [
   'git.ts',
   'google-drive.ts',
   'google.ts',
-  'identities.ts',
   'inbox.ts',
   'invitations.ts',
   'oauth.ts',
-  'outbound-mail.ts',
   'permission-rules.ts',
-  'permissions.ts',
-  'plugins.ts',
   'private-folders.ts',
   'records-ai-identities.ts',
   'records-ai-inbox.ts',
   'records-ai.ts',
-  'records.ts',
   'slack-connection.ts',
 ];
 
