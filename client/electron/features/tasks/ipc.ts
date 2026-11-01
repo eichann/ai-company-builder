@@ -13,6 +13,8 @@
 //                 both, and refuses a private folder's file for a task outside it)
 //   tasks:share   「部署に出す」: the member's owner-only task shown to a department folder's readers
 //                 (records.md "Owner-only records"; the server checks the owner and the folder)
+//   tasks:suggestTags  tags in use that fit a title: a Haiku model through the company's key, else
+//                 the app's own matching (tag-suggest.ts; only the title and the tags are sent)
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
@@ -31,6 +33,7 @@ import {
   type BundleChoicesResult, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
+import { createTagSuggester, type TagSuggestDeps } from './tag-suggest'
 
 export interface TasksDeps {
   baseUrl: () => string
@@ -39,6 +42,8 @@ export interface TasksDeps {
   log?: Pick<Console, 'warn'>
   now?: () => number
   timeoutMs?: number
+  /** Tag suggestions through the company's key; absent → the app's own matching only. */
+  tagSuggest?: TagSuggestDeps
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -295,6 +300,8 @@ export function createTasksApi(deps: TasksDeps) {
 
 export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   const api = createTasksApi(deps)
+  const tags = createTagSuggester(deps.tagSuggest ?? { brokerEnv: async () => ({}) })
+  ipc.handle('tasks:suggestTags', (_event, companyId, title, inUse) => tags.suggest(typeof companyId === 'string' ? companyId : '', title, inUse))
   ipc.handle('tasks:list', (_event, companyId) => api.list(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))

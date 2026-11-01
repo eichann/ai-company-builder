@@ -1,6 +1,7 @@
 // The list's one line (tasks-ui.md): 「見積を直す 明日15時まで #営業」 → a title, a due with or
 // without a time, and tags. Words for the day are read in company time; anything not
 // understood stays in the title, so nothing the member typed is lost.
+import { tagKey } from '../../../shared/tag-suggest'
 import { addDays, type CompanyNow } from './model'
 
 export interface QuickAddDraft {
@@ -61,14 +62,9 @@ export function parseQuickAdd(line: string, now: CompanyNow): QuickAddDraft {
   return { title, due: day ? (time ? `${day}T${time}` : day) : null, tags }
 }
 
-/** A tag folded for comparison: width, letter case and katakana / hiragana do not count. */
-function tagKey(tag: string): string {
-  return tag.normalize('NFKC').toLowerCase().replace(/[ァ-ヶ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0x60))
-}
-
 /**
  * The tag already in use that `typed` most likely means (only spelled differently: 「えいぎょう」
- * vs 「営業」 is not caught, 「ｴｲｷﾞｮｳ」 vs 「エイギョウ」 is). null when it is in use as typed or
+ * vs 「営業」 is not caught here — the AI's suggestions catch it —, 「ｴｲｷﾞｮｳ」 vs 「エイギョウ」 is). null when it is in use as typed or
  * nothing is close.
  */
 export function similarTag(typed: string, inUse: readonly string[]): string | null {

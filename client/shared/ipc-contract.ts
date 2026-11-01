@@ -42,6 +42,7 @@ import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { RecordCardResult, RecordListResult } from './record-views'
 import type { CalendarTodayResult } from './calendar'
 import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from './tasks'
+import type { TagSuggestions } from './tag-suggest'
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
@@ -502,6 +503,8 @@ export interface IpcInvokeChannels {
   /** 「もう一度」 on a run held for a person. */
   /** 「部署に出す」: an owner-only task shown to a department folder's readers (never undone). */
   'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+  /** Tags in use that fit a title (AI through the company's key, else local matching); only suggestions. */
+  'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
   /** What the member found in the outside system about an operation whose result was unknown. */
   'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
@@ -868,6 +871,7 @@ export interface ElectronAPI {
   unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   shareTask: Invoke<'tasks:share'>
+  suggestTaskTags: Invoke<'tasks:suggestTags'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.
   watchMinutes: Invoke<'minutes:watch'>

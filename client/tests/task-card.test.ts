@@ -81,3 +81,10 @@ test('a run id or operation key that could reshape the URL never reaches the ser
   assert.equal((await api.reconcile('co1', 'run-1', 'a/b', true)).success, false)
   assert.equal(calls, 0)
 })
+
+test('「タグの候補」 adds tags only where the member may set them: requester or assignee, not a finished task', () => {
+  assert.equal(card(task('todo', { assignee: ME, requested_by: BOSS })).canSetTags, true)
+  assert.equal(card(task('in_progress', { assignee: 'u-tanaka', requested_by: ME })).canSetTags, true)
+  assert.equal(card(task('todo', { assignee: 'u-tanaka', requested_by: BOSS })).canSetTags, false)
+  assert.equal(card(task('done', { assignee: ME, requested_by: BOSS })).canSetTags, false)
+})

@@ -70,6 +70,19 @@ test('the one line adds a task with its due and tags; a tag narrows the list', a
   expectNoPageErrors(state)
 })
 
+test('a tag suggested for the title (a reading variant) is added to the line only when picked', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const input = page.getByRole('textbox', { name: 'やることを追加' })
+  await input.fill('えいぎょう資料を直す')
+  const suggested = page.getByLabel('タグの候補')
+  await expect(suggested.getByRole('button', { name: '#営業' })).toBeVisible()
+  await expect(input).toHaveValue('えいぎょう資料を直す')
+  await suggested.getByRole('button', { name: '#営業' }).click()
+  await expect(input).toHaveValue('えいぎょう資料を直す #営業 ')
+  await expect(page.getByLabel('タグの候補')).toHaveCount(0)
+  expectNoPageErrors(state)
+})
+
 test('a file dragged from the file tree onto a task row is linked to it, named inside the company folder', async ({ page }) => {
   const state = await openPreview(page, 'tasks-list')
   const target = page.getByTestId('task-row').filter({ hasText: '見積書を作り直す' })

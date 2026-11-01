@@ -3,8 +3,10 @@ import { Clock, Hash, Plus, Sparkle } from '@phosphor-icons/react'
 import type { TaskCreateInput } from '../../../../shared/tasks'
 import { dueText, type CompanyNow } from '../model'
 import { parseQuickAdd, similarTag, tagChoices } from '../quickAdd'
+import { useTagSuggestions } from '../hooks/useTagSuggestions'
 
 interface Props {
+  companyId: string
   now: CompanyNow
   /** Tags in use in the list, most used first. */
   tagsInUse: string[]
@@ -13,12 +15,16 @@ interface Props {
 }
 
 /** The list's one line: a task of the member's own, with a due and tags read from what they type. */
-export function QuickAdd({ now, tagsInUse, onAdd }: Props) {
+export function QuickAdd({ companyId, now, tagsInUse, onAdd }: Props) {
   const [line, setLine] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const draft = parseQuickAdd(line, now)
   const choices = tagChoices(line, tagsInUse) ?? []
+  const { suggestions, ask } = useTagSuggestions(companyId, tagsInUse)
+  // Suggested for the title as typed, without the tags already on the line.
+  const suggested = suggestions && suggestions.title === draft.title ? suggestions.tags.filter(t => !draft.tags.includes(t)) : []
+  const type = (next: string) => { setLine(next); ask(parseQuickAdd(next, now).title) }
   const similar = draft.tags.map(t => ({ from: t, to: similarTag(t, tagsInUse) })).find(s => s.to !== null) ?? null
 
   const add = async () => {
@@ -28,7 +34,7 @@ export function QuickAdd({ now, tagsInUse, onAdd }: Props) {
     try {
       const failure = await onAdd({ title: draft.title, due: draft.due, tags: draft.tags })
       if (failure) setError(failure)
-      else setLine('')
+      else type('')
     } finally {
       setBusy(false)
     }
@@ -42,7 +48,7 @@ export function QuickAdd({ now, tagsInUse, onAdd }: Props) {
         <Plus size={13} className="shrink-0 text-gray-400" />
         <input
           value={line}
-          onChange={e => setLine(e.target.value)}
+          onChange={e => type(e.target.value)}
           onKeyDown={e => { if (e.key === 'Enter' && !e.nativeEvent.isComposing) void add() }}
           aria-label="やることを追加"
           placeholder="やることを追加（例：見積を直す 明日15時まで #営業）"
@@ -58,6 +64,13 @@ export function QuickAdd({ now, tagsInUse, onAdd }: Props) {
             <span className="inline-flex items-center gap-1">今あるタグ：{choices.map(t => (
               <button key={t} type="button" onClick={() => setLine(l => l.replace(/[#＃][^\s#＃]*$/, `#${t} `))} className="rounded border border-gray-200 px-1 hover:border-accent hover:text-accent dark:border-zinc-700">#{t}</button>
             ))}</span>
+          )}
+          {suggested.length > 0 && (
+            <span className="inline-flex items-center gap-1" aria-label="タグの候補">
+              <Sparkle size={10} weight="fill" className="text-accent" />タグの候補：{suggested.map(t => (
+                <button key={t} type="button" onClick={() => setLine(l => `${l.trimEnd()} #${t} `)} className="rounded border border-accent/40 px-1 text-accent hover:bg-accent/10">#{t}</button>
+              ))}
+            </span>
           )}
           {similar && (
             <span className="inline-flex items-center gap-1 rounded bg-accent/10 px-1.5 py-px text-accent">

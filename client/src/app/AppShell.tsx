@@ -56,7 +56,7 @@ import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
-import { companyPathOf, listShownFor } from '../features/tasks/model'
+import { companyPathOf, listShownFor, tagCounts } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask, linkMeetingBundle } from '../features/tasks/api'
 import { BundleChooser } from '../features/tasks/components/BundleChooser'
@@ -276,7 +276,7 @@ export function AppShell() {
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onConsult={consultAbout} onChanged={taskList.reload} />
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onConsult={consultAbout} tagsInUse={tagCounts(taskList.data?.items ?? []).map(t => t.tag)} onChanged={taskList.reload} />
     }
     const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
     // An approval request also gets its own card on top: approving or sending back is the person's press.

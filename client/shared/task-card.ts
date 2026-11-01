@@ -53,6 +53,8 @@ export interface TaskCardData {
   /** The member's place in it. */
   roles: { assignee: boolean; requester: boolean; okGiver: boolean }
   actions: TaskCardAction[]
+  /** The member may set its tags (タグを付ける: requester or assignee, not finished); tag suggestions add through it. */
+  canSetTags: boolean
   /** 「佐藤さんが田中さんの了承を得たとして完了にしました」 while the task stands on that OK. */
   okLine: string | null
   /** What the AI checked and made (its preparation). */
@@ -121,6 +123,9 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     if (complete) actions.push(complete)
   }
 
+  const setTags = def?.actions.set_tags
+  const canSetTags = !!setTags && personMay(setTags.who) && !(def?.final ?? []).includes(r.state ?? '')
+
   const okBy = str(r.fields.ok_by)
   const okNote = str(r.fields.ok_note)
   const completedEntry = [...src.entries].reverse().find(e => e.action === 'complete')
@@ -163,7 +168,7 @@ export function taskCardOf(src: TaskCardSources): TaskCardData {
     tags: parseTagsValue(r.fields.tags),
     purpose: str(r.fields.purpose),
     fields: cardFields({ ...r, fields: Object.fromEntries(Object.entries(r.fields).filter(([k]) => !FIELDS_SHOWN_ELSEWHERE.has(k))) }, def, people),
-    roles, actions, okLine,
+    roles, actions, canSetTags, okLine,
     prepSummary: str(r.fields.prep_summary),
     prepared, files, links, history, runs,
     people: Object.entries(people).filter(([id]) => id !== me).map(([id, name]) => ({ id, name })).sort((a, b) => a.name.localeCompare(b.name, 'ja')),
