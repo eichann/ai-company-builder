@@ -18,6 +18,9 @@ paths:
   - "server/tests/integration/slack-wiring.test.ts"
   - "admin/src/app/companies/*/integrations/slack.tsx"
   - "client/src/features/settings/components/SlackSection.tsx"
+  - "client/src/features/settings/hooks/useSlack.ts"
+  - "client/shared/slack.ts"
+  - "client/tests/slack-connect.test.ts"
   - "client/electron/features/slack/**"
 ---
 
@@ -35,9 +38,7 @@ notice DMs, and 「つないでいるサービス」 with Slack's switch (its ap
 file naming `slack` or `*`). `slackSchema` is in `db/index.ts` below the lane A marker. Routes:
 `routes/slack-connection.ts` (`slackRoute` at `/api/companies/:companyId`, `slackEventsRoute` at
 `/api/slack`), listed in `auth-guards.test.ts` `PUBLIC_ENDPOINTS` (events) and the permission
-matrix. Still to come: the admin screen and the app's settings section (the app needs IPC
-channels: after stage 2's screens merge and S3 adds lane markers), lane B's consumer of the
-signals (`services.onSlackSignal`).
+matrix. Lane B's consumer of the signals (`services.onSlackSignal`) is still to come.
 
 ## Storage (`db/schema/slack.ts`, `ports/slack.ts`, `adapters/sqlite/slack.ts`; every statement binds the company)
 
@@ -129,6 +130,30 @@ longer members. Slack lists only one authorization per event; reaching every mem
 broadcast needs `apps.event.authorizations.list`, which takes an **app-level token** (`xapp-`,
 `authorizations:read`) — a third secret the admin would register — and one call per broadcast
 (paged). Not done in A3 (not cheap): an @channel reaches only the one authorized member today.
+
+## Screens
+
+- Admin 「つなぎ先」→「Slack」 (`admin/src/app/companies/[id]/integrations/slack.tsx`, owners /
+  admins; `slackApi` in `admin/src/lib/api.ts`, pinned by `admin-contract.test.ts`): ワークスペースの
+  ID, クライアント ID / シークレット, 署名のシークレット, ボットの鍵 (password fields, sent once and
+  emptied, never shown; left empty = kept), 「Slack の設定を保存」, 「オンにする / オフにする」, the
+  戻り先 and the fixed 知らせの届け先 with 「コピー」, the note that Token Rotation stays off, the
+  practice / operator / vault notices, 「メンバーの許可」 with 「止める」 (confirmation). Test:
+  `admin/tests/integrations.test.tsx` 「つなぎ先 → Slack」.
+- App 設定 →「Slack」 (tab after 「Google」 in 「AI と連携」: `SlackSection.tsx`, `hooks/useSlack.ts`,
+  ports `SlackReads` / `SlackOutbound` in `features/settings/api.ts`; words and the view in
+  `client/shared/slack.ts`). Main: `client/electron/features/slack/ipc.ts` (registered under
+  lane A in `main.ts`) — `slack:status`, `slack:connect(companyId, features)`,
+  `slack:disconnect`, `slack:setFeature(companyId, feature, on)`; the session stays in main;
+  answers are the server's `MySlack` or a sentence built from the status and codes only
+  (`slackErrorText`); `slack:connect` opens the sign-in URL in the system browser only when it is
+  `https://slack.com/oauth/v2/authorize` (or the practice Slack on `127.0.0.1` / `localhost` /
+  `[::1]`, same path: `isSlackSignInUrl`) and never returns it. Shows what is allowed,
+  「Slack で許可」 (read + notices), 「返事を送る許可も足す」, the checkbox 「「あなたの番」になったら
+  Slack の DM で知らせてもらう」 (`notices`), 「許可をやめる」 (confirmation), the browser wait (3 s,
+  2 min) like Google. Test: `client/tests/slack-connect.test.ts` (exactly the server's URL opened
+  and never answered; lookalike hosts / other schemes / paths never opened; refusals as
+  sentences from codes; the switch sends `{ feature, on }` to the member's own permission).
 
 ## Practice Slack (staging)
 

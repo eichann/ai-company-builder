@@ -79,6 +79,7 @@ const TYPES: Record<string, string> = {
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
+  Slack: 'SlackAdminView',
   CoreConnectors: 'CoreConnectorsView',
   MinutesFolder: 'MinutesFolderSetting',
   Plugins: '{ plugins: PluginListItem[] }',
@@ -253,6 +254,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', pluginsRoute)
   app.route('/api/companies/:companyId', googleRoute)
   app.route('/api/companies/:companyId', coreConnectorsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/slack-connection')).slackRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api', invitationsRoute)
 
@@ -399,6 +401,19 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('Broker', USERS.owner, 'PUT', `${base}/broker/settings`, { internalHosts: ['crm.example.com'] })
     await expectShape('Broker', USERS.owner, 'POST', `${base}/broker/stop-all`)
     await expectShape('Broker', USERS.owner, 'DELETE', `${base}/broker/keys/${id}`)
+  })
+
+  it('つなぎ先 → Slack', async () => {
+    await expectShape('Slack', USERS.owner, 'GET', `${base}/slack`)
+    // No bot key: saving it would ask Slack (nothing leaves this test).
+    await expectShape('Slack', USERS.owner, 'PUT', `${base}/slack/app`, { teamId: 'T0CONTRACT', clientId: '1111.2222', clientSecret: 'slack-NOT-REAL-contract-0000', signingSecret: 'slack-NOT-REAL-signing-0000' })
+    await expectShape('Slack', USERS.owner, 'PUT', `${base}/slack/enabled`, { enabled: false })
+    const { db } = await import('../../src/db')
+    db.prepare(`INSERT INTO connector_grants (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, created_at, updated_at)
+      VALUES (?, ?, 'slack', 's-contract', 'm@example.com', '[]', NULL, 'revoked', ?, ?)`).run(CO, USERS.member, new Date().toISOString(), new Date().toISOString())
+    const view = await expectShape('Slack', USERS.owner, 'DELETE', `${base}/slack/grants/${USERS.member}`)
+    expect(view.grants.map((g: Loose) => g.userId)).toEqual([USERS.member])
+    expect(JSON.stringify(view)).not.toContain('slack-NOT-REAL')
   })
 
   it('つなぎ先 → Google', async () => {
@@ -605,6 +620,18 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
     await A.googleApi.setEnabled(CO, true)
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+  })
+
+  it('つなぎ先 → Slack: the app and the switch reach the server as chosen; empty secrets keep the stored ones', async () => {
+    await A.slackApi.saveApp(CO, { teamId: 'T0BUILDER', clientId: '3333.4444', clientSecret: 'slack-NOT-REAL-builder-5555', signingSecret: 'slack-NOT-REAL-signing-6666' })
+    expect(row('SELECT team_id, client_id, client_secret_last4 FROM slack_apps WHERE company_id = ?', CO))
+      .toEqual({ team_id: 'T0BUILDER', client_id: '3333.4444', client_secret_last4: '5555' })
+    await A.slackApi.saveApp(CO, { teamId: 'T0BUILDER', clientId: '3333.4444' })
+    expect(row('SELECT client_secret_last4 FROM slack_apps WHERE company_id = ?', CO).client_secret_last4).toBe('5555')
+    await A.slackApi.setEnabled(CO, false)
+    expect(row('SELECT enabled FROM slack_apps WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.slackApi.setEnabled(CO, true)
+    expect(row('SELECT enabled FROM slack_apps WHERE company_id = ?', CO).enabled).toBe(1)
   })
 
   it('つないでいるサービス: the switch and the role choice reach the server as chosen', async () => {
