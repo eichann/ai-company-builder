@@ -277,6 +277,10 @@ upgrade:                                 # where work pinned to an older version
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
   `preload` refused (the frame has no network and is given nothing).
+- **Where an operation may be called from** (`via: [screen, plugin, run]` on a business
+  operation use, contract 2 only; absent = `[screen, run]`; copied by `combineUse`; plan 4b B6):
+  the operation checks refuse another caller with 403 `NOT_VIA`; from a plugin's screen (the
+  bridge) an operation is only ever an approval request. Details: `plugin-frame.md`.
 - **Settings** are parameters only: `number` / `duration` (`30m`, `2h`, `3d`) with `min` / `max`,
   `choice` (`options`, `option_labels`), `boolean`, `role` (a declared role or `dept_manager` /
   `admin`), `connector` (which connected service serves a connector role; no default — the

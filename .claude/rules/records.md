@@ -1305,3 +1305,11 @@ ledger are written (and after lane B's `afterAct` above), the engine awaits `f(m
 recordId, type, action, toState })` — it needs the acting member and actor, which `afterAct` does not
 carry; a failure there never changes the action's answer. Today it moves a meeting's まとまり to its business
 plugin's step (`plugin-steps.md` "After a meeting is read").
+
+## Where an action may be called from (`via`, plan 4b B6)
+
+An action may say `via: [screen, plugin, run]` (absent = `[screen, run]`; `plugin` never with
+`approval: prior`). The engine refuses a call from elsewhere with 403 `NOT_VIA` (`callVia`: a
+plugin's screen when the actor carries `via`, a run when the AI's token is bound to one, else the
+core's screens). A change through a plugin's screen keeps `record_ledger.via` (`{ plugin, version }`)
+and its cause is `plugin`. The bridge, its rules and tests: `plugin-frame.md`.

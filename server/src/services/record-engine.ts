@@ -46,7 +46,8 @@ export {
   ASSIGNEE_CANNOT_READ, FILE_NOT_LINKABLE, LINK_TARGET_NOT_FOUND, OK_BY_CANNOT_READ, STATE_CHANGED_BY_SERVICE, TYPE_CREATED_BY_SERVICE,
 } from './record-engine/refusals'
 export { linkLedgerValue } from './record-engine/links'
-export { mayAct } from './record-engine/act'
+export { mayAct, NOT_VIA } from './record-engine/act'
+export { callVia } from './record-engine/types'
 export { SHARE_ACTION } from './record-engine/share'
 export {
   createExternalRecordWriter, type ExternalRecordInput, type ExternalRecordResult, type ExternalRecordWriter,

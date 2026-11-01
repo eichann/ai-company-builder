@@ -9,7 +9,7 @@ import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
 import { PLUGIN_ID_RE, asksFirst, effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep } from '../../shared/core/plugins'
 import type { LedgerValue } from '../../shared/core/record-ledger'
-import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
+import { ONTOLOGY_NAME_RE, viaOf } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { CompanyData } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
@@ -18,7 +18,7 @@ import { refuse } from './outcome'
 import { conflict, engineWho, notActive, notFound, type OperationActor, type PluginOperationDeps } from './plugin-operation-common'
 import type { ActivePlugin } from './plugins'
 import { recordReader } from './record-access'
-import { mayAct } from './record-engine'
+import { callVia, mayAct, NOT_VIA } from './record-engine'
 import { RECORDS_DISABLED } from './records'
 
 /** Fields that are not `auto` now (prior / off), for this operation and mapping. */
@@ -63,6 +63,9 @@ export function parsePluginRunStep(runStep: string): { pluginId: string; step: s
 /** The gate's one answer, whatever the reason (another plugin, another company's, stopped, undeclared…): it names nothing. */
 export const NOT_IN_STEP = { error: 'この手順では使えない操作です', code: 'NOT_IN_STEP' } as const
 export const notInStep = () => refuse('forbidden', NOT_IN_STEP.error, { code: NOT_IN_STEP.code })
+
+/** An operation called from where its `via` does not list (a plugin's screen, a run, the core's screens). */
+const notVia = () => refuse('forbidden', NOT_VIA.error, { code: NOT_VIA.code })
 
 /** The step's declaration (own property only), or null. */
 export const stepOf = (manifest: Pick<PluginManifest, 'steps'>, name: string): PluginStep | null =>
@@ -268,6 +271,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     const plugin = active.plugin
     const op = Object.prototype.hasOwnProperty.call(plugin.manifest.operations, operation) ? plugin.manifest.operations[operation] : undefined
     if (!op) return { refusal: refuse('not-found', 'この操作はありません', { code: 'OPERATION_NOT_FOUND' }) } as const
+    if (!viaOf(op).includes(callVia(actor))) return { refusal: notVia() } as const
     if (op.kind === 'create' && op.createsRecord) return { refusal: refuse('bad-request', 'この操作は記録を新しく作るものです（記録を指定しません）', { code: 'OPERATION_CREATES_RECORD' }) } as const
     const link = companyData.forCompany(member.companyId).plugins.linkOfRecord(recordId)
     if (!link || link.pluginId !== pluginId || link.connectionId !== plugin.connectionId || link.object !== (op.attachTo ?? op.object)) {
@@ -291,6 +295,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     const plugin = active.plugin
     const op = Object.prototype.hasOwnProperty.call(plugin.manifest.operations, operation) ? plugin.manifest.operations[operation] : undefined
     if (!op || op.kind !== 'create' || !op.createsRecord) return { refusal: refuse('not-found', 'この操作はありません', { code: 'OPERATION_NOT_FOUND' }) } as const
+    if (!viaOf(op).includes(callVia(actor))) return { refusal: notVia() } as const
     const place = plugin.mapping.objects[op.object]?.visibleToFolder ?? ''
     if (!folderReadable(member, place) || !mayRunAt(member, actor, op.who, {}, place, { pluginId, recordId: null })) {
       return { refusal: refuse('forbidden', actor.kind === 'ai' && !op.who.includes('ai') ? 'この操作は AI からはできません' : 'この操作をする権限がありません', { code: 'NOT_ALLOWED' }) } as const

@@ -149,9 +149,9 @@ beforeAll(async () => {
   const manifest = readFileSync(join(pkg, 'plugin.yaml'), 'utf8').replace('contract: 1', 'contract: 2')
     .replace('    note: optional\n    decision: true\n', '    note: optional\n    decision: true\n    moves_money: true\n')
     .replace(/^( {2}[a-z_]+): auto$/gm, '$1: prior')
-    .replace('  add_note:\n    who: [assignee, dept_manager, admin, ai]', '  add_note:\n    who: [role:deal_reviewer]')
+    .replace('  add_note:\n    who: [assignee, dept_manager, admin, ai]', '  add_note:\n    who: [role:deal_reviewer]\n    via: [screen]')
   expect(manifest).toContain('moves_money: true')
-  expect(manifest).toContain('who: [role:deal_reviewer]')
+  expect(manifest).toContain('who: [role:deal_reviewer]\n    via: [screen]')
   writeFileSync(join(pkg, 'plugin.yaml'), manifest + ROLES + STEPS)
   mkdirSync(join(pkg, 'steps'))
   for (const s of ['work', 'ask', 'plain']) writeFileSync(join(pkg, 'steps', `${s}.md`), `# ${s}\n`)
@@ -383,6 +383,19 @@ describe("role:<name> in an operation's who is held through the role assignment"
       expect(services.absences.remove(owner, absence).ok).toBe(true)
     }
     expect(await code('rg-cover')).toBe('NOT_ALLOWED')
+    expect(fake.requests.slice(before).filter(q => q.method !== 'GET')).toEqual([])
+  })
+})
+
+describe("an operation's via (plan 4b §5-13): where it may be called from", () => {
+  it('add_note says via: [screen] — a run of a step that allows it, and a plugin screen, are refused before who; the screen passes on', async () => {
+    const before = outsideCalls()
+    const deal = recordOf('1000000001')
+    const body = { body: '確認しました', at: '2026-11-05T15:00:00+09:00' }
+    const NOT_VIA = { ok: false, kind: 'forbidden', body: { code: 'NOT_VIA', error: 'この操作はここからはできません。本体の画面から行ってください' } }
+    expect(await services.pluginOperations.run(member, aiIn(runOf('sample-sales__ask')), 'sample-sales', deal, 'add_note', body)).toEqual(NOT_VIA)
+    expect(await services.approvals.request(member, { kind: 'human', via: { plugin: 'sample-sales', version: '0.1.0' } }, 'sample-sales', deal, 'add_note', body)).toEqual(NOT_VIA)
+    expect(await services.pluginOperations.run(member, { kind: 'human' }, 'sample-sales', deal, 'add_note', body)).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
     expect(fake.requests.slice(before).filter(q => q.method !== 'GET')).toEqual([])
   })
 })

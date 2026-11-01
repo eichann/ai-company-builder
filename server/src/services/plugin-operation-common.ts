@@ -6,6 +6,7 @@
  * `plugin-operations.ts`.
  */
 import type { AcbValue, ExternalProperties } from '../../shared/core/plugins'
+import type { LedgerVia } from '../../shared/core/record-ledger'
 import type { PluginOperationRecordView } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -36,6 +37,8 @@ export interface OperationActor {
   proposedBy?: 'ai' | null
   /** For the AI: the execution run its token is bound to (S10b; from the token). */
   runId?: string | null
+  /** For a person: the plugin screen the call came through (the bridge, plan 4b B6; never a body). */
+  via?: LedgerVia | null
 }
 
 /** An operation record as its record's readers see it (contract: shared/types/plugins.ts). */

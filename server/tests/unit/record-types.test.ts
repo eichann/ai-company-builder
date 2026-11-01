@@ -317,3 +317,25 @@ describe('a field that holds money (money: true)', () => {
     expect(compareTypeDefinitions(money, { ...plain, version: 3 }).breaking).toEqual(['欄「amount」のお金の印（money: true）を外す'])
   })
 })
+
+describe('where an action may be called from (via, plan 4b §5-13)', () => {
+  const typed = (action: string) =>
+    `---\nlabel: 案件\nversion: 1\nstorage: server\nfields:\n  owner: { label: 責任者, kind: person, source: server }\nstates: [open, done]\nactions:\n  ${action}\n---\n`
+  const result = (action: string) => parseTypeFile('deal', typed(action))
+
+  it('a list of screen / plugin / run; left out when not written (the default is screen and run)', () => {
+    const r = result('finish: { label: 終える, to: done, who: [owner], via: [screen, plugin] }')
+    expect(r.ok && r.definition.actions.finish.via).toEqual(['screen', 'plugin'])
+    const plain = result('finish: { label: 終える, to: done, who: [owner] }')
+    expect(plain.ok && plain.definition.actions.finish).not.toHaveProperty('via')
+    for (const bad of ['via: []', 'via: [screen, screen]', 'via: [anywhere]']) {
+      expect(result(`finish: { label: 終える, to: done, who: [owner], ${bad} }`).ok, bad).toBe(false)
+    }
+  })
+
+  it('an action that needs prior approval cannot be called from a plugin screen (approving is the core card)', () => {
+    const r = result('finish: { label: 終える, to: done, who: [owner], approval: prior, via: [screen, plugin] }')
+    expect(r.ok ? '' : r.errors.join('\n')).toMatch(/via に plugin は書けません/)
+    expect(result('finish: { label: 終える, to: done, who: [owner], approval: prior, via: [screen, run] }').ok).toBe(true)
+  })
+})

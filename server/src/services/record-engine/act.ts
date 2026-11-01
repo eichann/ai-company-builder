@@ -1,7 +1,7 @@
 /** Running an action of a record's type: the engine's five duties (records.md "The state engine"). */
 import { FULL_ACCESS_ROLES, findPrivateScope } from '../../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../../shared/core/paths'
-import { INTERFACES, OK_FIELDS, type ActionDef } from '../../../shared/core/record-types'
+import { INTERFACES, OK_FIELDS, viaOf, type ActionDef } from '../../../shared/core/record-types'
 import { ROLE_WHO_PREFIX } from '../../../shared/core/plugin-roles'
 import type { LedgerAttachment, LedgerChange, LedgerDecision, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
 import { fileLinkPath, RECORD_ID_RE } from '../../../shared/core/records'
@@ -17,7 +17,7 @@ import { applyAcceptance } from './acceptance'
 import type { EngineContext } from './context'
 import { linkLedgerValue, MAX_LINK_TARGETS, withLinkTargets } from './links'
 import { ASSIGNEE_CANNOT_READ, bad, conflict, OK_BY_CANNOT_READ, serviceStateOnly, STATE_CHANGED_BY_SERVICE } from './refusals'
-import type { ActorInput } from './types'
+import { callVia, type ActorInput } from './types'
 import { checkValue, NOTE_MAX, OK_REQUIRED, parseMaterials, parseOkStatement, provenance, REF_RE } from './values'
 
 /**
@@ -39,6 +39,9 @@ export function mayAct(who: string[], member: Member, actor: ActorInput, values:
     values[w] === member.userId)
 }
 
+/** An action called from where its type's `via` does not list (records.md "Where an action may be called from"). */
+export const NOT_VIA = { error: 'この操作はここからはできません。本体の画面から行ってください', code: 'NOT_VIA' } as const
+
 export function acting(ctx: EngineContext) {
   const { deps, companyData, transactions, clock, open, canRead, stateOf, historyLine, tell, summaryOf } = ctx
   return {
@@ -55,6 +58,12 @@ export function acting(ctx: EngineContext) {
       if (!def) return conflict('この記録の型の定義がありません', 'TYPE_UNKNOWN')
       const action: ActionDef | undefined = Object.prototype.hasOwnProperty.call(def.actions, actionName) ? def.actions[actionName] : undefined
       if (!action) return refuse('not-found', 'この操作はありません', { code: 'ACTION_NOT_FOUND' })
+      // Where it may be called from (`via`, plan 4b §5-13): a plugin's screen only where the type says so,
+      // and never an action needing prior approval (approving is the core's card, whatever the definition says).
+      const via = callVia(actor)
+      if (!viaOf(action).includes(via) || (via === 'plugin' && action.approval === 'prior')) {
+        return refuse('forbidden', NOT_VIA.error, { code: NOT_VIA.code })
+      }
 
       const b = body as Record<string, unknown> | null
       if (typeof b !== 'object' || b === null || Array.isArray(b)) return bad('The body must be an object')
@@ -247,6 +256,7 @@ export function acting(ctx: EngineContext) {
         actorId: member.userId, actorKind: actor.kind, actorSource: actor.source ?? null, at, note, changes, attachments,
         decision, isDecision: action.decision, typeVersion: row.typeVersion, reversesVersion: null, ...provenance(actor),
         ...(onBehalfOf ? { onBehalfOf } : {}),
+        ...(via === 'plugin' && actor.via ? { via: { plugin: actor.via.plugin, version: actor.via.version } } : {}),
       }
       // Duty 3: state and ledger together, only if nobody changed the record since `expectedVersion`.
       const expected = b.expectedVersion as number

@@ -27,6 +27,7 @@ import { migrateGoogleCompanyFeatures } from './schema/connectors'
 // lane B ▼
 import { identitySchema } from './schema/identities'
 import { inboxSchema, migrateInboxMessageSourceRef } from './schema/inbox'
+import { migrateRecordLedgerVia } from './schema/plugin-bridge'
 // lane B ▲
 // lane C ▼
 import { pluginStepSchema } from './schema/plugin-steps'
@@ -134,6 +135,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane A ▲
   // lane B ▼
   migrateInboxMessageSourceRef(conn)
+  // The plugin screen a ledger entry came through (plugin-frame.md, B6).
+  migrateRecordLedgerVia(conn)
   // lane B ▲
   // lane C ▼
   // lane C ▲

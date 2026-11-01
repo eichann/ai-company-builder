@@ -2,7 +2,7 @@ import { SERVICE_OWNED_TYPES, SERVICE_RECEIPT_TYPES, SERVICE_TRANSITIONS, servic
 import { findPrivateScope } from '../../../shared/core/permissions'
 import { normalizeRepoPath } from '../../../shared/core/paths'
 import type { TypeDefinition } from '../../../shared/core/record-types'
-import type { LedgerChange, LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
+import type { LedgerChange, LedgerEntry, LedgerValue, LedgerVia } from '../../../shared/core/record-ledger'
 import { newRecordId, RECORD_ID_RE } from '../../../shared/core/records'
 import type { RecordSummary } from '../../../shared/types/records'
 import type { RecordAccessRow, RecordLinkRow } from '../../ports/records'
@@ -26,6 +26,8 @@ export interface ServiceActor {
   onBehalfOf?: string | null
   /** The AI's execution run (S10b), from its token. */
   runId?: string | null
+  /** A person's call through a plugin's screen (the bridge, plan 4b B6): kept on a created record's first entry. */
+  via?: LedgerVia | null
 }
 
 /** A new record of a service-owned type (`SERVICE_OWNED_TYPES`). */
@@ -209,6 +211,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
         runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
+        ...(input.actor.kind === 'human' && input.actor.via ? { via: { plugin: input.actor.via.plugin, version: input.actor.via.version } } : {}),
       }
       const existing = records.find(id)
       let written = false

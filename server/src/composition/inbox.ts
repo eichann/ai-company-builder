@@ -17,6 +17,7 @@ import type { MembershipRepository } from '../ports/memberships'
 import type { Transactions } from '../ports/transactions'
 import { createIdentityService } from '../services/identities'
 import { createInboxService, type InboxDeps } from '../services/inbox'
+import { createPluginBridge, type PluginBridgeDeps } from '../services/plugin-bridge'
 import type { SlackSignal } from '../services/slack-events'
 import type { ServiceRecordWriter } from '../services/record-engine'
 
@@ -36,6 +37,8 @@ export interface InboxLaneDeps {
   roles?: InboxDeps['roles']
   /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
   onSlackSignal?: (listen: (signal: SlackSignal) => void) => void
+  /** A plugin screen's bridge (plan 4b B6, plugin-frame.md): what it reaches, all as the member. */
+  bridge: PluginBridgeDeps
 }
 
 /** A Slack signal as the inbox's message (chat): ids and pointers only. The member's own message is outgoing. */
@@ -82,5 +85,7 @@ export function wireInboxLane(deps: InboxLaneDeps) {
   deps.onSlackSignal?.(signal => {
     try { inbox.receive(signal.companyId, signal.userId, slackSignalMessage(signal)) } catch { /* never fails Slack's answer */ }
   })
-  return { identities, inbox }
+  // A plugin screen's bridge (plan 4b B6 「橋の関所」, plugin-frame.md).
+  const pluginBridge = createPluginBridge(deps.bridge)
+  return { identities, inbox, pluginBridge }
 }

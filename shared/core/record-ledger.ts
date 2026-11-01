@@ -115,20 +115,37 @@ export interface LedgerEntry {
    * on the AI's entries whose consultation reported one; absent otherwise.
    */
   skills?: SkillUse[] | null
+
+  /**
+   * The plugin screen the change came through (plan 4b B6, the bridge;
+   * `.claude/rules/plugin-frame.md`): the business plugin and the package
+   * version whose screen the person used. Set by the server from the bridge
+   * route, never from a request body. Absent / null otherwise (the core's
+   * screens, a consultation, a run).
+   */
+  via?: LedgerVia | null
+}
+
+/** A change made through a plugin's screen (its bridge): which plugin, which version of its package. */
+export interface LedgerVia {
+  plugin: string
+  version: string
 }
 
 /**
  * Who caused a change (owner decision 2026-11-01): a person's click, the
  * member's AI in a consultation, an automated run under the person's authority,
- * the server itself (its clock) or an outside system (seen there).
+ * a plugin's screen the person used (its bridge, plan 4b B6: the person's own
+ * authority, the plugin's button), the server itself (its clock) or an outside
+ * system (seen there).
  */
-export type LedgerCause = 'person' | 'ai' | 'run' | 'system' | 'outside'
+export type LedgerCause = 'person' | 'ai' | 'run' | 'plugin' | 'system' | 'outside'
 
 /** The server's own actors (the server clock): `acb:` ids never belong to a member or an outside system. */
 export const SYSTEM_ACTOR_PREFIX = 'acb:'
 
-export function ledgerCause(entry: Pick<LedgerEntry, 'actorKind' | 'actorId' | 'runId'>): LedgerCause {
-  if (entry.actorKind === 'human') return 'person'
+export function ledgerCause(entry: Pick<LedgerEntry, 'actorKind' | 'actorId' | 'runId' | 'via'>): LedgerCause {
+  if (entry.actorKind === 'human') return entry.via ? 'plugin' : 'person'
   if (entry.actorKind === 'ai') return entry.runId ? 'run' : 'ai'
   return entry.actorId.startsWith(SYSTEM_ACTOR_PREFIX) ? 'system' : 'outside'
 }

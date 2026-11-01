@@ -1,4 +1,5 @@
-import type { LedgerEntry, LedgerValue } from '../../../shared/core/record-ledger'
+import type { LedgerEntry, LedgerValue, LedgerVia } from '../../../shared/core/record-ledger'
+import type { ActionVia } from '../../../shared/core/record-types'
 import type { Clock, IdGenerator } from '../../ports/clock'
 import type { CompanyDataSource } from '../../ports/company-data'
 import type { RecordFileWriter } from '../../ports/record-files'
@@ -79,4 +80,18 @@ export interface ActorInput {
   proposedBy?: 'ai' | null
   /** For the AI: the execution run its token is bound to (S10b; from the token, never the body). */
   runId?: string | null
+  /**
+   * For a person: the plugin screen the call came through (its bridge, plan 4b B6;
+   * services/plugin-bridge.ts sets it, never a body). The action's `via` must
+   * then include `plugin`; the ledger keeps it.
+   */
+  via?: LedgerVia | null
 }
+
+/**
+ * Where a call comes from, as an action's `via` names it (shared/core/record-types.ts
+ * ACTION_VIA): a plugin's screen, an automated run, else the core's screens (a
+ * person's session, the member's consultation).
+ */
+export const callVia = (actor: Pick<ActorInput, 'kind' | 'runId' | 'via'>): ActionVia =>
+  actor.via ? 'plugin' : actor.kind === 'ai' && actor.runId ? 'run' : 'screen'
