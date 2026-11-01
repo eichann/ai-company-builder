@@ -130,11 +130,12 @@ export type RelayErrorCode =
   | 'ACB_NO_TOKEN' | 'ACB_REAL_KEY_REFUSED' | 'ACB_TOKEN_INVALID' | 'ACB_NOT_MEMBER' | 'ACB_NO_KEY' | 'ACB_BROKER_OFF'
   | 'ACB_UNKNOWN_SERVICE' | 'ACB_BAD_PATH' | 'ACB_DESTINATION_NOT_ALLOWED' | 'ACB_PRIVATE_ADDRESS' | 'ACB_TOO_LARGE'
   | 'ACB_UPSTREAM_UNREACHABLE' | 'ACB_UPSTREAM_TIMEOUT' | 'ACB_REDIRECT_REFUSED' | 'ACB_STOPPED' | 'ACB_OVER_CAP' | 'ACB_READ_ONLY'
-  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED'
+  | 'ACB_MANAGED_BY_PLUGIN' | 'ACB_READ_NOT_ALLOWED' | 'ACB_KEY_NOT_CHOSEN'
 
 /** How a refusal of the relay is filed in the AI action log. */
 const REFUSAL_RECORD: Partial<Record<RelayErrorCode, { decision: ToolDecision; guardReason?: GuardReason }>> = {
   ACB_NO_KEY: { decision: 'guard-denied', guardReason: 'key-not-available' },
+  ACB_KEY_NOT_CHOSEN: { decision: 'guard-denied', guardReason: 'key-not-available' },
   ACB_STOPPED: { decision: 'stopped' },
   ACB_BAD_PATH: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
   ACB_DESTINATION_NOT_ALLOWED: { decision: 'guard-denied', guardReason: 'destination-not-allowed' },
@@ -177,6 +178,8 @@ function tokenRefusal(reason: BrokerTokenRefusal, label: string, service: string
     case 'service-not-granted':
     case 'no-key': return jsonError(403, 'ACB_NO_KEY', NEEDS_KEY(label, service))
     case 'key-stopped': return jsonError(403, 'ACB_STOPPED', `管理者が ${label} の鍵を止めています。再開されるまで使えません。`)
+    // No 「自分の鍵」 marker: registering an own key is not the answer here.
+    case 'key-not-chosen': return jsonError(403, 'ACB_KEY_NOT_CHOSEN', `${label} の会社の鍵が複数あり、どれを使うか管理者がまだ選んでいません。管理者に、管理画面の「API キー」で使う鍵を選んでもらってください。`)
     default: return jsonError(401, 'ACB_TOKEN_INVALID', 'ACB の通行証の期限が切れたか、使えなくなりました。新しい相談でもう一度お試しください。')
   }
 }
