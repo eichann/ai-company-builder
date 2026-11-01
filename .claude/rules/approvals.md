@@ -116,9 +116,9 @@ POST /api/companies/:id/approvals/:approvalId/withdraw
   - applied → `approved` (`result_operation_id`, the approver's reason as the decision reason,
     the requester told) and a **「決めたこと」** through the decisions service: important, decided
     by the approver, links `approval` + `deal`, the department of the request's folder, title
-    「<what changed>を承認」 (no names), key `<approval id>:decision`. When the decisions service
-    refuses (the place, a name in the reason → retried once with a neutral `why`), the approval
-    stands and only the refusal's code is logged.
+    「<what changed>を承認」, why = the approver's reason, key `<approval id>:decision`. When the
+    decisions service refuses (the place), the approval stands and only the refusal's code is
+    logged.
   - `CHANGED_OUTSIDE`, `APPROVAL_STALE`, `VERSION_CONFLICT`, `ACCOUNT_CHANGED`, `NOT_LINKED` →
     `stale`, nothing written; 409 with the code, 「HubSpot 側で変わっています。もう一度お願いし直して
     ください」 and the view.

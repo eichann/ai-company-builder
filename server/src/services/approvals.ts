@@ -598,9 +598,8 @@ export function createApprovalService(deps: ApprovalDeps) {
   /**
    * 「決めたこと」 for an approval (design §1-7 step 22): important, decided by
    * the approver, linked to the request and the record, in the department of
-   * the record's folder. The title says what changed, never a name. When the
-   * decisions service refuses (the place, a name in the reason…), the approval
-   * stands and only the refusal's code is logged.
+   * the record's folder. When the decisions service refuses (the place…), the
+   * approval stands and only the refusal's code is logged.
    */
   async function recordDecision(approver: Member, a: Loaded, payload: PluginApprovalPayload, reason: string): Promise<void> {
     const handle = companyData.forCompany(approver.companyId)
@@ -613,9 +612,7 @@ export function createApprovalService(deps: ApprovalDeps) {
     })
     void payload
     try {
-      let r = await deps.decisions.record(approver, { kind: 'human' }, body(reason.replace(/\s+/g, ' ').slice(0, 1000)))
-      // A name in the reason: the decision is still kept, pointing at the request for the reason.
-      if (!r.ok && r.body.code === 'NAME_IN_DECISION') r = await deps.decisions.record(approver, { kind: 'human' }, body('理由は承認のお願いに残しています'))
+      const r = await deps.decisions.record(approver, { kind: 'human' }, body(reason.replace(/\s+/g, ' ').slice(0, 1000)))
       if (!r.ok) logError('approvals', 'The decision of an approval was not recorded', undefined, { company: approver.companyId, code: String(r.body.code ?? r.kind) })
     } catch (err) {
       logError('approvals', 'The decision of an approval was not recorded', err, { company: approver.companyId })

@@ -13,9 +13,10 @@
  *   a person it names able to read the record;
  * - 「AI の番」 lists only the member's own records, only readable ones, only
  *   in a state with an AI-only action, never another company's;
- * - a decision: no member's name or linked deal / customer title in it, never
- *   in a private folder (and the refusal never names the place), the same key
- *   writes one file, links only to readable records of this company.
+ * - a decision is a server record (no file): readable only by those who can
+ *   read its folder, never in a private folder (and the refusal never names
+ *   the place), the same key records once, links only to readable records of
+ *   this company.
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -39,13 +40,9 @@ let engine: RecordEngine
 let service: RecordService
 let writer: ServiceRecordWriter
 let decisions: DecisionService
-let files: Map<string, string>
-let fileWrites: number
 let notified: Array<[string, string[]]>
 
 const PEOPLE = ['u-owner', 'u-alice', 'u-bob', 'u-mallory']
-/** Display names (fictional): what a decision must not contain. */
-const NAMES: Record<string, string> = { 'u-alice': '試験 花子', 'u-bob': '見本 次郎' }
 const m = (userId: string, co = 'a', role = 'member'): Member => ({ companyId: co, userId, role })
 const owner = (co = 'a') => m('u-owner', co, 'owner')
 const HUMAN = { kind: 'human' as const }
@@ -64,11 +61,11 @@ function company(id: string) {
   conn.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(id, id, id, 'u-owner', TS, TS)
   conn.prepare("INSERT INTO scopes (id, company_id, path, kind, created_at) VALUES (?, ?, '', 'company', ?)").run(`${id}-root`, id, TS)
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'everyone', NULL, 1, 1, ?)").run(`${id}-root-r`, `${id}-root`, TS)
-  for (const folder of ['営業部', '経理部']) {
+  for (const folder of ['営業部', '経理部', '秘書室']) {
     conn.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`${id}-${folder}`, id, folder, folder, TS, TS)
   }
-  // 経理部/意思決定: a private folder only u-alice (and owners/admins) may read.
-  conn.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, '経理部/意思決定', 'folder', ?, ?)").run(`${id}-priv`, id, `${id}-repo`, TS)
+  // 経理部: a private folder only u-alice (and owners/admins) may read.
+  conn.prepare("INSERT INTO scopes (id, company_id, path, kind, repo_id, created_at) VALUES (?, ?, '経理部', 'folder', ?, ?)").run(`${id}-priv`, id, `${id}-repo`, TS)
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'everyone', NULL, 0, 0, ?)").run(`${id}-priv-e`, `${id}-priv`, TS)
   conn.prepare("INSERT INTO scope_rules (id, scope_id, subject_type, subject_id, can_read, can_write, created_at) VALUES (?, ?, 'user', 'u-alice', 1, 1, ?)").run(`${id}-priv-a`, `${id}-priv`, TS)
   // 秘書室: a folder u-mallory cannot read (scope rules, not private).
@@ -91,8 +88,6 @@ let tick = 0
 beforeEach(() => {
   tick = 0
   notified = []
-  files = new Map()
-  fileWrites = 0
   conn = new Database(':memory:')
   initDatabase(conn)
   source = sqliteCompanyData(conn)
@@ -113,16 +108,6 @@ beforeEach(() => {
   writer = createServiceRecordWriter(base)
   decisions = createDecisionService({
     companyData: source, writer, ids,
-    files: {
-      createFile: async (companyId, path, text) => {
-        const k = `${companyId}:${path}`
-        if (files.has(k)) return false
-        files.set(k, text)
-        fileWrites++
-        return true
-      },
-    },
-    memberNames: () => Object.values(NAMES),
     tokenDigest: { digest: (t: string) => createHash('sha256').update(t).digest('hex') },
   })
   company('a')
@@ -245,55 +230,49 @@ describe('decisions', () => {
   }
   const body = (extra: Record<string, unknown> = {}) => ({ folder: '営業部', title: '対象の窓口を3つにする', why: 'チャット窓口も最初から入れたいとの要望', source: '議事録 2026-11-05', ...extra })
 
-  it('writes the file with id / type / links only and an unconfirmed record; the AI’s is recorded as ai', async () => {
+  it('is a server record, with no file, readable only by those who can read its folder; the AI’s is recorded as ai', async () => {
     const d = deal()
     const minutes = newMinutes('u-bob')
-    const r = ok(await decisions.record(m('u-alice'), AI, body({ links: { deal: d.id, minutes: minutes.id } })))
+    // Names are fine in a server record now (visibility is by the reader's permissions).
+    const r = ok(await decisions.record(m('u-alice'), AI, body({ title: '試験さんの案で窓口を3つにする', links: { deal: d.id, minutes: minutes.id } })))
     expect(r.created).toBe(true)
-    expect(r.record).toMatchObject({ type: 'decision', state: 'unconfirmed', title: '対象の窓口を3つにする', fields: { recorded_by: 'ai', decided_by: null, owner: 'u-bob', important: false } })
-    expect(r.record.path).toBe(`営業部/意思決定/${r.record.id}.md`)
-    const text = files.get(`a:${r.record.path}`)!
-    expect(text).toContain(`id: ${r.record.id}\ntype: decision\nlinks:\n  deal: ${d.id}\n  minutes: ${minutes.id}\n---\n# 対象の窓口を3つにする`)
-    expect(text).not.toMatch(/state|unconfirmed|未確認/)
+    expect(r.record).toMatchObject({
+      type: 'decision', state: 'unconfirmed', title: '試験さんの案で窓口を3つにする', path: null,
+      fields: { recorded_by: 'ai', decided_by: null, owner: 'u-bob', important: false, why: 'チャット窓口も最初から入れたいとの要望', source: '議事録 2026-11-05' },
+    })
+    expect(source.forCompany('a').records.find(r.record.id)).toMatchObject({ path: null, folder: '営業部', scopeId: null })
     expect(source.forCompany('a').records.ledger(r.record.id)[0]).toMatchObject({ actorId: 'u-alice', actorKind: 'ai', conversationId: 'conv-1' })
     // The minutes' assignee (owner) confirms; the AI cannot.
     expect(await engine.act(m('u-bob'), AI, r.record.id, 'confirm', { expectedVersion: 1 })).toMatchObject({ ok: false, kind: 'forbidden' })
     expect(ok(await engine.act(m('u-bob'), HUMAN, r.record.id, 'confirm', { expectedVersion: 1 })).record.state).toBe('confirmed')
-  })
 
-  it('refuses a member’s name or the linked deal’s / customer’s title, in the title or the text', async () => {
-    const d = deal()
-    for (const extra of [
-      { title: '試験さんに見積を送る' },
-      { why: '見本 次郎が了承した' },
-      { title: 'サンプル物産へ窓口を3つ提案', links: { deal: d.id } },
-      { source: 'サンプル物産 導入案件の議事録', links: { deal: d.id } },
-    ]) {
-      const r = await decisions.record(m('u-alice'), AI, body(extra))
-      expect(r).toMatchObject({ ok: false, body: { code: 'NAME_IN_DECISION' } })
-    }
-    expect(fileWrites).toBe(0)
+    // 秘書室 is closed to u-mallory: its decision is, to her, a record that does not exist.
+    const closed = ok(await decisions.record(m('u-alice'), HUMAN, body({ folder: '秘書室' }))).record
+    expect(ok(service.query(m('u-alice'), { type: 'decision' })).total).toBe(2)
+    expect(ok(service.query(m('u-mallory'), { type: 'decision' })).records.map(x => x.id)).toEqual([r.record.id])
+    expect(await service.get(m('u-mallory'), closed.id)).toEqual(await service.get(m('u-mallory'), 'decision-zzzzzzzz'))
+    // Another company's member with the same id sees neither.
+    expect(ok(service.query(m('u-alice', 'b'), { type: 'decision' })).total).toBe(0)
   })
 
   it('is never placed in a private folder, and the refusal never names the place', async () => {
-    // 経理部/意思決定 is private: even the owner (who may read and write it) is refused.
+    // 経理部 is private: even the owner (who may read and write it) is refused.
     const r = await decisions.record(owner(), HUMAN, body({ folder: '経理部' }))
     expect(r).toMatchObject({ ok: false, kind: 'bad-request', body: { code: 'DECISION_PLACE_REFUSED' } })
-    expect(JSON.stringify(r)).not.toMatch(/経理|意思決定/)
+    expect(JSON.stringify(r)).not.toMatch(/経理/)
     // The same words for a folder that is not a department.
     const none = await decisions.record(owner(), HUMAN, body({ folder: '存在しない部' }))
     expect(none).toEqual(r)
-    expect(fileWrites).toBe(0)
+    expect(ok(service.query(owner(), { type: 'decision' })).total).toBe(0)
   })
 
-  it('the same key twice writes one file and one record', async () => {
+  it('the same key twice records once', async () => {
     const first = ok(await decisions.record(m('u-alice'), AI, body({ key: 'minutes-abc123:decision:2' })))
     const again = ok(await decisions.record(m('u-alice'), AI, body({ key: 'minutes-abc123:decision:2', title: '言い換えた件名' })))
     expect(again).toEqual({ record: first.record, created: false })
     // At the same moment, too.
     const both = await Promise.all([1, 2].map(() => decisions.record(m('u-alice'), AI, body({ key: 'k-same-time' }))))
     expect(both.map(x => ok(x).record.id)[0]).toBe(ok(both[1]).record.id)
-    expect(fileWrites).toBe(2)
     expect(ok(service.query(owner(), { type: 'decision' })).total).toBe(2)
   })
 
@@ -304,7 +283,7 @@ describe('decisions', () => {
     expect(missing).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
     const minutes = newMinutes('u-bob')
     expect(await decisions.record(owner(), HUMAN, body({ links: { deal: minutes.id } }))).toMatchObject({ ok: false, body: { code: 'BAD_LINK' } })
-    expect(fileWrites).toBe(0)
+    expect(ok(service.query(owner(), { type: 'decision' })).total).toBe(0)
     expect(source.forCompany('b').records.linksTo([theirs.id])).toHaveLength(0)
   })
 })

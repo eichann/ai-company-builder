@@ -31,8 +31,12 @@ paths:
 # Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
 
 The core foundation of the light ontology (owner design 「段4 本体の土台」, decisions 0.18–0.23):
-types are defined in files, records are Markdown files (or server-only rows), and the server
-keeps the **company map** — an index of every record, its links and its server-sourced state —
+types are defined in files; **record data lives only on the server** (owner decision 2026-11-01:
+tasks, decisions, deals, interactions, minutes, approvals, outbound mail — every core and plugin
+type is `storage: server`), while what people write (quotes, plans, scripts, procedures) stays
+ordinary files that records link to by company path. Record files remain only for a company's own
+`.acb/types/` type with `storage: file` (the parser's default; no core or plugin type uses it). The
+server keeps the **company map** — an index of every record, its links and its server-sourced state —
 answering a fixed-shape query filtered by what the caller may read — and the **state engine**,
 the only writer of a record's server values, with its append-only ledger — and the typed tools
 (4-6) the AI changes records with.
@@ -74,7 +78,7 @@ engine the day it is turned on.
   `type_file_removed`. Invalid YAML is accepted by the checker and reported by the index (the
   last valid version stays). No screen creates types yet (0.23-4).
 
-## Record files (`shared/core/records.ts`)
+## Record files (`shared/core/records.ts`) — a company's own `storage: file` types only
 
 - Frontmatter holds only `id`, `type`, `links` (0.3-8): state, assignee, due… live on the server.
   Other keys are ignored and reported (`ignored_keys`), never read — so an AI writing
@@ -113,6 +117,12 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
     out of a private folder by id (`moved_across_folders`) — except a folder **made public**,
     whose records the company repository adopts at the same path.
   - a record's `type` never changes (`type_changed`).
+  - **server-only types never come from files**: a file whose `type` is in force with storage
+    `server` / `either` (every core type: a `type: task` or `type: decision` file an AI or an
+    older build wrote) is not indexed and is reported (`server_only_type`); it stays an ordinary
+    file and no record changes (a row indexed from that same file before is left as it was).
+    Nothing adopts a file into a server record any more. Test: `tests/unit/record-index.test.ts`
+    "server-only types never come from files".
   - **public → private links** are stored but never shown or followed, for anyone
     (`linkAllowed`): a record outside a private folder never reveals or reaches one inside it.
 - A removed file marks the record removed (`removed_at`); its state is kept.
@@ -148,20 +158,24 @@ GET     /records/item/:recordId    any member: the record + its readable links (
 
 ## Core types (4-5, `shared/core/core-types.ts`)
 
-`task` (タスク: implements `request`; storage `either` — server-only until it has content worth a
-file, then the index adopts the file with the same id, 0.6-1; states todo / in_progress / review
-/ waiting / done / cancelled, final done / cancelled; actions start, request_review (attach
-files, notify the reviewer, hand to them), send_back (note required, decision), assign (note
-required, undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer
-only — not AI; attach, history line, decision), cancel (note required, history line), reopen) and
+`task` (タスク: implements `request`; storage `server` — version 2 (2026-11-01; version 1 was
+`either`, a file adopted once it had content, 0.6-1), `purpose` a server field; the content
+people write is an ordinary file linked through `files`; states todo / in_progress / review /
+waiting / done / cancelled, final done / cancelled; actions start, request_review (attach files,
+notify the reviewer, hand to them), send_back (note required, decision), assign (note required,
+undoable approval tier, decision), wait, set_due, complete (requested_by / reviewer only — not AI;
+attach, decision), cancel (note required, decision), reopen) and
 `interaction` (やりとり: server only, no body — summary, channel, counterpart, pointer to the
 original; version 2 adds a `deal` link; outbound mail records one per sent mail, `outbound-mail.md`). Stored per company with source `core` by every index run
 (`ensureCoreTypes`) unless a version at least as new is there; a company extends one with its
-own `.acb/types/task.md` (higher version, additive only). Definitions may also say `final`
+own `.acb/types/task.md` (higher version, additive only; a company file still saying `storage:
+either` is now a breaking change against the core version 2 and is reported, the core definition
+staying in force — unless that file's version is already ≥ 2, in which case it stays in force:
+`ensureCoreTypes` only adds a core version above every stored one). Definitions may also say `final`
 (states where nobody's turn is waiting) and, per action, `hand_to` (the person field or argument
 copied into `next_actor`; only for types implementing `request`).
 
-Milestone 4 adds four (no customer or person names in any of them; people by id):
+Milestone 4 adds four (people by id in person fields):
 
 - `minutes` (議事録, server): `meeting_at`, `assignee` (organizer or first discoverer),
   `attendees` (text: JSON array of member ids — no person-list kind exists), `external_count`,
@@ -181,9 +195,10 @@ Milestone 4 adds four (no customer or person names in any of them; people by id)
   `payload_hash`, `payload_version`, `sent_at`, `provider_message_id`, `channel` [email]; links
   `about`, `minutes`. draft → sent / unknown / discarded; unknown → sent or back to draft
   (送られていた／送られていなかった). **No actions.**
-- `decision` (決めたこと, **file**, "Decisions" below): `recorded_by` [ai, human], `important`,
-  `decided_by` (null when the AI recorded it), `owner` (the linked minutes' assignee at creation,
-  else the member — `who` cannot name "the minutes' assignee"), `source_key`; links `deal`,
+- `decision` (決めたこと, server — version 2; version 1 was a file, "Decisions" below):
+  `recorded_by` [ai, human], `important`, `decided_by` (null when the AI recorded it), `owner`
+  (the linked minutes' assignee at creation, else the member — `who` cannot name "the minutes'
+  assignee"), `source_key`, `why` (long_text), `source`; links `deal`,
   `minutes`, `approval`. unconfirmed → confirmed / retracted: `confirm` (note optional), `retract`
   (note required), both `who: [owner, dept_manager, admin]`, decisions.
 
@@ -208,11 +223,10 @@ an approval), `client/tests/records-tools.test.ts` — mutation-checked.
 
 The engine's entry for the core services (approvals G6, minutes G7, mail G8, decisions). Like the
 external writer, composition.ts hands it to those services only (`serviceRecords`, not in
-`services`). `create(companyId, { type, id?, title, summary?, folder? | path?, fields, links,
-actor, note? })` — service-owned types only; `path` for a file record the caller has already
-committed (company repository, not private), `folder` for a server record (not private);
-`check(companyId, input)` is the same validation without writing (ask it before committing a
-file). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, links?,
+`services`). `create(companyId, { type, id?, title, summary?, folder?, fields, links, actor,
+note? })` — service-owned types only, server records only (`folder`: the readers' place, never a
+private folder); `check(companyId, input)` is the same validation without writing (ask it before
+outside work, e.g. the minutes intake). `transition(companyId, { recordId, action, expectedVersion, to | null, fields?, links?,
 actor, note?, decisionReason?, notify? })` — the state only along `SERVICE_TRANSITIONS` (next to
 the types; `serviceTransitionAllowed`), `to: null` changes fields only; `links` replaces the named
 links (ledger change `links.<name>`, ids before / after — the minutes' deal, `minutes.md`). Both: values checked by kind,
@@ -276,7 +290,8 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   event itself (0.18-1, SSE rule). The app's one listener is 「議事録が届きました」: a `records`
   event only makes main ask the server again for the member's received minutes (`minutes.md`
   "The app").
-- **Milestone line** (duty 5, `history_line: true`, file records only): appended to the file's
+- **Milestone line** (duty 5, `history_line: true`, file records only — a company's own
+  `storage: file` type; no core type has one any more): appended to the file's
   「## 経緯」 section (created at the end when missing) as the server's own commit
   (`lib/bare-commit.ts` `commitFileEdit`: trees along the path rewritten, pushed to itself under the
   company lock, so the push checker runs; redone on a new tip). Line: `<date> <action label>（<member
@@ -328,8 +343,9 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
   `expectedVersion`, `note` — required where the type says —, the action's arguments). Wired like
   the company-files tools: Claude in-process (in `allowedTools`: the type's `who` and the server
   decide, nothing is asked), Codex as a loopback endpoint; registry `recordsMcp` /
-  `recordActions`. The system prompt says state lives on the server, never in files, and people
-  are named by id in records, while replies to the member call a record by its title and
+  `recordActions`. The system prompt says records (tasks, decisions…) live only on the server —
+  never make a record file; content people write is an ordinary file the record links to — and
+  person fields take member ids, while replies to the member call a record by its title and
   distinguishing details (担当, 金額, dates) and show internal ids (record ids, outside ids,
   operation ids) only when asked — the tools keep the ids (`RECORDS_INSTRUCTIONS`).
   Category `app-tool` in the action log. Not in the
@@ -393,17 +409,17 @@ null = every non-final state), where the member is `assignee` or `next_actor`, r
 `POST /records/decisions` (session) and `POST /api/records-ai/decisions` (act token, tool
 `decisions_record`): `{ folder, title, why, source, links?: { deal?, minutes?, approval? },
 important?, key? }` → 201 `{ record, created: true }` (200 `created: false` for a known key).
-- The server writes `<department>/意思決定/<id>.md` (frontmatter id / type / links; `# title`;
-  `- なぜ：` / `- 元：` / `- 記録：` who recorded it, by id — no state in the file) as its own
-  commit (`gitRecordFileCreator`: `commitFileEdit` under the company lock, through the push
-  checker; never over an existing file), then the index row + state (`unconfirmed`) through the
-  service writer. Everything is checked before the commit.
-- Place: `folder` must be a department folder (`departments.folders()`) the member may write,
-  the file not inside a private folder (q14), and inside every linked server record's folder.
-  Every refusal is 400 `DECISION_PLACE_REFUSED` with the same words, never naming the place.
-- Names (q7, 13.10): title / why / source containing a member's display name (whole, or a part of
-  2+ letters) or the title of the linked deal or of a customer linked from the deal / minutes
-  (also without 株式会社 & co.) → 400 `NAME_IN_DECISION` (the name is not echoed).
+- A server record (owner decision 2026-11-01): no file, no commit. The service writer creates the
+  row (`path` null, `folder` = the department folder) and its state `unconfirmed`, with `why` /
+  `source` as server fields (the summary is the start of `why`, what text search reads). Earlier
+  builds wrote `<department>/意思決定/<id>.md`; such files stay ordinary files (`server_only_type`).
+- Place and readers: `folder` must be a department folder (`departments.folders()`) the member may
+  write, not a private folder nor inside one (q14), and inside every linked server record's
+  folder. The folder decides who reads the decision (those who can read it, like every server
+  record). Every refusal is 400 `DECISION_PLACE_REFUSED` with the same words, never naming the
+  place.
+- Names are allowed (the old `NAME_IN_DECISION` refusal protected the repository's history, which
+  a server record does not have; visibility is by the reader's permissions).
 - Links: readable records of this company of the link's type (else 400 `BAD_LINK`).
 - `key` (e.g. `minutes-…:decision:2`): the id is derived from it (sha256) and it is stored in
   `source_key`; a known key answers the existing record, so the same item is written once even
@@ -421,7 +437,8 @@ the app's id assignment and duplicate repair, archiving finished tasks (0.6).
 from definitions, read scope / Codex without actions, schema refusals, write guard, action
 choices), `server/tests/unit/record-service-types.test.ts` (service-owned types refused by the generic
 create, no generic action / undo on approvals, the writer's transition table and CAS, 「AI の番」
-own + readable only, decisions: names, private folder, key, links — each mutation-checked),
+own + readable only, decisions: a server record readable by its folder's readers only, private
+folder, key, links — each mutation-checked),
 `server/tests/unit/record-engine.test.ts` (from / who incl. AI, notes, ledger before/after,
 concurrency, undo, replay, notify targets, history line, attachments, decisions, 「あなたの番」,
 cross-company), `server/tests/unit/push-channel.test.ts` (records notices reach only the named
@@ -430,5 +447,6 @@ members of that company), `server/tests/unit/record-types.test.ts` (YAML subset,
 filtering incl. counts and links, cross-company), `server/tests/integration/records.test.ts`
 (switch, full index, a member's push over git-http indexed, `.acb/types/` push rules, a task
 through the engine over HTTP with a real attached commit and the history line committed through
-the push checker, a decision file committed through the push checker and indexed),
+the push checker for a company's own file type, a decision with no commit and an old decision
+file left an ordinary file),
 permission matrix rows + `CROSS`.

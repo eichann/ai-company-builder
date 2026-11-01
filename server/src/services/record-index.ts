@@ -17,6 +17,9 @@
  *   keeps the record. A record never moves between a private folder and
  *   anywhere else this way.
  * - type of a record cannot change (`type_changed`).
+ * - a file claiming a type whose records live on the server only (every core
+ *   type: task, decision, …; owner decision 2026-11-01) is not a record
+ *   (`server_only_type`): it stays an ordinary file and no record changes.
  * - links from outside a private folder into it are stored but never shown
  *   or followed (services/record-access.ts linkAllowed).
  * Removed files mark their record removed; its server state is kept (it is
@@ -55,7 +58,7 @@ export function currentTypes(records: RecordRepository): Map<string, CurrentType
 }
 
 /**
- * Store the core types (task, interaction; shared/core/core-types.ts) for a
+ * Store the core types (task, interaction, …; shared/core/core-types.ts) for a
  * company, source `core`, unless a version at least as new is stored (a
  * company's own `.acb/types/task.md` may extend one with a higher version).
  */
@@ -88,6 +91,7 @@ const PROBLEM_TEXT = {
   type_changed: '記録の型は変えられません。いまの型のままにしています',
   unknown_type: 'この型の定義がありません（.acb/types/ に定義を置いてください）',
   type_file_removed: '定義のファイルが消えました。いまの定義をそのまま使います',
+  server_only_type: 'この型の記録はサーバーだけに置きます。このファイルは記録としては読まず、ふつうのファイルのままにしています',
 }
 
 /**
@@ -161,12 +165,19 @@ export function applyRecordChanges(records: RecordRepository, input: ApplyInput)
   for (const { path, rec } of parsed) {
     if (claimed.has(rec.id)) { problem(path, 'duplicate_id', PROBLEM_TEXT.duplicate_id); continue }
     const row = records.find(rec.id)
+    const typeDef = types.get(rec.type)
+    if (typeDef && typeDef.definition.storage !== 'file') {
+      // Server-only records never come from files. A row indexed from this very file before its
+      // type became server-only is left as it was (not removed, not changed).
+      problem(path, 'server_only_type', PROBLEM_TEXT.server_only_type)
+      if (row && row.removedAt === null && row.path === path && row.scopeId === scopeId) { claimed.add(rec.id); vacating.delete(rec.id) }
+      continue
+    }
     let ok = false
     if (!row) ok = true
     else if (row.removedAt === null && row.path === path && row.scopeId === scopeId) ok = true
     else if (row.removedAt === null && vacating.has(rec.id) && row.scopeId === scopeId) ok = true // moved
     else if (row.removedAt !== null && row.scopeId === scopeId) ok = true // came back
-    else if (row.removedAt === null && row.path === null && scopeId === null && (row.folder === null || isSameOrAncestorPath(row.folder, path))) ok = true // a server-only record gets its file
     else if (row.scopeId !== null && scopeId === null) {
       // The private folder was made public: its records now live in the company repository.
       const s = scopeById.get(row.scopeId)
@@ -180,7 +191,6 @@ export function applyRecordChanges(records: RecordRepository, input: ApplyInput)
     if (row && row.type !== rec.type) { problem(path, 'type_changed', PROBLEM_TEXT.type_changed); continue }
     claimed.add(rec.id)
     vacating.delete(rec.id)
-    const typeDef = types.get(rec.type)
     if (!typeDef) problem(path, 'unknown_type', PROBLEM_TEXT.unknown_type)
     if (rec.problems.length > 0) problem(path, 'ignored_keys', rec.problems.slice(0, 5).join(' / '))
     records.upsert({
