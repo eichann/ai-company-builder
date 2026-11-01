@@ -5,7 +5,7 @@
 
 import path from 'path'
 import { pathToFileURL } from 'url'
-import { app, BrowserWindow, dialog, nativeImage, net, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
+import { app, BrowserWindow, dialog, nativeImage, net, Notification, protocol, safeStorage, screen, session, shell, type Session, type WebContents, type WebPreferences } from 'electron'
 import type { AllowedRoots } from './allowed-roots'
 import { localFileTarget } from './local-file-protocol'
 import { allowPermission, type AppPage } from './permission-policy'
@@ -14,6 +14,9 @@ import type { ChatWindowHost } from './features/chat-windows/ipc'
 import type { MessageBoxHost } from './sync/message-box-dialog'
 import type { SecretBox } from './services/api-key-store'
 import { createCloseGuard, type CloseAnswer, type CloseGuard } from './services/close-guard'
+
+/** Desktop notifications still on screen (one that is garbage-collected loses its click). */
+const liveNotifications = new Set<Notification>()
 
 export const desktopShell: DesktopShell = {
   openPath: (target) => shell.openPath(target),
@@ -32,6 +35,14 @@ export const desktopShell: DesktopShell = {
         'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPj/HwADBwIAMCbHYQAAAABJRU5ErkJggg=='
       ),
     })
+  },
+  notify(title, body, onClick) {
+    if (!Notification.isSupported()) return
+    const shown = new Notification({ title, body })
+    liveNotifications.add(shown)
+    shown.on('click', () => { liveNotifications.delete(shown); onClick?.() })
+    shown.on('close', () => liveNotifications.delete(shown))
+    shown.show()
   },
 }
 

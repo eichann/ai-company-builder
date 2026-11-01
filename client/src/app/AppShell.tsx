@@ -34,7 +34,7 @@ import { useDepartmentDownload } from '../features/sync/hooks/useDepartmentDownl
 import { useSync } from '../features/sync/hooks/useSync'
 import { useAutoSync } from '../features/sync/hooks/useAutoSync'
 import { DepartmentDownloadPrompt } from '../features/sync/components/DepartmentDownloadPrompt'
-import { useCommandHandler, useKeybindings } from '../shared/commands/commands'
+import { runCommand, useCommandHandler, useKeybindings } from '../shared/commands/commands'
 import { useFilesFromChatWindows } from '../features/chat/hooks/useFilesFromChatWindows'
 import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeaving'
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
@@ -42,6 +42,9 @@ import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
 import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
+import { useNotices } from '../features/notifications/hooks/useNotices'
+import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
+import { consultationDraftFor } from '../../shared/notifications-app'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -64,6 +67,8 @@ export function AppShell() {
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
   // 「議事録が届きました」: main checks while Google may read the member's minutes (features/minutes).
   const minutes = useMinutesNotices(currentCompany?.id)
+  // 「あなたの番」 and the bell (features/notifications): main reads them with the session.
+  const notices = useNotices(currentCompany?.id)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
 
   // The department tab, saved per company; 全社 when the saved one is gone.
@@ -278,6 +283,14 @@ export function AppShell() {
         onShowSettings={() => setShowSettings(true)}
         onLogout={() => { void handleLogout() }}
         extra={minutes.available && currentCompany ? <MinutesCheckButton companyId={currentCompany.id} /> : undefined}
+        notices={currentCompany ? (
+          <TitleBarNotices
+            companyId={currentCompany.id}
+            state={notices}
+            // No card screen yet: a consultation about the record, its id in the input (nothing sent).
+            onOpen={target => { void runCommand('chat.newConsultation', consultationDraftFor(target)).catch(() => {}) }}
+          />
+        ) : undefined}
       />
       <LeaveConfirmDialog question={leaving.question} onAnswer={leaving.answer} />
       <DepartmentBar

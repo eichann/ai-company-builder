@@ -81,7 +81,7 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string }
+  | { kind: 'newConsultation'; message?: string; draft?: string; title?: string; minutesId?: string }
   | { kind: 'insertText'; text: string }
 
 // Memoised: every tab stays mounted, and the parent re-renders on any tab's
@@ -305,7 +305,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId } = inputRequest
+    const { message, draft, title, minutesId } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -318,6 +318,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       }
       if (minutesId) minutesIdRef.current = minutesId
       if (message) void handleSend(message)
+      // The input of the new conversation may mount a frame later.
+      else if (draft && !chatInputApiRef.current?.replaceText(draft)) requestAnimationFrame(() => { chatInputApiRef.current?.replaceText(draft) })
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])
 

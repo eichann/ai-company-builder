@@ -57,7 +57,9 @@ import { createBrokerRelay } from './services/broker-relay'
 import { createBrokerKeyCheck, type BrokerKeyCheckService } from './services/broker-key-check'
 import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
-import { createRecordEngine } from './services/record-engine'
+import { createRecordEngine, type RecordChange } from './services/record-engine'
+import { createNotificationService } from './services/notifications'
+import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
 import { createPluginShelf } from './services/plugin-shelf'
 import { createPluginService } from './services/plugins'
@@ -191,13 +193,24 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
 
   const access = createAccessPolicy(repos.memberships)
   // The state engine (4-3): the only writer of record_state / record_ledger.
+  // Notices (知らせ, notifications.md): written at the engine's notify points, pushed as a bare version.
+  const notifications = createNotificationService({
+    ...shared,
+    push: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'notifications', version: shared.ids.newToken().slice(0, 32) }),
+  })
+  /** The engine's notify: the `records` signal (「あなたの番」 may have changed) and, for an entry, the notices. */
+  const notifyRecords = (companyId: string, userIds: string[], change?: RecordChange) => {
+    push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) })
+    if (!change) return
+    try { notifications.recordChange(companyId, userIds, change) } catch (err) { logError('notifications', 'Writing notices failed', err, { company: companyId }) }
+  }
   const recordEngine = createRecordEngine({
     ...shared,
     files: gitRecordFileWriter(),
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
   })
 
   // The engine's entry for the core services of milestone 4 (minutes, approvals, outbound mail,
@@ -206,7 +219,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
   })
   const decisions = createDecisionService({
     ...shared,
@@ -245,7 +258,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const externalRecords = createExternalRecordWriter({
     ...shared,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
-    notify: (companyId, userIds) => push.notify(companyId, userIds, { kind: 'records', version: shared.ids.newToken().slice(0, 32) }),
+    notify: notifyRecords,
   })
   const pluginImport = createPluginImportService({
     ...shared, plugins, connector: pluginConnector, writer: externalRecords,
@@ -427,6 +440,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyScopes: createCompanyScopeService(shared),
     records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
     recordEngine,
+    notifications,
     decisions,
     recordAiTokens: createRecordAiTokenService({
       ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,

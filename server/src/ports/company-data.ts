@@ -27,6 +27,7 @@ import type { ConnectorRepository } from './connectors'
 import type { DepartmentRepository } from './departments'
 import type { FixedPayloadRepository } from './fixed-payloads'
 import type { InvitationRepository } from './invitations'
+import type { NotificationRepository } from './notifications'
 import type { OrphanedScopeReader } from './orphaned-scopes'
 import type { OutboundMailRepository } from './outbound-mail'
 import type { PluginRepository } from './plugins'
@@ -54,6 +55,8 @@ export interface CompanyData {
   readonly outbound: OutboundMailRepository
   /** Fixed content of approval requests and outbound mail, per version (ports/fixed-payloads.ts). */
   readonly fixedPayloads: FixedPayloadRepository
+  /** Notices per member, their read state and kind switches (ports/notifications.ts). */
+  readonly notifications: NotificationRepository
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

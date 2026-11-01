@@ -46,6 +46,8 @@ import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createNotificationsWatcher } from './features/notifications/watcher'
+import { registerNotificationsIpc } from './features/notifications/ipc'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
@@ -189,7 +191,12 @@ const session = createSession()
 // The AI policy, the emergency stop (M2) and the AI action log (M1): features/agent-control.
 // Set once 「議事録が届きました」 exists (below): a records signal only makes it ask the server again.
 let recordsSignal: (companyId: string) => void = () => {}
-const agentControl = wireAgentControl({ serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle, onRecords: companyId => recordsSignal(companyId) })
+let noticesSignal: (companyId: string) => void = () => {}
+const agentControl = wireAgentControl({
+  serverUrl: getServerApiUrl, session, userDataDir, home: os.homedir(), turns: () => chatTurns, lifecycle,
+  onRecords: companyId => recordsSignal(companyId),
+  onNotifications: companyId => noticesSignal(companyId),
+})
 // 「議事録が届きました」 (features/minutes): checked with the session here, only while Google may read minutes.
 const minutes = createMinutesChecker({
   baseUrl: getServerApiUrl,
@@ -197,9 +204,21 @@ const minutes = createMinutesChecker({
   onChanged: companyId => appWindow.send('minutes:changed', { companyId }),
   watchSignals: companyId => agentControl.watchSignals(companyId),
 })
-recordsSignal = companyId => minutes.recordsSignal(companyId)
 lifecycle.beforeQuit(() => minutes.stop())
 registerMinutesIpc(ipc, minutes)
+// The title bar's 「あなたの番」 and bell (features/notifications): read with the session here; a Mac
+// notification only for an approval request or a new item in あなたの番 (E-27).
+const notices = createNotificationsWatcher({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  onChanged: companyId => appWindow.send('notifications:changed', { companyId }),
+  watchSignals: companyId => agentControl.watchSignals(companyId),
+  desktopNotify: (title, body) => desktopShell.notify(title, body, () => mainWindowHost.focus()),
+})
+recordsSignal = companyId => { minutes.recordsSignal(companyId); notices.signal(companyId) }
+noticesSignal = companyId => notices.signal(companyId)
+lifecycle.beforeQuit(() => notices.stop())
+registerNotificationsIpc(ipc, notices)
 
 // Local chat history and hand-off memos (features/chat-history).
 const chatHistory = wireChatHistory(ipc, {
@@ -244,6 +263,7 @@ registerAuthIpc(ipc, {
     brokerTokens.clear()
     companyFilesApi.clear()
     minutes.stop()
+    notices.stop()
     // Another account must not find this one's consultations on screen.
     chatWindows.closeAll()
   },

@@ -404,9 +404,11 @@ arguments are copied into the server fields of the same name, `hand_to` copies o
 - **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
   the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
   value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
-  event itself (0.18-1, SSE rule). The app's one listener is 「議事録が届きました」: a `records`
-  event only makes main ask the server again for the member's received minutes (`minutes.md`
-  "The app").
+  event itself (0.18-1, SSE rule). The app's listeners: 「議事録が届きました」 (main asks the server
+  again for the member's received minutes, `minutes.md` "The app") and the title bar's 「あなたの番」
+  (`notifications.md`). `notify` also carries the ledger entry (`RecordChange`), from which the
+  notices (知らせ) are written — never the actor, kind + record + version only
+  (`notifications.md`).
 - **Milestone line** (duty 5, `history_line: true`, file records only — a company's own
   `storage: file` type; no core type has one any more): appended to the file's
   「## 経緯」 section (created at the end when missing) as the server's own commit

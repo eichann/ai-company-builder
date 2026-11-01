@@ -37,6 +37,7 @@ import type { GoogleConnectResult, GoogleFeature, GoogleStatusResult } from './g
 import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
+import type { NoticesActionResult, NoticesState } from './notifications-app'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
@@ -480,6 +481,13 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  // The title bar's 「あなたの番」 and bell (notifications.md): read with the member's session in main.
+  /** The company on screen (null: none); starts the 5-minute check. */
+  'notifications:watch': { args: [companyId: string | null]; result: void }
+  'notifications:state': { args: [companyId: string]; result: NoticesState }
+  'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+  'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
+  'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -593,6 +601,8 @@ export interface IpcEventChannels {
   'writeAccess:changed': [data: { companyId: string; access: WriteAccess }]
   /** The received minutes of this company may have changed: re-read them (`minutes:notices`). */
   'minutes:changed': [data: { companyId: string }]
+  /** 「あなたの番」 or the notices of this company may have changed: re-read them (`notifications:state`). */
+  'notifications:changed': [data: { companyId: string }]
   'setup:progress': [data: DownloadProgress]
   'sparse:progress': [data: DownloadProgress]
   'agent-interaction:request': [request: AgentInteractionRequest]
@@ -780,6 +790,12 @@ export interface ElectronAPI {
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
+  watchNotifications: Invoke<'notifications:watch'>
+  getNotificationsState: Invoke<'notifications:state'>
+  markNotificationsRead: Invoke<'notifications:markRead'>
+  getNotificationSettings: Invoke<'notifications:settings'>
+  setNotificationSetting: Invoke<'notifications:setSetting'>
+  onNotificationsChanged: Subscribe<'notifications:changed'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>

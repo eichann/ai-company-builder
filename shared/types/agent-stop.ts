@@ -86,7 +86,7 @@ export interface AgentStopRequest {
 // other kind, any extra field, and anything larger than PUSH_EVENT_MAX_BYTES.
 // ----------------------------------------------------------------------------
 
-export const PUSH_EVENT_KINDS = ['policy', 'records'] as const
+export const PUSH_EVENT_KINDS = ['policy', 'records', 'notifications'] as const
 export type PushEventKind = typeof PUSH_EVENT_KINDS[number]
 
 /**
@@ -94,6 +94,9 @@ export type PushEventKind = typeof PUSH_EVENT_KINDS[number]
  * `records`: something of the company map that concerns this member changed (an action named
  * them, or it is now their turn — `.claude/rules/records.md`); refetch 「あなたの番」. `version`
  * is only a fresh value: it says nothing about what changed.
+ * `notifications`: the member's notices (知らせ) or their read state changed — refetch
+ * `GET /me/notifications` (`.claude/rules/notifications.md`). Also only a fresh value. Released
+ * apps without this kind drop it (`parsePushEvent` knows only its own kinds) and keep the connection.
  */
 export interface PushEvent {
   kind: PushEventKind
