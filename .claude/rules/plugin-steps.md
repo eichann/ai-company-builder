@@ -75,10 +75,11 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
 
 ## The app
 
-Not yet (the next PR): the runner's queue from `GET /me/plugin-step-turns`, the step kind
-`client/shared/ai-turn-steps/plugin.ts`, loading the procedure from
-`<userData>/plugins/<id>@<version>/steps/…` (`pluginPackages.folderOf`) or the company Skill at the
-pinned tree, and the card's button.
+`ai-turns.md` "A business plugin's steps": the runner's queue from `GET /me/plugin-step-turns`,
+the step kind `client/shared/ai-turn-steps/plugin.ts` (the app parses these answers itself), the
+procedure read from `<userData>/plugins/<id>@<version>/steps/…` (`pluginPackages.folderOf`) or the
+company Skill at the pinned tree, the tool ceiling per consultation, and the card's button for
+`start: person` steps.
 
 Ready from C4 (`plugins.md` "The gate of a step's run"): claim a step's run as
 `<pluginId>__<step>` (`parsePluginRunStep`; `AI_RUN_STEP_RE` allows 40 characters); the server then
