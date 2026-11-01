@@ -14,7 +14,13 @@
  *   the step's `approvals` and then only becomes an approval request;
  * - the connector roles are the step's (`mail.read` is not `mail.send`);
  * - the plugin switched off, or stopped by the operator: nothing passes;
- * - a consultation and a core step (minutes reading) keep what they had.
+ * - a consultation and a core step (minutes reading) keep what they had;
+ * - an operation that moves money (`moves_money`) asks first like one reaching
+ *   outside: never direct, in a step only with `approvals` and then only a
+ *   request;
+ * - the AI's tool list of a step's run is that step's operations only;
+ * - `role:<name>` in an operation's `who` is held through C3's assignment (the
+ *   company's, a まとまり's override, an absent holder's delegate).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs'
@@ -53,6 +59,10 @@ deal:
 people:
   owners:
     "75123001": rg-member
+`
+const ROLES = `
+roles:
+  deal_reviewer: { label: 案件の確認者 }
 `
 const STEPS = `
 steps:
@@ -131,7 +141,13 @@ beforeAll(async () => {
   putSampleHub(shelfDir)
   // The business plugin as contract 2 with three steps.
   const pkg = join(shelfDir, 'sample-sales@0.1.0')
-  writeFileSync(join(pkg, 'plugin.yaml'), readFileSync(join(pkg, 'plugin.yaml'), 'utf8').replace('contract: 1', 'contract: 2') + STEPS)
+  // update_deal moves money; add_note is the deal reviewer's (a business role).
+  const manifest = readFileSync(join(pkg, 'plugin.yaml'), 'utf8').replace('contract: 1', 'contract: 2')
+    .replace('    note: optional\n    decision: true\n', '    note: optional\n    decision: true\n    moves_money: true\n')
+    .replace('  add_note:\n    who: [assignee, dept_manager, admin, ai]', '  add_note:\n    who: [role:deal_reviewer]')
+  expect(manifest).toContain('moves_money: true')
+  expect(manifest).toContain('who: [role:deal_reviewer]')
+  writeFileSync(join(pkg, 'plugin.yaml'), manifest + ROLES + STEPS)
   mkdirSync(join(pkg, 'steps'))
   for (const s of ['work', 'ask', 'plain']) writeFileSync(join(pkg, 'steps', `${s}.md`), `# ${s}\n`)
   Object.assign(process.env, {
@@ -156,7 +172,7 @@ beforeAll(async () => {
   const { ensureCompanyScope } = await import('../../src/adapters/sqlite/permission-store')
   db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(CO, CO, CO, 'rg-owner', ts(), ts())
   ensureCompanyScope(db, CO)
-  for (const [u, r] of [['rg-owner', 'owner'], ['rg-member', 'member']]) {
+  for (const [u, r] of [['rg-owner', 'owner'], ['rg-member', 'member'], ['rg-lead', 'member'], ['rg-cover', 'member']]) {
     db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(`m-${u}`, u, CO, r, ts(), ts())
   }
   db.prepare('INSERT INTO departments (id, company_id, name, folder, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('rg-d-sales', CO, '営業部', '営業部', ts(), ts())
@@ -255,5 +271,88 @@ describe('a stopped plugin passes nothing', () => {
       rmSync(join(shelfDir, 'stopped'))
     }
     expect(await role(work, 'mail.read')).toBe(true)
+  })
+})
+
+/** A token bound to `runId` (or a consultation's, without one), as the app gets it. */
+async function tokenFor(runId: string | null): Promise<string> {
+  const conversationId = runId ? companyData.forCompany(CO).aiRuns.byId(runId).conversationId : 'conv-rg-consult'
+  const t = await call({ user: member.userId, method: 'POST', path: `/api/companies/${CO}/me/record-tokens`, body: { conversationId, agent: 'claude-code', scope: 'act', ...(runId ? { run: { id: runId, generation: 1 } } : {}) } })
+  expect(t.status, JSON.stringify(t.body)).toBe(201)
+  return t.body.data.token as string
+}
+const toolNames = async (runId: string | null) => {
+  const r = await call({ token: await tokenFor(runId), method: 'GET', path: '/api/records-ai/plugins' })
+  expect(r.status, JSON.stringify(r.body)).toBe(200)
+  return (r.body.data.plugins as Json[]).flatMap(p => p.operations.map((o: Json) => `${p.id}.${o.name}`)).sort()
+}
+
+describe('an operation that moves money asks first, like one reaching outside', () => {
+  const versionOf = (id: string) => (db.prepare('SELECT version FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, id) as Json).version as number
+  const body = () => ({ expectedVersion: versionOf(recordOf('1000000001')), fields: { next_step: '見積の送付' }, note: '先方の依頼' })
+  const update = (actor: Json) => services.pluginOperations.run(member, actor, 'sample-sales', recordOf('1000000001'), 'update_deal', body())
+
+  it("never direct: a person (or a consultation's AI) is told to ask for approval, though the company chose auto", async () => {
+    const before = outsideCalls()
+    expect(await update({ kind: 'human' })).toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(await update(aiIn(null))).toMatchObject({ ok: false, body: { code: 'APPROVAL_REQUIRED' } })
+    expect(fake.requests.slice(before).filter(q => q.method !== 'GET')).toEqual([])
+  })
+
+  it("in a step's run: refused without the step's approvals; with them only an approval request", async () => {
+    const before = outsideCalls()
+    expect(await update(aiIn(runOf('sample-sales__work')))).toEqual(NOT_IN_STEP)
+    const approvals = approvalCount()
+    const asked = await services.approvals.request(member, aiIn(runOf('sample-sales__ask')), 'sample-sales', recordOf('1000000001'), 'update_deal', body())
+    expect(asked, JSON.stringify(asked)).toMatchObject({ ok: true, value: { outcome: 'approval-requested' } })
+    expect(approvalCount()).toBe(approvals + 1)
+    expect(fake.requests.slice(before).filter(q => q.method !== 'GET' && !q.path.includes('/search'))).toEqual([])
+  })
+})
+
+describe("the AI's tool list of a step's run is its step's operations", () => {
+  it("a consultation lists them all; a step what its step allows; a step without plugin_operations, another plugin's none", async () => {
+    const all = await toolNames(null)
+    expect(all).toEqual(expect.arrayContaining(['sample-sales.create_deal', 'sample-sales.refresh_deal', 'sample-sales.update_deal']))
+    expect(await toolNames(runOf('minutes-reading'))).toEqual(all)
+    // work: plugin_operations without approvals — nothing that asks first (money, a new record).
+    const work = await toolNames(runOf('sample-sales__work'))
+    expect(work).toContain('sample-sales.refresh_deal')
+    expect(work).not.toContain('sample-sales.update_deal')
+    expect(work).not.toContain('sample-sales.create_deal')
+    expect(await toolNames(runOf('sample-sales__ask'))).toEqual(expect.arrayContaining(['sample-sales.create_deal', 'sample-sales.update_deal']))
+    expect(await toolNames(runOf('sample-sales__plain'))).toEqual([])
+    expect(await toolNames(runOf('sample-leads__work'))).toEqual([])
+  })
+})
+
+describe("role:<name> in an operation's who is held through the role assignment", () => {
+  const P = 'sample-sales'
+  const note = (userId: string) => services.pluginOperations.run({ companyId: CO, userId, role: 'member' }, { kind: 'human' }, P, recordOf('1000000001'), 'add_note', { body: '確認しました', at: '2026-11-05T15:00:00+09:00' })
+  const code = async (userId: string) => ((await note(userId)) as Json).body?.code ?? 'OK'
+
+  it("nobody assigned: nobody; the company's holder; a まとまり override wins for that deal; an absent holder's delegate", async () => {
+    const before = outsideCalls()
+    expect(await code('rg-lead')).toBe('NOT_ALLOWED')
+    expect(services.pluginRoles.assign(owner, P, 'deal_reviewer', { userIds: ['rg-lead'] }).ok).toBe(true)
+    expect(await code('rg-lead')).toBe('APPROVAL_REQUIRED')
+    expect(await code('rg-member')).toBe('NOT_ALLOWED')
+    expect(await code('rg-cover')).toBe('NOT_ALLOWED')
+    // The deal's own holder replaces the company's (never merged).
+    const deal = recordOf('1000000001')
+    expect(services.pluginRoles.setBundleOverride(owner, P, 'deal_reviewer', deal, { userIds: ['rg-member'] }).ok).toBe(true)
+    expect(await code('rg-member')).toBe('APPROVAL_REQUIRED')
+    expect(await code('rg-lead')).toBe('NOT_ALLOWED')
+    expect(services.pluginRoles.setBundleOverride(owner, P, 'deal_reviewer', deal, { userIds: null }).ok).toBe(true)
+    // rg-lead away: rg-cover stands in.
+    const today = services.absences.view(owner, 'rg-lead').value.today as string
+    const absence = services.absences.create(owner, { userId: 'rg-lead', from: today, until: today, delegateId: 'rg-cover' }).value.absence.id as string
+    try {
+      expect(await code('rg-cover')).toBe('APPROVAL_REQUIRED')
+    } finally {
+      expect(services.absences.remove(owner, absence).ok).toBe(true)
+    }
+    expect(await code('rg-cover')).toBe('NOT_ALLOWED')
+    expect(fake.requests.slice(before).filter(q => q.method !== 'GET')).toEqual([])
   })
 })

@@ -6,7 +6,7 @@
  * forbid it, whatever is stored.
  */
 import { stricterApprover, type ApproverSpec } from './approvals'
-import { PRIOR_ONLY_FIELDS, type FieldPolicy, type PluginManifest } from './plugin-declaration'
+import { PRIOR_ONLY_FIELDS, asksFirst, type FieldPolicy, type PluginManifest } from './plugin-declaration'
 import { DEFAULT_APPROVERS, type PluginMapping } from './plugin-mapping'
 import type { AcbValue } from './plugin-values'
 
@@ -34,7 +34,7 @@ export function approverFor(manifest: PluginManifest, mapping: PluginMapping, op
  * declaration's default, else `prior` — and at least as strict as any other
  * field read from the same outside property; never `auto` for
  * `PRIOR_ONLY_FIELDS` nor for an operation that reaches people outside the
- * company, whatever the settings say (0.21).
+ * company or moves money (`moves_money`), whatever the settings say (0.21).
  */
 export function effectiveFieldPolicy(manifest: PluginManifest, mapping: PluginMapping, operationName: string, field: string): FieldPolicy {
   const op = manifest.operations[operationName]
@@ -51,19 +51,19 @@ export function effectiveFieldPolicy(manifest: PluginManifest, mapping: PluginMa
     if (PRIOR_ONLY_FIELDS.includes(other) && theirs === 'auto') theirs = 'prior'
     if (POLICY_STRICTNESS[theirs] > POLICY_STRICTNESS[chosen]) chosen = theirs
   }
-  return (op.reaches === 'external' || PRIOR_ONLY_FIELDS.includes(field)) && chosen === 'auto' ? 'prior' : chosen
+  return (op.reaches === 'external' || op.movesMoney || PRIOR_ONLY_FIELDS.includes(field)) && chosen === 'auto' ? 'prior' : chosen
 }
 
 const POLICY_STRICTNESS: Record<FieldPolicy, number> = { auto: 0, prior: 1, off: 2 }
 
 /**
  * An operation's own policy (create): the company's choice in the mapping,
- * else the declaration's; never `auto` when it reaches outside people or
+ * else the declaration's; never `auto` when it reaches outside people, moves money or
  * creates a record (create_deal), whatever is stored.
  */
 export function effectiveOperationPolicy(manifest: PluginManifest, operationName: string, mapping?: Pick<PluginMapping, 'policy'> | null): FieldPolicy {
   const op = manifest.operations[operationName]
   if (!op) return 'off'
   const chosen = (op.kind === 'create' ? mapping?.policy[operationName] : undefined) ?? op.policy
-  return (op.reaches === 'external' || op.createsRecord) && chosen === 'auto' ? 'prior' : chosen
+  return asksFirst(op) && chosen === 'auto' ? 'prior' : chosen
 }

@@ -145,7 +145,7 @@ recordsAiRoute.post('/item/:recordId/file-links/remove', async (c) => {
 // The operations the app turns into this AI's tools (a read token: reads only).
 recordsAiRoute.get('/plugins', async (c) => {
   const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await services.plugins.aiTools(h.member, h.scope))
+  return h instanceof Response ? h : answer(c, await services.plugins.aiTools(h.member, h.scope, h.run?.id ?? null))
 })
 
 // A plugin's typed operation: a read token may only run operations that read (refresh).

@@ -6,7 +6,7 @@
  */
 import { APPROVER_RULES, type ApproverRule, type ApproverSpec } from './approvals'
 import { roleRefName } from './plugin-roles'
-import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, externalFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
+import { FIELD_POLICIES, PRIOR_ONLY_FIELDS, asksFirst, externalFieldWriters, type FieldPolicy, type PluginManifest, type PluginParsed } from './plugin-declaration'
 import { EXTERNAL_NAME_RE, strList, unknownKeys } from './plugin-declaration-rules'
 import { normalizeRepoPath } from './paths'
 import { ONTOLOGY_NAME_RE, type FieldDef, type TypeDefinition } from './record-types'
@@ -195,7 +195,7 @@ export function parsePluginMapping(text: string, pkg: { manifest: PluginManifest
     if (!FIELD_POLICIES.includes(p as FieldPolicy)) { err(`policy の「${f}」は auto / prior / off です`); continue }
     const createOp = createOps.find(([n]) => n === f)?.[1]
     if (createOp) {
-      if (p === 'auto' && (createOp.reaches === 'external' || createOp.createsRecord)) { err(`policy の「${f}」: この操作は「自動」にできません（必ず人が承認します）`); continue }
+      if (p === 'auto' && asksFirst(createOp)) { err(`policy の「${f}」: この操作は「自動」にできません（必ず人が承認します）`); continue }
       policy[f] = p as FieldPolicy
       continue
     }

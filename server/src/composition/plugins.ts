@@ -16,6 +16,7 @@ import type { ApprovalRoleHolders } from '../services/approvals'
 import { createPluginRunGate } from '../services/plugin-ai-tools'
 import { createPluginDistribution } from '../services/plugin-distribution'
 import { createPluginRoleService } from '../services/plugin-roles'
+import type { OperationRoleHolds } from '../services/plugin-operation-checks'
 import type { PluginShelf } from '../services/plugin-shelf'
 import type { RoleHolders } from '../services/record-engine/types'
 
@@ -27,6 +28,9 @@ export interface PluginsLaneDeps {
   agentPolicy: Pick<AgentPolicyService, 'usePlugins'>
   recordEngine: { useRoles(r: RoleHolders): void }
   approvals: { useRoles(r: ApprovalRoleHolders): void }
+  pluginOperations: { useRoles(r: OperationRoleHolds): void }
+  /** Absentees a member stands in for today (services/absences.ts, the one resolution). */
+  actsFor: (companyId: string, userId: string) => string[]
   isMember: (companyId: string, userId: string) => boolean
   managedFolders: (companyId: string, userId: string) => string[]
 }
@@ -42,6 +46,10 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   })
   deps.recordEngine.useRoles(pluginRoles.resolver)
   deps.approvals.useRoles(pluginRoles.resolver)
+  // A plugin operation's `who` (C4 follow-up): `role:<name>` is held on the operation's record; a
+  // delegate stands in for an absent holder, as in the engine (plugin-roles.md "Absence").
+  deps.pluginOperations.useRoles((companyId, pluginId, recordId, role, userId) =>
+    [userId, ...deps.actsFor(companyId, userId)].some(u => pluginRoles.holdsForPlugin(companyId, pluginId, recordId, role, u)))
   // C4 「業務×操作の関所」: a step's run uses only the connector roles its step declares
   // (its operations are gated in plugin-operation-checks.ts, through the plugins service).
   const pluginRunGate = createPluginRunGate({ companyData: deps.companyData, shelf: deps.pluginShelf })

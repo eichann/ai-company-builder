@@ -63,7 +63,7 @@ export function createOperationUndo(
     const recordId = op.recordId as string
     const row = readable(member, recordId)!
     const place = placeOf(row)
-    if (!mayRun(member, human, declared.who, recordId, place)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
+    if (!mayRun(member, human, declared.who, recordId, place, plugin.pluginId)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
     const asked = JSON.parse(op.fields) as Record<string, AcbValue>
     const names = Object.keys(asked)
     const policy = notAuto(plugin, op.operation, names)
@@ -111,7 +111,7 @@ export function createOperationUndo(
     const row = op.recordId ? readable(member, op.recordId) : null
     if (!row) return notFound()
     const place = placeOf(row)
-    if (!mayRun(member, human, declared.who, row.id, place)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
+    if (!mayRun(member, human, declared.who, row.id, place, plugin.pluginId)) return refuse('forbidden', 'この操作をする権限がありません', { code: 'NOT_ALLOWED' })
     if (createPolicy(plugin, op.operation, declared) === 'off') return operationOff()
     const precheck = precheckFor(member, human, plugin, declared.who, row.id, place, p => createPolicy(p, op.operation, declared) !== 'off')
     const externalId = op.externalId

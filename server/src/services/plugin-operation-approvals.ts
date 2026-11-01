@@ -191,7 +191,7 @@ export function createOperationApprovals(
       if (op.kind === 'create' && op.createsRecord) {
         if (payload.record !== null || !payload.create) return refuse('bad-request', 'payload: a create of a record')
         const place = plugin.mapping.objects[op.object]?.visibleToFolder ?? ''
-        if (!checks.folderReadable(member, place) || !checks.mayRunAt(member, actor, op.who, {}, place)) return refuse('forbidden', 'お願いした人には、もうこの操作をする権限がありません', { code: 'NOT_ALLOWED' })
+        if (!checks.folderReadable(member, place) || !checks.mayRunAt(member, actor, op.who, {}, place, { pluginId: plugin.pluginId, recordId: null })) return refuse('forbidden', 'お願いした人には、もうこの操作をする権限がありません', { code: 'NOT_ALLOWED' })
         if (createPolicy(plugin, operation, op) === 'off') return operationOff()
         const precheck = precheckFor(member, actor, plugin, op.who, null, place, p => createPolicy(p, operation, op) !== 'off')
         const asked = { title: payload.create.title, ...stripTitle(externalToAcb({ manifest: plugin.manifest, types: plugin.types }, plugin.mapping, op.object, payload.create.properties).values) }
@@ -208,7 +208,7 @@ export function createOperationApprovals(
         return conflict('この記録は、いまの接続から取り込んだものではありません', 'NOT_LINKED')
       }
       const place = placeOf(row)
-      if (!checks.mayRun(member, actor, op.who, recordId, place)) return refuse('forbidden', 'お願いした人には、もうこの操作をする権限がありません', { code: 'NOT_ALLOWED' })
+      if (!checks.mayRun(member, actor, op.who, recordId, place, plugin.pluginId)) return refuse('forbidden', 'お願いした人には、もうこの操作をする権限がありません', { code: 'NOT_ALLOWED' })
 
       if (op.kind === 'create') {
         if (!payload.create) return refuse('bad-request', 'payload: a create')

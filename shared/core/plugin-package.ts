@@ -175,10 +175,13 @@ export function combineUse(business: PluginPackage, connector: PluginManifest): 
     }
     if (use.decision && op.kind === 'read') errors.push(`${where}: 読む操作は decision にできません`)
     if (use.policy !== null && op.kind !== 'create') errors.push(`${where}: policy は作る操作だけに書けます（書き換えの決まりは欄ごと：field_policy_defaults と読み替え表）`)
-    const policy = use.policy ?? op.policy
+    // Moving money asks first like reaching outside: its default is `prior`, and `auto` is refused.
+    const policy = use.policy ?? (use.movesMoney && op.policy === 'auto' ? 'prior' : op.policy)
     if (op.reaches === 'external' && policy === 'auto') errors.push(`${where}: 社外の人に届く操作は「自動」にできません`)
+    if (use.movesMoney && op.kind === 'read') errors.push(`${where}: 読む操作はお金を動かしません（moves_money は書く操作だけです）`)
+    if (use.movesMoney && policy === 'auto') errors.push(`${where}: お金が動く操作は「自動」にできません`)
     if (op.createsRecord && policy === 'auto') errors.push(`${where}: 記録を新しく作る操作は「自動」にできません（必ず人が承認します）`)
-    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy }
+    operations[opname] = { ...op, who: [...use.who], decision: use.decision, note: use.note, policy, movesMoney: use.movesMoney }
   }
   if (errors.length === 0) {
     for (const [f, p] of Object.entries(b.fieldPolicyDefaults)) {
