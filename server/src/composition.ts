@@ -61,6 +61,7 @@ import { createRecordIndexer } from './services/record-index'
 import { createRecordService } from './services/records'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createNotificationService } from './services/notifications'
+import { createAiRunService } from './services/ai-runs'
 import { createServerClock } from './services/server-clock'
 import { logError } from './lib/error-log'
 import { createRecordAiTokenService } from './services/record-ai-tokens'
@@ -415,6 +416,10 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyIds: () => repos.companies.allIds(),
   })
 
+  const records = createRecordService({ ...shared, indexer: recordIndexer, recordFiles })
+  // Execution runs of 「AI の番」 (S10b, records.md "Execution runs"): the server stores and checks; the AI runs on the PC.
+  const aiRuns = createAiRunService({ ...shared, tokenDigest: sha256TokenDigest, aiTurnOf: (member, recordId) => records.aiTurnOf(member, recordId) })
+
   return {
     access,
     outboundMail,
@@ -485,12 +490,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     companyFiles: companyFileViews(shared.companyData),
     /** git-http's push snapshot, private-folder lookups and orphan checks, for a member. */
     companyScopes: createCompanyScopeService(shared),
-    records: createRecordService({ ...shared, indexer: recordIndexer, recordFiles }),
+    records,
+    aiRuns,
     recordEngine,
     notifications,
     decisions,
     recordAiTokens: createRecordAiTokenService({
-      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped,
+      ...shared, tokenDigest: sha256TokenDigest, memberOf: access.memberOf, companyStopped: agentStops.companyStopped, runs: aiRuns,
     }),
     accounts: shared.accounts,
     repoStore,

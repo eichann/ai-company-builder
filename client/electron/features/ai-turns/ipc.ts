@@ -2,6 +2,7 @@
 //   aiTurns:settings  the company's 「自動で進める」 and its limits
 //   aiTurns:claim     take a record's AI turn for a hidden consultation (one PC wins)
 //   aiTurns:settle    after the turn: done / failed / put back to 「AI の番」
+//   aiTurns:retry     「もう一度」: the server's run held for a person goes back to the AI (S10b)
 // Only the main window runs AI turns: other windows are refused.
 
 import type { IpcRegistrar } from '../../ipc/registrar'
@@ -20,4 +21,6 @@ export function registerAiTurnsIpc(ipc: IpcRegistrar, deps: { claims: AiTurnClai
   })
   ipc.handle('aiTurns:settle', (event, companyId, recordId) =>
     isMainWindow(event.sender.id) && str(companyId) && str(recordId) ? claims.settle(companyId, recordId) : { outcome: 'unknown' } as const)
+  ipc.handle('aiTurns:retry', (event, companyId, recordId) =>
+    isMainWindow(event.sender.id) && str(companyId) && str(recordId) ? claims.retry(companyId, recordId) : { ok: false })
 }

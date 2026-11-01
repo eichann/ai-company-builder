@@ -10,7 +10,7 @@ type Control = {
   requests: Array<{ path: string; body: Record<string, unknown> | null }>
   open(): boolean
   finish(): void
-  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[] }
+  aiTurns: { claims: Array<[string, string, number, string]>; settled: string[]; retried: string[] }
 }
 const chat = async <T>(page: Page, fn: (control: Control) => T) =>
   (await page.evaluateHandle(() => (window as unknown as { __acbChat: Control }).__acbChat)).evaluate(fn)
@@ -78,5 +78,7 @@ test('a failed run is handed to the person with the reason, and 「もう一度�
   await expect(notice).toContainText('AI ができませんでした', { timeout: 15_000 })
   await expect(notice).toContainText('読み取れない')
   await notice.getByRole('button', { name: 'もう一度' }).click()
+  // The server's run, held for a person after the failure (S10b), is given back too.
+  await expect.poll(() => chat(page, c => c.aiTurns.retried), { timeout: 15_000 }).toEqual([MINUTES_ID])
   await expect.poll(() => chat(page, c => c.aiTurns.claims.length), { timeout: 15_000 }).toBe(2)
 })

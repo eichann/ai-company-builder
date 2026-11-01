@@ -111,6 +111,8 @@ interface World {
     approval: string
     /** A mail draft of the other company's member (outbound-mail.md). */
     outboundMail: string
+    /** An execution run of the other company's member, with an operation of unknown result (records.md "Execution runs"). */
+    aiRun: string
   }
 }
 
@@ -237,6 +239,14 @@ const MATRIX: Row[] = [
   // Task settings (tasks.md): every member reads, owner/admin change
   r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
   r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+  // Execution runs of 「AI の番」 (records.md "Execution runs"): every member, their own runs only
+  r('GET /api/companies/:companyId/ai-runs', w => ({ path: `${C(w)}/ai-runs` }), MEMBERS),
+  r('POST /api/companies/:companyId/ai-run-claims', w => ({ path: `${C(w)}/ai-run-claims`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/ai-runs/:runId', w => ({ path: `${C(w)}/ai-runs/no-such-run` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/ai-runs/:runId/renew', w => ({ path: `${C(w)}/ai-runs/no-such-run/renew`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/ai-runs/:runId/finish', w => ({ path: `${C(w)}/ai-runs/no-such-run/finish`, body: {} }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/ai-runs/:runId/retry', w => ({ path: `${C(w)}/ai-runs/no-such-run/retry` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/ai-runs/:runId/operations/:key/reconcile', w => ({ path: `${C(w)}/ai-runs/no-such-run/operations/k1/reconcile`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/companies/:companyId/me/agent-policy', w => ({ path: `${C(w)}/me/agent-policy` }), MEMBERS),
   r('GET /api/companies/:companyId/agent-stops', w => ({ path: `${C(w)}/agent-stops` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/agent-stops', w => ({ path: `${C(w)}/agent-stops`, body: { tool: 'no-such-tool' } }), [400, 400, 403, 403, 404, 401]),
@@ -457,6 +467,12 @@ const CROSS: CrossRow[] = [
   x('POST /api/companies/:companyId/records/item/:recordId/file-links/remove', (w, id) => ({ path: `${C(w)}/records/item/${id}/file-links/remove`, body: { path: '営業部/a.md', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('POST /api/companies/:companyId/records/item/:recordId/share', (w, id) => ({ path: `${C(w)}/records/item/${id}/share`, body: { folder: '営業部', expectedVersion: 1 } }), w => w.other.record, 'deal-nosuch01'),
   x('GET /api/companies/:companyId/records/item/:recordId/versions/:version', (w, id) => ({ path: `${C(w)}/records/item/${id}/versions/1` }), w => w.other.record, 'deal-nosuch01'),
+
+  x('GET /api/companies/:companyId/ai-runs/:runId', (w, id) => ({ path: `${C(w)}/ai-runs/${id}` }), w => w.other.aiRun),
+  x('POST /api/companies/:companyId/ai-runs/:runId/renew', (w, id) => ({ path: `${C(w)}/ai-runs/${id}/renew`, body: { generation: 1 } }), w => w.other.aiRun),
+  x('POST /api/companies/:companyId/ai-runs/:runId/finish', (w, id) => ({ path: `${C(w)}/ai-runs/${id}/finish`, body: { generation: 1, outcome: 'done' } }), w => w.other.aiRun),
+  x('POST /api/companies/:companyId/ai-runs/:runId/retry', (w, id) => ({ path: `${C(w)}/ai-runs/${id}/retry` }), w => w.other.aiRun),
+  x('POST /api/companies/:companyId/ai-runs/:runId/operations/:key/reconcile', (w, id) => ({ path: `${C(w)}/ai-runs/${id}/operations/k1/reconcile`, body: { done: true } }), w => w.other.aiRun),
 
   x('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', (w, id) => ({ path: `${C(w)}/me/record-tokens/${id}` }), w => w.other.recordToken),
 
@@ -704,6 +720,12 @@ async function seed(): Promise<World> {
   db.prepare("INSERT INTO outbound_mails (company_id, message_id, author_id, from_email, minutes_id, deal_id, created_at) VALUES (?, 'outbound_message-other00000001', ?, 'other@example.com', NULL, 'deal-other001', ?)")
     .run(other, otherMember, expires)
 
+  // An execution run of the other company's member, waiting for reconciliation (rows as services/ai-runs.ts writes them).
+  db.prepare(`INSERT INTO ai_runs (company_id, id, record_id, step, user_id, state, generation, created_at, updated_at)
+    VALUES (?, 'run-other-1', 'deal-other001', 'task-prep', ?, 'waiting_reconcile', 1, ?, ?)`).run(other, otherMember, expires, expires)
+  db.prepare(`INSERT INTO ai_run_operations (company_id, run_id, key, fingerprint, kind, state, generation, created_at, updated_at)
+    VALUES (?, 'run-other-1', 'k1', 'f', 'plugin-operation', 'unknown', 1, ?, ?)`).run(other, expires, expires)
+
   return {
     co, sales, accounting,
     privateScope: pf.scopeId, companyScope,
@@ -732,6 +754,7 @@ async function seed(): Promise<World> {
       googleGrant: otherMember,
       approval: 'approval-other001',
       outboundMail: 'outbound_message-other00000001',
+      aiRun: 'run-other-1',
     },
   }
 }

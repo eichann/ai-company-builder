@@ -147,6 +147,7 @@ const api: ElectronAPI = {
   getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
   claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId),
   settleAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:settle', companyId, recordId),
+  retryAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:retry', companyId, recordId),
   watchNotifications: (companyId: string | null) => invoke('notifications:watch', companyId),
   getNotificationsState: (companyId: string) => invoke('notifications:state', companyId),
   markNotificationsRead: (companyId: string, ids: string[] | 'all') => invoke('notifications:markRead', companyId, ids),

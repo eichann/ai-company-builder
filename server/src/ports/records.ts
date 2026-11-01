@@ -117,6 +117,9 @@ export interface RecordAiTokenRow {
   createdAt: string
   expiresAt: string
   revokedAt: string | null
+  /** The execution run the token is bound to and its claim generation (S10b); absent / null for a consultation's token. */
+  runId?: string | null
+  runGeneration?: number | null
 }
 
 export interface RecordRepository {

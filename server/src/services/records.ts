@@ -466,6 +466,25 @@ export function createRecordService(deps: RecordServiceDeps) {
       return ok({ total: waiting.length, records: page.map(r => byId.get(r.id)).filter((s): s is RecordSummary => !!s) })
     },
 
+    /**
+     * Whether one record is in the member's 「AI の番」 now (the rule of `aiTurn`
+     * above, for one record): what an execution run may be claimed for
+     * (services/ai-runs.ts). Unreadable = not found.
+     */
+    aiTurnOf(member: Member, recordId: string): 'yes' | 'not-ai-turn' | 'not-found' | 'disabled' {
+      const records = handleOf(member).records
+      if (!records.settings().enabled) return 'disabled'
+      const reader = recordReader(member, handleOf(member).scopes.listWithRules())
+      const row = RECORD_ID_RE.test(recordId) ? records.byIds([recordId]).find(r => reader.record(r)) : undefined
+      if (!row) return 'not-found'
+      const def = currentTypes(records).get(row.type)?.definition
+      const state = records.states([row.id])[0]
+      if (!def || !state) return 'not-ai-turn'
+      const fields = JSON.parse(state.fields) as Record<string, unknown>
+      const mine = fields.assignee === member.userId || fields.next_actor === member.userId
+      return mine && aiTurnStates(def).has(state.state ?? '') ? 'yes' : 'not-ai-turn'
+    },
+
     async get(member: Member, recordId: string): Promise<Outcome<RecordDetail>> {
       const records = handleOf(member).records
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })

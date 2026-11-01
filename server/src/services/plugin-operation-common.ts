@@ -34,6 +34,8 @@ export interface OperationActor {
   conversationId?: string | null
   /** A person confirming what their AI suggested (informational, self-reported by the app; records.md "Provenance"). */
   proposedBy?: 'ai' | null
+  /** For the AI: the execution run its token is bound to (S10b; from the token). */
+  runId?: string | null
 }
 
 /** An operation record as its record's readers see it (contract: shared/types/plugins.ts). */
