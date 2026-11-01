@@ -133,6 +133,10 @@ Google in the background) · the member's 「許可をやめる」 · the operat
 removed · Google refusing the token. A stopped / revoked grant is resumed only by the member's
 「Google で許可」 again.
 
+Users of the grant: the minutes (`minutes.md`), outbound mail (`outbound-mail.md`) and
+「今日の予定」 (`calendar.md`, `services/google-calendar.ts`: `calendar.events.list` of `primary`
+for today; no answer is an error there — a stop becomes an empty list with a reason).
+
 ## Practice Google (staging)
 
 `ACB_FAKE_GOOGLE_URL` (`lib/config.ts` `practiceUpstreamsFrom`, next to `ACB_FAKE_HUBSPOT_URL`,

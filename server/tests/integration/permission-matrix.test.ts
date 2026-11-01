@@ -378,6 +378,9 @@ const MATRIX: Row[] = [
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/oauth/google/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
+  // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
+  // another person); Google is not set up here, so the answer is an empty list with a reason.
+  r('GET /api/companies/:companyId/me/calendar/today', w => ({ path: `${C(w)}/me/calendar/today` }), MEMBERS, 'Google not set up: an empty list and `stopped`, nothing read'),
 
   // Invitations
   r('GET /api/companies/:companyId/invitations', w => ({ path: `${C(w)}/invitations` }), [200, 200, 403, 403, 403, 401]),

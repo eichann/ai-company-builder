@@ -68,6 +68,9 @@ import { createPluginMappingCheckService } from './services/plugin-mapping-check
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createDecisionService } from './services/decisions'
 import { createGoogleMeetings } from './services/google-meetings'
+import { createGoogleCalendar } from './services/google-calendar'
+import { createCalendarService } from './services/calendar'
+import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
 import { createMinutesService } from './services/minutes'
 import { createOutboundMailService } from './services/outbound-mail'
 import { createFixedPayloads } from './services/fixed-payloads'
@@ -341,6 +344,17 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
 
+  // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the one
+  // Google client; Google's specifics stay in google-calendar.ts (the role 「予定を読む」 replaces it).
+  const calendar = createCalendarService({
+    clock: shared.clock,
+    reader: createGoogleCalendar({
+      request: (companyId, userId, req) => googleClient.request(companyId, userId, req),
+      internalDomain: companyId => shared.companyData.forCompany(companyId).connectors.client()?.domain ?? null,
+    }),
+    timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
+  })
+
   // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
   // permission; the AI drafts only (records-ai routes have no send).
   const outboundMail = createOutboundMailService({
@@ -376,6 +390,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     googleClient,
     googleConnector,
     minutes,
+    calendar,
     pluginShelf,
     plugins,
     pluginImport,
