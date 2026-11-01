@@ -64,16 +64,18 @@ const HANDLE_TABLES: Record<string, string[]> = {
   scope_repos: ['adapters/private-folders.ts'],
   private_folder_archives: ['adapters/private-folders.ts'],
   orphaned_scopes: ['adapters/orphaned-scopes.ts'],
-  // The company map (records.md).
-  record_settings: ['adapters/sqlite/records.ts'],
+  // The company map (records.md). record-contents.ts: the startup move of older texts into the content store.
+  record_settings: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_types: ['adapters/sqlite/records.ts'],
-  records: ['adapters/sqlite/records.ts'],
+  records: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_links: ['adapters/sqlite/records.ts'],
-  record_state: ['adapters/sqlite/records.ts'],
+  record_state: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_index_heads: ['adapters/sqlite/records.ts'],
   record_index_problems: ['adapters/sqlite/records.ts'],
-  record_ledger: ['adapters/sqlite/records.ts'],
+  record_ledger: ['adapters/sqlite/records.ts', 'adapters/sqlite/record-contents.ts'],
   record_ai_tokens: ['adapters/sqlite/records.ts'],
+  // The content store (records.md "The content store"): written through the records adapter, erased by the eraser.
+  record_contents: ['adapters/sqlite/record-contents.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],

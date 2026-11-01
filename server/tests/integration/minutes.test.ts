@@ -26,6 +26,7 @@ import { createFakeGoogle, type FakeGoogle } from '../fakes/google/fake-google'
 import { defaultGoogleSeed, GOOGLE_SEED } from '../fakes/google/seed'
 import { createFakeHubSpot, ALL_FAKE_SCOPES, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { withRecordText } from '../helpers/record-text'
 
 vi.setConfig({ testTimeout: 90_000, hookTimeout: 120_000 })
 
@@ -102,9 +103,9 @@ async function call(user: string | null, method: string, path: string, body?: un
 const C = (co = CO) => `/api/companies/${co}`
 const check = (user: string) => call(user, 'POST', `${C()}/me/minutes/check`, {})
 const textOf = (user: string, id: string, co = CO) => call(user, 'GET', `${C(co)}/me/minutes/item/${id}/text`)
-const minutesRows = () => db.prepare("SELECT r.id, r.title, r.folder, s.state, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'minutes' ORDER BY r.created_at").all(CO) as Json[]
+const minutesRows = () => withRecordText(db, CO, db.prepare("SELECT r.id, r.title, r.folder, s.state, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'minutes' ORDER BY r.created_at").all(CO) as Json[])
 const linkOf = (id: string, name: string) => (db.prepare('SELECT target_id FROM record_links WHERE company_id = ? AND source_id = ? AND name = ?').get(CO, id, name) as Json)?.target_id ?? null
-const dealIdOf = (title: string) => (db.prepare("SELECT id FROM records WHERE company_id = ? AND type = 'deal' AND title = ?").get(CO, title) as Json).id as string
+const dealIdOf = (title: string) => (withRecordText(db, CO, db.prepare("SELECT id, title FROM records WHERE company_id = ? AND type = 'deal'").all(CO) as Json[]).find(r => r.title === title) as Json).id as string
 /** The time the member's app asks at (the fake Google's meetings are on 2026-11-05 and 11-12). */
 const at = (iso: string) => vi.setSystemTime(new Date(iso))
 
@@ -201,7 +202,7 @@ beforeAll(async () => {
   const imported = await services.pluginImport.run(owner, 'sample-sales')
   expect(imported.ok, JSON.stringify(imported)).toBe(true)
   // The customer's domain came in with the import (the fixture's customer type v2, mapping `domain`).
-  const customer = db.prepare("SELECT s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'customer' AND r.title = '株式会社サンプル'").get(CO) as Json
+  const customer = withRecordText(db, CO, db.prepare("SELECT r.id, r.title, s.fields FROM records r JOIN record_state s ON s.company_id = r.company_id AND s.record_id = r.id WHERE r.company_id = ? AND r.type = 'customer'").all(CO) as Json[]).find(r => r.title === '株式会社サンプル') as Json
   expect(JSON.parse(customer.fields).domain).toBe('a-corp.example')
 
   vi.useFakeTimers({ toFake: ['Date'] })
