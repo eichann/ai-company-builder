@@ -45,3 +45,27 @@ test('a task completed on someone\'s OK says so in words, never as an approval',
   await expect(card.getByRole('region', { name: '経緯' })).toContainText('佐藤さんが阿部さんの了承を得たとして完了にしました')
   expectNoPageErrors(state)
 })
+
+test('「＋ファイルをつなぐ」 links a company file; a linked file can be taken away; a dropped file is linked', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  await page.getByRole('button', { name: 'ファイルをつなぐ' }).click()
+  const picker = page.getByRole('group', { name: 'つなぐファイル' })
+  await picker.getByLabel('ファイルを探す').fill('提案')
+  await expect(picker.getByRole('button')).toHaveCount(1)
+  await picker.getByRole('button', { name: /提案書\.md/ }).click()
+  await expect(page.locator('#acted')).toHaveText('link 営業/提案書.md@3')
+
+  await page.getByRole('button', { name: '「見積書_v2.xlsx」を外す' }).click()
+  await expect(page.locator('#acted')).toContainText('unlink 営業/見積書_v2.xlsx@3')
+
+  const card = page.getByTestId('task-card')
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.setData('application/x-file-paths', JSON.stringify(['/Users/elsewhere/x.md', '/Users/me/company/経理/請求書.xlsx']))
+    return dt
+  })
+  await card.dispatchEvent('dragover', { dataTransfer: data })
+  await card.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#acted')).toContainText('link 経理/請求書.xlsx@3')
+  expectNoPageErrors(state)
+})

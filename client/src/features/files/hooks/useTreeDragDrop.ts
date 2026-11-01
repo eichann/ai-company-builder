@@ -2,6 +2,7 @@ import { useCallback, useState } from 'react'
 import { boundaryCrossing, crossingMessage } from '../../../../shared/private-folder-ui'
 import { droppedFilePath, getStats, moveFromExternal, moveItem, startDrag } from '../api'
 import type { FileEntry, FileTreeModel } from '../fileTreeModel'
+import { FILE_PATHS_DRAG_TYPE } from '../../../shared/lib/dragTypes'
 import type { SetSelectedPaths } from './useTreeSelection'
 import type { usePrivateFolders } from './usePrivateFolders'
 
@@ -12,7 +13,7 @@ const ALLOWED_DROP_EXTENSIONS = new Set([
   'json', 'yaml', 'yml',
 ])
 const MAX_DROP_FILE_SIZE = 20 * 1024 * 1024 // 20MB
-const INTERNAL_PATHS = 'application/x-file-paths'
+const INTERNAL_PATHS = FILE_PATHS_DRAG_TYPE
 
 const parentDir = (p: string) => p.substring(0, p.lastIndexOf('/'))
 

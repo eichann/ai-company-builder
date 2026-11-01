@@ -6,12 +6,15 @@
 //   tasks:act     an action on a record (引き受ける, 完了…): the server's engine decides who may
 //   tasks:card    one task's card (what the AI prepared, actions, 経緯, its runs waiting for a person);
 //                 opening it tells the server (POST …/opened), as the record card does
+//   tasks:linkFile / tasks:unlinkFile   a company file or folder linked to a task, or the link
+//                 taken away (records.md "Linking files later": the server checks the member reads
+//                 both, and refuses a private folder's file for a task outside it)
 //   tasks:retryRun / tasks:reconcile   a run held for a person: 「もう一度」, or what the member
 //                 found in the outside system about an operation whose result was unknown
 // The server answers only what the member may read; main adds nothing to it.
 
 import { dayWindow, DEFAULT_COMPANY_TIME_ZONE } from '../../../../shared/core/calendar'
-import { RECORD_ID_RE } from '../../../../shared/core/records'
+import { fileLinkPath, RECORD_ID_RE } from '../../../../shared/core/records'
 import { isDateValue, normalizeTagsValue } from '../../../../shared/core/record-types'
 import type { RecordDetail, RecordQueryResult, RecordSummary, RecordTypeView } from '../../../../shared/types/records'
 import type { LedgerEntry } from '../../../../shared/core/record-ledger'
@@ -156,6 +159,13 @@ export function createTasksApi(deps: TasksDeps) {
       return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList }) }
     },
 
+    async linkFile(companyId: string, recordId: string, companyPath: string, expectedVersion: number, remove: boolean): Promise<TaskWriteResult> {
+      const path = typeof companyPath === 'string' ? fileLinkPath(companyPath.normalize('NFC')) : null
+      if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
+      const a = await call(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/file-links${remove ? '/remove' : ''}`, { path, expectedVersion })
+      return a?.status === 200 ? { success: true, recordId } : failure(remove ? 'unlink file' : 'link file', a)
+    },
+
     async retryRun(companyId: string, runId: string): Promise<TaskWriteResult> {
       if (!COMPANY.test(companyId) || typeof runId !== 'string' || !RUN_ID.test(runId)) return BAD_INPUT
       const a = await call(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/retry`, {})
@@ -249,6 +259,10 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))
   ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))
+  ipc.handle('tasks:linkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
+    api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
+  ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
+    api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, true))
   ipc.handle('tasks:retryRun', (_event, companyId, runId) => api.retryRun(typeof companyId === 'string' ? companyId : '', runId))
   ipc.handle('tasks:reconcile', (_event, companyId, runId, key, done) => api.reconcile(typeof companyId === 'string' ? companyId : '', runId, key, done))
 }

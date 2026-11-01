@@ -5,6 +5,8 @@ paths:
   - "client/tests/task-card*"
   - "client/tests/ui/task-card.spec.ts"
   - "client/src/features/chat/components/PreparedMailCard.tsx"
+  - "client/src/shared/lib/dragTypes.ts"
+  - "client/src/features/files/contextMenuItems.tsx"
   - "client/electron/features/tasks/**"
   - "client/src/features/tasks/**"
   - "client/tests/tasks-*.test.ts"
@@ -110,6 +112,19 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
    (`RecordMarks`, also on the generic card and every record row).
 
+## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
+
+Three entrances, one operation (`tasks:linkFile` / `tasks:unlinkFile` → `POST …/file-links` /
+`…/file-links/remove`, the version the screen shows): the file tree's right-click
+「やることにつなぐ…」 (shown only while the task list shows for the department on screen; the
+chooser `LinkToTaskDialog` lists the member's open tasks from the list), a file dragged from the tree
+onto a task row or onto the task card (`src/shared/lib/dragTypes.ts`; the first dragged path inside
+the company folder), and the card's 「＋ファイルをつなぐ」 (the company's file names on this
+computer, `git:listFiles`) with 「外す」 on each linked file. Main sends only a path inside the
+company folder (`fileLinkPath`: no absolute path, no `..`); the server decides the rest — both
+readable by the member, never a private folder's file for a task outside it (one refusal,
+`FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
+
 ## Tests
 
 `client/tests/tasks-list.test.ts` (each record once and in its place; only one's own task
@@ -120,4 +135,6 @@ never reaches the server; records off = no list), `src/features/tasks/model.test
 the one line, the tag filter, a row opening its card), `client/tests/task-card.test.ts` (the
 assignee completes only on a stated OK and starts first; the AI's steps and what the member's
 place does not allow never offered; the OK in words; prepared apart from links; an unknown result
-offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts`.
+offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts` (also 「＋ファイルをつなぐ」,
+「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
+shows); `tasks-list.test.ts` also: only a company path reaches the server.

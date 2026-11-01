@@ -1,5 +1,5 @@
 import type { TFunction } from 'i18next'
-import { Copy, CloudArrowDown, FilePlus, FolderPlus, PencilSimple, Trash } from '@phosphor-icons/react'
+import { Copy, CloudArrowDown, FilePlus, FolderPlus, Link, PencilSimple, Trash } from '@phosphor-icons/react'
 import type { ContextMenuItem } from '../../shared/ui/ContextMenu'
 import type { FileEntry } from './fileTreeModel'
 
@@ -11,6 +11,8 @@ export interface TreeMenuActions {
   askDeleteMany: (paths: string[]) => void
   copyPath: (entry: FileEntry) => void
   download: (entry: FileEntry) => void
+  /** 「やることにつなぐ…」; absent where the company shows no task list (the item is not shown). */
+  linkToTask?: (entry: FileEntry) => void
   closeContextMenu: () => void
 }
 
@@ -69,5 +71,9 @@ export function treeMenuItems(
     { label: '', divider: true, onClick: () => {} },
     { label: t('fileTree.copyPath'), icon: <Copy size={16} />, onClick: () => actions.copyPath(entry) },
   )
+  const linkToTask = actions.linkToTask
+  if (linkToTask) {
+    items.push({ label: 'やることにつなぐ…', icon: <Link size={16} />, onClick: () => { actions.closeContextMenu(); linkToTask(entry) } })
+  }
   return items
 }

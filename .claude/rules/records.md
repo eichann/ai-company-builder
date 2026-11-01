@@ -237,12 +237,11 @@ be left out when the type has one; task: `files`). Contract `FileLinkRequest` / 
   so such an undo answers `CHANGED_SINCE`) and never lands in the server fields. A replay
   (`versions/:version`) shows `links.<name>` as of that version.
 - No existence check: a path not synced yet links and reads `broken` until it arrives.
-- No entrance in the core app: there is no task list in the app yet, so the file tree has no
-  「やることにつなぐ…」 (owner decision; the item, its chooser and the IPC `tasks:available` /
-  `tasks:open` / `tasks:linkFile` of #369 / #370 were removed). That entry will be **contributed by
-  the task plugin** through a plugin UI insertion point for the file context menu (milestone 5),
-  not by the core. Until then a file is linked by the AI (`records_link_file` /
-  `records_unlink_file`) or through the routes above.
+- The core app's entrances (owner decision 2026-11-01: the task list is the core's, and linking
+  comes back with it — not from a plugin): the file tree's 「やることにつなぐ…」, dragging a file
+  from the tree onto a task row or the task card, and the card's 「＋ファイルをつなぐ」 / 「外す」,
+  all through `tasks:linkFile` / `tasks:unlinkFile` with the session (`tasks-ui.md` "Linking
+  files"); the AI links with `records_link_file` / `records_unlink_file`.
 - The consultation AI: no consultation is linked to a task in the app yet (only a minutes
   consultation stores `minutesId`, `minutes.md`). `records_get` returns the file links (`path`,
   `broken`) and its description and `RECORDS_INSTRUCTIONS` tell the AI to check a task's linked

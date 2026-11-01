@@ -69,3 +69,18 @@ test('the one line adds a task with its due and tags; a tag narrows the list', a
   await expect(page.getByTestId('event-row')).toHaveCount(2)
   expectNoPageErrors(state)
 })
+
+test('a file dragged from the file tree onto a task row is linked to it, named inside the company folder', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const target = page.getByTestId('task-row').filter({ hasText: '見積書を作り直す' })
+  const data = await page.evaluateHandle(() => {
+    const dt = new DataTransfer()
+    dt.setData('application/x-file-paths', JSON.stringify(['/Users/me/company/営業/見積書_v2.xlsx']))
+    return dt
+  })
+  await target.dispatchEvent('dragover', { dataTransfer: data })
+  await target.dispatchEvent('drop', { dataTransfer: data })
+  await expect(page.locator('#acted')).toHaveText('task-mine02:link 営業/見積書_v2.xlsx@2')
+  await expect(page.getByRole('alert')).toContainText('「見積書_v2.xlsx」を「見積書を作り直す」につなぎました')
+  expectNoPageErrors(state)
+})

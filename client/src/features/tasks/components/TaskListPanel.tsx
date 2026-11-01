@@ -3,9 +3,9 @@ import { CaretDown, CaretRight } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask } from '../api'
+import { actOnTask, createTask, linkFileToTask } from '../api'
 import { useCalendarToday } from '../hooks/useCalendarToday'
-import { companyNow, filterByTag, listEvents, listSections, tagCounts, type ListMode, type ListSection } from '../model'
+import { companyNow, companyPathOf, filterByTag, listEvents, listSections, tagCounts, type ListMode, type ListSection } from '../model'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
 
@@ -13,6 +13,8 @@ const HEADER = 'mb-1 flex w-full items-center gap-1.5 px-2.5 text-[11px] font-se
 
 interface Props {
   companyId: string
+  /** The member's company folder (a dragged file's path is named inside it for the server). */
+  rootPath: string
   list: { data: TaskListData | null; error: string | null; reload: () => void }
   /** The automatic 「AI の番」's view of each record it holds (the chat's runner), when known. */
   aiTurns: AiTurnItemsView | null
@@ -21,7 +23,7 @@ interface Props {
 }
 
 /** The task list tab (やること): the list on the left, the opened item's card on the right. */
-export function TaskListPanel({ companyId, list, aiTurns, renderCard }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard }: Props) {
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
   const [opened, setOpened] = useState<string | null>(null)
@@ -56,6 +58,20 @@ export function TaskListPanel({ companyId, list, aiTurns, renderCard }: Props) {
     }
   }
   const finish = (item: TaskListItem) => run(item, item.state === 'in_progress' || item.state === 'review' ? [{ action: 'complete' }] : [{ action: 'start' }, { action: 'complete' }])
+  // A file from the file tree dropped on a task row is linked to it (the first one the server may take).
+  const dropFiles = async (item: TaskListItem, paths: string[]) => {
+    const path = paths.map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
+    if (!path) return
+    setBusy(item.id)
+    setMessage(null)
+    try {
+      const r = await linkFileToTask(companyId, item.id, path, item.version)
+      setMessage(r.success ? `「${path.split('/').pop()}」を「${item.title}」につなぎました（経緯に残り、カードから外せます）` : r.error)
+    } finally {
+      setBusy(null)
+      list.reload()
+    }
+  }
   const add = async (input: TaskCreateInput): Promise<string | null> => {
     const r = await createTask(companyId, input)
     if (!r.success) return r.error
@@ -74,6 +90,7 @@ export function TaskListPanel({ companyId, list, aiTurns, renderCard }: Props) {
         onAccept={i.turn === 'acceptance' && i.type === 'task' ? () => void run(i, [{ action: 'accept' }]) : null}
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
         onHand={ai?.canHand ? () => aiTurns?.handOver(i.id) : null}
+        onDropFiles={i.type === 'task' && i.turn !== 'done' ? paths => void dropFiles(i, paths) : null}
       />
     )
   }

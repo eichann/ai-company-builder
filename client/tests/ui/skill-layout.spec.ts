@@ -139,7 +139,7 @@ test('search finds records by kind next to files; a record opens as a card, its 
   await expect(card.getByText('山田 花子：作りました')).toBeVisible()
 
   // Following the linked file opens it; the file shows what links to it and its earlier versions.
-  await card.getByRole('button', { name: /A社_提案.md/ }).click()
+  await card.getByRole('button', { name: /^A社_提案\.md/ }).click()
   await expect(card).toHaveCount(0)
   await expect(page.getByText('A社への提案の骨子。')).toBeVisible()
   const side = page.getByLabel('つながっているもの', { exact: true })

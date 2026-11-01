@@ -206,3 +206,17 @@ test('when some items of a multi-delete fail, the rest are deleted and the faile
   await expect(row(page, 'README.md')).toBeVisible()
   await expect(row(page, 'README.md')).toHaveClass(/bg-accent\/20/) // still selected
 })
+
+test('「やることにつなぐ…」 hands the file to the task chooser; no item where the company shows no task list', async ({ page }) => {
+  await open(page)
+  await row(page, 'README.md').click({ button: 'right' })
+  await page.getByRole('button', { name: 'やることにつなぐ…' }).click()
+  await expect(page.getByRole('status', { name: 'やることにつなぐファイル' })).toHaveText(`${DEPT}/README.md`)
+
+  const state = await openPreview(page, 'file-tree', { tasks: 'off' })
+  await expect(row(page, 'README.md')).toBeVisible()
+  await row(page, 'README.md').click({ button: 'right' })
+  await expect(page.getByRole('button', { name: 'パスをコピー' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'やることにつなぐ…' })).toHaveCount(0)
+  expectNoPageErrors(state)
+})

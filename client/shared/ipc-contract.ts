@@ -486,6 +486,9 @@ export interface IpcInvokeChannels {
   'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
   /** One task's card: what the AI prepared, what the member can do, 経緯, its runs waiting for a person. */
   'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
+  /** A company file or folder linked to a task (`companyPath`: inside the company folder, e.g. `営業/見積.xlsx`). */
+  'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
+  'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
   /** 「もう一度」 on a run held for a person. */
   'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
   /** What the member found in the outside system about an operation whose result was unknown. */
@@ -826,6 +829,8 @@ export interface ElectronAPI {
   createTask: Invoke<'tasks:create'>
   actOnTask: Invoke<'tasks:act'>
   getTaskCard: Invoke<'tasks:card'>
+  linkFileToTask: Invoke<'tasks:linkFile'>
+  unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
   retryTaskRun: Invoke<'tasks:retryRun'>
   reconcileTaskRun: Invoke<'tasks:reconcile'>
   // 「議事録が届きました」: the notices, 「今は読まない」, 「議事録を確かめる」 and the まとまり choice.

@@ -1,15 +1,17 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useMemo, useState, type DragEvent, type ReactNode } from 'react'
 import { CheckCircle, CircleNotch, Clock, LinkSimple, Robot, Sparkle, Warning } from '@phosphor-icons/react'
 import type { TaskCardData } from '../../../../shared/task-card'
 import type { RecordViewSummary } from '../../../../shared/record-views'
 import type { TaskActInput } from '../../../../shared/tasks'
-import { FileLinkRow, RecordMarks, RecordRow } from '../../records/components/RecordRows'
+import { RecordMarks, RecordRow } from '../../records/components/RecordRows'
 import { groupByKind, kindTitle } from '../../records/model'
-import { actOnTask, reconcileTaskRun, retryTaskRun } from '../api'
+import { actOnTask, linkFileToTask, reconcileTaskRun, retryTaskRun, unlinkFileFromTask } from '../api'
+import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 import { useTaskCard } from '../hooks/useTaskCard'
-import { companyNow, dueText, dueWhen } from '../model'
+import { companyNow, companyPathOf, dueText, dueWhen } from '../model'
 import { RecordSourcePanel } from './RecordSourcePanel'
 import { TaskActions } from './TaskActions'
+import { TaskFiles } from './TaskFiles'
 
 interface Props {
   companyId: string
@@ -57,7 +59,13 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, onChan
     }
     return null
   })
+  const version = result.card.record.version
+  const fileLink = (companyPath: string, remove: boolean) => change(async () => {
+    const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
+    return r.success ? null : r.error
+  })
   return <CardBody card={result.card} rootPath={rootPath} busy={busy} renderPrepared={renderPrepared} onRun={runSteps(result.card)}
+    onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
 }
@@ -70,16 +78,35 @@ interface BodyProps {
   onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => Promise<string | null>
   onRetry: (runId: string) => Promise<string | null>
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
+  onLinkFile: (companyPath: string) => Promise<string | null>
+  onUnlinkFile: (companyPath: string) => Promise<string | null>
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, onRun, onRetry, onReconcile }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
   const dueSoon = card.due ? dueWhen(card.due, now) : 'none'
+  const [dropping, setDropping] = useState(false)
+  const [dropError, setDropError] = useState<string | null>(null)
   const runAction = async (fn: () => Promise<string | null>) => setRunError(await fn())
+  // A file dragged from the file tree onto the card is linked (the first one; one link per drop).
+  const drop = async (e: DragEvent) => {
+    setDropping(false)
+    const path = draggedFilePaths(e.dataTransfer).map(p => companyPathOf(p, rootPath)).find((p): p is string => p !== null)
+    if (!path) return
+    e.preventDefault()
+    setDropError(await onLinkFile(path))
+  }
   return (
-    <div className="flex flex-wrap gap-x-6 gap-y-5 p-5 text-gray-900 dark:text-zinc-100" data-testid="task-card">
+    <div
+      className={`flex flex-wrap gap-x-6 gap-y-5 p-5 text-gray-900 dark:text-zinc-100 ${dropping ? 'outline-dashed outline-2 -outline-offset-4 outline-accent' : ''}`}
+      data-testid="task-card"
+      onDragOver={e => { if (isFileTreeDrag(e.dataTransfer)) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; setDropping(true) } }}
+      onDragLeave={e => { if (e.currentTarget === e.target) setDropping(false) }}
+      onDrop={e => void drop(e)}
+    >
+      {dropError && <p role="alert" className="w-full text-[12px] text-red-600 dark:text-red-400">{dropError}</p>}
       <article className="min-w-[280px] flex-1 space-y-5">
         <header className="space-y-1.5">
           <div className="flex flex-wrap items-center gap-2 text-[11px] text-gray-500 dark:text-zinc-400">
@@ -149,19 +176,13 @@ function CardBody({ card, rootPath, busy, renderPrepared, onRun, onRetry, onReco
       </article>
       <aside className="w-[240px] flex-shrink-0 space-y-3" aria-label="つながっているもの">
         <h2 className="flex items-center gap-1.5 text-[12px] font-semibold"><LinkSimple size={13} />つながっているもの</h2>
-        {card.links.length === 0 && card.files.length === 0 && <p className="text-[11px] text-gray-400">まだありません</p>}
         {groupByKind(card.links.flatMap(l => (l.record ? [{ ...l.record, linkLabel: l.label }] : []))).map(g => (
           <section key={g.kind}>
             <h3 className="mb-1 text-[11px] font-semibold text-gray-500 dark:text-zinc-400">{kindTitle(g.kind)}（{g.items.length}）</h3>
             <ul>{g.items.map(r => <li key={r.id}><RecordRow record={r} sub={r.linkLabel === r.typeLabel ? r.typeLabel : `${r.typeLabel}・${r.linkLabel}`} /></li>)}</ul>
           </section>
         ))}
-        {card.files.length > 0 && (
-          <section>
-            <h3 className="mb-1 text-[11px] font-semibold text-gray-500 dark:text-zinc-400">ファイル（{card.files.length}）</h3>
-            <ul>{card.files.map(f => <li key={f.path}><FileLinkRow rootPath={rootPath} path={f.path} broken={f.broken} /></li>)}</ul>
-          </section>
-        )}
+        <TaskFiles rootPath={rootPath} files={card.files} busy={busy} onLink={onLinkFile} onUnlink={onUnlinkFile} />
       </aside>
     </div>
   )
