@@ -68,7 +68,8 @@ import { ApprovalCard } from '../features/chat/components/ApprovalCard'
 import { RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
-import { PluginFileActionDialog, pluginSlots, type FileActionOpen } from './pluginSlots'
+import { LazyPluginFileActionDialog as PluginFileActionDialog } from '../features/plugins/components/LazyPluginSlots'
+import { pluginSlots, type FileActionOpen } from './pluginSlots'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 

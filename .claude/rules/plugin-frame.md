@@ -124,15 +124,18 @@ is URL user-info (`acb-plugin://a@1.2.3/` has host `1.2.3`), and a dotted host r
 ## The four slots (A6, design 節目5 §2-1 and §40)
 
 Where a plugin's screens appear. The core draws every slot's place, label, icon and menu; the
-plugin's own content only ever runs in `PluginFrame`. Styling follows the existing tabs and cards
+plugin's own content only ever runs in `PluginFrame`. The slot parts load lazily
+(`components/LazyPluginSlots.tsx`, inside `<Suspense>`): the renderer bundle has a budget
+(`scripts/check-bundle-size.mjs`), so keep the declaration parser and frame code out of it. Styling follows the existing tabs and cards
 (the owner's visual pass comes later).
 
 - **Which plugins** (`plugins:screens`, `electron/features/plugins/screens.ts`, main window
   only): the `current` versions the company's agent policy lists, each read from its kept
   package's own `plugin.yaml` through the protocol's check (`protocol.ts` `declaration`: listed
   for this company now, the **whole folder verified again** against its fingerprint) and
-  `screensOfPackage` (`client/shared/plugin-screens.ts`: contract-2 business plugin, same id and
-  version, `ui.bridge` this app speaks, every entry a verified file). Turned off, stopped by the
+  `screensOfPackage` (same file — the parser stays in main, `client/shared/plugin-screens.ts` is
+  types only: contract-2 business plugin, same id and version, `ui.bridge` this app speaks, every
+  entry a verified file). Turned off, stopped by the
   operator (no longer listed — the store removes it), a pinned-only version, another company or a
   folder that does not match → no slot. The store tells the renderer (`plugins:changed`) only when
   what a company keeps changed (`store.ts` `onChanged`), so an equal policy never loops.

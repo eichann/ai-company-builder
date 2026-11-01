@@ -1,7 +1,7 @@
 // The four plugin slots composed into the screen (stage 4b, plan A6, plugin-frame.md "The four
 // slots"): ① left tabs with ② their peek, ③ record card sections, ④ file menu items. The plugins
 // feature draws the frames; the workspace, records, tasks and files features only offer a slot.
-import { lazy, Suspense, type ReactNode } from 'react'
+import { Suspense, type ReactNode } from 'react'
 import type { BridgeUiOpenArgs, PluginBridgeAnswer } from '../../shared/plugin-bridge-ops'
 import type { TaskListItem } from '../../shared/tasks'
 import { runCommand } from '../shared/commands/commands'
@@ -10,15 +10,7 @@ import type { FileMenuExtraItem } from '../features/files/contextMenuItems'
 import type { PluginScreensState } from '../features/plugins/hooks/usePluginScreens'
 import { fileActionsFor, peekItems, pluginTabId, pluginTabs, recordSectionsFor, type FileActionSlot } from '../features/plugins/model'
 import { pluginIcon } from '../features/plugins/pluginIcons'
-
-// Loaded when a slot first shows: members of companies without plugins never load the frame code
-// (the renderer bundle has a budget, scripts/check-bundle-size.mjs).
-const slots = () => import('../features/plugins/components/PluginSlots')
-const PluginTabPanel = lazy(() => slots().then(m => ({ default: m.PluginTabPanel })))
-const PluginPeek = lazy(() => slots().then(m => ({ default: m.PluginPeek })))
-const PluginRecordSections = lazy(() => slots().then(m => ({ default: m.PluginRecordSections })))
-/** ④'s dialog, loaded when a file action is first chosen. */
-export const PluginFileActionDialog = lazy(() => slots().then(m => ({ default: m.PluginFileActionDialog })))
+import { LazyPluginPeek as PluginPeek, LazyPluginRecordSections as PluginRecordSections, LazyPluginTabPanel as PluginTabPanel } from '../features/plugins/components/LazyPluginSlots'
 import { companyPathOf } from '../features/tasks/model'
 
 /** A file action the member chose: shown in a dialog with the plugin's frame. */
