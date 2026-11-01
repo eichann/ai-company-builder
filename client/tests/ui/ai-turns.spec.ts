@@ -30,6 +30,8 @@ test('a received minutes record runs by itself in a hidden consultation that is 
   const sent = await chat(page, c => c.requests.find(r => r.path === '/api/chat')?.body)
   // The claim named this very consultation (the record's ledger points at it).
   expect(sent?.appSessionId).toBe(claim[3])
+  // Only that step's tools for this unattended request (ai-turns.md); the member's next message is normal.
+  expect(sent?.aiTurnStep).toBe('minutes-reading')
   const saved = await chat(page, c => c.requests.find(r => r.path === 'flushChatSession')?.body)
   expect(saved?.id).toBe(claim[3])
   expect(saved?.minutesId).toBe(MINUTES_ID)

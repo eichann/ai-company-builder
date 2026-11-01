@@ -402,7 +402,11 @@ export function createCodexConnection(config: Config, createRpc: RpcFactory = de
   return {
     id: 'codex', ownsConversation: true, authenticationError: () => process.platform === 'win32' ? CODEX_WINDOWS_UNSUPPORTED : undefined,
     isMissingSession: (error, id) => error instanceof MissingAgentSession && error.sessionId === id,
-    createChatModel: request => createModel(config, request, false, createRpc, checkVersion),
+    // An unattended step needs the restrictions it names; Codex has none of them built (ai-turns.md).
+    createChatModel: request => {
+      if (request.unattended) throw new Error('Codex: unattended AI turns are not supported')
+      return createModel(config, request, false, createRpc, checkVersion)
+    },
     createTitleModel: request => createModel(config, request || {}, true, createRpc, checkVersion),
     readMetadata(metadata) {
       const value = metadata?.codex as { sessionId?: string } | undefined

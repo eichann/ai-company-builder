@@ -75,7 +75,45 @@ export interface AiTurnItemsView {
   handOver: (recordId: string) => void
 }
 
-const MINUTES_ID_RE =/^minutes-[0-9a-z]{6,32}$/
+/**
+ * An unattended step (owner decision 2026-11-01): the automatic run gets ONLY the tools its step
+ * declares — the app's record tools named here, and Claude Code's built-in tools listed in
+ * `builtinTools` (none for minutes reading). The member's own settings, MCP servers, hooks and
+ * plugins are not loaded. Normal consultations are unchanged.
+ */
+export type AiTurnStep = 'minutes-reading'
+
+export interface AiTurnStepTools {
+  /** Record tools (acb_records) by exact name. */
+  recordTools: readonly string[]
+  /** Record tools by name ending: a business plugin's operations (`<plugin>__update_deal`). */
+  recordToolEndings: readonly string[]
+  /** Claude Code built-in tools the step declares ([] = none at all). */
+  builtinTools: readonly string[]
+}
+
+export const AI_TURN_STEPS: Record<AiTurnStep, AiTurnStepTools> = {
+  'minutes-reading': {
+    recordTools: [
+      'minutes_read', 'minutes_link_deal', 'minutes__start_reading', 'minutes__finish_reading', 'minutes__fail_reading',
+      'records_create', 'decisions_record', 'mail_recipients', 'mail_draft_create', 'mail_draft_update', 'mail_draft_show',
+    ],
+    recordToolEndings: ['__update_deal', '__log_meeting'],
+    builtinTools: [],
+  },
+}
+
+export function isAiTurnStep(value: unknown): value is AiTurnStep {
+  return typeof value === 'string' && Object.prototype.hasOwnProperty.call(AI_TURN_STEPS, value)
+}
+
+/** Whether the step declares this record tool (its plain name, not the mcp__ id). */
+export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): boolean {
+  const tools = AI_TURN_STEPS[step]
+  return tools.recordTools.includes(name) || tools.recordToolEndings.some(ending => name.endsWith(ending) && name.length > ending.length)
+}
+
+const MINUTES_ID_RE = /^minutes-[0-9a-z]{6,32}$/
 
 /** The record kinds the runner handles, and each one's claiming action. Today: minutes 「読む」. */
 export const AI_TURN_CLAIM_ACTIONS = { minutes: 'start_reading' } as const

@@ -95,6 +95,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     pass.current.started += 1
     o.deliver(tabId, {
       kind: 'aiTurn',
+      step: 'minutes-reading',
       message: autoMinutesFirstMessage(minutesFirstMessage(notice)),
       title: minutesConsultationTitle(notice),
       minutesId: notice.id,

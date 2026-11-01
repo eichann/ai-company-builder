@@ -7,6 +7,7 @@ paths:
   - "client/src/features/chat/hooks/useAiTurnRunner.ts"
   - "client/src/features/chat/components/AiTurnNotice.tsx"
   - "client/tests/ai-turn-claims.test.ts"
+  - "client/tests/ai-turn-unattended.test.ts"
   - "client/tests/ui/ai-turns.spec.ts"
   - "client/src/features/minutes/components/MinutesNotices.tsx"
 ---
@@ -33,12 +34,28 @@ read, `minutes.md`); the 「議事録が届きました」 notice stays as the f
   minutes, `minutes:notices`). It ticks every 3 s; the rules are pure in
   `src/features/chat/aiTurns.ts`.
 - One run = a new tab **behind** the shown one (`useChatTabs` `openBackgroundTab`, never activated),
-  handed `ChatInputRequest` `{ kind: 'aiTurn', message, title, minutesId, claim }` through
+  handed `ChatInputRequest` `{ kind: 'aiTurn', step, message, title, minutesId, claim }` through
   `inputRequest` (the only request a tab takes while not shown). The tab calls `claim(its own
   conversation id)`; only when that wins does it set the title (「<件名> のあと（M/D）」, kept),
   store `minutesId` and send the first message (`minutesFirstMessage` wrapped by
   `autoMinutesFirstMessage`: the app started it, the start is already marked, end with
   finish / fail). It is listed in 「AIへの相談」 like any open tab (working → 新着).
+- **Only the step's tools** (owner decision 2026-11-01, binding): the automatic send carries
+  `aiTurnStep` (`ChatRequestOptions`, consumed by that one request — `chatRequestBody.ts`; the
+  member's own later messages in that consultation are normal turns). The chat server then gives
+  no references, company files, review, web research, choice prompts, steering or suggestions,
+  and only the record tools the step declares (`AI_TURN_STEPS` in `client/shared/ai-turns.ts`:
+  minutes reading = `minutes_read`, `minutes_link_deal`, the three minutes actions,
+  `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
+  `show`, and a business plugin's `…__update_deal` / `…__log_meeting`; anything else is filtered
+  out and refused if called). Claude Code runs it with `settingSources: []` and
+  `strictMcpConfig: true` (none of the member's settings, MCP servers, hooks or plugins, like the
+  hand-off agent), `tools: <the step's builtinTools>` (minutes reading: `[]`), a flag-settings deny
+  of `CLAUDE_UNATTENDED_DENIED_TOOLS` (shell, web, file writes, subagents) unless declared, and a
+  `canUseTool` that refuses — never asks — anything else (`unattended` on `createChatModel`,
+  `agents/connection.ts`). Codex and the API-key mode throw on `unattended`, and the chat server
+  answers 400 `AI_TURN_NOT_SUPPORTED` for an agent without `recordActions`: a restriction is never
+  assumed in force when it is not. Normal consultations are unchanged.
 - A run ends when the tab's status (`consultationStatusStore`) leaves working (an approval or a
   question keeps it running); then `aiTurns:settle`.
 
@@ -96,7 +113,10 @@ Sending and approving stay a person's (no change): the AI makes drafts and appro
 
 `src/features/chat/aiTurns.test.ts` (setting off, Codex, order, one at a time and the pass cap,
 daily limit, attempts per record, stop after failures and resume, usage pause, settings values; a failure handed with its reason and 「もう一度」, every state has a reason and stopped ones offer both choices, 「人に渡す」, due soon handed early),
-`tests/ai-turn-claims.test.ts` (two PCs → one claim; Codex / API key / closed window / stop →
+`tests/ai-turn-unattended.test.ts` (an unattended run's Claude options: no settings layers, strict
+MCP config, no built-in tools, shell / web / write denied, only the record server, everything else
+refused even in bypass; a normal turn unchanged; Codex refuses; the minutes step's tool list; the
+step rides on one request only), `tests/ai-turn-claims.test.ts` (two PCs → one claim; Codex / API key / closed window / stop →
 no server call; minutes only; settle puts an unfinished reading back), `tests/ui/ai-turns.spec.ts`
 (`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
 its title and `minutesId`, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;

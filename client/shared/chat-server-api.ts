@@ -6,6 +6,7 @@
  * them. Not IPC: the address and token come over IPC (`chat-server:getInfo` /
  * `chat-server:info`, `ChatServerInfo` in ipc-contract.ts).
  */
+import type { AiTurnStep } from './ai-turns'
 import type { AgentSession, AuthMode } from './agent'
 import type { RateLimitSnapshot } from './rate-limits'
 
@@ -48,6 +49,8 @@ export interface ChatRequestOptions {
   images?: Array<{ mediaType: string; data: string }>
   /** Files dropped from the file tree, read by the agent before answering. */
   referenceFiles?: string[]
+  /** An unattended 「AI の番」 step (ai-turns.md): only that step's tools; absent for every member's own turn. */
+  aiTurnStep?: AiTurnStep
 }
 
 export interface SteerRequest { appSessionId: string; text: string }

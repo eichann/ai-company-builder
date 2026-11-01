@@ -316,7 +316,7 @@ useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株
 
 // ?autoturn: the minutes notice with the runner's states, as AppShell composes them.
 let showAiTurns: (view: AiTurnItemsView) => void = () => {}
-function AutoTurnNotices() {
+export function AutoTurnNotices() {
   const [view, setView] = useState<AiTurnItemsView | null>(null)
   showAiTurns = setView
   return <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} aiTurns={view} />
