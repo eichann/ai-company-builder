@@ -215,6 +215,8 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/minutes/item/:recordId/text,
                               POST /me/minutes/item/:recordId/deal               minutes.ts
                                                                 (議事録の取り込み: minutes.md)
+                              GET /me/calendar/today                          calendar.ts
+                                                                (今日の予定: calendar.md)
 /api/records-ai               GET /types, /my-turn, /item/:recordId(/history), POST /query,
                               POST /item, POST /item/:recordId/actions/:action,
                               POST /item/:recordId/file-links (+ /remove),

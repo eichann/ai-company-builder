@@ -42,6 +42,7 @@ import { registerDownloadChoicesIpc } from './features/download-choices/ipc'
 import { wirePrivateFolders } from './features/private-folders/wire'
 import { wireKeyBroker } from './features/broker/wire'
 import { registerGoogleIpc } from './features/google/ipc'
+import { registerCalendarIpc } from './features/calendar/ipc'
 import { registerPluginOperationsIpc } from './features/plugin-operations/ipc'
 import { registerApprovalsIpc } from './features/approvals/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
@@ -224,6 +225,8 @@ const writeAccessStore = createWriteAccessStore({
 const { tokens: brokerTokens } = wireKeyBroker(ipc, { serverUrl: getServerApiUrl, session, paths: allowedRoots, shellEnv, shell: desktopShell, lifecycle })
 // 「Google で許可」 (features/google): the session stays here; the sign-in page opens in the browser.
 registerGoogleIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
+// 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
+registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The chat's approval card: approving is the person's own act, with the session (no AI route approves).
