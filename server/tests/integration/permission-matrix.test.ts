@@ -170,6 +170,10 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/departments/sync', w => ({ path: `${C(w)}/departments/sync` }), [200, 200, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/departments/:id/managers', w => ({ path: `${C(w)}/departments/${w.sales}/managers` }), MEMBERS),
   r('PUT /api/companies/:companyId/departments/:id/managers', w => ({ path: `${C(w)}/departments/${w.sales}/managers`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  // Department membership (所属する部署): any member reads; owner/admin and the department's own managers change it
+  r('GET /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members` }), MEMBERS),
+  r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.sales}/members`, body: {} }), [400, 400, 403, 400, 404, 401], 'the manager\'s department'),
+  r('PUT /api/companies/:companyId/departments/:id/members', w => ({ path: `${C(w)}/departments/${w.accounting}/members`, body: {} }), [400, 400, 403, 403, 404, 401], 'outside the manager\'s department'),
 
   // Files (read-only views)
   r('GET /api/companies/:companyId/folder-sizes', w => ({ path: `${C(w)}/folder-sizes`, query: `path=${encodeURIComponent('営業部')}` }), MEMBERS),
@@ -229,6 +233,10 @@ const MATRIX: Row[] = [
   r('GET /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox` }), [200, 200, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox', w => ({ path: `${C(w)}/agent-sandbox`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', w => ({ path: `${C(w)}/agent-sandbox/overrides/${USER.member}`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
+
+  // Task settings (tasks.md): every member reads, owner/admin change
+  r('GET /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings` }), MEMBERS),
+  r('PUT /api/companies/:companyId/task-settings', w => ({ path: `${C(w)}/task-settings`, body: 'x' }), [400, 400, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/agent-policy', w => ({ path: `${C(w)}/me/agent-policy` }), MEMBERS),
   r('GET /api/companies/:companyId/agent-stops', w => ({ path: `${C(w)}/agent-stops` }), [200, 200, 403, 403, 404, 401]),
   r('POST /api/companies/:companyId/agent-stops', w => ({ path: `${C(w)}/agent-stops`, body: { tool: 'no-such-tool' } }), [400, 400, 403, 403, 404, 401]),
@@ -408,6 +416,8 @@ const CROSS: CrossRow[] = [
   x('GET /api/companies/:companyId/departments/:id/stats', (w, id) => ({ path: `${D(w, id)}/stats` }), w => w.other.department),
   x('GET /api/companies/:companyId/departments/:id/managers', (w, id) => ({ path: `${D(w, id)}/managers` }), w => w.other.department),
   x('PUT /api/companies/:companyId/departments/:id/managers', (w, id) => ({ path: `${D(w, id)}/managers`, body: { userIds: [] } }), w => w.other.department),
+  x('GET /api/companies/:companyId/departments/:id/members', (w, id) => ({ path: `${D(w, id)}/members` }), w => w.other.department),
+  x('PUT /api/companies/:companyId/departments/:id/members', (w, id) => ({ path: `${D(w, id)}/members`, body: { userIds: [] } }), w => w.other.department),
 
   x('PATCH /api/companies/:companyId/permissions/rules/:ruleId', (w, id) => ({ path: `${C(w)}/permissions/rules/${id}`, body: { canRead: true, canWrite: false, force: true } }), w => w.other.rule),
   x('DELETE /api/companies/:companyId/permissions/rules/:ruleId', (w, id) => ({ path: `${C(w)}/permissions/rules/${id}`, query: 'force=true' }), w => w.other.rule),
@@ -626,6 +636,8 @@ async function seed(): Promise<World> {
   db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)')
     .run('m-other-member', otherMember, other, 'member', expires, expires)
   const otherDept = (db.prepare('SELECT id FROM departments WHERE company_id = ? AND folder = ?').get(other, '営業部') as { id: string }).id
+  // Someone belongs to it (所属する部署): a cross-company PUT …/members must not empty it.
+  await call('outsider', 'PUT', `${O}/departments/${otherDept}/members`, { userIds: [otherMember] })
   const otherRule = await call('outsider', 'POST', `${O}/permissions/rules`, {
     path: '営業部', subjectType: 'user', subjectId: otherMember, canWrite: true, force: true,
   })

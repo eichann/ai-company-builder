@@ -46,6 +46,7 @@ import { createPrivateFolderService } from './services/private-folders'
 import { createCompanyScopeService } from './services/company-scopes'
 import { createAgentEventService } from './services/agent-events'
 import { createAgentSandboxService } from './services/agent-sandbox'
+import { createTaskSettingsService } from './services/task-settings'
 import { createAgentStopService } from './services/agent-stops'
 import { createAgentPolicyService } from './services/agent-policy'
 import { createPushChannel } from './services/push-channel'
@@ -413,6 +414,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     }),
     invitations: createInvitationService({ ...repos, ...shared }),
     departments: createDepartmentService({ ...repos, ...shared, repoStore }),
+    taskSettings: createTaskSettingsService({ ...repos, ...shared }),
     permissionViews,
     permissionEditor: createPermissionEditorService({
       ...repos,
