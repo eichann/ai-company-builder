@@ -2,7 +2,8 @@
 // AI prepared is on top; the assignee completes only by naming whose OK (start first, then
 // complete with it, each at its version); 受けられない needs a reason; 延ばす sends a new due; a
 // run with an unknown outside result is settled by the member; the completed card states the OK
-// in words; the 自分だけ and 例外（この件だけ） marks show.
+// in words; the 自分だけ and 例外（この件だけ） marks show; the source slot shows what the screen gives
+// and stays hidden without it.
 import { test, expect } from '@playwright/test'
 import { expectNoPageErrors, openPreview } from './helpers'
 
@@ -68,4 +69,16 @@ test('「＋ファイルをつなぐ」 links a company file; a linked file can 
   await card.dispatchEvent('drop', { dataTransfer: data })
   await expect(page.locator('#acted')).toContainText('link 経理/請求書.xlsx@3')
   expectNoPageErrors(state)
+})
+
+test('the source slot shows what the screen gives for the task, and nothing without it', async ({ page }) => {
+  const state = await openPreview(page, 'task-card', { source: '1' })
+  const card = page.getByTestId('task-card')
+  await expect(card.getByRole('region', { name: '元のやりとり' })).toContainText('元のメール：A社 見積書を 150万円 で作り直す')
+  expectNoPageErrors(state)
+
+  const plain = await openPreview(page, 'task-card')
+  await expect(card.getByRole('region', { name: 'AI が用意したもの' })).toBeVisible()
+  await expect(card.getByRole('region', { name: '元のやりとり' })).toHaveCount(0)
+  expectNoPageErrors(plain)
 })

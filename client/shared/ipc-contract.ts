@@ -45,6 +45,13 @@ import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult
 import type { TaskCardResult } from './task-card'
 import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 
 // ---------------------------------------------------------------------------
 // Payload types
@@ -616,6 +623,13 @@ export interface IpcInvokeChannels {
   'chatWindow:openFile': { args: [filePath: string]; result: ChatWindowOpenFileResult }
   /** The main window's answer to app:closeRequested: `ack` at once, then `close` or `stay`. */
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 /** renderer → main, fire and forget: ipcRenderer.send(channel, ...args). */
@@ -653,6 +667,13 @@ export interface IpcEventChannels {
   'chatWindow:fileRequested': [request: ChatWindowFileRequest]
   /** The member closes the main window or quits: save the open tabs first, then answer app:closeResponse. */
   'app:closeRequested': []
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 export type InvokeChannel = keyof IpcInvokeChannels
@@ -906,4 +927,11 @@ export interface ElectronAPI {
   onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
   onCloseRequested: Subscribe<'app:closeRequested'>
   answerCloseRequest: Invoke<'app:closeResponse'>
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
