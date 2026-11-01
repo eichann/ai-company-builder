@@ -5,6 +5,7 @@
  */
 import type { MinutesNotice } from '../minutes-app'
 import type { TaskListItem } from '../tasks'
+import { inboxTriage } from './inbox-triage'
 import { minutesReading } from './minutes-reading'
 import type { AiTurnCandidate, AiTurnStepDefinition } from './types'
 
@@ -14,6 +15,7 @@ const STEPS = [
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  inboxTriage,
   // lane B ▲
   // lane C ▼
   // lane C ▲

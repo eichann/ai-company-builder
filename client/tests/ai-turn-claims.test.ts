@@ -10,8 +10,10 @@ import { createRunRegistry } from '../electron/records/runs'
 
 const COMPANY = 'acme'
 const RECORD = 'minutes-0a1b2c3d4e5f6071'
+const MINUTES = RECORD
+const INTERACTION = 'interaction-0a1b2c3d4e5f6071'
 
-function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown) {
+function fakeServer(initial: { state: string; version: number } = { state: 'received', version: 3 }, autoRun?: unknown, RECORD = MINUTES) {
   const record = { ...initial }
   const calls: string[] = []
   const tokens: Array<{ conversationId: string; agent: string; scope: string; run?: { id: string; generation: number } }> = []
@@ -226,4 +228,26 @@ test('an unfinished run is put back by finishing it on the server, never as the 
   assert.deepEqual(await pc.settle(COMPANY, RECORD), { outcome: 'put-back' })
   assert.deepEqual(server.record, { state: 'received', version: 5 })
   assert.ok(!server.calls.some(c => c.endsWith('/records/item/' + RECORD + '/actions/retry')))
+})
+
+test('a kind without a start mark (an incoming message in 届いた): the server\'s run alone is the claim, no record action; left in 届いた it is given back', async () => {
+  const server = fakeServer({ state: 'received', version: 2 }, undefined, INTERACTION)
+  const pcA = claimsFor(server)
+  const pcB = claimsFor(server)
+  const [a, b] = await Promise.all([pcA.claim(COMPANY, INTERACTION, 2, 'conversation-aaaa'), pcB.claim(COMPANY, INTERACTION, 2, 'conversation-bbbb')])
+  const won = [a, b].filter(r => r.claimed)
+  // One PC; the version the claim read is what the AI judges at (nothing moved it).
+  assert.deepEqual(won, [{ claimed: true, version: 2 }])
+  assert.equal(server.calls.filter(c => c.includes('/api/records-ai/item/')).length, 0)
+  assert.deepEqual(server.record, { state: 'received', version: 2 })
+  // The AI stopped without judging: the run is finished as temporary and the record is back in 「AI の番」.
+  const winner = a.claimed ? pcA : pcB
+  assert.deepEqual(await winner.settle(COMPANY, INTERACTION), { outcome: 'put-back' })
+  assert.deepEqual(server.run.finished.at(-1), { generation: 1, outcome: 'failed', failure: { class: 'temporary', code: 'UNFINISHED' } })
+  // Judged (handled): done.
+  const again = fakeServer({ state: 'received', version: 2 }, undefined, INTERACTION)
+  const pc = claimsFor(again)
+  assert.equal((await pc.claim(COMPANY, INTERACTION, 2, 'conversation-cccc')).claimed, true)
+  again.record.state = 'handled'
+  assert.deepEqual(await pc.settle(COMPANY, INTERACTION), { outcome: 'done' })
 })

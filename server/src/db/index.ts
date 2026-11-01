@@ -25,7 +25,7 @@ import { slackSchema } from './schema/slack'
 // lane A ▲
 // lane B ▼
 import { identitySchema } from './schema/identities'
-import { inboxSchema } from './schema/inbox'
+import { inboxSchema, migrateInboxMessageSourceRef } from './schema/inbox'
 // lane B ▲
 // lane C ▼
 import { pluginRoleSchema } from './schema/plugin-roles'
@@ -128,6 +128,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  migrateInboxMessageSourceRef(conn)
   // lane B ▲
   // lane C ▼
   // lane C ▲

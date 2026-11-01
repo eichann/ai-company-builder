@@ -76,7 +76,11 @@ turns").
   the runner's queue finds them (`listedBy`: `minutes` = main's received minutes, only while Google
   may read them; `ai-turn` = the task list's 「AI の番」, `turn: 'ai'`), main's `claim` (action, from
   state) and `settle` states (done / couldNot / closed / working, `putBack`), the consultation's
-  title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`.
+  title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
+  `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`). A type with no start mark
+  declares `claim.action: null`: the server's execution run is then the only claim (main runs no
+  record action and answers the version it read), and `settle.putBack: null` when the working
+  state is the claim's own from-state (given back by finishing the run).
 - `registry.ts` lists them (one line per step, under the lane markers): `aiTurnStepForRecord`
   (main's claim / settle / retry refuse a record without a step), `aiTurnStepAllowsRecordTool`
   (the chat server's least-privilege filter), `aiTurnQueue` (AppShell builds the runner's queue

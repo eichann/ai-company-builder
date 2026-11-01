@@ -34,12 +34,17 @@ export interface InboxLaneDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Role resolution (connector-roles.md), from lane A. */
   roles?: InboxDeps['roles']
+  /** メールを読む (the role, routed), from lane A: the AI's thread read (B4). */
+  mailReader?: InboxDeps['mailReader']
+  /** チャットを受け取る (the role's thread read), from lane A's A4 when it lands. */
+  chatReader?: InboxDeps['chatReader']
   /** Lane A's hook for Slack's signals (a DM, a mention, an @channel for a member; never the text). */
   onSlackSignal?: (listen: (signal: SlackSignal) => void) => void
 }
 
-/** A Slack signal as the inbox's message (chat): ids and pointers only. */
+/** A Slack signal as the inbox's message (chat): ids and pointers only. The member's own message is outgoing. */
 export function slackSignalMessage(s: SlackSignal) {
+  const own = s.kind === 'own'
   return {
     channel: 'chat' as const,
     messageId: `${s.channelId}:${s.ts}`,
@@ -48,9 +53,10 @@ export function slackSignalMessage(s: SlackSignal) {
     sourceRef: `slack:${s.channelId}:${s.ts}`,
     occurredAt: new Date(Math.floor(Number(s.ts) * 1000)).toISOString(),
     subject: null,
-    from: { address: `slack:${s.senderSlackUserId ?? 'unknown'}` },
-    to: [{ address: `slack-member:${s.userId}`, memberId: s.userId }],
+    from: own ? { address: `slack-member:${s.userId}`, memberId: s.userId } : { address: `slack:${s.senderSlackUserId ?? 'unknown'}` },
+    to: own ? [] : [{ address: `slack-member:${s.userId}`, memberId: s.userId }],
     cc: [],
+    outgoing: own,
   }
 }
 
@@ -75,6 +81,8 @@ export function wireInboxLane(deps: InboxLaneDeps) {
     },
     taskSettings: deps.taskSettings,
     roles: deps.roles,
+    mailReader: deps.mailReader,
+    chatReader: deps.chatReader,
   })
   // Slack's events (A3): each signal is one incoming chat message for that member.
   deps.onSlackSignal?.(signal => {

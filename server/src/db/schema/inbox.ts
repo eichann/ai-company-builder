@@ -5,6 +5,8 @@
  * a body, a subject or an address (the few the owner may see live on the
  * owner-only `interaction` record).
  */
+import type Database from 'better-sqlite3'
+
 export const inboxSchema = `
     -- The company's intake settings (shared/core/intake-settings.ts), one JSON document.
     CREATE TABLE IF NOT EXISTS inbox_settings (
@@ -23,6 +25,8 @@ export const inboxSchema = `
       direction TEXT NOT NULL CHECK (direction IN ('in', 'out')),
       occurred_at TEXT NOT NULL,
       seen_at TEXT NOT NULL,
+      -- The connector's opaque pointer to this message (the AI reads it again on demand, B4).
+      source_ref TEXT,
       PRIMARY KEY (company_id, channel, message_id)
     );
     CREATE INDEX IF NOT EXISTS idx_inbox_messages_interaction ON inbox_messages(company_id, interaction_id);
@@ -49,3 +53,9 @@ export const inboxSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_inbox_gaps_user ON inbox_gaps(company_id, user_id);
 `
+
+/** B4: each message keeps its connector pointer (a database made before it gets the column). */
+export function migrateInboxMessageSourceRef(conn: Database.Database): void {
+  const cols = new Set((conn.prepare('PRAGMA table_info(inbox_messages)').all() as Array<{ name: string }>).map(c => c.name))
+  if (!cols.has('source_ref')) conn.exec('ALTER TABLE inbox_messages ADD COLUMN source_ref TEXT')
+}

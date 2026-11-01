@@ -345,6 +345,13 @@ describe('the event receiver: what becomes a signal', () => {
     expect(signals.map(s => [s.kind, s.threadTs])).toEqual([['dm', null], ['mention', '17935.1'], ['broadcast', null]])
   })
 
+  it('the member\'s own message in a DM or a thread is their reply (`own`, B4); in a channel outside a thread, nothing', async () => {
+    await postEvent('c1', message('T0DIV', { user: 'U0ONE', channel_type: 'im', channel: 'D0ONE', text: '了解です' }))
+    await postEvent('c1', message('T0DIV', { user: 'U0ONE', text: '返しました', thread_ts: '17935.1' }))
+    await postEvent('c1', message('T0DIV', { user: 'U0ONE', text: 'just me' }))
+    expect(signals.map(s => [s.kind, s.userId, s.channelId, s.threadTs])).toEqual([['own', 'u1', 'D0ONE', null], ['own', 'u1', 'C0GENERAL', '17935.1']])
+  })
+
   it('a Slack Connect channel is an outside message', async () => {
     await postEvent('c1', message('T0DIV', { text: '<@U0ONE> quote?', is_ext_shared_channel: true, user: 'U0EXT', user_team: 'T0EXT' }))
     expect(signals).toMatchObject([{ kind: 'mention', external: true, senderSlackUserId: 'U0EXT' }])

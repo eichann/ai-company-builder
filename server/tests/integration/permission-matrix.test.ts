@@ -476,6 +476,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/inbox/items/:recordId/claim', w => ({ path: `${C(w)}/inbox/items/interaction-nosuch01/claim`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/inbox/items/:recordId', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/inbox/items/:recordId/judgement', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/judgement', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  r('GET /api/records-ai/inbox/items/:recordId/thread', () => ({ path: '/api/records-ai/inbox/items/interaction-nosuch01/thread' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   // lane B ▲
   // lane C ▼
   // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
@@ -654,6 +655,7 @@ const NOT_OBJECT_IDS: Record<string, string> = {
   'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',
   'GET /api/records-ai/inbox/items/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
   'POST /api/records-ai/inbox/items/:recordId/judgement': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
+  'GET /api/records-ai/inbox/items/:recordId/thread': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/inbox.test.ts)',
   // lane B ▲
   // lane C ▼
   // lane C ▲

@@ -156,6 +156,8 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
           await finishRun(companyId, recordId, { class: 'permission', code: 'READ_ONLY_TOKEN' })
           return { claimed: false, reason: 'not-allowed' }
         }
+        // No start mark in the type (an interaction in 届いた): the server's run is the claim.
+        if (step.claim.action === null) return { claimed: true, version: now?.version ?? null }
         const started = await access.call('POST', `/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(step.claim.action)}`, { expectedVersion }) as { record?: { version?: unknown } } | undefined
         const version = started?.record?.version
         return { claimed: true, version: typeof version === 'number' ? version : null }
@@ -213,7 +215,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       if (record.state !== settle.working) return { outcome: 'unknown' }
       const after = ran ? await recordOf(companyId, recordId) : record
       if (after && after.state === step.claim.from) return { outcome: 'put-back' }
-      if (!after || after.state !== settle.working) return { outcome: 'unknown' }
+      if (!after || after.state !== settle.working || settle.putBack === null) return { outcome: 'unknown' }
       // An older server leaves it reading: put it back with the member's session, as before.
       const r = await session(companyId, 'POST', `/records/item/${encodeURIComponent(recordId)}/actions/${encodeURIComponent(settle.putBack)}`, { expectedVersion: after.version })
       if (!r || r.status >= 300) log.warn(`[ai-turns] retry: answered ${r?.status ?? 'nothing'}`)

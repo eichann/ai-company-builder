@@ -3,6 +3,7 @@
 // its provider file and one line under its lane's marker; tools.ts itself does not change. An
 // unattended 「AI の番」 still gets only what its step names (`client/shared/ai-turn-steps/`).
 import { createDriveTools, type DrivePicking } from '../features/google/drive'
+import { createInboxTools } from '../features/inbox/tools'
 import type { PathGuard } from '../features/ports'
 import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
@@ -35,6 +36,8 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   // lane A ▼
   // lane A ▲
   // lane B ▼
+  // The inbox (来た連絡, inbox.md): read a message's thread on demand, record the judgement (B4).
+  providers.push((access, signal) => createInboxTools(access, signal))
   // lane B ▲
   // lane C ▼
   // lane C ▲

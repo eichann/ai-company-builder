@@ -38,7 +38,7 @@ notice DMs, and 「つないでいるサービス」 with Slack's switch (its ap
 file naming `slack` or `*`). `slackSchema` is in `db/index.ts` below the lane A marker. Routes:
 `routes/slack-connection.ts` (`slackRoute` at `/api/companies/:companyId`, `slackEventsRoute` at
 `/api/slack`), listed in `auth-guards.test.ts` `PUBLIC_ENDPOINTS` (events) and the permission
-matrix. Lane B's consumer of the signals (`services.onSlackSignal`) is still to come.
+matrix. Lane B consumes the signals (`services.onSlackSignal` → the inbox, `inbox.md`).
 
 ## Storage (`db/schema/slack.ts`, `ports/slack.ts`, `adapters/sqlite/slack.ts`; every statement binds the company)
 
@@ -123,8 +123,10 @@ A **signal** (`SlackSignal`: member, kind `dm` / `mention` / `broadcast`, channe
 sender's Slack id, `external` for Slack Connect or a sender of another workspace) goes to
 `onSignal` (B2). The text is read only in memory: `<@U…>` mentions, `<!channel|here|everyone>`.
 DMs and broadcasts go to the event's `authorizations` (non-bot, same workspace); mentions to the
-mentioned users. Signals go to the listeners registered with `services.onSlackSignal` (lane B's
-来た連絡); none yet, so they are dropped. Left out: bots (`bot_id`), edits and other subtypes, the sender themselves,
+mentioned users. The member's **own** message in a DM or a thread reply is a signal `own` for them
+(their reply: the inbox ends what it answered, B4). Signals go to the listeners registered with
+`services.onSlackSignal` (lane B's 来た連絡). Left out: bots (`bot_id`), edits and other subtypes,
+the sender themselves (except `own` above),
 members without an active grant that reads (`read` granted and not in `features_off`) or no
 longer members. Slack lists only one authorization per event; reaching every member of a
 broadcast needs `apps.event.authorizations.list`, which takes an **app-level token** (`xapp-`,

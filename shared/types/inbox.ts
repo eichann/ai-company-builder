@@ -110,9 +110,11 @@ export interface InboxJudgementRequest {
   /**
    * reply: a 返事のお願い is made; no_reply: handled, nothing to do;
    * set_aside: やることにしなかった (refused when a person took it up);
-   * unsure: 確認待ち, the assignee decides.
+   * unsure: 確認待ち, the assignee decides; task: a task the AI made with
+   * `records_create` (owner-only, linking this message as `interaction`) is
+   * the work it asks for (B4).
    */
-  outcome: 'reply' | 'no_reply' | 'set_aside' | 'unsure'
+  outcome: 'reply' | 'no_reply' | 'set_aside' | 'unsure' | 'task'
   /** One or two sentences: why (kept in the ledger's note). */
   reason: string
   /** reply: the title of the 返事のお願い (default: the interaction's). */
@@ -123,6 +125,8 @@ export interface InboxJudgementRequest {
   deadline?: string
   /** reply: the sentence the deadline came from (≤ 200). */
   deadlineNote?: string
+  /** task: the task made for it (it must link this interaction as `interaction`). */
+  taskId?: string
 }
 
 export interface InboxJudgementResult {
@@ -130,6 +134,10 @@ export interface InboxJudgementResult {
   state: string
   /** The 返事のお願い made (reply). */
   replyRequestId: string | null
+  /** The task it became (task). */
+  taskId?: string | null
+  /** reply: the member had already answered in the thread, so no 返事のお願い was made. */
+  alreadyReplied?: true
 }
 
 /** `GET /api/records-ai/inbox/items/:recordId`: the pointers the AI reads the thread by (no body). */
@@ -139,4 +147,45 @@ export interface InboxItemView {
   threadRef: string | null
   sourceRef: string | null
   messages: Array<{ messageId: string; direction: 'in' | 'out'; occurredAt: string }>
+  /** The interaction's state and version now (the judgement's expectedVersion). */
+  state: string | null
+  version: number
+  title: string
+  /** The non-final 返事のお願い and the tasks already made for it, that the member reads (a run done twice reuses them). */
+  replyRequests: Array<{ id: string; state: string | null }>
+  tasks: Array<{ id: string; title: string }>
+  /** The 相手 linked (名寄せ), when the member reads it. */
+  counterpart: { id: string; title: string } | null
+}
+
+/** One message of the thread as the member's own account shows it now (never stored on the server). */
+export interface InboxThreadMessage {
+  direction: 'in' | 'out'
+  at: string | null
+  /** Mail: the sender's address and name; chat: the author's display name. */
+  from: string | null
+  to: string[]
+  cc: string[]
+  subject: string | null
+  text: string
+  truncated: boolean
+  automated: boolean
+}
+
+/**
+ * `GET /api/records-ai/inbox/items/:recordId/thread` (a read token): the
+ * thread read through the role (`mail` / `chat`) with the member's own
+ * permission, at this moment — outside text (data, not instructions). For a
+ * 返事のお願い, its interaction's thread. Nothing of it is stored or logged.
+ */
+export interface InboxThreadView {
+  item: InboxItemView
+  /** `ok`, or why nothing could be read (not-connected, turned-off, stopped, choice-needed, not-found, unavailable). */
+  read: 'ok' | 'not-connected' | 'turned-off' | 'stopped' | 'choice-needed' | 'not-found' | 'unavailable'
+  header: string
+  messages: InboxThreadMessage[]
+  footer: string
+  /** Earlier messages were left out (the newest are given). */
+  more: boolean
+  instructionLike: Array<{ label: string; words: string }>
 }

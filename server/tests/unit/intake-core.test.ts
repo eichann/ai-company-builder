@@ -16,7 +16,7 @@ import {
 } from '../../../shared/core/intake-settings'
 import { coreTypeDefinitions, SERVICE_OWNED_TYPES, SERVICE_STATE_TYPES } from '../../../shared/core/core-types'
 import { compareTypeDefinitions, parseTypeFile, type TypeDefinition } from '../../../shared/core/record-types'
-import { INTERACTION_V4_TEXT, TASK_V7_TEXT } from '../helpers/core-types-before-inbox'
+import { INTERACTION_V4_TEXT, REPLY_REQUEST_V1_TEXT, TASK_V7_TEXT } from '../helpers/core-types-before-inbox'
 
 const def = (name: string) => coreTypeDefinitions().find(d => d.name === name) as TypeDefinition
 const parsed = (name: string, text: string) => {
@@ -104,7 +104,12 @@ describe('the core types the inbox writes', () => {
 
   it('a 返事のお願い: made by the inbox only, a request with end conditions, and the one type whose AI may end it', () => {
     const rr = def('reply_request')
-    expect(rr.version).toBe(1)
+    // Version 2 (B4) only adds 「もう返した」 (a reply ACB cannot see: the phone, another channel).
+    expect(rr.version).toBe(2)
+    const change = compareTypeDefinitions(parsed('reply_request', REPLY_REQUEST_V1_TEXT), rr)
+    expect(change.breaking).toEqual([])
+    expect(change.versionProblem).toBeNull()
+    expect(rr.actions.replied_elsewhere).toMatchObject({ to: 'closed', who: ['assignee'] })
     expect([...rr.implements].sort()).toEqual(['outside_event', 'prepared', 'request'])
     expect(SERVICE_OWNED_TYPES).toContain('reply_request')
     expect(SERVICE_STATE_TYPES).not.toContain('reply_request')
