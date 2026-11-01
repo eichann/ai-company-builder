@@ -28,8 +28,9 @@ export function useConnectTools(companyId: string) {
 
   const reload = useCallback(async () => {
     const [g, s] = await Promise.all([getGoogleStatus(companyId), getSlackStatus(companyId)])
-    const nextG = g.success ? g.data : null
-    const nextS = s.success ? s.data : null
+    // No answer (an older main, a preview without these channels) counts as "not offered".
+    const nextG = g?.success ? g.data : null
+    const nextS = s?.success ? s.data : null
     setGoogle(nextG)
     setSlack(nextS)
     setLoaded(true)
