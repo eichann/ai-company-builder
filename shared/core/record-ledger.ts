@@ -11,6 +11,7 @@
  */
 
 import type { AiRunProcedure } from './ai-runs'
+import type { SkillUse } from './skill-uses'
 
 export type LedgerValue = string | number | boolean | null
 
@@ -105,6 +106,15 @@ export interface LedgerEntry {
    * with a `runId`; absent / null otherwise (a person, a consultation).
    */
   procedure?: AiRunProcedure | null
+
+  /**
+   * Which company Skills the consultation had used when the AI wrote this
+   * entry (`shared/core/skill-uses.ts`; records.md "Which Skill"): name, git
+   * tree id of the skill folder, dirty, first use — copied when the entry is
+   * written, so a Skill used later in the consultation never rewrites it. Only
+   * on the AI's entries whose consultation reported one; absent otherwise.
+   */
+  skills?: SkillUse[] | null
 }
 
 /**

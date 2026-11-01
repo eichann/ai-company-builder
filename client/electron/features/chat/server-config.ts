@@ -25,6 +25,7 @@ import type { ConfigStore } from '../../services/config-store'
 import type { AgentEventRecorder } from '../../services/agent-events'
 import type { AgentPolicyStore } from '../../services/agent-policy-store'
 import type { AgentStop } from '../../services/agent-stop'
+import type { SkillUseReporter } from '../../services/skill-use-reporter'
 import type { BrokerTokenStore } from '../../services/broker-token-store'
 import { agentBrokerReservedServices } from '../../../shared/agents/registry'
 import type { ShellEnvironment } from '../../services/shell-env'
@@ -69,6 +70,8 @@ export interface ChatServerConfigDeps {
   drivePicking?: Pick<DrivePicking, 'pick'>
   /** The allowed-roots check (a Drive put reads a local file). */
   paths?: PathGuard
+  /** Which Skill a consultation used (services/skill-use-reporter.ts, records.md "Which Skill"); absent = not recorded. */
+  skillUses?: Pick<SkillUseReporter, 'observe'>
 }
 
 function hostOf(url: string): string | undefined {
@@ -173,5 +176,6 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     oneShotAiAllowed: deps.agentStop ? () => deps.agentStop!.oneShotAiAllowed() : undefined,
     onToolEvent: event => deps.agentEvents.record(event),
     toolEventPaths: () => deps.agentEvents.paths(),
+    onSkillUsed: deps.skillUses ? sighting => deps.skillUses?.observe(sighting) : undefined,
 }
 }

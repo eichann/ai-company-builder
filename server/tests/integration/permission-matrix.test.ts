@@ -292,6 +292,7 @@ const MATRIX: Row[] = [
   r('POST /api/records-ai/item/:recordId/file-links/remove', () => ({ path: '/api/records-ai/item/deal-nosuch01/file-links/remove', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/companies/:companyId/me/record-tokens', w => ({ path: `${C(w)}/me/record-tokens`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('DELETE /api/companies/:companyId/me/record-tokens/:tokenId', w => ({ path: `${C(w)}/me/record-tokens/no-such-token` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/skill-uses', w => ({ path: `${C(w)}/me/skill-uses`, body: {} }), [400, 400, 400, 400, 404, 401]),
   // The AI's routes take a record token (Bearer), never a session: every caller here has only a session.
   r('GET /api/records-ai/types', () => ({ path: '/api/records-ai/types' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('GET /api/records-ai/my-turn', () => ({ path: '/api/records-ai/my-turn' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),

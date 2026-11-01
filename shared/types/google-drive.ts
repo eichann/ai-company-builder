@@ -5,6 +5,7 @@
  * session (never to a record token, the AI or a log).
  */
 import type { DrivePickMode } from '../core/google-drive'
+import type { SkillUse } from '../core/skill-uses'
 
 export type { DrivePickMode } from '../core/google-drive'
 
@@ -82,6 +83,8 @@ export interface DrivePutView {
   finishedAt: string | null
   /** found-by-correlation: the answer was lost and ACB found its own file by the put's id. */
   reason: string | null
+  /** The company Skills the AI's consultation had used when the put was asked (records.md "Which Skill"); null when none or a person's put. */
+  skills: SkillUse[] | null
 }
 
 /** POST /api/records-ai/google/drive/put (act token) and GET …/puts/:putId. */

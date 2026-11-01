@@ -59,6 +59,7 @@ import { registerNotificationsIpc } from './features/notifications/ipc'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
 import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
+import { createSkillUseReporter } from './services/skill-use-reporter'
 import type { StoppableTurns } from './services/agent-stop'
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -272,7 +273,17 @@ registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookie
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
 // Execution runs (S10b): which consultation runs which claimed 「AI の番」; its record tokens are bound to the run.
 const aiRunRegistry = createRunRegistry()
-const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf })
+// The app's git (binary, credentials, guarded configuration: services/app-git.ts).
+const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') })
+// Which Skill a consultation used (records.md "Which Skill"): folder name + git tree id, read-only git, never a blob fetched.
+const skillUses = createSkillUseReporter({
+  baseUrl: getServerApiUrl, cookies: session.cookies, home: os.homedir(), log: console,
+  git: (root, args) => appGit.create(root, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
+})
+const recordsApi = createRecordsApi({
+  baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf,
+  beforeWrite: conversationId => skillUses.settled(conversationId),
+})
 // 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
 // window; main claims the server's execution run and the record by its version, and settles it afterwards.
 registerAiTurnsIpc(ipc, {
@@ -307,9 +318,6 @@ registerAuthIpc(ipc, {
   },
   onSignedIn: () => agentControl.eventSender.sessionStarted(),
 })
-
-// The app's git (binary, credentials, guarded configuration: services/app-git.ts).
-const appGit = createAppGit({ token: session.gitToken, appGitDir: () => path.join(userDataDir(), 'git') })
 
 // Skills (features/skills).
 const skills = registerSkillsIpc(ipc, {
@@ -379,6 +387,7 @@ app.whenReady().then(async () => {
       privateFolders: privateFolderGuards,
       companyFiles: companyFilesApi,
       records: recordsApi,
+      skillUses,
       toolApprovals,
       cancelChoicePrompts: appSessionId => agentInteractions.cancelConversation(appSessionId),
       agentEvents: agentControl.events,

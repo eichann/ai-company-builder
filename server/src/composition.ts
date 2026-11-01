@@ -64,6 +64,7 @@ import { createRecordService } from './services/records'
 import { createRecordEngine, type RecordChange } from './services/record-engine'
 import { createNotificationService } from './services/notifications'
 import { createAiRunService } from './services/ai-runs'
+import { createSkillUseService } from './services/skill-uses'
 import { createServerClock } from './services/server-clock'
 import { createTaskAcceptance } from './services/task-acceptance'
 import { logError } from './lib/error-log'
@@ -535,6 +536,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     absences,
     aiRuns,
     recordEngine,
+    // Which company Skill a consultation used (records.md "Which Skill").
+    skillUses: createSkillUseService(shared),
     notifications,
     decisions,
     recordAiTokens: createRecordAiTokenService({

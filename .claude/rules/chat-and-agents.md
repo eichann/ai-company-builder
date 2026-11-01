@@ -362,3 +362,7 @@ the server: `agent-events.md` ("Sending from the app").
   `stopped-by-admin` the reply first gets the text 「※ 管理者が停止しました。」. The emergency stop
   calls it (`agent-stop.md`); agents also get the request's `toolStop` (a live check per tool
   call, decision `stopped`).
+- **Which Skill** (`records.md` "Which Skill"): `withSkillSightings` wraps a consultation turn's
+  host; a `Skill` call that ran (`skillLoadedBy`) also goes to `onSkillUsed` → main's
+  `services/skill-use-reporter.ts` (folder name + git tree id + dirty, never a path). Codex has
+  no Skill tool: nothing is recorded for it.

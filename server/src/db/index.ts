@@ -17,6 +17,7 @@ import { migrateRuleAndManagerCompanies, permissionSchema } from './schema/permi
 import { migratePluginInstallKeyReference, migratePluginOperationCreates, migratePluginTables, pluginSchema } from './schema/plugins'
 import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecordTypeSources, recordSchema } from './schema/records'
 import { migrateMemberAbsenceHistory, taskSchema } from './schema/tasks'
+import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
 // The migrations tests run on their own against older databases.
 export { migrateInvitationClaims } from './schema/company'
@@ -27,6 +28,7 @@ export { migrateConnectorProviders } from './schema/connectors'
 export { migrateFixedPayloads } from './schema/fixed-payloads'
 export { migrateAiRunColumns } from './schema/ai-runs'
 export { migrateMemberAbsenceHistory } from './schema/tasks'
+export { migrateSkillUseColumns } from './schema/skill-uses'
 
 // Ensure data directory exists
 if (!fs.existsSync(DATA_DIR)) {
@@ -62,6 +64,7 @@ const SCHEMA = [
   outboundMailSchema,
   notificationSchema,
   aiRunSchema,
+  skillUseSchema,
 ]
 
 // Initialize application tables (separate from Better Auth tables).
@@ -82,6 +85,8 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migratePluginTables(conn)
   // After migratePluginTables (which may rebuild plugin_operations).
   migrateAiRunColumns(conn)
+  // Which Skill a consultation used, copied onto the AI's ledger entries and Drive puts (records.md "Which Skill").
+  migrateSkillUseColumns(conn)
   migrateRecordTypeSources(conn)
   // Core types link to interfaces, `minutes` became `meeting` (records.md "Core interfaces").
   migrateCoreInterfaceLinks(conn)

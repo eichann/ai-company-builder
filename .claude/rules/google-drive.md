@@ -103,6 +103,8 @@ The AI reads and writes **only** the member's own live picks.
   `revisionId` (`headRevisionId`) and `link`. Lost answer / 5xx → `unknown`, looked up at once
   by `acbPutId` (found → `done`, reason `found-by-correlation`), and again on every
   `GET /puts/:putId` and repeat; never re-sent. Refused / not sent → the receipt is removed.
+  An AI put's receipt copies the Skills its consultation had used (`skills`, records.md "Which
+  Skill"); `drive_put` waits for a Skill report still in flight (`records/api.ts` `beforeWrite`).
 - Confirmation: putting into the member's **own / internal** folder they picked is not sending
   outside — the pick is the person's choice of destination, so no per-file confirmation; a
   folder visible outside the company is sending outside, which stays a person's act
