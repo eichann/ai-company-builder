@@ -19,6 +19,10 @@ paths:
   - "client/electron/features/chat-windows/**"
   - "client/tests/chat-window*"
   - "client/tests/ipc-chat-windows.test.ts"
+  - "client/shared/tool-display.ts"
+  - "client/electron/tool-display-stream.ts"
+  - "client/tests/tool-display.test.ts"
+  - "client/electron/records/tool-providers.ts"
 ---
 
 # Chat panel, chat history store and chat rendering
@@ -227,7 +231,7 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   `src/features/chat/api.ts`: `ChatHistoryReads` / `ChatHistoryWrites`, `HandoffReads`, and
   `HandoffOutbound` (`handoff:update` / `handoff:complete` start or schedule the member's AI
   on the conversation, so they are not a plain write).
-- A message stores its tool calls only as `[Tool: name]` text; what must survive a restart is a
+- A message stores its tool calls only as `[Tool: name]` text (plus `toolLines`, see 「Tool rows」); what must survive a restart is a
   record next to `content`: `choicePrompts`, `steerInstructions` (both with `at`),
   `consultationReferences`, `reviewRequests` (restored as `data-review-request` parts after the
   text), `pluginOperations` (an outside system's write and its 「変更前の値を書き戻す」, restored as
@@ -277,6 +281,29 @@ request / status shapes and their checks, `closeStopsTheAI`), the window registr
   card after the parts (`features/chat/components/BrokerKeyNeededCard.tsx`, `key-broker.md`
   「自分の鍵」 is the one place for keys). Tool outputs are not stored in history, so a restored
   conversation shows the card only when the AI's text kept the marker.
+- **Tool rows** are plain Japanese for non-engineers (owner, 2026-11-02): never a raw tool id
+  (`mcp__acb_records__…`). `client/shared/tool-display.ts` (pure): `ToolDisplay` = `label`
+  (finished, 「決めたことを残しました」), `running` (「…しています」), `many` (`{n}`, 「決めたことを
+  {n} 件残しました」) and an optional `describe(input)` detail. **Every ACB tool declares its
+  `display` next to its definition**: `RecordToolDescriptor.display` is required (record tools,
+  tools made from types / plugins, every provider in `records/tool-providers.ts`), and the fixed
+  servers export one (`referenceDisplays`, `companyFileDisplays`, `reviewDisplay`,
+  `webResearchDisplay`, `askUserDisplay`). `tests/tool-display.test.ts` fails when a tool a turn
+  can get has none or one that is not Japanese. Built-in agent tools (Claude Code, Codex,
+  api-key) are labelled in `tool-display.ts`; anything else is muted 「道具を使いました（server・tool）」.
+- A detail is a title, a count or a company-relative path (outside the company folder: the file
+  name only), ≤ 40 characters with key/token-looking strings masked (`shortText`): never command
+  text (Bash shows Claude's own `description` only), mail addresses or subjects, URL paths.
+- Main labels each call (`electron/tool-display-stream.ts`, after the payload limits): the line
+  rides on the part as `callProviderMetadata.acb.display`; the renderer (`toolRows.ts`) falls
+  back to the built-in / muted line. Consecutive finished, successful calls of one tool become
+  one expandable row (`SameItem`). A failed call reads 「できませんでした：<reason>」 where the
+  reason is only the app's own Japanese refusal (`{ error }` answer, `failureOf`), never raw
+  English. History keeps calls as `\n[Tool: name]` markers (the hand-off compares that text;
+  `recovery-context.ts` reads restored calls as the same markers) plus `toolLines` (label and
+  `many` of the app's tools, never a detail); restoring turns each marker into a
+  `data-tool-call` part drawn as a row. Tests: `tests/tool-display.test.ts`,
+  `src/features/chat/tool-rows.test.ts`, `tests/chat-panel-helpers.test.ts`.
 - Per-turn tool payload cap (`electron/ui-stream-limits.ts` `turnBudget`): after 2 MB of tool
   inputs/outputs in one turn (api-key mode 8 MB), later payloads are cut to 1 KB and input deltas
   stop; rows, states, errors, answer text and data parts are untouched.

@@ -5,6 +5,7 @@ import {
   CODEX_CHOICE_TOOL, MAX_CHOICE_OPTIONS, MAX_CHOICE_QUESTIONS,
   choiceCancelMessage, claudeAnswers, codexAnswerText, parseChoiceQuestions,
 } from '../../shared/choice-prompt'
+import type { ToolDisplay } from '../../shared/tool-display'
 
 type ClaudePermission =
   | { behavior: 'allow'; updatedInput: Record<string, unknown> }
@@ -29,6 +30,9 @@ export async function answerAskUserQuestion(askUser: AskUser | undefined, input:
   if ('answers' in result) return { behavior: 'allow', updatedInput: { ...input, answers: claudeAnswers(questions, result.answers) } }
   return { behavior: 'deny', message: choiceCancelMessage(result.cancelled) }
 }
+
+/** How Codex's ask_user reads in the chat (`client/shared/tool-display.ts`). */
+export const askUserDisplay: ToolDisplay = { label: '質問しました', running: '質問しています', many: '{n} 回質問しました' }
 
 /** The same input shape as AskUserQuestion, so both agents ask alike. */
 export const askUserSchema = {

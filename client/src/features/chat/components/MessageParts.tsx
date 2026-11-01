@@ -13,8 +13,10 @@ import {
   ListChecks,
   PencilSimple,
   Robot,
+  Sparkle,
   Terminal,
   WarningCircle,
+  Wrench,
 } from '@phosphor-icons/react'
 import { referenceFromTool, type ConsultationReference } from '../../../../shared/consultation-reference'
 import { ConsultationReferenceLink } from './ConsultationReference'
@@ -38,7 +40,6 @@ import { BrokerKeyNeededCard } from './BrokerKeyNeededCard'
 import { brokerKeyNeedsOf } from '../brokerKeyNeeds'
 import {
   GROUP_PAGE_SIZE,
-  getToolDisplayName,
   isRunningState,
   planParts,
   signaturePropsEqual,
@@ -46,9 +47,11 @@ import {
   visibleRunItems,
   type AgentItem,
   type RunItem,
+  type SameItem,
   type ToolOrAgent,
   type ToolRow,
 } from '../toolRows'
+import { manyLine } from '../../../../shared/tool-display'
 
 // Rendering of an assistant message's parts. Everything here is memoised with
 // value-based equality: @ai-sdk/react structuredClones the streaming message
@@ -63,6 +66,11 @@ function StreamingCursor() {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const TOOL_ICONS: Record<string, React.ComponentType<any>> = {
+  Read: File,
+  Write: PencilSimple,
+  Edit: PencilSimple,
+  MultiEdit: PencilSimple,
+  Bash: Terminal,
   readFile: File,
   writeFile: PencilSimple,
   listDirectory: FolderOpen,
@@ -99,27 +107,37 @@ function ToolOutputDetail({ row }: { row: ToolRow }) {
   )
 }
 
+/** What a row says: the running / finished line, or 「できませんでした：<the app's reason>」. */
+function rowText(row: ToolRow, failed: string): string {
+  if (row.failure) return row.failure.reason ? `${failed}：${row.failure.reason}` : failed
+  return isRunningState(row.state) ? row.line.running : row.line.label
+}
+
 const ToolInvocationPartView = memo(function ToolInvocationPartView({ row }: { row: ToolRow }) {
+  const { t } = useTranslation()
   const [isExpanded, setIsExpanded] = useState(false)
-  const IconComponent = TOOL_ICONS[row.toolName] || Terminal
-  const displayName = getToolDisplayName(row.toolName)
+  const IconComponent = TOOL_ICONS[row.toolName] || (row.line.muted ? Wrench : Sparkle)
   const isFinished = row.state === 'output-available' || row.state === 'output-error'
 
   const reference = referenceFromTool(row.toolName, row.output)
   if (reference) return <ConsultationReferenceLink reference={reference} />
 
+  const muted = row.line.muted && !row.failure
   return (
     <div className="my-1.5 animate-fade-in">
       <button
         onClick={() => setIsExpanded(!isExpanded)}
+        title={row.line.label}
         className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
       >
-        <StatusIcon state={row.state} />
+        <StatusIcon state={row.failure ? 'output-error' : row.state} />
         <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-        <span className="font-medium text-gray-700 dark:text-zinc-300">{displayName}</span>
-        {row.inputSummary && (
-          <span className="text-gray-400 dark:text-zinc-500 font-mono truncate max-w-[200px]">
-            {row.inputSummary}
+        <span className={`min-w-0 truncate ${row.failure ? 'font-medium text-red-500 dark:text-red-400' : muted ? 'text-gray-400 dark:text-zinc-500' : 'font-medium text-gray-700 dark:text-zinc-300'}`}>
+          {rowText(row, t('chat.toolFailed'))}
+        </span>
+        {row.line.detail && (
+          <span className="text-gray-400 dark:text-zinc-500 truncate max-w-[240px]">
+            {row.line.detail}
           </span>
         )}
         {isFinished && (
@@ -205,10 +223,38 @@ const AgentToolGroup = memo(function AgentToolGroup({ item }: { item: AgentItem 
   )
 }, signaturePropsEqual)
 
+/** Consecutive finished calls of one tool: 「決めたことを 2 件残しました」, expanding to each call. */
+const SameToolGroup = memo(function SameToolGroup({ item }: { item: SameItem }) {
+  const [isExpanded, setIsExpanded] = useState(false)
+  const { row } = item
+  const IconComponent = TOOL_ICONS[row.toolName] || (row.line.muted ? Wrench : Sparkle)
+  return (
+    <div className="my-1.5 animate-fade-in">
+      <button
+        onClick={() => setIsExpanded(!isExpanded)}
+        aria-expanded={isExpanded}
+        className="flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
+      >
+        <StatusIcon state={row.state} />
+        <IconComponent size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
+        <span className={`min-w-0 truncate ${row.line.muted ? 'text-gray-400 dark:text-zinc-500' : 'font-medium text-gray-700 dark:text-zinc-300'}`}>
+          {manyLine(row.line, item.rows.length)}
+        </span>
+        <CaretDown size={12} className={`text-gray-400 ml-auto flex-shrink-0 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
+      </button>
+      {isExpanded && (
+        <div className="ml-4 pl-2 border-l border-gray-200 dark:border-zinc-700/60">
+          {item.rows.map(r => <ToolInvocationPartView key={r.toolCallId} row={r} />)}
+        </div>
+      )}
+    </div>
+  )
+}, signaturePropsEqual)
+
 function renderToolItem(item: ToolOrAgent) {
-  return item.kind === 'agent'
-    ? <AgentToolGroup key={item.key} item={item} />
-    : <ToolInvocationPartView key={item.key} row={item.row} />
+  if (item.kind === 'agent') return <AgentToolGroup key={item.key} item={item} />
+  if (item.kind === 'same') return <SameToolGroup key={item.key} item={item} />
+  return <ToolInvocationPartView key={item.key} row={item.row} />
 }
 
 /**
@@ -232,8 +278,8 @@ const ToolRunGroup = memo(function ToolRunGroup({ item }: { item: RunItem }) {
       aria-expanded={isExpanded}
       className="my-1.5 flex items-center gap-2 text-xs hover:bg-gray-100 dark:hover:bg-zinc-800 px-2 py-1.5 rounded-lg transition-colors w-full text-left"
     >
-      <Terminal size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
-      <ToolCountLabel count={item.items.length} running={item.runningCount} />
+      <ListChecks size={14} className="text-gray-500 dark:text-zinc-400 flex-shrink-0" />
+      <ToolCountLabel count={item.items.reduce((n, i) => n + (i.kind === 'same' ? i.rows.length : 1), 0)} running={item.runningCount} />
       <span className="text-accent">
         {isExpanded ? t('chat.collapseTools') : t('chat.showHiddenTools', { n: hidden })}
       </span>
