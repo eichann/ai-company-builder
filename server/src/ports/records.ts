@@ -80,6 +80,14 @@ export interface RecordCandidateFilter {
   /** Matched against title and summary (substring, A–Z case-insensitive). */
   text?: string
   ids?: string[]
+  /** Server field (validated name; date / datetime / number) → `gte` ≤ value < `lt` (compared as stored). */
+  ranges?: Array<{ name: string; gte?: string | number; lt?: string | number }>
+  /** Order by a server field (validated name), empty values last, then most recently changed. Default: most recently changed. */
+  sort?: { field: string; order: 'asc' | 'desc' }
+  /** In one of these (type, state) pairs, entered (a ledger entry into it from another state) at or after `since`. */
+  finishedSince?: { since: string; finals: Array<{ type: string; state: string }> }
+  /** An outgoing record link `name` holds `id`. */
+  link?: { name: string; id: string }
 }
 
 /** The columns read access is decided from. */

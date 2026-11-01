@@ -16,6 +16,19 @@
  * was (`ok_from: [assignee]` → `ok_by` a member, or `ok_note` for an OK from
  * outside ACB); the OK-giver is told and may reopen (「取り消す」). The
  * requester / reviewer complete as before; the AI never.
+ * Version 5 (stage 2 S2, 2026-11-01): tags, `wait_until` (when a reply or
+ * delivery is expected — what 追いかけ looks at), a `bundle` link (まとまり),
+ * 「AI が用意したもの」 (`prep_summary` + `prepared` links to the mail drafts /
+ * approval requests the AI made). State `preparing` is the AI's turn
+ * (`create_states`: a create may start there; `finish_prep`, AI only, hands
+ * it to the assignee), so an AI-prepared task reaches the person only when
+ * ready — but never hidden: `hand_over` (AI only, a reason required: due
+ * soon, the preparation failed, information is missing) hands it to the
+ * assignee early with whatever is ready, and `take_over` lets the assignee or
+ * requester take it from the AI at any time. `decline` (受けられない): the assignee only, with a note, hands it
+ * back to the requester, who reassigns, cancels or reopens it from
+ * `declined` (not final: it is the requester's turn). The AI never
+ * completes or declines.
  *
  * interaction (やりとり): the common receipt for what comes from outside
  * (mail, Slack, LINE…). Server only, no body — a summary and a pointer to the
@@ -35,7 +48,7 @@ import { parseTypeFile, type TypeDefinition } from './record-types'
 export const CORE_TYPE_FILES: Record<string, string> = {
   task: `---
 label: タスク
-version: 4
+version: 5
 implements: [request]
 storage: server
 fields:
@@ -49,27 +62,41 @@ fields:
   reviewer:     { label: レビューする人, kind: person, source: server }
   ok_by:        { label: OKした人, kind: person, source: server }
   ok_note:      { label: OKのいきさつ, kind: text, source: server }
+  tags:         { label: タグ, kind: tags, source: server }
+  wait_until:   { label: 返事・届く見込み, kind: date, source: server }
+  prep_summary: { label: AIが用意したこと, kind: long_text, source: server }
 links:
   customer:     { label: 顧客, target: customer, cardinality: one, inverse: tasks }
   files:        { label: 関係するファイル, target: file, cardinality: many }
   related:      { label: 関係するタスク, target: task, cardinality: many }
-states: [todo, in_progress, review, waiting, done, cancelled]
+  bundle:       { label: まとまり, interface: bundle, cardinality: one, inverse: tasks }
+  prepared:     { label: AIが用意したもの, interface: prepared, cardinality: many, inverse: tasks }
+states: [todo, in_progress, review, waiting, done, cancelled, preparing, declined]
 initial: todo
+create_states: [preparing]
 final: [done, cancelled]
 actions:
   start:          { label: 着手する, from: [todo, waiting], to: in_progress, who: [assignee, ai], hand_to: assignee }
   request_review: { label: レビューを依頼する, from: [in_progress], to: review, who: [assignee, ai], args: { reviewer: person }, notify: reviewer, attach: [files], note: optional, hand_to: reviewer }
   send_back:      { label: 差し戻す, from: [review], to: in_progress, who: [reviewer], notify: assignee, note: required, decision: true, hand_to: assignee }
-  assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
+  assign:         { label: 担当を替える, from: [todo, in_progress, review, waiting, declined], who: [assignee, requested_by, dept_manager, admin, ai], args: { assignee: person }, notify: assignee, note: required, approval: undoable, decision: true, hand_to: assignee }
   wait:           { label: 返事待ちにする, from: [todo, in_progress], to: waiting, who: [assignee, ai], args: { waiting_on: text }, note: optional }
   set_due:        { label: 期限を変える, who: [requested_by, assignee, ai], args: { due: date }, notify: requested_by, note: optional, approval: undoable }
   complete:       { label: 完了にする, from: [in_progress, review], to: done, who: [requested_by, reviewer], ok_from: [assignee], notify: [requested_by, ok_by], attach: [files], note: optional, decision: true }
-  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
-  reopen:         { label: やり直す, from: [done, cancelled], to: in_progress, who: [requested_by, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
+  cancel:         { label: 中止する, from: [todo, in_progress, review, waiting, preparing, declined], to: cancelled, who: [requested_by, admin], notify: assignee, note: required, decision: true }
+  reopen:         { label: やり直す, from: [done, cancelled, declined], to: in_progress, who: [requested_by, ok_by, admin], notify: assignee, note: optional, hand_to: assignee }
+  finish_prep:    { label: 用意ができた, from: [preparing], to: todo, who: [ai], args: { prep_summary: long_text }, links: [prepared], notify: assignee, hand_to: assignee }
+  hand_over:      { label: 先に渡す, from: [preparing], to: todo, who: [ai], links: [prepared], notify: assignee, note: required, hand_to: assignee }
+  take_over:      { label: 自分で進める, from: [preparing], to: todo, who: [assignee, requested_by], notify: assignee, note: optional, hand_to: assignee }
+  decline:        { label: 受けられない, from: [todo, in_progress, waiting], to: declined, who: [assignee], notify: requested_by, note: required, hand_to: requested_by }
+  set_tags:       { label: タグを付ける, who: [requested_by, assignee, ai], args: { tags: tags } }
+  set_wait_until: { label: 見込みの日時を決める, who: [requested_by, assignee, ai], args: { wait_until: date }, note: optional }
+  set_bundle:     { label: まとまりに入れる, who: [requested_by, assignee, ai], links: [bundle], note: optional }
 ---
 # タスク
 
 ACB に最初からある「依頼」の形。記録はサーバーだけが持ちます（ファイルにはしません）。見積や計画などの中身はふつうのファイルに書き、「関係するファイル」でつなぎます。
+「準備中」は AI の番です。AI が下ごしらえ（確かめたこと・下書き）を済ませて「用意ができた」で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、AI が理由を添えて「先に渡す」で早めに渡します。担当と頼んだ人は「自分で進める」でいつでも引き取れます。担当は「受けられない」で頼んだ人に返せます（ひとことの理由つき）。
 `,
   interaction: `---
 label: やりとり
@@ -127,8 +154,8 @@ actions:
 `,
   approval: `---
 label: 承認のお願い
-version: 2
-implements: [request]
+version: 3
+implements: [request, prepared]
 storage: server
 fields:
   requested_by:        { label: 頼んだ人, kind: person, source: server }
@@ -155,7 +182,8 @@ final: [approved, stale, withdrawn, failed]
 `,
   outbound_message: `---
 label: 送るメール
-version: 1
+version: 2
+implements: [prepared]
 storage: server
 fields:
   requested_by:        { label: 作った人, kind: person, source: server }
