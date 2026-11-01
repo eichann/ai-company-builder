@@ -318,6 +318,7 @@ export function AppShell() {
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
             paneId={paneId}
+            aiTurnQueue={minutes.available ? minutes.notices : undefined}
           />
         ) : (
         <>

@@ -57,7 +57,8 @@ one place an added agent brings its own controls; everything else asks the regis
 - Other features reach the chat only through commands: `chat.newConsultation` (a skill's 実行)
   and `chat.insertText`, handled per pane in `ChatPanel.tsx` and passed to the shown tab as
   `inputRequest` (`commands.md`), which `ChatPanelChat` carries out; there is no store field for
-  chat input.
+  chat input. The one request a tab takes while not shown is `aiTurn`: the automatic 「AI の番」
+  in a fresh background tab (`ai-turns.md`).
 - **Several chat panes** (refactor 5-7, preparing D8's split screen; one pane today). Nothing
   assumes one chat on screen:
   - `isShown` (was `isActive`): the tab its pane shows. Scrolling to new messages, the save on

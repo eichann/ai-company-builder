@@ -1,0 +1,89 @@
+---
+paths:
+  - "client/shared/ai-turns.ts"
+  - "client/electron/features/ai-turns/**"
+  - "client/src/features/chat/aiTurns.ts"
+  - "client/src/features/chat/aiTurns.test.ts"
+  - "client/src/features/chat/hooks/useAiTurnRunner.ts"
+  - "client/src/features/chat/components/AiTurnNotice.tsx"
+  - "client/tests/ai-turn-claims.test.ts"
+  - "client/tests/ui/ai-turns.spec.ts"
+---
+
+# 「AI の番」 run automatically (stage 2 S10)
+
+A record whose current state has an action with `who` exactly `[ai]` is 「AI の番」 (`records.md`).
+Without a person pressing anything, the member's app runs it **on the member's own PC, in the main
+window's renderer**, as a hidden consultation that goes through the normal chat pipeline and the
+normal history saving (owner decisions 2026-11-01, 節目5 §3–§7). There is **no** AI on the server
+and **no** history-writing path in main. Today the one kind is minutes 「読む」 (received → reading →
+read, `minutes.md`); the 「議事録が届きました」 notice stays as the fallback (removing it is S11).
+
+## Where it runs
+
+- Only while the main window is open — any tab, any consultation shown, behind other apps or
+  minimized: the main window has `backgroundThrottling: false` (`electron-adapter.ts`
+  `createMainWindowHost`; consultation windows keep the default, `tests/ipc-chat-windows.test.ts`).
+  A closed window or a quit app runs nothing (the renderer is gone; main's claim also checks the
+  window); reopened, it continues: an interrupted run stays 「読んでいる」 and the existing 30-minute
+  rule (`minutes.md` `stale` → `retry`) gives it back.
+- The runner is `useAiTurnRunner` (`src/features/chat/hooks/`), called in `ChatPanel.tsx` for the
+  pane AppShell hands `aiTurnQueue` to (the main window's main pane; the queue is main's received
+  minutes, `minutes:notices`). It ticks every 3 s; the rules are pure in
+  `src/features/chat/aiTurns.ts`.
+- One run = a new tab **behind** the shown one (`useChatTabs` `openBackgroundTab`, never activated),
+  handed `ChatInputRequest` `{ kind: 'aiTurn', message, title, minutesId, claim }` through
+  `inputRequest` (the only request a tab takes while not shown). The tab calls `claim(its own
+  conversation id)`; only when that wins does it set the title (「<件名> のあと（M/D）」, kept),
+  store `minutesId` and send the first message (`minutesFirstMessage` wrapped by
+  `autoMinutesFirstMessage`: the app started it, the start is already marked, end with
+  finish / fail). It is listed in 「AIへの相談」 like any open tab (working → 新着).
+- A run ends when the tab's status (`consultationStatusStore`) leaves working (an approval or a
+  question keeps it running); then `aiTurns:settle`.
+
+## Claiming and settling (main, `electron/features/ai-turns/`)
+
+- `aiTurns:claim(companyId, recordId, expectedVersion, conversationId)` — main window only. Main
+  opens a record token for **that consultation** (`act`, the configured agent) and runs the type's
+  first AI action (`AI_TURN_CLAIM_ACTIONS`: minutes → `start_reading`) at the version the app saw:
+  the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` → `taken`, never
+  tried again at that version). The ledger records it as the AI's, pointing at the consultation.
+  Refused without a call to the server (`not-allowed`): an agent without `recordActions` (Codex,
+  the API key), a closed main window, the emergency stop (`oneShotAiAllowed`), a record kind not
+  in the table, a malformed conversation id.
+- `aiTurns:settle(companyId, recordId)` — reads the record with the session: `read` → done,
+  `failed` / `skipped` → failed, still `reading` → `retry` (the assignee's own action) so it is not
+  stuck for 30 minutes.
+- `aiTurns:settings(companyId)` — the company's 「自動で進める」 (`AutoTurnSettings`: enabled, daily
+  limit, stop after N failures in a row; `readAutoTurnSettings` checks each value). Until S6 adds
+  the setting, `createAiTurnClaims` has no `readSettings` and answers the defaults (on, 20 a day,
+  stop after 3). S6 plugs in by passing `readSettings` in `main.ts`.
+
+## The rules (`aiTurns.ts`, per member and company in localStorage `aiTurns:<company>:<user>`)
+
+Checked in this order: setting off → nothing; nothing waiting → nothing; agent without
+`recordActions` → told 「…Claude Code が必要です」 (Codex never starts one); not signed in → told;
+stopped after N failures → told, with 「もう一度自動で進める」; Claude's usage limit → paused
+until the full window resets (the chat's rate-limit snapshot, `rateLimitsOf('claude-code')`;
+not a failure) and told; daily limit → told; one run at a time; at most `AI_TURN_PASS_CAP` (3)
+per pass of 10 minutes. Earliest due first, then the oldest meeting. A record is tried at most
+twice a day. The notice (`AiTurnNotice.tsx`, top of the chat) is the hook the notifications
+foundation (S5) will take over.
+
+Sending and approving stay a person's (no change): the AI makes drafts and approval requests only.
+
+## Tests
+
+`src/features/chat/aiTurns.test.ts` (setting off, Codex, order, one at a time and the pass cap,
+daily limit, attempts per record, stop after failures and resume, usage pause, settings values),
+`tests/ai-turn-claims.test.ts` (two PCs → one claim; Codex / API key / closed window / stop →
+no server call; minutes only; settle puts an unfinished reading back), `tests/ui/ai-turns.spec.ts`
+(`chat-header-ui.html?autoturn=1`: claimed with the hidden consultation's id, sent and saved with
+its title and `minutesId`, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
+Codex claims nothing and shows the notice).
+
+## Not yet (S11 and later)
+
+The notice is not removed and the deal choice still waits for the member in the consultation
+(S11 moves 「どの案件か」 to あなたの番); other AI-turn kinds (each needs its claim action in
+`AI_TURN_CLAIM_ACTIONS` and its first message); the company setting itself (S6); notifications (S5).

@@ -44,7 +44,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `plugin-operations` (pluginOperations:undo / reconcile / recreate: the chat card's person
   actions on an outside system's write, with the session; `plugins.md` "The app"), `minutes`
   (minutes:watch / check / notices / skip / linkDeal and the event `minutes:changed`:
-  「議事録が届きました」 checked with the session in main, `minutes.md` "The app"). No `tasks`
+  「議事録が届きました」 checked with the session in main, `minutes.md` "The app"), `ai-turns`
+  (aiTurns:settings / claim / settle: the automatic 「AI の番」's claim by version and settle, main
+  window only; the run itself is a hidden consultation in the renderer, `ai-turns.md`). No `tasks`
   channels: the file tree's 「やることにつなぐ…」 will come from the task plugin (`records.md`
   "Linking files later").
 - `electron/features/<domain>/wire.ts` — a feature's wiring that would otherwise sit in `main.ts`:
@@ -83,8 +85,9 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   `http:` / `https:`, opens in the member's own browser (`webLinkForBrowser`,
   `electron/external-url.ts`; never `file:`, `javascript:`, `mailto:` or a custom scheme). Owner
   decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
-  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. Tests:
-  `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
+  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. The main window alone adds
+  `backgroundThrottling: false` (the automatic 「AI の番」 runs there while it is behind or
+  minimized, `ai-turns.md`). Tests: `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
 - **Web permissions are default deny.** Electron grants every Chromium permission request
   (camera / microphone, notifications, clipboard, USB, …) when no handler is set.
   `guardEverySession` (`electron-adapter.ts`, called from `main.ts` before ready) installs a

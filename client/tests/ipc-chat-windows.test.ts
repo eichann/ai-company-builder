@@ -37,7 +37,10 @@ test('a consultation window gets the main window\'s hardened web preferences, lo
   const win = await openWindow('session-prefs')
   const main = BrowserWindow.all[0].options as Prefs
   const prefs = (win.options as Prefs).webPreferences
-  assert.deepEqual(prefs, main.webPreferences)
+  // Only the main window keeps full speed behind other apps: 「AI の番」 runs there (ai-turns.md).
+  const { backgroundThrottling, ...mainHardened } = main.webPreferences
+  assert.equal(backgroundThrottling, false)
+  assert.deepEqual(prefs, mainHardened)
   assert.equal(prefs.contextIsolation, true)
   assert.equal(prefs.nodeIntegration, false)
   assert.equal(prefs.sandbox, true)

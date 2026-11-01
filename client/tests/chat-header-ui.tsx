@@ -34,6 +34,9 @@ import type { MinutesNotice } from '../shared/minutes-app'
 //   ?auth=none     Claude Code is not signed in: the setup screen (設定を開く)
 //   ?storage=keep  keep localStorage across reloads (remembered folded groups)
 //   ?panes=2       two chat panes side by side (左の欄 = pane `chat`, 右の欄 = `right`)
+//   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
+//                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
+//                  ?autoturn=taken: another PC wins the claim
 //   ?minutes=1     「議事録が届きました」 above the chat (one received minutes record);
 //                  the deal choice card's links are recorded in __acbChat.minutesLinks
 
@@ -120,7 +123,15 @@ const windowChanges = emitter<ChatWindowsChange>()
 const windowCalls = { opened: [] as string[], focused: [] as string[] }
 const minutesLinks: Array<[string, string, string]> = []
 const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
+const autoTurn = params.get('autoturn')
+const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[] }
 installElectronAPI({
+  getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
+  claimAiTurn: async (companyId, recordId, version, conversationId) => {
+    aiTurns.claims.push([companyId, recordId, version, conversationId])
+    return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true }
+  },
+  settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: 'done' } },
   linkMinutesDeal: async (companyId, minutesId, dealId) => { minutesLinks.push([companyId, minutesId, dealId]); return { success: true } },
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
@@ -238,6 +249,8 @@ const control = {
   windowChanged(change: ChatWindowsChange) { windowChanges.emit(change) },
   /** 「どの案件の議事録ですか？」: what the card asked main to link (company, minutes, deal). */
   minutesLinks,
+  /** 「AI の番」 run automatically: the claims (company, record, version, conversation) and settles. */
+  aiTurns,
   /** Files the chat asked the main screen to open (a review request's files). */
   opened: [] as string[],
   answered(id: string, response: AgentInteractionResponse) {
@@ -309,7 +322,7 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       {params.get('minutes') === '1' && <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} />}
       <div className="min-h-0 flex-1 flex justify-end">
         <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-          <ChatPanel departmentPath="/tmp/acb-preview" />
+          <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} />
         </div>
       </div>
     </div>,

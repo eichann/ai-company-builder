@@ -37,6 +37,11 @@ export function reportAgentProgress(event: AgentProgressEvent) {
   notify()
 }
 
+/** The account's latest usage snapshot (outside React: the AI-turn runner's check). */
+export function rateLimitsOf(provider: RateLimitProvider): RateLimitSnapshot | undefined {
+  return rateLimits[provider]
+}
+
 export function useRateLimits(provider: RateLimitProvider): RateLimitSnapshot | undefined {
   return useSyncExternalStore(subscribe, () => rateLimits[provider])
 }

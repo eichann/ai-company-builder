@@ -272,7 +272,8 @@ export function createMainWindowHost(options: {
         minWidth: 1000,
         minHeight: 600,
         titleBarStyle: 'hiddenInset',
-        webPreferences: options.webPreferences(),
+        // AI turns run in this window while it is open, also behind other apps or minimized (ai-turns.md).
+        webPreferences: { ...options.webPreferences(), backgroundThrottling: false },
       })
       current = win
       win.on('closed', options.onClosed)

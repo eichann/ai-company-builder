@@ -38,6 +38,7 @@ import type { PluginOperationResult } from './plugin-operations'
 import type { ApprovalResult } from './approvals'
 import type { MinutesActionResult, MinutesNoticesResult } from './minutes-app'
 import type { CalendarTodayResult } from './calendar'
+import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './ai-turns'
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 
 // ---------------------------------------------------------------------------
@@ -484,6 +485,12 @@ export interface IpcInvokeChannels {
   'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
   /** 「どの案件の議事録ですか？」: link the chosen deal (nothing is written to HubSpot). */
   'minutes:linkDeal': { args: [companyId: string, minutesId: string, dealId: string]; result: MinutesActionResult }
+  // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
+  'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
+  /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
+  'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
+  /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
+  'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
   // The chat's mail card (outbound-mail.md): the person's own actions, with the session in main.
   'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
   'outboundMail:recipients': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -786,6 +793,10 @@ export interface ElectronAPI {
   skipMinutes: Invoke<'minutes:skip'>
   linkMinutesDeal: Invoke<'minutes:linkDeal'>
   onMinutesChanged: Subscribe<'minutes:changed'>
+  // 「AI の番」 run automatically (the main window only).
+  getAutoTurnSettings: Invoke<'aiTurns:settings'>
+  claimAiTurn: Invoke<'aiTurns:claim'>
+  settleAiTurn: Invoke<'aiTurns:settle'>
   getOutboundMail: Invoke<'outboundMail:get'>
   getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
   updateOutboundMail: Invoke<'outboundMail:update'>
