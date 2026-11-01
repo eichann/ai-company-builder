@@ -77,7 +77,10 @@ export const COMMANDS = defineCommands([
       action: z.string().regex(/^[a-z][a-z0-9_]{0,39}$/),
       expectedVersion: z.number().int().min(0).describe('The record version the member saw'),
       note: z.string().max(2000).optional(),
-      args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null()])).optional(),
+      // A tags argument (set_tags) is a list of short words.
+      args: z.record(z.string(), z.union([z.string(), z.number(), z.boolean(), z.null(), z.array(z.string().max(40)).max(20)])).optional(),
+      // Record links the action sets (its definition's `links`: a task's bundle).
+      links: z.record(z.string(), z.union([z.string().max(80), z.array(z.string().max(80)).max(50), z.null()])).optional(),
       // Whose OK it was, for an action the member does through `ok_from` (the assignee completing a task).
       ok: z.object({ by: z.string().max(200).optional(), note: z.string().max(500).optional() }).strict().optional(),
       // The member confirms what their AI suggested in a consultation: informational provenance for the ledger.

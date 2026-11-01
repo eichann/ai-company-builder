@@ -10,7 +10,7 @@
  * (`member.companyId`): another company's record id is a record that does not exist.
  */
 import { findPrivateScope, type ScopeWithRules } from '../../shared/core/permissions'
-import { normalizeTag, ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
+import { aiTurnStates, normalizeTag, ONTOLOGY_NAME_RE, type FieldKind } from '../../shared/core/record-types'
 import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
@@ -33,6 +33,8 @@ const ADMIN_ONLY = 'Only owners and admins can manage the company map'
 
 /** Rows read from SQL before the caller's read access is applied (a count beyond it is not exact). */
 export const MAX_CANDIDATES = 20000
+/** Field kinds a query may compare by range or sort by (stored values order correctly as text or number). */
+const ORDERED_KINDS: readonly FieldKind[] = ['date', 'datetime', 'number']
 /** Records reached per hop of a link traversal. */
 const MAX_NEIGHBOURS = 2000
 
@@ -90,6 +92,14 @@ interface ParsedQuery {
   fields: Array<{ name: string; values: Scalar[] }>
   /** `{ contains: tag }` on a tags field. */
   contains: Array<{ name: string; tag: string }>
+  /** `{ gte?, lt? }` on a date / datetime / number field. */
+  ranges: Array<{ name: string; gte?: string | number; lt?: string | number }>
+  /** Order by a date / datetime / number field (empty values last); default: most recently changed first. */
+  sort?: { field: string; order: 'asc' | 'desc' }
+  /** Records in a final state they entered at or after this time (ISO). */
+  finishedSince?: string
+  /** Records whose outgoing link `name` holds `id` (e.g. a task's `bundle`). */
+  link?: { name: string; id: string }
   linkedTo?: { id: string; hops: 1 | 2 }
   /** Records linking to this company path (a file or folder). */
   linkedToFile?: string
@@ -103,9 +113,9 @@ interface ParsedQuery {
 function parseQuery(body: unknown): ParsedQuery | string {
   if (typeof body !== 'object' || body === null || Array.isArray(body)) return 'The query must be an object'
   const b = body as Record<string, unknown>
-  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
+  const known = ['type', 'implements', 'state', 'fields', 'linkedTo', 'linkedToFile', 'link', 'sort', 'finishedSince', 'text', 'limit', 'offset', 'countOnly', 'includeOldConnection']
   for (const k of Object.keys(b)) if (!known.includes(k)) return `Unknown query key: ${k}`
-  const q: ParsedQuery = { fields: [], contains: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
+  const q: ParsedQuery = { fields: [], contains: [], ranges: [], limit: 50, offset: 0, countOnly: b.countOnly === true, includeOldConnection: false }
   if (b.type !== undefined) {
     if (typeof b.type !== 'string' || !ONTOLOGY_NAME_RE.test(b.type)) return 'type must be a type name'
     q.type = b.type
@@ -132,6 +142,14 @@ function parseQuery(body: unknown): ParsedQuery | string {
         q.contains.push({ name, tag })
         continue
       }
+      if (typeof v === 'object' && v !== null && !Array.isArray(v) && ('gte' in v || 'lt' in v)) {
+        const r = v as Record<string, unknown>
+        if (Object.keys(r).some(k => k !== 'gte' && k !== 'lt')) return `Field ${name}: { gte?, lt? } alone`
+        const bound = (x: unknown) => x === undefined || (typeof x === 'number' && Number.isFinite(x)) || (typeof x === 'string' && x.length >= 1 && x.length <= 40)
+        if (!bound(r.gte) || !bound(r.lt)) return `Field ${name}: gte / lt take a date, date and time, or number`
+        q.ranges.push({ name, ...(r.gte !== undefined ? { gte: r.gte as string | number } : {}), ...(r.lt !== undefined ? { lt: r.lt as string | number } : {}) })
+        continue
+      }
       if (isScalar(v)) values = [v]
       else if (typeof v === 'object' && v !== null && Array.isArray((v as { in?: unknown }).in)) values = (v as { in: unknown[] }).in
       else return `Field ${name}: a value or { in: [...] }`
@@ -151,6 +169,23 @@ function parseQuery(body: unknown): ParsedQuery | string {
     const p = typeof b.linkedToFile === 'string' && b.linkedToFile.length <= 1000 ? fileLinkPath(b.linkedToFile) : null
     if (!p) return 'linkedToFile must be a path inside the company folder'
     q.linkedToFile = p
+  }
+  if (b.link !== undefined) {
+    const l = b.link as { name?: unknown; id?: unknown }
+    if (typeof l !== 'object' || l === null || typeof l.name !== 'string' || !ONTOLOGY_NAME_RE.test(l.name) || typeof l.id !== 'string' || !RECORD_ID_RE.test(l.id)) {
+      return 'link: { name: link name, id: record id }'
+    }
+    q.link = { name: l.name, id: l.id }
+  }
+  if (b.sort !== undefined) {
+    const so = b.sort as { field?: unknown; order?: unknown }
+    if (typeof so !== 'object' || so === null || typeof so.field !== 'string' || !ONTOLOGY_NAME_RE.test(so.field)) return 'sort: { field, order?: asc | desc }'
+    if (so.order !== undefined && so.order !== 'asc' && so.order !== 'desc') return 'sort.order is asc or desc'
+    q.sort = { field: so.field, order: (so.order as 'asc' | 'desc' | undefined) ?? 'asc' }
+  }
+  if (b.finishedSince !== undefined) {
+    if (typeof b.finishedSince !== 'string' || b.finishedSince.length > 40 || Number.isNaN(Date.parse(b.finishedSince))) return 'finishedSince must be a date and time'
+    q.finishedSince = new Date(b.finishedSince).toISOString()
   }
   if (b.text !== undefined) {
     if (typeof b.text !== 'string') return 'text must be a string'
@@ -313,6 +348,22 @@ export function createRecordService(deps: RecordServiceDeps) {
         filter.types = filter.types ? filter.types.filter(t => withTags.includes(t)) : withTags
         filter.contains = q.contains
       }
+      // Ranges and sorting: only types whose field of that name is ordered (date, date and time, number).
+      const orderedFields = [...q.ranges.map(r => r.name), ...(q.sort ? [q.sort.field] : [])]
+      if (orderedFields.length > 0) {
+        const fit = [...types].filter(([, t]) => orderedFields.every(n => t.definition.fields[n]?.source === 'server' && ORDERED_KINDS.includes(t.definition.fields[n].kind))).map(([n]) => n)
+        if (q.type && types.has(q.type) && !fit.includes(q.type)) return refuse('bad-request', `${orderedFields.join(', ')} must be date, date-and-time or number fields of ${q.type}`)
+        filter.types = filter.types ? filter.types.filter(t => fit.includes(t)) : fit
+        if (q.ranges.length > 0) filter.ranges = q.ranges
+        if (q.sort) filter.sort = q.sort
+      }
+      if (q.finishedSince) {
+        // Final states differ per type: the pairs (type, final state); a type without any is never finished.
+        const finals = [...types].flatMap(([n, t]) => t.definition.final.map(s => ({ type: n, state: s })))
+        const withFinal = new Set(finals.map(f => f.type))
+        filter.types = (filter.types ?? [...types.keys()]).filter(t => withFinal.has(t))
+        filter.finishedSince = { since: q.finishedSince, finals }
+      }
       if (q.state) filter.states = q.state
       if (q.fields.length > 0) filter.fields = q.fields
       if (q.text) filter.text = q.text
@@ -336,10 +387,19 @@ export function createRecordService(deps: RecordServiceDeps) {
         const sourceIds = [...new Set(records.fileLinksTo([path]).map(l => l.sourceId))].slice(0, MAX_NEIGHBOURS)
         filter.ids = records.byIds(sourceIds).filter(r => linkAllowed(r, target)).map(r => r.id)
       }
+      // By a link (a task's bundle): the target must be one the member reads, as linkedTo; a link that
+      // may not be followed (public → private) never matches.
+      let linkTarget: RecordAccessRow | undefined
+      if (q.link) {
+        linkTarget = records.byIds([q.link.id]).find(r => reader.record(r))
+        if (!linkTarget) return refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
+        filter.link = q.link
+      }
       if (filter.types?.length === 0 || filter.ids?.length === 0) return ok({ total: 0, records: [] })
 
       const old = oldConnectionIds(member)
-      const visible = records.candidates(filter, MAX_CANDIDATES).filter(r => reader.record(r) && (q.includeOldConnection || !old.has(r.id)))
+      const visible = records.candidates(filter, MAX_CANDIDATES)
+        .filter(r => reader.record(r) && (q.includeOldConnection || !old.has(r.id)) && (!linkTarget || linkAllowed(r, linkTarget)))
       if (q.countOnly) return ok({ total: visible.length, records: [] })
       const page = visible.slice(q.offset, q.offset + q.limit)
       const byId = recordSummaries(records, records.byIds(page.map(r => r.id)), old)
@@ -358,7 +418,8 @@ export function createRecordService(deps: RecordServiceDeps) {
       const types = [...currentTypes(records)].filter(([, t]) => t.definition.implements.includes('request'))
       if (types.length === 0) return ok({ total: 0, records: [] })
       const names = types.map(([n]) => n)
-      const finalOf = new Map(types.map(([n, t]) => [n, new Set(t.definition.final)]))
+      // Not final, and not the AI's turn (a task being prepared reaches the person when the AI hands it over).
+      const finalOf = new Map(types.map(([n, t]) => [n, new Set([...t.definition.final, ...aiTurnStates(t.definition)])]))
       const reader = recordReader(member, handleOf(member).scopes.listWithRules())
       const mine = records.candidates({ types: names, fields: [{ name: 'next_actor', values: [member.userId] }] }, MAX_CANDIDATES)
       const assigned = records.candidates({
@@ -387,12 +448,7 @@ export function createRecordService(deps: RecordServiceDeps) {
       if (!records.settings().enabled) return refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
       const aiStates = new Map<string, Set<string>>()
       for (const [name, t] of currentTypes(records)) {
-        const d = t.definition
-        const states = new Set<string>()
-        for (const a of Object.values(d.actions)) {
-          if (a.who.length !== 1 || a.who[0] !== 'ai') continue
-          for (const s of a.from ?? d.states.filter(x => !d.final.includes(x))) states.add(s)
-        }
+        const states = aiTurnStates(t.definition)
         if (states.size > 0) aiStates.set(name, states)
       }
       if (aiStates.size === 0) return ok({ total: 0, records: [] })

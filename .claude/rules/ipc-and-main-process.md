@@ -79,8 +79,14 @@ Full text: `docs/architecture/main-process-and-ipc.md` (internal).
   data layer, no exceptions: `renderer-structure.md`).
 - **Windows.** Every app window — the main one and the consultation windows — gets the one
   `webPreferences()` of `createAppPages` (`electron-adapter.ts`; contextIsolation, sandbox, no Node, the one preload; CSP from
-  `index.html`); consultation windows also deny popups and navigation. Test:
-  `tests/ipc-chat-windows.test.ts`.
+  `index.html`). Every app window also shows only the app's page (`keepAppPageInWindow`): a
+  popup (`target="_blank"` links in chat answers and markdown previews, `window.open`) is denied
+  and a navigation away from the app's page (`isAppPage`) is prevented; either one, when it is
+  `http:` / `https:`, opens in the member's own browser (`webLinkForBrowser`,
+  `electron/external-url.ts`; never `file:`, `javascript:`, `mailto:` or a custom scheme). Owner
+  decision (Electron 45 upgrade): before, the main window opened such links as a new Electron
+  window. Only the main frame: the PDF preview's iframe is Chromium's own viewer. Tests:
+  `tests/ipc-window-links.test.ts`, `tests/ipc-chat-windows.test.ts`.
 - **Web permissions are default deny.** Electron grants every Chromium permission request
   (camera / microphone, notifications, clipboard, USB, …) when no handler is set.
   `guardEverySession` (`electron-adapter.ts`, called from `main.ts` before ready) installs a

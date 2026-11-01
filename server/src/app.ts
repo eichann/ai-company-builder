@@ -30,6 +30,7 @@ import { keyBrokerRoute } from './routes/key-broker'
 import { brokerRelayRoute } from './routes/broker-relay'
 import { googleRoute } from './routes/google'
 import { minutesRoute } from './routes/minutes'
+import { calendarRoute } from './routes/calendar'
 import { oauthRoute } from './routes/oauth'
 import { requestLog } from './lib/request-log'
 import { services } from './composition'
@@ -112,6 +113,7 @@ app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)
 app.route('/api/companies/:companyId', minutesRoute)
+app.route('/api/companies/:companyId', calendarRoute)
 // Google sends the browser back here (public: the state finds the company; google-connector.md).
 app.route('/api/oauth', oauthRoute)
 // Approval requests: a person's session only (no AI or admin-API route; approvals.md).

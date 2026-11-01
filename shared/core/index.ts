@@ -22,6 +22,7 @@
  *   approvals.ts          approval requests: who approves, reasons, the fixed payload
  *   mail.ts               outgoing mail: verified recipients, limits, canonical form
  *   minutes.ts            minutes handed to the AI as outside text; quotes
+ *   calendar.ts           the member's own calendar today: event shape, reasons, the day window
  *
  * Dependency rule: nothing here imports anything outside shared/core — no
  * Node built-ins, Electron, React, Hono, database or git (enforced by
@@ -48,3 +49,4 @@ export * from './fixed-content'
 export * from './approvals'
 export * from './mail'
 export * from './minutes'
+export * from './calendar'

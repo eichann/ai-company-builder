@@ -706,15 +706,18 @@ export function initDatabase(conn: Database.Database = sqlite) {
       updated_by TEXT NOT NULL
     );
 
-    -- A member's permission at an outside provider (today only google): the
+    -- A member's permission at an outside provider (member-oauth.md): the
     -- refresh token sealed; NULL once revoked or stopped (it is never used again).
+    -- features_off: the provider's features the member turned off (JSON list).
+    -- The provider list is repeated in migrateConnectorProviders and ports/connectors.ts.
     CREATE TABLE IF NOT EXISTS connector_grants (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       user_id TEXT NOT NULL,
-      provider TEXT NOT NULL CHECK (provider IN ('google')),
+      provider TEXT NOT NULL CHECK (provider IN ('google', 'slack')),
       grant_id TEXT NOT NULL,
       account_email TEXT NOT NULL,
       scopes TEXT NOT NULL,
+      features_off TEXT NOT NULL DEFAULT '[]',
       refresh_token_sealed TEXT,
       status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'stopped')),
       status_reason TEXT,
@@ -725,12 +728,12 @@ export function initDatabase(conn: Database.Database = sqlite) {
       CHECK (status = 'active' OR refresh_token_sealed IS NULL)
     );
 
-    -- A started 「Google で許可」: only the sha256 of the state, the PKCE
+    -- A started 「… で許可」: only the sha256 of the state, the PKCE
     -- verifier sealed; single use, 10 minutes.
     CREATE TABLE IF NOT EXISTS oauth_pending (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
       state_hash TEXT NOT NULL,
-      provider TEXT NOT NULL CHECK (provider IN ('google')),
+      provider TEXT NOT NULL CHECK (provider IN ('google', 'slack')),
       user_id TEXT NOT NULL,
       scopes TEXT NOT NULL,
       verifier_sealed TEXT NOT NULL,
@@ -878,6 +881,7 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migratePluginOperationCreates(conn)
   migratePluginTables(conn)
   migrateRecordTypeSources(conn)
+  migrateConnectorProviders(conn)
   migrateFixedPayloads(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
@@ -897,7 +901,7 @@ function migrateAgentEventSandbox(conn: Database.Database): void {
   conn.exec(`CREATE INDEX IF NOT EXISTS idx_agent_events_company_sandbox ON agent_events(company_id, at) WHERE sandbox IS NOT NULL OR guard_reason IN ('denied-read', 'sandbox')`)
 }
 
-/** The relay's internal-host exception (K4), generic services (K9) and the read-only switch, added after the broker's tables shipped. */
+/** The relay's internal-host exception (K4), generic services (K9), the read-only switch and the chosen key, added after the broker's tables shipped. */
 function migrateBrokerSettings(conn: Database.Database): void {
   const cols = new Set((conn.prepare(`PRAGMA table_info(broker_settings)`).all() as Array<{ name: string }>).map(c => c.name))
   if (!cols.has('internal_hosts')) conn.exec(`ALTER TABLE broker_settings ADD COLUMN internal_hosts TEXT NOT NULL DEFAULT '[]'`)
@@ -906,6 +910,8 @@ function migrateBrokerSettings(conn: Database.Database): void {
   if (!serviceCols.has('relay')) conn.exec(`ALTER TABLE broker_services ADD COLUMN relay TEXT`)
   // The relay only reads for this service (milestone 3: HubSpot once its plugin is on): 1 / 0.
   if (!serviceCols.has('read_only')) conn.exec(`ALTER TABLE broker_services ADD COLUMN read_only INTEGER NOT NULL DEFAULT 0`)
+  // The company key the admin chose for the service when several exist (key-broker.md "Which company key"); null = none chosen.
+  if (!serviceCols.has('default_key_id')) conn.exec(`ALTER TABLE broker_services ADD COLUMN default_key_id TEXT`)
 }
 
 /**
@@ -1180,6 +1186,69 @@ export function migratePluginOperationCreates(conn: Database.Database): void {
       CREATE INDEX IF NOT EXISTS idx_plugin_operations_record ON plugin_operations(company_id, record_id, created_at);
     `)
   })()
+}
+
+/**
+ * connector_grants / oauth_pending for every member-level OAuth provider
+ * (member-oauth.md): the provider CHECK lists slack too, and a grant carries
+ * features_off. SQLite cannot change a CHECK, so a table made before is
+ * rebuilt once with its rows (nothing references either table). Idempotent.
+ */
+export function migrateConnectorProviders(conn: Database.Database): void {
+  const sqlOf = (t: string) => (conn.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?`).get(t) as { sql: string } | undefined)?.sql
+  const grants = sqlOf('connector_grants')
+  if (grants && !grants.includes("'slack'")) {
+    conn.transaction(() => {
+      conn.exec(`
+        CREATE TABLE connector_grants_rebuilt (
+          company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          user_id TEXT NOT NULL,
+          provider TEXT NOT NULL CHECK (provider IN ('google', 'slack')),
+          grant_id TEXT NOT NULL,
+          account_email TEXT NOT NULL,
+          scopes TEXT NOT NULL,
+          features_off TEXT NOT NULL DEFAULT '[]',
+          refresh_token_sealed TEXT,
+          status TEXT NOT NULL CHECK (status IN ('active', 'revoked', 'stopped')),
+          status_reason TEXT,
+          created_at TEXT NOT NULL,
+          updated_at TEXT NOT NULL,
+          last_used_at TEXT,
+          PRIMARY KEY (company_id, user_id, provider),
+          CHECK (status = 'active' OR refresh_token_sealed IS NULL)
+        );
+        INSERT INTO connector_grants_rebuilt (company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason,
+          created_at, updated_at, last_used_at)
+          SELECT company_id, user_id, provider, grant_id, account_email, scopes, refresh_token_sealed, status, status_reason,
+            created_at, updated_at, last_used_at FROM connector_grants;
+        DROP TABLE connector_grants;
+        ALTER TABLE connector_grants_rebuilt RENAME TO connector_grants;
+      `)
+    })()
+  }
+  const pending = sqlOf('oauth_pending')
+  if (pending && !pending.includes("'slack'")) {
+    conn.transaction(() => {
+      conn.exec(`
+        CREATE TABLE oauth_pending_rebuilt (
+          company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+          state_hash TEXT NOT NULL,
+          provider TEXT NOT NULL CHECK (provider IN ('google', 'slack')),
+          user_id TEXT NOT NULL,
+          scopes TEXT NOT NULL,
+          verifier_sealed TEXT NOT NULL,
+          created_at TEXT NOT NULL,
+          expires_at TEXT NOT NULL,
+          PRIMARY KEY (company_id, state_hash)
+        );
+        INSERT INTO oauth_pending_rebuilt (company_id, state_hash, provider, user_id, scopes, verifier_sealed, created_at, expires_at)
+          SELECT company_id, state_hash, provider, user_id, scopes, verifier_sealed, created_at, expires_at FROM oauth_pending;
+        DROP TABLE oauth_pending;
+        ALTER TABLE oauth_pending_rebuilt RENAME TO oauth_pending;
+        CREATE INDEX IF NOT EXISTS idx_oauth_pending_expires ON oauth_pending(company_id, expires_at);
+      `)
+    })()
+  }
 }
 
 /**

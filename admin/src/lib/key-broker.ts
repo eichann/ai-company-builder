@@ -36,7 +36,7 @@ export {
   parseRelayBaseUrl,
   relayBaseUrl,
 } from '../../../shared/core/key-broker'
-import type { BrokerChangeDetail, BrokerKeySnapshot } from '../../../shared/types/key-broker'
+import type { BrokerChangeDetail, BrokerKeyRef, BrokerKeySnapshot, BrokerKeySummary, BrokerView } from '../../../shared/types/key-broker'
 
 export const CATEGORY_LABELS: Record<BrokerServiceCategory, string> = {
   person: '本人として動く',
@@ -69,6 +69,44 @@ export function misdirectedKeyText(k: { scope: string; service: string; destinat
     : 'この鍵を削除して、メンバーに登録し直してもらってください。'
   return `送り先が ${builtin.label} のものではないため、この鍵は使われていません。${fix}`
 }
+
+/**
+ * 「このサービスは、この鍵を使う」: a service with two or more company keys, the
+ * keys that can be chosen (active ones) and the one chosen. Services with one
+ * company key or none need no choice and are left out.
+ */
+export interface KeyChoice {
+  service: string
+  label: string
+  /** Active company keys of the service (a stopped key cannot be chosen). */
+  keys: BrokerKeySummary[]
+  chosenId: string | null
+  /**
+   * Nothing chosen while a key could be: the server then refuses the company key
+   * to anyone who may use more than one of them (never picks one by itself).
+   */
+  needed: boolean
+}
+
+export function keyChoices(view: BrokerView): KeyChoice[] {
+  return view.services.flatMap((s) => {
+    const all = view.keys.filter((k) => k.scope === 'company' && k.service === s.service)
+    if (all.length < 2) return []
+    const keys = all.filter((k) => k.status === 'active')
+    return [{ service: s.service, label: s.label, keys, chosenId: s.defaultKeyId, needed: s.defaultKeyId === null && keys.length > 0 }]
+  })
+}
+
+export const KEY_CHOICE_HELP =
+  '同じサービスに会社の鍵が2つ以上あるときは、どの鍵を使うかをここで選びます。選んだ鍵を止めたり削除したりすると「選んでいない」に戻り、もう一度選ぶまで別の鍵が勝手に使われることはありません。'
+
+/** The warning under a service whose key is not chosen yet. */
+export function keyChoiceNeededText(label: string): string {
+  return `${label} の会社の鍵が複数あります。どの鍵を使うか選んでください。選ぶまで、AI は ${label} の会社の鍵を使えません（使える鍵が1つだけの人を除く）。`
+}
+
+/** One chosen key as a choice / history label: its name and last 4 (never its value). */
+export const keyChoiceLabel = (k: { displayName: string; last4: string }) => `${k.displayName}（…${k.last4}）`
 
 export const STATUS_LABELS: Record<BrokerKeyStatus, string> = {
   active: '使用中',
@@ -191,6 +229,11 @@ function fieldLines(name: string, before: Partial<BrokerKeySnapshot>, after: Par
   return lines
 }
 
+function defaultKeyLine(c: { service: string; before: BrokerKeyRef | null; after: BrokerKeyRef | null; because?: 'stopped' | 'deleted' }): string {
+  if (c.because) return `${c.service}: 使う鍵 ${c.before ? keyChoiceLabel(c.before) : ''} を${c.because === 'stopped' ? '止めた' : '削除した'}ため、選んでいない状態に戻りました`
+  return `${c.service}: 使う鍵 → ${c.after ? keyChoiceLabel(c.after) : '選んでいない'}`
+}
+
 /** The history's lines for one change (never a key's value: only its last 4). */
 export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[] {
   switch (c.action) {
@@ -224,6 +267,8 @@ export function brokerChangeLines(c: BrokerChangeDetail, names: Names): string[]
     }
     case 'read-only':
       return [`${c.service}: 中継 → ${c.after ? '読むだけ' : '読み書き'}`]
+    case 'default-key':
+      return [defaultKeyLine(c)]
     case 'settings': {
       const lines: string[] = []
       if (c.before.memberKeysAllowed !== c.after.memberKeysAllowed) {

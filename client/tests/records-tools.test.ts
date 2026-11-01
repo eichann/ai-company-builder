@@ -161,7 +161,7 @@ test('a record file\'s frontmatter cannot get state & co., nor an existing recor
 
 test('screens are offered only the actions that can start from the record\'s state', () => {
   const titles = (state: string) => recordActionChoices(TASK, state).map(c => c.action).sort()
-  assert.deepEqual(titles('done'), ['reopen', 'set_due'])
+  assert.deepEqual(titles('done'), ['reopen', 'set_bundle', 'set_due', 'set_tags', 'set_wait_until'])
   assert.ok(titles('review').includes('complete'))
   assert.ok(!titles('todo').includes('complete'))
   assert.equal(recordActionChoices(TASK, 'review').find(c => c.action === 'send_back')!.noteRequired, true)
