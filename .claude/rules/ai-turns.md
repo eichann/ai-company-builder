@@ -235,7 +235,16 @@ ceiling, the first message).
   denied). The server's C4 gate decides each call too.
 - **Settle**: the record left the state it was at when claimed → `done`; still there → `temporary`
   `UNFINISHED` (the server retries later, then a person).
-- Test: `client/tests/plugin-step-turns.test.ts` (the turns parsed strictly, the claim runs the
+- **A person's start** (`start: person`): a record's card (AppShell, above `RecordCard`) shows
+  `PersonStepButtons` (`src/features/plugin-steps/`) for the steps at its state
+  (`pluginSteps:onRecord` → `GET /me/plugin-steps/records/:id`, person steps only). Pressing one:
+  `pluginSteps:start` (`electron/features/plugin-steps/ipc.ts`; the company folder validated by
+  `AllowedRoots` before any server call) → `POST …/start` pins the work's procedure (its first run)
+  → main reads the pinned text (`procedures.ts`) → `chat.newConsultation` with that first
+  message. It is the member's own consultation: their tools and rights, no run, no ceiling (the
+  ceiling binds the AI's unattended run); not on this PC → 「まだこの PC にありません」.
+- Test: `client/tests/plugin-step-turns.test.ts` (the person steps offered, a person's start's
+  message with the pinned procedure, an outside company folder refused before any call, the turns parsed strictly, the claim runs the
   plugin step with the pinned procedure and no type action, the ceiling for that consultation and
   step only, the mapping, a procedure not here gives the run back, the emergency stop calls
   nothing, settle, the procedure file only inside the pinned package / a Skill from the pinned

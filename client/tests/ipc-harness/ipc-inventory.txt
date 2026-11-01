@@ -136,6 +136,8 @@ contract.invoke outboundMail:update
 contract.invoke pluginOperations:reconcile
 contract.invoke pluginOperations:recreate
 contract.invoke pluginOperations:undo
+contract.invoke pluginSteps:onRecord
+contract.invoke pluginSteps:start
 contract.invoke privateFolders:create
 contract.invoke privateFolders:createContext
 contract.invoke privateFolders:mine
@@ -354,6 +356,7 @@ contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFil
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
+contract.type ElectronAPI.listPersonSteps = listPersonSteps: Invoke<'pluginSteps:onRecord'>
 contract.type ElectronAPI.listPluginStepTurns = listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
@@ -423,6 +426,7 @@ contract.type ElectronAPI.sparseGetExclusions = sparseGetExclusions: Invoke<'git
 contract.type ElectronAPI.sparseSetExclusions = sparseSetExclusions: Invoke<'git:sparseSetExclusions'>
 contract.type ElectronAPI.sparseUncommittedChanges = sparseUncommittedChanges: Invoke<'git:sparseUncommittedChanges'>
 contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDrag'>) => void
+contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps:start'>
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
@@ -667,6 +671,8 @@ contract.type IpcInvokeChannels.'outboundMail:update' = 'outboundMail:update': {
 contract.type IpcInvokeChannels.'pluginOperations:reconcile' = 'pluginOperations:reconcile': { args: [companyId: string, pluginId: string, operationId: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:recreate' = 'pluginOperations:recreate': { args: [companyId: string, pluginId: string, operationId: string, confirm: boolean, conversationId?: string]; result: PluginOperationResult }
 contract.type IpcInvokeChannels.'pluginOperations:undo' = 'pluginOperations:undo': { args: [companyId: string, pluginId: string, operationId: string, conversationId?: string]; result: PluginOperationResult }
+contract.type IpcInvokeChannels.'pluginSteps:onRecord' = 'pluginSteps:onRecord': { args: [companyId: string, recordId: string]; result: PluginStepButton[] }
+contract.type IpcInvokeChannels.'pluginSteps:start' = 'pluginSteps:start': { args: [companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string]; result: PluginStepStartResult }
 contract.type IpcInvokeChannels.'privateFolders:create' = 'privateFolders:create': { args: [companyId: string, input: CreatePrivateFolderRequest]; result: CreatePrivateFolderResult }
 contract.type IpcInvokeChannels.'privateFolders:createContext' = 'privateFolders:createContext': { args: [companyId: string, parentPath: string]; result: { success: true; context: PrivateFolderCreateContext } | PrivateFoldersFailure }
 contract.type IpcInvokeChannels.'privateFolders:mine' = 'privateFolders:mine': { args: [companyId: string]; result: { success: true; folders: MyPrivateFolder[] } | PrivateFoldersFailure }
@@ -899,6 +905,8 @@ main.handle outboundMail:update @ features/outbound-mail/ipc.ts (companyId, mess
 main.handle pluginOperations:reconcile @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId)
 main.handle pluginOperations:recreate @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, confirm, conversationId)
 main.handle pluginOperations:undo @ features/plugin-operations/ipc.ts (companyId, pluginId, operationId, conversationId)
+main.handle pluginSteps:onRecord @ features/plugin-steps/ipc.ts (companyId, recordId)
+main.handle pluginSteps:start @ features/plugin-steps/ipc.ts (companyId, recordId, pluginId, step, companyRoot)
 main.handle privateFolders:create @ features/private-folders/ipc.ts (companyId: string, input: CreatePrivateFolderRequest)
 main.handle privateFolders:createContext @ features/private-folders/ipc.ts (companyId: string, parentPath: string)
 main.handle privateFolders:mine @ features/private-folders/ipc.ts (companyId: string)
@@ -1128,6 +1136,8 @@ preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
 preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
+preload listPersonSteps -> invoke pluginSteps:onRecord($0, $1)
+preload listPersonSteps : (companyId: string, recordId: string) => Promise<PluginStepButton[]>
 preload listPluginStepTurns -> invoke aiTurns:pluginTurns($0)
 preload listPluginStepTurns : (companyId: string) => Promise<PluginStepTurn[]>
 preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
@@ -1266,6 +1276,8 @@ preload sparseUncommittedChanges -> invoke git:sparseUncommittedChanges($0, $1)
 preload sparseUncommittedChanges : (repoPath: string, folders: string[]) => Promise<SparseUncommittedChangesResult>
 preload startDrag -> send fs:startDrag($0)
 preload startDrag : (filePath: string) => void
+preload startPersonStep -> invoke pluginSteps:start($0, $1, $2, $3, $4)
+preload startPersonStep : (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string | undefined) => Promise<PluginStepStartResult>
 preload startTool -> invoke tools:start($0, $1, $2)
 preload startTool : (toolPath: string, startCommand?: string | undefined, companyId?: string | undefined) => Promise<StartToolResult>
 preload stopTool -> invoke tools:stop($0)

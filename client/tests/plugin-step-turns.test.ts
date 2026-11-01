@@ -12,6 +12,8 @@ import { createAiTurnClaims, type AiTurnClaimsDeps } from '../electron/features/
 import { createProcedureReader } from '../electron/features/ai-turns/procedures'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
+import { registerPluginStepsIpc } from '../electron/features/plugin-steps/ipc'
+import type { IpcRegistrar } from '../electron/ipc/registrar'
 import { parsePluginStepTurns, pluginStepToolAccess, type PluginProcedurePin } from '../shared/ai-turn-steps/plugin'
 
 const COMPANY = 'acme'
@@ -185,4 +187,54 @@ test('the chat server refuses a plugin step whose ceiling main does not hold (ne
   } finally {
     server.server.close()
   }
+})
+
+// A person's start (`start: person` steps on the record's card).
+function personIpc(opts: { pin?: unknown; readProcedure?: (pin: PluginProcedurePin) => string | null } = {}) {
+  const calls: string[] = []
+  const handlers = new Map<string, (...args: unknown[]) => unknown>()
+  const ipc = { handle: (channel: string, fn: (...args: unknown[]) => unknown) => { handlers.set(channel, fn) } } as unknown as IpcRegistrar
+  const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
+  const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input))
+    calls.push(`${init?.method ?? 'GET'} ${url.pathname}`)
+    if (url.pathname === `/api/companies/${COMPANY}/me/plugin-steps/records/${DEAL}`) {
+      return json(200, { data: { steps: [
+        { pluginId: 'sample-sales', step: 'work', label: '案件を進める', start: 'ai_turn', procedure: 'steps/work.md', tools: [], connectorRoles: [], pin: null },
+        { pluginId: 'sample-sales', step: 'prepare', label: '提案書を用意する', start: 'person', procedure: 'steps/prepare.md', tools: ['records'], connectorRoles: [], pin: null },
+      ] } })
+    }
+    if (url.pathname.endsWith('/sample-sales/prepare/start')) {
+      return json(200, { data: { recordId: DEAL, version: 4, pluginId: 'sample-sales', step: 'prepare', label: '提案書を用意する', start: 'person', procedure: 'steps/prepare.md', tools: ['records'], connectorRoles: [], pin: opts.pin ?? { source: 'company_skill', skill: 'deal-proposal', fingerprint: TREE } } })
+    }
+    return json(404, { error: 'この手順はありません', code: 'PLUGIN_STEP_NOT_FOUND' })
+  }) as typeof fetch
+  const roots: string[] = []
+  registerPluginStepsIpc(ipc, {
+    baseUrl: () => 'https://acb.example', cookies: () => ['s=1'], fetch,
+    readProcedure: async (_c, pin, _file, root) => { roots.push(String(root)); return opts.readProcedure ? opts.readProcedure(pin) : '# 会社の提案書の手順\n' },
+    paths: { validate: (p: string) => { if (!p.startsWith('/company')) throw new Error('outside'); return p }, add: () => {}, rootOf: () => null },
+  })
+  const invoke = (channel: string, ...args: unknown[]) => handlers.get(channel)!({ sender: { id: 1 } }, ...args)
+  return { calls, invoke, roots }
+}
+
+test("a person's start: only person steps are offered; the consultation's message carries the pinned procedure", async () => {
+  const h = personIpc()
+  assert.deepEqual(await h.invoke('pluginSteps:onRecord', COMPANY, DEAL), [{ pluginId: 'sample-sales', step: 'prepare', label: '提案書を用意する' }])
+  const r = await h.invoke('pluginSteps:start', COMPANY, DEAL, 'sample-sales', 'prepare', '/company') as { ok: boolean; message?: string; title?: string }
+  assert.equal(r.ok, true)
+  assert.ok(r.message?.includes('会社の提案書の手順') && r.message.includes(DEAL))
+  assert.ok(r.title?.startsWith('提案書を用意する'))
+  assert.deepEqual(h.roots, ['/company'])
+})
+
+test("a person's start: a company folder outside the allowed roots is refused before any server call; a procedure not here is said", async () => {
+  const h = personIpc()
+  assert.equal((await h.invoke('pluginSteps:start', COMPANY, DEAL, 'sample-sales', 'prepare', '/elsewhere') as { ok: boolean }).ok, false)
+  assert.deepEqual(h.calls, [])
+  const missing = personIpc({ readProcedure: () => null })
+  const r = await missing.invoke('pluginSteps:start', COMPANY, DEAL, 'sample-sales', 'prepare', '/company') as { ok: boolean; error?: string }
+  assert.equal(r.ok, false)
+  assert.match(String(r.error), /まだこの PC にありません/)
 })

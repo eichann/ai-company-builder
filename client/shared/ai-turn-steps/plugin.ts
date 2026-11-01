@@ -183,3 +183,27 @@ export function pluginStepFirstMessage(input: {
     '- 「ほかの人が先に変えました」と断られたら、その答えの version でもう一度だけ試してください。',
   ].join('\n')
 }
+
+/** A `start: person` step offered on a record's card. */
+export interface PluginStepButton {
+  pluginId: string
+  step: string
+  label: string
+}
+
+/** The answer of a person's start: the consultation's title and first message, or why not. */
+export type PluginStepStartResult = { ok: true; title: string; message: string } | { ok: false; error: string }
+
+/**
+ * The first message of a consultation a person starts from a step (the member's own message, made
+ * by the app): the step, the record and the pinned procedure to follow together.
+ */
+export function pluginStepPersonMessage(input: { label: string; recordId: string; procedure: string; source: PluginProcedurePin['source'] }): string {
+  return [
+    `手順「${input.label}」を、記録 ${input.recordId} について一緒に進めたいです。まず records_get で記録を確かめてから、次の${input.source === 'company_skill' ? '会社の手順書（スキル）' : '手順書'}に沿って進めてください。`,
+    '',
+    '-----',
+    input.procedure.trim(),
+    '-----',
+  ].join('\n')
+}

@@ -24,7 +24,7 @@ export function usePluginStepTurns(companyId: string | undefined): readonly Plug
   const subscribe = useCallback((listener: (payload: undefined) => void) => companyId ? everyMinute(listener) : undefined, [companyId])
   useIpcEvent(subscribe, () => {
     if (!companyId) return
-    void listPluginStepTurns(companyId).then(turns => setState({ companyId, turns }), () => {})
+    void listPluginStepTurns(companyId).then(turns => setState({ companyId, turns: Array.isArray(turns) ? turns : NONE }), () => {})
   }, !!companyId)
   return state.companyId === companyId ? state.turns : NONE
 }

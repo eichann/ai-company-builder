@@ -70,6 +70,7 @@ import { registerSlackIpc } from './features/slack/ipc'
 // lane B ▲
 // lane C ▼
 import { createProcedureReader } from './features/ai-turns/procedures'
+import { registerPluginStepsIpc } from './features/plugin-steps/ipc'
 // lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -298,6 +299,11 @@ const recordsApi = createRecordsApi({
 })
 // 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
 // window; main claims the server's execution run and the record by its version, and settles it afterwards.
+// A business plugin's step's pinned procedure (plugin-steps.md): the package C2 keeps, or the company Skill's tree.
+const readPluginProcedure = createProcedureReader({
+  folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
+  git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
+})
 const aiTurnClaims = createAiTurnClaims({
   baseUrl: getServerApiUrl,
   cookies: session.cookies,
@@ -310,11 +316,7 @@ const aiTurnClaims = createAiTurnClaims({
   deviceId: `app-${randomUUID()}`,
   // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
   recordMovedOn: companyId => minutes.recordsSignal(companyId),
-  // A business plugin's step's pinned procedure (plugin-steps.md): the package C2 keeps, or the company Skill's tree.
-  readProcedure: createProcedureReader({
-    folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
-    git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
-  }),
+  readProcedure: readPluginProcedure,
 })
 registerAiTurnsIpc(ipc, {
   claims: aiTurnClaims,
@@ -329,6 +331,7 @@ registerSlackIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shel
 // lane B ▼
 // lane B ▲
 // lane C ▼
+registerPluginStepsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, readProcedure: readPluginProcedure, paths: allowedRoots })
 // lane C ▲
 
 registerAuthIpc(ipc, {

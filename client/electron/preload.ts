@@ -338,6 +338,8 @@ const api: ElectronAPI = {
   // lane B ▲
   // lane C ▼
   listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
+  listPersonSteps: (companyId: string, recordId: string) => invoke('pluginSteps:onRecord', companyId, recordId),
+  startPersonStep: (companyId: string, recordId: string, pluginId: string, step: string, companyRoot?: string) => invoke('pluginSteps:start', companyId, recordId, pluginId, step, companyRoot),
   // lane C ▲
 }
 

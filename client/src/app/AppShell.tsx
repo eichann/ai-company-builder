@@ -54,6 +54,7 @@ import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/
 import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
+import { PersonStepButtons } from '../features/plugin-steps/components/PersonStepButtons'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
@@ -279,7 +280,8 @@ export function AppShell() {
     if (recordId.startsWith('task-')) {
       return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} shareFolders={shareFolders} onChanged={taskList.reload} />
     }
-    const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
+    // A business plugin's `start: person` steps at the record's state (plugin-steps.md) sit above its card.
+    const readOnly = <div key={recordId}><PersonStepButtons companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /><RecordCard companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} /></div>
     // An approval request also gets its own card on top: approving or sending back is the person's press.
     if (recordId.startsWith('approval-')) {
       return <div key={recordId}><div className="px-5 pt-5">{approvalCard(recordId, '')}</div>{readOnly}</div>
