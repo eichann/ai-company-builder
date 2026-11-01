@@ -528,6 +528,28 @@ export const WAIT_OVER_ACTION = 'wait_over'
 export const CLOCK_ACTOR = Object.freeze({ id: 'acb:clock', kind: 'external' as const, source: 'ACB の時計' })
 
 /**
+ * Whether a record is in its current state because the clock's 「見込みの日時が過ぎた」 put it
+ * there: its newest state change (oldest → newest ledger) is the clock's `wait_over`. A later
+ * field-only entry (tags, a new 見込み) keeps it; any later move ends it. The PC's step for a
+ * task's wait that is over (`TASK_WAIT_OVER_STEP`) runs only such a task — a task a consultation
+ * created in 準備中 is that consultation's to prepare, never this step's.
+ */
+export function enteredByWaitOver(ledger: ReadonlyArray<{ action: string; actorId: string; fromState: string | null; toState: string | null }>): boolean {
+  for (let i = ledger.length - 1; i >= 0; i--) {
+    const e = ledger[i]
+    if (e.toState === null || e.toState === e.fromState) continue
+    return e.action === WAIT_OVER_ACTION && e.actorId === CLOCK_ACTOR.id
+  }
+  return false
+}
+
+/**
+ * The PC's AI-turn step for a task whose wait is over (`client/shared/ai-turn-steps/task-wait-over.ts`):
+ * the server lets it be claimed only for a task `enteredByWaitOver` (services/records.ts `aiTurnOf`).
+ */
+export const TASK_WAIT_OVER_STEP = 'task-wait-over'
+
+/**
  * The ledger action of the startup carry-over of a meeting's outside time
  * (`meeting_at` → `occurred_at`, meeting version 2): no action of the type.
  */

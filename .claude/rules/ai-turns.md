@@ -16,6 +16,7 @@ paths:
   - "client/electron/records/runs.ts"
   - "client/src/features/plugin-steps/**"
   - "client/tests/plugin-step-turns.test.ts"
+  - "client/electron/features/ai-turns/task-wait-tools.ts"
 ---
 
 # 「AI の番」 run automatically (stage 2 S10)
@@ -85,7 +86,8 @@ turns").
   start mark, `claimStates`), `minutes-bundle.ts` (the まとまり's part of a meeting read without one,
   `minutes.md` "A まとまり chosen later": only `minutes_read`, `meeting__finish_bundle_work` /
   `fail_bundle_work` — it confirms the まとまり and finishes; the まとまり's own step follows,
-  `plugin-steps.md` "After a meeting is read"; nothing that makes homework, decisions or mail). A type with no start mark
+  `plugin-steps.md` "After a meeting is read"; nothing that makes homework, decisions or mail),
+`task-wait-over.ts` (lane C: a task the clock's 「見込みの日時が過ぎた」 put in 準備中, below). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).
@@ -263,6 +265,36 @@ ceiling, the first message).
   step only, the mapping, a procedure not here gives the run back, the emergency stop calls
   nothing, settle, the procedure file only inside the pinned package / a Skill from the pinned
   tree, the chat server refusing a step main does not hold) — mutation-checked.
+
+## A task's wait that is over (`task-wait-over`, lane C)
+
+- **The clock** (S14, `notifications.md` "The server clock"): a `waiting` task past its
+  `wait_until` goes to `preparing` when 自動で進める is on, else straight to `todo` (the assignee's
+  turn; nothing runs on the PC). Only the first case runs here.
+- **Only a task the clock put there**: `enteredByWaitOver` (`shared/core/core-types.ts`: the
+  newest state change is the clock's `wait_over`; later field-only entries keep it). The server
+  marks such records `waitOver: true` in 「AI の番」 (`records.aiTurn`; the task list's
+  `TaskListItem.waitOver`), the step declares `onlyWaitOver` so `aiTurnQueue` skips any other
+  準備中 task, and the server's claim of the step `task-wait-over` (`TASK_WAIT_OVER_STEP`) answers
+  `NOT_AI_TURN` otherwise (`records.aiTurnOf(member, recordId, step)`). A task a consultation made
+  in 準備中 is that consultation's to prepare, never this step's.
+- **One claim per record**: a record a business plugin's `ai_turn` step lists (`GET
+  /me/plugin-step-turns`) is queued only as that plugin step, never also as a core step
+  (`aiTurnQueue`); main's claim already prefers the plugin turn.
+- **The run** (no start mark, `claim.from: preparing`; settle `todo` → done, `cancelled` →
+  closed, still 準備中 → given back): `task_wait_read` (`electron/features/ai-turns/task-wait-tools.ts`,
+  provider under lane C: the task's 待っているもの, 見込み, 期限 and links — `interaction`,
+  `counterpart`, `bundle`, `prepared` — only for a task `enteredByWaitOver`; any other record its
+  state alone), `inbox_read` on the linked 連絡 (its thread). Then one of: the awaited thing already
+  came → `task__finish_prep` saying so; not yet → a nudge as a reply in that thread
+  (`mail_recipients` / `mail_draft_create { interactionId }`) and `task__finish_prep` with the draft
+  in `links.prepared`; no thread, unreadable, unsure or due soon → `task__hand_over` with a
+  one-line note. Its only tools are those six. It never sends; the person checks and sends.
+- Tests: `client/tests/ai-turn-steps.test.ts` (queued only with `waitOver`, a plugin step wins,
+  the tool list, the first message's three ways, `task_wait_read` in full only after the clock),
+  `client/tests/ai-turn-claims.test.ts` (claimed as that step with no record action; settle),
+  `server/tests/integration/ai-runs.test.ts` ("a task whose wait is over": listed and claimable
+  only after the clock) — mutation-checked.
 
 ## Not yet
 

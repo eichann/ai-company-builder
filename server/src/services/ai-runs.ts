@@ -48,7 +48,7 @@ export interface AiRunDeps {
   transactions: Transactions
   /** sha256 (hex): a request's fingerprint. */
   tokenDigest: TokenDigest
-  aiTurnOf: (member: Member, recordId: string) => AiTurnCheck
+  aiTurnOf: (member: Member, recordId: string, step: string) => AiTurnCheck
   /**
    * A run finished as failed: its step may give the record back to 「AI の番」 (minutes reading:
    * still 「読んでいる」 → 「届いた」), recorded as caused by the run, not by the member.
@@ -209,7 +209,7 @@ export function createAiRunService(deps: AiRunDeps) {
       // A plugin step's name (`<pluginId>__<step>`) is never a core step's: unbound, it is nobody's turn.
       const steps = step.includes('__') ? pluginSteps : null
       if (step.includes('__') && !steps?.isPluginStep(step)) return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })
-      const turn = steps ? steps.turnOf(member, recordId, step) : deps.aiTurnOf(member, recordId)
+      const turn = steps ? steps.turnOf(member, recordId, step) : deps.aiTurnOf(member, recordId, step)
       if (turn === 'disabled') return refuse('not-found', 'この会社では記録の機能が有効になっていません', { code: 'RECORDS_DISABLED' })
       if (turn === 'not-found') return refuse('not-found', '記録が見つかりません', { code: 'RECORD_NOT_FOUND' })
       if (turn === 'not-ai-turn') return refuse('conflict', 'この記録はいま AI の番ではありません', { code: 'NOT_AI_TURN' })

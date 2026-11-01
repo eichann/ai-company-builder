@@ -45,6 +45,8 @@ export interface TaskListItem {
   finishedAt: string | null
   /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
   needsBundle?: true
+  /** 「AI の番」 only: the server clock put it there because its wait is over (the PC's wait-over step runs it). */
+  waitOver?: true
 }
 
 /** A まとまり the member may choose for a meeting (unfinished, readable). */
@@ -158,6 +160,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       bundle: src.bundles[r.id] ?? null,
       finishedAt,
       ...(needsBundle ? { needsBundle: true as const } : {}),
+      ...(turn === 'ai' && r.waitOver ? { waitOver: true as const } : {}),
     })
   }
   for (const r of src.myTurn) {

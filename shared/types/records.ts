@@ -157,6 +157,12 @@ export interface RecordSummary {
    * records.md "Absence and the delegate"). Absent otherwise.
    */
   actingFor?: string
+  /**
+   * 「AI の番」 only: the server clock's 「見込みの日時が過ぎた」 put it in this state
+   * (`enteredByWaitOver`, shared/core/core-types.ts) — what the PC's wait-over step runs.
+   * Absent otherwise.
+   */
+  waitOver?: true
 }
 
 export interface RecordQueryResult {

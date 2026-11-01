@@ -215,6 +215,7 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   and `outgoing`), the server clock calling `inbox.pollCompany`, and `connect` on a grant.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
   another To member (moves `personal_owner`), the app's screens (A4).
-- A task's own wait (`WAIT_OVER.task` → `preparing`) has no PC step yet: lane C covers it.
+- A task's own wait (`WAIT_OVER.task` → `preparing`) runs as lane C's `task-wait-over` step
+  (`ai-turns.md` "A task's wait that is over").
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no
   assignee (nobody's turn); A4 may create them `handled`.

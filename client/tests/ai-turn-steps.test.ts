@@ -25,13 +25,17 @@ import type { TaskListItem } from '../shared/tasks'
 import { createRecordTools, type ExtraRecordTools, type RecordToolProvider } from '../electron/records/tools'
 import type { RecordTurnAccess } from '../electron/records/api'
 import { createInboxTools } from '../electron/features/inbox/tools'
+import { createTaskWaitTools, taskWaitView } from '../electron/features/ai-turns/task-wait-tools'
+import { taskWaitOverFirstMessage } from '../shared/ai-turn-steps/task-wait-over'
+import type { LedgerEntry } from '../../shared/core/record-ledger'
+import type { RecordDetail } from '../../shared/types/records'
 import type { InboxItemView } from '../../shared/types/inbox'
 import type { ThreadView } from '../../shared/types/threads'
 
 test('a record runs under its kind\'s step; a kind without a step is never run', () => {
   assert.equal(aiTurnStepForRecord('meeting-abcdef12')?.step, 'minutes-reading')
   assert.equal(aiTurnStepForRecord('minutes-abcdef12')?.step, 'minutes-reading')
-  assert.equal(aiTurnStepForRecord('task-abcdef12'), null)
+  assert.equal(aiTurnStepForRecord('decision-abcdef12'), null)
   assert.equal(aiTurnStepForRecord('meeting-abcdef12/../x'), null)
 })
 
@@ -47,8 +51,8 @@ test('the queue: received minutes from main\'s check, other kinds only when thei
     tasks: [
       // A meeting is listed by the minutes check (only while Google may read minutes), not by the task list.
       item('meeting-bbbbbbbb', 'ai'),
-      // No step for tasks (yet): shown in the list, never run.
-      item('task-cccccccc', 'ai', { due: '2026-11-02T09:00' }),
+      // A task in 準備中 the clock did not put there (a consultation prepares it): shown, never run.
+      item('task-cccccccc', 'ai', { state: 'preparing', due: '2026-11-02T09:00' }),
       item('meeting-aaaaaaaa', 'ai'),
     ],
   })
@@ -204,4 +208,70 @@ test('a 返事のお願い (準備中 / 確かめ中) runs under follow-up with 
   }
   // Several from-states only without a start mark.
   assert.match(checkAiTurnSteps([step({ step: 'x', recordId: /^x-[a-z]{6}$/, claim: { action: 'start_reading', from: ['received', 'reading'] } })]) ?? '', /several from-states/)
+})
+
+test('a task whose wait is over runs under task-wait-over only when the clock put it in 準備中; a business plugin\'s step on the same record wins (one claim per record)', () => {
+  assert.equal(aiTurnStepForRecord('task-abcdef12', 'preparing')?.step, 'task-wait-over')
+  const overdue = item('task-aaaaaaaa', 'ai', { state: 'preparing', waitOver: true, due: '2026-11-09' })
+  const made = item('task-bbbbbbbb', 'ai', { state: 'preparing' })
+  const plugin = item('task-cccccccc', 'ai', { state: 'preparing', waitOver: true })
+  const queue = aiTurnQueue({
+    minutes: [], tasks: [overdue, made, plugin, item('task-dddddddd', 'others', { state: 'waiting' })],
+    plugins: [{ recordId: 'task-cccccccc', version: 2, pluginId: 'sales', step: 'nudge', runStep: 'sales__nudge', label: '催促' }],
+  })
+  assert.deepEqual(queue.map(q => [q.id, q.pluginStep ?? null]), [['task-aaaaaaaa', null], ['task-cccccccc', 'sales__nudge']])
+})
+
+test('the wait-over run gets only its task\'s read, the thread, a draft and the two hand-backs: it never sends, completes or edits anything else', () => {
+  for (const name of ['task_wait_read', 'inbox_read', 'mail_recipients', 'mail_draft_create', 'task__finish_prep', 'task__hand_over']) {
+    assert.ok(aiTurnStepAllowsRecordTool('task-wait-over', name), name)
+  }
+  for (const name of ['records_get', 'records_query', 'records_create', 'mail_draft_update', 'task__complete', 'task__cancel', 'task__wait', 'task__set_wait_until', 'task__assign', 'reply_request__ai_close', 'inbox_judge']) {
+    assert.ok(!aiTurnStepAllowsRecordTool('task-wait-over', name), name)
+  }
+  // Each way out is named: already arrived (finish_prep), a nudge draft (finish_prep + prepared), handed back with one line.
+  const m = taskWaitOverFirstMessage({ id: 'task-aaaaaaaa', title: '見積の返事' }, 7)
+  assert.match(m, /届いていました/)
+  assert.match(m, /mail_draft_create \{ interactionId/)
+  assert.match(m, /links\.prepared/)
+  assert.match(m, /task__hand_over。note に一行/)
+  assert.match(m, /version は 7/)
+  assert.match(m, /送信はしません/)
+})
+
+const entry = (action: string, fromState: string | null, toState: string | null, actorId = 'u-bob'): LedgerEntry =>
+  ({ action, fromState, toState, actorId } as LedgerEntry)
+
+test('task_wait_read answers in full only for a task the clock put in 準備中; any other record gets its state alone', async () => {
+  const sum = (over: Record<string, unknown>) => ({
+    id: 'task-aaaaaaaa', type: 'task', typeVersion: 8, title: '見積の返事', summary: '', path: null, state: 'preparing', version: 4, updatedAt: '',
+    fields: { waiting_on: '先方の見積', wait_until: '2026-11-04', due: '2026-11-09', assignee: 'u-bob' }, ...over,
+  })
+  const detail = {
+    record: sum({}),
+    links: [
+      { name: 'interaction', direction: 'out', record: sum({ id: 'interaction-bbbbbbbb', type: 'interaction', title: '見積のお願い', state: 'handled' }) },
+      { name: 'related', direction: 'out', record: sum({ id: 'task-cccccccc', title: '別のタスク' }) },
+    ],
+  } as unknown as RecordDetail
+  const overByClock = [entry('create', null, 'todo'), entry('wait', 'todo', 'waiting'), entry('wait_over', 'waiting', 'preparing', 'acb:clock'), entry('set_tags', null, null)]
+  const view = taskWaitView(detail, overByClock)
+  assert.equal(view.purpose, 'follow_up')
+  assert.deepEqual('interaction' in view && view.interaction, { id: 'interaction-bbbbbbbb', type: 'interaction', title: '見積のお願い', state: 'handled' })
+  assert.equal('waitingOn' in view && view.waitingOn, '先方の見積')
+  // Created in 準備中 by a consultation, or moved since: no details.
+  for (const ledger of [[entry('create', null, 'preparing')], [...overByClock, entry('take_over', 'preparing', 'todo'), entry('wait', 'todo', 'waiting'), entry('wait_over', 'waiting', 'preparing', 'u-bob')]]) {
+    assert.deepEqual(taskWaitView(detail, ledger), { id: 'task-aaaaaaaa', state: 'preparing', version: 4, purpose: 'none' })
+  }
+  // Through the tool: the item and its ledger, then the view.
+  const calls: string[] = []
+  const access = {
+    scope: 'act',
+    async call(method: string, path: string) { calls.push(`${method} ${path}`); return path.endsWith('/history') ? { entries: overByClock } : detail },
+    async close() {},
+  } as unknown as RecordTurnAccess
+  const tools = await createTaskWaitTools(access)
+  assert.match(await tools!.execute('task_wait_read', { recordId: 'task-aaaaaaaa' }), /"purpose":"follow_up"/)
+  assert.deepEqual(calls, ['GET /item/task-aaaaaaaa', 'GET /item/task-aaaaaaaa/history'])
+  assert.match(await tools!.execute('task_wait_read', { recordId: 'interaction-bbbbbbbb' }), /入力が正しくありません/)
 })

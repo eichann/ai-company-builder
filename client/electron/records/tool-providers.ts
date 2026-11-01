@@ -4,6 +4,7 @@
 // unattended 「AI の番」 still gets only what its step names (`client/shared/ai-turn-steps/`).
 import { createDriveTools, type DrivePicking } from '../features/google/drive'
 import { createInboxTools } from '../features/inbox/tools'
+import { createTaskWaitTools } from '../features/ai-turns/task-wait-tools'
 import type { PathGuard } from '../features/ports'
 import type { PrivateFolderGuards } from '../features/private-folders/guards'
 import { notDownloadedFolders } from '../sync/not-downloaded'
@@ -40,6 +41,8 @@ export function recordToolProviders(deps: RecordToolProviderDeps, turn: RecordTo
   providers.push((access, signal) => createInboxTools(access, signal))
   // lane B ▲
   // lane C ▼
+  // A task's wait that is over (ai-turns.md): the wait-over step's one read of its task.
+  providers.push((access, signal) => createTaskWaitTools(access, signal))
   // lane C ▲
   return providers
 }
