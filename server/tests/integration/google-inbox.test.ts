@@ -163,6 +163,9 @@ const gmailReads = () => fake.requests.filter(r => r.path.startsWith('/gmail/v1/
 describe('Google as a core connector: 受信を読む', () => {
   it('受信を読む is asked for only when first needed, and nothing wider', async () => {
     expect((await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })).status).toBe(200)
+    // Off for the company until the admin turns it on (owner decision 2026-11-02): not even asked.
+    expect((await call('g-sato', 'POST', `${C()}/me/google/connect`, { features: ['inbox'] })).body.code).toBe('GOOGLE_FEATURE_COMPANY_OFF')
+    expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(200)
     const first = await allow('g-sato', ['minutes'], GOOGLE_SEED.member)
     expect(first.url.searchParams.get('scope')).not.toContain('gmail')
     const { url, page } = await allow('g-sato', ['inbox'], GOOGLE_SEED.member)

@@ -68,7 +68,7 @@ export interface GoogleAdminView {
   history: GoogleChange[]
   /** Google Picker (Drive: 選んだファイルを読む・置く, google-drive.md): the API key's last 4 and the project number. */
   picker: GooglePickerView
-  /** Features the admin turned off for the whole company: never asked of members, refused from the next call. */
+  /** Features off for the whole company (受信を読む until the admin turns it on): never asked of members, refused from the next call. */
   featuresOff: GoogleFeature[]
   /** What members are asked for in one consent (on, and Drive only with the Picker registered). */
   companyFeatures: GoogleFeature[]

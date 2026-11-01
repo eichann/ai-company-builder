@@ -90,6 +90,9 @@ export interface GoogleSectionView {
   domainHint: string | null
 }
 
+/** The company offers the feature (an older server without the list: as before, offered). */
+const offered = (my: MyGoogle, f: GoogleFeature) => !my.companyFeatures || my.companyFeatures.includes(f)
+
 export function googleSectionView(my: MyGoogle): GoogleSectionView {
   const unavailable = my.available ? null : GOOGLE_UNAVAILABLE_TEXT[my.reason ?? 'not-configured']
   const ended = !my.connected && my.status ? GOOGLE_GRANT_STATUS_TEXT[my.status] ?? null : null
@@ -98,8 +101,8 @@ export function googleSectionView(my: MyGoogle): GoogleSectionView {
     allowed: my.connected ? my.features.map(f => `${GOOGLE_FEATURE_LABEL[f]}${(my.featuresOff ?? []).includes(f) ? '（オフにしています）' : ''}`) : [],
     notice: unavailable ?? ended,
     connectFeatures: my.available && !my.connected ? ['minutes'] : null,
-    canAddMail: my.available && my.connected && !my.features.includes('mail'),
-    canAddInbox: my.available && my.connected && !my.features.includes('inbox'),
+    canAddMail: my.available && my.connected && !my.features.includes('mail') && offered(my, 'mail'),
+    canAddInbox: my.available && my.connected && !my.features.includes('inbox') && offered(my, 'inbox'),
     canDisconnect: my.connected || my.status !== null,
     domainHint: my.domain ? `会社の Google アカウント（@${my.domain}）で許可してください。` : null,
   }

@@ -19,8 +19,12 @@ export interface OAuthClientRow {
   secretLast4: string
   domain: string
   enabled: boolean
-  /** Google features the admin turned off for the whole company (never asked, refused from the next call). */
+  /**
+   * The admin's company-level switches over each feature's default (`GOOGLE_COMPANY_DEFAULT_OFF`):
+   * default-on features turned off, default-off features turned on.
+   */
   featuresOff: string[]
+  featuresOn: string[]
   createdAt: string
   createdBy: string
   updatedAt: string
@@ -75,8 +79,8 @@ export interface ConnectorRepository {
   /** Insert or replace; `secret` null keeps the stored one (and its last 4). */
   saveClient(row: { clientId: string; domain: string; at: string; by: string }, secret: { sealed: SealedSecret; last4: string } | null, change: ConnectorChangeRow): void
   setClientEnabled(enabled: boolean, at: string, by: string, change: ConnectorChangeRow): void
-  /** The company-level turned-off features (the client must exist). */
-  setClientFeaturesOff(featuresOff: string[], at: string, by: string, change: ConnectorChangeRow): void
+  /** The company-level switches (the client must exist). */
+  setClientFeatures(switches: { featuresOff: string[]; featuresOn: string[] }, at: string, by: string, change: ConnectorChangeRow): void
   /** Google Picker's API key and app id on the client (google-drive.md); null when not registered. */
   picker(): { apiKey: string; appId: string } | null
   /** Sets (or with null, removes) the Picker's registration; the client must exist. */

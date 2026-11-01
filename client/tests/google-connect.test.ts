@@ -80,6 +80,10 @@ test('受信を読む is offered only to a connected member without it, and a fe
   assert.equal(off.canAddInbox, false)
   assert.deepEqual(off.allowed, ['予定と議事録を読む', '受信を読む（オフにしています）'])
   assert.equal(googleSectionView({ ...base, connected: false, status: null, features: [], featuresOff: [] }).canAddInbox, false)
+  // The company has 受信を読む off (its default): never offered, the server would refuse it.
+  const companyOff = googleSectionView({ ...base, features: ['minutes', 'mail'], featuresOff: [], companyFeatures: ['minutes', 'mail'], seen: [] })
+  assert.equal(companyOff.canAddInbox, false)
+  assert.equal(googleSectionView({ ...base, features: ['minutes'], featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'], seen: [] }).canAddInbox, true)
 })
 
 test('「Google でつなぐ」 (connectAll) asks for { all } and opens only the sign-in page; 「あとで」 is a PUT of /seen', async () => {

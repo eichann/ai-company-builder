@@ -8,7 +8,7 @@ import type { ConnectorChangeRow, ConnectorGrantRow, ConnectorProvider, Connecto
 import type { SealedSecret } from '../../ports/secret-cipher'
 
 type ClientRow = {
-  client_id: string; secret_last4: string; domain: string; enabled: number; features_off: string
+  client_id: string; secret_last4: string; domain: string; enabled: number; features_off: string; features_on: string
   created_at: string; created_by: string; updated_at: string; updated_by: string
 }
 type GrantRow = {
@@ -23,7 +23,7 @@ type HistoryRow = { id: string; provider: string; action: string; user_id: strin
 const GRANT_COLUMNS = 'user_id, provider, grant_id, account_email, scopes, features_off, status, status_reason, created_at, updated_at, last_used_at'
 
 const toClient = (r: ClientRow): OAuthClientRow => ({
-  clientId: r.client_id, secretLast4: r.secret_last4, domain: r.domain, enabled: r.enabled === 1, featuresOff: scopesOf(r.features_off),
+  clientId: r.client_id, secretLast4: r.secret_last4, domain: r.domain, enabled: r.enabled === 1, featuresOff: scopesOf(r.features_off), featuresOn: scopesOf(r.features_on),
   createdAt: r.created_at, createdBy: r.created_by, updatedAt: r.updated_at, updatedBy: r.updated_by,
 })
 /** A stored JSON list of strings (scopes, features); anything unreadable is empty. */
@@ -55,7 +55,7 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
 
   return {
     client() {
-      const r = conn.prepare(`SELECT client_id, secret_last4, domain, enabled, features_off, created_at, created_by, updated_at, updated_by
+      const r = conn.prepare(`SELECT client_id, secret_last4, domain, enabled, features_off, features_on, created_at, created_by, updated_at, updated_by
         FROM google_oauth_clients WHERE company_id = ?`).get(companyId) as ClientRow | undefined
       return r ? toClient(r) : null
     },
@@ -88,9 +88,10 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
         addHistory(change)
       })()
     },
-    setClientFeaturesOff(featuresOff, at, by, change) {
+    setClientFeatures(switches, at, by, change) {
       conn.transaction(() => {
-        conn.prepare('UPDATE google_oauth_clients SET features_off = ?, updated_at = ?, updated_by = ? WHERE company_id = ?').run(JSON.stringify(featuresOff), at, by, companyId)
+        conn.prepare('UPDATE google_oauth_clients SET features_off = ?, features_on = ?, updated_at = ?, updated_by = ? WHERE company_id = ?')
+          .run(JSON.stringify(switches.featuresOff), JSON.stringify(switches.featuresOn), at, by, companyId)
         addHistory(change)
       })()
     },

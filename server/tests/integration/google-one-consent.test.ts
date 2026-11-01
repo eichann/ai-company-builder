@@ -4,6 +4,7 @@
  * end to end against the fake Google through the practice redirect.
  *
  * What it protects:
+ * - 受信を読む is off for a company until its admin turns it on (owner decision 2026-11-02);
  * - `{ all: true }` asks exactly the union of the company's features (the admin's switches,
  *   Drive only with the Picker registered) — a feature the company turned off is never asked,
  *   not even one the member had allowed before;
@@ -161,14 +162,18 @@ const sendAs = (user: string) =>
   services.googleClient.request(CO, user, { api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw: Buffer.from('To: tanaka@div.example\r\nSubject: t\r\n\r\nhi').toString('base64url') }, scope: SEND, operation: 'gmail.send' })
 
 describe('「仕事の道具をつなぐ」: one consent for what the company offers', () => {
-  it('only owners and admins switch a feature for the company', async () => {
-    expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })).status).toBe(404)
-    expect((await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })).status).toBe(200)
-    expect((await call('g-sato', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })).status).toBe(403)
+  it('受信を読む is off for a company until its admin turns it on; only owners and admins switch', async () => {
+    expect((await call('g-owner', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(404)
+    const saved = await call('g-owner', 'PUT', `${C()}/google/client`, { clientId: CLIENT_ID, clientSecret: SECRET, domain: DOMAIN })
+    expect(saved.status).toBe(200)
+    // The defaults (owner decision 2026-11-02): 受信を読む off; no Picker yet, so Drive is not offered either.
+    expect(saved.body.data).toMatchObject({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })
+    expect((await call('g-sato', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })).status).toBe(403)
     expect((await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'everything', on: false })).status).toBe(400)
+    // On and off again: the history says so, and off is the stored state again.
+    const on = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: true })
+    expect(on.body.data).toMatchObject({ featuresOff: [], companyFeatures: ['minutes', 'mail', 'inbox'] })
     const off = await call('g-admin', 'PUT', `${C()}/google/features`, { feature: 'inbox', on: false })
-    expect(off.status).toBe(200)
-    // No Picker yet: Drive is not offered either.
     expect(off.body.data).toMatchObject({ featuresOff: ['inbox'], companyFeatures: ['minutes', 'mail'] })
     expect(off.body.data.history[0]).toMatchObject({ action: 'features', detail: { feature: 'inbox', on: false } })
   })
