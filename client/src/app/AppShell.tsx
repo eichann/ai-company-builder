@@ -340,6 +340,14 @@ export function AppShell() {
             read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
             skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
           } : undefined}
+          // The card opens where a file opens: the ファイル tab's split (list = the tree's width, card = the editor's).
+          frame={({ list, card }) => (
+            <SplitView
+              split={layout.files} limits={PANE_LIMITS} className="h-full w-full min-w-0"
+              paneClassName={paneClassName} dividerLabel={dividerLabel} onResizeStart={startResize} onResize={resize}
+              renderPane={paneId => (paneId === 'fileTree' ? list : card)}
+            />
+          )}
         />
       ) : null,
     },

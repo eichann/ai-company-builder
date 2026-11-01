@@ -55,6 +55,11 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   department the app could filter by).
 - `TaskListPanel`: the list on the left, the opened item's card on the right (`renderCard`,
   composed by AppShell: the records feature's card). A まとまり chip opens that まとまり there too.
+  On the main screen the card opens **where a file opens**: AppShell's `frame` puts the list and
+  the card in the ファイル tab's split (`layout.files`: the list takes the file tree's width, the
+  card the editor area's, one divider for both), so with the consultation open the card is never
+  a strip between the list and the chat. Test: `tests/ui/tasks-layout.spec.ts` (the card area at
+  least the editor area's width, 「＋ファイルをつなぐ」 left of the consultation).
 - `useTaskList` (in AppShell): read at mount, on `notifications:changed` for the company (the title
   bar keeps main watching), every 2 minutes and after the member's own change. `useCalendarToday`:
   at mount and every 10 minutes.

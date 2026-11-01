@@ -26,10 +26,15 @@ interface Props {
    * consultation themselves, or puts it aside. Absent where the company reads no minutes.
    */
   meetingActions?: { read: (recordId: string) => void; skip: (recordId: string) => Promise<string | null> }
+  /**
+   * Places the list and the opened card on the screen (AppShell: the ファイル tab's split, so the
+   * card gets the editor area a file opens in). Absent: the list at a fixed width, the card beside it.
+   */
+  frame?: (panes: { list: ReactNode; card: ReactNode }) => ReactNode
 }
 
 /** The task list tab (やること): the list on the left, the opened item's card on the right. */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions, frame }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -125,8 +130,8 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
     )
   }
 
-  return (
-    <div className="flex h-full min-h-0 w-full">
+  const listPane = (
+    <>
       {choosing && (
         <BundleChooser
           companyId={companyId} meetingTitle={choosing.title}
@@ -138,7 +143,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
           onClose={() => setChoosing(null)}
         />
       )}
-      <section aria-label="やることの一覧" className="flex w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <section aria-label="やることの一覧" className={`flex ${frame ? 'h-full w-full' : 'w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0'} flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900`}>
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
           <span className="text-[13px] font-semibold text-gray-800 dark:text-zinc-100">やること</span>
           <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
@@ -176,11 +181,20 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
           )}
         </div>
       </section>
-      <div className="min-w-0 flex-1 overflow-y-auto bg-white dark:bg-zinc-900">
-        {/* Keyed by the version the list knows: a change made from the list shows on the card too. */}
-        {opened ? <div key={`${opened}@${items.find(i => i.id === opened)?.version ?? 0}`} className="h-full">{renderCard(opened)}</div>
-          : <div className="flex h-full items-center justify-center text-sm text-gray-400">左の一覧から開きます</div>}
-      </div>
+    </>
+  )
+  const cardPane = (
+    <div className="h-full min-w-0 flex-1 overflow-y-auto bg-white dark:bg-zinc-900" data-testid="task-card-area">
+      {/* Keyed by the version the list knows: a change made from the list shows on the card too. */}
+      {opened ? <div key={`${opened}@${items.find(i => i.id === opened)?.version ?? 0}`} className="h-full">{renderCard(opened)}</div>
+        : <div className="flex h-full items-center justify-center text-sm text-gray-400">左の一覧から開きます</div>}
+    </div>
+  )
+  if (frame) return <>{frame({ list: listPane, card: cardPane })}</>
+  return (
+    <div className="flex h-full min-h-0 w-full">
+      {listPane}
+      {cardPane}
     </div>
   )
 }
