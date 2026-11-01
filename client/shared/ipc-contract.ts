@@ -47,6 +47,7 @@ import type { AiTurnClaimResult, AiTurnSettleResult, AutoTurnSettings } from './
 import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -625,6 +626,14 @@ export interface IpcInvokeChannels {
   'app:closeResponse': { args: [answer: 'ack' | 'close' | 'stay']; result: void }
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // The Slack connection (「Slack で許可」, slack-connector.md): the app holds no token; the sign-in URL stays in main.
+  'slack:status': { args: [companyId: string]; result: SlackStatusResult }
+  /** Opens Slack's sign-in page in the system browser (the URL never comes back). */
+  'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
+  /** 「許可をやめる」 (revoked at Slack too). */
+  'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
+  /** The member turns an allowed feature off / on (大事な知らせを DM で受け取る). */
+  'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -929,6 +938,11 @@ export interface ElectronAPI {
   answerCloseRequest: Invoke<'app:closeResponse'>
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // The Slack connection (設定 → Slack): the member's view only, never a token or the sign-in URL.
+  getSlackStatus: Invoke<'slack:status'>
+  connectSlack: Invoke<'slack:connect'>
+  disconnectSlack: Invoke<'slack:disconnect'>
+  setSlackFeature: Invoke<'slack:setFeature'>
   // lane A ▲
   // lane B ▼
   // lane B ▲

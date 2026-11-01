@@ -147,6 +147,10 @@ contract.invoke skills:list
 contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
+contract.invoke slack:connect
+contract.invoke slack:disconnect
+contract.invoke slack:setFeature
+contract.invoke slack:status
 contract.invoke tasks:act
 contract.invoke tasks:bundles
 contract.invoke tasks:card
@@ -275,6 +279,7 @@ contract.type ElectronAPI.claimAiTurn = claimAiTurn: Invoke<'aiTurns:claim'>
 contract.type ElectronAPI.closeChatWindows = closeChatWindows: Invoke<'chatWindow:closeAll'>
 contract.type ElectronAPI.completeHandoffTurn = completeHandoffTurn: Invoke<'handoff:complete'>
 contract.type ElectronAPI.connectGoogle = connectGoogle: Invoke<'google:connect'>
+contract.type ElectronAPI.connectSlack = connectSlack: Invoke<'slack:connect'>
 contract.type ElectronAPI.copyItem = copyItem: Invoke<'fs:copy'>
 contract.type ElectronAPI.createCompany = createCompany: Invoke<'api:createCompany'>
 contract.type ElectronAPI.createDirectory = createDirectory: Invoke<'fs:createDirectory'>
@@ -286,6 +291,7 @@ contract.type ElectronAPI.deleteItem = deleteItem: Invoke<'fs:delete'>
 contract.type ElectronAPI.deleteOwnBrokerKey = deleteOwnBrokerKey: Invoke<'brokerKeys:delete'>
 contract.type ElectronAPI.discardOutboundMail = discardOutboundMail: Invoke<'outboundMail:discard'>
 contract.type ElectronAPI.disconnectGoogle = disconnectGoogle: Invoke<'google:disconnect'>
+contract.type ElectronAPI.disconnectSlack = disconnectSlack: Invoke<'slack:disconnect'>
 contract.type ElectronAPI.exists = exists: Invoke<'fs:exists'>
 contract.type ElectronAPI.flushChatSession = flushChatSession: (...args: SyncArgs<'chatHistory:flushSession'>) => ChatSaveReceipt
 contract.type ElectronAPI.focusChatWindow = focusChatWindow: Invoke<'chatWindow:focus'>
@@ -323,6 +329,7 @@ contract.type ElectronAPI.getRecordCard = getRecordCard: Invoke<'recordViews:car
 contract.type ElectronAPI.getRecordsForFile = getRecordsForFile: Invoke<'recordViews:forFile'>
 contract.type ElectronAPI.getServerUrl = getServerUrl: Invoke<'config:getServerUrl'>
 contract.type ElectronAPI.getSession = getSession: Invoke<'auth:getSession'>
+contract.type ElectronAPI.getSlackStatus = getSlackStatus: Invoke<'slack:status'>
 contract.type ElectronAPI.getStats = getStats: Invoke<'fs:stat'>
 contract.type ElectronAPI.getTaskCard = getTaskCard: Invoke<'tasks:card'>
 contract.type ElectronAPI.getTaskList = getTaskList: Invoke<'tasks:list'>
@@ -402,6 +409,7 @@ contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'
 contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
+contract.type ElectronAPI.setSlackFeature = setSlackFeature: Invoke<'slack:setFeature'>
 contract.type ElectronAPI.settleAiTurn = settleAiTurn: Invoke<'aiTurns:settle'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
 contract.type ElectronAPI.signOut = signOut: Invoke<'auth:signOut'>
@@ -666,6 +674,10 @@ contract.type IpcInvokeChannels.'skills:list' = 'skills:list': { args: [rootPath
 contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult & { code?: 'already_shared' } }
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
+contract.type IpcInvokeChannels.'slack:connect' = 'slack:connect': { args: [companyId: string, features: SlackFeature[]]; result: SlackConnectResult }
+contract.type IpcInvokeChannels.'slack:disconnect' = 'slack:disconnect': { args: [companyId: string]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:setFeature' = 'slack:setFeature': { args: [companyId: string, feature: SlackFeature, on: boolean]; result: SlackStatusResult }
+contract.type IpcInvokeChannels.'slack:status' = 'slack:status': { args: [companyId: string]; result: SlackStatusResult }
 contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:bundles' = 'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
 contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
@@ -892,6 +904,10 @@ main.handle skills:list @ features/skills/ipc.ts (rootPath: string, departmentFo
 main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
+main.handle slack:connect @ features/slack/ipc.ts (companyId: string, features: SlackFeature[])
+main.handle slack:disconnect @ features/slack/ipc.ts (companyId: string)
+main.handle slack:setFeature @ features/slack/ipc.ts (companyId: string, feature: SlackFeature, on: boolean)
+main.handle slack:status @ features/slack/ipc.ts (companyId: string)
 main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
 main.handle tasks:bundles @ features/tasks/ipc.ts (companyId)
 main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
@@ -958,6 +974,8 @@ preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
 preload completeHandoffTurn : (company: string, id: string, receipt: HandoffCompletion) => Promise<void>
 preload connectGoogle -> invoke google:connect($0, $1)
 preload connectGoogle : (companyId: string, features: ("minutes" | "mail" | "drive" | "inbox")[]) => Promise<GoogleConnectResult>
+preload connectSlack -> invoke slack:connect($0, $1)
+preload connectSlack : (companyId: string, features: ("read" | "reply" | "notices")[]) => Promise<SlackConnectResult>
 preload copyItem -> invoke fs:copy($0, $1)
 preload copyItem : (sourcePath: string, destPath: string) => Promise<FileOpResult>
 preload createCompany -> invoke api:createCompany($0)
@@ -980,6 +998,8 @@ preload discardOutboundMail -> invoke outboundMail:discard($0, $1)
 preload discardOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload disconnectGoogle -> invoke google:disconnect($0)
 preload disconnectGoogle : (companyId: string) => Promise<GoogleStatusResult>
+preload disconnectSlack -> invoke slack:disconnect($0)
+preload disconnectSlack : (companyId: string) => Promise<SlackStatusResult>
 preload exists -> invoke fs:exists($0)
 preload exists : (path: string) => Promise<boolean>
 preload flushChatSession -> sendSync chatHistory:flushSession($0, $1)
@@ -1054,6 +1074,8 @@ preload getServerUrl -> invoke config:getServerUrl()
 preload getServerUrl : () => Promise<string | null>
 preload getSession -> invoke auth:getSession()
 preload getSession : () => Promise<SessionResult>
+preload getSlackStatus -> invoke slack:status($0)
+preload getSlackStatus : (companyId: string) => Promise<SlackStatusResult>
 preload getStats -> invoke fs:stat($0)
 preload getStats : (path: string) => Promise<{ success: boolean; data?: FileStats | undefined; }>
 preload getTaskCard -> invoke tasks:card($0, $1)
@@ -1212,6 +1234,8 @@ preload setPermissionMode -> invoke config:setPermissionMode($0)
 preload setPermissionMode : (mode: "auto" | "default" | "bypassPermissions") => Promise<boolean>
 preload setServerUrl -> invoke config:setServerUrl($0)
 preload setServerUrl : (url: string) => Promise<boolean>
+preload setSlackFeature -> invoke slack:setFeature($0, $1, $2)
+preload setSlackFeature : (companyId: string, feature: "read" | "reply" | "notices", on: boolean) => Promise<SlackStatusResult>
 preload settleAiTurn -> invoke aiTurns:settle($0, $1)
 preload settleAiTurn : (companyId: string, recordId: string) => Promise<AiTurnSettleResult>
 preload signIn -> invoke auth:signIn($0, $1)

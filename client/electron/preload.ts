@@ -22,6 +22,7 @@ import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import type { SlackFeature } from '../shared/slack'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -327,6 +328,10 @@ const api: ElectronAPI = {
   answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  getSlackStatus: (companyId: string) => invoke('slack:status', companyId),
+  connectSlack: (companyId: string, features: SlackFeature[]) => invoke('slack:connect', companyId, features),
+  disconnectSlack: (companyId: string) => invoke('slack:disconnect', companyId),
+  setSlackFeature: (companyId: string, feature: SlackFeature, on: boolean) => invoke('slack:setFeature', companyId, feature, on),
   // lane A ▲
   // lane B ▼
   // lane B ▲

@@ -5,6 +5,7 @@
 // those never read a value back: only per name whether it is set.
 import type { ElectronAPI, ElectronPort } from '../../shared/ipc/electron-api'
 import type { GoogleFeature } from '../../../shared/google'
+import type { SlackFeature } from '../../../shared/slack'
 
 /** Reading on this computer: which git binary the app runs. */
 export type GitBinaryReads = ElectronPort<'gitBinaryStatus'>
@@ -117,4 +118,25 @@ export function disconnectGoogle(companyId: string, outbound: GoogleOutbound = w
 /** Sends the .env key `name` to the server as one's own key; the .env loses it only once the server kept it. */
 export function moveEnvKeyToServer(companyId: string, rootPath: string, name: string, outbound: EnvKeyMoveOutbound = window.electronAPI) {
   return outbound.moveEnvKeyToServer(companyId, rootPath, name)
+}
+
+/** Asking the company server about the member's Slack permission (no token ever reaches the app). */
+export type SlackReads = ElectronPort<'getSlackStatus'>
+/** 「Slack で許可」 (main opens Slack's page in the browser), 「許可をやめる」 and the 知らせの DM switch. */
+export type SlackOutbound = ElectronPort<'connectSlack' | 'disconnectSlack' | 'setSlackFeature'>
+
+export function getSlackStatus(companyId: string, reads: SlackReads = window.electronAPI) {
+  return reads.getSlackStatus(companyId)
+}
+
+export function connectSlack(companyId: string, features: SlackFeature[], outbound: SlackOutbound = window.electronAPI) {
+  return outbound.connectSlack(companyId, features)
+}
+
+export function disconnectSlack(companyId: string, outbound: SlackOutbound = window.electronAPI) {
+  return outbound.disconnectSlack(companyId)
+}
+
+export function setSlackFeature(companyId: string, feature: SlackFeature, on: boolean, outbound: SlackOutbound = window.electronAPI) {
+  return outbound.setSlackFeature(companyId, feature, on)
 }

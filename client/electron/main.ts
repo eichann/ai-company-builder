@@ -64,6 +64,7 @@ import { createSkillUseReporter } from './services/skill-use-reporter'
 import type { StoppableTurns } from './services/agent-stop'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
+import { registerSlackIpc } from './features/slack/ipc'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -315,6 +316,7 @@ registerAiTurnsIpc(ipc, {
 // Lanes (ipc-and-main-process.md "Lane markers"): one line per feature, `register<Feature>Ipc(ipc, { … })`
 // or `wire<Feature>(ipc, { … })` from features/<feature>/, right under your lane's ▼.
 // lane A ▼
+registerSlackIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies, shell: desktopShell })
 // lane A ▲
 // lane B ▼
 // lane B ▲
