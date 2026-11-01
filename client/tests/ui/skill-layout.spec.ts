@@ -131,9 +131,9 @@ test('search finds records by kind next to files; a record opens as a card, its 
   await expect(hits.getByText('決めたこと (1)')).toBeVisible()
   expect(await calls(page, 'searchRecords')).toEqual([['demo', '提案']])
 
-  // A record opens as a card in the editor area of the files tab.
+  // A record opens as a card in the editor area of the files tab (a task: the task card).
   await hits.getByRole('button', { name: /A社 提案書を仕上げる/ }).click()
-  const card = page.getByTestId('record-card')
+  const card = page.getByTestId('task-card')
   await expect(card.getByRole('heading', { name: 'A社 提案書を仕上げる' })).toBeVisible()
   await expect(card.getByText('田中 太郎')).toBeVisible()
   await expect(card.getByText('山田 花子：作りました')).toBeVisible()

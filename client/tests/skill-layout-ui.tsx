@@ -181,6 +181,18 @@ const api: Partial<ElectronAPI> = {
       links: [{ label: '関係するファイル', path: '営業部/提案書/A社_提案.md' }, { label: '決めたこと', record: RECORD_DECISION }],
     } }
     : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
+  // A task opens in the task card (features/tasks): the same data, with nothing for this member to press.
+  getTaskCard: async (_companyId: string, recordId: string) => recordId === RECORD_TASK.id
+    ? { success: true, card: {
+      record: { ...RECORD_TASK, state: 'in_progress', version: 2 }, due: null, tags: [], purpose: null,
+      fields: [{ label: '担当', value: '田中 太郎' }],
+      roles: { assignee: false, requester: false, okGiver: false }, actions: [], okLine: null, prepSummary: null, prepared: [],
+      files: [{ path: '営業部/提案書/A社_提案.md' }],
+      links: [{ label: '決めたこと', record: RECORD_DECISION }],
+      history: [{ at: '2026-10-30T10:00:00+09:00', text: '山田 花子：作りました', ai: false }],
+      runs: [], people: [],
+    } }
+    : { success: false, offline: false, notFound: true, error: '見つかりません。消されたか、見られないものです。' },
   getRecordsForFile: async (_companyId: string, companyPath: string) => {
     record('getRecordsForFile', [companyPath])
     return { success: true, available: true, total: companyPath === '営業部/提案書/A社_提案.md' ? 1 : 0, records: companyPath === '営業部/提案書/A社_提案.md' ? [RECORD_TASK] : [] }
