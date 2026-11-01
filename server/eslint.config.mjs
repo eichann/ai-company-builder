@@ -2,13 +2,6 @@ import js from '@eslint/js';
 import tseslint from 'typescript-eslint';
 import globals from 'globals';
 
-// Route files still checking the session by hand: the same list as
-// tests/security/auth-guards.test.ts NOT_YET_GUARDED (server.md "Route guards").
-// One file per line, so lanes removing different files do not conflict.
-const NOT_YET_GUARDED = [
-  'ai-runs.ts',
-];
-
 export default tseslint.config(
   {
     ignores: ['dist', 'node_modules', '**/*.tsbuildinfo'],
@@ -33,8 +26,7 @@ export default tseslint.config(
 
   // Route guards (server.md "Route guards"): a route's handler gets the
   // signed-in user / company member from src/routes/guards.ts and its input
-  // from body() / query() / serviceBody, never by hand. Files not yet moved
-  // only warn (NOT_YET_GUARDED above); that list only shrinks.
+  // from body() / query() / serviceBody, never by hand.
   {
     files: ['src/routes/**/*.ts'],
     ignores: [
@@ -61,9 +53,5 @@ export default tseslint.config(
         },
       ],
     },
-  },
-  {
-    files: NOT_YET_GUARDED.map(f => `src/routes/${f}`),
-    rules: { 'no-restricted-imports': 'warn', 'no-restricted-syntax': 'warn' },
   },
 );

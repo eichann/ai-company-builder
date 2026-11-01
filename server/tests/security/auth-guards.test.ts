@@ -12,8 +12,7 @@
  *
  * Every endpoint also names one of src/routes/guards.ts's guards as its first
  * handler (companyMember, signedIn, publicRoute), so a forgotten check cannot
- * be written (server.md "Route guards"). Files still being moved onto the
- * guards are in NOT_YET_GUARDED; that list only shrinks.
+ * be written (server.md "Route guards").
  */
 import { describe, it, expect, vi, beforeAll } from 'vitest'
 import { readdirSync } from 'fs'
@@ -40,15 +39,6 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
   'slack-connection.ts POST /events/:companyId': 'Slack sends a company\'s events without an ACB session; the company\'s own signing secret (HMAC of the exact body, 5 minutes) is the proof — anything unsigned answers an empty 401 (slack-connector.md)',
   'oauth.ts GET /:provider/callback': 'the provider (Google, Slack) sends the member\'s browser back without an ACB session; the state (single use, 10 min, found only inside its own company and for that provider) is the proof',
 }
-
-/**
- * Route files whose endpoints still check the session by hand. Moved file by
- * file onto the guards; remove a file here when it is moved (the test fails
- * while a listed file is fully guarded). Never add one.
- */
-const NOT_YET_GUARDED = new Set([
-  'ai-runs.ts',
-])
 
 interface Endpoint { file: string; method: string; path: string; app: Hono; guard: ReturnType<typeof guardKind> }
 
@@ -119,7 +109,6 @@ describe('Authentication guards', () => {
     const missing: string[] = []
     const wrongPublic: string[] = []
     for (const e of endpoints) {
-      if (NOT_YET_GUARDED.has(e.file)) continue
       const key = `${e.file} ${e.method} ${e.path}`
       if (e.guard === null) missing.push(key)
       else if ((e.guard === 'public') !== (key in PUBLIC_ENDPOINTS)) wrongPublic.push(`${key} (${e.guard})`)
@@ -128,9 +117,4 @@ describe('Authentication guards', () => {
     expect(wrongPublic, 'publicRoute(...) is for exactly the PUBLIC_ENDPOINTS, and they use it').toEqual([])
   })
 
-  it('NOT_YET_GUARDED lists only files that still have an unguarded endpoint', () => {
-    const files = new Set(endpoints.map(e => e.file))
-    const stale = [...NOT_YET_GUARDED].filter(f => files.has(f) && endpoints.filter(e => e.file === f).every(e => e.guard !== null))
-    expect(stale, 'these files are fully guarded now: remove them from NOT_YET_GUARDED').toEqual([])
-  })
 })
