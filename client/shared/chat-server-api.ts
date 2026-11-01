@@ -6,7 +6,7 @@
  * them. Not IPC: the address and token come over IPC (`chat-server:getInfo` /
  * `chat-server:info`, `ChatServerInfo` in ipc-contract.ts).
  */
-import type { AiTurnStep } from './ai-turns'
+import type { AiTurnStep } from './ai-turn-steps/registry'
 import type { AgentSession, AuthMode } from './agent'
 import type { RateLimitSnapshot } from './rate-limits'
 

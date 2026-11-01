@@ -91,7 +91,7 @@ async function tools(scope: 'read' | 'act', root: string | null, opts: { availab
   if (root) roots.add(root)
   const t = await createRecordTools(access!, undefined, {
     companyId: 'co', conversationId: 'conv-1',
-    extraTools: a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'] } }),
+    toolProviders: [a => createDriveTools(a, { picking: pick.p, companyId: 'co', companyRoot: root, local: { pathGuard: roots, notDownloaded: () => ['営業部/置いていない'], privateFolders: () => ['人事'] } })],
   })
   return { t: t!, seen: server.seen, pick }
 }

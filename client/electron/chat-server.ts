@@ -1,4 +1,4 @@
-import { AI_TURN_STEPS, aiTurnStepAllowsRecordTool, isAiTurnStep } from '../shared/ai-turns'
+import { aiTurnStepAllowsRecordTool, aiTurnStepDefinition, isAiTurnStep } from '../shared/ai-turn-steps/registry'
 import { REFERENCE_INSTRUCTIONS, type ReferenceTools } from './consultations/tools'
 import type { RecordTools } from './records/tools'
 import type { CompanyFileTools } from './company-files/tools'
@@ -405,7 +405,7 @@ export async function startChatServer(config: ChatServerConfig) {
     const turnEnv = companyId && appSessionId
       ? await Promise.resolve(config.getBrokerEnv?.({ agent: authMode, companyId, conversationId: appSessionId, department: activeDepartment?.folder ?? null })).catch(() => undefined)
       : undefined
-    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: AI_TURN_STEPS[aiTurnStep].builtinTools } } : {}) }
+    const modelRequest = { workingDirectory, appSessionId, modelId, effort, resumeId: existingCliSessionId, references, companyFiles: companyFiles?.tools, review, records, webResearch: webResearch?.tools, writeGuard, privateReads, askUser, onEvent, steering: turn?.steering, onPromptSuggestion: turn?.onPromptSuggestion, toolEventContext, sandbox, turnEnv, toolStop: turnStop?.toolStopped, ...(aiTurnStep ? { unattended: { builtinTools: aiTurnStepDefinition(aiTurnStep).tools.builtinTools } } : {}) }
     let usedMemo = false
     const recoveryEvent = (status: HandoffRecovery['status']) => {
       if (companyId && appSessionId) config.onRecovery?.(companyId, appSessionId, { status, usedMemo, at: new Date().toISOString() })

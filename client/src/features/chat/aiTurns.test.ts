@@ -5,8 +5,9 @@ import assert from 'node:assert/strict'
 import { DEFAULT_AUTO_TURN_SETTINGS, readAutoTurnSettings } from '../../../shared/ai-turns'
 import {
   AI_TURN_PASS_CAP, AI_TURN_PASS_INTERVAL_MS, MAX_ATTEMPTS_PER_RECORD, freshLog, logForToday, nextAiTurn, orderAiTurns,
-  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnCandidate, type AiTurnDecisionInput,
+  FAILED_REASON, URGENT_WITHIN_MS, aiTurnItems, handUrgent, handedOver, recordOutcome, recordStarted, resumed, retried, usagePauseUntil, type AiTurnDecisionInput,
 } from './aiTurns'
+import type { AiTurnCandidate } from '../../../shared/ai-turn-steps/types'
 
 // 「自動で進める」 on (the company default); the tests below never rely on it implicitly.
 const ON = { ...DEFAULT_AUTO_TURN_SETTINGS, enabled: true }

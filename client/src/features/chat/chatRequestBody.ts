@@ -1,6 +1,6 @@
 import type { AgentSession, AuthMode } from '../../../shared/agent'
 import type { ChatRequestOptions } from '../../../shared/chat-server-api'
-import type { AiTurnStep } from '../../../shared/ai-turns'
+import type { AiTurnStep } from '../../../shared/ai-turn-steps/registry'
 
 type Ref<T> = { current: T }
 

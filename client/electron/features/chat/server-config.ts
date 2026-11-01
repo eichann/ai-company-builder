@@ -11,7 +11,8 @@ import type { ChatHistoryStore } from '../../chat-history-store'
 import type { CompanyFilesApi } from '../../company-files/api'
 import type { RecordsApi } from '../../records/api'
 import { createRecordTools } from '../../records/tools'
-import { createDriveTools, type DrivePicking } from '../google/drive'
+import { recordToolProviders } from '../../records/tool-providers'
+import type { DrivePicking } from '../google/drive'
 import type { PathGuard } from '../ports'
 import { companyFilesInstructions, createCompanyFileTools } from '../../company-files/tools'
 import { createWebResearchBudget, createWebResearchTools } from '../../web-research/tools'
@@ -141,15 +142,9 @@ export function createChatServerConfig(deps: ChatServerConfigDeps): ChatServerCo
     },
     createRecordTools: async ({ companyId, conversationId, agent, actions, companyRoot, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft }, signal) => {
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: actions ? 'act' : 'read' })
-      // Google Drive's tools ride on the same token (google-drive.md); only where Drive is set up for the company.
-      const { drivePicking, paths } = deps
-      const extraTools = drivePicking && paths
-        ? (turnAccess: Parameters<typeof createDriveTools>[0], turnSignal?: AbortSignal) => createDriveTools(turnAccess, {
-          picking: drivePicking, companyId, companyRoot: companyRoot ?? null,
-          local: { pathGuard: paths, notDownloaded: notDownloadedFolders, privateFolders: () => deps.privateFolders.readable(companyId) },
-        }, turnSignal)
-        : undefined
-      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, extraTools }) : null
+      // Connectors' tools ride on the same token (records/tool-providers.ts: Google Drive, …).
+      const toolProviders = recordToolProviders(deps, { companyId, companyRoot: companyRoot ?? null })
+      return access ? createRecordTools(access, signal, { companyId, conversationId, onOperationCard, onApprovalCard, onBundleChoice, onMailDraft, toolProviders }) : null
     },
     createWebResearch: ({ agent, conversationId, signal }) => ({
       tools: createWebResearchTools({

@@ -7,7 +7,7 @@ import { z } from 'zod'
 import type { claudeCode } from 'ai-sdk-provider-claude-code'
 import { createClaudeConnection, type ClaudeConnectionConfig } from '../electron/agents/claude'
 import { createCodexConnection } from '../electron/agents/codex'
-import { AI_TURN_STEPS, aiTurnStepAllowsRecordTool } from '../shared/ai-turns'
+import { aiTurnStepAllowsRecordTool, aiTurnStepDefinition } from '../shared/ai-turn-steps/registry'
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { createRecordsApi } from '../electron/records/api'
 import { createRecordTools } from '../electron/records/tools'
@@ -35,7 +35,7 @@ function optionsOf(unattended: boolean) {
     webResearch: { execute: text },
     records: { specs: [spec('minutes_read'), spec('records_create')], execute: text, close: async () => {}, instructions: '' },
     askUser: async () => ({ answers: {} }) as never,
-    ...(unattended ? { unattended: { builtinTools: AI_TURN_STEPS['minutes-reading'].builtinTools } } : {}),
+    ...(unattended ? { unattended: { builtinTools: aiTurnStepDefinition('minutes-reading').tools.builtinTools } } : {}),
   })
   return options
 }

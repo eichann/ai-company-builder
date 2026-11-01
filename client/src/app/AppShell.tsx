@@ -53,6 +53,7 @@ import { TitleBarNotices } from '../features/notifications/components/TitleBarNo
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
+import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
 import { companyPathOf, listShownFor } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask } from '../features/tasks/api'
@@ -90,6 +91,11 @@ export function AppShell() {
   const notices = useNotices(currentCompany?.id)
   // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
   const taskList = useTaskList(currentCompany?.id)
+  // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
+  const aiTurns = useMemo(
+    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [] }),
+    [minutes.available, minutes.notices, taskList.data],
+  )
   // 「やることにつなぐ…」 from the file tree: the file chosen (as the company names it), while its chooser is open.
   const [linkingFile, setLinkingFile] = useState<string | null>(null)
   const sparseCheckout = useSparseCheckout({ rootPath: rootPath || '' })
@@ -409,7 +415,7 @@ export function AppShell() {
             activeDepartment={isCompanyWide ? undefined : selectedDept ? { name: selectedDept.name, folder: selectedDept.folder } : undefined}
             slashCommands={slashCommands}
             paneId={paneId}
-            aiTurnQueue={minutes.available ? minutes.notices : undefined}
+            aiTurnQueue={aiTurns}
             onAiTurnItems={setAiTurnItems}
           />
         ) : (

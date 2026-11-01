@@ -167,7 +167,7 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - **Automatic reading** (stage 2 S10, `ai-turns.md`): with the company's 「自動で進める」 on and
   Claude Code chosen, the main window reads received minutes by itself in a hidden consultation
   (claimed with `start_reading` at the record's version read just before, then the same first message wrapped by
-  `autoMinutesFirstMessage`). What it made reaches the member as the task list's items (homework
+  `autoMinutesFirstMessage`, `client/shared/ai-turn-steps/minutes-reading.ts`). What it made reaches the member as the task list's items (homework
   tasks), the cards (the meeting's, a task's 「AI が用意したもの」) and notices.
 - **「自分で読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
   `chat.newConsultation { message, title, minutesId }` (`commands.md`). The chat starts a new

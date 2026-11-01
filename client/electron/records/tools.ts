@@ -52,14 +52,17 @@ export interface RecordToolDescriptor {
 }
 
 /**
- * Tools of a connector that ride on the record token (Google Drive,
- * `features/google/drive-tools.ts`): their own execution, on the same MCP server.
+ * Tools of a connector that ride on the record token (Google Drive, `features/google/drive.ts`):
+ * their own execution, on the same MCP server. Made by a provider (`tool-providers.ts`).
  */
 export interface ExtraRecordTools {
   specs: RecordToolDescriptor[]
   execute(name: string, input: unknown): Promise<string>
   instructions: string
 }
+
+/** Makes one connector's tools for a turn (`tool-providers.ts`); null = none (not set up for the company). */
+export type RecordToolProvider = (access: RecordTurnAccess, signal?: AbortSignal) => Promise<ExtraRecordTools | null>
 
 export interface RecordToolSpec extends RecordToolDescriptor {
   /** Shows an approval request: the answer becomes the app's approval card in the reply. */
@@ -577,8 +580,8 @@ export interface RecordToolsOptions {
   onBundleChoice?: (card: MinutesBundleChoiceCard) => void
   /** A mail draft was made or changed: its card for the reply. */
   onMailDraft?: (card: MailDraftCard) => void
-  /** A connector's tools on the same token (Google Drive); null / a failure = none this turn. */
-  extraTools?: (access: RecordTurnAccess, signal?: AbortSignal) => Promise<ExtraRecordTools | null>
+  /** Connectors' tools on the same token (`tool-providers.ts`); each one's null / failure = none of its tools this turn. */
+  toolProviders?: readonly RecordToolProvider[]
   /** Card ids (default: random). */
   newId?: () => string
   now?: () => Date
@@ -605,14 +608,26 @@ export async function createRecordTools(access: RecordTurnAccess, signal?: Abort
   const newId = options.newId ?? (() => crypto.randomUUID())
   const now = options.now ?? (() => new Date())
   const byName = new Map(specs.map(s => [s.name, s]))
-  const extra = options.extraTools ? await options.extraTools(access, signal).catch(() => null) : null
-  const extraNames = new Set((extra?.specs ?? []).map(s => s.name).filter(n => TOOL_NAME_RE.test(n) && !byName.has(n)))
+  // A provider's tool never replaces a record tool or an earlier provider's (first one wins).
+  const provided = await Promise.all((options.toolProviders ?? []).map(p => p(access, signal).catch(() => null)))
+  const owner = new Map<string, ExtraRecordTools>()
+  const extraSpecs: RecordToolDescriptor[] = []
+  let extraInstructions = ''
+  for (const extra of provided) {
+    if (!extra) continue
+    const mine = extra.specs.filter(s => TOOL_NAME_RE.test(s.name) && !byName.has(s.name) && !owner.has(s.name))
+    for (const s of mine) owner.set(s.name, extra)
+    if (mine.length === 0) continue
+    extraSpecs.push(...mine)
+    extraInstructions += extra.instructions
+  }
   return {
-    specs: [...specs, ...(extra?.specs ?? []).filter(s => extraNames.has(s.name))],
-    instructions: RECORDS_INSTRUCTIONS + (extra && extraNames.size > 0 ? extra.instructions : ''),
+    specs: [...specs, ...extraSpecs],
+    instructions: RECORDS_INSTRUCTIONS + extraInstructions,
     close: () => access.close(),
     async execute(name, input) {
-      if (extra && extraNames.has(name)) return extra.execute(name, input)
+      const extra = owner.get(name)
+      if (extra) return extra.execute(name, input)
       const spec = byName.get(name)
       if (!spec) return JSON.stringify({ error: 'この道具はありません。' })
       const parsed = spec.schema.safeParse(input ?? {})

@@ -33,7 +33,7 @@ Everything is in the Google connector's files: `shared/core/google-drive.ts` (ru
 `googleDrive`), app `client/electron/features/google/drive.ts`, the Picker window
 (`electron-adapter.ts` `createDrivePickerWindow` + `picker-preload.ts`). The core only gives
 seams: `routes/record-ai-auth.ts` (record-token auth + S10b's `keyedWrite`, shared with
-`records-ai.ts`), `RecordToolsOptions.extraTools` (a connector's tools on `acb_records`), the
+`records-ai.ts`), the tool providers (`client/electron/records/tool-providers.ts`: a connector's tools on `acb_records`, merged by `createRecordTools`), the
 `DrivePickerWindow` port, and `drive-put` in S10b's `outcomeOf` / `replayReadPath`.
 
 ## Scopes

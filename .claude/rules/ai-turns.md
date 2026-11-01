@@ -1,6 +1,9 @@
 ---
 paths:
   - "client/shared/ai-turns.ts"
+  - "client/shared/ai-turn-steps/**"
+  - "client/electron/records/tool-providers.ts"
+  - "client/tests/ai-turn-steps.test.ts"
   - "client/electron/features/ai-turns/**"
   - "client/src/features/chat/aiTurns.ts"
   - "client/src/features/chat/aiTurns.test.ts"
@@ -34,8 +37,8 @@ turns").
   window); reopened, it continues: an interrupted run stays 「読んでいる」 and the existing 30-minute
   rule (`minutes.md` `stale` → `retry`) gives it back.
 - The runner is `useAiTurnRunner` (`src/features/chat/hooks/`), called in `ChatPanel.tsx` for the
-  pane AppShell hands `aiTurnQueue` to (the main window's main pane; the queue is main's received
-  minutes, `minutes:notices`). It ticks every 3 s; the rules are pure in
+  pane AppShell hands `aiTurnQueue` to (the main window's main pane; the queue is every waiting record
+  whose kind has a step, `aiTurnQueue`, "Steps" below: today main's received minutes). It ticks every 3 s; the rules are pure in
   `src/features/chat/aiTurns.ts`.
 - One run = a new tab **behind** the shown one (`useChatTabs` `openBackgroundTab`, never activated),
   handed `ChatInputRequest` `{ kind: 'aiTurn', step, message, title, minutesId, claim }` through
@@ -49,7 +52,7 @@ turns").
   `aiTurnStep` (`ChatRequestOptions`, consumed by that one request — `chatRequestBody.ts`; the
   member's own later messages in that consultation are normal turns). The chat server then gives
   no references, company files, review, web research, choice prompts, steering or suggestions,
-  and only the record tools the step declares (`AI_TURN_STEPS` in `client/shared/ai-turns.ts`:
+  and only the record tools the step declares (its `tools` in `client/shared/ai-turn-steps/<step>.ts`:
   minutes reading = `minutes_read`, `minutes_link_bundle`, the three `meeting__…_reading` actions,
   `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
   `show`, and a business plugin's `…__update_deal` / `…__log_meeting`; anything else is filtered
@@ -67,18 +70,36 @@ turns").
 - A run ends when the tab's status (`consultationStatusStore`) leaves working (an approval or a
   question keeps it running); then `aiTurns:settle`.
 
+## Steps: one kind per file (`client/shared/ai-turn-steps/`, B3 seam)
+
+- `<step>.ts` declares one kind (`AiTurnStepDefinition`, `types.ts`): the record ids it runs, where
+  the runner's queue finds them (`listedBy`: `minutes` = main's received minutes, only while Google
+  may read them; `ai-turn` = the task list's 「AI の番」, `turn: 'ai'`), main's `claim` (action, from
+  state) and `settle` states (done / couldNot / closed / working, `putBack`), the consultation's
+  title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`.
+- `registry.ts` lists them (one line per step, under the lane markers): `aiTurnStepForRecord`
+  (main's claim / settle / retry refuse a record without a step), `aiTurnStepAllowsRecordTool`
+  (the chat server's least-privilege filter), `aiTurnQueue` (AppShell builds the runner's queue
+  from the minutes notices and the task list: every waiting record whose kind has a step, once).
+  `checkAiTurnSteps` refuses at load a step listed twice, an id pattern matching any id, or a
+  tool that is not one exact tool (an ending must be a whole `__operation`; no wildcard).
+- A step gets only its own tools: connectors' tools (`electron/records/tool-providers.ts`, one
+  provider per connector, under the lane markers; `createRecordTools` merges them, none
+  replacing a record tool or an earlier provider's, a failing one costs only its own) reach an
+  unattended run only when its step names them. Test: `tests/ai-turn-steps.test.ts`.
+
 ## Claiming and settling (main, `electron/features/ai-turns/`)
 
 - `aiTurns:claim(companyId, recordId, expectedVersion, conversationId)` — main window only. Main
   first claims the server's **execution run** of the record's step (S10b, below); then it
   opens a record token for **that consultation** (`act`, the configured agent) and runs the type's
-  first AI action (`AI_TURN_CLAIM_ACTIONS`: meeting → `start_reading`; a meeting's id is
+  first AI action (its step's `claim.action`: meeting → `start_reading`; a meeting's id is
   `meeting-…`, or `minutes-…` for one made before the type was renamed) at the version **read just
   before** with the session (the notice's `expectedVersion` is only a fallback when unreadable: a
   notice from before a put-back is older than the record, and claiming at it was refused every
   time): the record engine's compare-and-set lets exactly one PC win (`VERSION_CONFLICT` →
   `taken`, never tried again at that version). A record no longer in the claim's from-state
-  (`AI_TURN_CLAIM_FROM`: meeting → `received`) is `taken` without claiming a run. When the record
+  (`claim.from`: meeting → `received`) is `taken` without claiming a run. When the record
   moved on (that, or a conflict at the start) main re-reads the notices at once
   (`recordMovedOn` → `minutes.recordsSignal`), so this PC stops showing 「AI が読み取る予定です」.
   Answers `{ claimed: true, version }` (the version after the start). The ledger records it as the AI's, pointing at the consultation.
@@ -109,7 +130,7 @@ The execution state lives on the server; the AI still runs only here.
   (`minutes:notices`) does not list the absentee's items yet — not yet wired in the runner.
 
 - **Claim**: `aiTurns:claim` first asks `POST /ai-run-claims { recordId, step:
-  AI_TURN_KIND_STEPS[kind], deviceId, conversationId }` (session; the request's
+  <the record's step>, deviceId, conversationId }` (session; the request's
   `X-ACB-Client-Version` names the build, which the server keeps as the run's procedure with the
   plugins on then — `records.md` "Which procedure"). `deviceId` = this app instance
   (`app-<uuid>` per launch, `main.ts`). Another PC holding it, or a run waiting for a person or for
@@ -182,5 +203,4 @@ Codex claims nothing, shows the notice and hands the record over; a failed run s
 
 ## Not yet
 
-Other AI-turn kinds (each needs its claim action in
-`AI_TURN_CLAIM_ACTIONS` and its first message); the company setting itself (S6); notifications (S5).
+Other AI-turn kinds (each is one step file, "Steps"); the company setting itself (S6); notifications (S5).
