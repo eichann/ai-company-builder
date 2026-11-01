@@ -22,6 +22,12 @@ import { aiTurnStepForRecord } from '../../../shared/ai-turn-steps/registry'
 import { readAutoTurnSettings, type AiTurnClaimResult, type AiTurnSettleResult, type AutoTurnSettings } from '../../../shared/ai-turns'
 import type { RecordsApi } from '../../records/api'
 import type { RunRegistry } from '../../records/runs'
+// lane C ▼
+import {
+  isPluginRunStep, parsePluginStepTurns, parsePluginStepsOn, parseProcedurePin, pluginStepFirstMessage, pluginStepToolAccess,
+  type PluginProcedurePin, type PluginStepToolAccess, type PluginStepTurn,
+} from '../../../shared/ai-turn-steps/plugin'
+// lane C ▲
 
 export interface AiTurnClaimsDeps {
   baseUrl: () => string
@@ -46,6 +52,14 @@ export interface AiTurnClaimsDeps {
   renewEveryMs?: number
   fetch?: typeof fetch
   log?: Pick<Console, 'warn'>
+  // lane C ▼
+  /**
+   * A business plugin's step's procedure (plugin-steps.md): the text of the pinned plugin
+   * version's file (`<userData>/plugins/<id>@<version>/<file>`, kept by C2), or of the company
+   * Skill's SKILL.md at the pinned tree in the member's company folder. null = not on this PC.
+   */
+  readProcedure?: (companyId: string, pin: PluginProcedurePin, file: string, companyRoot: string | null) => Promise<string | null>
+  // lane C ▲
 }
 
 const COMPANY = /^[A-Za-z0-9_-]{1,100}$/
@@ -57,6 +71,14 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
   /** Runs this app instance holds: record → its run, generation, consultation and renewal timer. */
   const held = new Map<string, { runId: string; generation: number; conversationId: string; timer: ReturnType<typeof setInterval> }>()
   const heldKey = (companyId: string, recordId: string) => `${companyId}\n${recordId}`
+  // lane C ▼
+  /** The member's records at a plugin's ai_turn step, as last listed (company → record → turn). */
+  const pluginTurns = new Map<string, Map<string, PluginStepTurn>>()
+  /** Plugin step runs this app holds: record → the state it started at (settle: moved on = done). */
+  const pluginStarts = new Map<string, string>()
+  /** The tool ceiling of each plugin step's consultation (the chat server asks it). */
+  const pluginTools = new Map<string, { step: string; access: PluginStepToolAccess }>()
+  // lane C ▲
 
   function release(companyId: string, recordId: string) {
     const h = held.get(heldKey(companyId, recordId))
@@ -64,6 +86,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     clearInterval(h.timer)
     held.delete(heldKey(companyId, recordId))
     deps.runs.clear(companyId, h.conversationId)
+    pluginTools.delete(h.conversationId)
     return h
   }
 
@@ -93,13 +116,89 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
     }
   }
 
-  async function recordOf(companyId: string, recordId: string): Promise<{ state: string; version: number } | null> {
+  async function recordOf(companyId: string, recordId: string): Promise<{ state: string; version: number; type: string | null } | null> {
     const r = await session(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}`)
-    const record = (r?.status === 200 ? (r.data as { record?: { state?: unknown; version?: unknown } } | undefined)?.record : undefined)
-    return record && typeof record.state === 'string' && typeof record.version === 'number' ? { state: record.state, version: record.version } : null
+    const record = (r?.status === 200 ? (r.data as { record?: { state?: unknown; version?: unknown; type?: unknown } } | undefined)?.record : undefined)
+    return record && typeof record.state === 'string' && typeof record.version === 'number'
+      ? { state: record.state, version: record.version, type: typeof record.type === 'string' ? record.type : null } : null
   }
 
+  /** Hold a claimed run: register it for the consultation's tokens and renew it while running. */
+  function hold(companyId: string, recordId: string, conversationId: string, run: { id: string; generation: number }) {
+    release(companyId, recordId)
+    deps.runs.set(companyId, conversationId, { id: run.id, generation: run.generation })
+    const timer = setInterval(() => {
+      void session(companyId, 'POST', `/ai-runs/${encodeURIComponent(run.id)}/renew`, { generation: run.generation }).then(r => {
+        // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
+        if (r && r.status === 409) release(companyId, recordId)
+      })
+    }, deps.renewEveryMs ?? 60_000)
+    timer.unref?.()
+    held.set(heldKey(companyId, recordId), { runId: run.id, generation: run.generation, conversationId, timer })
+  }
+
+  // lane C ▼
+  /**
+   * A business plugin's step (plugin-steps.md): the server's run of `<pluginId>__<step>` is the
+   * claim (the step has no claim action); the claim's pin names the procedure, read on this PC
+   * (the package C2 keeps, or the company Skill at the pinned tree); the step's tools — narrowed
+   * by the pinned version on the server — are the consultation's ceiling.
+   */
+  async function claimPluginStep(companyId: string, turn: PluginStepTurn, conversationId: string, companyRoot: string | null): Promise<AiTurnClaimResult> {
+    const { recordId } = turn
+    const now = await recordOf(companyId, recordId)
+    if (!now) return { claimed: false, reason: 'unavailable' }
+    const claimed = await session(companyId, 'POST', '/ai-run-claims', { recordId, step: turn.runStep, deviceId: deps.deviceId, conversationId })
+    if (!claimed || claimed.status >= 500) return { claimed: false, reason: 'unavailable' }
+    const run = claimed.status < 300 ? (claimed.data as { run?: { id?: unknown; generation?: unknown; procedure?: { pin?: unknown } | null } } | undefined)?.run : undefined
+    if (!run || typeof run.id !== 'string' || typeof run.generation !== 'number') return { claimed: false, reason: 'taken' }
+    hold(companyId, recordId, conversationId, { id: run.id, generation: run.generation })
+    const giveBack = async (code: string): Promise<AiTurnClaimResult> => {
+      await finishRun(companyId, recordId, { class: 'temporary', code })
+      return { claimed: false, reason: 'unavailable' }
+    }
+    const pin = parseProcedurePin(run.procedure?.pin)
+    const on = await session(companyId, 'GET', `/me/plugin-steps/records/${encodeURIComponent(recordId)}`)
+    const step = on?.status === 200 ? parsePluginStepsOn(on.data)?.find(s => s.pluginId === turn.pluginId && s.step === turn.step) : undefined
+    if (!pin || !step || !now.type) return giveBack('STEP_NOT_READABLE')
+    const text = await (deps.readProcedure?.(companyId, pin, step.procedure, companyRoot) ?? Promise.resolve(null)).catch(() => null)
+    // Not on this PC yet (the package not fetched, the Skill not synced): tried again later.
+    if (text === null) return giveBack('PROCEDURE_NOT_HERE')
+    pluginStarts.set(heldKey(companyId, recordId), now.state)
+    pluginTools.set(conversationId, { step: turn.runStep, access: pluginStepToolAccess(step, now.type) })
+    return {
+      claimed: true, version: now.version,
+      message: pluginStepFirstMessage({ label: step.label, recordId, version: now.version, procedure: text, source: pin.source }),
+    }
+  }
+  // lane C ▲
+
   return {
+    // lane C ▼
+    /**
+     * The member's records waiting at a business plugin's `start: ai_turn` step (`GET
+     * /me/plugin-step-turns`), remembered for the claim. Not readable (offline, an older server):
+     * the last list.
+     */
+    async pluginTurns(companyId: string): Promise<PluginStepTurn[]> {
+      if (!COMPANY.test(companyId)) return []
+      const r = await session(companyId, 'GET', '/me/plugin-step-turns')
+      const turns = r?.status === 200 ? parsePluginStepTurns(r.data) : null
+      if (turns === null) return [...(pluginTurns.get(companyId)?.values() ?? [])]
+      pluginTurns.set(companyId, new Map(turns.map(t => [t.recordId, t])))
+      return turns
+    },
+
+    /**
+     * The tool ceiling of a plugin step's consultation this app claimed (the chat server's
+     * least-privilege filter); null for any other consultation or step.
+     */
+    pluginStepTools(conversationId: string, step: string): PluginStepToolAccess | null {
+      const known = pluginTools.get(conversationId)
+      return known && isPluginRunStep(step) && known.step === step ? known.access : null
+    },
+    // lane C ▲
+
     /** The company's 「自動で進める」 (`autoRun` of S6's task settings); not readable → off. */
     async settings(companyId: string): Promise<AutoTurnSettings> {
       if (!COMPANY.test(companyId)) return readAutoTurnSettings(undefined)
@@ -113,13 +212,16 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * first. The version comes from the record read now: the notice's may be old (an earlier run
      * was put back), and claiming at it would be refused every time.
      */
-    async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string): Promise<AiTurnClaimResult> {
-      const step = aiTurnStepForRecord(recordId)
-      if (!COMPANY.test(companyId) || !step || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
+    async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string, companyRoot?: string | null): Promise<AiTurnClaimResult> {
+      const pluginTurn = pluginTurns.get(companyId)?.get(recordId) ?? null
+      const step = pluginTurn ? null : aiTurnStepForRecord(recordId)
+      if (!COMPANY.test(companyId) || (!step && !pluginTurn) || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
         return { claimed: false, reason: 'not-allowed' }
       }
       const agent = deps.agent()
       if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(agent, 'recordActions')) return { claimed: false, reason: 'not-allowed' }
+      if (pluginTurn) return claimPluginStep(companyId, pluginTurn, conversationId, companyRoot ?? null)
+      if (!step) return { claimed: false, reason: 'not-allowed' }
       const now = await recordOf(companyId, recordId)
       // No longer waiting for the AI (another PC read it, a person skipped it): nothing to claim.
       if (now && now.state !== step.claim.from) {
@@ -133,18 +235,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
       if (!claimed || claimed.status >= 500) return { claimed: false, reason: 'unavailable' }
       const run = claimed.status < 300 ? (claimed.data as { run?: { id?: unknown; generation?: unknown } } | undefined)?.run : undefined
       if (!run || typeof run.id !== 'string' || typeof run.generation !== 'number') return { claimed: false, reason: 'taken' }
-      release(companyId, recordId)
-      deps.runs.set(companyId, conversationId, { id: run.id, generation: run.generation })
-      const runId = run.id
-      const generation = run.generation
-      const timer = setInterval(() => {
-        void session(companyId, 'POST', `/ai-runs/${encodeURIComponent(runId)}/renew`, { generation }).then(r => {
-          // Taken over by another PC (or ended): this PC's tokens are refused from now on; stop renewing.
-          if (r && r.status === 409) release(companyId, recordId)
-        })
-      }, deps.renewEveryMs ?? 60_000)
-      timer.unref?.()
-      held.set(heldKey(companyId, recordId), { runId, generation, conversationId, timer })
+      hold(companyId, recordId, conversationId, { id: run.id, generation: run.generation })
 
       const access = await deps.records.openTurn(companyId, { conversationId, agent, scope: 'act' })
       if (!access) {
@@ -179,7 +270,7 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      * retried later) back to the AI. One with an unknown outside result stays until reconciled.
      */
     async retry(companyId: string, recordId: string): Promise<{ ok: boolean }> {
-      if (!COMPANY.test(companyId) || !aiTurnStepForRecord(recordId)) return { ok: false }
+      if (!COMPANY.test(companyId) || (!aiTurnStepForRecord(recordId) && !pluginTurns.get(companyId)?.has(recordId))) return { ok: false }
       const list = await session(companyId, 'GET', '/ai-runs')
       const runs = list?.status === 200 ? (list.data as { runs?: Array<{ id?: unknown; recordId?: unknown }> } | undefined)?.runs ?? [] : []
       const run = runs.find(r => r.recordId === recordId && typeof r.id === 'string')
@@ -190,6 +281,20 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
 
     /** After the automatic turn: finished, failed, or still in progress → back to 「AI の番」. */
     async settle(companyId: string, recordId: string): Promise<AiTurnSettleResult> {
+      // lane C ▼
+      const startedAt = pluginStarts.get(heldKey(companyId, recordId))
+      if (startedAt !== undefined && COMPANY.test(companyId)) {
+        // A plugin step is done when the record left the step's state; otherwise it is tried again later.
+        pluginStarts.delete(heldKey(companyId, recordId))
+        const record = await recordOf(companyId, recordId)
+        if (record && record.state !== startedAt) {
+          await finishRun(companyId, recordId, null)
+          return { outcome: 'done' }
+        }
+        await finishRun(companyId, recordId, { class: 'temporary', code: record ? 'UNFINISHED' : 'NOT_READABLE' })
+        return { outcome: record ? 'put-back' : 'unknown' }
+      }
+      // lane C ▲
       const step = aiTurnStepForRecord(recordId)
       if (!COMPANY.test(companyId) || !step) return { outcome: 'unknown' }
       const { settle } = step

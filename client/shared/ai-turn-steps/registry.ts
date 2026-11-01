@@ -7,6 +7,9 @@ import type { MinutesNotice } from '../minutes-app'
 import type { TaskListItem } from '../tasks'
 import { inboxTriage } from './inbox-triage'
 import { minutesReading } from './minutes-reading'
+// lane C ▼
+import { pluginTurnCandidate, type PluginStepTurn } from './plugin'
+// lane C ▲
 import type { AiTurnCandidate, AiTurnStepDefinition } from './types'
 
 const STEPS = [
@@ -78,7 +81,7 @@ export function aiTurnStepAllowsRecordTool(step: AiTurnStep, name: string): bool
  * minutes from main's check (`listedBy: 'minutes'`), the rest from the task list's 「AI の番」
  * (`turn: 'ai'`).
  */
-export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[] }): AiTurnCandidate[] {
+export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: readonly TaskListItem[]; plugins?: readonly PluginStepTurn[] }): AiTurnCandidate[] {
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
   for (const n of input.minutes) {
@@ -91,5 +94,13 @@ export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: r
     seen.add(r.id)
     queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due })
   }
+  // lane C ▼
+  // A business plugin's steps (plugin.ts): the server's list of the member's records at an ai_turn step.
+  for (const t of input.plugins ?? []) {
+    if (seen.has(t.recordId)) continue
+    seen.add(t.recordId)
+    queue.push(pluginTurnCandidate(t))
+  }
+  // lane C ▲
   return queue
 }

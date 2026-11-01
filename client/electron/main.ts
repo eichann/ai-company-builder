@@ -69,6 +69,7 @@ import { registerSlackIpc } from './features/slack/ipc'
 // lane B ▼
 // lane B ▲
 // lane C ▼
+import { createProcedureReader } from './features/ai-turns/procedures'
 // lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
@@ -297,21 +298,28 @@ const recordsApi = createRecordsApi({
 })
 // 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
 // window; main claims the server's execution run and the record by its version, and settles it afterwards.
-registerAiTurnsIpc(ipc, {
-  claims: createAiTurnClaims({
-    baseUrl: getServerApiUrl,
-    cookies: session.cookies,
-    records: recordsApi,
-    agent: () => config.authMode(),
-    windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
-    aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
-    runs: aiRunRegistry,
-    // This app instance (per launch): the server's claim holder.
-    deviceId: `app-${randomUUID()}`,
-    // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
-    recordMovedOn: companyId => minutes.recordsSignal(companyId),
+const aiTurnClaims = createAiTurnClaims({
+  baseUrl: getServerApiUrl,
+  cookies: session.cookies,
+  records: recordsApi,
+  agent: () => config.authMode(),
+  windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
+  aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+  runs: aiRunRegistry,
+  // This app instance (per launch): the server's claim holder.
+  deviceId: `app-${randomUUID()}`,
+  // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
+  recordMovedOn: companyId => minutes.recordsSignal(companyId),
+  // A business plugin's step's pinned procedure (plugin-steps.md): the package C2 keeps, or the company Skill's tree.
+  readProcedure: createProcedureReader({
+    folderOf: (companyId, pluginId, version) => agentControl.pluginPackages.folderOf(companyId, pluginId, version),
+    git: (gitRoot, args) => appGit.create(gitRoot, { GIT_NO_LAZY_FETCH: '1' }).raw(args),
   }),
+})
+registerAiTurnsIpc(ipc, {
+  claims: aiTurnClaims,
   isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+  paths: allowedRoots,
 })
 // Lanes (ipc-and-main-process.md "Lane markers"): one line per feature, `register<Feature>Ipc(ipc, { … })`
 // or `wire<Feature>(ipc, { … })` from features/<feature>/, right under your lane's ▼.
@@ -420,7 +428,8 @@ app.whenReady().then(async () => {
       requestInteraction: (request, appSessionId, signal) =>
         requestFromOwner(agentInteractions, webContentsForSession(appSessionId), request, appSessionId, signal),
     })
-    const result = await startChatServer(serverConfig)
+    // A business plugin's step run: only its step's tools (plugin-steps.md), from the claim main holds.
+    const result = await startChatServer({ ...serverConfig, pluginStepTools: (conversationId, step) => aiTurnClaims.pluginStepTools(conversationId, step) })
     chatServerInfo = { port: result.port, authToken: result.authToken }
     chatTurns = result.turns
   } catch (err) {

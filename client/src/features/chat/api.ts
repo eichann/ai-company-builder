@@ -310,8 +310,9 @@ export function getAutoTurnSettings(companyId: string, reads: AutoTurnSettingsRe
   return reads.getAutoTurnSettings(companyId)
 }
 
-export function claimAiTurn(companyId: string, recordId: string, expectedVersion: number, conversationId: string, writes: AiTurnWrites = window.electronAPI) {
-  return writes.claimAiTurn(companyId, recordId, expectedVersion, conversationId)
+/** `companyRoot`: the company folder, where a company Skill pinned as a plugin step's procedure is read (plugin-steps.md). */
+export function claimAiTurn(companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string, writes: AiTurnWrites = window.electronAPI) {
+  return writes.claimAiTurn(companyId, recordId, expectedVersion, conversationId, companyRoot)
 }
 
 export function settleAiTurn(companyId: string, recordId: string, writes: AiTurnWrites = window.electronAPI) {

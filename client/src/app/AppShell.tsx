@@ -53,6 +53,7 @@ import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices, type MeetingTurnRow } from '../features/notifications/components/TitleBarNotices'
 import { meetingTurns } from '../../shared/notifications-app'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
+import { usePluginStepTurns } from '../features/plugin-steps/hooks/usePluginStepTurns'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
 import { renderRecordSource } from './recordSource'
 import { aiTurnQueue } from '../../shared/ai-turn-steps/registry'
@@ -95,9 +96,11 @@ export function AppShell() {
   // やることの一覧 (features/tasks): read here for the tab's count and whether it shows.
   const taskList = useTaskList(currentCompany?.id)
   // What the chat's runner starts by itself: every waiting kind that has a step (ai-turn-steps/registry.ts).
+  // A business plugin's steps that start as an AI turn (plugin-steps.md): the server lists the member's records at one.
+  const pluginTurns = usePluginStepTurns(currentCompany?.id)
   const aiTurns = useMemo(
-    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [] }),
-    [minutes.available, minutes.notices, taskList.data],
+    () => aiTurnQueue({ minutes: minutes.available ? minutes.notices : [], tasks: taskList.data?.items ?? [], plugins: pluginTurns }),
+    [minutes.available, minutes.notices, taskList.data, pluginTurns],
   )
   const { isReadOnly } = useWriteAccess()
   // 「どのまとまりの会議ですか？」 chosen from the title bar (where the department shows no task list).

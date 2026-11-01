@@ -109,6 +109,7 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const consumeAiTurnRequest = useCallback(() => setAiTurnRequest(null), [])
   const aiTurns = useAiTurnRunner({
     companyId: currentCompany?.id ?? '',
+    companyRoot: currentCompany?.rootPath,
     userId,
     queue: aiTurnQueue,
     authMode,

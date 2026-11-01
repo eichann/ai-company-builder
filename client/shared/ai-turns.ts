@@ -44,7 +44,8 @@ export function readAutoTurnSettings(value: unknown): AutoTurnSettings {
  * null when the server's answer did not say).
  */
 export type AiTurnClaimResult =
-  | { claimed: true; version: number | null }
+  /** `message`: the first message main made (a business plugin's step: its pinned procedure, plugin-steps.md). */
+  | { claimed: true; version: number | null; message?: string }
   | { claimed: false; reason: 'taken' | 'not-allowed' | 'unavailable' }
 
 /**

@@ -20,6 +20,7 @@ contract.invoke absences:remove
 contract.invoke agent-interaction:list
 contract.invoke agent-interaction:respond
 contract.invoke aiTurns:claim
+contract.invoke aiTurns:pluginTurns
 contract.invoke aiTurns:retry
 contract.invoke aiTurns:settings
 contract.invoke aiTurns:settle
@@ -353,6 +354,7 @@ contract.type ElectronAPI.linkFileToTask = linkFileToTask: Invoke<'tasks:linkFil
 contract.type ElectronAPI.linkMinutesBundle = linkMinutesBundle: Invoke<'minutes:linkBundle'>
 contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:list'>
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
+contract.type ElectronAPI.listPluginStepTurns = listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
 contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
@@ -548,7 +550,8 @@ contract.type IpcInvokeChannels.'absences:get' = 'absences:get': { args: [compan
 contract.type IpcInvokeChannels.'absences:remove' = 'absences:remove': { args: [companyId: string, absenceId: string]; result: AbsenceRemoveResult }
 contract.type IpcInvokeChannels.'agent-interaction:list' = 'agent-interaction:list': { args: []; result: AgentInteractionRequest[] }
 contract.type IpcInvokeChannels.'agent-interaction:respond' = 'agent-interaction:respond': { args: [id: string, response: AgentInteractionResponse]; result: boolean }
-contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
+contract.type IpcInvokeChannels.'aiTurns:claim' = 'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
+contract.type IpcInvokeChannels.'aiTurns:pluginTurns' = 'aiTurns:pluginTurns': { args: [companyId: string]; result: PluginStepTurn[] }
 contract.type IpcInvokeChannels.'aiTurns:retry' = 'aiTurns:retry': { args: [companyId: string, recordId: string]; result: { ok: boolean } }
 contract.type IpcInvokeChannels.'aiTurns:settings' = 'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
 contract.type IpcInvokeChannels.'aiTurns:settle' = 'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
@@ -779,7 +782,8 @@ main.handle absences:get @ features/absences/ipc.ts (companyId)
 main.handle absences:remove @ features/absences/ipc.ts (companyId, absenceId)
 main.handle agent-interaction:list @ features/agent-interactions/ipc.ts ()
 main.handle agent-interaction:respond @ features/agent-interactions/ipc.ts (id: string, response: AgentInteractionResponse)
-main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId)
+main.handle aiTurns:claim @ features/ai-turns/ipc.ts (companyId, recordId, expectedVersion, conversationId, companyRoot)
+main.handle aiTurns:pluginTurns @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:retry @ features/ai-turns/ipc.ts (companyId, recordId)
 main.handle aiTurns:settings @ features/ai-turns/ipc.ts (companyId)
 main.handle aiTurns:settle @ features/ai-turns/ipc.ts (companyId, recordId)
@@ -970,8 +974,8 @@ preload backupRestore -> invoke backup:restore($0, $1, $2)
 preload backupRestore : (repoPath: string, backupId: string, filePath: string) => Promise<BackupRestoreResult>
 preload checkMinutes -> invoke minutes:check($0)
 preload checkMinutes : (companyId: string) => Promise<MinutesActionResult>
-preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3)
-preload claimAiTurn : (companyId: string, recordId: string, expectedVersion: number, conversationId: string) => Promise<AiTurnClaimResult>
+preload claimAiTurn -> invoke aiTurns:claim($0, $1, $2, $3, $4)
+preload claimAiTurn : (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string | undefined) => Promise<AiTurnClaimResult>
 preload closeChatWindows -> invoke chatWindow:closeAll()
 preload closeChatWindows : () => Promise<void>
 preload completeHandoffTurn -> invoke handoff:complete($0, $1, $2)
@@ -1124,6 +1128,8 @@ preload listChatWindows -> invoke chatWindow:list()
 preload listChatWindows : () => Promise<ChatWindowInfo[]>
 preload listOwnBrokerKeys -> invoke brokerKeys:list($0)
 preload listOwnBrokerKeys : (companyId: string) => Promise<OwnKeysResult>
+preload listPluginStepTurns -> invoke aiTurns:pluginTurns($0)
+preload listPluginStepTurns : (companyId: string) => Promise<PluginStepTurn[]>
 preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)

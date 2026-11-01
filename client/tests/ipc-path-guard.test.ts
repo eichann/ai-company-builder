@@ -53,6 +53,7 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'brokerKeys:moveFromEnv': { args: ['co', IN, 'OPENAI_API_KEY'], paths: [1] },
   'privateFolders:reservedPathRefusal': { args: [IN_FILE], paths: [0] },
   'git:sync': { args: [IN, 'co', 'msg'], paths: [0] },
+  'aiTurns:claim': { args: ['co', 'deal-0a1b2c3d4e5f', 1, 'conv-guard-0001', IN], paths: [4] },
   'git:autoSync': { args: [IN, 'co', 'receive', { unsavedEdits: false, needsMember: false, offline: false }], paths: [0] },
   'git:preview': { args: [IN], paths: [0] },
   'git:generateSummary': { args: [IN], paths: [0] },

@@ -168,7 +168,7 @@ const api: ElectronAPI = {
   linkMinutesBundle: (companyId: string, minutesId: string, bundleId: string) => invoke('minutes:linkBundle', companyId, minutesId, bundleId),
   onMinutesChanged: callback => subscribe('minutes:changed', callback),
   getAutoTurnSettings: (companyId: string) => invoke('aiTurns:settings', companyId),
-  claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId),
+  claimAiTurn: (companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string) => invoke('aiTurns:claim', companyId, recordId, expectedVersion, conversationId, companyRoot),
   settleAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:settle', companyId, recordId),
   retryAiTurn: (companyId: string, recordId: string) => invoke('aiTurns:retry', companyId, recordId),
   watchNotifications: (companyId: string | null) => invoke('notifications:watch', companyId),
@@ -337,6 +337,7 @@ const api: ElectronAPI = {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  listPluginStepTurns: (companyId: string) => invoke('aiTurns:pluginTurns', companyId),
   // lane C ▲
 }
 

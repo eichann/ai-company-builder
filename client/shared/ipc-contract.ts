@@ -52,6 +52,7 @@ import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slac
 // lane B ▼
 // lane B ▲
 // lane C ▼
+import type { PluginStepTurn } from './ai-turn-steps/plugin'
 // lane C ▲
 
 // ---------------------------------------------------------------------------
@@ -518,7 +519,7 @@ export interface IpcInvokeChannels {
   // 「AI の番」 run automatically in the main window (ai-turns.md): main claims and settles, never runs the AI.
   'aiTurns:settings': { args: [companyId: string]; result: AutoTurnSettings }
   /** Take the record's AI turn for this hidden consultation (its first AI action at this version; one PC wins). */
-  'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string]; result: AiTurnClaimResult }
+  'aiTurns:claim': { args: [companyId: string, recordId: string, expectedVersion: number, conversationId: string, companyRoot?: string]; result: AiTurnClaimResult }
   /** After the automatic turn: done / failed / still in progress → put back to 「AI の番」. */
   'aiTurns:settle': { args: [companyId: string, recordId: string]; result: AiTurnSettleResult }
   /** 「もう一度」: give the record's execution run the server holds for a person back to the AI (S10b). */
@@ -640,6 +641,8 @@ export interface IpcInvokeChannels {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  /** The member's records at a business plugin's ai_turn step (C5, plugin-steps.md); main remembers them for the claim. */
+  'aiTurns:pluginTurns': { args: [companyId: string]; result: PluginStepTurn[] }
   // lane C ▲
 }
 
@@ -950,5 +953,6 @@ export interface ElectronAPI {
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  listPluginStepTurns: Invoke<'aiTurns:pluginTurns'>
   // lane C ▲
 }

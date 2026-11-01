@@ -13,6 +13,11 @@ export interface AiTurnCandidate {
   dueAt?: string | null
   /** The meeting's time (ISO) for minutes. */
   meetingAt?: string | null
+  /**
+   * A business plugin's step (`<pluginId>__<step>`, `plugin.ts`): the record runs that step,
+   * whatever its type (the server listed it at the step's state). Absent for the static kinds.
+   */
+  pluginStep?: `${string}__${string}`
 }
 
 /**
