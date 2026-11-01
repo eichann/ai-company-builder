@@ -8,10 +8,13 @@
  *
  * Tools made per company: a record type's action (`<type>__<action>`) reads its
  * action's Japanese label in the past tense (「議事録を読み終えました」, from the core
- * types here, from the company's definition in main); a plugin operation reads its
+ * types' labels here, from the company's definition in main); a plugin operation reads its
  * label; anything not known here still gets a plain sentence, never the raw id.
+ *
+ * Only plain strings: the renderer bundle is at its budget, so the core type definitions
+ * (`shared/core/core-types.ts`) are not imported here; `tests/tool-display.test.ts` fails when
+ * the labels below drift from them.
  */
-import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { companyPath, countOf, shortText } from './tool-display-text'
 import type { ToolDisplay } from './tool-display'
 
@@ -81,6 +84,16 @@ function mailDetail(input: Record<string, unknown>): string | undefined {
 
 const JUDGEMENT_WORDS: Record<string, string> = { reply: '返事が要る', task: 'やることにした', no_reply: '読めば済む', set_aside: 'やることにしない', unsure: '確認待ち' }
 
+/** The core types' labels (shared/core/core-types.ts), as plain strings. */
+export const CORE_TYPE_LABELS: Readonly<Record<string, string>> = { task: 'タスク', interaction: 'やりとり', meeting: '会議', approval: '承認のお願い', outbound_message: '送るもの', decision: '決めたこと', reply_request: '返事のお願い' }
+export const CORE_ACTION_LABELS: Readonly<Record<string, string>> = {
+  task__start: '着手する', task__request_review: 'レビューを依頼する', task__send_back: '差し戻す', task__assign: '担当を替える', task__wait: '返事待ちにする', task__set_due: '期限を変える', task__complete: '完了にする', task__cancel: '中止する', task__reopen: 'やり直す', task__finish_prep: '用意ができた', task__hand_over: '先に渡す', task__take_over: '自分で進める', task__accept: '引き受ける', task__decline: '受けられない', task__set_tags: 'タグを付ける', task__set_wait_until: '見込みの日時を決める', task__set_bundle: 'まとまりに入れる',
+  interaction__handle: '対応済みにする', interaction__set_aside: 'やることにしない', interaction__ask_person: '確認待ちにする', interaction__confirm: '自分の担当にする', interaction__drop: 'やることにしない（自分で決める）', interaction__take_up: 'やることにする',
+  meeting__start_reading: '議事録を読み始める', meeting__finish_reading: '議事録を読み終える', meeting__fail_reading: '議事録を読めなかった', meeting__retry: 'もう一度読む', meeting__skip: '読まない', meeting__start_bundle_work: 'まとまりの分を始める', meeting__finish_bundle_work: 'まとまりの分を終える', meeting__fail_bundle_work: 'まとまりの分をできなかった', meeting__retry_bundle_work: 'まとまりの分をやり直す', meeting__skip_bundle_work: 'まとまりの分はしない',
+  decision__confirm: '確かめる', decision__retract: '取り消す', decision__set_exception: '例外（この件だけ）を切り替える',
+  reply_request__finish_prep: '用意ができた', reply_request__hand_over: '先に渡す', reply_request__ai_close: 'AI が判断して終わりにする', reply_request__take_over: '自分で進める', reply_request__await_reply: '相手の返事待ちにする', reply_request__resume: '自分の番に戻す', reply_request__close: '終わりにする', reply_request__drop: '返事をしない', reply_request__reopen: 'やり直す', reply_request__replied_elsewhere: 'もう返した', reply_request__set_end_condition: '終わりの条件を決める', reply_request__set_due: '期限を変える', reply_request__set_wait_until: '返事の見込みを決める',
+}
+
 const say = (label: string, running: string, many: string, describe?: ToolDisplay['describe']): ToolDisplay => ({ label, running, many, ...(describe ? { describe } : {}) })
 const records = (name: string) => `mcp__acb_records__${name}`
 
@@ -94,7 +107,7 @@ export const ACB_TOOL_DISPLAYS: Readonly<Record<string, ToolDisplay>> = {
   [records('records_history')]: say('記録の台帳を見ました', '記録の台帳を見ています', '記録の台帳を {n} 件見ました'),
   [records('records_types')]: say('記録の種類を確かめました', '記録の種類を確かめています', '記録の種類を {n} 回確かめました'),
   [records('records_create')]: say('記録を作りました', '記録を作っています', '記録を {n} 件作りました', input => {
-    const kind = coreTypeDefinitions().find(t => t.name === input.type)?.label
+    const kind = CORE_TYPE_LABELS[String(input.type)]
     const title = shortText(input.title, 30)
     return kind && title ? `${kind}「${title}」` : title
   }),
@@ -153,11 +166,11 @@ export function acbToolDisplay(toolName: string): ToolDisplay | undefined {
   const m = /^mcp__acb_records__([a-z][a-z0-9_-]*?)__([a-z0-9_]+)$/.exec(toolName)
   if (!m) return /^mcp__acb_[a-z_]+__/.test(toolName) ? say('アプリの道具を使いました', 'アプリの道具を使っています', 'アプリの道具を {n} 回使いました') : undefined
   const [, owner, action] = m
-  const type = coreTypeDefinitions().find(t => t.name === owner)
-  const declared = type?.actions[action]?.label
+  const declared = CORE_ACTION_LABELS[`${owner}__${action}`]
   if (declared) return actionToolDisplay(declared)
+  const typeLabel = CORE_TYPE_LABELS[owner]
   const word = OPERATION_WORDS.find(([re]) => re.test(`${action}_`))?.[1]
-  return type
-    ? actionToolDisplay(word ? `${type.label}を${word}` : `${type.label}の作業をする`)
+  return typeLabel
+    ? actionToolDisplay(word ? `${typeLabel}を${word}` : `${typeLabel}の作業をする`)
     : actionToolDisplay(word ? `記録を${word}` : 'つながっているサービスで作業する')
 }

@@ -25,7 +25,7 @@ import { REVIEW_TOOL_ID } from '../shared/review-request'
 import { WEB_RESEARCH_TOOL_ID } from '../shared/web-research'
 import { CHOICE_TOOL_NAMES } from '../shared/choice-prompt'
 import { builtinToolDisplay, readToolLine, toolLineOf, type ToolDisplay } from '../shared/tool-display'
-import { ACB_TOOL_DISPLAYS, actionToolDisplay, pluginOperationDisplay } from '../shared/acb-tool-displays'
+import { ACB_TOOL_DISPLAYS, CORE_ACTION_LABELS, CORE_TYPE_LABELS, actionToolDisplay, pluginOperationDisplay } from '../shared/acb-tool-displays'
 
 const PLUGINS: PluginAiTools = {
   plugins: [{
@@ -101,6 +101,12 @@ test('every ACB tool a turn can get has a plain-Japanese label (records, plugins
     assert.ok(!line.muted && JAPANESE.test(line.label) && !/mcp__|acb_/.test(line.label), `${name} has no name of its own in the renderer: ${line.label}`)
   }
   for (const spec of specs) if (ACB_TOOL_DISPLAYS[`mcp__acb_records__${spec.name}`]) assert.equal(spec.display, ACB_TOOL_DISPLAYS[`mcp__acb_records__${spec.name}`], spec.name)
+})
+
+test('the renderer\'s plain-string labels of the core types match their definitions', () => {
+  const types = coreTypeDefinitions()
+  assert.deepEqual(CORE_TYPE_LABELS, Object.fromEntries(types.map(t => [t.name, t.label])))
+  assert.deepEqual(CORE_ACTION_LABELS, Object.fromEntries(types.flatMap(t => Object.entries(t.actions).map(([n, a]) => [`${t.name}__${n}`, a.label]))))
 })
 
 test('a record type\'s action reads its Japanese label in the past tense; an unknown one still reads as a sentence', () => {
