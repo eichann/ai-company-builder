@@ -109,7 +109,7 @@ const LOOKUPS: RecordToolSpec[] = [
   },
   {
     name: 'records_get', readOnly: true, schema: z.object({ id }).strict(),
-    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it.',
+    description: '記録を1件、つながりと一緒に読む。version は操作のときの expectedVersion に使う。fromOldConnection: true の記録は前のつなぎ先から取り込んだもの（いまは使われていない）：操作も最新化もできない。ファイルへのつながりの broken: true は「つながりが切れています」（ファイルが消えたか、たどれない場所へ移った）。\nRead one record with its links; pass its `version` as `expectedVersion` when acting on it. A record with fromOldConnection: true came through an earlier connection and is no longer used: nothing can be run on it. A file link with broken: true is broken (the file was deleted, or moved where the link cannot follow).',
     request: input => ({ method: 'GET', path: `/item/${enc(String(input.id))}` }),
   },
   {

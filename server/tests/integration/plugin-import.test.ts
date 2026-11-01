@@ -267,8 +267,8 @@ describe('runs, stops and connections', () => {
     const marked = all.records.filter((r: Json) => r.fromOldConnection)
     expect(marked.map((r: Json) => r.id).sort()).toEqual(oldIds.filter(id => id.startsWith('deal-')).sort())
     expect(marked[0].notice).toBe('前のつなぎ先から取り込んだもの（いまは使われていません）')
-    expect(services.records.get(member, oldIds[0]).value.record).toMatchObject({ fromOldConnection: true })
-    expect(services.records.get(member, recordOf('1000000001')).value.record.fromOldConnection).toBeUndefined()
+    expect((await services.records.get(member, oldIds[0])).value.record).toMatchObject({ fromOldConnection: true })
+    expect((await services.records.get(member, recordOf('1000000001'))).value.record.fromOldConnection).toBeUndefined()
 
     // Nothing runs on them, and nothing is asked outside: not even a refresh.
     const n = way.sent.length

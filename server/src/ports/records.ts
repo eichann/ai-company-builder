@@ -122,6 +122,15 @@ export interface RecordRepository {
   markRemoved(id: string, at: string): void
 
   linksFrom(ids: string[]): RecordLinkRow[]
+  /** Links whose target is a file at exactly one of `paths` (company paths). */
+  fileLinksTo(paths: string[]): RecordLinkRow[]
+  /** Point these links (source, name, position) at another file path. */
+  retargetFileLinks(links: Array<{ sourceId: string; name: string; position: number; targetPath: string }>): void
+  /**
+   * A department folder renamed by the server (services/departments.ts): records whose readers'
+   * folder is at or under `from`, links to files at or under it, and the minutes folder move to `to`.
+   */
+  moveFolder(from: string, to: string): void
   /** Links naming any of `ids` as their target. */
   linksTo(ids: string[]): RecordLinkRow[]
   replaceLinks(sourceId: string, links: RecordLinkRow[]): void

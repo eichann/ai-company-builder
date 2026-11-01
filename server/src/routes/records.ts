@@ -98,7 +98,7 @@ recordsRoute.post('/records/query', async (c) => {
 recordsRoute.get('/records/item/:recordId', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
-  return answer(c, records.get(member, c.req.param('recordId')))
+  return answer(c, await records.get(member, c.req.param('recordId')))
 })
 
 recordsRoute.get('/records/my-turn', async (c) => {

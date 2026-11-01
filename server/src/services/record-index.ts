@@ -24,9 +24,17 @@
  *   or followed (services/record-access.ts linkAllowed).
  * Removed files mark their record removed; its server state is kept (it is
  * not rebuildable), and the same file coming back revives it.
+ *
+ * Links to files follow them (owner decision 10/29): a file the push renamed
+ * or moved (git's rename detection) takes every link to it along, unless that
+ * would put a path inside a private folder into a record outside that folder,
+ * or carry a link across a private folder's edge — then the link stays on
+ * the old path and reads as broken (`followRename`). A deleted file's links
+ * stay (services/records.ts says they are broken).
  */
 import { coreTypeDefinitions } from '../../shared/core/core-types'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
+import { findPrivateScope } from '../../shared/core/permissions'
 import {
   canonicalTypeJson, compareTypeDefinitions, parseTypeFile, storedTypeDefinition, typeNameOfPath, type TypeDefinition,
 } from '../../shared/core/record-types'
@@ -34,10 +42,11 @@ import { fileLinkPath, parseRecordFile, RECORD_ID_RE, type ParsedRecordFile } fr
 import type { ScopeWithRules } from '../../shared/core/permissions'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
-import type { RecordFileChange, RecordFileSource } from '../ports/record-files'
+import type { RecordFileChange, RecordFileRename, RecordFileSource } from '../ports/record-files'
 import type { RecordLinkRow, RecordProblemRow, RecordRepoKey, RecordRepository, RecordRow } from '../ports/records'
 import type { Transactions } from '../ports/transactions'
 import { logError } from '../lib/error-log'
+import { linkAllowed } from './record-access'
 
 export interface CurrentType {
   version: number
@@ -81,8 +90,40 @@ export interface ApplyInput {
   tip: string
   at: string
   changes: RecordFileChange[]
+  /** Files renamed or moved in this repository since its last indexed commit (paths inside it). */
+  renames?: RecordFileRename[]
   /** Every scope of the company (to tell a folder made public from one deleted). */
   scopes: ScopeWithRules[]
+}
+
+/**
+ * May a link of `source` to the file at `from` follow it to `to`? Only when
+ * both paths are in the same place (the company repository, or one private
+ * folder) and the new path is one the source may link to at all
+ * (`linkAllowed`): a record outside a private folder never gets a path
+ * inside it, and no link crosses a private folder's edge.
+ */
+export function followRename(source: { scopeId: string | null }, from: string, to: string, scopes: ScopeWithRules[]): boolean {
+  const before = findPrivateScope(scopes, from)?.id ?? null
+  const after = findPrivateScope(scopes, to)?.id ?? null
+  return before === after && linkAllowed(source, { scopeId: after })
+}
+
+/** Point links at renamed files' new paths (company paths), where `followRename` allows. */
+function followRenames(records: RecordRepository, renames: Array<{ from: string; to: string }>, scopes: ScopeWithRules[]): void {
+  const next = new Map(renames.map(r => [r.from, r.to]))
+  const links = records.fileLinksTo([...next.keys()])
+  if (links.length === 0) return
+  const sources = new Map(records.byIds([...new Set(links.map(l => l.sourceId))]).map(r => [r.id, r]))
+  const moves: Array<{ sourceId: string; name: string; position: number; targetPath: string }> = []
+  for (const l of links) {
+    const from = l.targetPath as string
+    const to = next.get(from)
+    const source = sources.get(l.sourceId)
+    if (to === undefined || !source || !followRename(source, from, to, scopes)) continue
+    moves.push({ sourceId: l.sourceId, name: l.name, position: l.position, targetPath: to })
+  }
+  records.retargetFileLinks(moves)
 }
 
 const PROBLEM_TEXT = {
@@ -224,6 +265,12 @@ export function applyRecordChanges(records: RecordRepository, input: ApplyInput)
   }
   for (const id of vacating.keys()) records.markRemoved(id, at)
 
+  // 3. Links follow renamed / moved files (after the record files: a record file re-read in this
+  //    push wrote its links from its own text, which may still name the old path).
+  if (input.renames && input.renames.length > 0) {
+    followRenames(records, input.renames.map(r => ({ from: companyPath(r.from), to: companyPath(r.to) })), input.scopes)
+  }
+
   records.replaceProblems(input.repoKey, input.full ? null : [...touched], problems)
   records.setHead(input.repoKey, input.tip, at)
 }
@@ -251,10 +298,10 @@ export function createRecordIndexer({ companyData, transactions, clock, recordFi
     ]
     for (const r of repos) {
       const read = await recordFiles.read(companyId, r.repo, handle.records.head(r.key))
-      if (read.tip === null || (read.changes.length === 0 && !read.full && read.tip === handle.records.head(r.key))) continue
+      if (read.tip === null || (read.changes.length === 0 && read.renames.length === 0 && !read.full && read.tip === handle.records.head(r.key))) continue
       const tip = read.tip
       transactions.run(() => applyRecordChanges(handle.records, {
-        repoKey: r.key, scopeId: r.scopeId, prefix: r.prefix, full: read.full, tip, at: clock.now(), changes: read.changes, scopes,
+        repoKey: r.key, scopeId: r.scopeId, prefix: r.prefix, full: read.full, tip, at: clock.now(), changes: read.changes, renames: read.renames, scopes,
       }))
     }
   }

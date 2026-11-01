@@ -3,6 +3,7 @@ import { commitFileEdit, type CommitIdentity } from '../lib/bare-commit'
 import { withCompanyLock } from '../lib/company-lock'
 import { companyRepoPath } from '../lib/config'
 import { gitAsync } from '../lib/git-exec'
+import { existingPaths } from '../lib/repo-paths'
 import { privateRepoPath } from '../lib/private-folders'
 import { readRecordFiles } from '../lib/record-files'
 import type { RecordFileRepo, RecordFileSource, RecordFileWriter } from '../ports/record-files'
@@ -14,6 +15,7 @@ const repoPath = (companyId: string, repo: RecordFileRepo) =>
 export function gitRecordFileSource(): RecordFileSource {
   return {
     read: (companyId, repo, since) => readRecordFiles(repoPath(companyId, repo), since),
+    existing: (companyId, repo, paths) => existingPaths(repoPath(companyId, repo), paths),
   }
 }
 

@@ -110,9 +110,9 @@ recordsAiRoute.post('/query', async (c) => {
   return h instanceof Response ? h : answer(c, records.query(h.member, await jsonBody(c)))
 })
 
-recordsAiRoute.get('/item/:recordId', (c) => {
+recordsAiRoute.get('/item/:recordId', async (c) => {
   const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, records.get(h.member, c.req.param('recordId')))
+  return h instanceof Response ? h : answer(c, await records.get(h.member, c.req.param('recordId')))
 })
 
 recordsAiRoute.get('/item/:recordId/history', (c) => {

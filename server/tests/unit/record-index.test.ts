@@ -169,22 +169,22 @@ describe('index: type definitions', () => {
 })
 
 describe('query: only what the caller may read', () => {
-  it('a private folder’s records are absent from answers and counts for a member who cannot read it', () => {
+  it('a private folder’s records are absent from answers and counts for a member who cannot read it', async () => {
     expect(query(owner('a'), { type: 'deal' }).total).toBe(3)
     expect(query(viewer('a'), { type: 'deal' }).total).toBe(3)
     expect(query(other('a'), { type: 'deal', countOnly: true }).total).toBe(2)
     expect(ids(query(other('a'), { text: '値引き' }))).toEqual(['deal-adeal01'])
     expect(ids(query(viewer('a'), { text: '値引き' }))).toEqual(['deal-adeal01', 'deal-apriv01'])
-    const missing = service.get(other('a'), 'deal-zzzzzz99')
-    const hidden = service.get(other('a'), 'deal-apriv01')
+    const missing = await service.get(other('a'), 'deal-zzzzzz99')
+    const hidden = await service.get(other('a'), 'deal-apriv01')
     expect(hidden).toEqual(missing)
   })
 
-  it('links: inbound from a private record only for its readers; public → private never, not even for the owner', () => {
+  it('links: inbound from a private record only for its readers; public → private never, not even for the owner', async () => {
     expect(ids(query(other('a'), { linkedTo: { id: 'customer-acust01' } }))).toEqual(['deal-adeal01'])
     expect(ids(query(viewer('a'), { linkedTo: { id: 'customer-acust01' } }))).toEqual(['deal-adeal01', 'deal-apriv01'])
     expect(ids(query(owner('a'), { linkedTo: { id: 'deal-adeal02' } }))).toEqual([])
-    const detail = service.get(owner('a'), 'deal-adeal02')
+    const detail = await service.get(owner('a'), 'deal-adeal02')
     expect(detail.ok && detail.value.links).toEqual([])
   })
 
@@ -202,20 +202,20 @@ describe('query: only what the caller may read', () => {
     expect(service.query(other('a'), { type: 'deal', fields: { title: 'x' } }).ok).toBe(false)
   })
 
-  it('turned off: every read answers RECORDS_DISABLED', () => {
+  it('turned off: every read answers RECORDS_DISABLED', async () => {
     source.forCompany('a').records.setEnabled(false, 'u-owner', TS)
-    for (const r of [service.query(owner('a'), {}), service.get(owner('a'), 'deal-adeal01'), service.types(owner('a'))]) {
+    for (const r of [service.query(owner('a'), {}), await service.get(owner('a'), 'deal-adeal01'), service.types(owner('a'))]) {
       expect(r).toMatchObject({ ok: false, kind: 'not-found', body: { code: 'RECORDS_DISABLED' } })
     }
   })
 })
 
 describe('across companies', () => {
-  it('a company’s handle never sees, counts or reaches another company’s records', () => {
+  it('a company’s handle never sees, counts or reaches another company’s records', async () => {
     expect(source.forCompany('a').records.find('deal-bdeal01')).toBeNull()
     expect(query(owner('a'), { type: 'deal' }).total).toBe(3)
     expect(ids(query(owner('a'), { text: 'b ' }))).toEqual([])
-    expect(service.get(owner('a'), 'deal-bdeal01')).toEqual(service.get(owner('a'), 'deal-zzzzzz99'))
+    expect(await service.get(owner('a'), 'deal-bdeal01')).toEqual(await service.get(owner('a'), 'deal-zzzzzz99'))
     expect(service.query(owner('a'), { linkedTo: { id: 'customer-bcust01' } })).toMatchObject({ ok: false, kind: 'not-found' })
   })
 

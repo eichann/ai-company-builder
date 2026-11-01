@@ -305,7 +305,8 @@ from the bare repo via `lib/repo-folders.ts`, commits built in the bare repo by
   tip read, author/committer "AI Company Builder"), then a push from the bare repo to itself with
   `internalGitEnv()` — receive-pack runs the pre-receive checker (`push-check.md`). A member's
   push in between (the ref update loses) → the edit is redone on the new tip, up to 5 times.
-  Then the DB is updated. Why: the old working clone (`data/workdirs/<companyId>`: pull,
+  Then the DB is updated (a rename moves the department's scopes and its records — server
+  records' folder, links to files under it: `records.md` "Links to files"). Why: the old working clone (`data/workdirs/<companyId>`: pull,
   `git mv`, `git add -A`) took 119 s for a 1 MB rename in a 13 GB company; now ~1 s, mostly the
   checker's start-up (`tests/integration/department-commits.test.ts`).
 - A target name is taken when a root entry (folder or file) has the same `nameKey` (NFC, A–Z
