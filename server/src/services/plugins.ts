@@ -48,7 +48,7 @@ import { activeOf, createPluginEvaluation } from './plugin-evaluation'
 import { createPluginRelayScope } from './plugin-relay-scope'
 import {
   AUTO_ACKNOWLEDGEMENT, CONNECTOR_PROBLEMS, NOT_A_BUSINESS, NOT_A_CONNECTOR, NO_CONNECTOR, PLUGIN_NOT_FOUND, PLUGINS_FORBIDDEN,
-  connectorRequired, storeBusinessTypes, type ActivePlugin, type PluginServiceDeps,
+  TYPE_EXTENSION_CONFLICT, businessTypePlan, connectorRequired, storeBusinessTypes, type ActivePlugin, type PluginServiceDeps,
 } from './plugin-service-common'
 import { createPluginViews } from './plugin-views'
 
@@ -99,6 +99,12 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (taken && theirs) return `型「${taken}」は、すでに入っている「${theirs.label}」の型です。同じ名前の型を2つのプラグインが持つことはできません`
     }
     return null
+  }
+
+  /** 409 TYPE_EXTENSION_CONFLICT (with the sentences) when the package's types would go over the company's extensions. */
+  function typeExtensionConflict(companyId: string, pkg: PluginPackage) {
+    const { conflicts } = businessTypePlan(companyData, companyId, pkg.types)
+    return conflicts.length > 0 ? refuse('conflict', TYPE_EXTENSION_CONFLICT.error, { code: TYPE_EXTENSION_CONFLICT.code, conflicts }) : null
   }
 
   /**
@@ -194,6 +200,11 @@ export function createPluginService(deps: PluginServiceDeps) {
             { code: 'PLUGIN_WOULD_STOP', problem: 'connector-mismatch', dependents })
         }
       }
+      if (row.enabled && manifest.role === 'business') {
+        // A company's extension of a type must survive a newer version: report, never store over it (plugins.md ④).
+        const conflict = typeExtensionConflict(member.companyId, found.pkg)
+        if (conflict) return conflict
+      }
       const change = before
         ? { version: { before: before.version, after: row.version }, keyId: { before: before.keyId, after: keyId }, fingerprint: row.fingerprint }
         : { version: row.version, keyId, fingerprint: row.fingerprint }
@@ -231,6 +242,8 @@ export function createPluginService(deps: PluginServiceDeps) {
         if (body.enabled) {
           const p = await packageProblem(member.companyId, row, false)
           if (p.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: p.problem })
+          const conflict = typeExtensionConflict(member.companyId, p.found.pkg)
+          if (conflict) return conflict
           repo.saveInstall(row, history(pluginId, 'enable', member.userId, at, { version: row.version }))
           // Its types are the company's from now on (owner decision 2026-11-01), import or not.
           storeBusinessTypes(companyData, member.companyId, p.found.pkg.types, at)

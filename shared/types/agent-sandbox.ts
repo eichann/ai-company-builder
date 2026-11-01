@@ -5,6 +5,7 @@
  */
 import type { AgentSandboxMode, AgentSandboxSettings } from '../core/agent-sandbox'
 import type { AgentStopPolicy } from './agent-stop'
+import type { DistributedPlugin } from './plugins'
 
 /** A member whose mode differs from the company's (rollout: owner's PC → a department → everyone). */
 export interface AgentSandboxOverride {
@@ -58,4 +59,10 @@ export interface AgentPolicy {
    * server: the app then stops nothing.
    */
   stop?: AgentStopPolicy
+  /**
+   * The business plugins' packages the app keeps for this company (plan C2,
+   * plugins.md "Handing packages to the app"). Absent from an older server:
+   * the app then leaves what it keeps as it is.
+   */
+  plugins?: DistributedPlugin[]
 }

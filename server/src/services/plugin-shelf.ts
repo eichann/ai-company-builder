@@ -54,6 +54,13 @@ export interface PluginShelf {
   find(companyId: string, pluginId: string, version: string): ShelfPackage | null
   /** Stopped for every company by the operator (read on every call). */
   isStopped(pluginId: string, version: string): Promise<boolean>
+  /**
+   * The files of one version this company may use, read from disk now (plan
+   * C2), with the v2 fingerprint of what was read — the caller compares it
+   * with the one the shelf loaded (a package replaced on disk since is not
+   * handed out). Null when not on the shelf for this company or unreadable.
+   */
+  files(companyId: string, pluginId: string, version: string): Promise<{ files: Array<{ path: string; bytes: Uint8Array }>; fingerprintV2: string } | null>
 }
 
 export function createPluginShelf(source: PluginShelfSource): PluginShelf {
@@ -97,6 +104,11 @@ export function createPluginShelf(source: PluginShelfSource): PluginShelf {
     async isStopped(pluginId, version) {
       const list = await source.stopped()
       return list.includes('*') || list.includes(pluginId) || list.includes(`${pluginId}@${version}`)
+    },
+    async files(companyId, pluginId, version) {
+      const found = packages.find(p => p.pkg.manifest.id === pluginId && p.pkg.manifest.version === version && usableBy(p, companyId))
+      if (!found) return null
+      return source.files(`${pluginId}@${version}`)
     },
   }
 }

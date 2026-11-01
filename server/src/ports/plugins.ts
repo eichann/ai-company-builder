@@ -46,6 +46,12 @@ export interface PluginShelfSource {
    * but cannot be read).
    */
   stopped(): Promise<string[]>
+  /**
+   * One package folder's files, read again with the same rules as `scan`
+   * (plan C2: what the app is handed), with the v2 fingerprint of what was
+   * read. Null when the folder is gone or no longer passes those rules.
+   */
+  files(dir: string): Promise<{ files: Array<{ path: string; bytes: Uint8Array }>; fingerprintV2: string } | null>
 }
 
 export interface PluginInstallRow {

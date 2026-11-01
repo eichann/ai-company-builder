@@ -8,6 +8,8 @@ import { createAgentStop, type StoppableTurns } from '../../services/agent-stop'
 import { createAgentEventSender } from '../../services/agent-event-sender'
 import { createAgentEventRecorder } from '../../services/agent-events'
 import type { AppLifecycle } from '../ports'
+import { createPluginFetcher } from '../plugins/fetch'
+import { createPluginPackageStore } from '../plugins/store'
 
 export interface AgentControlDeps {
   serverUrl: () => string
@@ -31,6 +33,16 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
     cookies: session.cookies,
     userId: session.userId,
     dir: () => path.join(userDataDir(), 'agent-policy'),
+  })
+  // The business plugins' packages the policy lists (plan C2): fetched, verified and kept under
+  // <userData>/plugins; removed when no company lists them. Main only, no renderer channel yet.
+  const pluginPackages = createPluginPackageStore({
+    dir: () => path.join(userDataDir(), 'plugins'),
+    userId: session.userId,
+    fetchPackage: createPluginFetcher({ baseUrl: serverUrl, cookies: session.cookies }),
+  })
+  policy.onPolicy((companyId, answer) => {
+    if (answer.plugins) void pluginPackages.sync(companyId, answer.plugins)
   })
   // The push channel's only effect is a policy refetch; a received stop stops
   // the company's running turns (services/agent-stop.ts).
@@ -61,6 +73,7 @@ export function wireAgentControl({ serverUrl, session, userDataDir, home, turns,
 
   return {
     policy,
+    pluginPackages,
     stop,
     events,
     eventSender,

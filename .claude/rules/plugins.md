@@ -42,6 +42,12 @@ paths:
   - "client/electron/features/plugin-operations/**"
   - "client/src/features/chat/components/PluginOperationCard.tsx"
   - "client/tests/plugin-tools.test.ts"
+  - "server/src/services/plugin-distribution.ts"
+  - "server/src/composition/plugins.ts"
+  - "server/tests/integration/plugin-distribution.test.ts"
+  - "client/electron/features/plugins/**"
+  - "client/shared/plugin-packages.ts"
+  - "client/tests/plugin-packages.test.ts"
 ---
 
 # Connector and business plugins (milestone 3): declaration, mapping, field policies
@@ -270,12 +276,55 @@ higher version, additive — `records.md`) → ⑤ **a separate business plugin*
 Try them in that order; a declaration key that would let a company change the flow is never the
 answer.
 
-④ and plugin upgrades: a company's extension of a plugin type must survive a newer plugin version.
-Whoever implements choosing a newer version (C2 / `storeBusinessTypes`) compares the company's
-extension with the new plugin type and **reports a conflict** (same field or state name with a
-different meaning, a version that is no longer higher) instead of storing over it; company fields
-are never dropped silently. Not built yet — required before a second version of a plugin with a
-company extension is chosen.
+④ and plugin upgrades (C2): a company's extension of a plugin type survives a newer plugin version.
+`businessTypePlan` (`services/plugin-service-common.ts`) never stores a plugin type over one whose
+definition in force is the company's (`record_types.source = 'file'`); it compares them with
+`companyExtensionConflicts` (`shared/core/plugin-type-upgrade.ts`): the company's version no longer
+higher, or the company's definition lacking / changing something the new plugin type has
+(`compareTypeDefinitions` breaking, field / link / state / action / shared type / storage). Installing
+another version while on, or turning on, with a conflict → 409 `TYPE_EXTENSION_CONFLICT` +
+`conflicts` (Japanese sentences naming the type), nothing changed; the company (div's FDE) updates
+its `.acb/types/<name>.md` first. The import's `storeBusinessTypes` skips such a type the same way.
+Company fields are never dropped. Test: `tests/integration/plugin-distribution.test.ts` (mutation-checked).
+
+## Handing packages to the app (plan C2 「配る道」)
+
+- **The policy lists them**: `GET /me/agent-policy` (`services/agent-policy.ts`) carries `plugins:
+  [{ id, version, fingerprint, use }]` (`DistributedPlugin`, `shared/types/plugins.ts`) from
+  `services/plugin-distribution.ts` `pluginsFor`: every **contract-2 business plugin the company
+  turned on** whose package may be used now — on the shelf for this company, not stopped by the
+  operator, the fingerprint (v2) the company chose — as `current`, plus older versions some work is
+  pinned to as `pinned` (§5-9; the `pinnedVersions` dependency, which C5 binds with its stored pins:
+  listed only while on the shelf with the pinned fingerprint). **The operator's stop overrides
+  pins** and turning the plugin off lists nothing. Contract-1 packages and connectors have nothing
+  for the app. The list is in the policy's version (ETag), so a change reaches the apps by the push
+  channel: `routes/plugins.ts` announces after an install / version change and on / off; the
+  operator's stop file is read on every answer (an app sees it at its next refresh, ≤ 60 s).
+  `agentPolicy.usePlugins` is bound once in `composition/plugins.ts`; `policyFor` is async.
+- **The package route**: `GET /api/companies/:companyId/plugins/:pluginId/package/:version` — any
+  member, only a version `pluginsFor` lists now (else the same 404 `PLUGIN_NOT_FOUND` as nothing;
+  another company's package never); the files are read from disk again (`PluginShelfSource.files`,
+  the shelf's own rules) and handed out only when their v2 fingerprint is still the listed one (else
+  409 `PACKAGE_CHANGED`). Answer `PluginPackageDownload`: every file as base64, `signature.yaml`
+  too (not verified yet).
+- **The app** (main only; no renderer channel until the stage-2 IPC files are free):
+  `features/plugins/fetch.ts` fetches with the member's session and keeps a package only when
+  every path is a package path (`isPluginPackagePath`, `shared/core/plugin-package-paths.ts`) and
+  the files' v2 fingerprint (`pluginFingerprintV2`, the server's computation) equals the one **the
+  policy** listed — never the answer's own. `features/plugins/store.ts` writes it to
+  `<userData>/plugins/.incoming-…` and moves it to `<userData>/plugins/<id>@<version>/`; it removes
+  a folder no company of any account on the computer lists any more, and a kept folder whose
+  listed fingerprint changed and could not be fetched again. `index.json` there: what each account ×
+  company listed, and the fingerprint each folder was verified against. Wired in
+  `features/agent-control/wire.ts` on the policy store's `onPolicy` (each answer, 304 included);
+  an answer without `plugins` (an older server) or with a malformed one changes nothing
+  (`client/shared/plugin-packages.ts`). `pluginPackages.folderOf(company, id, version)` is what C5
+  runs steps from.
+- Tests: `server/tests/integration/plugin-distribution.test.ts` (what is listed and to whom, the
+  files and their fingerprint, 404 for anything not listed, the stop, a replaced package, pins, the
+  type-extension conflict), `client/tests/plugin-packages.test.ts` (strict parse, paths and the
+  policy's fingerprint, the session header, keep / remove across companies, nothing unverified
+  kept), permission matrix row + `CROSS` — each guard mutation-checked.
 
 ## What we say, and what we do not claim (review §12, owner-approved wording)
 

@@ -264,3 +264,28 @@ export interface PluginAiOperation {
 export interface PluginAiTools {
   plugins: Array<{ id: string; label: string; operations: PluginAiOperation[] }>
 }
+
+/**
+ * A business plugin's package the member's app keeps (plan C2, plugins.md
+ * "Handing packages to the app"): listed in the agent policy
+ * (`GET /me/agent-policy` → `plugins`) for every member of a company that
+ * turned the plugin on. `current` is the version the company chose; `pinned`
+ * an older one some work is still pinned to (stored by C5). A plugin turned
+ * off, or a version the operator stopped, is not listed: the app removes it.
+ */
+export interface DistributedPlugin {
+  id: string
+  version: string
+  /** Fingerprint v2 (shared/core/plugin-fingerprint.ts): what the app checks the files against. */
+  fingerprint: string
+  use: 'current' | 'pinned'
+}
+
+/** GET …/plugins/:pluginId/package/:version (any member, a listed version only): the package's files. */
+export interface PluginPackageDownload {
+  id: string
+  version: string
+  fingerprint: string
+  /** Every file of the package (`signature.yaml` too; it is not part of the fingerprint), bytes as base64. */
+  files: Array<{ path: string; base64: string }>
+}

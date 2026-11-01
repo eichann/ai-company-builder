@@ -4,8 +4,8 @@
  * service's dependencies, a business plugin's running use of its connector
  * (`ActivePlugin`), and storing a business plugin's types.
  */
-import type { PluginManifest, PluginMapping } from '../../shared/core/plugins'
-import { canonicalTypeJson, type TypeDefinition } from '../../shared/core/record-types'
+import { companyExtensionConflicts, type PluginManifest, type PluginMapping } from '../../shared/core/plugins'
+import { canonicalTypeJson, storedTypeDefinition, type TypeDefinition } from '../../shared/core/record-types'
 import type { PluginProblem } from '../../shared/types/plugins'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
@@ -32,20 +32,55 @@ export const connectorRequired = (label: string, minVersion: string) =>
 export const CONNECTOR_PROBLEMS: readonly PluginProblem[] = ['connector-missing', 'connector-stopped', 'connector-mismatch', 'no-key', 'key-stopped', 'key-destination']
 
 /**
+ * What storing a business plugin's types would do in the company: the
+ * definitions to store, and the conflicts with the company's own extensions
+ * (`.acb/types/<name>.md` in force, source `file`; `companyExtensionConflicts`,
+ * plugins.md "Fitting a company" ④). A type the company extended is never
+ * stored over: with a conflict it is reported, without one the company's
+ * definition already holds everything.
+ */
+export function businessTypePlan(companyData: CompanyDataSource, companyId: string, types: Record<string, TypeDefinition>): { store: TypeDefinition[]; conflicts: string[] } {
+  const records = companyData.forCompany(companyId).records
+  const current = new Map<string, { version: number; definition: string; source: string }>()
+  for (const row of records.typeVersions()) {
+    const prev = current.get(row.name)
+    if (!prev || row.version > prev.version) current.set(row.name, row)
+  }
+  const store: TypeDefinition[] = []
+  const conflicts: string[] = []
+  for (const def of Object.values(types)) {
+    const cur = current.get(def.name)
+    if (cur?.source === 'file') {
+      conflicts.push(...companyExtensionConflicts(storedTypeDefinition(cur.definition), def))
+      continue
+    }
+    if ((cur?.version ?? 0) >= def.version) continue
+    store.push(def)
+  }
+  return { store, conflicts }
+}
+
+/**
  * Store a business plugin's types in the company (source `plugin`) unless a
  * version at least as new is there. Owner decision 2026-11-01: when it is
  * turned on, not at the first import (the import still does it, for a newer
- * version chosen meanwhile).
+ * version chosen meanwhile). A type the company extended is never stored over
+ * (`businessTypePlan`): its conflicts are returned, the company's fields stay.
  */
-export function storeBusinessTypes(companyData: CompanyDataSource, companyId: string, types: Record<string, TypeDefinition>, at: string): void {
+export function storeBusinessTypes(companyData: CompanyDataSource, companyId: string, types: Record<string, TypeDefinition>, at: string): string[] {
   const records = companyData.forCompany(companyId).records
-  const stored = new Map<string, number>()
-  for (const row of records.typeVersions()) stored.set(row.name, Math.max(stored.get(row.name) ?? 0, row.version))
-  for (const def of Object.values(types)) {
-    if ((stored.get(def.name) ?? 0) >= def.version) continue
+  const plan = businessTypePlan(companyData, companyId, types)
+  for (const def of plan.store) {
     records.insertTypeVersion({ name: def.name, version: def.version, definition: canonicalTypeJson(def), source: 'plugin', commitSha: null, createdAt: at })
   }
+  return plan.conflicts
 }
+
+/** 409 when a version's types conflict with the company's extensions (nothing changed). */
+export const TYPE_EXTENSION_CONFLICT = {
+  error: 'この版の型が、会社で広げた型と合わないため、変えていません。会社の型（.acb/types/）を先に直してください',
+  code: 'TYPE_EXTENSION_CONFLICT',
+} as const
 
 /** What the connector needs to know about a key (never its value). */
 export interface PluginKeyInfo {

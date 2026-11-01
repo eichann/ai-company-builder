@@ -440,6 +440,8 @@ const MATRIX: Row[] = [
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  // Plugin packages for the members' apps (plan C2): any member, only a version their policy lists (none here: 404).
+  r('GET /api/companies/:companyId/plugins/:pluginId/package/:version', w => ({ path: `${C(w)}/plugins/no-such-plugin/package/0.1.0` }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]
 
@@ -548,6 +550,7 @@ const CROSS: CrossRow[] = [
   // lane B ▼
   // lane B ▲
   // lane C ▼
+  x('GET /api/companies/:companyId/plugins/:pluginId/package/:version', (w, id) => ({ path: `${C(w)}/plugins/${id}/package/0.1.0` }), w => w.other.plugin, 'no-such-plugin'),
   // lane C ▲
 ]
 

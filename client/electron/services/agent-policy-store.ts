@@ -20,6 +20,7 @@ import path from 'node:path'
 import { parseAgentSandboxSettings } from '../../../shared/core/agent-sandbox'
 import type { AgentPolicy, AgentSandboxPolicy } from '../../../shared/types/agent-sandbox'
 import { AGENT_STOP_SUPPORT_HEADER, parseAgentStopPolicy, type AgentStopPolicy } from '../../shared/agent-stop'
+import { parseDistributedPlugins } from '../../shared/plugin-packages'
 
 export interface AgentPolicyStoreDeps {
   baseUrl: () => string
@@ -42,6 +43,11 @@ export interface AgentPolicyStore {
   stoppedCompanies(): string[]
   /** Called when a company's received stop changes (not for one loaded from disk). */
   onStopChange(listener: (companyId: string, stop: AgentStopPolicy | undefined) => void): void
+  /**
+   * Called with the policy each time the server answered (a new one or 304
+   * for the cached one), e.g. to keep the plugin packages it lists (plan C2).
+   */
+  onPolicy(listener: (companyId: string, policy: AgentPolicy) => void): void
   /** Sign-out: forget the memory copy (the files stay, per account). */
   clear(): void
 }
@@ -56,7 +62,9 @@ export function parseAgentPolicy(data: unknown): AgentPolicy | undefined {
   const source = (value.sandbox as { source?: unknown }).source === 'member' ? 'member' : 'company'
   const policy: AgentSandboxPolicy = { ...sandbox.value, source }
   const stop = parseAgentStopPolicy(value.stop)
-  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}) }
+  // Plugin packages (plan C2): absent or unreadable = the app keeps what it has.
+  const plugins = parseDistributedPlugins((value as { plugins?: unknown }).plugins)
+  return { version: value.version, sandbox: policy, ...(stop ? { stop } : {}), ...(plugins ? { plugins } : {}) }
 }
 
 const sameStop = (a: AgentStopPolicy | undefined, b: AgentStopPolicy | undefined) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null)
@@ -69,6 +77,14 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
   const log = deps.log ?? console
   const doFetch = deps.fetch ?? fetch
   const listeners: Array<(companyId: string, stop: AgentStopPolicy | undefined) => void> = []
+  const policyListeners: Array<(companyId: string, policy: AgentPolicy) => void> = []
+  const answered = (companyId: string, policy: AgentPolicy) => {
+    for (const listener of policyListeners) {
+      try { listener(companyId, policy) } catch (error) {
+        log.warn(`[agent-policy] ${companyId}: a policy listener failed (${error instanceof Error ? error.message : 'unknown'})`)
+      }
+    }
+  }
   /** Accounts whose kept stops were read from disk this run. */
   const scanned = new Set<string>()
 
@@ -126,7 +142,10 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       const headers: Record<string, string> = { Cookie: deps.cookies().join('; '), [AGENT_STOP_SUPPORT_HEADER]: '1' }
       if (cached) headers['If-None-Match'] = `"${cached.version}"`
       const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/agent-policy`, { headers, redirect: 'error' })
-      if (res.status === 304) return cached
+      if (res.status === 304) {
+        if (cached) answered(companyId, cached)
+        return cached
+      }
       if (!res.ok) {
         // 404 from an older server that has no policy yet: the same as "off".
         log.warn(`[agent-policy] ${companyId}: HTTP ${res.status}; ${keep}`)
@@ -143,6 +162,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       }
       cache.set(companyId, policy)
       receivedStop(companyId, policy.stop)
+      answered(companyId, policy)
       return policy
     } catch (error) {
       log.warn(`[agent-policy] ${companyId}: ${error instanceof Error ? error.message : 'request failed'}; ${keep}`)
@@ -184,6 +204,7 @@ export function createAgentPolicyStore(deps: AgentPolicyStoreDeps): AgentPolicyS
       return [...stops].filter(([key, stop]) => key.startsWith(prefix) && stop?.all).map(([key]) => key.slice(prefix.length))
     },
     onStopChange(listener) { listeners.push(listener) },
+    onPolicy(listener) { policyListeners.push(listener) },
     clear() { cache.clear(); stops.clear(); scanned.clear() },
   }
 }
