@@ -15,6 +15,7 @@
  */
 import type { BrokerCipherState, BrokerKeyRepository, BrokerStatusReason } from '../ports/key-broker'
 import type { SealedSecret, SecretContext } from '../ports/secret-cipher'
+import type { ConnectorProvider } from '../ports/connectors'
 
 export interface BrokerVaultDeps {
   brokerKeys: BrokerKeyRepository
@@ -35,7 +36,8 @@ export function brokerSecretContext(companyId: string, keyId: string): SecretCon
 
 /** A connector secret's binding: what it is, whose company, which row. */
 export interface ConnectorSecretContext {
-  purpose: 'acb-google-client' | 'acb-google-grant' | 'acb-oauth-pending'
+  /** A member's refresh token: `acb-<provider>-grant` (member-oauth.ts `grantSealContext`). */
+  purpose: 'acb-google-client' | `acb-${ConnectorProvider}-grant` | 'acb-oauth-pending'
   companyId: string
   /** The row: `google-client`, the grant id, the state hash. */
   id: string

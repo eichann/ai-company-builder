@@ -415,10 +415,10 @@ who uses it).
   `ACB_STOPPED` 「管理者が <サービス> の鍵を止めています。…」, recorded as `stopped`; token issue
   reports `unavailable: stopped`. `POST /broker/stop-all` (owner/admin; admin button
   「すべての鍵を止める」 with a confirmation) disables every active key, company and own, each in
-  the history; resuming is per key. It also stops every member's **Google permission** in the
-  company at once (`onStopAll` → `googleConnector.stopAll`: grants `stopped`, the sealed refresh
-  tokens cleared, revoked at Google in the background); a member resumes with 「Google で許可」
-  (`google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
+  the history; resuming is per key. It also stops every member's **OAuth permission (Google, every provider)** in the
+  company at once (`onStopAll` → `memberOAuth.stopAll`: grants `stopped`, the sealed refresh
+  tokens cleared, revoked at the provider in the background); a member resumes with 「Google で許可」
+  (`member-oauth.md`, `google-connector.md`). Tokens are not revoked, so the AI gets the "stopped" answer
   (revoking would answer "token expired").
   A company-wide stop of the whole AI (M2, `agent-stop.md`) also refuses every relay call with
   `ACB_STOPPED` 「管理者が AI の利用を一時停止しています。…」 until it is released.
