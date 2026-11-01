@@ -241,6 +241,7 @@ export function applyRecordChanges(records: RecordRepository, input: ApplyInput)
       scopeId,
       path,
       folder: null,
+      personalOwner: null,
       title: rec.title,
       summary: rec.summary,
       createdAt: row?.createdAt ?? at,

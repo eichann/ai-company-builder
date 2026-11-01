@@ -215,6 +215,7 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
       id: r.id, type: r.type, typeVersion: r.typeVersion, title: r.title, summary: r.summary, path: r.path,
       state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s && s.updatedAt > r.updatedAt ? s.updatedAt : r.updatedAt,
       ...(old?.has(r.id) ? { fromOldConnection: true as const, notice: OLD_CONNECTION_LABEL } : {}),
+      ...(r.personalOwner !== null ? { personal: true as const } : {}),
     } satisfies RecordSummary]
   }))
 }

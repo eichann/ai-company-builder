@@ -18,6 +18,8 @@
  *   POST    /records/item/:recordId/undo              reverse an earlier change (a new entry)
  *   POST    /records/item/:recordId/file-links        { path, link?, expectedVersion, note? } link a file later
  *   POST    /records/item/:recordId/file-links/remove { path, link?, expectedVersion, note? } remove that link
+ *   POST    /records/item/:recordId/share             { folder, expectedVersion, note? } the owner shows their
+ *                                                     owner-only record to a folder's readers (session only)
  *   GET     /records/item/:recordId/history           the ledger
  *   GET     /records/item/:recordId/versions/:version the server values at that version
  *   POST    /me/record-tokens     any member: a record token for their AI (one chat turn;
@@ -159,6 +161,14 @@ recordsRoute.post('/records/item/:recordId/file-links/remove', async (c) => {
   if (member instanceof Response) return member
   const body = await jsonBody(c)
   return answer(c, recordEngine.fileLink(member, humanWith(body), c.req.param('recordId'), 'unlink', body))
+})
+
+// Owner-only → a folder's readers (records.md "Owner-only records"): the person's own step, so no AI route.
+recordsRoute.post('/records/item/:recordId/share', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  const body = await jsonBody(c)
+  return answer(c, recordEngine.share(member, humanWith(body), c.req.param('recordId'), body))
 })
 
 recordsRoute.get('/records/item/:recordId/history', async (c) => {

@@ -390,7 +390,7 @@ export function createPluginService(deps: PluginServiceDeps) {
     if (departments.length === 0) return false
     const handle = companyData.forCompany(companyId)
     const reader = recordReader({ companyId, userId, role }, handle.scopes.listWithRules())
-    return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder }))
+    return handle.departments.list().some(d => departments.includes(d.id) && reader.record({ id: '', type: '', scopeId: null, path: null, folder: d.folder, personalOwner: null }))
   }
 
   const notFound = () => refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
