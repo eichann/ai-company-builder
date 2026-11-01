@@ -42,6 +42,8 @@ export interface RoleHolders {
   holders(companyId: string, pluginId: string, role: string, bundleId: string | null): string[]
   /** For a type's `role:<name>`: does `userId` hold it on this record (its plugin = the type's owner, its まとまり)? */
   holdsOnRecord(companyId: string, type: string, recordId: string, role: string, userId: string): boolean
+  /** For a plugin operation's `role:<name>`: does `userId` hold `pluginId`'s role on this record's まとまり (null: a record not made yet — the company's)? */
+  holdsForPlugin(companyId: string, pluginId: string, recordId: string | null, role: string, userId: string): boolean
   /** The role's label as the installed plugin declares it, or null. */
   label(companyId: string, pluginId: string, role: string): string | null
 }
@@ -97,6 +99,9 @@ export function createPluginRoleService(deps: PluginRoleDeps) {
     holdsOnRecord(companyId, type, recordId, role, userId) {
       const pluginId = ownerOfType(companyId, type)
       return pluginId !== null && holders(companyId, pluginId, role, bundleOf(companyId, recordId)).includes(userId)
+    },
+    holdsForPlugin(companyId, pluginId, recordId, role, userId) {
+      return holders(companyId, pluginId, role, recordId === null ? null : bundleOf(companyId, recordId)).includes(userId)
     },
     label(companyId, pluginId, role) {
       const m = installed(companyId, pluginId)

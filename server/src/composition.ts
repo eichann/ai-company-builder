@@ -471,7 +471,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   const inboxLane = wireInboxLane({ conn, ...shared })
   // lane C ▼
   const pluginsLane = wirePluginsLane({
-    conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals,
+    conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, actsFor,
     isMember: (companyId, userId) => access.memberOf(companyId, userId) !== null,
     managedFolders: (companyId, userId) => permissionViews.managedFolders(companyId, userId),
   })

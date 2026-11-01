@@ -29,6 +29,7 @@ const NOT_IN_CONNECTOR_OBJECT: Record<string, string> = {
 const operationUseKeyReason = (k: string) => `「${k}」は、つなぎ先を使う業務のプラグインの operations に書きます（誰がどう使うかは業務が決めます）`
 const NOT_IN_CONNECTOR_OPERATION: Record<string, string> = {
   who: operationUseKeyReason('who'), decision: operationUseKeyReason('decision'), note: operationUseKeyReason('note'), policy: operationUseKeyReason('policy'),
+  moves_money: operationUseKeyReason('moves_money'),
   fields: 'fields は書きません（書き戻せる欄は、業務のプラグインの読み替え表で「書く」にした欄です）',
 }
 
@@ -146,6 +147,7 @@ export function parseConnector(raw: { [k: string]: YamlValue }, err: (m: string)
       associationType,
       correlationProperty,
       createsRecord,
+      movesMoney: false,
     }
   }
 

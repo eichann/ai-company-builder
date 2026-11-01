@@ -20,4 +20,5 @@ so a pinned older version stays listed and kept — the operator's stop still re
 
 Ready from C4 (`plugins.md` "The gate of a step's run"): claim a step's run as
 `<pluginId>__<step>` (`parsePluginRunStep`; `AI_RUN_STEP_RE` allows 40 characters); the server then
-lets its tokens call only that plugin's operations the step allows and the step's connector roles.
+lets its tokens call only that plugin's operations the step allows and the step's connector roles,
+and `GET /api/records-ai/plugins` lists only those operations for such a token.

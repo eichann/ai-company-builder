@@ -197,7 +197,7 @@ contract: 2
 types: [deal, customer]
 connector: hubspot >= 0.3.0
 operations:
-  update_deal: { who: [assignee, role:sales_manager, ai], decision: true }
+  update_deal: { who: [assignee, role:sales_manager, ai], decision: true, moves_money: true }
 roles:                                   # the business declares; who fills it is the company's (C3)
   sales_manager: { label: 営業の責任者 }
 settings:                                # rung ① below: typed parameters, never branches
@@ -244,8 +244,14 @@ upgrade:                                 # where work pinned to an older version
   emergency stop of a version stops pinned work too.
 - **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
   or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
-  C3's (`plugin-roles.md`): the engine's `who` and the approvers resolve them; an operation's
-  `who` still matches no one (fails closed; the resolver is not passed there yet).
+  C3's (`plugin-roles.md`): the engine's `who`, the approvers and an operation's `who` resolve them.
+- **Money** (`moves_money: true` on a business operation that writes; contract 2 only, refused on
+  a connector — the business says what its use of an operation means): the operation asks first
+  exactly like one with `reaches: external` (`asksFirst` in `plugin-declaration.ts`): its fields
+  and its create policy are never `auto` whatever the mapping or `field_policy_defaults` say
+  (`effectiveFieldPolicy` / `effectiveOperationPolicy` hold them to `prior`), a create's default
+  is `prior` and a declared `policy: auto` is refused; in a step's run it is only an approval
+  request. The connector's `reaches` stays the one place for "outside"; money is the business's.
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
   `preload` refused (the frame has no network and is given nothing).
@@ -827,8 +833,8 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   approval requests through `prepareApproval`): an AI whose token is bound to such a run may call
   only **its own plugin's** declared operations (`plugins.active` — so the company switch, the
   operator stop, the package and the connector apply), only when the step's `tools` include
-  `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external` or
-  creates a record — never `auto`, never `ok_from`, never direct) only when they also include
+  `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external`,
+  `moves_money` or creates a record — never `auto`, never `ok_from`, never direct) only when they also include
   `approvals`: it can only become an approval request (202), never be sent.
 - **Connector roles** (`createPluginRunGate` in `plugin-ai-tools.ts`, wired in
   `composition/plugins.ts`; routes call `connectorRoleRefusal(c, h, role)` from
@@ -839,11 +845,20 @@ The server gate is the pair business plugin × operation, and inside a step's ru
 - Every refusal is one answer, 403 `NOT_IN_STEP` 「この手順では使えない操作です」, checked before
   anything else: it does not tell another plugin, another company's, a stopped one or an
   undeclared operation apart, and nothing is asked outside.
-- Not yet: the AI's tool listing (`GET /plugins`) is not narrowed to the step (the app gives a
-  step's run only its step's tools, C5); the step is read from the installed version (C5 pins it);
-  a plugin operation's `who` with `role:` still matches no one (`plugin-roles.md`).
+- **The AI's tool list** (`GET /api/records-ai/plugins`, `aiTools(member, scope, runId)`): a token
+  bound to such a run lists only its plugin's operations its step allows (`stepAllowsOperation`,
+  the gate's own rule; a run that cannot be read lists none); a consultation or a core step as
+  before. The gate still decides each call.
+- **Roles in an operation's `who`** (`mayRunAt(…, { pluginId, recordId })`): `role:<name>` is the
+  plugin's role held on the operation's record (its まとまり's override, else the company's; a
+  create of a record not made yet: the company's), through `pluginRoles.holdsForPlugin`, bound
+  with `pluginOperations.useRoles` in `composition/plugins.ts`; a delegate (`actsFor`) stands in
+  for an absent holder. Unbound or unassigned: nobody.
+- Not yet: the step is read from the installed version (C5 pins it).
 - Test: `tests/integration/plugin-run-gate.test.ts` (a step without `plugin_operations`, another
-  plugin's / not installed here, asks first without `approvals` then only a request, the step's
+  plugin's / not installed here, asks first without `approvals` then only a request, money
+  (`moves_money`) never direct and only a request in a step, the tool list per step, `role:` in an
+  operation's `who` (company / まとまり / delegate), the step's
   roles only, the switch and the operator stop, a consultation and a core step unchanged) —
   mutation-checked.
 

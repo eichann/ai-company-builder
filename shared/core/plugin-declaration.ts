@@ -139,7 +139,17 @@ export interface PluginOperation {
    * own type (`create_deal`). Such an operation is never `auto`.
    */
   createsRecord: boolean
+  /**
+   * The business plugin declared that it moves money (`moves_money: true`,
+   * contract 2): treated like an operation reaching outside — never `auto`,
+   * in a step's run only an approval request. False on a connector's own.
+   */
+  movesMoney: boolean
 }
+
+/** Never runs without a person's approval: it reaches people outside, moves money, or creates a record (統合版: never `ok_from`, never direct). */
+export const asksFirst = (op: Pick<PluginOperation, 'reaches' | 'createsRecord' | 'movesMoney'>): boolean =>
+  op.reaches === 'external' || op.movesMoney || op.createsRecord
 
 /**
  * How a business plugin uses one connector (owner decision 2026-11-01): which
@@ -162,6 +172,8 @@ export interface OperationUse {
   note: NoteRule
   /** A create's own policy (null: the default, `prior` when external or creating a record, else `auto`). */
   policy: FieldPolicy | null
+  /** `moves_money: true` (contract 2): the operation moves money; it asks first like one reaching outside. */
+  movesMoney: boolean
 }
 
 /**

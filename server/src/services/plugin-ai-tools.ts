@@ -9,7 +9,7 @@ import type { PluginAiField, PluginAiOperation, PluginAiTools } from '../../shar
 import type { Member } from './access'
 import { ok, type Outcome } from './outcome'
 import type { PluginEvaluation } from './plugin-evaluation'
-import { parsePluginRunStep, stepAllowsConnectorRole, stepOf } from './plugin-operation-checks'
+import { parsePluginRunStep, stepAllowsConnectorRole, stepAllowsOperation, stepOf } from './plugin-operation-checks'
 import type { PluginServiceDeps } from './plugin-service-common'
 import type { PluginShelf } from './plugin-shelf'
 
@@ -58,16 +58,32 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
      * (milestone 4) its policy now (an `off` create is left out) and its
      * content slots, or — creating a record — the fields it may fill. Any
      * member: what they may do on a record is decided per call (P6).
+     *
+     * A token bound to a run of a business plugin's step (`runId`, plan C4)
+     * sees only that plugin's operations its step allows (`stepAllowsOperation`,
+     * the gate's own rule — the gate still decides each call); a run that
+     * cannot be read sees none. A consultation or a core step: as before.
      */
-    async aiTools(member: Member, scope: 'read' | 'act'): Promise<Outcome<PluginAiTools>> {
+    async aiTools(member: Member, scope: 'read' | 'act', runId: string | null = null): Promise<Outcome<PluginAiTools>> {
       const out: PluginAiTools['plugins'] = []
-      for (const install of companyData.forCompany(member.companyId).plugins.installs()) {
+      const handle = companyData.forCompany(member.companyId)
+      let bound: { pluginId: string; step: string } | null = null
+      if (runId) {
+        const run = handle.aiRuns.byId(runId)
+        if (!run) return ok({ plugins: [] })
+        bound = parsePluginRunStep(run.step)
+      }
+      for (const install of handle.plugins.installs()) {
+        if (bound && install.pluginId !== bound.pluginId) continue
         const evaluated = await evaluation.evaluate(member.companyId, install)
         if (!evaluated.active) continue
         const { manifest, mapping, types } = evaluated.active
+        const step = bound ? stepOf(manifest, bound.step) : null
+        if (bound && !step) continue
         const operations: PluginAiOperation[] = []
         for (const [name, op] of Object.entries(manifest.operations)) {
           if (!op.who.includes('ai')) continue
+          if (step && !stepAllowsOperation(step, manifest, name)) continue
           if (op.kind !== 'read' && scope !== 'act') continue
           if (op.kind === 'create') {
             const policy = effectiveOperationPolicy(manifest, name, mapping)

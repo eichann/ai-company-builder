@@ -7,7 +7,7 @@
  */
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
-import { PLUGIN_ID_RE, effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep } from '../../shared/core/plugins'
+import { PLUGIN_ID_RE, asksFirst, effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep } from '../../shared/core/plugins'
 import type { LedgerValue } from '../../shared/core/record-ledger'
 import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
@@ -68,12 +68,13 @@ export const stepOf = (manifest: Pick<PluginManifest, 'steps'>, name: string): P
   Object.prototype.hasOwnProperty.call(manifest.steps, name) ? manifest.steps[name] : null
 
 /**
- * An operation that never runs without a person's approval: it reaches people
- * outside the company, or creates a record (統合版: never `ok_from`, never
- * direct). In a step's run it can only become an approval request, so the
- * step must declare the `approvals` tool.
+ * An operation that never runs without a person's approval (`asksFirst`,
+ * shared/core): it reaches people outside the company, moves money
+ * (`moves_money`) or creates a record (統合版: never `ok_from`, never direct).
+ * In a step's run it can only become an approval request, so the step must
+ * declare the `approvals` tool.
  */
-export const asksFirst = (op: Pick<PluginOperation, 'reaches' | 'createsRecord'>) => op.reaches === 'external' || op.createsRecord
+export { asksFirst }
 
 /** May a step call this operation of its own plugin: the plugin declared it, the step has `plugin_operations` (and `approvals` when it asks first). */
 export function stepAllowsOperation(step: Pick<PluginStep, 'tools'>, manifest: Pick<PluginManifest, 'operations'>, operation: string): boolean {
@@ -91,8 +92,18 @@ export function stepAllowsConnectorRole(step: Pick<PluginStep, 'connectorRoles'>
 /** Where the record (or the created record's folder) sits, for `who`'s department managers. */
 export const placeOf = (row: RecordRow) => row.path ?? row.folder ?? ''
 
+/**
+ * Does `userId` hold the business role `role` of `pluginId` for this record
+ * (its まとまり; a create's record not made yet: the company's assignment)?
+ * Bound once by the plugins lane (plan C3, `composition/plugins.ts`); until
+ * then a `role:` entry in an operation's `who` matches no one.
+ */
+export type OperationRoleHolds = (companyId: string, pluginId: string, recordId: string | null, role: string, userId: string) => boolean
+
 export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyData' | 'plugins' | 'roleOf' | 'managedFolders' | 'aiStopped'>) {
   const { companyData, plugins } = deps
+  let roleHolds: OperationRoleHolds | null = null
+  const useRoles = (r: OperationRoleHolds) => { roleHolds = r }
 
   function readable(member: Member, recordId: string | null): RecordRow | null {
     if (recordId === null) return null
@@ -115,14 +126,22 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return { version: s?.version ?? 0, fields }
   }
 
-  /** `who` for a member (and kind) at a place, with the record's values (none for a record not made yet). */
-  function mayRunAt(member: Member, actor: Pick<OperationActor, 'kind' | 'source'>, who: string[], values: Record<string, LedgerValue>, place: string): boolean {
+  /**
+   * `who` for a member (and kind) at a place, with the record's values (none
+   * for a record not made yet); `role:<name>` is the plugin's role held on
+   * that record (`at`, plan C3).
+   */
+  function mayRunAt(
+    member: Member, actor: Pick<OperationActor, 'kind' | 'source'>, who: string[], values: Record<string, LedgerValue>, place: string,
+    at: { pluginId: string; recordId: string | null },
+  ): boolean {
     const managesPlace = who.includes('dept_manager') && deps.managedFolders(member.companyId, member.userId).some(f => isSameOrAncestorPath(f, place))
-    return mayAct(engineWho(who), member, { kind: actor.kind, source: actor.source }, values, managesPlace)
+    const holds = (role: string) => roleHolds?.(member.companyId, at.pluginId, at.recordId, role, member.userId) === true
+    return mayAct(engineWho(who), member, { kind: actor.kind, source: actor.source }, values, managesPlace, holds)
   }
 
-  function mayRun(member: Member, actor: Pick<OperationActor, 'kind' | 'source'>, who: string[], recordId: string, place: string): boolean {
-    return mayRunAt(member, actor, who, valuesOf(member.companyId, recordId).fields, place)
+  function mayRun(member: Member, actor: Pick<OperationActor, 'kind' | 'source'>, who: string[], recordId: string, place: string, pluginId: string): boolean {
+    return mayRunAt(member, actor, who, valuesOf(member.companyId, recordId).fields, place, { pluginId, recordId })
   }
 
   /**
@@ -144,7 +163,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
       if (role === null) return 'not-member'
       if (actor.kind === 'ai' && deps.aiStopped(member.companyId)) return 'ai-stopped'
       const values = recordId ? valuesOf(member.companyId, recordId).fields : {}
-      if (!mayRunAt({ ...member, role }, actor, who, values, place)) return 'not-allowed'
+      if (!mayRunAt({ ...member, role }, actor, who, values, place, { pluginId: plugin.pluginId, recordId })) return 'not-allowed'
       if (!policyOk(now.plugin)) return 'policy-changed'
       return null
     }
@@ -187,7 +206,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
       return { refusal: conflict('この記録は、いまの接続から取り込んだものではありません', 'NOT_LINKED') } as const
     }
     const place = placeOf(row)
-    if (!mayRun(member, actor, op.who, recordId, place)) {
+    if (!mayRun(member, actor, op.who, recordId, place, pluginId)) {
       return { refusal: refuse('forbidden', actor.kind === 'ai' && !op.who.includes('ai') ? 'この操作は AI からはできません' : 'この操作をする権限がありません', { code: 'NOT_ALLOWED' }) } as const
     }
     return { refusal: null, row, plugin, op, link, place } as const
@@ -205,7 +224,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     const op = Object.prototype.hasOwnProperty.call(plugin.manifest.operations, operation) ? plugin.manifest.operations[operation] : undefined
     if (!op || op.kind !== 'create' || !op.createsRecord) return { refusal: refuse('not-found', 'この操作はありません', { code: 'OPERATION_NOT_FOUND' }) } as const
     const place = plugin.mapping.objects[op.object]?.visibleToFolder ?? ''
-    if (!folderReadable(member, place) || !mayRunAt(member, actor, op.who, {}, place)) {
+    if (!folderReadable(member, place) || !mayRunAt(member, actor, op.who, {}, place, { pluginId, recordId: null })) {
       return { refusal: refuse('forbidden', actor.kind === 'ai' && !op.who.includes('ai') ? 'この操作は AI からはできません' : 'この操作をする権限がありません', { code: 'NOT_ALLOWED' }) } as const
     }
     return { refusal: null, plugin, op, place } as const
@@ -222,7 +241,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor, useRoles }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

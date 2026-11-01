@@ -58,8 +58,11 @@ per まとまり, who holds which role. The core roles 本人 (`self`), 部署�
 - **Absence** (`actsFor`): no code of its own — the engine and `standing` already ask "does the
   absentee hold it?" for whom a delegate covers, so a delegate stands in for any holder of the
   role (not only the one asked).
-- Not yet: a plugin **operation's** `who` with `role:` (`plugin-operation-checks.ts`) still matches
-  no one (fails closed) — the resolver is not passed there yet (not part of C4). The notice `role_unassigned` (reserved in
+- **Operation `who`** (`plugin-operation-checks.ts` `mayRunAt`): `role:<name>` is met by the
+  member holding that plugin's role for the operation's record (`holdsForPlugin`: the まとまり's
+  override, else the company's; a create of a record not made yet: the company's), or by a
+  delegate of an absent holder (`actsFor`, applied in the binding in `composition/plugins.ts`).
+- Not yet: the notice `role_unassigned` (reserved in
   `NOTIFICATION_KINDS`) is not sent yet; an unassigned role's approval goes to an owner / admin.
 
 ## Routes (`routes/plugins.ts`)
@@ -90,6 +93,7 @@ the approval goes to the holder, a non-holding manager cannot approve; a まと�
 that deal only and only an owner / admin or its manager sets it; an absent holder's delegate;
 nobody assigned → an admin; the engine's `role:` action by the holder only),
 `server/tests/unit/plugin-roles.test.ts` (`mayApprove` / `stricterApprover` for roles, undeclared
-roles refused in a package's types and in `approval_by`), `admin/tests/integrations.test.tsx`
+roles refused in a package's types and in `approval_by`), `server/tests/integration/plugin-run-gate.test.ts`
+(an operation's `who` with `role:`: company, まとまり override, delegate), `admin/tests/integrations.test.tsx`
 「役割」, permission matrix rows + `CROSS`, `company-scoped-sql.test.ts` — each guard
 mutation-checked.

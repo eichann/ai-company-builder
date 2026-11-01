@@ -24,6 +24,7 @@ operations:
     who: [assignee, role:sales_manager, ai]
     note: optional
     decision: true
+    moves_money: true           # asks first like an operation reaching outside (contract 2)
 
 roles:
   sales_manager: { label: 営業の責任者, description: 金額の承認をする人 }

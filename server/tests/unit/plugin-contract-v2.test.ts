@@ -13,6 +13,8 @@
  *   entry is a file under `ui/`; `role:<name>` only for a declared role;
  * - settings are typed values within their bounds; a company Skill replaces a
  *   procedure only where the step allows it and never adds tools;
+ * - `moves_money` (contract 2, a business operation that writes) asks first
+ *   like reaching outside: never `auto`, whatever the company chooses;
  * - fingerprint v2 changes with any byte, name or file and ignores the
  *   signature slot; the signature slot is shape-checked, and a company's key
  *   signs only that company's own package.
@@ -22,7 +24,7 @@ import { describe, expect, it } from 'vitest'
 import { existsSync, readFileSync, readdirSync, statSync } from 'fs'
 import { join, relative } from 'path'
 import {
-  combineUse, companySkillOverrideProblem, parsePluginSignature, pluginFingerprintV2, pluginFingerprintV2Listing, settingValueProblem,
+  asksFirst, combineUse, companySkillOverrideProblem, effectiveFieldPolicy, effectiveOperationPolicy, parsePluginSignature, pluginFingerprintV2, pluginFingerprintV2Listing, settingValueProblem,
   stepToolsFor, validatePluginPackage, type PluginManifest, type PluginPackage,
 } from '../../../shared/core/plugins'
 
@@ -196,7 +198,7 @@ describe('plugin contract 2: the shapes of stages 4a / 4b', () => {
     expect(flowErrors(['at: [{ type: deal, state: open }]', 'at: [{ type: deal, state: lost }]'])).toMatch(/終わりの状態/)
     // plugin_operations only with a connector.
     const noConnector = flowWith(['connector: sample-hub >= 0.1.0\n', ''], ['objects:\n  deal: { record_type: deal }\n  company: { record_type: customer }\n', ''],
-      ['operations:\n  refresh_deal:\n    who: [viewer, ai]\n  update_deal:\n    who: [assignee, role:sales_manager, ai]\n    note: optional\n    decision: true\n', ''])
+      ['operations:\n  refresh_deal:\n    who: [viewer, ai]\n  update_deal:\n    who: [assignee, role:sales_manager, ai]\n    note: optional\n    decision: true\n    moves_money: true           # asks first like an operation reaching outside (contract 2)\n', ''])
     expect(errors(noConnector)).toMatch(/plugin_operations は、つなぎ先を使う業務のプラグイン/)
   })
 
@@ -248,5 +250,42 @@ describe('fingerprint v2 and the signature slot', () => {
     expect(parsePluginSignature(sig('div'), { ...official, contract: 1 }).ok).toBe(false)
     expect(parsePluginSignature(`${sig('div')}trusted: true\n`, official).ok).toBe(false)
     expect(parsePluginSignature(sig('div').replace('ed25519', 'none'), official).ok).toBe(false)
+  })
+})
+
+describe('an operation that moves money (moves_money)', () => {
+  const combineErrors = (files: Files) => { const c = combineUse(valid(files), valid(HUB).manifest); return c.ok ? '' : c.errors.join('\n') }
+  const combined = (files: Files) => {
+    const c = combineUse(valid(files), valid(HUB).manifest)
+    if (!c.ok) throw new Error(c.errors.join('\n'))
+    return c.value.manifest
+  }
+  const MONEY = '    moves_money: true           # asks first like an operation reaching outside (contract 2)\n'
+  const NOTE_OP = 'operations:\n'
+  const mapping = { objects: { deal: { fields: { next_step: { from: 'hs_next_step', write: true } } } }, policy: { next_step: 'auto' } } as never
+
+  it('asks first like reaching outside: a write is never auto, whatever the company chose', () => {
+    const m = combined(FLOW)
+    expect(m.operations.update_deal.movesMoney).toBe(true)
+    expect(m.operations.refresh_deal.movesMoney).toBe(false)
+    expect(asksFirst(m.operations.update_deal)).toBe(true)
+    expect(effectiveFieldPolicy(m, mapping, 'update_deal', 'next_step')).toBe('prior')
+    // Without it the same mapping writes at once (the clamp is the declaration's).
+    const plain = combined(flowWith([MONEY, '']))
+    expect(asksFirst(plain.operations.update_deal)).toBe(false)
+    expect(effectiveFieldPolicy(plain, mapping, 'update_deal', 'next_step')).toBe('auto')
+    // A create that moves money: `prior` by default, `auto` refused (declared, or chosen by the company).
+    const withNote = (extra: string) => flowWith([NOTE_OP, `${NOTE_OP}  add_note:\n    who: [assignee, ai]\n    moves_money: true\n${extra}`])
+    const n = combined(withNote(''))
+    expect(n.operations.add_note.policy).toBe('prior')
+    expect(effectiveOperationPolicy(n, 'add_note', { policy: { add_note: 'auto' } })).toBe('prior')
+    expect(combineErrors(withNote('    policy: auto\n'))).toMatch(/お金が動く操作は「自動」にできません/)
+  })
+
+  it('only on a contract-2 business operation that writes; a boolean', () => {
+    expect(flowErrors([MONEY, '    moves_money: maybe\n'])).toMatch(/moves_money は true か false です/)
+    expect(errors({ ...SALES, manifest: SALES.manifest.replace('    note: optional\n    decision: true\n', `    note: optional\n    decision: true\n${MONEY}`) })).toMatch(/moves_money は contract: 2 の包みだけ/)
+    expect(errors({ manifest: HUB.manifest.replace('    reaches: internal\n    undo: restore_previous\n', '    reaches: internal\n    undo: restore_previous\n    moves_money: true\n') })).toMatch(/「moves_money」は、つなぎ先を使う業務のプラグインの operations に書きます/)
+    expect(combineErrors(flowWith(['    who: [viewer, ai]\n', '    who: [viewer, ai]\n    moves_money: true\n']))).toMatch(/読む操作はお金を動かしません/)
   })
 })
