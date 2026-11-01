@@ -337,6 +337,7 @@ const api: ElectronAPI = {
   connectGoogleAll: (companyId: string) => invoke('google:connectAll', companyId),
   markGoogleSeen: (companyId: string) => invoke('google:markSeen', companyId),
   markSlackSeen: (companyId: string) => invoke('slack:markSeen', companyId),
+  getRecordThread: (companyId: string, recordId: string) => invoke('threads:get', companyId, recordId),
   // lane A ▲
   // lane B ▼
   // lane B ▲

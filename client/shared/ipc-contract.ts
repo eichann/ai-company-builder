@@ -49,6 +49,7 @@ import type { MailDraftEdit, OutboundMailResult } from './outbound-mail'
 // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
 // lane A ▼
 import type { SlackConnectResult, SlackFeature, SlackStatusResult } from './slack'
+import type { RecordThreadResult } from './threads'
 // lane A ▲
 // lane B ▼
 // lane B ▲
@@ -645,6 +646,8 @@ export interface IpcInvokeChannels {
   'google:connectAll': { args: [companyId: string]; result: GoogleConnectResult }
   'google:markSeen': { args: [companyId: string]; result: GoogleStatusResult }
   'slack:markSeen': { args: [companyId: string]; result: SlackStatusResult }
+  // The card's 元のスレッド (outbound-mail.md "Replies"): read now on the server with the member's own permission.
+  'threads:get': { args: [companyId: string, recordId: string]; result: RecordThreadResult }
   // lane A ▲
   // lane B ▼
   // lane B ▲
@@ -965,6 +968,7 @@ export interface ElectronAPI {
   connectGoogleAll: Invoke<'google:connectAll'>
   markGoogleSeen: Invoke<'google:markSeen'>
   markSlackSeen: Invoke<'slack:markSeen'>
+  getRecordThread: Invoke<'threads:get'>
   // lane A ▲
   // lane B ▼
   // lane B ▲
