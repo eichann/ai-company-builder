@@ -65,7 +65,7 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
      * A token bound to a run of a business plugin's step (`runId`, plan C4)
      * sees only that plugin's operations its step allows (`stepAllowsOperation`,
      * the gate's own rule — the gate still decides each call); a run that
-     * cannot be read sees none. A consultation or a core step: as before.
+     * cannot be read sees none. A core step's run: reads only. An ordinary consultation: as before.
      */
     async aiTools(member: Member, scope: 'read' | 'act', runId: string | null = null, conversationId: string | null = null): Promise<Outcome<PluginAiTools>> {
       const out: PluginAiTools['plugins'] = []
@@ -74,6 +74,8 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
       const run = boundStepOf(handle, member.userId, { runId, conversationId })
       if (run === 'missing') return ok({ plugins: [] })
       if (run) bound = parsePluginRunStep(run.step)
+      // A core step's run lists a business plugin's reads only (the gate refuses the rest).
+      const coreStep = run !== null && bound === null
       for (const install of handle.plugins.installs()) {
         if (bound && install.pluginId !== bound.pluginId) continue
         const evaluated = await evaluation.evaluate(member.companyId, install)
@@ -85,7 +87,7 @@ export function createPluginAiTools(deps: Pick<PluginServiceDeps, 'companyData'>
         for (const [name, op] of Object.entries(manifest.operations)) {
           if (!op.who.includes('ai')) continue
           if (step && !stepAllowsOperation(step, manifest, name)) continue
-          if (op.kind !== 'read' && scope !== 'act') continue
+          if (op.kind !== 'read' && (scope !== 'act' || coreStep)) continue
           if (op.kind === 'create') {
             const policy = effectiveOperationPolicy(manifest, name, mapping)
             if (policy !== 'auto' && policy !== 'prior') continue

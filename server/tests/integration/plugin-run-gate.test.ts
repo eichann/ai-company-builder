@@ -14,7 +14,8 @@
  *   the step's `approvals` and then only becomes an approval request;
  * - the connector roles are the step's (`mail.read` is not `mail.send`);
  * - the plugin switched off, or stopped by the operator: nothing passes;
- * - a consultation and a core step (minutes reading) keep what they had;
+ * - a consultation keeps what it had; a core step (minutes reading) only reads a business plugin
+ *   (plan C5: what a まとまり gets from a meeting is the plugin's own step);
  * - an operation that moves money (`moves_money`) asks first like one reaching
  *   outside: never direct, in a step only with `approvals` and then only a
  *   request;
@@ -342,7 +343,8 @@ describe("the AI's tool list of a step's run is its step's operations", () => {
   it("a consultation lists them all; a step what its step allows; a step without plugin_operations, another plugin's none", async () => {
     const all = await toolNames(null)
     expect(all).toEqual(expect.arrayContaining(['sample-sales.create_deal', 'sample-sales.refresh_deal', 'sample-sales.update_deal']))
-    expect(await toolNames(runOf('minutes-reading'))).toEqual(all)
+    // A core step lists a business plugin's reads only.
+    expect(await toolNames(runOf('minutes-reading'))).toEqual(['sample-sales.refresh_deal'])
     // work: plugin_operations without approvals — nothing that asks first (money, a new record).
     const work = await toolNames(runOf('sample-sales__work'))
     expect(work).toContain('sample-sales.refresh_deal')

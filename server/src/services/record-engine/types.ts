@@ -3,7 +3,15 @@ import type { Clock, IdGenerator } from '../../ports/clock'
 import type { CompanyDataSource } from '../../ports/company-data'
 import type { RecordFileWriter } from '../../ports/record-files'
 import type { Transactions } from '../../ports/transactions'
+import type { Member } from '../access'
 import type { AcceptanceQuestion } from '../task-acceptance'
+
+/**
+ * After an action ran (its state and ledger written): what happened, for a lane that reacts to it
+ * (plan C5: a meeting read moves its まとまり to a business plugin's step). Bound once
+ * (`useAfterAction`); a listener's failure never changes the action's answer.
+ */
+export type AfterActionListener = (member: Member, actor: ActorInput, done: { recordId: string; type: string; action: string; toState: string | null }) => Promise<void>
 
 /** Who holds a business role on a record (plan C3; services/plugin-roles.ts implements it). */
 export interface RoleHolders {

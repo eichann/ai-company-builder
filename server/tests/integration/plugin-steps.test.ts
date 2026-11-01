@@ -29,6 +29,7 @@ import type { AddressInfo } from 'net'
 import { serve, type ServerType } from '@hono/node-server'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
+import { ensureCoreTypes } from '../../src/services/record-index'
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
@@ -81,6 +82,12 @@ steps:
     start: person
     procedure: { default: steps/fixed.md }
     tools: [records]
+  reflect_meeting:
+    label: 会議を案件に反映する
+    for: { type: deal, state: after_meeting }
+    start: ai_turn
+    procedure: { default: steps/reflect.md }
+    tools: [records, plugin_operations]
 `
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -144,6 +151,12 @@ beforeAll(async () => {
   // Three contract-2 versions of the business plugin: 0.3.0 lets work pinned to 0.2.0 move at (deal, open).
   const base = join(shelfDir, 'sample-sales@0.1.0')
   const manifest = readFileSync(join(base, 'plugin.yaml'), 'utf8').replace('contract: 1', 'contract: 2')
+  // The deal gets a state after a meeting, reached by the AI (the meeting read moves it there).
+  const dealType = join(base, 'types', 'deal.md')
+  writeFileSync(dealType, readFileSync(dealType, 'utf8').replace('states: [open, won, lost]', `states: [open, talking, after_meeting, won, lost]
+actions:
+  meeting_held: { label: 会議のあと, from: [talking], to: after_meeting, who: [assignee, ai] }
+  reflected:    { label: 反映した, from: [after_meeting], to: open, who: [assignee, ai] }`))
   for (const [version, tools, upgrade] of [
     ['0.1.0', 'records', ''],
     ['0.2.0', 'records, plugin_operations', ''],
@@ -153,7 +166,7 @@ beforeAll(async () => {
     if (version !== '0.1.0') cpSync(base, dir, { recursive: true })
     writeFileSync(join(dir, 'plugin.yaml'), manifest.replace('version: 0.1.0', `version: ${version}`) + steps(tools) + upgrade)
     mkdirSync(join(dir, 'steps'), { recursive: true })
-    for (const s of ['work', 'prepare', 'fixed']) writeFileSync(join(dir, 'steps', `${s}.md`), `# ${s} ${version}\n`)
+    for (const s of ['work', 'prepare', 'fixed', 'reflect']) writeFileSync(join(dir, 'steps', `${s}.md`), `# ${s} ${version}\n`)
   }
   Object.assign(process.env, {
     BROKER_KEK_FILE: join(kekDir, 'kek'), PLUGINS_DIR: shelfDir, ACB_ALLOW_FAKE_UPSTREAMS: '1', ACB_FAKE_HUBSPOT_URL: `http://127.0.0.1:${port}`,
@@ -366,5 +379,102 @@ describe('another company never sees it', () => {
     expect(services.pluginSteps.stepSkills(outsider, 'sample-sales')).toMatchObject({ ok: false, kind: 'not-found' })
     expect(await services.aiRuns.claim(outsider, { recordId: d, step: 'sample-sales__work', deviceId: 'device-ps-other', conversationId: 'conv-x' }))
       .toMatchObject({ ok: false, kind: 'not-found' })
+  })
+})
+
+describe('a meeting read moves its まとまり to the business plugin\'s step (no guessing)', () => {
+  const stateOf = (id: string) => (db.prepare('SELECT state, version FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, id) as Json)
+  const setState = (id: string, state: string) => db.prepare('UPDATE record_state SET state = ?, version = version + 1 WHERE company_id = ? AND record_id = ?').run(state, CO, id)
+  let n = 0
+  /** A meeting being read (or its まとまり's part being done), assigned to `assignee`, linked to `bundle`. */
+  function meeting(bundle: string | null, state = 'reading', assignee = member.userId): string {
+    const handle = companyData.forCompany(CO)
+    ensureCoreTypes(handle.records, ts())
+    const id = `meeting-ps${String(++n).padStart(8, '0')}`
+    const typeVersion = (db.prepare("SELECT MAX(version) AS v FROM record_types WHERE company_id = ? AND name = 'meeting'").get(CO) as Json).v
+    handle.records.upsert({ id, type: 'meeting', typeVersion, scopeId: null, path: null, folder: null, personalOwner: null, title: `商談 ${n}`, summary: '', createdAt: ts(), updatedAt: ts(), removedAt: null })
+    handle.records.writeState({ recordId: id, state, fields: JSON.stringify({ assignee }), version: 1, updatedAt: ts() }, 0)
+    if (bundle) handle.records.replaceLinks(id, [{ sourceId: id, name: 'bundle', position: 0, targetId: bundle, targetPath: null }])
+    return id
+  }
+  const aiOf = (who: Json) => ({ kind: 'ai' as const, source: 'claude-code', conversationId: `conv-meet-${who.userId}`, runId: null })
+  const finish = (who: Json, id: string, action = 'finish_reading') =>
+    services.recordEngine.act(who, aiOf(who), id, action, { expectedVersion: 1, ...(action === 'finish_reading' ? { args: { summary_text: '要約' } } : {}) })
+
+  it('read → the deal moves to after_meeting by the AI for the reader, its note naming the meeting; the step is the AI\'s turn now', async () => {
+    const deal = recordOf('1000000002')
+    setState(deal, 'talking')
+    const m = meeting(deal)
+    expect(await finish(member, m)).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('after_meeting')
+    const entries = services.recordEngine.history(member, deal).value.entries as Json[]
+    const last = entries[entries.length - 1]
+    expect(last).toMatchObject({ action: 'meeting_held', actorId: member.userId, actorKind: 'ai' })
+    expect(last.note).toContain(m)
+    expect((services.pluginSteps.turns(member).value.turns as Json[]).some(t => t.recordId === deal && t.step === 'reflect_meeting')).toBe(true)
+    setState(deal, 'talking')
+  })
+
+  it("the まとまり chosen later: its part's finish moves the deal the same way", async () => {
+    const deal = recordOf('1000000002')
+    const m = meeting(deal, 'bundle_working')
+    expect(await finish(member, m, 'finish_bundle_work')).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('after_meeting')
+    setState(deal, 'talking')
+    // Its part not done (fail_bundle_work, also → read): nothing moves.
+    expect(await finish(member, meeting(deal, 'bundle_working'), 'fail_bundle_work')).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('talking')
+  })
+
+  it('no まとまり, already the AI\'s turn, no permission, or two ways there → nothing (the meeting is still read)', async () => {
+    const deal = recordOf('1000000002')
+    expect(stateOf(deal).state).toBe('talking')
+    expect(await finish(member, meeting(null))).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('talking')
+    // The reader (an owner who is not the deal's assignee) may not move it: the engine's who decides.
+    expect(await finish(owner, meeting(deal, 'reading', owner.userId))).toMatchObject({ ok: true })
+    expect(stateOf(deal).state).toBe('talking')
+    // Already at an ai_turn step's state (this one, or `work`'s open): nothing more.
+    for (const at of ['after_meeting', 'open']) {
+      setState(deal, at)
+      const before = stateOf(deal).version
+      expect(await finish(member, meeting(deal))).toMatchObject({ ok: true })
+      expect(stateOf(deal)).toMatchObject({ state: at, version: before })
+    }
+    setState(deal, 'talking')
+    // Two actions lead there: no guessing.
+    const row = db.prepare("SELECT version, definition FROM record_types WHERE company_id = ? AND name = 'deal' ORDER BY version DESC LIMIT 1").get(CO) as Json
+    const def = JSON.parse(row.definition)
+    const twin = { ...def, actions: { ...def.actions, meeting_held_again: { ...def.actions.meeting_held, label: 'もう一つ' } } }
+    db.prepare("UPDATE record_types SET definition = ? WHERE company_id = ? AND name = 'deal' AND version = ?").run(JSON.stringify(twin), CO, row.version)
+    try {
+      expect(await finish(member, meeting(deal))).toMatchObject({ ok: true })
+      expect(stateOf(deal).state).toBe('talking')
+      // A way there the AI may not take is not a second way: the one AI action runs.
+      const personOnly = { ...def, actions: { ...def.actions, meeting_held_again: { ...def.actions.meeting_held, who: ['assignee'] } } }
+      db.prepare("UPDATE record_types SET definition = ? WHERE company_id = ? AND name = 'deal' AND version = ?").run(JSON.stringify(personOnly), CO, row.version)
+      expect(await finish(member, meeting(deal))).toMatchObject({ ok: true })
+      expect(stateOf(deal).state).toBe('after_meeting')
+      setState(deal, 'talking')
+    } finally {
+      db.prepare("UPDATE record_types SET definition = ? WHERE company_id = ? AND name = 'deal' AND version = ?").run(row.definition, CO, row.version)
+    }
+  })
+})
+
+describe("the core's minutes reading writes nothing of a business plugin", () => {
+  it("a minutes-reading run may read the deal but not update it (the plugin's own step does that)", async () => {
+    const deal = recordOf('1000000002')
+    const at = ts()
+    const runId = 'ps-run-minutes'
+    companyData.forCompany(CO).aiRuns.insert({
+      id: runId, recordId: deal, step: 'minutes-reading', userId: member.userId, state: 'running', generation: 1, deviceId: 'device-ps-minutes',
+      conversationId: 'conv-ps-minutes', claimExpiresAt: new Date(Date.now() + 3_600_000).toISOString(), failureClass: null, failureCode: null,
+      retryAt: null, attempts: 0, pluginVersion: null, stepsVersion: null, procedure: null, createdAt: at, updatedAt: at, closedAt: null,
+    })
+    const version = (db.prepare('SELECT version FROM record_state WHERE company_id = ? AND record_id = ?').get(CO, deal) as Json).version
+    const ai = { kind: 'ai' as const, source: 'claude-code', conversationId: 'conv-ps-minutes', runId }
+    expect(await services.pluginOperations.run(member, ai, 'sample-sales', deal, 'update_deal', { expectedVersion: version, fields: { next_step: '見積' } })).toEqual(NOT_IN_STEP)
+    expect(await services.pluginOperations.run(member, ai, 'sample-sales', deal, 'refresh_deal', {})).not.toEqual(NOT_IN_STEP)
   })
 })

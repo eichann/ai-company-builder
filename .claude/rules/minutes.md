@@ -70,21 +70,28 @@ access itself: `google-connector.md` (G3).
 3. **Reading** — the AI (tool `minutes_read`) or the app reads the text (below), runs
    `meeting__start_reading`, makes the outputs with the existing tools (`records_create` task —
    assignee = attending member ids, due within a year —, `decisions_record` linking meeting /
-   bundle, the business plugin's `…__update_deal` (the first message names tools by that ending; `plugins.md` "Two roles") — prior fields become approval requests (G6) —, the HubSpot
-   meeting tool (G5), the mail draft (G8)), each citing the minutes text it rests on, then
+   bundle, the mail draft (G8)), each citing the minutes text it rests on, then
    `meeting__finish_reading` with a ≤ 300-character summary. Those three actions are `who: [ai]`
    (「AI の番」); `retry` / `skip` are the assignee's / an admin's. The optional server quote
    check (`quoteAppearsIn`) is not wired (owner §11: optional).
 
 ### A まとまり chosen later (meeting version 3, owner 2026-11-02)
 
-Read without a まとまり, the AI leaves the まとまり's part (the deal's fields, the meeting log). When a
+**What a まとまり gets from a meeting is not the core's** (coordinator decision 2026-11-02; the core
+names no business operation): the reading has no business plugin's tool, and the server refuses a
+core step's run any business plugin operation but a read (`plugin-operation-checks.ts`). When the
+meeting becomes `read` (`finish_reading`, or `finish_bundle_work` below) the server moves its
+まとまり to the business plugin's `ai_turn` step for it (`plugin-steps.md` "After a meeting is
+read", e.g. 「会議を案件に反映する」: the deal's fields and the meeting log), which runs as its own
+AI turn.
+
+Read without a まとまり, the AI leaves the まとまり's part. When a
 person then chooses one (`POST …/minutes/…/bundle` on a `read` meeting that had **no** `bundle`
 link), the same transition moves it `read → bundle_waiting` (`SERVICE_TRANSITIONS.meeting`): 「AI
 の番」 again, for that part only. The app's step `minutes-bundle` (`ai-turns.md` "Steps") claims
 the run (`step: 'minutes-bundle'`, one run per record and step), starts it with
 `start_bundle_work` (→ `bundle_working`) and has only `minutes_read`, the plugin's
-`…__update_deal` / `…__log_meeting` and `finish_bundle_work` / `fail_bundle_work` (both → `read`;
+`finish_bundle_work` / `fail_bundle_work` (both → `read`;
 the reason in the ledger's note). `retry_bundle_work` (bundle_working → bundle_waiting) is the
 put-back — after a failed run (`afterFailedRun`) and in the 30-minute rule — and
 `skip_bundle_work` (bundle_waiting → read) a person's 「しない」. **Once**: choosing again when a

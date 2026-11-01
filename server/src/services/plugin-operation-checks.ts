@@ -202,9 +202,18 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
    * The gate of a step's run (C4), checked before anything else so its one
    * answer tells nothing: an AI whose token is bound to a run of a business
    * plugin's step may call only that plugin's declared operations its step
-   * allows, while the plugin runs. A consultation or a core step: null.
+   * allows, while the plugin runs. A core step's run (minutes reading): reads only. An
+   * ordinary consultation: null.
    */
   async function stepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId' | 'conversationId'>, pluginId: string, operation: string) {
+    const run = actor.kind === 'ai' ? boundStepOf(companyData.forCompany(member.companyId), member.userId, actor) : null
+    if (run && run !== 'missing' && !parsePluginRunStep(run.step)) {
+      // A core step's run (minutes reading…) only reads a business plugin: what a まとまり gets from it
+      // is the business plugin's own step (plugin-steps.md "After a meeting is read"; the core names none).
+      const plugin = await plugins.active(member.companyId, pluginId)
+      const op = plugin.ok && Object.prototype.hasOwnProperty.call(plugin.plugin.manifest.operations, operation) ? plugin.plugin.manifest.operations[operation] : undefined
+      return op?.kind === 'read' ? null : notInStep()
+    }
     const bound = await boundStep(member, actor, pluginId)
     if (bound === null) return null
     return bound && stepAllowsOperation(bound.step, bound.manifest, operation) ? null : notInStep()

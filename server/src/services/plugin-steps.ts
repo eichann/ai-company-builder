@@ -35,6 +35,7 @@ import type { PluginStepOnRecord, PluginStepSkillsView, PluginStepStartView, Plu
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordRow } from '../ports/records'
+import type { ActorInput } from './record-engine/types'
 import { requireFullAccess, type Member } from './access'
 import type { AiTurnCheck } from './ai-runs'
 import { ok, refuse, type Outcome } from './outcome'
@@ -66,7 +67,12 @@ export interface PluginStepDeps {
   skillTree: (companyId: string, name: string) => Promise<string | null>
   /** Absentees a member stands in for today (services/absences.ts). */
   actsFor: (companyId: string, userId: string) => string[]
+  /** The record engine's action (its `who`, `mayAct`, compare-and-set): how a meeting read moves its まとまり. */
+  act?: (member: Member, actor: ActorInput, recordId: string, action: string, body: unknown) => Promise<Outcome<unknown>>
 }
+
+/** The meeting's actions that leave it read (its reading, or its まとまり's part chosen later). */
+const MEETING_READ_ACTIONS: readonly string[] = ['finish_reading', 'finish_bundle_work']
 
 interface InstalledStep {
   manifest: PluginManifest
@@ -212,6 +218,40 @@ export function createPluginStepService(deps: PluginStepDeps) {
 
   return {
     stepSkills,
+
+    /**
+     * After a meeting became `read` (the record engine's after-act, plan C5): its まとまり moves to
+     * a business plugin's `ai_turn` step, so that step (e.g. 「会議を案件に反映する」) becomes the
+     * AI's turn. The まとまり's type must be one an enabled contract-2 business plugin has an
+     * `ai_turn` step for; exactly one action of that type must lead there (`to` = a step's state,
+     * the current state in `from`, `ai` in `who`). It runs as the same AI for the member who read
+     * the meeting (the engine's `who` / `mayAct` apply), its note naming the meeting. Zero or two
+     * or more such actions, already at a step's state, no permission or a version conflict →
+     * nothing: no guessing. The core never names a business operation (owner rule).
+     */
+    async afterAct(member: Member, actor: ActorInput, done: { recordId: string; type: string; action: string; toState: string | null }): Promise<void> {
+      if (done.type !== 'meeting' || done.toState !== 'read' || !MEETING_READ_ACTIONS.includes(done.action) || !deps.act) return
+      const handle = companyData.forCompany(member.companyId)
+      const bundleId = handle.records.linksFrom([done.recordId]).find(l => l.name === 'bundle' && l.targetId)?.targetId
+      const bundle = bundleId ? readable(member, bundleId) : null
+      if (!bundleId || !bundle) return
+      const states = new Set<string>()
+      for (const i of handle.plugins.installs()) {
+        if (!i.enabled) continue
+        const m = shelf.find(member.companyId, i.pluginId, i.version)?.pkg.manifest
+        if (!m || m.role !== 'business' || m.contract < PLUGIN_CONTRACT_V2 || await shelf.isStopped(i.pluginId, i.version)) continue
+        for (const step of Object.values(m.steps)) if (step.start === 'ai_turn' && step.for.type === bundle.row.type) states.add(step.for.state)
+      }
+      if (states.size === 0 || states.has(bundle.state)) return
+      const def = currentTypes(handle.records).get(bundle.row.type)?.definition
+      const moves = Object.entries(def?.actions ?? {}).filter(([, a]) =>
+        a.to !== null && a.to !== undefined && states.has(a.to) && (a.from?.includes(bundle.state) ?? false) && a.who.includes('ai'))
+      if (moves.length !== 1) return
+      const title = handle.records.byIds([done.recordId])[0]?.title ?? ''
+      await deps.act(member, actor, bundleId, moves[0][0], {
+        expectedVersion: bundle.version, note: `会議「${title.slice(0, 80)}」（${done.recordId}）を読んだあと`.slice(0, 200),
+      })
+    },
 
     /**
      * Whether a record is in the member's 「AI の番」 for a plugin step's run

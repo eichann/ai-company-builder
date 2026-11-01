@@ -57,8 +57,9 @@ turns").
   and only the record tools the step declares (its `tools` in `client/shared/ai-turn-steps/<step>.ts`:
   minutes reading = `minutes_read`, `minutes_link_bundle`, the three `meeting__…_reading` actions,
   `records_create`, `decisions_record`, `mail_recipients`, `mail_draft_create` / `update` /
-  `show`, and a business plugin's `…__update_deal` / `…__log_meeting`; anything else is filtered
-  out and refused if called). There is deliberately **no `records_get`** (least privilege: the run
+  `show` — no business plugin's operation: what a まとまり gets from the meeting is the plugin's
+  own step, `plugin-steps.md` "After a meeting is read"; anything else is filtered out and refused
+  if called). There is deliberately **no `records_get`** (least privilege: the run
   reads only its meeting): the version it acts at comes from the first message, `minutes_read`'s
   answer (`version`), `minutes_link_bundle`'s answer, and a `VERSION_CONFLICT` refusal, which
   carries the record's version now (`refusalForAi`, `records/tools.ts`, for every record tool). Claude Code runs it with `settingSources: []` and
@@ -83,8 +84,8 @@ turns").
   B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
   start mark, `claimStates`), `minutes-bundle.ts` (the まとまり's part of a meeting read without one,
   `minutes.md` "A まとまり chosen later": only `minutes_read`, `meeting__finish_bundle_work` /
-  `fail_bundle_work` and the plugin's `__update_deal` / `__log_meeting` — nothing that makes
-  homework, decisions or mail). A type with no start mark
+  `fail_bundle_work` — it confirms the まとまり and finishes; the まとまり's own step follows,
+  `plugin-steps.md` "After a meeting is read"; nothing that makes homework, decisions or mail). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).

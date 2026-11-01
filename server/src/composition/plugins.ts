@@ -21,7 +21,9 @@ import { createPluginRoleService } from '../services/plugin-roles'
 import { parsePluginRunStep, type OperationRoleHolds, type RunStepOf } from '../services/plugin-operation-checks'
 import { createPluginStepService } from '../services/plugin-steps'
 import type { PluginShelf } from '../services/plugin-shelf'
-import type { RoleHolders } from '../services/record-engine/types'
+import type { Member } from '../services/access'
+import type { Outcome } from '../services/outcome'
+import type { ActorInput, AfterActionListener, RoleHolders } from '../services/record-engine/types'
 
 export interface PluginsLaneDeps {
   conn: Database.Database
@@ -29,7 +31,11 @@ export interface PluginsLaneDeps {
   clock: Clock
   pluginShelf: PluginShelf
   agentPolicy: Pick<AgentPolicyService, 'usePlugins'>
-  recordEngine: { useRoles(r: RoleHolders): void }
+  recordEngine: {
+    useRoles(r: RoleHolders): void
+    useAfterAction(f: AfterActionListener): void
+    act(member: Member, actor: ActorInput, recordId: string, action: string, body: unknown): Promise<Outcome<unknown>>
+  }
   approvals: { useRoles(r: ApprovalRoleHolders): void }
   pluginOperations: { useRoles(r: OperationRoleHolds): void; usePinnedSteps(f: RunStepOf): void }
   aiRuns: { usePluginSteps(r: PluginStepRuns): void }
@@ -43,7 +49,10 @@ export function wirePluginsLane(deps: PluginsLaneDeps) {
   // C5 「手順の自動実行」: a step's work is pinned at its first run; runs of `<pluginId>__<step>` are claimed at its state.
   const pluginSteps = createPluginStepService({
     companyData: deps.companyData, clock: deps.clock, shelf: deps.pluginShelf, skillTree: companySkillTree, actsFor: deps.actsFor,
+    act: (member, actor, recordId, action, body) => deps.recordEngine.act(member, actor, recordId, action, body),
   })
+  // A meeting read moves its まとまり to the business plugin's step for it (plan C5, plugin-steps.md).
+  deps.recordEngine.useAfterAction((member, actor, done) => pluginSteps.afterAct(member, actor, done))
   deps.aiRuns.usePluginSteps({
     isPluginStep: step => parsePluginRunStep(step) !== null,
     turnOf: (member, recordId, step) => pluginSteps.turnOf(member, recordId, step),

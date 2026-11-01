@@ -78,7 +78,26 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   roles and `GET /api/records-ai/plugins`): only that plugin's operations the step allows and its
   connector roles, narrowed by the pinned version; a company Skill pinned as its procedure never
   widens it.
+- **After a meeting is read** (coordinator decision 2026-11-02; `afterAct`, bound to the record
+  engine's after-action seam `useAfterAction` in `composition/plugins.ts`): when a meeting becomes `read`
+  by `finish_reading` or `finish_bundle_work` (not `fail_…` / `skip_…`), its `bundle` link's record —
+  readable by the member — moves to a business plugin's `ai_turn` step: an enabled, not stopped
+  contract-2 business plugin with an `ai_turn` step whose `for.type` is that record's type, and
+  **exactly one** action of that type with `to` = one of those steps' states, the current state in
+  `from` and `ai` in `who`. It runs through the engine as the same AI for the member who read the
+  meeting (`who` / `mayAct`, the delegate rule, the compare-and-set), note 「会議「…」（meeting-…）を
+  読んだあと」. Nothing (no guessing) when: no まとまり, the まとまり already at an `ai_turn` step's
+  state (it is the AI's turn already), zero or two or more such actions, the member may not, a
+  version conflict. A failure never changes the meeting's answer. The step then appears in the
+  member's `GET /me/plugin-step-turns`. The core's minutes reading writes nothing of a business
+  plugin (`minutes.md`).
 - Another company: the record and the plugin are the same 404 as none; no turns.
+- Test (after a meeting): `plugin-steps.test.ts` "a meeting read moves its まとまり…" (read → the
+  deal at the step's state by the AI for the reader, its note naming the meeting, the step in the
+  turns; the まとまり chosen later the same, its failed part nothing; no まとまり / already the AI's turn
+  / not the assignee / two AI ways → nothing; a person-only way is not a second way) and "the core's
+  minutes reading writes nothing…" (a minutes-reading run reads the deal, cannot update it) —
+  mutation-checked.
 - Test (person consultations): `plugin-steps.test.ts` "a person's consultation" (an ordinary
   consultation unchanged; only a started person step binds; bound → no plugin operation or role
   beyond the step's, with a company Skill as procedure; never rebound; another member's consultation
