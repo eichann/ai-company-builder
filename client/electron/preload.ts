@@ -147,6 +147,7 @@ const api: ElectronAPI = {
   createTask: (companyId: string, input: TaskCreateInput) => invoke('tasks:create', companyId, input),
   actOnTask: (companyId: string, recordId: string, input: TaskActInput) => invoke('tasks:act', companyId, recordId, input),
   getTaskCard: (companyId: string, recordId: string) => invoke('tasks:card', companyId, recordId),
+  getBundleChoices: (companyId: string) => invoke('tasks:bundles', companyId),
   linkFileToTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:linkFile', companyId, recordId, companyPath, expectedVersion),
   unlinkFileFromTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:unlinkFile', companyId, recordId, companyPath, expectedVersion),
   retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),

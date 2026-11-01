@@ -3,9 +3,10 @@ import { CaretDown, CaretRight } from '@phosphor-icons/react'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
 import type { TaskActInput, TaskCreateInput, TaskListData, TaskListItem } from '../../../../shared/tasks'
 import { useInterval } from '../../../shared/hooks/useInterval'
-import { actOnTask, createTask, linkFileToTask } from '../api'
+import { actOnTask, createTask, linkFileToTask, linkMeetingBundle } from '../api'
 import { useCalendarToday } from '../hooks/useCalendarToday'
 import { companyNow, companyPathOf, filterByTag, listEvents, listSections, tagCounts, type ListMode, type ListSection } from '../model'
+import { BundleChooser } from './BundleChooser'
 import { QuickAdd } from './QuickAdd'
 import { EventRow, TaskRow } from './TaskRow'
 
@@ -20,10 +21,16 @@ interface Props {
   aiTurns: AiTurnItemsView | null
   /** The opened record's card, drawn by the screen (the records feature). */
   renderCard: (recordId: string) => ReactNode
+  /**
+   * A received meeting the AI has not started (stopped, or no Claude Code): the member reads it in a
+   * consultation themselves, or puts it aside. Absent where the company reads no minutes.
+   */
+  meetingActions?: { read: (recordId: string) => void; skip: (recordId: string) => Promise<string | null> }
 }
 
 /** The task list tab (やること): the list on the left, the opened item's card on the right. */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions }: Props) {
+  const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
   const [opened, setOpened] = useState<string | null>(null)
@@ -81,6 +88,12 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard }
 
   const row = (i: TaskListItem) => {
     const ai = i.turn === 'ai' ? aiOf(i.id) : null
+    const extra: Array<{ label: string; run: () => void }> = []
+    if (i.needsBundle) extra.push({ label: 'まとまりを選ぶ', run: () => setChoosing(i) })
+    if (i.type === 'meeting' && i.turn === 'ai' && meetingActions && ai?.state !== 'running') {
+      extra.push({ label: '自分で読み取る', run: () => meetingActions.read(i.id) })
+      extra.push({ label: '今は読まない', run: () => void meetingActions.skip(i.id).then(e => { setMessage(e); list.reload() }) })
+    }
     const canFinish = i.own && i.turn === 'mine' && ['todo', 'in_progress', 'review', 'waiting'].includes(i.state ?? '')
     return (
       <TaskRow
@@ -91,6 +104,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard }
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
         onHand={ai?.canHand ? () => aiTurns?.handOver(i.id) : null}
         onDropFiles={i.type === 'task' && i.turn !== 'done' ? paths => void dropFiles(i, paths) : null}
+        extra={extra}
       />
     )
   }
@@ -113,6 +127,17 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard }
 
   return (
     <div className="flex h-full min-h-0 w-full">
+      {choosing && (
+        <BundleChooser
+          companyId={companyId} meetingTitle={choosing.title}
+          onChoose={async b => {
+            const r = await linkMeetingBundle(companyId, choosing.id, b.id)
+            list.reload()
+            return r?.success ? null : (r?.error ?? 'できませんでした。')
+          }}
+          onClose={() => setChoosing(null)}
+        />
+      )}
       <div className="flex w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
           <span className="text-[13px] font-semibold text-gray-800 dark:text-zinc-100">やること</span>

@@ -753,7 +753,7 @@ clock's, a separate service writing through the service writer: `notifications.m
 - **Notify** (duty 4): the members named by the action's `notify` and the new `next_actor`, never
   the actor, through the push channel's `notify` — event `records`, kind + version only (a fresh
   value), addressed by company × member (`agent-stop.md`). The app refetches; it never acts on the
-  event itself (0.18-1, SSE rule). The app's listeners: 「議事録が届きました」 (main asks the server
+  event itself (0.18-1, SSE rule). The app's listeners: received minutes (main asks the server
   again for the member's received minutes, `minutes.md` "The app") and the title bar's 「あなたの番」
   (`notifications.md`). `notify` also carries the ledger entry (`RecordChange`), from which the
   notices (知らせ) are written — never the actor, kind + record + version only

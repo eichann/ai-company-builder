@@ -61,7 +61,7 @@ test('when another PC took the AI turn first, nothing is sent from this one', as
 test('with Codex nothing is claimed or sent; the record says why and can be handed to the person', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual', autoturn: '1', agent: 'codex' })
   await expect(page.getByRole('status', { name: 'AI の番の自動実行' })).toContainText('Claude Code が必要です', { timeout: 15_000 })
-  const notice = page.getByRole('region', { name: '議事録のお知らせ' })
+  const notice = page.getByRole('region', { name: 'AI の番' })
   await expect(notice).toContainText('AI では始められません')
   await expect(notice.getByRole('button', { name: 'もう一度' })).toBeVisible()
   await notice.getByRole('button', { name: '人に渡す' }).click()
@@ -74,8 +74,8 @@ test('with Codex nothing is claimed or sent; the record says why and can be hand
 test('a failed run is handed to the person with the reason, and 「もう一度」 gives it back to the AI', async ({ page }) => {
   await openPreview(page, 'chat-header', { turn: 'manual', autoturn: 'fail' })
   await expect.poll(() => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length), { timeout: 15_000 }).toBe(1)
-  const notice = page.getByRole('region', { name: '議事録のお知らせ' })
-  await expect(notice).toContainText('AI が読み取っています')
+  const notice = page.getByRole('region', { name: 'AI の番' })
+  await expect(notice).toContainText('AI が進めています')
   await chat(page, c => c.finish())
   await expect(notice).toContainText('AI ができませんでした', { timeout: 15_000 })
   await expect(notice).toContainText('読み取れない')

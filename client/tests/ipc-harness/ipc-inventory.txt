@@ -148,6 +148,7 @@ contract.invoke skills:makePrivate
 contract.invoke skills:publish
 contract.invoke skills:toggleNurturing
 contract.invoke tasks:act
+contract.invoke tasks:bundles
 contract.invoke tasks:card
 contract.invoke tasks:create
 contract.invoke tasks:linkFile
@@ -296,6 +297,7 @@ contract.type ElectronAPI.getApiKeyStatus = getApiKeyStatus: Invoke<'config:getA
 contract.type ElectronAPI.getApproval = getApproval: Invoke<'approvals:get'>
 contract.type ElectronAPI.getAuthMode = getAuthMode: Invoke<'config:getAuthMode'>
 contract.type ElectronAPI.getAutoTurnSettings = getAutoTurnSettings: Invoke<'aiTurns:settings'>
+contract.type ElectronAPI.getBundleChoices = getBundleChoices: Invoke<'tasks:bundles'>
 contract.type ElectronAPI.getCalendarToday = getCalendarToday: Invoke<'calendar:today'>
 contract.type ElectronAPI.getChatServerInfo = getChatServerInfo: Invoke<'chat-server:getInfo'>
 contract.type ElectronAPI.getChatSession = getChatSession: Invoke<'chatHistory:getSession'>
@@ -665,6 +667,7 @@ contract.type IpcInvokeChannels.'skills:makePrivate' = 'skills:makePrivate': { a
 contract.type IpcInvokeChannels.'skills:publish' = 'skills:publish': { args: [rootPath: string, skillRelativePath: string]; result: SimpleResult }
 contract.type IpcInvokeChannels.'skills:toggleNurturing' = 'skills:toggleNurturing': { args: [skillMdPath: string, makeNurturing: boolean]; result: SimpleResult }
 contract.type IpcInvokeChannels.'tasks:act' = 'tasks:act': { args: [companyId: string, recordId: string, input: TaskActInput]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:bundles' = 'tasks:bundles': { args: [companyId: string]; result: BundleChoicesResult }
 contract.type IpcInvokeChannels.'tasks:card' = 'tasks:card': { args: [companyId: string, recordId: string]; result: TaskCardResult }
 contract.type IpcInvokeChannels.'tasks:create' = 'tasks:create': { args: [companyId: string, input: TaskCreateInput]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:linkFile' = 'tasks:linkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
@@ -890,6 +893,7 @@ main.handle skills:makePrivate @ features/skills/ipc.ts (rootPath: string, skill
 main.handle skills:publish @ features/skills/ipc.ts (rootPath: string, skillRelativePath: string)
 main.handle skills:toggleNurturing @ features/skills/ipc.ts (unsafeSkillMdPath: string, makeNurturing: boolean)
 main.handle tasks:act @ features/tasks/ipc.ts (companyId, recordId, input)
+main.handle tasks:bundles @ features/tasks/ipc.ts (companyId)
 main.handle tasks:card @ features/tasks/ipc.ts (companyId, recordId)
 main.handle tasks:create @ features/tasks/ipc.ts (companyId, input)
 main.handle tasks:linkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
@@ -998,6 +1002,8 @@ preload getAuthMode -> invoke config:getAuthMode()
 preload getAuthMode : () => Promise<AuthMode>
 preload getAutoTurnSettings -> invoke aiTurns:settings($0)
 preload getAutoTurnSettings : (companyId: string) => Promise<AutoTurnSettings>
+preload getBundleChoices -> invoke tasks:bundles($0)
+preload getBundleChoices : (companyId: string) => Promise<BundleChoicesResult>
 preload getCalendarToday -> invoke calendar:today($0)
 preload getCalendarToday : (companyId: string) => Promise<CalendarTodayResult>
 preload getChatServerInfo -> invoke chat-server:getInfo()

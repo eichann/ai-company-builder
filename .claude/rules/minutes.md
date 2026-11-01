@@ -158,15 +158,18 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
 - **The records signal** (push channel, `agent-stop.md`): `wireAgentControl`'s `onRecords` →
   `recordsSignal(companyId)`, which only re-reads the received minutes, for the company being
   watched and only while the grant was seen. The signal's content is never used.
-- **The notice** (`client/src/features/minutes/components/MinutesNotices.tsx`, under the
-  department bar): 「議事録が届きました：<件名> <M/D>」 per received record, with 「読み取る」 and
-  「今は読まない」 (`minutes:skip` → the type's `skip` with the session). 「議事録を確かめる」 is an
+- **No banner** (S11, owner decision 2026-11-01): the 「議事録が届きました」 notice under the
+  department bar is gone. A received record is a row of the task list's 「AI の番」 (the `ai-turn`
+  answer), with the automatic runner's state; while the AI has not started it, the row offers
+  「自分で読み取る」 (`src/features/minutes/startReading.ts`) and 「今は読まない」 (`minutes:skip` → the
+  type's `skip` with the session) — `tasks-ui.md` "Minutes and AI turns". 「議事録を確かめる」 is an
   icon button in the title bar (`MinutesCheckButton.tsx`), shown only while the grant allows minutes.
 - **Automatic reading** (stage 2 S10, `ai-turns.md`): with the company's 「自動で進める」 on and
   Claude Code chosen, the main window reads received minutes by itself in a hidden consultation
   (claimed with `start_reading` at the record's version read just before, then the same first message wrapped by
-  `autoMinutesFirstMessage`). The notice below stays as the fallback until S11.
-- **「読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
+  `autoMinutesFirstMessage`). What it made reaches the member as the task list's items (homework
+  tasks), the cards (the meeting's, a task's 「AI が用意したもの」) and notices.
+- **「自分で読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
   `chat.newConsultation { message, title, minutesId }` (`commands.md`). The chat starts a new
   consultation titled 「<件名> のあと（M/D）」 (kept, not generated), stores `minutesId` with the
   conversation, and sends the app-composed first message as the member's (`minutesFirstMessage`,
@@ -177,7 +180,13 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   the record's id and title only — **the app never has the minutes text**. An agent without
   record actions (registry `recordActions` false: Codex) gets 「議事録の読み取りは Claude Code の相談で
   できます」 and nothing starts.
-- **「どのまとまりの会議ですか？」** (`MinutesBundleChoiceCard.tsx`): when `minutes_read` answers no
+- **「どのまとまりの会議ですか？」 in 「あなたの番」** (S11): a meeting of the member read in the last
+  14 days with no `bundle` link — only where the company has some まとまり — is an item of the task
+  list's あなたの番 with 「まとまりを選ぶ」 (the unfinished まとまり the member reads, `tasks:bundles`;
+  choosing calls `minutes:linkBundle`). The first message tells the AI to leave the まとまり's fields
+  and the meeting log alone and finish the rest when none is linked, so an automatic run never waits
+  for a card nobody sees.
+- **The card in a consultation** (`MinutesBundleChoiceCard.tsx`): when `minutes_read` answers no
   linked まとまり and 0 or ≥ 2 candidates, the record tool (main) puts the app's card into the reply
   (data part `data-minutes-deal-choice` and the stored key `minutesDealChoices`, kept as named
   before for saved consultations; `bundleChoiceFor`) and tells the AI not to write to it until the

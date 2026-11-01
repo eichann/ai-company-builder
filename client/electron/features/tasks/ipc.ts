@@ -6,6 +6,8 @@
 //   tasks:act     an action on a record (引き受ける, 完了…): the server's engine decides who may
 //   tasks:card    one task's card (what the AI prepared, actions, 経緯, its runs waiting for a person);
 //                 opening it tells the server (POST …/opened), as the record card does
+//   tasks:bundles the unfinished まとまり the member reads, for 「どのまとまりの会議ですか？」 (the choice
+//                 itself is minutes:linkBundle)
 //   tasks:linkFile / tasks:unlinkFile   a company file or folder linked to a task, or the link
 //                 taken away (records.md "Linking files later": the server checks the member reads
 //                 both, and refuses a private folder's file for a task outside it)
@@ -24,7 +26,7 @@ import { taskCardOf, type TaskCardResult } from '../../../shared/task-card'
 import { OPERATION_KEY_RE } from '../../../../shared/core/ai-runs'
 import {
   classifyTasks, OPEN_TASK_STATES, TASKS_OFFLINE_TEXT,
-  type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskWriteResult,
+  type BundleChoicesResult, type TaskActInput, type TaskCreateInput, type TaskListResult, type TaskWriteResult,
 } from '../../../shared/tasks'
 import type { IpcRegistrar } from '../../ipc/registrar'
 
@@ -46,6 +48,8 @@ const opKey = (key: unknown): key is string => typeof key === 'string' && OPERAT
 const BAD_INPUT = { success: false as const, offline: false, code: 'BAD_REQUEST', error: '入力が正しくありません。' }
 /** At most this many records get their まとまり looked up per read (the rest show without it). */
 const BUNDLE_LOOKUPS = 150
+/** Meetings read this far back still ask for their まとまり when none was chosen. */
+const MEETING_BUNDLE_DAYS = 14
 
 type Answer = { status: number; json: { data?: unknown; error?: unknown; code?: unknown } | null } | null
 
@@ -104,7 +108,7 @@ export function createTasksApi(deps: TasksDeps) {
   /** Each record's まとまり (its outgoing `bundle` link), looked up once per record version. */
   async function bundles(companyId: string, list: RecordSummary[]): Promise<Record<string, { id: string; title: string }>> {
     const out: Record<string, { id: string; title: string }> = {}
-    const todo = list.filter(r => r.type === 'task').slice(0, BUNDLE_LOOKUPS)
+    const todo = list.filter(r => r.type === 'task' || r.type === 'meeting').slice(0, BUNDLE_LOOKUPS)
     let next = 0
     async function worker() {
       while (next < todo.length) {
@@ -159,6 +163,22 @@ export function createTasksApi(deps: TasksDeps) {
       return { success: true, card: taskCardOf({ me, detail, def: defs.get(detail.record.type), defs, entries, people: names, runs: runList }) }
     },
 
+    async bundles(companyId: string): Promise<BundleChoicesResult> {
+      if (!COMPANY.test(companyId)) return { success: false, offline: false, error: '入力が正しくありません。' }
+      const [a, defs] = await Promise.all([call(companyId, 'POST', '/records/query', { implements: 'bundle', limit: 200 }), typeDefs(companyId)])
+      const list = records(a)
+      if (!list) {
+        const f = failure('bundles', a)
+        return { success: false, offline: f.offline, error: f.error }
+      }
+      return {
+        success: true,
+        bundles: list
+          .filter(r => !(defs.get(r.type)?.final ?? []).includes(r.state ?? ''))
+          .map(r => ({ id: r.id, title: r.title || '（名前なし）', typeLabel: defs.get(r.type)?.label ?? r.type })),
+      }
+    },
+
     async linkFile(companyId: string, recordId: string, companyPath: string, expectedVersion: number, remove: boolean): Promise<TaskWriteResult> {
       const path = typeof companyPath === 'string' ? fileLinkPath(companyPath.normalize('NFC')) : null
       if (!COMPANY.test(companyId) || typeof recordId !== 'string' || !RECORD_ID_RE.test(recordId) || !path || !Number.isInteger(expectedVersion)) return BAD_INPUT
@@ -183,7 +203,8 @@ export function createTasksApi(deps: TasksDeps) {
       const id = await myId()
       if (!id) return { success: false, offline: true, error: TASKS_OFFLINE_TEXT }
       const since = new Date(dayWindow(now(), DEFAULT_COMPANY_TIME_ZONE).from).toISOString()
-      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings] = await Promise.all([
+      const meetingsSince = new Date(now() - MEETING_BUNDLE_DAYS * 86_400_000).toISOString()
+      const [myTurn, aiTurn, asked, doneMine, doneAsked, types, names, settings, meetings, anyBundle] = await Promise.all([
         call(companyId, 'GET', '/records/my-turn'),
         call(companyId, 'GET', '/records/ai-turn'),
         call(companyId, 'POST', '/records/query', { type: 'task', state: [...OPEN_TASK_STATES], fields: { requested_by: id }, limit: 200 }),
@@ -192,6 +213,8 @@ export function createTasksApi(deps: TasksDeps) {
         call(companyId, 'GET', '/records/types'),
         people(companyId),
         call(companyId, 'GET', '/task-settings'),
+        call(companyId, 'POST', '/records/query', { type: 'meeting', state: ['read'], finishedSince: meetingsSince, fields: { assignee: id }, limit: 50 }),
+        call(companyId, 'POST', '/records/query', { implements: 'bundle', countOnly: true }),
       ])
       if (myTurn?.status === 404 && myTurn.json?.code === 'RECORDS_DISABLED') {
         return { success: true, data: { available: false, listDepartmentIds: null, items: [] } }
@@ -207,13 +230,21 @@ export function createTasksApi(deps: TasksDeps) {
       for (const t of (types?.status === 200 ? (types.json?.data as { types?: RecordTypeView[] }).types ?? [] : [])) typeLabels[t.definition.name] = t.definition.label
       const ids = (settings?.status === 200 ? (settings.json?.data as { settings?: { taskListDepartmentIds?: unknown } }).settings?.taskListDepartmentIds : null)
       const doneToday = [...done1, ...done2]
-      const all = [...mine, ...ai, ...askedList, ...doneToday]
+      // A meeting asks for its まとまり only where the company has some to choose from.
+      const hasBundles = anyBundle?.status === 200 && ((anyBundle.json?.data as { total?: number }).total ?? 0) > 0
+      const readMeetings = hasBundles ? records(meetings) ?? [] : []
+      const all = [...mine, ...ai, ...askedList, ...doneToday, ...readMeetings]
+      const linked = await bundles(companyId, all)
       return {
         success: true,
         data: {
           available: true,
           listDepartmentIds: Array.isArray(ids) ? ids.filter((x): x is string => typeof x === 'string') : null,
-          items: classifyTasks({ me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, people: names, bundles: await bundles(companyId, all) }),
+          items: classifyTasks({
+            me: id, myTurn: mine, aiTurn: ai, asked: askedList, doneToday, typeLabels, people: names, bundles: linked,
+            // Only meetings whose link could be read: one not looked up never asks.
+            meetingsWithoutBundle: readMeetings.filter(m => bundleCache.get(`${companyId}:${m.id}@${m.version}`) === null),
+          }),
         },
       }
     },
@@ -259,6 +290,7 @@ export function registerTasksIpc(ipc: IpcRegistrar, deps: TasksDeps): void {
   ipc.handle('tasks:create', (_event, companyId, input) => api.create(typeof companyId === 'string' ? companyId : '', input))
   ipc.handle('tasks:act', (_event, companyId, recordId, input) => api.act(typeof companyId === 'string' ? companyId : '', recordId, input))
   ipc.handle('tasks:card', (_event, companyId, recordId) => api.card(typeof companyId === 'string' ? companyId : '', recordId))
+  ipc.handle('tasks:bundles', (_event, companyId) => api.bundles(typeof companyId === 'string' ? companyId : ''))
   ipc.handle('tasks:linkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>
     api.linkFile(typeof companyId === 'string' ? companyId : '', recordId, companyPath, expectedVersion, false))
   ipc.handle('tasks:unlinkFile', (_event, companyId, recordId, companyPath, expectedVersion) =>

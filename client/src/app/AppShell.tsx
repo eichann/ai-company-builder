@@ -44,7 +44,8 @@ import { useSaveBeforeLeaving } from '../features/editor/hooks/useSaveBeforeLeav
 import { LeaveConfirmDialog } from '../features/editor/components/LeaveConfirmDialog'
 import { useAuthStore } from '../stores/authStore'
 import { useMinutesNotices } from '../features/minutes/hooks/useMinutesNotices'
-import { MinutesNotices } from '../features/minutes/components/MinutesNotices'
+import { startMinutesReading } from '../features/minutes/startReading'
+import { skipMinutes } from '../features/minutes/api'
 import { MinutesCheckButton } from '../features/minutes/components/MinutesCheckButton'
 import type { AiTurnItemsView } from '../../shared/ai-turns'
 import { useNotices } from '../features/notifications/hooks/useNotices'
@@ -79,7 +80,8 @@ export function AppShell() {
   const rootPath = currentCompany?.rootPath
 
   const { departments, isLoading: isLoadingDepartments, refresh: refreshDepartments } = useDepartments(currentCompany?.id)
-  // 「議事録が届きました」: main checks while Google may read the member's minutes (features/minutes).
+  // Received minutes: main checks while Google may read the member's minutes (features/minutes); the
+  // AI turn runner reads them, the task list shows them in 「AI の番」.
   const minutes = useMinutesNotices(currentCompany?.id)
   // Where each of them stands with the automatic 「AI の番」 (the chat's runner reports it).
   const [aiTurnItems, setAiTurnItems] = useState<AiTurnItemsView | null>(null)
@@ -333,6 +335,10 @@ export function AppShell() {
           list={taskList}
           aiTurns={aiTurnItems}
           renderCard={recordCard}
+          meetingActions={minutes.available ? {
+            read: recordId => { const notice = minutes.notices.find(n => n.id === recordId); if (notice) startMinutesReading(notice) },
+            skip: async recordId => { const r = await skipMinutes(currentCompany.id, recordId); return r && !r.success ? r.error : null },
+          } : undefined}
         />
       ) : null,
     },
@@ -374,7 +380,6 @@ export function AppShell() {
         showNotDownloadedNote={isCompanyWide && sparseCheckout.enabled && !!unsyncedFolders && unsyncedFolders.size > 0}
         onOpenSettings={() => setShowSettings(true)}
       />
-      {minutes.available && currentCompany && <MinutesNotices companyId={currentCompany.id} notices={minutes.notices} aiTurns={aiTurnItems} />}
 
       {/* Main Content: the split tree (features/workspace/layoutTree.ts); the chat is one pane */}
       <SplitView

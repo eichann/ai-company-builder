@@ -1,4 +1,4 @@
-// 「議事録が届きました」's access to the main process (src/shared/ipc/electron-api.ts):
+// Received minutes' access to the main process (src/shared/ipc/electron-api.ts):
 // small ports, each function taking its port last (default window.electronAPI).
 // Main asks the company server with the member's session; nothing here holds minutes text.
 import type { ElectronPort } from '../../shared/ipc/electron-api'

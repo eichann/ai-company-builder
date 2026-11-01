@@ -6,7 +6,7 @@ import { getMinutesNotices, subscribeMinutes } from '../api'
 const NONE: MinutesNoticesResult = { available: false, notices: [] }
 
 /**
- * The company's received minutes waiting for the member (「議事録が届きました」):
+ * The company's received minutes waiting for the member (the AI turn runner's queue):
  * while mounted, main checks for new minutes for this company (start, every
  * 10 minutes) and tells when the notices may have changed; they are read again then.
  */

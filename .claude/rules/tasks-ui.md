@@ -7,6 +7,7 @@ paths:
   - "client/src/features/chat/components/PreparedMailCard.tsx"
   - "client/src/shared/lib/dragTypes.ts"
   - "client/src/features/files/contextMenuItems.tsx"
+  - "client/src/features/minutes/startReading.ts"
   - "client/electron/features/tasks/**"
   - "client/src/features/tasks/**"
   - "client/tests/tasks-*.test.ts"
@@ -125,6 +126,24 @@ company folder (`fileLinkPath`: no absolute path, no `..`); the server decides t
 readable by the member, never a private folder's file for a task outside it (one refusal,
 `FILE_NOT_LINKABLE`, shown as the server words it). Each link and removal is in 経緯.
 
+## Minutes and AI turns (S11, owner decision 2026-11-01: 議事録の帯をやめる)
+
+- No banner: a received meeting is a row of 「AI の番」 (the server's `ai-turn`), showing the automatic
+  runner's state in words and its reason (「AI が進めています」「AI では始められません：…」…), with
+  「もう一度」 / 「人に渡す」 when stopped and, while the AI has not started it, 「自分で読み取る」 (a
+  consultation the person starts, `startMinutesReading`) and 「今は読まない」 (`minutes:skip`) —
+  `meetingActions`, composed by `AppShell` from the minutes feature.
+- What the AI made shows where the member works: homework tasks in the list, drafts and approval
+  requests in a task's card (「AI が用意したもの」), and the server's notices.
+- 「どのまとまりの会議ですか？」 is an item of あなたの番: `tasks:list` also reads the member's meetings
+  read in the last 14 days (`finishedSince`), and one whose detail shows no `bundle` link — only when
+  the company has any まとまり (`implements: bundle`, `countOnly`) and only for a meeting whose
+  detail was read — becomes `needsBundle` (「どのまとまり（案件など）の会議か選んでください」) with
+  「まとまりを選ぶ」: `BundleChooser` lists the unfinished まとまり the member reads (`tasks:bundles`,
+  final states of each type left out) and links the chosen one (`minutes:linkBundle`; nothing goes
+  outside). The minutes first message tells the AI, when none is linked, to leave the まとまり's
+  fields and the meeting log and finish the rest.
+
 ## Tests
 
 `client/tests/tasks-list.test.ts` (each record once and in its place; only one's own task
@@ -137,4 +156,6 @@ assignee completes only on a stated OK and starts first; the AI's steps and what
 place does not allow never offered; the OK in words; prepared apart from links; an unknown result
 offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts` (also 「＋ファイルをつなぐ」,
 「外す」 and a dropped file), `client/tests/ui/file-tree.spec.ts` (「やることにつなぐ…」 only where the list
-shows); `tasks-list.test.ts` also: only a company path reaches the server.
+shows); `tasks-list.test.ts` also: only a company path reaches the server; a meeting read without a まとまり
+asks once, only when its link was read as missing and the company has まとまり. `tests/ui/ai-turns.spec.ts`
+and `minutes.spec.ts` drive the AI-turn row (`chat-header-ui.html`).

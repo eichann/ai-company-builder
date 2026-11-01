@@ -25,6 +25,7 @@ let data: TaskListData = {
     it({ id: 'task-ai0001', title: '日程の候補を探す', turn: 'ai', state: 'preparing' }),
     it({ id: 'task-oth001', title: '金額の変更の承認', turn: 'others', waitingFor: '阿部さんの番' }),
     it({ id: 'task-done01', title: '経費の申請', turn: 'done', state: 'done', finishedAt: new Date().toISOString() }),
+    it({ id: 'meeting-00aa11', type: 'meeting', typeLabel: '会議', title: 'C社 打ち合わせ', turn: 'mine', state: 'read', waitingFor: 'どのまとまり（案件など）の会議か選んでください', needsBundle: true }),
   ],
 }
 const changed = emitter<{ companyId: string }>()
@@ -45,6 +46,13 @@ installElectronAPI({
   createTask: async (_companyId, input) => {
     data = { ...data, items: [it({ id: 'task-new001', title: input.title, turn: 'mine', due: input.due ?? null, tags: input.tags ?? [], own: true, personal: true }), ...data.items] }
     return { success: true, recordId: 'task-new001' }
+  },
+  getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-c00001', title: 'C社 研修導入', typeLabel: '案件' }, { id: 'deal-c00002', title: 'C社 追加', typeLabel: '案件' }] }),
+  linkMinutesBundle: async (_companyId, meetingId, bundleId) => {
+    acted.push(`${meetingId}:bundle ${bundleId}`)
+    document.getElementById('acted')!.textContent = acted.join(',')
+    data = { ...data, items: data.items.filter(i => i.id !== meetingId) }
+    return { success: true }
   },
   linkFileToTask: async (_companyId, recordId, companyPath, version) => {
     acted.push(`${recordId}:link ${companyPath}@${version}`)
