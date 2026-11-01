@@ -69,7 +69,9 @@ each rule below with its test. The key broker's 「鍵」 unit stays in 「API �
   `server/tests/unit/push-channel.test.ts`). Released apps drop it (unknown kind); the app only
   refetches the policy on `policy` (`client/tests/agent-stop.test.ts`) and, on `records`, asks the
   server again for the member's received minutes (`minutes.md` "The app",
-  `client/tests/minutes-app.test.ts`). Nothing else.
+  `client/tests/minutes-app.test.ts`) and 「あなたの番」. Since the notices (`notifications.md`):
+  `event: notifications` + `{"kind":"notifications","version":"<fresh 32 hex>"}` to a member whose
+  notices or read state changed; the app only asks `/me/notifications` again. Nothing else.
 - **No content in an event**: kind + version only — never a reason, name or folder
   (`parsePushEvent` in `shared/types/agent-stop.ts` is the one shape; test "sends only kind +
   version, never the reason or a name").

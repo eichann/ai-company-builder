@@ -27,6 +27,8 @@ export interface AgentPushChannelDeps {
   refresh: (companyId: string, version?: string) => void
   /** A `records` event: something of the company map concerning this member changed (refetch only). */
   onRecords?: (companyId: string) => void
+  /** A `notifications` event: the member's notices or their read state changed (refetch only). */
+  onNotifications?: (companyId: string) => void
   fetch?: typeof fetch
   log?: Pick<Console, 'log' | 'warn'>
   random?: () => number
@@ -75,6 +77,12 @@ export function createAgentPushChannel(deps: AgentPushChannelDeps) {
   const safeRecords = (companyId: string) => {
     try { deps.onRecords?.(companyId) } catch (error) {
       log.warn(`[push] ${companyId}: records listener failed (${error instanceof Error ? error.message : 'unknown'})`)
+    }
+  }
+
+  const safeNotifications = (companyId: string) => {
+    try { deps.onNotifications?.(companyId) } catch (error) {
+      log.warn(`[push] ${companyId}: notifications listener failed (${error instanceof Error ? error.message : 'unknown'})`)
     }
   }
 
@@ -149,6 +157,7 @@ export function createAgentPushChannel(deps: AgentPushChannelDeps) {
             // records.md) only tells the records view to refetch, when one listens.
             if (item.event.kind === 'policy') safeRefresh(w.companyId, item.event.version)
             else if (item.event.kind === 'records') safeRecords(w.companyId)
+            else if (item.event.kind === 'notifications') safeNotifications(w.companyId)
           } else if (item.type === 'dropped') {
             log.warn(`[push] ${w.companyId}: dropped an event that is not allowed (${item.name})`)
           }

@@ -387,6 +387,11 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/deal`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
+  // The member's own notices (notifications.md): any member, their own only (no user id in the path).
+  r('GET /api/companies/:companyId/me/notifications', w => ({ path: `${C(w)}/me/notifications` }), MEMBERS),
+  r('POST /api/companies/:companyId/me/notifications/read', w => ({ path: `${C(w)}/me/notifications/read`, body: {} }), [400, 400, 400, 400, 404, 401]),
+  r('GET /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings` }), MEMBERS),
+  r('PUT /api/companies/:companyId/me/notifications/settings', w => ({ path: `${C(w)}/me/notifications/settings`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('GET /api/oauth/:provider/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
   // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
   // another person); Google is not set up here, so the answer is an empty list with a reason.

@@ -191,6 +191,9 @@ GET  /api/config                                  setup state (no auth)
                               GET /me/broker-keys, PUT|DELETE /me/broker-keys/:service
                                                                               key-broker.ts
                                                                 (「API キー」: key-broker.md)
+                              GET /me/notifications, POST /me/notifications/read,
+                              GET|PUT /me/notifications/settings              notifications.ts
+                                                                (知らせ: notifications.md)
                               GET|PUT /records/settings, GET /records/problems,
                               POST /records/reindex, GET /records/types,
                               POST /records/query, GET /records/item/:recordId,

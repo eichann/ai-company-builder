@@ -52,8 +52,19 @@ export interface RecordEngineDeps {
   isMember: (companyId: string, userId: string) => boolean
   /** The member's role in the company, or null (an assignee must be able to read the record). */
   roleOf: (companyId: string, userId: string) => string | null
-  /** Tell these members their 「あなたの番」 may have changed (push channel; kind + version only). */
-  notify: (companyId: string, userIds: string[]) => void
+  /**
+   * Tell these members their 「あなたの番」 may have changed (push channel; kind + version only).
+   * `change` says which ledger entry it was, for the notices (services/notifications.ts), which
+   * keep only kind, record, version and actor — never a value — and push nothing but a version.
+   */
+  notify: (companyId: string, userIds: string[], change?: RecordChange) => void
+}
+
+/** The entry a notify is about (the record's type and its server fields after the entry). */
+export interface RecordChange {
+  type: string
+  entry: LedgerEntry
+  fields: Record<string, LedgerValue>
 }
 
 /**
@@ -330,10 +341,10 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       .catch(err => logError('records', 'Writing the history line failed', err, { company: member.companyId }))
   }
 
-  function tell(member: Member, userIds: Array<LedgerValue | undefined>) {
+  function tell(member: Member, userIds: Array<LedgerValue | undefined>, change: RecordChange) {
     const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== member.userId))]
     if (to.length > 0) {
-      try { deps.notify(member.companyId, to) } catch { /* the 60 s check catches up */ }
+      try { deps.notify(member.companyId, to, change) } catch { /* the 60 s check catches up */ }
     }
   }
 
@@ -455,7 +466,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         records.appendLedger(entry)
       })
       // While it is the AI's turn nobody is told: the person hears when the AI hands it over.
-      if (initial === null || !aiTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee])
+      if (initial === null || !aiTurnStates(def).has(initial)) tell(member, [fields.next_actor, fields.assignee], { type: def.name, entry, fields })
       return ok({ record: summaryOf(records, id), entry })
     },
 
@@ -647,7 +658,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
 
       // Duty 4: tell whom the action names (and whose turn it now is).
-      tell(member, [...action.notify.map(n => nextFields[n]), nextFields.next_actor])
+      tell(member, [...action.notify.map(n => nextFields[n]), nextFields.next_actor], { type: row.type, entry, fields: nextFields })
       // Duty 5: the milestone line.
       if (action.historyLine) historyLine(member, row, action.label, actor, note, at)
       return ok({ record: summaryOf(records, row.id), entry })
@@ -722,7 +733,7 @@ export function createRecordEngine(deps: RecordEngineDeps) {
         return true
       })
       if (!written) return conflict('ほかの人が先に変えました。最新の状態を見てからもう一度お試しください', 'VERSION_CONFLICT')
-      tell(member, [nextFields.next_actor])
+      tell(member, [nextFields.next_actor], { type: row.type, entry, fields: nextFields })
       return ok({ record: summaryOf(records, row.id), entry })
     },
 
@@ -953,9 +964,9 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         const misses = link ? interfaceLinkMisses(records, link, valid) : []
         return valid.filter(t => !misses.includes(t)).map((t, i) => ({ sourceId: id, name, position: i, targetId: t, targetPath: null }))
       })
-      const tellAbout = (values: Record<string, LedgerValue>) => {
+      const tellAbout = (values: Record<string, LedgerValue>, entry: LedgerEntry) => {
         const to = [...new Set([values.assignee, values.next_actor].filter((u): u is string => typeof u === 'string'))]
-        if (to.length > 0) { try { deps.notify(companyId, to) } catch { /* the app's own check catches up */ } }
+        if (to.length > 0) { try { deps.notify(companyId, to, { type: def.name, entry, fields: values }) } catch { /* the app's own check catches up */ } }
       }
       const title = input.title === null ? null : input.title.normalize('NFC').slice(0, 200)
 
@@ -980,7 +991,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
           if (!records.writeState({ recordId: id, state: def.initial, fields: JSON.stringify(fields), version: 1, updatedAt: at }, 0)) throw new Error('record id taken')
           records.appendLedger(entry)
         })
-        tellAbout(fields)
+        tellAbout(fields, entry)
         return { ok: true, recordId: id, version: 1, created: true, changed: true, entry, problems }
       }
 
@@ -1025,7 +1036,7 @@ export function createExternalRecordWriter(deps: Pick<RecordEngineDeps, 'company
         return true
       })
       if (!written) return { ok: false, reason: 'stale' }
-      tellAbout(next)
+      tellAbout(next, entry)
       return { ok: true, recordId: row.id, version: entry.version, created: false, changed: true, entry, problems }
     },
   }
@@ -1131,9 +1142,9 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
     return { values }
   }
 
-  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>) {
+  function tell(companyId: string, actorId: string, userIds: Array<LedgerValue | undefined>, change: RecordChange) {
     const to = [...new Set(userIds.filter((u): u is string => typeof u === 'string' && u !== actorId))]
-    if (to.length > 0) { try { deps.notify(companyId, to) } catch { /* the app's own check catches up */ } }
+    if (to.length > 0) { try { deps.notify(companyId, to, change) } catch { /* the app's own check catches up */ } }
   }
 
   /** Everything `create` checks, without writing: the prepared rows, or why not. */
@@ -1219,7 +1230,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         written = false
       }
       if (!written) return fail('exists')
-      tell(companyId, input.actor.id, [values.assignee, values.next_actor])
+      tell(companyId, input.actor.id, [values.assignee, values.next_actor], { type: def.name, entry, fields: values })
       return { ok: true, record: recordSummaries(records, records.byIds([id])).get(id) as RecordSummary, entry }
     },
 
@@ -1284,7 +1295,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         return true
       })
       if (!written) return fail('stale')
-      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])])
+      tell(companyId, input.actor.id, [next.assignee, next.next_actor, ...(input.notify ?? [])], { type: row.type, entry, fields: next })
       return { ok: true, record: recordSummaries(records, [row]).get(row.id) as RecordSummary, entry }
     },
   }

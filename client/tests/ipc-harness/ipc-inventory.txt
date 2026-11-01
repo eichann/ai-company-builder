@@ -8,6 +8,7 @@ contract.events chatWindow:fileRequested
 contract.events fs:changes
 contract.events handoff:changed
 contract.events minutes:changed
+contract.events notifications:changed
 contract.events setup:progress
 contract.events sparse:progress
 contract.events tool-approval-request
@@ -112,6 +113,11 @@ contract.invoke minutes:linkDeal
 contract.invoke minutes:notices
 contract.invoke minutes:skip
 contract.invoke minutes:watch
+contract.invoke notifications:markRead
+contract.invoke notifications:setSetting
+contract.invoke notifications:settings
+contract.invoke notifications:state
+contract.invoke notifications:watch
 contract.invoke outboundMail:addRecipient
 contract.invoke outboundMail:discard
 contract.invoke outboundMail:get
@@ -283,6 +289,8 @@ contract.type ElectronAPI.getGoogleStatus = getGoogleStatus: Invoke<'google:stat
 contract.type ElectronAPI.getHandoff = getHandoff: Invoke<'handoff:get'>
 contract.type ElectronAPI.getMinutesNotices = getMinutesNotices: Invoke<'minutes:notices'>
 contract.type ElectronAPI.getMyPrivateFolders = getMyPrivateFolders: Invoke<'privateFolders:mine'>
+contract.type ElectronAPI.getNotificationSettings = getNotificationSettings: Invoke<'notifications:settings'>
+contract.type ElectronAPI.getNotificationsState = getNotificationsState: Invoke<'notifications:state'>
 contract.type ElectronAPI.getOutboundMail = getOutboundMail: Invoke<'outboundMail:get'>
 contract.type ElectronAPI.getOutboundMailRecipients = getOutboundMailRecipients: Invoke<'outboundMail:recipients'>
 contract.type ElectronAPI.getPathForFile = getPathForFile: (file: File) => string
@@ -313,6 +321,7 @@ contract.type ElectronAPI.listChatWindows = listChatWindows: Invoke<'chatWindow:
 contract.type ElectronAPI.listOwnBrokerKeys = listOwnBrokerKeys: Invoke<'brokerKeys:list'>
 contract.type ElectronAPI.listSkills = listSkills: Invoke<'skills:list'>
 contract.type ElectronAPI.makeSkillPrivate = makeSkillPrivate: Invoke<'skills:makePrivate'>
+contract.type ElectronAPI.markNotificationsRead = markNotificationsRead: Invoke<'notifications:markRead'>
 contract.type ElectronAPI.moveEnvKeyToServer = moveEnvKeyToServer: Invoke<'brokerKeys:moveFromEnv'>
 contract.type ElectronAPI.moveFromExternal = moveFromExternal: Invoke<'fs:moveFromExternal'>
 contract.type ElectronAPI.moveItem = moveItem: Invoke<'fs:move'>
@@ -327,6 +336,7 @@ contract.type ElectronAPI.onFileChanges = onFileChanges: Subscribe<'fs:changes'>
 contract.type ElectronAPI.onFileRequestedFromChatWindow = onFileRequestedFromChatWindow: Subscribe<'chatWindow:fileRequested'>
 contract.type ElectronAPI.onHandoffChanged = onHandoffChanged: Subscribe<'handoff:changed'>
 contract.type ElectronAPI.onMinutesChanged = onMinutesChanged: Subscribe<'minutes:changed'>
+contract.type ElectronAPI.onNotificationsChanged = onNotificationsChanged: Subscribe<'notifications:changed'>
 contract.type ElectronAPI.onSetupProgress = onSetupProgress: Subscribe<'setup:progress'>
 contract.type ElectronAPI.onSparseProgress = onSparseProgress: Subscribe<'sparse:progress'>
 contract.type ElectronAPI.onToolApprovalRequest = onToolApprovalRequest: Subscribe<'tool-approval-request'>
@@ -359,6 +369,7 @@ contract.type ElectronAPI.sendOutboundMail = sendOutboundMail: Invoke<'outboundM
 contract.type ElectronAPI.setAgentEnvPassthrough = setAgentEnvPassthrough: Invoke<'config:setAgentEnvPassthrough'>
 contract.type ElectronAPI.setApiKey = setApiKey: Invoke<'config:setApiKey'>
 contract.type ElectronAPI.setAuthMode = setAuthMode: Invoke<'config:setAuthMode'>
+contract.type ElectronAPI.setNotificationSetting = setNotificationSetting: Invoke<'notifications:setSetting'>
 contract.type ElectronAPI.setPermissionMode = setPermissionMode: Invoke<'config:setPermissionMode'>
 contract.type ElectronAPI.setServerUrl = setServerUrl: Invoke<'config:setServerUrl'>
 contract.type ElectronAPI.signIn = signIn: Invoke<'auth:signIn'>
@@ -381,6 +392,7 @@ contract.type ElectronAPI.validateServerUrl = validateServerUrl: Invoke<'config:
 contract.type ElectronAPI.voiceInput = voiceInput: VoiceInputAPI
 contract.type ElectronAPI.watchCompany = watchCompany: Invoke<'fs:watch'>
 contract.type ElectronAPI.watchMinutes = watchMinutes: Invoke<'minutes:watch'>
+contract.type ElectronAPI.watchNotifications = watchNotifications: Invoke<'notifications:watch'>
 contract.type ElectronAPI.withdrawApproval = withdrawApproval: Invoke<'approvals:withdraw'>
 contract.type ElectronAPI.writeFile = writeFile: Invoke<'fs:writeFile'>
 contract.type EnvStatusResult = export interface EnvStatusResult { }
@@ -482,6 +494,7 @@ contract.type IpcEventChannels.'chatWindow:fileRequested' = 'chatWindow:fileRequ
 contract.type IpcEventChannels.'fs:changes' = 'fs:changes': [changes: FileChangeEvent[]]
 contract.type IpcEventChannels.'handoff:changed' = 'handoff:changed': [scope: { companyId: string; sessionId: string }]
 contract.type IpcEventChannels.'minutes:changed' = 'minutes:changed': [data: { companyId: string }]
+contract.type IpcEventChannels.'notifications:changed' = 'notifications:changed': [data: { companyId: string }]
 contract.type IpcEventChannels.'setup:progress' = 'setup:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'sparse:progress' = 'sparse:progress': [data: DownloadProgress]
 contract.type IpcEventChannels.'tool-approval-request' = 'tool-approval-request': [data: ToolApprovalRequest]
@@ -587,6 +600,11 @@ contract.type IpcInvokeChannels.'minutes:linkDeal' = 'minutes:linkDeal': { args:
 contract.type IpcInvokeChannels.'minutes:notices' = 'minutes:notices': { args: [companyId: string]; result: MinutesNoticesResult }
 contract.type IpcInvokeChannels.'minutes:skip' = 'minutes:skip': { args: [companyId: string, minutesId: string]; result: MinutesActionResult }
 contract.type IpcInvokeChannels.'minutes:watch' = 'minutes:watch': { args: [companyId: string | null]; result: void }
+contract.type IpcInvokeChannels.'notifications:markRead' = 'notifications:markRead': { args: [companyId: string, ids: string[] | 'all']; result: NoticesActionResult }
+contract.type IpcInvokeChannels.'notifications:setSetting' = 'notifications:setSetting': { args: [companyId: string, kind: string, on: boolean]; result: NoticesActionResult }
+contract.type IpcInvokeChannels.'notifications:settings' = 'notifications:settings': { args: [companyId: string]; result: { success: true; kinds: Record<string, boolean> } | { success: false; error: string } }
+contract.type IpcInvokeChannels.'notifications:state' = 'notifications:state': { args: [companyId: string]; result: NoticesState }
+contract.type IpcInvokeChannels.'notifications:watch' = 'notifications:watch': { args: [companyId: string | null]; result: void }
 contract.type IpcInvokeChannels.'outboundMail:addRecipient' = 'outboundMail:addRecipient': { args: [companyId: string, messageId: string, email: string, name?: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:discard' = 'outboundMail:discard': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
 contract.type IpcInvokeChannels.'outboundMail:get' = 'outboundMail:get': { args: [companyId: string, messageId: string]; result: OutboundMailResult }
@@ -792,6 +810,11 @@ main.handle minutes:linkDeal @ features/minutes/ipc.ts (companyId, minutesId, de
 main.handle minutes:notices @ features/minutes/ipc.ts (companyId)
 main.handle minutes:skip @ features/minutes/ipc.ts (companyId, minutesId)
 main.handle minutes:watch @ features/minutes/ipc.ts (companyId)
+main.handle notifications:markRead @ features/notifications/ipc.ts (companyId, ids)
+main.handle notifications:setSetting @ features/notifications/ipc.ts (companyId, kind, on)
+main.handle notifications:settings @ features/notifications/ipc.ts (companyId)
+main.handle notifications:state @ features/notifications/ipc.ts (companyId)
+main.handle notifications:watch @ features/notifications/ipc.ts (companyId)
 main.handle outboundMail:addRecipient @ features/outbound-mail/ipc.ts (companyId, messageId, email, name)
 main.handle outboundMail:discard @ features/outbound-mail/ipc.ts (companyId, messageId)
 main.handle outboundMail:get @ features/outbound-mail/ipc.ts (companyId, messageId)
@@ -837,6 +860,7 @@ main.send chatWindow:fileRequested @ features/chat-windows/ipc.ts
 main.send fs:changes @ features/fs/ipc.ts
 main.send handoff:changed @ main.ts
 main.send minutes:changed @ main.ts
+main.send notifications:changed @ main.ts
 main.send setup:progress @ features/company-setup/ipc.ts
 main.send sparse:progress @ features/download-choices/ipc.ts
 main.send tool-approval-request @ main.ts
@@ -930,6 +954,10 @@ preload getMinutesNotices -> invoke minutes:notices($0)
 preload getMinutesNotices : (companyId: string) => Promise<MinutesNoticesResult>
 preload getMyPrivateFolders -> invoke privateFolders:mine($0)
 preload getMyPrivateFolders : (companyId: string) => Promise<{ success: true; folders: MyPrivateFolder[]; } | PrivateFoldersFailure>
+preload getNotificationSettings -> invoke notifications:settings($0)
+preload getNotificationSettings : (companyId: string) => Promise<{ success: true; kinds: Record<string, boolean>; } | { success: false; error: string; }>
+preload getNotificationsState -> invoke notifications:state($0)
+preload getNotificationsState : (companyId: string) => Promise<NoticesState>
 preload getOutboundMail -> invoke outboundMail:get($0, $1)
 preload getOutboundMail : (companyId: string, messageId: string) => Promise<OutboundMailResult>
 preload getOutboundMailRecipients -> invoke outboundMail:recipients($0, $1)
@@ -990,6 +1018,8 @@ preload listSkills -> invoke skills:list($0, $1, $2, $3, $4)
 preload listSkills : (rootPath: string, departmentFolder: string, departmentId: string, departmentName?: string | undefined, options?: { force?: boolean | undefined; } | undefined) => Promise<SkillsResult>
 preload makeSkillPrivate -> invoke skills:makePrivate($0, $1)
 preload makeSkillPrivate : (rootPath: string, skillRelativePath: string) => Promise<SimpleResult & { code?: "already_shared" | undefined; }>
+preload markNotificationsRead -> invoke notifications:markRead($0, $1)
+preload markNotificationsRead : (companyId: string, ids: string[] | "all") => Promise<NoticesActionResult>
 preload moveEnvKeyToServer -> invoke brokerKeys:moveFromEnv($0, $1, $2)
 preload moveEnvKeyToServer : (companyId: string, rootPath: string, name: string) => Promise<OwnKeyMoveResult>
 preload moveFromExternal -> invoke fs:moveFromExternal($0, $1)
@@ -1018,6 +1048,8 @@ preload onHandoffChanged -> on handoff:changed(<fn>) ; removeListener handoff:ch
 preload onHandoffChanged : (callback: (scope: { companyId: string; sessionId: string; }) => void) => () => void
 preload onMinutesChanged -> on minutes:changed(<fn>) ; removeListener minutes:changed(<fn>)
 preload onMinutesChanged : (callback: (data: { companyId: string; }) => void) => () => void
+preload onNotificationsChanged -> on notifications:changed(<fn>) ; removeListener notifications:changed(<fn>)
+preload onNotificationsChanged : (callback: (data: { companyId: string; }) => void) => () => void
 preload onSetupProgress -> on setup:progress(<fn>) ; removeListener setup:progress(<fn>)
 preload onSetupProgress : (callback: (data: DownloadProgress) => void) => () => void
 preload onSparseProgress -> on sparse:progress(<fn>) ; removeListener sparse:progress(<fn>)
@@ -1082,6 +1114,8 @@ preload setApiKey -> invoke config:setApiKey($0)
 preload setApiKey : (apiKey: string) => Promise<SimpleResult>
 preload setAuthMode -> invoke config:setAuthMode($0)
 preload setAuthMode : (mode: AuthMode) => Promise<boolean>
+preload setNotificationSetting -> invoke notifications:setSetting($0, $1, $2)
+preload setNotificationSetting : (companyId: string, kind: string, on: boolean) => Promise<NoticesActionResult>
 preload setPermissionMode -> invoke config:setPermissionMode($0)
 preload setPermissionMode : (mode: "auto" | "default" | "bypassPermissions") => Promise<boolean>
 preload setServerUrl -> invoke config:setServerUrl($0)
@@ -1142,6 +1176,8 @@ preload watchCompany -> invoke fs:watch($0)
 preload watchCompany : (rootPath: string) => Promise<SimpleResult>
 preload watchMinutes -> invoke minutes:watch($0)
 preload watchMinutes : (companyId: string | null) => Promise<void>
+preload watchNotifications -> invoke notifications:watch($0)
+preload watchNotifications : (companyId: string | null) => Promise<void>
 preload withdrawApproval -> invoke approvals:withdraw($0, $1)
 preload withdrawApproval : (companyId: string, approvalId: string) => Promise<ApprovalResult>
 preload writeFile -> invoke fs:writeFile($0, $1)
