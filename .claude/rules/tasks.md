@@ -35,7 +35,7 @@ The task list screen, the AI's turn running by itself and the shared inbox come 
 - `reply` (返事の目安 of a message that names no deadline): `next-business-day` (翌営業日, the
   default) or `same-day` (当日中) with `sameDayCutoff` (`HH:MM`, default 17:00). Only `same-day`
   uses the cutoff.
-- `autoRun` (自動で進める): `enabled` (default off), `dailyLimit` per member per day (default 30,
+- `autoRun` (自動で進める): `enabled` (default **on**, owner decision 2026-11-01; an admin turns it off), `dailyLimit` per member per day (default 30,
   1–500), `stopAfterFailures` in a row (default 3, 1–20). Sending and approving are always pressed
   by a person whatever this says (approvals.md, outbound-mail.md); the runner (S10) enforces the
   limits.

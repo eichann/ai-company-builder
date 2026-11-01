@@ -24,6 +24,8 @@ export interface ServiceActor {
   proposedBy?: 'ai' | null
   /** The absent member a delegate stood in for (「代わりに（本来は X）」); the calling service decides it. */
   onBehalfOf?: string | null
+  /** The AI's execution run (S10b), from its token. */
+  runId?: string | null
 }
 
 /** A new record of a service-owned type (`SERVICE_OWNED_TYPES`). */
@@ -183,6 +185,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         ],
         attachments: [], decision: null, isDecision: false, typeVersion: def.version, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
+        runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
       }
       const existing = records.find(id)
       let written = false
@@ -260,6 +263,7 @@ export function createServiceRecordWriter(deps: Pick<RecordEngineDeps, 'companyD
         isDecision, typeVersion: row.typeVersion, reversesVersion: null,
         proposedBy: input.actor.kind === 'human' && input.actor.proposedBy === 'ai' ? 'ai' : null, conversationId: input.actor.conversationId ?? null,
         ...(input.actor.onBehalfOf ? { onBehalfOf: input.actor.onBehalfOf } : {}),
+        runId: input.actor.kind === 'ai' ? input.actor.runId ?? null : null,
       }
       const written = deps.transactions.run(() => {
         if (!records.writeState({ recordId: row.id, state: nextState, fields: JSON.stringify(next), version: entry.version, updatedAt: at }, version)) return false

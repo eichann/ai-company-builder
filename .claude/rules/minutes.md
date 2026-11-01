@@ -137,6 +137,10 @@ Records off → 404 `RECORDS_DISABLED`. The AI's emergency stop ends record toke
   department bar): 「議事録が届きました：<件名> <M/D>」 per received record, with 「読み取る」 and
   「今は読まない」 (`minutes:skip` → the type's `skip` with the session). 「議事録を確かめる」 is an
   icon button in the title bar (`MinutesCheckButton.tsx`), shown only while the grant allows minutes.
+- **Automatic reading** (stage 2 S10, `ai-turns.md`): with the company's 「自動で進める」 on and
+  Claude Code chosen, the main window reads received minutes by itself in a hidden consultation
+  (claimed with `start_reading` at the record's version, then the same first message wrapped by
+  `autoMinutesFirstMessage`). The notice below stays as the fallback until S11.
 - **「読み取る」 = the person starts the reading once** (design §9 q6, §4-7): command
   `chat.newConsultation { message, title, minutesId }` (`commands.md`). The chat starts a new
   consultation titled 「<件名> のあと（M/D）」 (kept, not generated), stores `minutesId` with the

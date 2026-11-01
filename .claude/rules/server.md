@@ -100,7 +100,9 @@ construction, not by remembering a check (owner plan 0.13–0.14).
   members' grants, pending starts, history, `adapters/sqlite/connectors.ts`, `google-connector.md`)
   and `outbound` (mail drafts, their recipients per version, typed addresses, send attempts,
   `adapters/sqlite/outbound-mail.ts`, `outbound-mail.md`) and `tasks` (the task settings and
-  department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`).
+  department membership 所属する部署, `adapters/sqlite/task-settings.ts`, `tasks.md`) and `aiRuns`
+  (execution runs of 「AI の番」 and their operations by idempotency key, `adapters/sqlite/ai-runs.ts`,
+  `records.md` "Execution runs").
   Every company table has `company_id`, and handle statements filter by it directly. New tables
   (stage 4: types, company map, state engine…) are created behind the handle from the start,
   with `company_id`.
@@ -205,6 +207,10 @@ GET  /api/config                                  setup state (no auth)
                               POST /records/item/:recordId/file-links (+ /remove),
                               POST …/undo, GET …/history, GET …/versions/:version,
                               POST /me/record-tokens, DELETE /me/record-tokens/:tokenId   records.ts
+                              GET /ai-runs, POST /ai-run-claims, GET /ai-runs/:runId,
+                              POST /ai-runs/:runId/renew | finish | retry,
+                              POST /ai-runs/:runId/operations/:key/reconcile   ai-runs.ts
+                                                                (実行の管理, S10b: records.md "Execution runs")
                               GET /plugins, GET|PUT /plugins/:pluginId, PUT …/enabled,
                               PUT …/mapping, POST …/mapping/restore, POST …/mapping/check, POST …/import,
                               POST …/connection/renew,
@@ -387,7 +393,7 @@ changes nothing more).
   (Better Auth; one WAL connection for the process, `lib/auth.ts` `authDb`, also used by
   `/api/config` and the sign-up check — `tests/unit/auth-db.test.ts`). Schema: one module per area in `server/src/db/schema/` (company, permissions, agents,
   broker, records, plugins, connectors, fixed-payloads, tasks, content-store, outbound-mail,
-  notifications), each with its tables, indexes and migrations; `server/src/db/index.ts`
+  notifications, ai-runs), each with its tables, indexes and migrations; `server/src/db/index.ts`
   `initDatabase` is the one ordered entry point: every area's `CREATE TABLE IF NOT EXISTS` in one
   batch at startup (a new area goes in its `SCHEMA` list), then the migrations in a fixed order,
   then the permission seeding. Columns added later get an idempotent check-then-`ALTER TABLE`

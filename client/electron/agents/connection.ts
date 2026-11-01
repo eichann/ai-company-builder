@@ -104,6 +104,13 @@ export interface AgentConnection {
      * relay URLs, client/shared/broker-env.ts); agent-env.ts still filters them.
      */
     turnEnv?: Record<string, string>
+    /**
+     * An unattended step of 「AI の番」 (ai-turns.md): only the given record tools and the
+     * declared built-in tools; the member's own settings, MCP servers, hooks and plugins are not
+     * loaded; nothing asks the member. The chat server sends it only to Claude Code (registry
+     * `recordActions`); an agent that cannot honour it must refuse rather than run unrestricted.
+     */
+    unattended?: { builtinTools: readonly string[] }
   }): LanguageModel
   createTitleModel(request?: { modelId?: string }): LanguageModel
   readMetadata(metadata: Record<string, unknown> | undefined): {

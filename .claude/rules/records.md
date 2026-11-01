@@ -47,6 +47,14 @@ paths:
   - "client/electron/features/absences/**"
   - "client/src/features/absences/**"
   - "client/shared/absences.ts"
+  - "shared/core/ai-runs.ts"
+  - "shared/types/ai-runs.ts"
+  - "server/src/services/ai-runs.ts"
+  - "server/src/routes/ai-runs.ts"
+  - "server/src/ports/ai-runs.ts"
+  - "server/src/adapters/sqlite/ai-runs.ts"
+  - "server/src/db/schema/ai-runs.ts"
+  - "server/tests/integration/ai-runs.test.ts"
 ---
 
 # Records: types, the company map and the state engine (light ontology, stage 4-1 … 4-5)
@@ -615,6 +623,71 @@ clock's, a separate service writing through the service writer: `notifications.m
   summary, optional folder (not inside a private folder yet), server fields, links; the id is
   `<type>-<16 hex>`; `requested_by` defaults to the creator and `next_actor` to the assignee.
 
+## Execution runs (stage 2 S10b, owner decision 2026-11-01)
+
+Conversations stay on the PC; **the execution state of 「AI の番」 lives on the server**, which only
+stores and checks (the AI never runs on the server). One **run** per record × AI step
+(`ai_runs`, behind the company handle `aiRuns`; rules `services/ai-runs.ts`, words and classes
+`shared/core/ai-runs.ts`, contract `shared/types/ai-runs.ts`). The app's side: `ai-turns.md`.
+
+```
+GET  /ai-runs                                    the member's open runs (session)
+POST /ai-run-claims                              { recordId, step, deviceId, conversationId, pluginVersion?, stepsVersion? }
+GET  /ai-runs/:runId
+POST /ai-runs/:runId/renew                       { generation }
+POST /ai-runs/:runId/finish                      { generation, outcome: done | failed, failure?: { class, code? } }
+POST /ai-runs/:runId/retry                       「もう一度」
+POST /ai-runs/:runId/operations/:key/reconcile   { done }
+```
+
+- **Claim**: only a record in the member's 「AI の番」 (`records.aiTurnOf`: readable, an AI-turn
+  state, the member its assignee / next actor; else 404 / 409 `NOT_AI_TURN`). At most one open
+  run per record and step (unique index); a live claim of another app instance → 409
+  `RUN_CLAIMED`. A claim lasts `AI_RUN_CLAIM_TTL_MS` (5 min) and is renewed while running.
+  Every claim — a new run, or re-claiming one whose claim expired / was given back — raises the
+  **generation**. The run keeps the device (app instance), the consultation, the member whose
+  authority it runs under, and the plugin / steps versions (for looking back).
+- **Fencing**: `POST /me/record-tokens { …, run: { id, generation } }` binds the AI's token to
+  the run (only the member's own run, claimed now at that generation for that consultation, else
+  409 `RUN_SUPERSEDED`). `recordAiTokens.authenticate` refuses every call of a bound token once
+  the run's generation moved on or it is no longer running (409 `RUN_SUPERSEDED`): a PC whose
+  claim was taken over writes nothing. Renew / finish of an older generation: the same 409.
+- **Idempotency key per outside operation**: with a run-bound token, the creates and outside
+  operations of `/api/records-ai` (`POST /item`, `/decisions`, a plugin's write or create, `POST
+  /outbound`, `PUT /outbound/:id`; a plugin read needs none) require an `Idempotency-Key` header
+  (400 `OPERATION_KEY_REQUIRED`). `ai_run_operations` keeps, per run and key, the request's
+  fingerprint, state and what it made (`ref`, never a body). The same key again answers `200 {
+  replayed: true, operationKey, ref }` without running anything; another request with that key →
+  409 `OPERATION_KEY_REUSED`; one still in flight → 409 `OPERATION_IN_PROGRESS`; a refused
+  request (4xx, a plugin write `failed`) frees the key. A consultation's token (no run) is
+  unchanged. HubSpot's `acb_operation_id` and outbound mail's states stay underneath.
+- **「結果が分からない」**: an answer ≥ 500, a thrown handler, a plugin write `sent-unknown`, or an
+  operation still in flight when another PC re-claims → `unknown`. While any is unknown the run
+  cannot be resumed: a re-claim moves it to `waiting_reconcile` (409 `RUN_NEEDS_RECONCILE`), a
+  finish — even `done` — goes there, 「もう一度」 is refused, and the key answers 409
+  `OPERATION_RESULT_UNKNOWN`. A person reconciles (`…/reconcile { done }`, after looking in the
+  outside system): done → the key answers as done from then on; not done → the key may run
+  again; with nothing unknown left the run is `open` again. A late answer settles it too.
+- **Failures go to their own place** (`failureDestination`): temporary → `retry_later` (5, 10,
+  20 … ≤ 60 min; after `AI_RUN_TEMPORARY_LIMIT` (3) in a row → `waiting_person`, code
+  `REPEATED_TEMPORARY`); permission → `waiting_setup`; bad input → `waiting_person`; unknown
+  result → `waiting_reconcile`. None goes back to 「AI の番」 by itself except temporary after its
+  wait: the others wait for a person's 「もう一度」 (`retry`). A failure carries a short code
+  (`FAILURE_CODE_RE`), never free text (a reason could name a customer). `classifyFailure` maps
+  an HTTP answer to a class for the app.
+- **Who caused a change**: ledger column `run_id` (also `plugin_operations.run_id`; the actor's
+  `runId` comes from the token, never a body). `ledgerCause` (`shared/core/record-ledger.ts`):
+  `person` (a session), `ai` (the member's AI in a consultation), `run` (an automated run under
+  the member's authority), `system` (`acb:` actors: the server clock), `outside` (seen in an
+  outside system). The history answers each entry's `cause` and `runId`.
+- A run is its member's: anyone else, another company's id and a missing one get the same 404
+  `RUN_NOT_FOUND` (permission matrix rows + `CROSS`).
+- Test: `server/tests/integration/ai-runs.test.ts` (two devices → one claim; the older
+  generation refused and nothing written after a re-claim; the same key → one effect, no key
+  refused, a key never reused; in flight at a re-claim / a lost answer → no resume and no second
+  send until reconciled; each failure class's place; the ledger's cause; another member's /
+  company's run missing — each guard mutation-checked).
+
 ## The content store (中身の箱, owner decision 2026-11-01)
 
 Text that easily holds personal data is kept apart from the append-only ledger so an operator can
@@ -837,7 +910,8 @@ mailbox, never their role.
   `coverOf`, `managersOf`). composition.ts injects `actsFor` / `coverOf` into 「あなたの番」 and
   「AI の番」 (`services/records.ts`), the engine's `who` (`record-engine/act.ts`), approvals'
   `qualifies` (`approvals.md`) and the notices (`notifications.md`). Nothing else decides it; the
-  AI-turn runner (S10) claims what `ai-turn` gives the delegate's app.
+  AI-turn runner (S10) runs what `ai-turn` gives the delegate's app, and an execution run may be
+  claimed by the delegate (`aiTurnOf`, "Execution runs") — their token, their permissions.
 - **The engine's `who`**: the member first; failing that, for each absentee they cover, `mayAct`
   as that absentee with role `member` (a value naming them, `dept_manager` of their department —
   never their admin role). The entry keeps `actorId` = the delegate and **`onBehalfOf`** = the

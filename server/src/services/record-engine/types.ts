@@ -51,4 +51,6 @@ export interface ActorInput {
    */
   conversationId?: string | null
   proposedBy?: 'ai' | null
+  /** For the AI: the execution run its token is bound to (S10b; from the token, never the body). */
+  runId?: string | null
 }

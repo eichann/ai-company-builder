@@ -10,7 +10,9 @@ export function createApiConnection(config: { getApiKey: () => string | undefine
     id: 'anthropic-api',
     ownsConversation: false,
     authenticationError: () => config.getApiKey() ? undefined : 'APIキーが設定されていません。',
-    createChatModel() {
+    createChatModel(request) {
+      // An unattended step needs the restrictions it names; this mode has none of them built (ai-turns.md).
+      if (request.unattended) throw new Error('API key: unattended AI turns are not supported')
       return wrapLanguageModel({
         model: createAnthropic({ apiKey: config.getApiKey() })(API_KEY_TASKS.chat!),
         middleware: extractReasoningMiddleware({ tagName: 'think' }),

@@ -6,6 +6,7 @@ import { registerVoiceInput } from './voice-input'
 import { app, BrowserWindow, ipcMain, type IpcMainEvent, type IpcMainInvokeEvent, type WebContents } from 'electron'
 import path from 'path'
 import os from 'node:os'
+import { randomUUID } from 'node:crypto'
 import { fileURLToPath } from 'url'
 
 import { startChatServer } from './chat-server'
@@ -49,6 +50,9 @@ import { registerApprovalsIpc } from './features/approvals/ipc'
 import { registerAbsencesIpc } from './features/absences/ipc'
 import { createMinutesChecker } from './features/minutes/checker'
 import { registerMinutesIpc } from './features/minutes/ipc'
+import { createAiTurnClaims } from './features/ai-turns/claims'
+import { createRunRegistry } from './records/runs'
+import { registerAiTurnsIpc } from './features/ai-turns/ipc'
 import { createNotificationsWatcher } from './features/notifications/watcher'
 import { registerNotificationsIpc } from './features/notifications/ipc'
 import { registerOutboundMailIpc } from './features/outbound-mail/ipc'
@@ -263,7 +267,25 @@ registerOutboundMailIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookie
 // The chat AI's read-only company files (company-files/): the session stays
 // here in the main process; answers are cached briefly per member.
 const companyFilesApi = createCompanyFilesApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
-const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console })
+// Execution runs (S10b): which consultation runs which claimed 「AI の番」; its record tokens are bound to the run.
+const aiRunRegistry = createRunRegistry()
+const recordsApi = createRecordsApi({ baseUrl: getServerApiUrl, cookies: session.cookies, log: console, runOf: aiRunRegistry.runOf })
+// 「AI の番」 run automatically (features/ai-turns): the hidden consultation runs in the main
+// window; main claims the server's execution run and the record by its version, and settles it afterwards.
+registerAiTurnsIpc(ipc, {
+  claims: createAiTurnClaims({
+    baseUrl: getServerApiUrl,
+    cookies: session.cookies,
+    records: recordsApi,
+    agent: () => config.authMode(),
+    windowOpen: () => { const win = mainWindowHost.window(); return !!win && !win.isDestroyed() },
+    aiAllowed: () => agentControl.stop.oneShotAiAllowed(),
+    runs: aiRunRegistry,
+    // This app instance (per launch): the server's claim holder.
+    deviceId: `app-${randomUUID()}`,
+  }),
+  isMainWindow: senderId => mainWindowHost.isWindow(senderId),
+})
 
 registerAuthIpc(ipc, {
   session,

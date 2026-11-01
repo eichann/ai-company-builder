@@ -9,7 +9,7 @@
  * - which departments show the task list;
  * - 返事の目安: 翌営業日 (default) or 当日中 with a cutoff (default 17:00; a
  *   message received at or after the cutoff → the next business day);
- * - 自動で進める (the AI's turn runs without a press) on/off, with a daily run
+ * - 自動で進める (the AI's turn runs without a press) on (default) / off, with a daily run
  *   limit and "stop after N failures in a row"; sending and approving are
  *   always pressed by a person;
  * - business days: weekends and Japanese public holidays are off, plus the
@@ -70,7 +70,8 @@ export const TASK_SETTINGS_LIMITS = {
 export const DEFAULT_TASK_SETTINGS: TaskSettings = Object.freeze({
   taskListDepartmentIds: null,
   reply: Object.freeze({ rule: 'next-business-day', sameDayCutoff: '17:00' }) as ReplySettings,
-  autoRun: Object.freeze({ enabled: false, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
+  // 自動で進める is on unless the company turns it off (owner decision 2026-11-01).
+  autoRun: Object.freeze({ enabled: true, dailyLimit: 30, stopAfterFailures: 3 }) as AutoRunSettings,
   companyHolidays: [],
 }) as TaskSettings
 

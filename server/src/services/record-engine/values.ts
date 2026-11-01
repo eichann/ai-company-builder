@@ -27,6 +27,8 @@ export function selfReportedProvenance(body: unknown): Pick<ActorInput, 'convers
 export const provenance = (actor: ActorInput) => ({
   proposedBy: actor.kind === 'human' && actor.proposedBy === 'ai' ? 'ai' as const : null,
   conversationId: actor.conversationId ?? null,
+  // Only the AI acts in a run (a person's body never sets it: routes build the actor from the credential).
+  runId: actor.kind === 'ai' ? actor.runId ?? null : null,
 })
 
 export const NOTE_MAX = 2000

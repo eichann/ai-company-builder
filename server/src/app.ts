@@ -23,6 +23,7 @@ import { agentSandboxRoute } from './routes/agent-sandbox'
 import { taskSettingsRoute } from './routes/task-settings'
 import { absencesRoute } from './routes/absences'
 import { recordsRoute } from './routes/records'
+import { aiRunsRoute } from './routes/ai-runs'
 import { recordsAiRoute } from './routes/records-ai'
 import { outboundMailRoute } from './routes/outbound-mail'
 import { pluginsRoute } from './routes/plugins'
@@ -114,6 +115,7 @@ app.route('/api/companies/:companyId', absencesRoute)
 app.route('/api/companies/:companyId', agentStopsRoute)
 app.route('/api/companies/:companyId', keyBrokerRoute)
 app.route('/api/companies/:companyId', recordsRoute)
+app.route('/api/companies/:companyId', aiRunsRoute)
 app.route('/api/companies/:companyId', outboundMailRoute)
 app.route('/api/companies/:companyId', pluginsRoute)
 app.route('/api/companies/:companyId', googleRoute)

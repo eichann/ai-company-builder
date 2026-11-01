@@ -29,7 +29,7 @@ export function receiptFor(plugin: ActivePlugin, op: PluginOperationRow, externa
 }
 
 export const actorOf = (op: PluginOperationRow, proposedBy: 'ai' | null = null) =>
-  ({ id: op.actorId, kind: op.actorKind, source: op.actorSource, conversationId: op.conversationId, proposedBy: op.actorKind === 'human' ? proposedBy : null })
+  ({ id: op.actorId, kind: op.actorKind, source: op.actorSource, conversationId: op.conversationId, proposedBy: op.actorKind === 'human' ? proposedBy : null, runId: op.actorKind === 'ai' ? op.runId ?? null : null })
 
 type NewRowParts = Pick<PluginOperationRow, 'operation' | 'accountId' | 'object' | 'externalId' | 'recordId' | 'fields' | 'written' | 'previous'> & { approvedBy?: string | null; undoOf?: string | null }
 
@@ -42,7 +42,7 @@ export function createOperationRecords(deps: Pick<PluginOperationDeps, 'companyD
       id: deps.ids.newId(), pluginId: plugin.pluginId, pluginVersion: plugin.version, fingerprint: plugin.fingerprint, mappingVersion: plugin.mappingVersion,
       connectionId: plugin.connectionId, actorId: member.userId, actorKind: actor.kind, actorSource: actor.kind === 'ai' ? actor.source ?? null : null,
       conversationId: actor.conversationId ?? null, state: 'pending', reason: null, undoOf: parts.undoOf ?? null, undoneBy: null, recordVersion: null,
-      createdAt: at, updatedAt: at, replacedBy: null, approvedBy: parts.approvedBy ?? null,
+      createdAt: at, updatedAt: at, replacedBy: null, approvedBy: parts.approvedBy ?? null, runId: actor.kind === 'ai' ? actor.runId ?? null : null,
       operation: parts.operation, accountId: parts.accountId, object: parts.object, externalId: parts.externalId, recordId: parts.recordId,
       fields: parts.fields, written: parts.written, previous: parts.previous,
     }

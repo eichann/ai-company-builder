@@ -110,11 +110,11 @@ describe('replyTarget (返事の目安)', () => {
 })
 
 describe('parseTaskSettings', () => {
-  it('the defaults: every department, 翌営業日, 17:00, auto-run off', () => {
+  it('the defaults: every department, 翌営業日, 17:00, auto-run on (owner decision)', () => {
     expect(DEFAULT_TASK_SETTINGS).toEqual({
       taskListDepartmentIds: null,
       reply: { rule: 'next-business-day', sameDayCutoff: '17:00' },
-      autoRun: { enabled: false, dailyLimit: 30, stopAfterFailures: 3 },
+      autoRun: { enabled: true, dailyLimit: 30, stopAfterFailures: 3 },
       companyHolidays: [],
     })
     expect(parseTaskSettings(defaultTaskSettings())).toEqual({ value: DEFAULT_TASK_SETTINGS })

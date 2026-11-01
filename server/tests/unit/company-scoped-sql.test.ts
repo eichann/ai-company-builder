@@ -76,6 +76,9 @@ const HANDLE_TABLES: Record<string, string[]> = {
   record_ai_tokens: ['adapters/sqlite/records.ts'],
   // The content store (records.md "The content store"): written through the records adapter, erased by the eraser.
   record_contents: ['adapters/sqlite/record-contents.ts'],
+  // Execution runs of 「AI の番」 (records.md "Execution runs").
+  ai_runs: ['adapters/sqlite/ai-runs.ts'],
+  ai_run_operations: ['adapters/sqlite/ai-runs.ts'],
   // Connector plugins (plugins.md).
   plugin_installs: ['adapters/sqlite/plugins.ts'],
   plugin_mappings: ['adapters/sqlite/plugins.ts'],

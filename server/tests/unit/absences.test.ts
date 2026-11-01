@@ -153,6 +153,16 @@ describe('the delegate acts only during the absence', () => {
     expect(await engine.act(m('u-bob'), HUMAN, t.id, 'wait', { expectedVersion: 2, args: { waiting_on: '先方' } })).toMatchObject({ ok: false, body: { code: 'NOT_ALLOWED' } })
   })
 
+  it('the absentee\'s AI turn is the delegate\'s to claim only during the absence (S10 runs it on the delegate\'s PC)', () => {
+    const p = ok(engine.create(m('u-owner'), HUMAN, { type: 'task', title: '下調べ', state: 'preparing', fields: { assignee: 'u-alice' } })).record
+    expect(records.aiTurnOf(m('u-bob'), p.id)).toBe('not-ai-turn')
+    ok(away('u-alice', 'u-bob'))
+    expect(records.aiTurnOf(m('u-bob'), p.id)).toBe('yes')
+    expect(ok(records.aiTurn(m('u-bob'))).records.find(r => r.id === p.id)).toMatchObject({ actingFor: 'u-alice' })
+    nowMs = Date.parse('2026-11-03T01:00:00.000Z')
+    expect(records.aiTurnOf(m('u-bob'), p.id)).toBe('not-ai-turn')
+  })
+
   it('the absentee\'s notice also reaches the delegate, marked as theirs', async () => {
     ok(away('u-alice', 'u-bob'))
     for (const u of ['u-alice', 'u-bob']) ok(notices.setSettings(m(u), { kinds: { others: true } }))

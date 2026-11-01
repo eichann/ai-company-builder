@@ -455,7 +455,7 @@ export function createApprovalService(deps: ApprovalDeps) {
               payload_hash: fixedNow.hash, payload_version: fixedNow.version, reason: proposed,
             },
             links: { ...(payload.record ? { about: [payload.record.id] } : {}), ...(minutesId ? { minutes: [minutesId] } : {}) },
-            actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null },
+            actor: { id: member.userId, kind: actor.kind, source: actor.source ?? null, conversationId: actor.conversationId ?? null, proposedBy: actor.proposedBy ?? null, runId: actor.runId ?? null },
             note: '承認をお願いしました',
           })
           if (!made.ok) { failure = writeFailure(made); throw new Error('not-created') }
