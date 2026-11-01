@@ -20,18 +20,13 @@
 import { createHash } from 'crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
-import { aiActor, holderOf, keyedWrite } from './record-ai-auth'
+import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
+import { aiActs, aiReads, companyMember, publicRoute, serviceBody } from './guards'
 
-const { access, googleDrive } = services
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
+const { googleDrive } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -39,57 +34,44 @@ function answer<T>(c: Context, result: Outcome<T>) {
   return c.json({ success: true, data: result.value })
 }
 
-async function sessionMember(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
 // ---- the member's app (session) ----
 
 export const googleDriveRoute = new Hono()
 
-googleDriveRoute.post('/me/google/drive/picker', async (c) => {
-  const member = await sessionMember(c)
-  if (member instanceof Response) return member
-  return answer(c, await googleDrive.pickerSession(member, await jsonBody(c)))
+googleDriveRoute.post('/me/google/drive/picker', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleDrive.pickerSession(member, c.var.body))
 })
 
-googleDriveRoute.post('/me/google/drive/picks', async (c) => {
-  const member = await sessionMember(c)
-  if (member instanceof Response) return member
-  return answer(c, await googleDrive.savePicks(member, await jsonBody(c)))
+googleDriveRoute.post('/me/google/drive/picks', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await googleDrive.savePicks(member, c.var.body))
 })
 
 // ---- the member's AI (record token) ----
 
 export const googleDriveAiRoute = new Hono()
 
-googleDriveAiRoute.get('/status', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await googleDrive.aiStatus(h.member))
+googleDriveAiRoute.get('/status', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await googleDrive.aiStatus(h.member))
 })
 
-googleDriveAiRoute.post('/read', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await googleDrive.read(h.member, await jsonBody(c)))
+googleDriveAiRoute.post('/read', aiReads, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, await googleDrive.read(h.member, c.var.body))
 })
 
-googleDriveAiRoute.post('/put', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+googleDriveAiRoute.post('/put', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   const { conversationId, runId } = aiActor(h)
   return keyedWrite(c, h, 'drive-put', body, async () => answer(c, await googleDrive.put(h.member, { kind: 'ai', conversationId, runId }, body)))
 })
 
-googleDriveAiRoute.get('/puts/:putId', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await googleDrive.putState(h.member, c.req.param('putId')))
+googleDriveAiRoute.get('/puts/:putId', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await googleDrive.putState(h.member, c.req.param('putId')))
 })
 
 // ---- the Picker page (public, static) ----
@@ -149,7 +131,7 @@ function pickerPage(): string {
 
 export const googlePickerPageRoute = new Hono()
 
-googlePickerPageRoute.get('/', (c) => {
+googlePickerPageRoute.get('/', publicRoute('a static page holding no secret; the token reaches it only from the app\'s own Picker window'), (c) => {
   const extra = googleDrive.pickerScriptOrigin === 'https://apis.google.com' ? '' : ` ${googleDrive.pickerScriptOrigin}`
   c.header('Cache-Control', 'no-store')
   c.header('Referrer-Policy', 'strict-origin-when-cross-origin')

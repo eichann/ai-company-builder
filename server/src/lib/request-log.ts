@@ -50,11 +50,10 @@ export function noteRequestUser(request: Request, userId: string): void {
   usersByRequest.set(request, userId)
 }
 
-/** The company a route is about: `:companyId`, `/api/companies/:id`, or a git repository `<companyId>.git`. */
+/** The company a route is about: `:companyId` (also `/api/companies/:companyId`), or a git repository `<companyId>.git`. */
 function companyOf(pattern: string, params: Record<string, string>): string | undefined {
   if (params.companyId) return params.companyId
   if (params.company) return params.company
-  if (pattern.startsWith('/api/companies/:id') && params.id) return params.id
   if (pattern.startsWith('/api/git-http/:repo/') && params.repo) return params.repo.replace(/\.git$/, '')
   return undefined
 }

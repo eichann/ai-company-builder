@@ -14,8 +14,8 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
+import { companyMember } from './guards'
 import {
   CompanyFilesError,
   listTree,
@@ -31,16 +31,6 @@ import { logError } from '../lib/error-log'
 export const companyFilesRoute = new Hono()
 
 type Member = { companyId: string; userId: string; role: string }
-
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = services.access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
 
 /** Integer query parameter within [min, max]; `fallback` when absent; null when invalid. */
 function intParam(raw: string | undefined, fallback: number, min: number, max: number): number | null {
@@ -69,9 +59,8 @@ async function respond(c: Context, m: Member, run: (view: CompanyFilesView) => P
   }
 }
 
-companyFilesRoute.get('/tree', async (c) => {
-  const m = await authAndAuthorize(c)
-  if (m instanceof Response) return m
+companyFilesRoute.get('/tree', companyMember, async (c) => {
+  const m = c.var.member
   const segments = parseRequestPath(c.req.query('path'))
   if (!segments) return invalid(c, 'INVALID_PATH', 'Invalid path')
   const depth = intParam(c.req.query('depth'), 1, 1, LIMITS.treeMaxDepth)
@@ -79,9 +68,8 @@ companyFilesRoute.get('/tree', async (c) => {
   return respond(c, m, view => listTree(view, segments, depth))
 })
 
-companyFilesRoute.get('/content', async (c) => {
-  const m = await authAndAuthorize(c)
-  if (m instanceof Response) return m
+companyFilesRoute.get('/content', companyMember, async (c) => {
+  const m = c.var.member
   const segments = parseRequestPath(c.req.query('path'))
   if (!segments) return invalid(c, 'INVALID_PATH', 'Invalid path')
   const offset = intParam(c.req.query('offset'), 1, 1, Number.MAX_SAFE_INTEGER)
@@ -91,9 +79,8 @@ companyFilesRoute.get('/content', async (c) => {
   return respond(c, m, view => readContent(view, segments, { offset, limit, maxBytes }))
 })
 
-companyFilesRoute.get('/search', async (c) => {
-  const m = await authAndAuthorize(c)
-  if (m instanceof Response) return m
+companyFilesRoute.get('/search', companyMember, async (c) => {
+  const m = c.var.member
   const segments = parseRequestPath(c.req.query('path'))
   if (!segments) return invalid(c, 'INVALID_PATH', 'Invalid path')
   const query = (c.req.query('q') ?? '').normalize('NFC')

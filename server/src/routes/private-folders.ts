@@ -43,7 +43,6 @@
 import { createHash } from 'crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { privateFoldersClientCutoff } from '../lib/client-version'
 import { isValidFolderName, parseScopePath } from '../../shared/core/names'
 import {
@@ -56,46 +55,32 @@ import {
   type MyScopesResponse,
 } from '../../shared/types/private-folders'
 import { services } from '../composition'
-import { hasFullAccess, requireFullAccess, type Member } from '../services/access'
+import { hasFullAccess, requireFullAccess } from '../services/access'
 import { PRIVATE_FOLDERS_OUTDATED_ERROR } from '../services/private-folders'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 import { logError } from '../lib/error-log'
 
 export { PRIVATE_FOLDERS_OUTDATED_ERROR }
 
 export const privateFoldersRoute = new Hono()
-const { access, privateFolders } = services
+const { privateFolders } = services
 
 type Ctx = Context
 
-async function authAndAuthorize(c: Ctx): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function readJson(c: Ctx): Promise<Record<string, unknown> | null> {
-  try {
-    const body: unknown = await c.req.json()
-    return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null
-  } catch {
-    return null
-  }
+/** The JSON body (serviceBody) when it is an object; null otherwise (not JSON, an array, a value). */
+function objectBody(body: unknown): Record<string, unknown> | null {
+  return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null
 }
 
 // POST /private-folders  { parentPath, name, viewers?, editors?, force? }
-privateFoldersRoute.post('/private-folders', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.post('/private-folders', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   // No released app syncs private folders yet: refuse outright, force or not.
   if (privateFoldersClientCutoff() === null) {
     return c.json({ error: PRIVATE_FOLDERS_UNAVAILABLE_MESSAGE, code: 'PRIVATE_FOLDERS_UNAVAILABLE' }, 409)
   }
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
 
   const parent = parseScopePath(body.parentPath ?? '')
@@ -139,9 +124,8 @@ privateFoldersRoute.post('/private-folders', async (c) => {
 })
 
 // GET /private-folders
-privateFoldersRoute.get('/private-folders', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.get('/private-folders', companyMember, async (c) => {
+  const actor = c.var.member
   if (!hasFullAccess(actor.role) && !privateFolders.managesAnyDepartment(actor)) {
     return c.json({ error: 'Only owners, admins and department managers can list private folders' }, 403)
   }
@@ -149,21 +133,19 @@ privateFoldersRoute.get('/private-folders', async (c) => {
 })
 
 // GET /private-folders/:scopeId
-privateFoldersRoute.get('/private-folders/:scopeId', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.get('/private-folders/:scopeId', companyMember, async (c) => {
+  const actor = c.var.member
   const folder = privateFolders.managed(actor, c.req.param('scopeId') ?? '')
   if (!folder.ok) return refusal(c, folder)
   return c.json({ success: true, data: privateFolders.detail(actor, folder.value) })
 })
 
 // PUT /private-folders/:scopeId/members  { viewers, editors? }
-privateFoldersRoute.put('/private-folders/:scopeId/members', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.put('/private-folders/:scopeId/members', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   const folder = privateFolders.managed(actor, c.req.param('scopeId') ?? '')
   if (!folder.ok) return refusal(c, folder)
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const members = privateFolders.parseMembers(actor.companyId, body.viewers, body.editors, [])
   if ('error' in members) return c.json({ error: members.error, code: 'INVALID_MEMBERS' }, 400)
@@ -171,9 +153,8 @@ privateFoldersRoute.put('/private-folders/:scopeId/members', async (c) => {
 })
 
 // POST /private-folders/:scopeId/make-public  (owner/admin)
-privateFoldersRoute.post('/private-folders/:scopeId/make-public', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+privateFoldersRoute.post('/private-folders/:scopeId/make-public', companyMember, async (c) => {
+  const member = c.var.member
   const actor = requireFullAccess(member, 'Only owners and admins can make a private folder public')
   if (!actor.ok) return refusal(c, actor)
   const folder = privateFolders.find(actor.value, c.req.param('scopeId'))
@@ -195,18 +176,16 @@ function publicBaseUrl(c: Ctx): string {
 }
 
 // GET /me/private-folders — the readable ones, with who can read them
-privateFoldersRoute.get('/me/private-folders', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.get('/me/private-folders', companyMember, async (c) => {
+  const actor = c.var.member
   const data = privateFolders.mine(actor)
   c.header('Cache-Control', 'private, no-cache')
   return c.json({ success: true, data })
 })
 
 // GET /me/scopes — ETag / If-None-Match → 304
-privateFoldersRoute.get('/me/scopes', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+privateFoldersRoute.get('/me/scopes', companyMember, async (c) => {
+  const actor = c.var.member
   // Nothing about private folders the caller cannot read — not even a salted
   // hash of the path (short Japanese folder names are cheap to brute-force).
   // The app asks POST /paths/check instead.
@@ -264,10 +243,9 @@ export function resetPathCheckBudgetForTests(): void {
 // a strict ancestor of any private folder (shared/core isPathUsable). The
 // answer is the same shape, wording and work whatever makes a path unusable,
 // says nothing about which folder, and the paths are never logged.
-privateFoldersRoute.post('/paths/check', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
-  const body = await readJson(c)
+privateFoldersRoute.post('/paths/check', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
+  const body = objectBody(c.var.body)
   const raw = body?.paths
   if (!Array.isArray(raw) || raw.length === 0 || raw.length > PATHS_CHECK_MAX_PATHS) {
     return c.json({ error: `paths must be an array of 1-${PATHS_CHECK_MAX_PATHS} paths` }, 400)
@@ -297,15 +275,14 @@ privateFoldersRoute.post('/paths/check', async (c) => {
 // DELETE /private-folders/:scopeId?confirm=<folder name>  (owner/admin)
 // ----------------------------------------------------------------------------
 
-privateFoldersRoute.delete('/private-folders/:scopeId', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+privateFoldersRoute.delete('/private-folders/:scopeId', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
   const actor = requireFullAccess(member, 'Only owners and admins can delete a private folder')
   if (!actor.ok) return refusal(c, actor)
   const folder = privateFolders.find(actor.value, c.req.param('scopeId'))
   if (!folder.ok) return refusal(c, folder)
   // Type-the-name confirmation: the folder's own name (last segment), NFC.
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   const confirm = c.req.query('confirm') ?? (typeof body?.confirm === 'string' ? body.confirm : undefined)
   const name = folder.value.scope.path.split('/').pop()!
   if (typeof confirm !== 'string' || confirm.normalize('NFC') !== name.normalize('NFC')) {

@@ -94,6 +94,15 @@ route.get('/', signedIn, (c) => …c.var.user…)                               
 route.post('/hook', publicRoute('what proves the caller'), (c) => …)            // + PUBLIC_ENDPOINTS
 ```
 
+Also: `companyAdmin(error)` (owner/admin only; members and non-members alike get 403 `{ error }` —
+the endpoints that always answered so: invitations, adding / removing members),
+`companyMemberNotFound(body)` (the endpoint's own 404 body for a non-member: `/api/git`),
+`signedInOr(error)` (the endpoint's own 401 text), `aiReads` / `aiActs` (a record token on
+/api/records-ai, `c.var.holder`; records.md), `ownCredential(reason)` (git-http's Basic auth, the
+key broker's relay token; still 401 without it). Company routes always name the company
+`:companyId` (companies.ts too). Where a role check must answer before the body (403 before 400),
+take `serviceBody` and parse it with a zod schema in the handler after that check.
+
 - `companyMember`: 401 `{ error: 'Unauthorized' }` without a session; 404 `Company not found or
   access denied` for a non-member (same as a company that does not exist). The handler uses
   `c.var.member` (company, user, role from the server) and never reads `companyId` from the URL.
@@ -198,10 +207,10 @@ GET  /api/config                                  setup state (no auth)
 *    /api/auth/**                                 Better Auth; sign-up after the first user
                                                   needs X-Invitation-Token
 /api/me                       GET                 me.ts (no PATCH: it never saved)
-/api/companies                GET /, GET /:id, POST /, PATCH /:id,
-                              GET /:id/members, POST /:id/members,
-                              PUT /:id/members/:userId/role, DELETE /:id/members/:userId,
-                              GET /:id/client-activity                       companies.ts
+/api/companies                GET /, GET /:companyId, POST /, PATCH /:companyId,
+                              GET /:companyId/members, POST /:companyId/members,
+                              PUT /:companyId/members/:userId/role, DELETE /:companyId/members/:userId,
+                              GET /:companyId/client-activity                companies.ts
 /api/companies/:companyId/departments
                               GET /, GET /:id, POST /, PUT /:id, DELETE /:id, GET /:id/stats,
                               POST /reorder, POST /sync, GET|PUT /:id/managers,
@@ -310,8 +319,8 @@ The admin console's calls are pinned by `server/tests/integration/admin-contract
 
 ## Accounts and roles
 
-- Only owners grant owner/admin: `PUT /companies/:id/members/:userId/role`,
-  `POST /companies/:id/members` with role owner/admin, and admin invitations are owner-only (an
+- Only owners grant owner/admin: `PUT /companies/:companyId/members/:userId/role`,
+  `POST /companies/:companyId/members` with role owner/admin, and admin invitations are owner-only (an
   admin adding a second account of their own as owner could take the company over).
 - Nobody is put into a company without agreeing (2026-10-31): people join by accepting an
   invitation (existing accounts of other companies too). `POST …/members` adds only an account

@@ -10,7 +10,7 @@
  *   (activeMembersBuildCheck).
  *
  * Sources of a record:
- * - API requests under a company (/api/companies/:id/..., /api/git/repos/:id)
+ * - API requests under a company (/api/companies/:companyId/..., /api/git/repos/:companyId)
  *   that carry X-ACB-Client-Version: build, platform, last_seen_at. API
  *   requests WITHOUT the header (old apps, the admin panel in a browser) record
  *   nothing, so an owner using the admin panel never blanks their app build.

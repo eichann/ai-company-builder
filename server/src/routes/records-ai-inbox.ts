@@ -12,23 +12,22 @@
  */
 import { Hono } from 'hono'
 import { services } from '../composition'
-import { aiActor, connectorRoleRefusal, holderOf, keyedWrite } from './record-ai-auth'
+import { aiActor, connectorRoleRefusal, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
+import { aiActs, aiReads, serviceBody } from './guards'
 
 export const recordsAiInboxRoute = new Hono()
 const { inbox } = services
 
-recordsAiInboxRoute.get('/items/:recordId', (c) => {
-  const h = holderOf(c, 'read')
-  if (h instanceof Response) return h
+recordsAiInboxRoute.get('/items/:recordId', aiReads, (c) => {
+  const h = c.var.holder
   const r = inbox.item(h.member, c.req.param('recordId'))
   if (!r.ok) return refusal(c, r)
   return c.json({ success: true, data: r.value }, 200)
 })
 
-recordsAiInboxRoute.get('/items/:recordId/thread', async (c) => {
-  const h = holderOf(c, 'read')
-  if (h instanceof Response) return h
+recordsAiInboxRoute.get('/items/:recordId/thread', aiReads, async (c) => {
+  const h = c.var.holder
   const recordId = c.req.param('recordId')
   // A business plugin's step may use only the roles it declares (C4): mail or chat, by the record's channel.
   const pointers = inbox.item(h.member, recordId)
@@ -39,11 +38,9 @@ recordsAiInboxRoute.get('/items/:recordId/thread', async (c) => {
   return c.json({ success: true, data: r.value }, 200)
 })
 
-recordsAiInboxRoute.post('/items/:recordId/judgement', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  let body: unknown = null
-  try { body = await c.req.json() } catch { body = null }
+recordsAiInboxRoute.post('/items/:recordId/judgement', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'inbox-judgement', body, async () => {
     const actor = { id: h.member.userId, ...aiActor(h) }
     const r = inbox.judge(h.member, actor, c.req.param('recordId'), body)

@@ -153,14 +153,14 @@ const MATRIX: Row[] = [
   r('POST /api/invitations/:token/accept', () => ({ path: '/api/invitations/no-such-token/accept', body: {} }), [404, 404, 404, 404, 404, 401]),
 
   // Companies
-  r('GET /api/companies/:id', w => ({ path: C(w) }), MEMBERS),
-  r('PATCH /api/companies/:id', w => ({ path: C(w), body: {} }), [400, 400, 403, 403, 404, 401]),
-  r('GET /api/companies/:id/members', w => ({ path: `${C(w)}/members` }), MEMBERS),
-  r('POST /api/companies/:id/members', w => ({ path: `${C(w)}/members`, body: {} }), [400, 400, 403, 403, 403, 401]),
-  r('PUT /api/companies/:id/members/:userId/role', w => ({ path: `${C(w)}/members/${USER.member}/role`, body: {} }), [400, 403, 403, 403, 404, 401]),
-  r('DELETE /api/companies/:id/members/:userId', w => ({ path: `${C(w)}/members/pm-nobody` }), [200, 200, 403, 403, 403, 401],
+  r('GET /api/companies/:companyId', w => ({ path: C(w) }), MEMBERS),
+  r('PATCH /api/companies/:companyId', w => ({ path: C(w), body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/members', w => ({ path: `${C(w)}/members` }), MEMBERS),
+  r('POST /api/companies/:companyId/members', w => ({ path: `${C(w)}/members`, body: {} }), [400, 400, 403, 403, 403, 401]),
+  r('PUT /api/companies/:companyId/members/:userId/role', w => ({ path: `${C(w)}/members/${USER.member}/role`, body: {} }), [400, 403, 403, 403, 404, 401]),
+  r('DELETE /api/companies/:companyId/members/:userId', w => ({ path: `${C(w)}/members/pm-nobody` }), [200, 200, 403, 403, 403, 401],
     'removing someone who is not a member changes nothing'),
-  r('GET /api/companies/:id/client-activity', w => ({ path: `${C(w)}/client-activity` }), [200, 200, 403, 403, 404, 401]),
+  r('GET /api/companies/:companyId/client-activity', w => ({ path: `${C(w)}/client-activity` }), [200, 200, 403, 403, 404, 401]),
 
   // Departments
   r('GET /api/companies/:companyId/departments', w => ({ path: `${C(w)}/departments` }), MEMBERS),
@@ -530,8 +530,8 @@ const CROSS: CrossRow[] = [
   x('POST /api/git-http/:company/scopes/:repo/git-receive-pack', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/git-receive-pack` }), w => w.other.privateScope),
   x('GET /api/git-http/:company/scopes/:repo/HEAD', (w, id) => ({ path: `${GIT_SCOPE(w, id)}/HEAD` }), w => w.other.privateScope),
 
-  x('PUT /api/companies/:id/members/:userId/role', (w, id) => ({ path: `${C(w)}/members/${id}/role`, body: { role: 'admin' } }), w => w.other.member, 'pm-nobody'),
-  x('DELETE /api/companies/:id/members/:userId', (w, id) => ({ path: `${C(w)}/members/${id}` }), w => w.other.member, 'pm-nobody'),
+  x('PUT /api/companies/:companyId/members/:userId/role', (w, id) => ({ path: `${C(w)}/members/${id}/role`, body: { role: 'admin' } }), w => w.other.member, 'pm-nobody'),
+  x('DELETE /api/companies/:companyId/members/:userId', (w, id) => ({ path: `${C(w)}/members/${id}` }), w => w.other.member, 'pm-nobody'),
   x('PUT /api/companies/:companyId/agent-sandbox/overrides/:userId', (w, id) => ({ path: `${C(w)}/agent-sandbox/overrides/${id}`, body: { mode: 'off' } }), w => w.other.member, 'pm-nobody'),
   x('DELETE /api/companies/:companyId/agent-stops/:stopId', (w, id) => ({ path: `${C(w)}/agent-stops/${id}` }), w => w.other.stop),
 
@@ -674,7 +674,6 @@ function objectParams(path: string): string[] {
   const params = [...path.matchAll(/:(\w+)/g)].map(m => m[1])
   return params.filter((p, i) =>
     p !== 'companyId' && p !== 'company' &&
-    !(i === 0 && p === 'id' && path.startsWith('/api/companies/:id')) &&
     !(i === 0 && p === 'repo' && path.startsWith('/api/git-http/:repo')))
 }
 

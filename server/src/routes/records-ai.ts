@@ -50,113 +50,104 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import { services } from '../composition'
 import type { Outcome } from '../services/outcome'
-import { aiActor, holderOf, keyedWrite } from './record-ai-auth'
+import { aiActor, keyedWrite } from './record-ai-auth'
 import { refusal } from './respond'
+import { aiActs, aiReads, serviceBody } from './guards'
 
 export const recordsAiRoute = new Hono()
 const { records, recordEngine, pluginOperations, decisions, approvals, minutes, outboundMail } = services
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
 
 function answer<T>(c: Context, result: Outcome<T>, status: 200 | 201 | 202 = 200) {
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value }, status)
 }
 
-recordsAiRoute.get('/types', (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, records.types(h.member))
+recordsAiRoute.get('/types', aiReads, (c) => {
+  const h = c.var.holder
+  return answer(c, records.types(h.member))
 })
 
-recordsAiRoute.get('/my-turn', (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, records.myTurn(h.member))
+recordsAiRoute.get('/my-turn', aiReads, (c) => {
+  const h = c.var.holder
+  return answer(c, records.myTurn(h.member))
 })
 
-recordsAiRoute.get('/ai-turn', (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, records.aiTurn(h.member))
+recordsAiRoute.get('/ai-turn', aiReads, (c) => {
+  const h = c.var.holder
+  return answer(c, records.aiTurn(h.member))
 })
 
-recordsAiRoute.post('/decisions', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+recordsAiRoute.post('/decisions', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'decision', body, async () => {
     const result = await decisions.record(h.member, aiActor(h), body)
     return answer(c, result, result.ok && result.value.created ? 201 : 200)
   })
 })
 
-recordsAiRoute.get('/minutes/:recordId/text', async (c) => {
-  const h = holderOf(c, 'read')
-  if (h instanceof Response) return h
+recordsAiRoute.get('/minutes/:recordId/text', aiReads, async (c) => {
+  const h = c.var.holder
   c.header('Cache-Control', 'no-store')
   return answer(c, await minutes.text(h.member, c.req.param('recordId')))
 })
 
-recordsAiRoute.post('/minutes/:recordId/bundle', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
+recordsAiRoute.post('/minutes/:recordId/bundle', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
   const { kind, source, conversationId, runId } = aiActor(h)
-  return answer(c, minutes.linkBundle(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), await jsonBody(c)))
+  return answer(c, minutes.linkBundle(h.member, { kind, source, conversationId, runId }, c.req.param('recordId'), c.var.body))
 })
 
-recordsAiRoute.post('/query', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, records.query(h.member, await jsonBody(c)))
+recordsAiRoute.post('/query', aiReads, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, records.query(h.member, c.var.body))
 })
 
-recordsAiRoute.get('/item/:recordId', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await records.get(h.member, c.req.param('recordId')))
+recordsAiRoute.get('/item/:recordId', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await records.get(h.member, c.req.param('recordId')))
 })
 
-recordsAiRoute.get('/item/:recordId/history', (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, recordEngine.history(h.member, c.req.param('recordId')))
+recordsAiRoute.get('/item/:recordId/history', aiReads, (c) => {
+  const h = c.var.holder
+  return answer(c, recordEngine.history(h.member, c.req.param('recordId')))
 })
 
-recordsAiRoute.post('/item', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+recordsAiRoute.post('/item', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'record-create', body, async () => answer(c, recordEngine.create(h.member, aiActor(h), body), 201))
 })
 
-recordsAiRoute.post('/item/:recordId/actions/:action', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), await jsonBody(c)))
+recordsAiRoute.post('/item/:recordId/actions/:action', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, await recordEngine.act(h.member, aiActor(h), c.req.param('recordId'), c.req.param('action'), c.var.body))
 })
 
-recordsAiRoute.post('/item/:recordId/file-links', async (c) => {
-  const h = holderOf(c, 'act')
-  return h instanceof Response ? h : answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'link', await jsonBody(c)))
+recordsAiRoute.post('/item/:recordId/file-links', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'link', c.var.body))
 })
 
-recordsAiRoute.post('/item/:recordId/file-links/remove', async (c) => {
-  const h = holderOf(c, 'act')
-  return h instanceof Response ? h : answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'unlink', await jsonBody(c)))
+recordsAiRoute.post('/item/:recordId/file-links/remove', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, recordEngine.fileLink(h.member, aiActor(h), c.req.param('recordId'), 'unlink', c.var.body))
 })
 
 // The operations the app turns into this AI's tools (a read token: reads only).
-recordsAiRoute.get('/plugins', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await services.plugins.aiTools(h.member, h.scope, h.run?.id ?? null))
+recordsAiRoute.get('/plugins', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await services.plugins.aiTools(h.member, h.scope, h.run?.id ?? null))
 })
 
 // A plugin's typed operation: a read token may only run operations that read (refresh).
-recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', async (c) => {
-  const h = holderOf(c, 'read')
-  if (h instanceof Response) return h
+recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation', aiReads, serviceBody, async (c) => {
+  const h = c.var.holder
   const reads = services.plugins.operationKind(h.member.companyId, c.req.param('pluginId'), c.req.param('operation')) === 'read'
   if (h.scope !== 'act' && !reads) {
     return c.json({ error: 'この AI は読むことだけができます', code: 'READ_ONLY_TOKEN' }, 403)
   }
-  const body = await jsonBody(c)
+  const body = c.var.body
   const run = async () => {
     // Needing approval: the request is made (202) — the AI asks, a person approves (routes/approvals.ts, session only).
     const r = await approvals.runOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('recordId'), c.req.param('operation'), body)
@@ -168,21 +159,20 @@ recordsAiRoute.post('/plugins/:pluginId/records/:recordId/operations/:operation'
 })
 
 // Approval requests, read only: the AI lists and shows them (「承認待ちを見せて」); it has no way to approve.
-recordsAiRoute.get('/approvals', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await approvals.list(h.member, { scope: c.req.query('scope'), state: c.req.query('state') }))
+recordsAiRoute.get('/approvals', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await approvals.list(h.member, { scope: c.req.query('scope'), state: c.req.query('state') }))
 })
 
-recordsAiRoute.get('/approvals/:approvalId', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await approvals.get(h.member, c.req.param('approvalId')))
+recordsAiRoute.get('/approvals/:approvalId', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await approvals.get(h.member, c.req.param('approvalId')))
 })
 
 // A create of a record (create_deal; milestone 4): writes, so an act token only. Never auto: an approval request (202).
-recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+recordsAiRoute.post('/plugins/:pluginId/create/:operation', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'plugin-create', body, async () => {
     const r = await approvals.createOrRequest(h.member, aiActor(h), c.req.param('pluginId'), c.req.param('operation'), body)
     const requested = r.ok && typeof r.value === 'object' && r.value !== null && (r.value as { outcome?: unknown }).outcome === 'approval-requested'
@@ -190,32 +180,30 @@ recordsAiRoute.post('/plugins/:pluginId/create/:operation', async (c) => {
   })
 })
 
-recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await pluginOperations.get(h.member, c.req.param('pluginId'), c.req.param('operationId')))
+recordsAiRoute.get('/plugins/:pluginId/operations/:operationId', aiReads, async (c) => {
+  const h = c.var.holder
+  return answer(c, await pluginOperations.get(h.member, c.req.param('pluginId'), c.req.param('operationId')))
 })
 
 // Outbound mail: the AI drafts (refs from mail_recipients only); it can never send.
-recordsAiRoute.post('/outbound-recipients', async (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, await outboundMail.recipients(h.member, await jsonBody(c)))
+recordsAiRoute.post('/outbound-recipients', aiReads, serviceBody, async (c) => {
+  const h = c.var.holder
+  return answer(c, await outboundMail.recipients(h.member, c.var.body))
 })
 
-recordsAiRoute.post('/outbound', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+recordsAiRoute.post('/outbound', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'mail-draft', body, async () => answer(c, await outboundMail.create(h.member, aiActor(h), body), 201))
 })
 
-recordsAiRoute.get('/outbound/:messageId', (c) => {
-  const h = holderOf(c, 'read')
-  return h instanceof Response ? h : answer(c, outboundMail.get(h.member, c.req.param('messageId')))
+recordsAiRoute.get('/outbound/:messageId', aiReads, (c) => {
+  const h = c.var.holder
+  return answer(c, outboundMail.get(h.member, c.req.param('messageId')))
 })
 
-recordsAiRoute.put('/outbound/:messageId', async (c) => {
-  const h = holderOf(c, 'act')
-  if (h instanceof Response) return h
-  const body = await jsonBody(c)
+recordsAiRoute.put('/outbound/:messageId', aiActs, serviceBody, async (c) => {
+  const h = c.var.holder
+  const body = c.var.body
   return keyedWrite(c, h, 'mail-draft-version', body, async () => answer(c, await outboundMail.update(h.member, aiActor(h), c.req.param('messageId'), body)))
 })

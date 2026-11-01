@@ -6,7 +6,7 @@
 import { createMiddleware } from 'hono/factory'
 import type { MiddlewareHandler } from 'hono'
 
-export type GuardKind = 'company' | 'signed-in' | 'public'
+export type GuardKind = 'company' | 'signed-in' | 'record-token' | 'own-credential' | 'public'
 
 const GUARDS = new WeakMap<object, GuardKind>()
 
@@ -28,4 +28,14 @@ export function tagged<T extends object>(kind: GuardKind, mw: T): T {
 export function publicRoute(reason: string): MiddlewareHandler {
   void reason
   return tagged('public', createMiddleware(async (_c, next) => { await next() }))
+}
+
+/**
+ * The endpoint checks a credential of its own instead of a session (the smart
+ * HTTP Basic auth carrying the session token, a key-broker token); without it
+ * the answer is still 401 (tests/security/auth-guards.test.ts calls every endpoint).
+ */
+export function ownCredential(reason: string): MiddlewareHandler {
+  void reason
+  return tagged('own-credential', createMiddleware(async (_c, next) => { await next() }))
 }

@@ -69,7 +69,6 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import type { ScopeRule } from '../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../shared/core/permissions'
 import { parseScopePath } from '../../shared/core/names'
@@ -84,38 +83,25 @@ import {
   privateRootRuleError,
 } from '../services/permission-editor'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export { OUTDATED_CLIENTS_ERROR, PRIVATE_SUBJECT_ERROR, READ_RESTRICTION_UNAVAILABLE }
 
 export const permissionRulesRoute = new Hono()
-const { access, permissionEditor: editor } = services
+const { permissionEditor: editor } = services
 
 type Ctx = Context
-
-async function authAndAuthorize(c: Ctx): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
 
 const forbiddenEdit = (c: Ctx) =>
   c.json({ error: 'Only owners, admins and the managers of this department can change its permissions' }, 403)
 
-async function readJson(c: Ctx): Promise<Record<string, unknown> | null> {
-  try {
-    const body: unknown = await c.req.json()
-    return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null
-  } catch {
-    return null
-  }
+/** The JSON body (serviceBody) when it is an object; null otherwise (not JSON, an array, a value). */
+function objectBody(body: unknown): Record<string, unknown> | null {
+  return body && typeof body === 'object' && !Array.isArray(body) ? body as Record<string, unknown> : null
 }
 
-function scopeResponse(c: Ctx, scopeId: string, status: 200 | 201 = 200) {
-  return c.json({ success: true, data: editor.scopeView(c.req.param('companyId')!, scopeId) }, status)
+function scopeResponse(c: Ctx, companyId: string, scopeId: string, status: 200 | 201 = 200) {
+  return c.json({ success: true, data: editor.scopeView(companyId, scopeId) }, status)
 }
 
 /**
@@ -143,12 +129,11 @@ const replaceError = (c: Ctx, error: string, code?: string) => c.json({ error, .
 
 // PUT /permissions/scopes/by-path  { path, rules: [{ subjectType, subjectId?, canWrite, canRead? }] }
 // Replaces the path's whole rule set in one transaction. [] = inherit again.
-permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.put('/permissions/scopes/by-path', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
 
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const parsed = parseScopePath(body.path)
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
@@ -192,16 +177,15 @@ permissionRulesRoute.put('/permissions/scopes/by-path', async (c) => {
     : guarded(c, actor, force, [parsed.path], () => editor.replaceRules(actor, parsed.path, rules))
   if (scope instanceof Response) return scope
   if (!scope) return c.json({ success: true, data: { scope: null, rules: [] } })
-  return scopeResponse(c, scope.id)
+  return scopeResponse(c, c.var.member.companyId, scope.id)
 })
 
 // POST /permissions/rules  { path, subjectType, subjectId?, canWrite, canRead? }
-permissionRulesRoute.post('/permissions/rules', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.post('/permissions/rules', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
 
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const parsed = parseScopePath(body.path)
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
@@ -223,19 +207,18 @@ permissionRulesRoute.post('/permissions/rules', async (c) => {
   const upsert = () => editor.upsertRule(actor, parsed.path, { ...subject, canRead: ruleAccess.canRead, canWrite: ruleAccess.canWrite })
   const result = place ? upsert() : guarded(c, actor, force, [parsed.path], upsert)
   if (result instanceof Response) return result
-  return scopeResponse(c, result.scope.id, result.created ? 201 : 200)
+  return scopeResponse(c, c.var.member.companyId, result.scope.id, result.created ? 201 : 200)
 })
 
 // PATCH /permissions/rules/:ruleId  { canWrite, canRead? }
-permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.patch('/permissions/rules/:ruleId', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const found = editor.getRule(actor.companyId, c.req.param('ruleId'))
   if (!found) return c.json({ error: 'Rule not found' }, 404)
   if (!editor.canEditPath(actor, found.scope.path)) return forbiddenEdit(c)
 
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const force = parseForce(c, actor, body)
   if (force instanceof Response) return force
@@ -251,18 +234,17 @@ permissionRulesRoute.patch('/permissions/rules/:ruleId', async (c) => {
   }
   const done = place ? update() : guarded(c, actor, force, [found.scope.path], update)
   if (done instanceof Response) return done
-  return scopeResponse(c, found.scope.id)
+  return scopeResponse(c, c.var.member.companyId, found.scope.id)
 })
 
 // DELETE /permissions/rules/:ruleId
-permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.delete('/permissions/rules/:ruleId', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const found = editor.getRule(actor.companyId, c.req.param('ruleId'))
   if (!found) return c.json({ error: 'Rule not found' }, 404)
   if (!editor.canEditPath(actor, found.scope.path)) return forbiddenEdit(c)
-  const force = parseForce(c, actor, await readJson(c))
+  const force = parseForce(c, actor, objectBody(c.var.body))
   if (force instanceof Response) return force
 
   const rules = editor.rulesOf(actor, found.scope.id)
@@ -284,13 +266,12 @@ permissionRulesRoute.delete('/permissions/rules/:ruleId', async (c) => {
   }
   const done = place ? remove() : guarded(c, actor, force, [found.scope.path], remove)
   if (done instanceof Response) return done
-  return scopeResponse(c, found.scope.id)
+  return scopeResponse(c, c.var.member.companyId, found.scope.id)
 })
 
 // DELETE /permissions/scopes/:scopeId/rules — inherit from the parent again
-permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const scope = editor.getScope(actor.companyId, c.req.param('scopeId'))
   if (!scope) return c.json({ error: 'Scope not found' }, 404)
@@ -298,7 +279,7 @@ permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
   if (scope.path === '') return c.json({ error: 'The company-wide rule cannot be removed; change it instead' }, 400)
   const place = editor.privatePlaceOf(actor.companyId, scope.path)
   if (place?.root) return c.json({ error: PRIVATE_RULES_REQUIRED, code: 'PRIVATE_RULES_REQUIRED' }, 400)
-  const force = parseForce(c, actor, await readJson(c))
+  const force = parseForce(c, actor, objectBody(c.var.body))
   if (force instanceof Response) return force
 
   const removed = place ? editor.clearRules(actor, scope) : guarded(c, actor, force, [scope.path], () => editor.clearRules(actor, scope))
@@ -310,16 +291,15 @@ permissionRulesRoute.delete('/permissions/scopes/:scopeId/rules', async (c) => {
 // Move the rules of a folder (and of the folders inside it) to another
 // existing folder that has no rules yet. For rules left behind when a folder
 // was renamed by a sync push (GET /permissions → orphanedScopes).
-permissionRulesRoute.post('/permissions/scopes/:scopeId/move', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.post('/permissions/scopes/:scopeId/move', companyMember, serviceBody, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const scope = editor.getScope(actor.companyId, c.req.param('scopeId'))
   if (!scope) return c.json({ error: 'Scope not found' }, 404)
   if (scope.path === '') return c.json({ error: 'The company-wide rules cannot be moved' }, 400)
   if (!editor.canEditPath(actor, scope.path)) return forbiddenEdit(c)
 
-  const body = await readJson(c)
+  const body = objectBody(c.var.body)
   if (!body) return c.json({ error: 'Invalid JSON body' }, 400)
   const parsed = parseScopePath(body.toPath)
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
@@ -349,9 +329,8 @@ permissionRulesRoute.post('/permissions/scopes/:scopeId/move', async (c) => {
 })
 
 // GET /permissions/effective?path=
-permissionRulesRoute.get('/permissions/effective', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.get('/permissions/effective', companyMember, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const parsed = parseScopePath(c.req.query('path') ?? '')
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
@@ -361,9 +340,8 @@ permissionRulesRoute.get('/permissions/effective', async (c) => {
 })
 
 // GET /permissions/folders?path=
-permissionRulesRoute.get('/permissions/folders', async (c) => {
-  const actor = await authAndAuthorize(c)
-  if (actor instanceof Response) return actor
+permissionRulesRoute.get('/permissions/folders', companyMember, async (c) => {
+  const actor = c.var.member
   if (!editor.canEditAnything(actor)) return forbiddenEdit(c)
   const parsed = parseScopePath(c.req.query('path') ?? '')
   if ('error' in parsed) return c.json({ error: parsed.error }, 400)
@@ -377,9 +355,8 @@ permissionRulesRoute.get('/permissions/folders', async (c) => {
 const MAX_REJECTIONS_PAGE = 100
 
 // GET /push-rejections?userId=&marker=&limit=&offset=  (owner/admin)
-permissionRulesRoute.get('/push-rejections', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+permissionRulesRoute.get('/push-rejections', companyMember, async (c) => {
+  const member = c.var.member
   const actor = requireFullAccess(member, 'Only owners and admins can view rejected pushes')
   if (!actor.ok) return refusal(c, actor)
   const userId = c.req.query('userId') || undefined
