@@ -8,13 +8,15 @@ import type { TaskListItem } from '../tasks'
 import { inboxTriage } from './inbox-triage'
 import { followUp } from './follow-up'
 import { minutesReading } from './minutes-reading'
+import { minutesBundle } from './minutes-bundle'
 // lane C ▼
 import { pluginTurnCandidate, type PluginStepTurn } from './plugin'
 // lane C ▲
-import type { AiTurnCandidate, AiTurnStepDefinition } from './types'
+import { claimStates, type AiTurnCandidate, type AiTurnStepDefinition } from './types'
 
 const STEPS = [
   minutesReading,
+  minutesBundle,
   // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
   // lane A ▲
@@ -46,6 +48,9 @@ export function checkAiTurnSteps(steps: readonly AiTurnStepDefinition[]): string
     names.add(s.step)
     if (s.recordId.test('')) return `${s.step}: its record id pattern matches any id`
     if (typeof s.claim.from !== 'string' && (s.claim.action !== null || s.claim.from.length === 0)) return `${s.step}: several from-states only without a start mark`
+    // Two steps of one kind must start from different states, or the state could not pick one.
+    const sameStart = steps.find(o => o !== s && o.recordId.source === s.recordId.source && claimStates(o).some(f => claimStates(s).includes(f)))
+    if (sameStart) return `${s.step}: starts from the same state as ${sameStart.step}`
     const bad = s.tools.recordTools.find(n => !TOOL_NAME.test(n))
       ?? s.tools.recordToolEndings.find(e => !TOOL_ENDING.test(e))
       ?? s.tools.builtinTools.find(n => !TOOL_NAME.test(n))
@@ -68,9 +73,19 @@ export function aiTurnStepDefinition(step: AiTurnStep): Step {
   return AI_TURN_STEPS.get(step)!
 }
 
-/** The step that runs this record, or null (a kind the app does not run). */
-export function aiTurnStepForRecord(recordId: string): Step | null {
-  return [...AI_TURN_STEPS.values()].find(s => s.recordId.test(recordId)) ?? null
+/**
+ * The step that runs this record, or null (a kind the app does not run). With the record's state,
+ * the step that starts or works there (a meeting `received` → its reading, `bundle_waiting` → its
+ * まとまり's part); without it, or none matching, the kind's first step.
+ */
+export function aiTurnStepForRecord(recordId: string, state?: string | null): Step | null {
+  const steps = [...AI_TURN_STEPS.values()].filter(s => s.recordId.test(recordId))
+  if (steps.length === 0) return null
+  if (state) {
+    const found = steps.find(s => claimStates(s).includes(state) || s.settle.working === state)
+    if (found) return found
+  }
+  return steps[0]
 }
 
 /** Whether the step declares this record tool (its plain name, not the mcp__ id). */
@@ -88,14 +103,14 @@ export function aiTurnQueue(input: { minutes: readonly MinutesNotice[]; tasks: r
   const queue: AiTurnCandidate[] = []
   const seen = new Set<string>()
   for (const n of input.minutes) {
-    if (aiTurnStepForRecord(n.id)?.listedBy !== 'minutes' || seen.has(n.id)) continue
+    if (aiTurnStepForRecord(n.id, 'received')?.listedBy !== 'minutes' || seen.has(n.id)) continue
     seen.add(n.id)
-    queue.push({ id: n.id, title: n.title, version: n.version, meetingAt: n.meetingAt })
+    queue.push({ id: n.id, title: n.title, version: n.version, meetingAt: n.meetingAt, state: 'received' })
   }
   for (const r of input.tasks) {
-    if (r.turn !== 'ai' || aiTurnStepForRecord(r.id)?.listedBy !== 'ai-turn' || seen.has(r.id)) continue
+    if (r.turn !== 'ai' || aiTurnStepForRecord(r.id, r.state)?.listedBy !== 'ai-turn' || seen.has(r.id)) continue
     seen.add(r.id)
-    queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due })
+    queue.push({ id: r.id, title: r.title, version: r.version, dueAt: r.due, state: r.state })
   }
   // lane C ▼
   // A business plugin's steps (plugin.ts): the server's list of the member's records at an ai_turn step.

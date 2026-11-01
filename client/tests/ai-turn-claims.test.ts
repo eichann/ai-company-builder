@@ -18,7 +18,7 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
   const record = { ...initial }
   const calls: string[] = []
   const tokens: Array<{ conversationId: string; agent: string; scope: string; run?: { id: string; generation: number } }> = []
-  const run = { id: 'run-1', generation: 0, holder: null as string | null, state: 'none', finished: [] as unknown[], keys: [] as Array<string | null> }
+  const run = { id: 'run-1', generation: 0, holder: null as string | null, state: 'none', finished: [] as unknown[], keys: [] as Array<string | null>, steps: [] as string[] }
   const json = (status: number, body: unknown) => new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } })
   const fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input))
@@ -34,6 +34,7 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
       if (run.state === 'waiting_person') return json(409, { code: 'RUN_WAITING' })
       if (run.state === 'running' && run.holder !== body.deviceId) return json(409, { code: 'RUN_CLAIMED' })
       run.state = 'running'
+      run.steps.push(body.step)
       run.holder = body.deviceId
       run.generation += 1
       return json(run.generation === 1 ? 201 : 200, { data: { run: { id: run.id, generation: run.generation } } })
@@ -55,8 +56,9 @@ function fakeServer(initial: { state: string; version: number } = { state: 'rece
       assert.match(String(new Headers(init?.headers).get('Authorization')), /^Bearer acb_rec_/)
       run.keys.push(new Headers(init?.headers).get('Idempotency-Key'))
       if (body.expectedVersion !== record.version) return json(409, { error: 'ほかの人が先に変えました', code: 'VERSION_CONFLICT' })
-      if (act[2] !== 'start_reading' || record.state !== 'received') return json(409, { error: 'できません', code: 'BAD_STATE' })
-      record.state = 'reading'
+      const starts: Record<string, [string, string]> = { start_reading: ['received', 'reading'], start_bundle_work: ['bundle_waiting', 'bundle_working'] }
+      if (!starts[act[2]] || record.state !== starts[act[2]][0]) return json(409, { error: 'できません', code: 'BAD_STATE' })
+      record.state = starts[act[2]][1]
       record.version += 1
       return json(200, { data: { record } })
     }
@@ -267,4 +269,18 @@ test('a 返事のお願い is claimed from 準備中 or 確かめ中 (no start m
   const waitingReply = fakeServer({ state: 'waiting_reply', version: 4 }, undefined, REPLY_REQUEST)
   assert.deepEqual(await claimsFor(waitingReply).claim(COMPANY, REPLY_REQUEST, 4, 'conversation-cccc'), { claimed: false, reason: 'taken' })
   assert.equal(waitingReply.calls.filter(c => c.endsWith('/ai-run-claims')).length, 0)
+})
+
+test('a meeting whose まとまり was chosen after the reading: the claim takes its まとまり\'s part (that step, that start), and a finished one claims nothing again', async () => {
+  const server = fakeServer({ state: 'bundle_waiting', version: 7 })
+  const pc = claimsFor(server)
+  assert.deepEqual(await pc.claim(COMPANY, RECORD, 7, 'conversation-bund'), { claimed: true, version: 8 })
+  assert.deepEqual(server.run.steps, ['minutes-bundle'])
+  assert.deepEqual(server.record, { state: 'bundle_working', version: 8 })
+  server.record.state = 'read'
+  assert.deepEqual(await pc.settle(COMPANY, RECORD), { outcome: 'done' })
+  // Done: the meeting is read again, so there is no AI turn left to claim (no second deal update or log).
+  const again = await claimsFor(server).claim(COMPANY, RECORD, 9, 'conversation-agan')
+  assert.equal(again.claimed, false)
+  assert.deepEqual(server.run.steps, ['minutes-bundle'])
 })

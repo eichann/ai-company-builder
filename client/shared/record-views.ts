@@ -74,7 +74,7 @@ export function recordKindOf(type: string, def?: Pick<TypeDefinition, 'implement
 /** The core types' states in members' words (definitions carry no state labels); others as they are. */
 const STATE_LABELS: Record<string, string> = {
   todo: '未着手', in_progress: '進めている', review: '確認待ち', waiting: '返事待ち', done: '完了', cancelled: '中止',
-  received: '届いた', handled: '対応済み', reading: '読んでいる', read: '読んだ', skipped: '読まない', failed: 'うまくいかなかった',
+  received: '届いた', handled: '対応済み', reading: '読んでいる', read: '読んだ', skipped: '読まない', failed: 'うまくいかなかった', bundle_waiting: 'まとまりの分を待っている', bundle_working: 'まとまりの分を進めている',
   pending: '承認待ち', approved: '承認済み', sent_back: '差し戻し', stale: '古くなった', withdrawn: '取り下げ',
   draft: '下書き', sent: '送った', unknown: '送れたか不明', discarded: '捨てた',
   unconfirmed: '未確認', confirmed: '確かめ済み', retracted: '取り消し',

@@ -628,7 +628,9 @@ Milestone 4 adds four (people by id in person fields):
   (organizer or first discoverer), `attendees` (text: JSON array of member ids — no person-list
   kind exists), `external_count`, `source_ref` (opaque pointer to its minutes documents, no text),
   `doc_version`, `summary_text` (long_text; ≤ 300 is the intake's rule); links `bundle`,
-  `counterpart`. The 議事録 is its content, read where it is. received → reading → read / skipped / failed:
+  `counterpart`. The 議事録 is its content, read where it is. Version 3: read → bundle_waiting →
+  bundle_working → read, the まとまり's part when one is chosen after the reading (`minutes.md` "A
+  まとまり chosen later"). received → reading → read / skipped / failed:
   `start_reading`, `finish_reading` (arg `summary_text`), `fail_reading` are `who: [ai]` —
   received is the example of 「AI の番」 (no separate reader AI: the consultation AI reads, owner
   §11); `retry` (reading / failed → received, also for "reading > 30 min") and `skip` are

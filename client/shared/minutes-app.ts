@@ -56,7 +56,7 @@ export function minutesConsultationTitle(notice: Pick<MinutesNotice, 'title' | '
 }
 
 /** A meeting record's id (`minutes-…` for one made before the type was renamed `meeting`). */
-const MINUTES_ID_RE = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
+export const MINUTES_ID_RE = /^(?:meeting|minutes)-[0-9a-z]{6,32}$/
 
 /**
  * The first message of the consultation, composed by the app and shown as

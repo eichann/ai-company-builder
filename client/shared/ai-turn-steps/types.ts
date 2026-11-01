@@ -18,6 +18,8 @@ export interface AiTurnCandidate {
    * whatever its type (the server listed it at the step's state). Absent for the static kinds.
    */
   pluginStep?: `${string}__${string}`
+  /** Its state when queued: picks the step when one kind of record has several (a meeting's reading, its まとまり's part). */
+  state?: string | null
 }
 
 /**
@@ -37,7 +39,7 @@ export interface AiTurnStepTools {
 export interface AiTurnStepDefinition<Step extends string = string> {
   /** The step's name: the server's execution run is per record and step (S10b). */
   step: Step
-  /** The record ids this step runs (one step per record kind; the registry refuses overlaps). */
+  /** The record ids this step runs (a kind may have several steps: the record's state picks one, `aiTurnStepForRecord`). */
   recordId: RegExp
   /**
    * Where the runner's queue gets these records: `minutes` = main's received minutes

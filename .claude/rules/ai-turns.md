@@ -81,15 +81,21 @@ turns").
   title and first message (`minutesId` link or not), and its `tools`. Today: `minutes-reading.ts`,
   `inbox-triage.ts` (lane B, B4: an `interaction` in 届いた, `inbox.md`), `follow-up.ts` (lane B,
   B5: a `reply_request` in 準備中 / 確かめ中; `claim.from` may list several states only without a
-  start mark, `claimStates`). A type with no start mark
+  start mark, `claimStates`), `minutes-bundle.ts` (the まとまり's part of a meeting read without one,
+  `minutes.md` "A まとまり chosen later": only `minutes_read`, `meeting__finish_bundle_work` /
+  `fail_bundle_work` and the plugin's `__update_deal` / `__log_meeting` — nothing that makes
+  homework, decisions or mail). A type with no start mark
   declares `claim.action: null`: the server's execution run is then the only claim (main runs no
   record action and answers the version it read), and `settle.putBack: null` when the working
   state is the claim's own from-state (given back by finishing the run).
-- `registry.ts` lists them (one line per step, under the lane markers): `aiTurnStepForRecord`
-  (main's claim / settle / retry refuse a record without a step), `aiTurnStepAllowsRecordTool`
+- `registry.ts` lists them (one line per step, under the lane markers): `aiTurnStepForRecord(id, state?)`
+  (main's claim / settle / retry refuse a record without a step; one kind may have several steps,
+  and the record's state — read by main just before the claim and the settle, carried in the
+  queue's `state` for the runner — picks the one that starts or works there), `aiTurnStepAllowsRecordTool`
   (the chat server's least-privilege filter), `aiTurnQueue` (AppShell builds the runner's queue
   from the minutes notices and the task list: every waiting record whose kind has a step, once).
-  `checkAiTurnSteps` refuses at load a step listed twice, an id pattern matching any id, or a
+  `checkAiTurnSteps` refuses at load a step listed twice, two steps of one kind starting from the
+  same state, an id pattern matching any id, or a
   tool that is not one exact tool (an ending must be a whole `__operation`; no wildcard).
 - A step gets only its own tools: connectors' tools (`electron/records/tool-providers.ts`, one
   provider per connector, under the lane markers; `createRecordTools` merges them, none

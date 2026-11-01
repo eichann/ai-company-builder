@@ -94,7 +94,7 @@ export function useAiTurnRunner(options: AiTurnRunnerOptions): { notice: string 
     const o = latest.current
     // A business plugin's step (plugin-steps.md): main's claim makes its first message from the pinned procedure.
     const pluginStep = notice.pluginStep ?? null
-    const step = pluginStep ? null : aiTurnStepForRecord(notice.id)
+    const step = pluginStep ? null : aiTurnStepForRecord(notice.id, notice.state)
     const stepName = step?.step ?? pluginStep
     if (!stepName) return
     const tabId = o.openBackgroundTab()

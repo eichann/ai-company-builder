@@ -215,15 +215,17 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
      */
     async claim(companyId: string, recordId: string, noticeVersion: number, conversationId: string, companyRoot?: string | null): Promise<AiTurnClaimResult> {
       const pluginTurn = pluginTurns.get(companyId)?.get(recordId) ?? null
-      const step = pluginTurn ? null : aiTurnStepForRecord(recordId)
-      if (!COMPANY.test(companyId) || (!step && !pluginTurn) || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
+      const kind = pluginTurn ? null : aiTurnStepForRecord(recordId)
+      if (!COMPANY.test(companyId) || (!kind && !pluginTurn) || !Number.isInteger(noticeVersion) || noticeVersion < 1 || !CONVERSATION.test(conversationId)) {
         return { claimed: false, reason: 'not-allowed' }
       }
       const agent = deps.agent()
       if (!deps.windowOpen() || !deps.aiAllowed() || !agentCan(agent, 'recordActions')) return { claimed: false, reason: 'not-allowed' }
       if (pluginTurn) return claimPluginStep(companyId, pluginTurn, conversationId, companyRoot ?? null)
-      if (!step) return { claimed: false, reason: 'not-allowed' }
+      if (!kind) return { claimed: false, reason: 'not-allowed' }
       const now = await recordOf(companyId, recordId)
+      // The record's state now picks the step (a meeting's reading, or its まとまり's part).
+      const step = aiTurnStepForRecord(recordId, now?.state) ?? kind
       // No longer waiting for the AI (another PC read it, a person skipped it): nothing to claim.
       if (now && !claimStates(step).includes(now.state)) {
         deps.recordMovedOn?.(companyId)
@@ -296,10 +298,10 @@ export function createAiTurnClaims(deps: AiTurnClaimsDeps) {
         return { outcome: record ? 'put-back' : 'unknown' }
       }
       // lane C ▲
-      const step = aiTurnStepForRecord(recordId)
-      if (!COMPANY.test(companyId) || !step) return { outcome: 'unknown' }
-      const { settle } = step
+      if (!COMPANY.test(companyId) || !aiTurnStepForRecord(recordId)) return { outcome: 'unknown' }
       const record = await recordOf(companyId, recordId)
+      const step = aiTurnStepForRecord(recordId, record?.state)!
+      const { settle } = step
       if (!record) {
         await finishRun(companyId, recordId, { class: 'temporary', code: 'NOT_READABLE' })
         return { outcome: 'unknown' }
