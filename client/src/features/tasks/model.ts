@@ -159,3 +159,15 @@ export function listShownFor(departmentId: string | null, listDepartmentIds: rea
   if (listDepartmentIds === null) return true
   return departmentId === null ? listDepartmentIds.length > 0 : listDepartmentIds.includes(departmentId)
 }
+
+/** 「延ばす」's quick choices from now, in company time (a passed one is left out). */
+export function postponeChoices(now: CompanyNow): Array<{ label: string; due: string }> {
+  const [h, m] = now.time.split(':').map(Number)
+  const nextHour = h + (m > 0 ? 2 : 1)
+  const out: Array<{ label: string; due: string }> = []
+  if (nextHour <= 23) out.push({ label: '1時間あと', due: `${now.date}T${String(nextHour).padStart(2, '0')}:00` })
+  if (now.time < '17:00') out.push({ label: '今日の夕方', due: `${now.date}T17:00` })
+  out.push({ label: 'あしたの朝', due: `${addDays(now.date, 1)}T09:00` })
+  out.push({ label: '来週の月曜', due: `${addDays(now.date, ((8 - now.weekday) % 7) || 7)}T09:00` })
+  return out
+}

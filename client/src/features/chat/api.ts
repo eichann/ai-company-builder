@@ -279,6 +279,13 @@ export function linkMinutesBundle(companyId: string, minutesId: string, bundleId
  */
 export type MailOutbound = ElectronPort<'getOutboundMailRecipients' | 'updateOutboundMail' | 'addOutboundMailRecipient' | 'sendOutboundMail' | 'resolveOutboundMail' | 'discardOutboundMail' | 'connectGoogle'>
 
+/** Reading one draft as the server holds it now (a task's 「AI が用意したもの」 shows the latest). */
+export type MailReads = ElectronPort<'getOutboundMail'>
+
+export function getOutboundMail(companyId: string, messageId: string, reads: MailReads = window.electronAPI) {
+  return reads.getOutboundMail(companyId, messageId)
+}
+
 /** The port the mail card uses (preview pages pass their own). */
 export function mailOutbound(): MailOutbound {
   return window.electronAPI

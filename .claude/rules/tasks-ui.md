@@ -1,6 +1,10 @@
 ---
 paths:
   - "client/shared/tasks.ts"
+  - "client/shared/task-card.ts"
+  - "client/tests/task-card*"
+  - "client/tests/ui/task-card.spec.ts"
+  - "client/src/features/chat/components/PreparedMailCard.tsx"
   - "client/electron/features/tasks/**"
   - "client/src/features/tasks/**"
   - "client/tests/tasks-*.test.ts"
@@ -8,7 +12,7 @@ paths:
   - "client/tests/ui/tasks-*.spec.ts"
 ---
 
-# The task list in the app (やることの一覧, stage 2 S7b)
+# The task list and the task card in the app (やることの一覧・カード, stage 2 S7b / S7c)
 
 The standard list belongs to the core (owner decision 2026-11-01, 「タスクの一覧は本体に」): what
 waits for the member, the AI and others, today's meetings and today's done, in one place. A plugin
@@ -71,6 +75,41 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
   (width, case, katakana / hiragana) is offered as that one (`similarTag`). There is no AI tag
   suggestion yet (the server has none).
 
+## The card (S7c, `TaskCard.tsx`, `client/shared/task-card.ts`)
+
+A task opens in its own card wherever a record opens (`AppShell` `recordCard`: an id starting
+`task-` — ids start with their type — gets `TaskCard`; anything else the records feature's
+read-only card; an `approval-` id also gets the chat's approval card on top, where approving is
+the person's press). Main: `tasks:card` reads the record, its 経緯, the type definitions, the
+members and the member's open execution runs, and tells the server it was opened (`POST …/opened`,
+not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談をさかのぼらずに届く):
+
+1. Header: state, 「自分だけ」, tags, due (期限切れ in red), 目的; a task done on someone's OK says
+   so — 「佐藤さんが阿部さんの了承を得たとして完了にしました（電話で）」 (`okWords`: an OK is never
+   called an approval), in the header and in 経緯.
+2. **AI が用意したもの**: `prep_summary` and each `prepared` link drawn by the screen with the
+   consultation's own cards (`renderPrepared`): a mail draft through `PreparedMailCard` (chat
+   feature: reads the draft now, so the latest version is checked and sent — the person sends), an
+   approval request through `ApprovalCard`.
+3. Runs waiting for a person (`GET /ai-runs`, `needsPerson`): the state in words; an operation
+   whose outside result is unknown asks 「届いていた」/「届いていなかった」 (`tasks:reconcile` →
+   `…/operations/:key/reconcile`), and only with nothing unknown 「もう一度」 (`tasks:retryRun`).
+   Run ids and operation keys that could reshape the URL (`.`/`..`, separators) never reach the
+   server.
+4. Actions (`TaskActions.tsx`), offered from the type (`recordActionChoices`) and the member's
+   place: a `who` person field holding the member, or `ok_from` (then the member must say whose OK:
+   a member, or a note for an OK from outside ACB). Never the AI's own steps (`who: [ai]`:
+   finish_prep, hand_over) nor actions needing a record chooser (set_bundle) or the list's own
+   editors (tags, wait_until). 完了 from 未着手 / 返事待ち runs 着手 first (complete starts from
+   in_progress / review), each step at the version the previous one moved to. 受けられない needs a
+   reason (to the requester). 延ばす: 1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜 or a date and time
+   (`postponeChoices`); the server tells the requester. The server decides every action.
+5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
+   reply draft) that stage 3's connectors fill; empty and hidden today.
+6. Fields, 経緯, and 「つながっているもの」 with the record card's rows (`RecordRows.tsx`, registered
+   import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
+   (`RecordMarks`, also on the generic card and every record row).
+
 ## Tests
 
 `client/tests/tasks-list.test.ts` (each record once and in its place; only one's own task
@@ -78,4 +117,7 @@ finishes from the list; the one line is owner-only and assigned to the member; a
 never reaches the server; records off = no list), `src/features/tasks/model.test.ts`,
 `src/features/tasks/quickAdd.test.ts`, `client/tests/ui/tasks-list.spec.ts`
 (`tests/tasks-list-ui.html`: sections, meetings mixed in, folding, date view, 引き受ける, finishing,
-the one line, the tag filter, a row opening its card).
+the one line, the tag filter, a row opening its card), `client/tests/task-card.test.ts` (the
+assignee completes only on a stated OK and starts first; the AI's steps and what the member's
+place does not allow never offered; the OK in words; prepared apart from links; an unknown result
+offers reconciling only; run ids and keys never reshape the URL), `client/tests/ui/task-card.spec.ts`.

@@ -2,7 +2,7 @@ import { CircleNotch, Clock, LinkSimple } from '@phosphor-icons/react'
 import type { RecordCardLink, RecordCardView } from '../../../../shared/record-views'
 import { useRecordCard } from '../hooks/useRecordCard'
 import { groupByKind, kindTitle } from '../model'
-import { FileLinkRow, RecordRow } from './RecordRows'
+import { FileLinkRow, RecordMarks, RecordRow } from './RecordRows'
 
 interface Props {
   companyId: string
@@ -41,6 +41,7 @@ function CardBody({ card, rootPath }: { card: RecordCardView; rootPath: string }
             <span className="font-medium">{kindTitle(record.kind)}</span>
             {record.typeLabel !== kindTitle(record.kind) && <span>{record.typeLabel}</span>}
             {record.stateLabel && <span className="rounded-full bg-accent/10 px-2 py-px text-accent">{record.stateLabel}</span>}
+            <RecordMarks record={record} />
           </div>
           <h1 className="text-xl font-bold leading-snug">{record.title}</h1>
           {record.summary && <p className="text-[13px] text-gray-600 dark:text-zinc-300 whitespace-pre-wrap">{record.summary}</p>}

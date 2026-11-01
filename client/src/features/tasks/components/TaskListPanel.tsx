@@ -135,7 +135,8 @@ export function TaskListPanel({ companyId, list, aiTurns, renderCard }: Props) {
         </div>
       </div>
       <div className="min-w-0 flex-1 overflow-y-auto bg-white dark:bg-zinc-900">
-        {opened ? <div key={opened} className="h-full">{renderCard(opened)}</div>
+        {/* Keyed by the version the list knows: a change made from the list shows on the card too. */}
+        {opened ? <div key={`${opened}@${items.find(i => i.id === opened)?.version ?? 0}`} className="h-full">{renderCard(opened)}</div>
           : <div className="flex h-full items-center justify-center text-sm text-gray-400">左の一覧から開きます</div>}
       </div>
     </div>

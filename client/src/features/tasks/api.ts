@@ -4,6 +4,7 @@
 // member may read and do.
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
+import type { TaskCardResult } from '../../../shared/task-card'
 import type { TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
@@ -12,6 +13,10 @@ export type CalendarReads = ElectronPort<'getCalendarToday'>
 export type TaskReads = ElectronPort<'getTaskList' | 'onNotificationsChanged'>
 /** Changing shared state on the server (a new task, an action on one). */
 export type TaskWrites = ElectronPort<'createTask' | 'actOnTask'>
+/** One task's card. */
+export type TaskCardReads = ElectronPort<'getTaskCard'>
+/** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
+export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
 
 /**
  * Today's meetings of the member in `companyId`. A calendar that cannot be read
@@ -40,4 +45,16 @@ export function createTask(companyId: string, input: TaskCreateInput, writes: Ta
 
 export function actOnTask(companyId: string, recordId: string, input: TaskActInput, writes: TaskWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.actOnTask(companyId, recordId, input)
+}
+
+export function getTaskCard(companyId: string, recordId: string, reads: TaskCardReads = window.electronAPI): Promise<TaskCardResult> {
+  return reads.getTaskCard(companyId, recordId)
+}
+
+export function retryTaskRun(companyId: string, runId: string, writes: TaskRunWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.retryTaskRun(companyId, runId)
+}
+
+export function reconcileTaskRun(companyId: string, runId: string, key: string, done: boolean, writes: TaskRunWrites = window.electronAPI): Promise<TaskWriteResult> {
+  return writes.reconcileTaskRun(companyId, runId, key, done)
 }
