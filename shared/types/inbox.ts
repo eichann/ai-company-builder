@@ -180,6 +180,21 @@ export interface InboxThreadMessage {
  */
 export interface InboxThreadView {
   item: InboxItemView
+  /**
+   * Read by a 返事のお願い's id (B5): it, and why it is the AI's turn — `draft` (準備中: the reply's
+   * draft), `follow_up` (準備中 after 返事の見込み passed: a nudge's draft), `check_reply` (確かめ中:
+   * a reply came; its content decides), else `none`.
+   */
+  request?: {
+    id: string
+    state: string | null
+    version: number
+    purpose: 'draft' | 'follow_up' | 'check_reply' | 'none'
+    waitUntil: string | null
+    due: string | null
+    endCondition: string | null
+    triggerKind: string | null
+  }
   /** `ok`, or why nothing could be read (not-connected, turned-off, stopped, choice-needed, not-found, unavailable). */
   read: 'ok' | 'not-connected' | 'turned-off' | 'stopped' | 'choice-needed' | 'not-found' | 'unavailable'
   header: string

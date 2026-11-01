@@ -14,6 +14,7 @@ paths:
   - "admin/src/app/companies/*/task-list/intake-settings.tsx"
   - "client/electron/features/inbox/**"
   - "client/shared/ai-turn-steps/inbox-triage.ts"
+  - "client/shared/ai-turn-steps/follow-up.ts"
 ---
 
 # Incoming messages (来た連絡, stage 3, lane B: B2)
@@ -132,6 +133,31 @@ server's execution run alone picks the PC; left in `received` the run is given b
 quoted) and `reply_request__hand_over`. It never sends. Tests: `client/tests/ai-turn-steps.test.ts`,
 `client/tests/ai-turn-claims.test.ts` (no start mark).
 
+## Following up (追いかけ, B5: `follow-up`)
+
+- **The clock**: `WAIT_OVER.reply_request` (`core-types.ts`): a 返事待ち whose `wait_until` (返事の
+  見込み: the AI reads a promise, the person sets it, or the 目安) has passed goes to `preparing` (the
+  AI drafts the nudge) when 自動で進める is on, else to `open` (the assignee). **Never before**: the
+  only way out of `waiting_reply` into 準備中 is the clock's `wait_over` after the time (no action of
+  the type does it). The person still presses 送る.
+- **Their reply ends it** (the reply's content decides): a reply that is not automatic moves a
+  返事待ち — or a follow-up still 準備中 / handed over (`open`) after `wait_over` (`followingUp`: a
+  `wait_over` newer than the last move into `waiting_reply`) — to `checking`, and the nudge's
+  prepared drafts are discarded. A first draft (準備中 not after a `wait_over`) stays.
+- **The PC's step** `client/shared/ai-turn-steps/follow-up.ts`: a `reply_request` in `preparing` or
+  `checking` (no start mark; `claim.from` lists both). `inbox_read` with the request's id answers
+  `request.purpose` — `draft`, `follow_up`, `check_reply` — and the AI acts: the draft or nudge as
+  `prep_summary` (`finish_prep`), `ai_close` (answered / sent / accepted), `await_reply` (+
+  `set_wait_until` for a promise such as 「明日送ります」: the clock follows it up), or `hand_over`
+  (still the member's).
+- **A promise in the reply** (「明日送ります」, owner decision 2026-11-02): the same reply request goes
+  back to 返事待ち with the promised time as `wait_until` — no separate promise-wait record — and
+  the clock follows it up like any 返事の見込み.
+- **The draft** is text in `prep_summary` (「AIが用意したこと」) until A4's reply draft lands; the
+  steps then switch to A4's tools (owner decision 2026-11-02). Its only tools: `inbox_read` and those six `reply_request__…` actions.
+- Tests: `server/tests/unit/inbox.test.ts` ("B5"), `client/tests/ai-turn-steps.test.ts`,
+  `client/tests/ai-turn-claims.test.ts`.
+
 ## Member routes (`routes/inbox.ts`, session, `/api/companies/:companyId`)
 
 `GET|PUT /inbox-settings` (any member reads; owner/admin change — 403; a shared address on a
@@ -185,7 +211,8 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   A's `mailReader` (it lists header facts newest first; the inbox needs Message-ID / References
   and `outgoing`), the server clock calling `inbox.pollCompany`, and `connect` on a grant.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
-  another To member (moves `personal_owner`), the app's screens (A4), follow-up (B5).
+  another To member (moves `personal_owner`), the app's screens (A4).
+- A task's own wait (`WAIT_OVER.task` → `preparing`) has no PC step yet: lane C covers it.
 - The reply's draft is text in `prep_summary` until A4's reply draft (`outbound_message` v4,
   replying to the interaction, with the sender as a recipient source) lands; the step then names
   A4's draft tools instead. The chat thread read waits for A4's `ChatReader` (one line in

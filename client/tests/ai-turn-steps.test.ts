@@ -121,7 +121,6 @@ test('providers: tools of several connectors on one token; no replacing; a failu
 
 test('an incoming message (interaction) runs under inbox-triage from the task list\'s 「AI の番」; its run gets only the inbox\'s tools', () => {
   assert.equal(aiTurnStepForRecord('interaction-abcdef12')?.step, 'inbox-triage')
-  assert.equal(aiTurnStepForRecord('reply_request-abcdef12'), null)
   const queue = aiTurnQueue({ minutes: [], tasks: [item('interaction-aaaaaaaa', 'ai', { due: null }), item('interaction-bbbbbbbb', 'mine')] })
   assert.deepEqual(queue.map(q => q.id), ['interaction-aaaaaaaa'])
   for (const name of ['inbox_read', 'inbox_judge', 'records_create', 'reply_request__finish_prep', 'reply_request__hand_over']) {
@@ -159,4 +158,16 @@ test('the inbox tools: the thread is read through the server as outside text; a 
   assert.match(await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'send', reason: 'x' }), /入力が正しくありません/)
   await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' })
   assert.deepEqual(calls.at(-1), { method: 'POST', path: '/inbox/items/interaction-aaaaaaaa/judgement', body: { expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' } })
+})
+
+test('a 返事のお願い (準備中 / 確かめ中) runs under follow-up with only its own actions: it can end only its own request, never send', () => {
+  assert.equal(aiTurnStepForRecord('reply_request-abcdef12')?.step, 'follow-up')
+  for (const name of ['inbox_read', 'reply_request__finish_prep', 'reply_request__hand_over', 'reply_request__ai_close', 'reply_request__await_reply', 'reply_request__set_wait_until']) {
+    assert.ok(aiTurnStepAllowsRecordTool('follow-up', name), name)
+  }
+  for (const name of ['inbox_judge', 'records_create', 'records_get', 'reply_request__close', 'reply_request__drop', 'mail_draft_create', 'task__complete']) {
+    assert.ok(!aiTurnStepAllowsRecordTool('follow-up', name), name)
+  }
+  // Several from-states only without a start mark.
+  assert.match(checkAiTurnSteps([step({ step: 'x', recordId: /^x-[a-z]{6}$/, claim: { action: 'start_reading', from: ['received', 'reading'] } })]) ?? '', /several from-states/)
 })

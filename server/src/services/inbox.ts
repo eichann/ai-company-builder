@@ -24,7 +24,7 @@
  * read gets exactly the missing record's answer. Lists answer only the
  * caller's own.
  */
-import { INBOX_ACTIONS, INBOX_ACTOR } from '../../shared/core/core-types'
+import { INBOX_ACTIONS, INBOX_ACTOR, WAIT_OVER_ACTION } from '../../shared/core/core-types'
 import type { ConnectorRole, RoleResolution } from '../../shared/core/connector-roles'
 import {
   chatThreadOf, companyDomains, defaultIntakeSettings, mailIdOf, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
@@ -257,6 +257,23 @@ export function createInboxService(deps: InboxDeps) {
     }
   }
 
+  /** The clock moved it out of 返事待ち (WAIT_OVER) and it has not gone back to waiting since: a follow-up (B5). */
+  function followingUp(handle: CompanyData, replyRequestId: string): boolean {
+    const ledger = handle.records.ledger(replyRequestId)
+    const lastOver = ledger.map(e => e.action).lastIndexOf(WAIT_OVER_ACTION)
+    const lastWait = ledger.map(e => e.toState).lastIndexOf('waiting_reply')
+    return lastOver >= 0 && lastOver > lastWait
+  }
+
+  /** What a 返事のお願い is in the AI's turn for (B5): the thread view tells the PC's AI. */
+  function requestView(handle: CompanyData, id: string): NonNullable<InboxThreadView['request']> {
+    const { state, version, fields } = fieldsOf(handle, id)
+    const purpose = state === 'checking' ? 'check_reply' : state === 'preparing' ? (followingUp(handle, id) ? 'follow_up' : 'draft') : 'none'
+    return {
+      id, state, version, purpose, waitUntil: str(fields.wait_until), due: str(fields.due), endCondition: str(fields.end_condition), triggerKind: str(fields.trigger_kind),
+    }
+  }
+
   /** The 返事のお願い's prepared drafts still in 下書き: discarded (the reply went out elsewhere). */
   function discardDrafts(companyId: string, handle: CompanyData, replyRequestId: string, channel: InboxChannel): void {
     const ids = handle.records.linksFrom([replyRequestId]).filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string)
@@ -316,14 +333,18 @@ export function createInboxService(deps: InboxDeps) {
     }
     // An automatic reply is no reply (spec §7-3).
     if (msg.automated || msg.bulk) return
-    const waiting = replies.filter(r => r.state === 'waiting_reply')
+    // 返事待ち, or a nudge being drafted or handed over after 返事の見込み passed (B5): the reply came.
+    const waiting = replies.filter(r => r.state === 'waiting_reply' || ((r.state === 'preparing' || r.state === 'open') && followingUp(handle, r.id)))
     for (const r of waiting) {
-      logFailure('reply arrived', deps.writer.transition(companyId, {
+      const moved = deps.writer.transition(companyId, {
         recordId: r.id, action: INBOX_ACTIONS.replyArrived, expectedVersion: r.version, to: 'checking',
         fields: { trigger_kind: 'their_reply', trigger_ref: msg.sourceRef }, actor: INBOX_ACTOR, note: '',
         // The assignee hears 「返事が来た」 (notice `reply_arrived`); the AI's check is their AI's turn.
         notify: typeof r.fields.assignee === 'string' ? [r.fields.assignee] : [],
-      }))
+      })
+      logFailure('reply arrived', moved)
+      // A nudge drafted for it is no longer wanted: never offered to send.
+      if (moved.ok && r.state !== 'waiting_reply') discardDrafts(companyId, handle, r.id, msg.channel)
     }
     if (replies.length > 0) return
     // Nothing open about it: a handled interaction is the AI's to judge again.
@@ -582,8 +603,9 @@ export function createInboxService(deps: InboxDeps) {
       const row = interactionFor(member, handle, recordId)
       if (!row) return notFound()
       const item = itemView(member, handle, row)
+      const request = row.id !== recordId ? requestView(handle, recordId) : undefined
       const answer = (read: InboxThreadView['read'], messages: InboxThreadMessage[] = [], more = false): InboxThreadView => ({
-        item, read, header: THREAD_TEXT_HEADER, messages, footer: THREAD_TEXT_FOOTER, more,
+        item, ...(request ? { request } : {}), read, header: THREAD_TEXT_HEADER, messages, footer: THREAD_TEXT_FOOTER, more,
         instructionLike: findInstructionLikeText(messages.map(m => m.text).join('\n')).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
       if (item.channel === 'chat') {

@@ -31,7 +31,11 @@
  *   next plain message in that DM within 3 days) ends what it answered: a
  *   draft made for it is discarded, an unjudged message is handled, the AI
  *   makes no 返事のお願い for an answered thread; a reply ACB cannot see is
- *   the person's 「もう返した」.
+ *   the person's 「もう返した」;
+ * - B5 追いかけ: past 返事の見込み (never before) the server clock puts a 返事待ち
+ *   into the AI's turn to draft a nudge (自動で進める on; else the assignee's);
+ *   their reply then sends it to the AI's check and drops the nudge's draft;
+ *   the AI is told why it is its turn (draft / follow_up / check_reply).
  */
 import { beforeEach, describe, expect, it } from 'vitest'
 import Database from 'better-sqlite3'
@@ -45,6 +49,7 @@ import { createServiceRecordWriter, type RecordChange, type ServiceActor } from 
 import { createIdentityService } from '../../src/services/identities'
 import { createInboxService, type InboxChatReader, type InboxService } from '../../src/services/inbox'
 import { createRecordEngine, type RecordEngine } from '../../src/services/record-engine'
+import { createServerClock } from '../../src/services/server-clock'
 import type { MailMessage, MailReadFailure } from '../../src/ports/mail'
 import { canonicalTypeJson, parseTypeFile } from '../../../shared/core/record-types'
 
@@ -667,5 +672,75 @@ describe('B4: the member already replied (Gmail, Slack, or somewhere ACB cannot 
     const person = await engine.act(m('u-alice'), { id: 'u-alice', kind: 'human', source: null }, rr, 'replied_elsewhere', { expectedVersion: 1, note: '電話で返した' })
     expect(person.ok).toBe(true)
     expect(stateOf(rr).state).toBe('closed')
+  })
+})
+
+
+describe('B5: 追いかけ (following up)', () => {
+  /** A 返事のお願い in 返事待ち until `waitUntil` (the person's 「相手の返事待ちにする」, stored as the engine would). */
+  function waiting(waitUntil: string) {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const row = interactions().find(r => !handle().records.candidates({ types: ['reply_request'], link: { name: 'interaction', id: r.id } }, 5).length)!
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    handle().records.writeState({ recordId: rr, state: 'waiting_reply', fields: JSON.stringify({ ...fieldsOf(rr), wait_until: waitUntil }), version: 2, updatedAt: TS }, 1)
+    return { first, rr }
+  }
+  function clockWith(autoRun: boolean) {
+    const clock = { now: () => new Date(nowMs).toISOString(), nowMs: () => nowMs }
+    return createServerClock({
+      companyIds: () => ['a'], companyData: source, clock, writer: serviceWriter,
+      notifications: { sweep: () => 0 },
+      taskSettings: () => { const s = defaultTaskSettings(); s.autoRun.enabled = autoRun; return s },
+      timeZoneOf: () => 'Asia/Tokyo', yieldNow: async () => {}, log: () => {},
+    })
+  }
+
+  it('never before the promised time; after it the AI\'s turn (自動で進める on), else the assignee\'s', async () => {
+    // 2026-11-02T01:00Z = 10:00 in Tokyo.
+    const { rr } = waiting('2026-11-02T11:00')
+    await clockWith(true).runOnce()
+    expect(stateOf(rr).state).toBe('waiting_reply')
+    nowMs = Date.parse('2026-11-02T02:30:00.000Z') // 11:30
+    await clockWith(true).runOnce()
+    expect(stateOf(rr).state).toBe('preparing')
+    expect(handle().records.ledger(rr).at(-1)).toMatchObject({ action: 'wait_over', actorKind: 'external' })
+    mailTexts['u-alice'] = {}
+    expect(ok(await inbox.thread(m('u-alice'), rr)).request).toMatchObject({ id: rr, purpose: 'follow_up', waitUntil: '2026-11-02T11:00' })
+
+    const other = waiting('2026-11-01')
+    await clockWith(false).runOnce()
+    expect(stateOf(other.rr).state).toBe('open')
+  })
+
+  it('their reply after the time passed: the AI checks it (the reply\'s content decides) and the nudge\'s draft is dropped', async () => {
+    const { first, rr } = waiting('2026-11-01')
+    await clockWith(true).runOnce()
+    expect(stateOf(rr).state).toBe('preparing')
+    const nudge = serviceWriter.create('a', {
+      type: 'outbound_message', title: '催促', personalOwner: 'u-alice', fields: { assignee: 'u-alice', requested_by: 'u-alice', channel: 'email' },
+      actor: { id: 'u-alice', kind: 'ai', source: 'claude-code', conversationId: 'conv-1', runId: null }, note: '', quiet: true,
+    })
+    if (!nudge.ok) throw new Error(nudge.reason)
+    handle().records.replaceLinks(rr, [...handle().records.linksFrom([rr]), { sourceId: rr, name: 'prepared', position: 9, targetId: nudge.record.id, targetPath: null }])
+    // An automatic reply is no reply.
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId], automated: true }))
+    expect(stateOf(rr).state).toBe('preparing')
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId] }))
+    expect(stateOf(rr).state).toBe('checking')
+    expect(stateOf(nudge.record.id).state).toBe('discarded')
+    mailTexts['u-alice'] = {}
+    expect(ok(await inbox.thread(m('u-alice'), rr)).request?.purpose).toBe('check_reply')
+  })
+
+  it('a first draft (not a follow-up) is not ended by another message of theirs', async () => {
+    const first = mail()
+    inbox.receive('a', 'u-alice', first)
+    const [row] = interactions()
+    const rr = ok(inbox.judge(m('u-alice'), AI('u-alice'), row.id, { expectedVersion: 1, outcome: 'reply', reason: '返事が要る' })).replyRequestId!
+    inbox.receive('a', 'u-alice', mail({ references: [first.messageId] }))
+    expect(stateOf(rr).state).toBe('preparing')
+    mailTexts['u-alice'] = {}
+    expect(ok(await inbox.thread(m('u-alice'), rr)).request?.purpose).toBe('draft')
   })
 })

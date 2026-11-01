@@ -44,9 +44,10 @@ export interface AiTurnStepDefinition<Step extends string = string> {
    * The type's first AI action, run by main at the version read just before, and the state it
    * starts from. `action: null`: the type has no start mark (an interaction in 届いた) — the
    * server's execution run alone decides which PC runs it, and the run's own writes are compared
-   * at the version the claim read.
+   * at the version the claim read. `from` may name several AI-turn states (a 返事のお願い: 準備中 and
+   * 確かめ中) only with `action: null`.
    */
-  claim: { action: string | null; from: string }
+  claim: { action: string | null; from: string | readonly string[] }
   /**
    * The record's state after the run (main's `aiTurns:settle`): `done` = finished; `couldNot` =
    * the AI said it could not (a person looks); `closed` = a person ended it meanwhile; `working` =
@@ -60,4 +61,9 @@ export interface AiTurnStepDefinition<Step extends string = string> {
   linksMinutes: boolean
   /** The first message, with the record's version after the claim (null when the server did not say). */
   firstMessage(candidate: AiTurnCandidate, version: number | null): string
+}
+
+/** The states a step's claim starts from (one or several). */
+export function claimStates(step: Pick<AiTurnStepDefinition, 'claim'>): readonly string[] {
+  return typeof step.claim.from === 'string' ? [step.claim.from] : step.claim.from
 }
