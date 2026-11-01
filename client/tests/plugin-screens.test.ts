@@ -11,9 +11,8 @@ import { pluginFingerprintV2 } from '../../shared/core/plugin-fingerprint'
 import type { DistributedPlugin } from '../../shared/types/plugins'
 import { sha256Hex } from '../electron/features/plugins/fetch'
 import { createPluginFileServer } from '../electron/features/plugins/protocol'
-import { createPluginScreens } from '../electron/features/plugins/screens'
+import { createPluginScreens, screensOfPackage } from '../electron/features/plugins/screens'
 import { createPluginPackageStore } from '../electron/features/plugins/store'
-import { screensOfPackage } from '../shared/plugin-screens'
 
 const quiet = { warn: () => {}, info: () => {} }
 const FIXTURE = path.join(import.meta.dirname, 'fixtures', 'plugins', 'slots-sample')

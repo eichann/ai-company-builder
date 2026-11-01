@@ -9,10 +9,33 @@
 // kept for the steps of older work only. Only the main window may ask.
 
 import { COMPANY_ID_RE } from '../../../../shared/core/plugin-declaration-rules'
+import { PLUGIN_CONTRACT_V2 } from '../../../../shared/core/plugin-declaration'
+import { parsePluginManifest } from '../../../../shared/core/plugin-manifest'
 import type { DistributedPlugin } from '../../../../shared/types/plugins'
 import type { PluginPackageRef } from '../../../shared/plugin-bridge'
-import { screensOfPackage, type PluginScreens, type PluginScreensResult } from '../../../shared/plugin-screens'
+import { APP_BRIDGE_VERSION } from '../../../shared/plugin-bridge-ops'
+import type { PluginScreens, PluginScreensResult } from '../../../shared/plugin-screens'
 import type { IpcRegistrar } from '../../ipc/registrar'
+
+/**
+ * The screens of one kept package, from its verified declaration and file
+ * list. Only a contract-2 business plugin whose declaration names this package
+ * (same id and version), declares `ui` with a bridge version this app speaks,
+ * and whose every frame entry is a file of the verified package has any;
+ * anything else answers null (no slot).
+ */
+export function screensOfPackage(ref: PluginPackageRef, manifestText: string, files: ReadonlySet<string>): PluginScreens | null {
+  const parsed = parsePluginManifest(manifestText)
+  if (!parsed.ok) return null
+  const m = parsed.value
+  if (m.role !== 'business' || m.contract !== PLUGIN_CONTRACT_V2 || !m.ui || m.ui.bridge !== APP_BRIDGE_VERSION) return null
+  if (m.id !== ref.id || m.version !== ref.version) return null
+  const ui = m.ui
+  const entries = [...(ui.tab ? [ui.tab.entry] : []), ...ui.recordSections.map(s => s.entry), ...ui.fileActions.map(a => a.entry)]
+  // The shelf checked this already; a kept folder that lacks one is not the package the company chose.
+  if (entries.some(e => !files.has(e))) return null
+  return { plugin: { id: m.id, version: m.version }, label: m.label, tab: ui.tab, peek: ui.peek, recordSections: ui.recordSections, fileActions: ui.fileActions }
+}
 
 export interface PluginScreensDeps {
   /** What the company's agent policy lists now (asked of the server when nothing is known yet); null = unknown. */

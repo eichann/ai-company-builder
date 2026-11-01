@@ -16,7 +16,8 @@ export function usePluginScreens(companyId: string | undefined): PluginScreensSt
   const [state, setState] = useState<{ companyId: string; value: PluginScreensState } | null>(null)
   const load = useCallback((id: string) => {
     void getPluginScreens(id).then(
-      r => setState({ companyId: id, value: r.success ? { screens: r.screens, failed: false } : { screens: [], failed: true } }),
+      // No answer (an older main, a preview without plugins): no slots, not a failure.
+      r => setState({ companyId: id, value: !r ? NONE : r.success ? { screens: r.screens, failed: false } : { screens: [], failed: true } }),
       () => setState({ companyId: id, value: { screens: [], failed: true } }),
     )
   }, [])

@@ -1,7 +1,7 @@
 // The four plugin slots composed into the screen (stage 4b, plan A6, plugin-frame.md "The four
 // slots"): ① left tabs with ② their peek, ③ record card sections, ④ file menu items. The plugins
 // feature draws the frames; the workspace, records, tasks and files features only offer a slot.
-import type { ReactNode } from 'react'
+import { lazy, Suspense, type ReactNode } from 'react'
 import type { BridgeUiOpenArgs, PluginBridgeAnswer } from '../../shared/plugin-bridge-ops'
 import type { TaskListItem } from '../../shared/tasks'
 import { runCommand } from '../shared/commands/commands'
@@ -10,7 +10,15 @@ import type { FileMenuExtraItem } from '../features/files/contextMenuItems'
 import type { PluginScreensState } from '../features/plugins/hooks/usePluginScreens'
 import { fileActionsFor, peekItems, pluginTabId, pluginTabs, recordSectionsFor, type FileActionSlot } from '../features/plugins/model'
 import { pluginIcon } from '../features/plugins/pluginIcons'
-import { PluginPeek, PluginRecordSections, PluginTabPanel } from '../features/plugins/components/PluginSlots'
+
+// Loaded when a slot first shows: members of companies without plugins never load the frame code
+// (the renderer bundle has a budget, scripts/check-bundle-size.mjs).
+const slots = () => import('../features/plugins/components/PluginSlots')
+const PluginTabPanel = lazy(() => slots().then(m => ({ default: m.PluginTabPanel })))
+const PluginPeek = lazy(() => slots().then(m => ({ default: m.PluginPeek })))
+const PluginRecordSections = lazy(() => slots().then(m => ({ default: m.PluginRecordSections })))
+/** ④'s dialog, loaded when a file action is first chosen. */
+export const PluginFileActionDialog = lazy(() => slots().then(m => ({ default: m.PluginFileActionDialog })))
 import { companyPathOf } from '../features/tasks/model'
 
 /** A file action the member chose: shown in a dialog with the plugin's frame. */
@@ -62,15 +70,15 @@ export function pluginSlots({ companyId, rootPath, plugins, taskItems, onFileAct
       mount: 'once-opened',
       className: 'flex',
       badgeCount: peeked && screen.peek?.stateGroup === 'mine' ? peeked.length : null,
-      render: () => <PluginTabPanel companyId={companyId} screen={screen} failed={plugins.failed} onOpen={openFromPlugin} frameUrl={frameUrl} />,
-      peek: peeked ? () => <PluginPeek screen={screen} items={peeked} onOpenRecord={recordId => { void runCommand('record.open', { recordId }).catch(() => {}) }} /> : undefined,
+      render: () => <Suspense fallback={null}><PluginTabPanel companyId={companyId} screen={screen} failed={plugins.failed} onOpen={openFromPlugin} frameUrl={frameUrl} /></Suspense>,
+      peek: peeked ? () => <Suspense fallback={null}><PluginPeek screen={screen} items={peeked} onOpenRecord={recordId => { void runCommand('record.open', { recordId }).catch(() => {}) }} /></Suspense> : undefined,
     }
   })
 
   const renderSections = (record: { id: string; type: string }): ReactNode => {
     if (!companyId) return null
     const sections = recordSectionsFor(plugins.screens, record.type)
-    return sections.length > 0 ? <PluginRecordSections companyId={companyId} recordId={record.id} sections={sections} onOpen={openFromPlugin} frameUrl={frameUrl} /> : null
+    return sections.length > 0 ? <Suspense fallback={null}><PluginRecordSections companyId={companyId} recordId={record.id} sections={sections} onOpen={openFromPlugin} frameUrl={frameUrl} /></Suspense> : null
   }
 
   const fileMenuItems = (entry: { path: string; isDirectory: boolean; notDownloaded?: boolean }): FileMenuExtraItem[] => {

@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useRef } from 'react'
+import { Suspense, useState, useMemo, useCallback, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Lightning, FolderSimple, MagnifyingGlass, ChatCircle, CaretLeft, ListChecks } from '@phosphor-icons/react'
 import { ChatPanel } from '../features/chat/components/ChatPanel'
@@ -68,8 +68,7 @@ import { ApprovalCard } from '../features/chat/components/ApprovalCard'
 import { RecordRow } from '../features/records/components/RecordRows'
 import type { RecordViewSummary } from '../../shared/record-views'
 import { usePluginScreens } from '../features/plugins/hooks/usePluginScreens'
-import { PluginFileActionDialog } from '../features/plugins/components/PluginSlots'
-import { pluginSlots, type FileActionOpen } from './pluginSlots'
+import { PluginFileActionDialog, pluginSlots, type FileActionOpen } from './pluginSlots'
 
 // The main screen: composes the features (state lives in their hooks) and lays them out.
 
@@ -514,14 +513,16 @@ export function AppShell() {
       )}
       {/* Hidden as soon as its plugin is no longer listed (turned off, stopped). */}
       {fileAction && currentCompany && pluginScreens.screens.some(s => s.plugin.id === fileAction.action.plugin.id && s.plugin.version === fileAction.action.plugin.version) && (
-        <PluginFileActionDialog
-          companyId={currentCompany.id}
-          action={fileAction.action}
-          companyPath={fileAction.companyPath}
-          isFolder={fileAction.isFolder}
-          onOpen={target => { setFileAction(null); return plugins.openFromPlugin(target) }}
-          onClose={() => setFileAction(null)}
-        />
+        <Suspense fallback={null}>
+          <PluginFileActionDialog
+            companyId={currentCompany.id}
+            action={fileAction.action}
+            companyPath={fileAction.companyPath}
+            isFolder={fileAction.isFolder}
+            onOpen={target => { setFileAction(null); return plugins.openFromPlugin(target) }}
+            onClose={() => setFileAction(null)}
+          />
+        </Suspense>
       )}
       <AppDialogs
         companyId={currentCompany?.id}
