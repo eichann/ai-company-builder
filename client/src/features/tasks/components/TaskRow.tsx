@@ -1,11 +1,19 @@
 import { useState } from 'react'
 import { CheckCircle, Circle, CircleNotch, Clock, LockSimple, Robot, VideoCamera, Warning } from '@phosphor-icons/react'
-import type { AiTurnItemView } from '../../../../shared/ai-turns'
+import type { AiTurnItemState, AiTurnItemView } from '../../../../shared/ai-turns'
 import type { TaskListItem } from '../../../../shared/tasks'
 import { dueText, dueWhen, type CompanyNow, type ListEvent } from '../model'
 import { draggedFilePaths, isFileTreeDrag } from '../../../shared/lib/dragTypes'
 
 const CHIP = 'shrink-0 rounded px-1 text-[10px]'
+/** Where the automatic 「AI の番」 stands (ai-turns.md "Never silent"), before its reason. */
+const AI_STATE_WORDS: Record<AiTurnItemState, string> = {
+  running: 'AI が進めています',
+  waiting: 'AI が始める予定です',
+  'not-allowed': 'AI では始められません',
+  failed: 'AI ができませんでした',
+  handed: 'あなたにお渡ししました',
+}
 
 interface RowProps {
   item: TaskListItem
@@ -22,17 +30,19 @@ interface RowProps {
   onHand: (() => void) | null
   /** A file dragged from the file tree onto it (absolute paths); null: it takes no files. */
   onDropFiles: ((paths: string[]) => void) | null
+  /** More buttons for this item (「まとまりを選ぶ」, a meeting's 「自分で読み取る」 / 「今は読まない」). */
+  extra?: Array<{ label: string; run: () => void }>
 }
 
 /** One item of the list: what it is, when it is due, whose turn, its まとまり and tags. */
-export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand, onDropFiles }: RowProps) {
+export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccept, onRetry, onHand, onDropFiles, extra = [] }: RowProps) {
   const [over, setOver] = useState(false)
   const done = item.turn === 'done'
   const when = dueWhen(item.due, now)
   const sub: string[] = []
   if (item.type !== 'task') sub.push(item.typeLabel)
   if (item.waitingFor) sub.push(item.waitingFor)
-  else if (item.turn === 'ai' && ai?.reason) sub.push(ai.reason)
+  else if (item.turn === 'ai' && ai) sub.push(ai.reason ? `${AI_STATE_WORDS[ai.state]}：${ai.reason}` : AI_STATE_WORDS[ai.state])
   else if (item.turn === 'ai') sub.push('AI が進めます')
   if (item.actingFor) sub.push(`${item.actingFor}さんの代わり`)
   if (done) sub.push(item.state === 'cancelled' ? '中止' : '終わった')
@@ -84,6 +94,11 @@ export function TaskRow({ item, now, active, ai, busy, onOpen, onFinish, onAccep
           <span className="flex flex-wrap justify-end gap-0.5">{item.tags.slice(0, 3).map(t => <span key={t} className={`${CHIP} bg-gray-100 dark:bg-zinc-800 text-gray-600 dark:text-zinc-300`}>#{t}</span>)}</span>
         )}
         {onAccept && <button type="button" disabled={busy} onClick={onAccept} className="rounded bg-accent px-2 py-0.5 text-[11px] text-white disabled:opacity-40">引き受ける</button>}
+        {extra.length > 0 && (
+          <span className="flex flex-wrap justify-end gap-1">
+            {extra.map(x => <button key={x.label} type="button" disabled={busy} onClick={x.run} className="rounded border border-accent/40 px-1.5 text-[10.5px] text-accent hover:bg-accent/10 disabled:opacity-40">{x.label}</button>)}
+          </span>
+        )}
         {(onRetry || onHand) && (
           <span className="flex gap-1">
             {onRetry && <button type="button" onClick={onRetry} className="rounded border border-gray-300 dark:border-zinc-600 px-1.5 text-[10.5px] hover:border-accent hover:text-accent">もう一度</button>}

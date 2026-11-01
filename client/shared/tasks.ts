@@ -43,7 +43,24 @@ export interface TaskListItem {
   bundle: { id: string; title: string } | null
   /** `done` only: when it finished (ISO), as far as the list knows (its last change). */
   finishedAt: string | null
+  /** A meeting read with no まとまり: the member says which one (「どのまとまりの会議ですか？」). */
+  needsBundle?: true
 }
+
+/** A まとまり the member may choose for a meeting (unfinished, readable). */
+export interface BundleChoice {
+  id: string
+  title: string
+  /** Its type's own label (案件, 企画, 取り組み…). */
+  typeLabel: string
+}
+
+export type BundleChoicesResult =
+  | { success: true; bundles: BundleChoice[] }
+  | { success: false; offline: boolean; error: string }
+
+/** The words of the 「あなたの番」 item for a meeting read without a まとまり. */
+export const MEETING_NEEDS_BUNDLE_TEXT = 'どのまとまり（案件など）の会議か選んでください'
 
 export interface TaskListData {
   /** false: records are off for the company (no list at all). */
@@ -90,6 +107,8 @@ export interface TaskSources {
   asked: RecordSummary[]
   /** Records that reached a final state today, the member's or asked by them. */
   doneToday: RecordSummary[]
+  /** Meetings of the member read lately whose まとまり nobody chose (none when the company has none). */
+  meetingsWithoutBundle?: RecordSummary[]
   typeLabels: Record<string, string>
   /** Member id → display name. */
   people: Record<string, string>
@@ -125,7 +144,7 @@ function waitingWords(r: RecordSummary, me: string, people: Record<string, strin
 export function classifyTasks(src: TaskSources): TaskListItem[] {
   const seen = new Set<string>()
   const out: TaskListItem[] = []
-  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null) => {
+  const add = (r: RecordSummary, turn: TaskTurn, waitingFor: string | null, finishedAt: string | null = null, needsBundle = false) => {
     if (seen.has(r.id)) return
     seen.add(r.id)
     out.push({
@@ -138,6 +157,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
       actingFor: r.actingFor ? nameOf(src.people, r.actingFor) : null,
       bundle: src.bundles[r.id] ?? null,
       finishedAt,
+      ...(needsBundle ? { needsBundle: true as const } : {}),
     })
   }
   for (const r of src.myTurn) {
@@ -146,6 +166,7 @@ export function classifyTasks(src: TaskSources): TaskListItem[] {
     else if (r.state === 'declined') add(r, 'mine', `${nameOf(src.people, r.fields.assignee)}さんが受けられないと返しました`)
     else add(r, 'mine', null)
   }
+  for (const r of src.meetingsWithoutBundle ?? []) add(r, 'mine', MEETING_NEEDS_BUNDLE_TEXT, null, true)
   for (const r of src.aiTurn) add(r, 'ai', null)
   for (const r of src.asked) add(r, 'others', waitingWords(r, src.me, src.people))
   for (const r of src.doneToday) add(r, 'done', null, r.updatedAt)

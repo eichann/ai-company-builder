@@ -5,7 +5,7 @@
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
-import type { TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
+import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
 export type CalendarReads = ElectronPort<'getCalendarToday'>
@@ -19,6 +19,9 @@ export type TaskCardReads = ElectronPort<'getTaskCard'>
 export type TaskFileWrites = ElectronPort<'linkFileToTask' | 'unlinkFileFromTask'>
 /** The company's file names on this computer (downloaded folders only), for 「＋ファイルをつなぐ」. */
 export type CompanyFileReads = ElectronPort<'gitListFiles'>
+/** 「どのまとまりの会議ですか？」: the まとまり to choose from, and linking the chosen one (nothing goes outside). */
+export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
+export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle'>
 /** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
 export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
 
@@ -75,4 +78,12 @@ export function unlinkFileFromTask(companyId: string, recordId: string, companyP
 /** Company-relative paths of the files on this computer. */
 export function listCompanyFiles(rootPath: string, reads: CompanyFileReads = window.electronAPI) {
   return reads.gitListFiles(rootPath, '')
+}
+
+export function getBundleChoices(companyId: string, reads: MeetingBundleReads = window.electronAPI): Promise<BundleChoicesResult> {
+  return reads.getBundleChoices(companyId)
+}
+
+export function linkMeetingBundle(companyId: string, meetingId: string, bundleId: string, writes: MeetingBundleWrites = window.electronAPI) {
+  return writes.linkMinutesBundle(companyId, meetingId, bundleId)
 }

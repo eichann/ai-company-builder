@@ -101,3 +101,39 @@ test('linking a file sends only a path inside the company folder; taking it away
     ['/records/item/task-abc123/file-links/remove', { path: '営業/見積.xlsx', expectedVersion: 4 }],
   ])
 })
+
+test('a meeting read without a まとまり waits in あなたの番 to be chosen, once', () => {
+  const meeting: RecordSummary = { ...rec('meeting-00aa11', 'read', { assignee: ME }), type: 'meeting' }
+  const items = classifyTasks(src({ meetingsWithoutBundle: [meeting], doneToday: [meeting] }))
+  assert.equal(items.length, 1)
+  assert.deepEqual([items[0].turn, items[0].needsBundle, items[0].waitingFor], ['mine', true, 'どのまとまり（案件など）の会議か選んでください'])
+})
+
+test('only meetings whose まとまり was read as missing ask; none where the company has no まとまり', async () => {
+  const meetingRead = (id: string) => ({ id, type: 'meeting', typeVersion: 2, title: id, summary: '', path: null, state: 'read', fields: { assignee: ME }, version: 5, updatedAt: '' })
+  const empty = { status: 200, body: { data: { total: 0, records: [] } } }
+  const base = {
+    '/api/me': { status: 200, body: { data: { id: ME } } },
+    'GET /api/companies/co1/records/my-turn': empty, 'GET /api/companies/co1/records/ai-turn': empty,
+    'GET /api/companies/co1/records/item/meeting-linked1': { status: 200, body: { data: { record: meetingRead('meeting-linked1'), links: [{ name: 'bundle', direction: 'out', record: { id: 'deal-abcdef', type: 'deal', title: 'A社' } }] } } },
+    'GET /api/companies/co1/records/item/meeting-free01': { status: 200, body: { data: { record: meetingRead('meeting-free01'), links: [] } } },
+  }
+  const query = (bundles: number) => async (body: Record<string, unknown>) =>
+    body.type === 'meeting' ? { data: { total: 3, records: [meetingRead('meeting-linked1'), meetingRead('meeting-free01'), meetingRead('meeting-unread1')] } }
+      : body.implements === 'bundle' ? { data: { total: bundles, records: [] } } : { data: { total: 0, records: [] } }
+  for (const [bundles, expected] of [[2, ['meeting-free01']], [0, []]] as const) {
+    const answer = query(bundles)
+    const api = createTasksApi({
+      baseUrl: () => 'https://acb.test', cookies: () => ['s=1'], log: { warn: () => {} }, now: () => Date.parse('2026-11-05T06:00:00.000Z'),
+      fetch: (async (url: string, init: RequestInit) => {
+        const path = url.replace('https://acb.test', '')
+        if (path.endsWith('/records/query')) return new Response(JSON.stringify(await answer(JSON.parse(String(init.body)))), { status: 200 })
+        const a = (base as Record<string, { status: number; body: unknown }>)[`${init.method} ${path}`] ?? (base as Record<string, { status: number; body: unknown }>)[path] ?? { status: 503, body: {} }
+        return new Response(JSON.stringify(a.body), { status: a.status })
+      }) as unknown as typeof fetch,
+    })
+    const r = await api.list('co1')
+    assert.ok(r.success)
+    assert.deepEqual(r.data.items.filter(i => i.needsBundle).map(i => i.id), expected)
+  }
+})

@@ -17,8 +17,11 @@ import type { ChatSaveReceipt, ChatSession } from '../shared/chat-history'
 import type { ChatWindowsChange } from '../shared/chat-windows'
 import { emitter, installElectronAPI } from './ui/fixtures/electron-api'
 import { commands, runCommand } from '../src/shared/commands/commands'
-import { MinutesNotices } from '../src/features/minutes/components/MinutesNotices'
+import { TaskListPanel } from '../src/features/tasks/components/TaskListPanel'
+import { useTaskList } from '../src/features/tasks/hooks/useTaskList'
+import { startMinutesReading } from '../src/features/minutes/startReading'
 import type { MinutesNotice } from '../shared/minutes-app'
+import type { TaskListItem } from '../shared/tasks'
 
 // Preview page for the chat header's usage meter, the message gutter and a
 // running subagent's progress line: the real ChatPanel with a mocked
@@ -39,8 +42,8 @@ import type { MinutesNotice } from '../shared/minutes-app'
 //   ?autoturn=1    the main pane gets one received minutes record as 「AI の番」: the runner claims it
 //                  (claimAiTurn recorded in __acbChat.aiTurns) and runs it in a hidden consultation;
 //                  ?autoturn=taken: another PC wins the claim; ?autoturn=fail: the AI says it cannot read it
-//   ?minutes=1     「議事録が届きました」 above the chat (one received minutes record);
-//                  the deal choice card's links are recorded in __acbChat.minutesLinks
+//   ?minutes=1     the task list beside the chat with one received minutes record in 「AI の番」
+//                  (「自分で読み取る」); the deal choice card's links are recorded in __acbChat.minutesLinks
 
 const params = new URLSearchParams(location.search)
 if (params.get('theme') === 'dark') document.documentElement.classList.add('dark')
@@ -126,6 +129,10 @@ const windowCalls = { opened: [] as string[], focused: [] as string[] }
 const minutesLinks: Array<[string, string, string]> = []
 const MINUTES_NOTICE: MinutesNotice = { id: 'minutes-0a1b2c3d4e5f60718293a4b5', title: 'A社 商談', meetingAt: '2026-11-05T06:00:00.000Z', version: 1 }
 const autoTurn = params.get('autoturn')
+const MEETING_ITEM: TaskListItem = {
+  id: MINUTES_NOTICE.id, type: 'meeting', typeLabel: '会議', title: MINUTES_NOTICE.title, state: 'received', stateLabel: '届いた', version: 1,
+  due: null, tags: [], turn: 'ai', waitingFor: null, personal: false, own: false, actingFor: null, bundle: null, finishedAt: null,
+}
 const aiTurns = { claims: [] as Array<[string, string, number, string]>, settled: [] as string[], retried: [] as string[] }
 installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
@@ -136,6 +143,8 @@ installElectronAPI({
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
   retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
   linkMinutesBundle: async (companyId, minutesId, bundleId) => { minutesLinks.push([companyId, minutesId, bundleId]); return { success: true } },
+  // The task list as main answers it: the received meeting waits in 「AI の番」.
+  getTaskList: async () => ({ success: true, data: { available: true, listDepartmentIds: null, items: [MEETING_ITEM] } }),
   openChatWindow: async (sessionId) => {
     windowCalls.opened.push(sessionId)
     windowChanges.emit({ windows: [{ companyId: 'preview-company', sessionId, status: { state: 'idle', line: '' } }] })
@@ -315,12 +324,20 @@ Object.assign(window, { __acbCommands: { run: runCommand } })
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
-// ?autoturn: the minutes notice with the runner's states, as AppShell composes them.
+// ?autoturn / ?minutes: the task list with the runner's states, as AppShell composes them.
 let showAiTurns: (view: AiTurnItemsView) => void = () => {}
-export function AutoTurnNotices() {
+export function AutoTurnList() {
   const [view, setView] = useState<AiTurnItemsView | null>(null)
   showAiTurns = setView
-  return <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} aiTurns={view} />
+  const list = useTaskList('preview-company')
+  return (
+    <div className="h-[260px] flex-shrink-0 border-b border-gray-200 flex dark:border-zinc-800">
+      <TaskListPanel
+        companyId="preview-company" rootPath="/tmp/acb-preview" list={list} aiTurns={view} renderCard={() => null}
+        meetingActions={{ read: () => startMinutesReading(MINUTES_NOTICE), skip: async () => null }}
+      />
+    </div>
+  )
 }
 
 const width = Number(params.get('width')) || 760
@@ -330,8 +347,7 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
     </div>
   : <div className="h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
-      {params.get('minutes') === '1' && <MinutesNotices companyId="preview-company" notices={[MINUTES_NOTICE]} />}
-      {autoTurn && <AutoTurnNotices />}
+      {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
       <div className="min-h-0 flex-1 flex justify-end">
         <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
           <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined} />

@@ -84,3 +84,17 @@ test('a file dragged from the file tree onto a task row is linked to it, named i
   await expect(page.getByRole('alert')).toContainText('「見積書_v2.xlsx」を「見積書を作り直す」につなぎました')
   expectNoPageErrors(state)
 })
+
+test('a meeting read without a まとまり asks in あなたの番; choosing links it and the item goes', async ({ page }) => {
+  const state = await openPreview(page, 'tasks-list')
+  const mine = page.getByRole('region', { name: 'あなたの番' })
+  await expect(mine).toContainText('どのまとまり（案件など）の会議か選んでください')
+  await mine.getByRole('button', { name: 'まとまりを選ぶ' }).click()
+  const dialog = page.getByRole('dialog', { name: 'どのまとまりの会議ですか？' })
+  await dialog.getByLabel('まとまりを探す').fill('研修')
+  await dialog.getByRole('button', { name: /C社 研修導入/ }).click()
+  await expect(page.locator('#acted')).toHaveText('meeting-00aa11:bundle deal-c00001')
+  await expect(dialog).toHaveCount(0)
+  await expect(mine).not.toContainText('C社 打ち合わせ')
+  expectNoPageErrors(state)
+})

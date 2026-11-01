@@ -9,7 +9,7 @@ paths:
   - "client/tests/ai-turn-claims.test.ts"
   - "client/tests/ai-turn-unattended.test.ts"
   - "client/tests/ui/ai-turns.spec.ts"
-  - "client/src/features/minutes/components/MinutesNotices.tsx"
+  - "client/src/features/minutes/startReading.ts"
   - "client/electron/records/runs.ts"
 ---
 
@@ -20,8 +20,10 @@ Without a person pressing anything, the member's app runs it **on the member's o
 window's renderer**, as a hidden consultation that goes through the normal chat pipeline and the
 normal history saving (owner decisions 2026-11-01, 節目5 §3–§7). There is **no** AI on the server
 and **no** history-writing path in main. Today the one kind is reading a meeting's minutes (a
-`meeting` record: received → reading → read, `minutes.md`); the 「議事録が届きました」 notice stays as
-the fallback (removing it is S11).
+`meeting` record: received → reading → read, `minutes.md`). There is no 「議事録が届きました」 banner
+any more (S11): a received meeting is a row in the task list's 「AI の番」 with its state and, when the
+AI has not started it, the person's 「自分で読み取る」 / 「今は読まない」 (`tasks-ui.md` "Minutes and AI
+turns").
 
 ## Where it runs
 
@@ -146,16 +148,15 @@ usage pause, today's limit, a stop); `not-allowed` (no Claude Code, Codex, not s
 setting off); `failed` (the AI could not finish — handed to the person at once with the reason);
 `handed` (given to the person early). The runner reports them through `ChatPanel`'s
 `onAiTurnItems` (`AiTurnItemsView`: items + `retry` + `handOver`); AppShell passes them to the
-minutes notice, which shows the state and reason per record, and to the task list's AI-turn rows
-(`tasks-ui.md`). Anything stopped offers **「もう一度」** (`retried`: hand-off and today's attempts cleared, a
+task list's AI-turn rows, which show the state and reason per record (`tasks-ui.md`). Anything stopped offers **「もう一度」** (`retried`: hand-off and today's attempts cleared, a
 stop or pause lifted) and **「人に渡す」** (`handedOver`: the AI will not start it; the reason is
 kept). Handed early, without waiting for the AI's preparation: a failed run (`recordOutcome`), a
 record due within 2 hours that the AI has not started (`handUrgent`), and a running one whose AI
 waits for the member's answer (a question or approval: information it lacks). Hand-offs are kept
 in the member's log across days until 「もう一度」. For minutes the person is the assignee (the
 runner only runs the member's own records), so handing is local: the record stays `received` on
-the server and the notice's 「読み取る」 is the person's way on — no server-side hand-off action
-exists in the minutes type (a type version for that is S11 work).
+the server and the row's 「自分で読み取る」 is the person's way on — no server-side hand-off action
+exists in the minutes type (a type version for it would be a later change).
 
 Sending and approving stay a person's (no change): the AI makes drafts and approval requests only.
 
@@ -179,8 +180,7 @@ also: after earlier put-backs (version > 2) an unattended run finishes without `
 its title, `minutesId` and the claim's version in the first message, the shown tab untouched, settled once; `?autoturn=taken` sends nothing;
 Codex claims nothing, shows the notice and hands the record over; a failed run shows its reason and 「もう一度」 gives the server's run back and claims again).
 
-## Not yet (S11 and later)
+## Not yet
 
-The notice is not removed and the まとまり choice still waits for the member in the consultation
-(S11 moves 「どのまとまりの会議か」 to あなたの番); other AI-turn kinds (each needs its claim action in
+Other AI-turn kinds (each needs its claim action in
 `AI_TURN_CLAIM_ACTIONS` and its first message); the company setting itself (S6); notifications (S5).
