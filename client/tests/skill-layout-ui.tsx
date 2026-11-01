@@ -9,6 +9,7 @@
 //   keep      1 = keep what the previous load saved (an app restart); otherwise storage starts empty
 //   seed      JSON {key: value} written to localStorage before the screen mounts
 //             (what an earlier version of the app saved)
+//   tasks     1 = records on with a task list: the やること tab shows (tests/ui/tasks-layout.spec.ts)
 //
 // Departments: 営業部 (downloaded), 開発部 (not downloaded on this computer),
 // 総務 (read-only for this member). window.__acbLayout lets the Playwright UI
@@ -210,6 +211,15 @@ const api: Partial<ElectronAPI> = {
   getChatSessionSummaries: async () => [],
   getAgentInteractions: async () => [],
   signOut: async () => { record('signOut', []); return { success: true } },
+  // ?tasks=1: the やること tab (features/tasks) with a few rows; otherwise records give no list.
+  getTaskList: async () => params.get('tasks') === '1'
+    ? { success: true, data: { available: true, listDepartmentIds: null, items: Array.from({ length: 3 }, (_, i) => ({
+      id: i === 0 ? RECORD_TASK.id : `task-row00${i}`, type: 'task', typeLabel: 'タスク', title: i === 0 ? RECORD_TASK.title : `やること ${i + 1}`, turn: 'mine' as const, state: 'todo', version: 1, due: null,
+      tags: [], waitingFor: null, personal: false, own: true, actingFor: null, bundle: null, finishedAt: null, stateLabel: null,
+    })) } }
+    : { success: true, data: { available: false, listDepartmentIds: null, items: [] } },
+  onNotificationsChanged: () => () => {},
+  getCalendarToday: async () => ({ success: true, data: { date: '2026-11-02', timeZone: 'Asia/Tokyo', reason: null, events: [] } }),
 }
 installElectronAPI(api)
 

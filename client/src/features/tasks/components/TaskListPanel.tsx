@@ -138,7 +138,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
           onClose={() => setChoosing(null)}
         />
       )}
-      <div className="flex w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
+      <section aria-label="やることの一覧" className="flex w-[380px] min-w-[300px] max-w-[45%] flex-shrink-0 flex-col border-r border-gray-200 bg-white dark:border-zinc-800 dark:bg-zinc-900">
         <div className="flex h-10 flex-shrink-0 items-center gap-2 border-b border-gray-200 px-3 dark:border-zinc-800">
           <span className="text-[13px] font-semibold text-gray-800 dark:text-zinc-100">やること</span>
           <span role="group" aria-label="並べ方" className="inline-flex overflow-hidden rounded-md border border-gray-200 text-[11px] dark:border-zinc-700">
@@ -175,7 +175,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
             <p className="px-2.5 text-[10.5px] text-gray-400">設定で Google の予定を読む許可をすると、今日の予定もここに並びます。</p>
           )}
         </div>
-      </div>
+      </section>
       <div className="min-w-0 flex-1 overflow-y-auto bg-white dark:bg-zinc-900">
         {/* Keyed by the version the list knows: a change made from the list shows on the card too. */}
         {opened ? <div key={`${opened}@${items.find(i => i.id === opened)?.version ?? 0}`} className="h-full">{renderCard(opened)}</div>

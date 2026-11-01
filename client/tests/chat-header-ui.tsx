@@ -324,14 +324,15 @@ Object.assign(window, { __acbCommands: { run: runCommand } })
 useAuthStore.setState({ user: { id: 'preview-user', email: 'member@example.com', name: '山田 花子' } as never })
 useAppStore.setState({ currentCompany: { id: 'preview-company', name: 'デモ株式会社', rootPath: '/tmp/acb-preview', departments: [], createdAt: new Date() } })
 
-// ?autoturn / ?minutes: the task list with the runner's states, as AppShell composes them.
+// ?autoturn / ?minutes: the task list with the runner's states, as AppShell composes them:
+// the list fills the left side, the consultation is the pane on its right.
 let showAiTurns: (view: AiTurnItemsView) => void = () => {}
 export function AutoTurnList() {
   const [view, setView] = useState<AiTurnItemsView | null>(null)
   showAiTurns = setView
   const list = useTaskList('preview-company')
   return (
-    <div className="h-[260px] flex-shrink-0 border-b border-gray-200 flex dark:border-zinc-800">
+    <div className="h-full min-w-0 flex-1 flex">
       <TaskListPanel
         companyId="preview-company" rootPath="/tmp/acb-preview" list={list} aiTurns={view} renderCard={() => null}
         meetingActions={{ read: () => startMinutesReading(MINUTES_NOTICE), skip: async () => null }}
@@ -346,12 +347,10 @@ createRoot(document.getElementById('root')!).render(params.get('panes') === '2'
       <section aria-label="左の欄" className="h-full flex-1 min-w-0 border-r border-gray-200 dark:border-zinc-800"><ChatPanel departmentPath="/tmp/acb-preview" paneId="chat" /></section>
       <section aria-label="右の欄" className="h-full flex-1 min-w-0"><ChatPanel departmentPath="/tmp/acb-preview" paneId="right" /></section>
     </div>
-  : <div className="h-screen flex flex-col bg-gray-50 dark:bg-zinc-950">
+  : <div className="h-screen flex justify-end bg-gray-50 dark:bg-zinc-950">
       {(params.get('minutes') === '1' || autoTurn) && <AutoTurnList />}
-      <div className="min-h-0 flex-1 flex justify-end">
-        <div style={{ width }} className="h-full border-l border-gray-200 dark:border-zinc-800">
-          <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined} />
-        </div>
+      <div style={{ width }} className="h-full flex-shrink-0 border-l border-gray-200 dark:border-zinc-800">
+        <ChatPanel departmentPath="/tmp/acb-preview" aiTurnQueue={autoTurn ? [MINUTES_NOTICE] : undefined} onAiTurnItems={autoTurn ? view => showAiTurns(view) : undefined} />
       </div>
     </div>,
 )
