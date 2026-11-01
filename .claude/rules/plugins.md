@@ -197,7 +197,9 @@ contract: 2
 types: [deal, customer]
 connector: hubspot >= 0.3.0
 operations:
-  update_deal: { who: [assignee, role:sales_manager, ai], decision: true, moves_money: true }
+  update_deal: { who: [assignee, role:sales_manager, ai], decision: true }   # amount: money (types/deal.md)
+  issue_invoice: { who: [role:sales_manager], decision: true, moves_money: true } # moves money, writes no money field
+field_policy_defaults: { confidence: auto, next_step: auto }   # 確度・次のアクションは自動、金額は承認
 roles:                                   # the business declares; who fills it is the company's (C3)
   sales_manager: { label: 営業の責任者 }
 settings:                                # rung ① below: typed parameters, never branches
@@ -246,8 +248,22 @@ upgrade:                                 # where work pinned to an older version
 - **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
   or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
   C3's (`plugin-roles.md`): the engine's `who`, the approvers and an operation's `who` resolve them.
-- **Money** (`moves_money: true` on a business operation that writes; contract 2 only, refused on
-  a connector — the business says what its use of an operation means): the operation asks first
+- **Money, per field** (`money: true` on a type's field — kind `number`, `source: server`; e.g.
+  `amount: { label: 金額, kind: number, source: server, money: true }` in `types/deal.md`): any
+  write of that field asks first, whichever operation writes it, in any step, through any
+  mapping; the operation's other fields keep their own policy (one `update_deal`: 確度・次のアクション
+  `auto`, 金額 an approval request). `auto` for it is refused where it is written — the plugin's
+  `field_policy_defaults` (`validatePluginPackage`) and the company mapping's `policy`
+  (`parsePluginMapping`) — and held to `prior` at run time (`effectiveFieldPolicy`, also for a
+  field read from the same outside property). A type's action may not name it in `args` (so no
+  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`).
+  **One place** (`plugin-declaration.ts`): `moneyField` (the field) and `asksFirst` /
+  `priorFieldWriters` (the operation), joined by `writeAsksFirst`, which `effectiveFieldPolicy`
+  uses. Tests: `tests/unit/plugin-contract-v2.test.ts` "a field that holds money",
+  `record-types.test.ts`, `record-money-field.test.ts` (mutation-checked). Fixture: `sample-flow`.
+- **Money, per operation** (`moves_money: true` on a business operation that writes; contract 2
+  only, refused on a connector — the business says what its use of an operation means; for an
+  operation that moves money without writing a money field, e.g. issuing an invoice): the operation asks first
   exactly like one with `reaches: external` (`asksFirst` in `plugin-declaration.ts`): its fields
   and its create policy are never `auto`: written that way it is refused (owner: make the mistake
   impossible to write) — a field it writes as `auto` in `field_policy_defaults` (`combineUse`) or
@@ -838,7 +854,10 @@ The server gate is the pair business plugin × operation, and inside a step's ru
   operator stop, the package and the connector apply), only when the step's `tools` include
   `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external`,
   `moves_money` or creates a record — never `auto`, never `ok_from`, never direct) only when they also include
-  `approvals`: it can only become an approval request (202), never be sent.
+  `approvals`: it can only become an approval request (202), never be sent. A money field
+  (`money: true`) written by an operation that does not ask first is held per field instead
+  (`effectiveFieldPolicy` → `prior`): the direct call answers `APPROVAL_REQUIRED` with nothing
+  sent, and only an approval request writes it — in a step and in a consultation alike.
 - **Connector roles** (`createPluginRunGate` in `plugin-ai-tools.ts`, wired in
   `composition/plugins.ts`; routes call `connectorRoleRefusal(c, h, role)` from
   `routes/record-ai-auth.ts` before using a role): only the roles the step's `connector_roles`

@@ -26,7 +26,7 @@ export function notAuto(plugin: ActivePlugin, operation: string, fields: string[
   const prior: string[] = []
   const off: string[] = []
   for (const f of fields) {
-    const p = effectiveFieldPolicy(plugin.manifest, plugin.mapping, operation, f)
+    const p = effectiveFieldPolicy(plugin, plugin.mapping, operation, f)
     if (p === 'prior') prior.push(f)
     else if (p !== 'auto') off.push(f)
   }

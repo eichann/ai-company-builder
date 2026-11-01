@@ -18,7 +18,10 @@
  *   characters); a link to an interface names one that exists, and the
  *   `bundle` interface needs `owner` / `purpose` on the server; adding either
  *   is not a breaking change, switching a link between a type and an
- *   interface is.
+ *   interface is;
+ * - `money: true` only on a server number field, never set by an action
+ *   (money is written only through an approval request), and removing it is
+ *   a breaking change.
  */
 import { describe, expect, it } from 'vitest'
 import { parseYamlLite } from '../../../shared/core/yaml-lite'
@@ -279,5 +282,38 @@ describe('tags and links to an interface (stage 2 S1)', () => {
     expect(compareTypeDefinitions(toInterface, { ...typeNamedBundle, version: 3 }).breaking.length).toBeGreaterThan(0)
     const tagsToText = next(y => y.replace(reviewer, `${reviewer}  tags: { label: タグ, kind: tags, source: server }\n`))
     expect(compareTypeDefinitions(tagsToText, next(y => y.replace(reviewer, `${reviewer}  tags: { label: タグ, kind: text, source: server }\n`).replace('version: 1', 'version: 3'))).breaking.length).toBeGreaterThan(0)
+  })
+})
+
+describe('a field that holds money (money: true)', () => {
+  const deal = (amount: string, extra = '', version = 1) =>
+    `---\nlabel: 案件\nversion: ${version}\nstorage: server\nfields:\n  owner: { label: 責任者, kind: person, source: server }\n  amount: ${amount}\nstates: [open]\n${extra}---\n`
+  const MONEY = '{ label: 金額, kind: number, source: server, money: true }'
+  const parsed = (text: string) => {
+    const r = parseTypeFile('deal', text)
+    if (!r.ok) throw new Error(r.errors.join('\n'))
+    return r.definition
+  }
+  const errorsOf = (text: string) => { const r = parseTypeFile('deal', text); return r.ok ? '' : r.errors.join('\n') }
+
+  it('only on a number field kept on the server; left out when not money', () => {
+    expect(parsed(deal(MONEY)).fields.amount).toEqual({ label: '金額', kind: 'number', source: 'server', money: true })
+    expect(parsed(deal('{ label: 金額, kind: number, source: server, money: false }')).fields.amount).not.toHaveProperty('money')
+    expect(errorsOf(deal('{ label: 金額, kind: text, source: server, money: true }'))).toMatch(/money: true は kind: number, source: server の欄だけ/)
+    expect(errorsOf(deal('{ label: 金額, kind: number, source: file, money: true }'))).toMatch(/money: true は kind: number, source: server の欄だけ/)
+    expect(errorsOf(deal('{ label: 金額, kind: number, source: server, money: yes }'))).toMatch(/money は true か false です/)
+  })
+
+  it('an action cannot set it (so no ok_from reaches it): money is written only through an approval request', () => {
+    const action = (amount: string) => deal(amount, 'actions:\n  set_amount: { label: 金額を決める, who: [owner], args: { amount: number } }\n')
+    expect(errorsOf(action(MONEY))).toMatch(/引数「amount」はお金の欄（money: true）です/)
+    expect(errorsOf(action('{ label: 金額, kind: number, source: server }'))).toBe('')
+  })
+
+  it('removing the marker is a breaking change; adding it is not', () => {
+    const plain = parsed(deal('{ label: 金額, kind: number, source: server }'))
+    const money = parsed(deal(MONEY, '', 2))
+    expect(compareTypeDefinitions(plain, money)).toMatchObject({ changed: true, breaking: [] })
+    expect(compareTypeDefinitions(money, { ...plain, version: 3 }).breaking).toEqual(['欄「amount」のお金の印（money: true）を外す'])
   })
 })

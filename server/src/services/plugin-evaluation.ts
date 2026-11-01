@@ -26,13 +26,14 @@ type Evaluated = { problem: PluginProblem; active: null } | { problem: null; act
  * `create:<object>` (the admin confirms no HubSpot workflow starts when such
  * an object is created).
  */
-function autoFields(manifest: PluginManifest, mapping: PluginMapping): Array<{ field: string; property: string }> {
+function autoFields(pkg: PluginPackage, mapping: PluginMapping): Array<{ field: string; property: string }> {
+  const { manifest } = pkg
   const out = new Map<string, string>()
   for (const [name, op] of Object.entries(manifest.operations)) {
     if (op.kind === 'create' && effectiveOperationPolicy(manifest, name, mapping) === 'auto') out.set(name, `${AUTO_CREATE_PREFIX}${op.object}`)
     if (op.kind !== 'update') continue
     for (const [field, rule] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
-      if (effectiveFieldPolicy(manifest, mapping, name, field) === 'auto') out.set(field, rule.from)
+      if (effectiveFieldPolicy(pkg, mapping, name, field) === 'auto') out.set(field, rule.from)
     }
   }
   return [...out].map(([field, property]) => ({ field, property }))
@@ -86,9 +87,9 @@ export function createPluginEvaluation(deps: Pick<PluginServiceDeps, 'companyDat
   }
 
   /** Auto fields without a recorded acknowledgement for the property they write now. */
-  function unacknowledgedAuto(companyId: string, pluginId: string, manifest: PluginManifest, mapping: PluginMapping) {
+  function unacknowledgedAuto(companyId: string, pluginId: string, pkg: PluginPackage, mapping: PluginMapping) {
     const acks = new Map(companyData.forCompany(companyId).plugins.policyAcks(pluginId).map(a => [a.field, a.property]))
-    return autoFields(manifest, mapping).filter(f => acks.get(f.field) !== f.property)
+    return autoFields(pkg, mapping).filter(f => acks.get(f.field) !== f.property)
   }
 
   /** The switches every plugin has: the operator's stop, the company's switch, the shelf, the fingerprint. */
@@ -161,7 +162,7 @@ export function createPluginEvaluation(deps: Pick<PluginServiceDeps, 'companyDat
     const row = install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
     const parsed = row ? parseForCompany(companyId, c.use, row.text) : null
     if (!parsed?.ok) return { problem: 'mapping-invalid', active: null }
-    if (unacknowledgedAuto(companyId, install.pluginId, c.use.manifest, parsed.mapping).length > 0) return { problem: 'auto-not-acknowledged', active: null }
+    if (unacknowledgedAuto(companyId, install.pluginId, c.use, parsed.mapping).length > 0) return { problem: 'auto-not-acknowledged', active: null }
     return { problem: null, active: activeOf(install, c.install, c.use, parsed.mapping) }
   }
 

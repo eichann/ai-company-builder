@@ -401,7 +401,7 @@ export function createPluginService(deps: PluginServiceDeps) {
     const parsed = parseForCompany(member.companyId, editing.use, text)
     if (!parsed.ok) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: parsed.errors })
     // A field that would write automatically needs the acknowledgement, recorded with who and when.
-    const missing = unacknowledgedAuto(member.companyId, pluginId, editing.use.manifest, parsed.mapping)
+    const missing = unacknowledgedAuto(member.companyId, pluginId, editing.use, parsed.mapping)
     const unconfirmed = missing.filter(f => !acknowledge.includes(f.field))
     if (unconfirmed.length > 0) {
       return refuse('bad-request', `自動で書き戻す欄は、「${AUTO_ACKNOWLEDGEMENT}」の確認が要ります`, {

@@ -237,7 +237,7 @@ export function createOperationApprovals(
       // An update: exactly the payload's raw values, only while HubSpot still holds rawBefore.
       if (!Array.isArray(payload.changes) || payload.changes.length === 0) return refuse('bad-request', 'payload: changes')
       const names = payload.changes.map(c => c.field)
-      const stillWritable = (p: ActivePlugin) => names.every(f => effectiveFieldPolicy(p.manifest, p.mapping, operation, f) !== 'off')
+      const stillWritable = (p: ActivePlugin) => names.every(f => effectiveFieldPolicy(p, p.mapping, operation, f) !== 'off')
       if (!stillWritable(plugin)) return refuse('bad-request', 'いまは書き戻さない欄が含まれています（何も変えていません）', { code: 'FIELD_NOT_WRITABLE' })
       const precheck = precheckFor(member, actor, plugin, op.who, recordId, place, stillWritable)
       const externalId = link.externalId

@@ -24,7 +24,12 @@ operations:
     who: [assignee, role:sales_manager, ai]
     note: optional
     decision: true
-    moves_money: true           # asks first like an operation reaching outside (contract 2)
+
+# 確度と次のアクションは自動、金額は承認: the deal type's amount says `money: true`, so
+# whichever operation writes it asks first; the other fields keep their own policy.
+field_policy_defaults:
+  confidence: auto
+  next_step: auto
 
 roles:
   sales_manager: { label: 営業の責任者, description: 金額の承認をする人 }

@@ -64,6 +64,8 @@ export function creating(ctx: EngineContext) {
         if (!f || f.source !== 'server') return bad(`${name} is not a server field of ${def.name}`)
         // Who accepted is the engine's to write (records.md "Acceptance"), never a create's.
         if (name === acceptanceOf(def.name)?.acceptedBy) return bad(`${name} is set by accepting`, 'BAD_VALUE')
+        // Money (`money: true`) is written only through an approval request (plugins.md "Money"), never by a create.
+        if (f.money) return bad(`「${f.label}」はお金の欄です。承認のお願いを通してだけ書けます`, 'MONEY_NEEDS_APPROVAL')
         const v = checkValue(f.kind, value, f.options, isMember)
         if (v !== null && typeof v === 'object') return bad(`${name}: ${v.error}`, 'BAD_VALUE')
         fields[name] = v

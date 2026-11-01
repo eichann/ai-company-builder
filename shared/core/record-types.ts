@@ -113,7 +113,20 @@ export interface FieldDef {
   optionLabels?: Record<string, string>
   /** kind record: the type of the record it names. */
   target?: string
+  /**
+   * YAML `money: true` (kind number, source server): the field holds money (a
+   * deal's 金額). Whoever writes it — any plugin operation, in any step,
+   * through any mapping — asks a person first: never `auto`, never `ok_from`,
+   * only an approval request (plugins.md "Money"). A type's action cannot set
+   * it and a create cannot fill it. Absent = not money (left out, so stored
+   * definitions compare equal); removing it is a breaking change.
+   */
+  money?: true
 }
+
+/** Whether `field` of the type holds money (`money: true`). */
+export const isMoneyField = (def: Pick<TypeDefinition, 'fields'> | undefined, field: string): boolean =>
+  def !== undefined && Object.prototype.hasOwnProperty.call(def.fields, field) && def.fields[field].money === true
 
 export interface LinkDef {
   label: string
@@ -347,7 +360,7 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
       if (!ONTOLOGY_NAME_RE.test(fname)) { err(`欄の名前「${fname}」は英小文字・数字・_ で書いてください`); continue }
       if (RESERVED_FIELD_NAMES.has(fname) && fname !== 'title' && fname !== 'summary') { err(`「${fname}」は欄の名前に使えません`); continue }
       if (!isYamlMap(f)) { err(`欄「${fname}」は { label, kind, source } の形で書いてください`); continue }
-      for (const k of Object.keys(f)) if (!['label', 'kind', 'source', 'options', 'option_labels', 'target'].includes(k)) err(`欄「${fname}」に知らない項目「${k}」があります`)
+      for (const k of Object.keys(f)) if (!['label', 'kind', 'source', 'options', 'option_labels', 'target', 'money'].includes(k)) err(`欄「${fname}」に知らない項目「${k}」があります`)
       const kind = f.kind
       if (!FIELD_KINDS.includes(kind as FieldKind)) { err(`欄「${fname}」の kind は ${FIELD_KINDS.join(' / ')} のどれかです`); continue }
       const source = f.source ?? 'server'
@@ -372,6 +385,11 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
         if (!isStr(f.target) || !ONTOLOGY_NAME_RE.test(f.target)) err(`欄「${fname}」の target に型の名前を書いてください`)
         else def.target = f.target
       } else if (f.target !== undefined) err(`欄「${fname}」の target は kind: record のときだけ書けます`)
+      if (f.money !== undefined) {
+        if (typeof f.money !== 'boolean') err(`欄「${fname}」の money は true か false です`)
+        else if (f.money && (kind !== 'number' || source !== 'server')) err(`欄「${fname}」の money: true は kind: number, source: server の欄だけに書けます`)
+        else if (f.money) def.money = true
+      }
       fields[fname] = def
     }
   }
@@ -473,6 +491,8 @@ export function validateTypeDefinition(name: string, raw: YamlValue): TypeParseR
           const field = fields[arg]
           if (!field || field.source !== 'server') { err(`操作「${aname}」の引数「${arg}」は、同じ名前の欄（source: server）を決めるものです`); continue }
           if (kind !== field.kind) { err(`操作「${aname}」の引数「${arg}」の種類は欄と同じ ${field.kind} です`); continue }
+          // Money is written only through an approval request (plugins.md "Money"): never by an action, so never through `ok_from`.
+          if (field.money) { err(`操作「${aname}」の引数「${arg}」はお金の欄（money: true）です。お金の欄は承認のお願いを通してだけ書けます`); continue }
           args[arg] = field.kind
         }
       }
@@ -582,6 +602,7 @@ export function compareTypeDefinitions(prev: TypeDefinition, next: TypeDefinitio
     if (!g) breaking.push(`欄「${n}」を消す（名前を変える）`)
     else if (g.kind !== f.kind || g.source !== f.source || g.target !== f.target) breaking.push(`欄「${n}」の種類・置き場所を変える`)
     else if (f.options && !f.options.every(o => g.options?.includes(o))) breaking.push(`欄「${n}」の選択肢を消す`)
+    else if (f.money && !g.money) breaking.push(`欄「${n}」のお金の印（money: true）を外す`)
   }
   for (const [n, l] of Object.entries(prev.links)) {
     const m = next.links[n]

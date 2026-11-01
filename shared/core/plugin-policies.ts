@@ -6,7 +6,8 @@
  * forbid it, whatever is stored.
  */
 import { stricterApprover, type ApproverSpec } from './approvals'
-import { PRIOR_ONLY_FIELDS, asksFirst, type FieldPolicy, type PluginManifest } from './plugin-declaration'
+import { PRIOR_ONLY_FIELDS, asksFirst, moneyField, writeAsksFirst, type FieldPolicy, type PluginManifest } from './plugin-declaration'
+import type { TypeDefinition } from './record-types'
 import { DEFAULT_APPROVERS, type PluginMapping } from './plugin-mapping'
 import type { AcbValue } from './plugin-values'
 
@@ -33,10 +34,14 @@ export function approverFor(manifest: PluginManifest, mapping: PluginMapping, op
  * `off` unless the mapping writes it, else the company's choice, else the
  * declaration's default, else `prior` — and at least as strict as any other
  * field read from the same outside property; never `auto` for
- * `PRIOR_ONLY_FIELDS` nor for an operation that reaches people outside the
- * company or moves money (`moves_money`), whatever the settings say (0.21).
+ * `PRIOR_ONLY_FIELDS`, for a write that asks first (`writeAsksFirst`: an
+ * operation that reaches people outside the company or moves money, or a
+ * money field — `money: true` on the type), whatever the settings say (0.21).
  */
-export function effectiveFieldPolicy(manifest: PluginManifest, mapping: PluginMapping, operationName: string, field: string): FieldPolicy {
+export function effectiveFieldPolicy(
+  pkg: { manifest: PluginManifest; types: Record<string, Pick<TypeDefinition, 'fields'>> }, mapping: PluginMapping, operationName: string, field: string,
+): FieldPolicy {
+  const { manifest } = pkg
   const op = manifest.operations[operationName]
   if (!op || op.kind !== 'update') return 'off'
   const rule = mapping.objects[op.object]?.fields[field]
@@ -48,10 +53,10 @@ export function effectiveFieldPolicy(manifest: PluginManifest, mapping: PluginMa
   for (const [other, r] of Object.entries(mapping.objects[op.object]?.fields ?? {})) {
     if (other === field || r.from !== rule.from) continue
     let theirs: FieldPolicy = mapping.policy[other] ?? manifest.fieldPolicyDefaults[other] ?? 'prior'
-    if (PRIOR_ONLY_FIELDS.includes(other) && theirs === 'auto') theirs = 'prior'
+    if ((PRIOR_ONLY_FIELDS.includes(other) || moneyField(pkg, op.object, other)) && theirs === 'auto') theirs = 'prior'
     if (POLICY_STRICTNESS[theirs] > POLICY_STRICTNESS[chosen]) chosen = theirs
   }
-  return (op.reaches === 'external' || op.movesMoney || PRIOR_ONLY_FIELDS.includes(field)) && chosen === 'auto' ? 'prior' : chosen
+  return (writeAsksFirst(pkg, operationName, field) || PRIOR_ONLY_FIELDS.includes(field)) && chosen === 'auto' ? 'prior' : chosen
 }
 
 const POLICY_STRICTNESS: Record<FieldPolicy, number> = { auto: 0, prior: 1, off: 2 }

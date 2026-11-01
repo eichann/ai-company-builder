@@ -5,7 +5,7 @@
  * reads (contract, actors, the fixed endpoints, `available_to`). Parsing is in
  * `plugin-manifest.ts`; the overview and owner rules are in `plugins.ts`.
  */
-import type { NoteRule, TypeDefinition } from './record-types'
+import { isMoneyField, type NoteRule, type TypeDefinition } from './record-types'
 
 /**
  * Who may run a plugin operation, besides the record type's person fields
@@ -150,6 +150,33 @@ export interface PluginOperation {
 /** Never runs without a person's approval: it reaches people outside, moves money, or creates a record (統合版: never `ok_from`, never direct). */
 export const asksFirst = (op: Pick<PluginOperation, 'reaches' | 'createsRecord' | 'movesMoney'>): boolean =>
   op.reaches === 'external' || op.movesMoney || op.createsRecord
+
+/** What the field-level money rule reads: the objects' record types and those types. */
+export type MoneyFieldSource = { manifest: Pick<PluginManifest, 'objects'>; types: Record<string, Pick<TypeDefinition, 'fields'>> }
+
+/**
+ * Whether `field` of connector object `objectName` holds money: `money: true`
+ * on that field of the object's record type. Such a field is written only
+ * through an approval request, whichever operation writes it (plugins.md "Money").
+ */
+export function moneyField(pkg: MoneyFieldSource, objectName: string, field: string): boolean {
+  const o = Object.prototype.hasOwnProperty.call(pkg.manifest.objects, objectName) ? pkg.manifest.objects[objectName] : undefined
+  const type = o?.recordType && Object.prototype.hasOwnProperty.call(pkg.types, o.recordType) ? pkg.types[o.recordType] : undefined
+  return isMoneyField(type, field)
+}
+
+/**
+ * The one rule for "does writing `field` with `operationName` ask a person
+ * first" (never `auto`, never `ok_from`, in a step only an approval request):
+ * the operation asks first (`asksFirst`: outside, `moves_money`, a new record)
+ * or the field holds money (`moneyField`). The declaration and mapping checks
+ * (`priorFieldWriters`, `moneyField`) and the run-time policy
+ * (`effectiveFieldPolicy`) all come back to these two.
+ */
+export function writeAsksFirst(pkg: MoneyFieldSource & { manifest: Pick<PluginManifest, 'operations'> }, operationName: string, field: string): boolean {
+  const op = Object.prototype.hasOwnProperty.call(pkg.manifest.operations, operationName) ? pkg.manifest.operations[operationName] : undefined
+  return op !== undefined && (asksFirst(op) || moneyField(pkg, op.object, field))
+}
 
 /**
  * How a business plugin uses one connector (owner decision 2026-11-01): which
@@ -363,8 +390,11 @@ export const roleOfWho = (w: string): string | null => w.startsWith(ROLE_WHO_PRE
 
 /**
  * Operations writing mapped fields that reach people outside the company or
- * move money (`moves_money`), optionally of one object: a field they write is
- * never `auto` — refused when declared or chosen, not only held at run time.
+ * move money (`moves_money`) — `asksFirst` but for creating a record, whose
+ * own policy holds it — optionally of one object: every field they write is
+ * never `auto`, refused when declared or chosen, not only held at run time.
+ * The field-level twin is `moneyField` (a money field is never `auto`
+ * whichever operation writes it); `writeAsksFirst` joins the two.
  */
 export function priorFieldWriters(manifest: Pick<PluginManifest, 'operations'>, objectName?: string): string[] {
   return Object.entries(manifest.operations)
