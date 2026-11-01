@@ -817,6 +817,36 @@ export const departmentsApi = {
       method: 'PUT',
       body: { userIds },
     }),
+
+  /** Who belongs to the department (所属する部署); changes nobody's folder access. */
+  getMembers: (companyId: string, departmentId: string) =>
+    getData<DepartmentMembersView>(`${deptBase(companyId)}/${enc(departmentId)}/members`),
+
+  /** Owner/admin, or a manager of this department; replaces the set. */
+  setMembers: (companyId: string, departmentId: string, userIds: string[]) =>
+    getData<DepartmentMembersView>(`${deptBase(companyId)}/${enc(departmentId)}/members`, {
+      method: 'PUT',
+      body: { userIds },
+    }),
+}
+
+// ---------------------------------------------------------------------------
+// Task settings (やることの一覧の設定) and department membership: shapes from
+// shared/types/task-settings.ts, rules in shared/core/task-settings.ts.
+// ---------------------------------------------------------------------------
+
+export type { DepartmentMember, DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
+export type { CompanyHoliday, ReplyRule, TaskSettings } from '../../../shared/core/task-settings'
+
+import type { DepartmentMembersView, TaskSettingsView } from '../../../shared/types/task-settings'
+import type { TaskSettings } from '../../../shared/core/task-settings'
+
+export const taskSettingsApi = {
+  /** Every member reads; canEdit says whether the caller may change them. */
+  get: (companyId: string) => getData<TaskSettingsView>(`/api/companies/${enc(companyId)}/task-settings`),
+  /** Owner/admin: the whole document. */
+  update: (companyId: string, settings: TaskSettings) =>
+    getData<TaskSettingsView>(`/api/companies/${enc(companyId)}/task-settings`, { method: 'PUT', body: settings }),
 }
 
 // ---------------------------------------------------------------------------

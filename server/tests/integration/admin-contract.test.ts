@@ -90,6 +90,8 @@ const TYPES: Record<string, string> = {
   Department: 'Department',
   DepartmentStats: '{ files: number; folders: number; exists: boolean }',
   Managers: '{ managers: DepartmentManager[] }',
+  DepartmentMembers: 'DepartmentMembersView',
+  TaskSettings: 'TaskSettingsView',
   Success: '{ success: boolean }',
   DepartmentDelete: '{ success: boolean; deletedFiles?: number; deletedFolders?: number }',
   DepartmentSync: '{ success: boolean; added: number; removed: number }',
@@ -222,6 +224,7 @@ beforeAll(async () => {
   const { invitationsRoute } = await import('../../src/routes/invitations')
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
+  const { taskSettingsRoute } = await import('../../src/routes/task-settings')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   const { pluginsRoute } = await import('../../src/routes/plugins')
@@ -237,6 +240,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', privateFoldersRoute)
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
+  app.route('/api/companies/:companyId', taskSettingsRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
@@ -277,6 +281,8 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('DepartmentStats', USERS.owner, 'GET', `${base}/departments/${created.id}/stats`)
     await expectShape('Managers', USERS.owner, 'PUT', `${base}/departments/${created.id}/managers`, { userIds: [USERS.member] })
     await expectShape('Managers', USERS.owner, 'GET', `${base}/departments/${created.id}/managers`)
+    await expectShape('DepartmentMembers', USERS.owner, 'PUT', `${base}/departments/${created.id}/members`, { userIds: [USERS.member] })
+    await expectShape('DepartmentMembers', USERS.member, 'GET', `${base}/departments/${created.id}/members`)
     await expectShape('Success', USERS.owner, 'POST', `${base}/departments/reorder`, { items: [{ id: created.id, sortOrder: 0 }] }, false)
     await expectShape('DepartmentSync', USERS.owner, 'POST', `${base}/departments/sync`, undefined, false)
     await expectShape('DepartmentDelete', USERS.owner, 'DELETE', `${base}/departments/${created.id}`, undefined, false)
@@ -344,6 +350,11 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
   })
 
   it('AI sandbox (「AI の囲い」)', async () => {
+    await expectShape('TaskSettings', USERS.member, 'GET', `${base}/task-settings`)
+    await expectShape('TaskSettings', USERS.owner, 'PUT', `${base}/task-settings`, {
+      taskListDepartmentIds: null, reply: { rule: 'same-day', sameDayCutoff: '17:00' },
+      autoRun: { enabled: false, dailyLimit: 30, stopAfterFailures: 3 }, companyHolidays: [{ date: '2026-12-29', name: '年末' }],
+    })
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox/overrides/${USERS.member}`, { mode: 'enforce' })
@@ -469,6 +480,8 @@ describe('the admin console\'s requests do what the admin means on the server', 
     await A.departmentsApi.setManagers(CO, dept.id, [USERS.member])
     expect(db.prepare('SELECT user_id FROM department_managers WHERE department_id = ?').all(dept.id)).toEqual([{ user_id: USERS.member }])
     expect((await A.departmentsApi.getManagers(CO, dept.id)).managers.map(m => m.userId)).toEqual([USERS.member])
+    await A.departmentsApi.setMembers(CO, dept.id, [USERS.member, USERS.admin])
+    expect((await A.departmentsApi.getMembers(CO, dept.id)).members.map(m => m.userId).sort()).toEqual([USERS.admin, USERS.member].sort())
   })
 
   it('permission edits: writing changes as asked, reading is never taken away', async () => {
