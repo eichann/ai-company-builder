@@ -15,7 +15,7 @@ import { fromClaudeRateLimitInfo } from '../../shared/rate-limits'
 import { agentProgressFromSdkMessage } from '../../shared/agent-progress'
 import type { PermissionMode } from '../../shared/permission-mode'
 import { decideReservedWrite, decideToolWrite } from '../write-guard'
-import { decidePrivateWrite, noteToolInput, noteToolResult } from '../private-read-guard'
+import { decidePrivateWrite, noteToolInput, noteToolResult, privateConfirmMessage, recordPrivateConsent } from '../private-read-guard'
 import { answerAskUserQuestion } from './choice-tools'
 import { CLAUDE_CHOICE_TOOL } from '../../shared/choice-prompt'
 import { createClaudeSteer, tapQuery } from './steering'
@@ -236,13 +236,14 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
         // conversation has read a private folder, the member confirms every
         // write to a public place and every send-out — in every permission
         // mode, so the question is asked here and not left to canUseTool.
+        // 許可 covers that kind (write / send) for the rest of the conversation.
         let confirmedPrivate = false
         if (privateReads) {
           noteToolInput(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           const decision = decidePrivateWrite(privateReads.context, privateReads.state, String(input.tool_name), input.tool_input, toolCwd)
           if (decision.ask) {
             const answer = config.requestToolApproval
-              ? await config.requestToolApproval(String(input.tool_name), input.tool_input ?? {}, input.tool_use_id || crypto.randomUUID(), appSessionId, decision.message)
+              ? await config.requestToolApproval(String(input.tool_name), input.tool_input ?? {}, input.tool_use_id || crypto.randomUUID(), appSessionId, privateConfirmMessage(decision))
               : { approved: false }
             if (!answer.approved) {
               console.log(`[hooks] Member declined a write after private reads: ${input.tool_name}`)
@@ -255,6 +256,7 @@ export function createClaudeConnection(config: ClaudeConnectionConfig, createMod
                 },
               }, config.requestToolApproval ? 'member-denied' : 'guard-denied', 'private-read')
             }
+            recordPrivateConsent(privateReads.state, decision.kind)
             confirmedPrivate = true
           }
         }
