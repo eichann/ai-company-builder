@@ -256,7 +256,10 @@ upgrade:                                 # where work pinned to an older version
   `field_policy_defaults` (`validatePluginPackage`) and the company mapping's `policy`
   (`parsePluginMapping`) — and held to `prior` at run time (`effectiveFieldPolicy`, also for a
   field read from the same outside property). A type's action may not name it in `args` (so no
-  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`).
+  `ok_from` reaches it) and the record engine's create may not fill it (`records.md`). **Not
+  blocked: the external writer** (`createExternalRecordWriter`, imports and confirmed writes):
+  the outside system is the source of truth for money, so a mirrored amount is created and
+  updated freely — never extend the money block to it (`record-money-field.test.ts` fails).
   **One place** (`plugin-declaration.ts`): `moneyField` (the field) and `asksFirst` /
   `priorFieldWriters` (the operation), joined by `writeAsksFirst`, which `effectiveFieldPolicy`
   uses. Tests: `tests/unit/plugin-contract-v2.test.ts` "a field that holds money",
