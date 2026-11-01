@@ -23,6 +23,7 @@ import {
   type TaskSettingsView,
 } from '@/lib/api'
 import { useCompany } from '@/lib/company-context'
+import { IntakeSettingsSection } from './intake-settings'
 import { describeError } from '@/lib/errors'
 import { formatDateTime } from '@/lib/format'
 import {
@@ -82,6 +83,7 @@ export default function TaskListSettingsPage() {
               onSaved={(next) => settings.setData(() => next)}
             />
           ) : null)}
+        {isAdmin && <IntakeSettingsSection departments={departments.data ?? []} />}
         <MembershipCard departments={departments.data} error={departments.error} onRetry={departments.reload} />
       </div>
     </>

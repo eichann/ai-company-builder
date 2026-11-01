@@ -22,6 +22,7 @@ import { sqliteTaskSettingsRepository } from './task-settings'
 // lane A ▲
 // lane B ▼
 import { sqliteIdentityRepository } from './identities'
+import { sqliteInboxRepository } from './inbox'
 // lane B ▲
 // lane C ▼
 import { sqlitePluginRoleRepository } from './plugin-roles'
@@ -57,6 +58,7 @@ export function sqliteCompanyData(conn: Database.Database): CompanyDataSource {
         // lane A ▲
         // lane B ▼
         identities: sqliteIdentityRepository(conn, companyId),
+        inbox: sqliteInboxRepository(conn, companyId),
         // lane B ▲
         // lane C ▼
         pluginRoles: sqlitePluginRoleRepository(conn, companyId),

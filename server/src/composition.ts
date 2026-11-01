@@ -489,7 +489,13 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     publicUrl,
   })
   // lane B ▼
-  const inboxLane = wireInboxLane({ conn, ...shared })
+  const inboxLane = wireInboxLane({
+    conn, ...shared, memberships: repos.memberships, serviceRecords,
+    roleOf: (companyId, userId) => access.memberOf(companyId, userId)?.role ?? null,
+    taskSettings: companyId => taskSettings.settingsOf(companyId),
+    roles: connectorsLane.connectorRoles,
+    onSlackSignal: listen => connectorsLane.onSlackSignal(listen),
+  })
   // lane C ▼
   const pluginsLane = wirePluginsLane({
     conn, companyData: shared.companyData, clock: shared.clock, pluginShelf, agentPolicy, recordEngine, approvals, pluginOperations, actsFor,

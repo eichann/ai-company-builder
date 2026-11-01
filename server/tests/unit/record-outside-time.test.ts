@@ -22,6 +22,7 @@ import type { CompanyDataSource } from '../../src/ports/company-data'
 import { CORE_TYPE_FILES, coreTypeDefinitions, MIGRATION_ACTOR, OUTSIDE_TIME_ACTION } from '../../shared/core/core-types'
 import { ledgerCause, replayRecordState } from '../../shared/core/record-ledger'
 import { compareTypeDefinitions, parseTypeFile } from '../../shared/core/record-types'
+import { INTERACTION_V4_TEXT } from '../helpers/core-types-before-inbox'
 
 const TS = '2026-11-01T00:00:00.000Z'
 let conn: Database.Database
@@ -40,9 +41,9 @@ const parse = (name: string, text: string) => parseTypeFile(name, text)
 const def = (name: string) => coreTypeDefinitions().find(d => d.name === name)!
 
 describe('the outside time is one field, through the interface', () => {
-  it('interaction and meeting implement outside_event; outbound_message (made by ACB) does not', () => {
+  it('interaction and meeting implement outside_event (and the reply request born of a message); outbound_message (made by ACB) does not', () => {
     const claiming = coreTypeDefinitions().filter(d => d.implements.includes('outside_event')).map(d => d.name).sort()
-    expect(claiming).toEqual(['interaction', 'meeting'])
+    expect(claiming).toEqual(['interaction', 'meeting', 'reply_request'])
     for (const name of claiming) expect(def(name).fields.occurred_at).toMatchObject({ kind: 'datetime', source: 'server' })
   })
 
@@ -55,7 +56,8 @@ describe('the outside time is one field, through the interface', () => {
 
   it('the new versions only add over the old ones: existing records and a company\'s own extension stay valid', () => {
     const before: Record<string, string> = {
-      interaction: CORE_TYPE_FILES.interaction.replace('version: 4\nimplements: [outside_event]\n', 'version: 3\n'),
+      // Version 4 as it was (interaction 5 is the inbox's: tests/unit/intake-core.test.ts).
+      interaction: INTERACTION_V4_TEXT.replace('version: 4\nimplements: [outside_event]\n', 'version: 3\n'),
       meeting: CORE_TYPE_FILES.meeting.replace('version: 2\nimplements: [outside_event]\n', 'version: 1\n')
         .replace(/ {2}occurred_at: .*\n/, ''),
     }

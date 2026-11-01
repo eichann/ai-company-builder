@@ -46,6 +46,8 @@ import { slackEventsRoute, slackRoute } from './routes/slack-connection'
 // lane B ▼
 import { identitiesRoute } from './routes/identities'
 import { recordsAiIdentitiesRoute } from './routes/records-ai-identities'
+import { inboxRoute } from './routes/inbox'
+import { recordsAiInboxRoute } from './routes/records-ai-inbox'
 // lane B ▲
 // lane C ▼
 // lane C ▲
@@ -163,6 +165,9 @@ app.route('/api/slack', slackEventsRoute)
 // Matching people and companies (名寄せ, identity.md): members decide, the AI only proposes.
 app.route('/api/companies/:companyId', identitiesRoute)
 app.route('/api/records-ai/identities', recordsAiIdentitiesRoute)
+// Messages that came in (来た連絡, inbox.md): a member's own; the AI judges by its record token.
+app.route('/api/companies/:companyId', inboxRoute)
+app.route('/api/records-ai/inbox', recordsAiInboxRoute)
 // lane B ▲
 // lane C ▼
 // lane C ▲

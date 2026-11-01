@@ -32,6 +32,9 @@ export const NOTIFICATION_KINDS = [
   // lane A ▼ (reserved: connection_broken)
   // ── lane A ▲
   // lane B ▼ (reserved: reply_arrived, intake_unsure, follow_up_ready)
+  // The inbox (inbox.md): their reply came to a 返事のお願い; a message waits for its owner's 確認.
+  'reply_arrived',
+  'intake_unsure',
   // ── lane B ▲
   // lane C ▼ (reserved: role_unassigned)
   // ── lane C ▲
@@ -58,6 +61,8 @@ export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
   // lane A ▼
   // ── lane A ▲
   // lane B ▼
+  reply_arrived: '返事を待っていた連絡に、相手から返事が来た',
+  intake_unsure: '来た連絡を誰が受け持つか決めきれず、確かめてほしい',
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲
@@ -80,6 +85,8 @@ export const NOTIFICATION_DEFAULTS: Record<NotificationKind, boolean> = {
   // lane A ▼
   // ── lane A ▲
   // lane B ▼
+  reply_arrived: true,
+  intake_unsure: true,
   // ── lane B ▲
   // lane C ▼
   // ── lane C ▲

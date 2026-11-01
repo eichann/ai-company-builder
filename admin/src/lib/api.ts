@@ -849,6 +849,22 @@ export const taskSettingsApi = {
     getData<TaskSettingsView>(`/api/companies/${enc(companyId)}/task-settings`, { method: 'PUT', body: settings }),
 }
 
+// The intake settings (来た連絡の細かい決まり, inbox.md): shapes from shared/types/inbox.ts,
+// rules in shared/core/intake-settings.ts.
+export type { InboxSettingsView } from '../../../shared/types/inbox'
+export type { IntakeSettings, SharedAddress } from '../../../shared/core/intake-settings'
+
+import type { InboxSettingsView } from '../../../shared/types/inbox'
+import type { IntakeSettings } from '../../../shared/core/intake-settings'
+
+export const inboxSettingsApi = {
+  /** Every member reads; canEdit says whether the caller may change them. */
+  get: (companyId: string) => getData<InboxSettingsView>(`/api/companies/${enc(companyId)}/inbox-settings`),
+  /** Owner/admin: the whole document. */
+  update: (companyId: string, settings: IntakeSettings) =>
+    getData<InboxSettingsView>(`/api/companies/${enc(companyId)}/inbox-settings`, { method: 'PUT', body: settings }),
+}
+
 // ---------------------------------------------------------------------------
 // Absence and the delegate (不在・代わりの人): shapes from shared/types/absences.ts,
 // rules in shared/core/absences.ts. The member, owner/admin, or a manager of a

@@ -95,6 +95,7 @@ const TYPES: Record<string, string> = {
   Managers: '{ managers: DepartmentManager[] }',
   DepartmentMembers: 'DepartmentMembersView',
   TaskSettings: 'TaskSettingsView',
+  InboxSettings: 'InboxSettingsView',
   Absences: 'MemberAbsencesView',
   AbsenceCreated: 'AbsenceCreated',
   AbsenceRemoved: '{ removed: true }',
@@ -231,6 +232,7 @@ beforeAll(async () => {
   const { agentEventsRoute } = await import('../../src/routes/agent-events')
   const { agentSandboxRoute } = await import('../../src/routes/agent-sandbox')
   const { taskSettingsRoute } = await import('../../src/routes/task-settings')
+  const { inboxRoute } = await import('../../src/routes/inbox')
   const { agentStopsRoute } = await import('../../src/routes/agent-stops')
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   const { pluginsRoute } = await import('../../src/routes/plugins')
@@ -248,6 +250,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', agentEventsRoute)
   app.route('/api/companies/:companyId', agentSandboxRoute)
   app.route('/api/companies/:companyId', taskSettingsRoute)
+  app.route('/api/companies/:companyId', inboxRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/absences')).absencesRoute)
   app.route('/api/companies/:companyId', agentStopsRoute)
   app.route('/api/companies/:companyId', keyBrokerRoute)
@@ -371,6 +374,10 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     await expectShape('TaskSettings', USERS.owner, 'PUT', `${base}/task-settings`, {
       taskListDepartmentIds: null, reply: { rule: 'same-day', sameDayCutoff: '17:00' },
       autoRun: { enabled: false, dailyLimit: 30, stopAfterFailures: 3 }, companyHolidays: [{ date: '2026-12-29', name: '年末' }],
+    })
+    await expectShape('InboxSettings', USERS.member, 'GET', `${base}/inbox-settings`)
+    await expectShape('InboxSettings', USERS.owner, 'PUT', `${base}/inbox-settings`, {
+      multipleTo: 'unsure', ccOnly: 'nothing', memberReply: 'close', excludeInternal: true, internalDomains: ['group.example'], excludeBulk: true, sharedAddresses: [],
     })
     await expectShape('AgentSandbox', USERS.owner, 'GET', `${base}/agent-sandbox`)
     await expectShape('AgentSandbox', USERS.owner, 'PUT', `${base}/agent-sandbox`, { mode: 'observe', allowedDomains: ['api.github.com'], deniedReadPaths: ['~/x'], onUnavailable: 'record-only' })

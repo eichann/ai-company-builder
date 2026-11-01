@@ -119,6 +119,11 @@ const HANDLE_TABLES: Record<string, string[]> = {
   identity_members: ['adapters/sqlite/identities.ts'],
   identity_proposals: ['adapters/sqlite/identities.ts'],
   identity_history: ['adapters/sqlite/identities.ts'],
+  // The inbox (inbox.md).
+  inbox_settings: ['adapters/sqlite/inbox.ts'],
+  inbox_messages: ['adapters/sqlite/inbox.ts'],
+  inbox_connections: ['adapters/sqlite/inbox.ts'],
+  inbox_gaps: ['adapters/sqlite/inbox.ts'],
   // lane B ▲
   // lane C ▼
   // Business roles (plugin-roles.md).
@@ -135,6 +140,7 @@ const HANDLE_FACTORIES = [
   // lane A ▲
   // lane B ▼
   'sqliteIdentityRepository',
+  'sqliteInboxRepository',
   // lane B ▲
   // lane C ▼
   'sqlitePluginRoleRepository',
