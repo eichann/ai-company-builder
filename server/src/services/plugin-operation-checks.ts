@@ -7,8 +7,9 @@
  */
 import { FULL_ACCESS_ROLES } from '../../shared/core/permissions'
 import { isSameOrAncestorPath } from '../../shared/core/paths'
-import { effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginOperation } from '../../shared/core/plugins'
+import { PLUGIN_ID_RE, effectiveFieldPolicy, effectiveOperationPolicy, type FieldPolicy, type PluginManifest, type PluginOperation, type PluginStep } from '../../shared/core/plugins'
 import type { LedgerValue } from '../../shared/core/record-ledger'
+import { ONTOLOGY_NAME_RE } from '../../shared/core/record-types'
 import { RECORD_ID_RE } from '../../shared/core/records'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
@@ -41,6 +42,51 @@ export function createPolicy(plugin: ActivePlugin, operation: string, op: Plugin
 }
 
 export const fieldsAuto = (operation: string, fields: string[]) => (p: ActivePlugin) => { const n = notAuto(p, operation, fields); return n.prior.length + n.off.length === 0 }
+
+/**
+ * The business × operation gate (plan C4, plugins.md "The gate of a step's
+ * run"): an execution run of a business plugin's step is named
+ * `<pluginId>__<step>` (a plugin id has no `_`, so the first `__` splits it;
+ * C5 claims runs under this name). null = not a plugin step (a core step such
+ * as minutes reading keeps what it had).
+ */
+export const PLUGIN_RUN_STEP_SEPARATOR = '__'
+export function parsePluginRunStep(runStep: string): { pluginId: string; step: string } | null {
+  const at = runStep.indexOf(PLUGIN_RUN_STEP_SEPARATOR)
+  if (at < 0) return null
+  const pluginId = runStep.slice(0, at)
+  const step = runStep.slice(at + PLUGIN_RUN_STEP_SEPARATOR.length)
+  return PLUGIN_ID_RE.test(pluginId) && ONTOLOGY_NAME_RE.test(step) ? { pluginId, step } : null
+}
+
+/** The gate's one answer, whatever the reason (another plugin, another company's, stopped, undeclared…): it names nothing. */
+export const NOT_IN_STEP = { error: 'この手順では使えない操作です', code: 'NOT_IN_STEP' } as const
+export const notInStep = () => refuse('forbidden', NOT_IN_STEP.error, { code: NOT_IN_STEP.code })
+
+/** The step's declaration (own property only), or null. */
+export const stepOf = (manifest: Pick<PluginManifest, 'steps'>, name: string): PluginStep | null =>
+  Object.prototype.hasOwnProperty.call(manifest.steps, name) ? manifest.steps[name] : null
+
+/**
+ * An operation that never runs without a person's approval: it reaches people
+ * outside the company, or creates a record (統合版: never `ok_from`, never
+ * direct). In a step's run it can only become an approval request, so the
+ * step must declare the `approvals` tool.
+ */
+export const asksFirst = (op: Pick<PluginOperation, 'reaches' | 'createsRecord'>) => op.reaches === 'external' || op.createsRecord
+
+/** May a step call this operation of its own plugin: the plugin declared it, the step has `plugin_operations` (and `approvals` when it asks first). */
+export function stepAllowsOperation(step: Pick<PluginStep, 'tools'>, manifest: Pick<PluginManifest, 'operations'>, operation: string): boolean {
+  const op = Object.prototype.hasOwnProperty.call(manifest.operations, operation) ? manifest.operations[operation] : undefined
+  if (!op || !step.tools.includes('plugin_operations')) return false
+  return !asksFirst(op) || step.tools.includes('approvals')
+}
+
+/** May a step use a connector role (`mail.send`): declared as is, or the bare role (`mail`) for all its operations. */
+export function stepAllowsConnectorRole(step: Pick<PluginStep, 'connectorRoles'>, role: string): boolean {
+  const bare = role.split('.')[0]
+  return step.connectorRoles.some(r => r === role || r === bare)
+}
 
 /** Where the record (or the created record's folder) sits, for `who`'s department managers. */
 export const placeOf = (row: RecordRow) => row.path ?? row.folder ?? ''
@@ -104,8 +150,28 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     }
   }
 
+  /**
+   * The gate of a step's run (C4), checked before anything else so its one
+   * answer tells nothing: an AI whose token is bound to a run of a business
+   * plugin's step may call only that plugin's declared operations its step
+   * allows, while the plugin runs. A consultation or a core step: null.
+   */
+  async function stepRefusal(member: Member, actor: Pick<OperationActor, 'kind' | 'runId'>, pluginId: string, operation: string) {
+    if (actor.kind !== 'ai' || !actor.runId) return null
+    const run = companyData.forCompany(member.companyId).aiRuns.byId(actor.runId)
+    if (!run) return notInStep()
+    const bound = parsePluginRunStep(run.step)
+    if (!bound) return null
+    if (bound.pluginId !== pluginId) return notInStep()
+    const active = await plugins.active(member.companyId, pluginId)
+    const step = active.ok ? stepOf(active.plugin.manifest, bound.step) : null
+    return active.ok && step && stepAllowsOperation(step, active.plugin.manifest, operation) ? null : notInStep()
+  }
+
   /** The checks a record operation gets before its own work: (row, plugin, op, link) or the refusal. */
   async function recordChecks(member: Member, actor: OperationActor, pluginId: string, recordId: string, operation: string) {
+    const gate = await stepRefusal(member, actor, pluginId, operation)
+    if (gate) return { refusal: gate } as const
     if (!companyData.forCompany(member.companyId).records.settings().enabled) return { refusal: refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code }) } as const
     const row = readable(member, recordId)
     if (!row) return { refusal: notFound() } as const
@@ -129,6 +195,8 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
 
   /** The checks a create of a record gets (no record yet): the folder it would go to stands for the record. */
   async function newRecordChecks(member: Member, actor: OperationActor, pluginId: string, operation: string) {
+    const gate = await stepRefusal(member, actor, pluginId, operation)
+    if (gate) return { refusal: gate } as const
     if (!companyData.forCompany(member.companyId).records.settings().enabled) return { refusal: refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code }) } as const
     const active = await plugins.active(member.companyId, pluginId)
     if (!active.ok) return { refusal: notActive(active.problem) } as const
@@ -154,7 +222,7 @@ export function createOperationChecks(deps: Pick<PluginOperationDeps, 'companyDa
     return readable(member, op.recordId) ? op : null
   }
 
-  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, recordChecks, newRecordChecks, opFor }
+  return { readable, folderReadable, valuesOf, mayRunAt, mayRun, precheckFor, stepRefusal, recordChecks, newRecordChecks, opFor }
 }
 
 export type OperationChecks = ReturnType<typeof createOperationChecks>

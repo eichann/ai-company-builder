@@ -38,6 +38,7 @@ paths:
   - "admin/src/lib/integrations.ts"
   - "admin/tests/integrations.test.tsx"
   - "server/tests/integration/plugin-operations.test.ts"
+  - "server/tests/integration/plugin-run-gate.test.ts"
   - "client/shared/plugin-operations.ts"
   - "client/electron/features/plugin-operations/**"
   - "client/src/features/chat/components/PluginOperationCard.tsx"
@@ -244,7 +245,7 @@ upgrade:                                 # where work pinned to an older version
 - **Roles**: declared names; `role:<name>` in a business operation's `who`, a type's action `who`
   or a mapping's `approval_by` only for a declared role (refused on contract 1). Who holds them is
   C3's (`plugin-roles.md`): the engine's `who` and the approvers resolve them; an operation's
-  `who` still matches no one until C4 passes the resolver (fails closed).
+  `who` still matches no one (fails closed; the resolver is not passed there yet).
 - **Screens** (`ui`): `bridge` is the bridge version (1); entries are files under `ui/` (no URL,
   no `..`); the peek is drawn by the core (no `entry`); `connect`, `csp`, `permissions`,
   `preload` refused (the frame has no network and is given nothing).
@@ -814,6 +815,37 @@ POST /api/companies/:companyId/plugins/:pluginId/operations/:operationId/recreat
 - Approving itself (who may, the hash, once only) is the approvals service's (G6, `approvals.md`).
 - `similarDeals(member, pluginId, title)`: shown on a create-of-a-record approval card (only
   records the viewer may read).
+
+## The gate of a step's run (plan C4 「業務×操作の関所」)
+
+The server gate is the pair business plugin × operation, and inside a step's run also the step.
+
+- An execution run (`ai-turns.md`, S10b) of a business plugin's step is named
+  `<pluginId>__<step>` (`parsePluginRunStep`, `plugin-operation-checks.ts`; a plugin id has no `_`).
+  Any other run step (minutes reading) and a consultation's token keep what they had.
+- **Operations** (`stepRefusal`, first in `recordChecks` / `newRecordChecks`, so it also covers
+  approval requests through `prepareApproval`): an AI whose token is bound to such a run may call
+  only **its own plugin's** declared operations (`plugins.active` — so the company switch, the
+  operator stop, the package and the connector apply), only when the step's `tools` include
+  `plugin_operations`, and an operation that **asks first** (`asksFirst`: `reaches: external` or
+  creates a record — never `auto`, never `ok_from`, never direct) only when they also include
+  `approvals`: it can only become an approval request (202), never be sent.
+- **Connector roles** (`createPluginRunGate` in `plugin-ai-tools.ts`, wired in
+  `composition/plugins.ts`; routes call `connectorRoleRefusal(c, h, role)` from
+  `routes/record-ai-auth.ts` before using a role): only the roles the step's `connector_roles`
+  declare (`mail.read` as is, or a bare `mail` for all its operations), while the plugin is
+  installed here, on, on the shelf and not stopped by the operator. No AI route uses a role yet —
+  lanes A / B call it when they add theirs.
+- Every refusal is one answer, 403 `NOT_IN_STEP` 「この手順では使えない操作です」, checked before
+  anything else: it does not tell another plugin, another company's, a stopped one or an
+  undeclared operation apart, and nothing is asked outside.
+- Not yet: the AI's tool listing (`GET /plugins`) is not narrowed to the step (the app gives a
+  step's run only its step's tools, C5); the step is read from the installed version (C5 pins it);
+  a plugin operation's `who` with `role:` still matches no one (`plugin-roles.md`).
+- Test: `tests/integration/plugin-run-gate.test.ts` (a step without `plugin_operations`, another
+  plugin's / not installed here, asks first without `approvals` then only a request, the step's
+  roles only, the switch and the operator stop, a consultation and a core step unchanged) —
+  mutation-checked.
 
 ## 「HubSpot に聞いて確かめる」 (P8, `services/plugin-mapping-check.ts`)
 
