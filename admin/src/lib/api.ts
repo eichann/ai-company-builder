@@ -4,7 +4,21 @@
 // server, and without a reverse proxy the admin's own /api/* proxy
 // (src/proxy.ts) forwards them. Either way the session cookie is first-party.
 
+import type { ZodMiniType } from 'zod/mini'
+
 import type { ClientBuild } from '../../../shared/core/client-version'
+import {
+  capabilitiesSchema,
+  clientActivitiesSchema,
+  companiesSchema,
+  companySchema,
+  configSchema,
+  departmentSchema,
+  departmentsSchema,
+  membersSchema,
+  overviewSchema,
+  userSchema,
+} from './api-schemas'
 import type {
   AgentEventPage,
   AgentEventQuery,
@@ -33,6 +47,14 @@ export class ApiError extends Error {
     this.body = body
     this.code = typeof body?.code === 'string' ? body.code : undefined
   }
+}
+
+/** `ApiError.code` of an answer that is not JSON or not the shape the page expects (describeError). */
+export const INVALID_RESPONSE = 'INVALID_RESPONSE'
+
+function invalidResponse(status: number, issues: string[] = []): ApiError {
+  // Only where the shape broke (field paths), never the values.
+  return new ApiError(status, 'Invalid response from the server', { code: INVALID_RESPONSE, issues })
 }
 
 type RequestOptions = {
@@ -79,7 +101,7 @@ export async function apiClient<T>(endpoint: string, options: RequestOptions = {
       const message = typeof error?.error === 'string' ? error.error : typeof error?.message === 'string' ? error.message : ''
       throw new ApiError(res.status, message || `Request failed (${res.status})`, error)
     }
-    if (raw === undefined) throw new ApiError(res.status, 'Invalid response from the server')
+    if (raw === undefined) throw invalidResponse(res.status)
     return raw as T
   } catch (err) {
     if (controller.signal.aborted) throw new ApiTimeoutError()
@@ -95,6 +117,18 @@ type Envelope<T> = { success: boolean; data: T }
 async function getData<T>(endpoint: string, options?: RequestOptions): Promise<T> {
   const res = await apiClient<Envelope<T> | null>(endpoint, options)
   return res?.data as T
+}
+
+/**
+ * getData for the main calls: the envelope's `data` is checked against `schema` (api-schemas.ts)
+ * and an answer of another shape is refused with INVALID_RESPONSE instead of being rendered.
+ */
+async function getParsed<T>(endpoint: string, schema: ZodMiniType<T>, options?: RequestOptions): Promise<T> {
+  const res = await apiClient<unknown>(endpoint, options)
+  const data = res !== null && typeof res === 'object' && !Array.isArray(res) ? (res as { data?: unknown }).data : undefined
+  const parsed = schema.safeParse(data)
+  if (!parsed.success) throw invalidResponse(200, parsed.error.issues.slice(0, 10).map(i => ['data', ...i.path.map(String)].join('.')))
+  return parsed.data
 }
 
 const enc = encodeURIComponent
@@ -132,11 +166,11 @@ export const authApi = {
 }
 
 export const meApi = {
-  getMe: () => getData<User>('/api/me'),
+  getMe: () => getParsed('/api/me', userSchema),
 }
 
 export const configApi = {
-  get: () => getData<{ name: string; version: string; setupComplete: boolean }>('/api/config'),
+  get: () => getParsed('/api/config', configSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -167,18 +201,18 @@ export interface Member {
 }
 
 export const companiesApi = {
-  list: () => getData<Company[]>('/api/companies'),
+  list: () => getParsed('/api/companies', companiesSchema),
 
   create: (name: string, slug?: string) =>
-    getData<Company>('/api/companies', { method: 'POST', body: { name, slug } }),
+    getParsed('/api/companies', companySchema, { method: 'POST', body: { name, slug } }),
 
-  get: (id: string) => getData<Company>(`/api/companies/${enc(id)}`),
+  get: (id: string) => getParsed(`/api/companies/${enc(id)}`, companySchema),
 
-  getMembers: (id: string) => getData<Member[]>(`/api/companies/${enc(id)}/members`),
+  getMembers: (id: string) => getParsed(`/api/companies/${enc(id)}/members`, membersSchema),
 
   /** owner / admin. Only the display name changes. */
   rename: (id: string, name: string) =>
-    getData<Company>(`/api/companies/${enc(id)}`, { method: 'PATCH', body: { name } }),
+    getParsed(`/api/companies/${enc(id)}`, companySchema, { method: 'PATCH', body: { name } }),
 
   /** owner only; the last owner cannot be demoted. */
   setMemberRole: (companyId: string, userId: string, role: Role) =>
@@ -205,7 +239,7 @@ export interface Capabilities {
 }
 
 export const capabilitiesApi = {
-  get: (companyId: string) => getData<Capabilities>(`/api/companies/${enc(companyId)}/me/capabilities`),
+  get: (companyId: string) => getParsed(`/api/companies/${enc(companyId)}/me/capabilities`, capabilitiesSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -257,7 +291,7 @@ export interface OrphanedScopeSummary {
 }
 
 export const overviewApi = {
-  get: (companyId: string) => getData<Overview>(`/api/companies/${enc(companyId)}/overview`),
+  get: (companyId: string) => getParsed(`/api/companies/${enc(companyId)}/overview`, overviewSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -282,7 +316,7 @@ export interface ClientActivity {
 }
 
 export const clientActivityApi = {
-  list: (companyId: string) => getData<ClientActivity[]>(`/api/companies/${enc(companyId)}/client-activity`),
+  list: (companyId: string) => getParsed(`/api/companies/${enc(companyId)}/client-activity`, clientActivitiesSchema),
 }
 
 // ---------------------------------------------------------------------------
@@ -781,13 +815,13 @@ export interface DepartmentManager {
 const deptBase = (companyId: string) => `/api/companies/${enc(companyId)}/departments`
 
 export const departmentsApi = {
-  list: (companyId: string) => getData<Department[]>(`${deptBase(companyId)}?flat=true`),
+  list: (companyId: string) => getParsed(`${deptBase(companyId)}?flat=true`, departmentsSchema),
 
   create: (companyId: string, data: CreateDepartmentInput) =>
-    getData<Department>(deptBase(companyId), { method: 'POST', body: data }),
+    getParsed(deptBase(companyId), departmentSchema, { method: 'POST', body: data }),
 
   update: (companyId: string, departmentId: string, data: UpdateDepartmentInput) =>
-    getData<Department>(`${deptBase(companyId)}/${enc(departmentId)}`, { method: 'PUT', body: data }),
+    getParsed(`${deptBase(companyId)}/${enc(departmentId)}`, departmentSchema, { method: 'PUT', body: data }),
 
   delete: (companyId: string, departmentId: string) =>
     apiClient<{ success: boolean; deletedFiles?: number; deletedFolders?: number }>(

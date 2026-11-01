@@ -89,6 +89,13 @@ describe('概要', () => {
     expect(await screen.findByText('対応が必要なことはありません')).toBeInTheDocument()
   })
 
+  it('a malformed overview shows the error state, not an empty "nothing to do"', async () => {
+    mockApi({ ...companyRoutes(), [`GET ${base}/overview`]: { body: ok({ memberCount: '3', attention: null }) } })
+    renderInCompany(<OverviewPage />)
+    expect(await screen.findByRole('alert')).toHaveTextContent('応答を正しく読み取れなかった')
+    expect(screen.queryByText('対応が必要なことはありません')).not.toBeInTheDocument()
+  })
+
   it('members and managers see their own role instead of the admin overview', async () => {
     const { calls } = mockApi(companyRoutes(managerCapabilities))
     renderInCompany(<OverviewPage />)
