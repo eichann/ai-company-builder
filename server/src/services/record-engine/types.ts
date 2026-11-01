@@ -38,6 +38,12 @@ export interface RecordEngineDeps {
    * request is accepted at once (as before version 7 of the task type).
    */
   autoAccepts?: (companyId: string, q: AcceptanceQuestion) => boolean
+  /**
+   * After an action was written (state and ledger committed): a core service that must follow up
+   * on a person's action (the inbox: 「もう返した」 drops the prepared reply drafts). Never throws
+   * into the engine; nothing is undone when it fails.
+   */
+  afterAct?: (companyId: string, change: RecordChange) => void
 }
 
 /** The entry a notify is about (the record's type and its server fields after the entry). */
