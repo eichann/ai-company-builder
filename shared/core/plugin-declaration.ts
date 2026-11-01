@@ -34,8 +34,23 @@ export const PRIOR_ONLY_FIELDS: readonly string[] = ['stage']
 export const CREATE_CONTENT_SLOTS = ['title', 'body', 'at', 'outcome'] as const
 export type CreateContentSlot = typeof CREATE_CONTENT_SLOTS[number]
 
-/** The plugin contract this build understands (0.17). A declaration naming another is not used. */
+/**
+ * The plugin contract of milestone 3 (0.17): a connector or a business plugin
+ * that is data only — declaration, types, mapping. Packages written for it keep
+ * working unchanged (same keys, same files, same fingerprint).
+ */
 export const PLUGIN_CONTRACT = 1
+/**
+ * Contract 2 (stages 4a / 4b, plan C1): contract 1 plus a business plugin's
+ * `roles`, `steps` (the AI's turn, run on the member's PC), `ui` (isolated
+ * frames, unused until 4b), `upgrade` (where pinned work may move to this
+ * version), the package folders `steps/` and `ui/`, the signature slot
+ * (`signature.yaml`) and fingerprint v2 (`plugin-fingerprint.ts`).
+ * `plugin-flow-declaration.ts` holds its rules; the syntax is fixed here once.
+ */
+export const PLUGIN_CONTRACT_V2 = 2
+/** The contracts this build understands. A declaration naming another is not used. */
+export const PLUGIN_CONTRACTS: readonly number[] = [PLUGIN_CONTRACT, PLUGIN_CONTRACT_V2]
 
 export type PluginKind = 'official' | 'company'
 /**
@@ -149,6 +164,123 @@ export interface OperationUse {
   policy: FieldPolicy | null
 }
 
+/**
+ * A role a business plugin needs (contract 2, owner decision 2026-11-01): the
+ * business declares it (「企画の承認者」); who fills it is the company's
+ * (FDE's default assignment, then per-bundle overrides — C3). Referred to as
+ * `role:<name>` in an operation's `who`. Until assigned, a role matches no one.
+ */
+export interface PluginRoleDeclaration {
+  label: string
+  description: string | null
+}
+
+/** Where a step (or a pinned work's move to a new version) applies: one record type in one non-final state. */
+export interface PluginStatePoint {
+  type: string
+  state: string
+}
+
+/**
+ * How a step starts: `ai_turn` = automatically, when the record is in the AI's
+ * turn (the member's PC picks it up, C5); `person` = a person starts it from
+ * the record, which opens a consultation with the step's procedure.
+ */
+export const PLUGIN_STEP_STARTS = ['ai_turn', 'person'] as const
+export type PluginStepStart = typeof PLUGIN_STEP_STARTS[number]
+
+/**
+ * A step's procedure (coordinator, 2026-11-02): the plugin's own default (a
+ * file under `steps/`) and whether a company may put one of its own Skills
+ * (`.claude/skills/<name>/`) in its place — 「提案書を用意する」 runs div's
+ * `sales-proposal-v1` at div and the plugin's default elsewhere. Which Skill a
+ * company uses is the company's setting (a later item); the step's `tools`
+ * and `connectorRoles` stay the ceiling whichever procedure runs.
+ */
+export interface PluginStepProcedure {
+  /** `steps/<file>.md`, a file of the package. */
+  default: string
+  /** A company may map this step to one of its Skills. */
+  overridable: boolean
+}
+
+/**
+ * What a work is pinned to for a step, recorded at its first run (owner
+ * decision 2026-11-01 night: pinned per work; C5 stores it): the plugin's
+ * procedure at a version and fingerprint, or the company Skill used instead,
+ * by its content fingerprint (the same fingerprint #403 records for Skills in
+ * consultations).
+ */
+export type PluginStepProcedurePin =
+  | { source: 'plugin'; pluginId: string; version: string; fingerprint: string }
+  | { source: 'company_skill'; skill: string; fingerprint: string }
+
+/**
+ * One step (contract 2, design 節目5 §4): when a record of `for.type` is in
+ * `for.state`, the member's PC runs the AI once with the step's procedure,
+ * only `tools` and the connector roles in `connectorRoles` — automatically
+ * (`start: ai_turn`) or when a person starts it (`start: person`). Always on
+ * the PC — there is no way to say "on the server". No scripts in 4a (§5-11),
+ * no conditions or expressions. The procedure is pinned per work at its first
+ * run (`PluginStepProcedurePin`).
+ */
+export interface PluginStep {
+  label: string
+  for: PluginStatePoint
+  start: PluginStepStart
+  procedure: PluginStepProcedure
+  /** Names from `PLUGIN_STEP_TOOLS`: the most the step gets, also when a company Skill is its procedure. */
+  tools: string[]
+  /** Connector roles the step uses (`mail.send`, `calendar.read`…), resolved against the core's list of roles when it runs. */
+  connectorRoles: string[]
+}
+
+/**
+ * The plugin's screens (contract 2, design 節目5 §2; parsed and checked only —
+ * nothing shows them before stage 4b). Frames talk to the core through one
+ * bridge of version `bridge`; the core draws the peek, approvals and sending.
+ */
+export interface PluginUi {
+  bridge: number
+  /** A left tab: its label and icon drawn by the core, its content the frame at `entry`. */
+  tab: { label: string; icon: string; entry: string } | null
+  /** The peek over the tab, drawn by the core: which records it lists. */
+  peek: { implements: string; stateGroup: string } | null
+  /** A section inside a record card, its content the frame at `entry`. */
+  recordSections: Array<{ type: string; label: string; entry: string }>
+}
+
+/**
+ * Where work pinned to an older version may move to this one (owner decision
+ * 2026-11-01 night: work is pinned per work; it moves only at points the FDE
+ * declares). `from`: the oldest version whose work may move; `at`: the states.
+ */
+export interface PluginUpgrade {
+  from: string
+  at: PluginStatePoint[]
+}
+
+/**
+ * A company setting a business plugin offers (contract 2; the first rung of
+ * the owner's "fit ladder": ① settings ② role assignment ③ a company Skill as
+ * a step's procedure ④ a company extension of a plugin type ⑤ a separate
+ * plugin). A typed parameter with a default and bounds; an owner/admin changes
+ * it per company later, steps and approval rules read it. **Parameters only**:
+ * nothing in a setting selects a state, an action or a step.
+ */
+export type PluginSetting =
+  | { kind: 'number'; label: string; default: number; min: number | null; max: number | null }
+  /** `<n>m` / `<n>h` / `<n>d` (minutes, hours, days). */
+  | { kind: 'duration'; label: string; default: string; min: string | null; max: string | null }
+  | { kind: 'choice'; label: string; default: string; options: string[]; optionLabels: Record<string, string> }
+  | { kind: 'boolean'; label: string; default: boolean }
+  /** A person by role: one of the plugin's `roles` or `dept_manager` / `admin`. */
+  | { kind: 'role'; label: string; default: string }
+  /** Which connected service serves a connector role for this plugin (null default: the company's usual one). */
+  | { kind: 'connector'; label: string; connectorRole: string; default: null }
+
+export const PLUGIN_SETTING_KINDS = ['number', 'duration', 'choice', 'boolean', 'role', 'connector'] as const
+
 export interface PluginManifest {
   id: string
   label: string
@@ -186,6 +318,12 @@ export interface PluginManifest {
    * written to another (review §5.7).
    */
   accountInfo: PluginEndpoint | null
+  /** Contract 2, business plugins only (empty / null otherwise). */
+  roles: Record<string, PluginRoleDeclaration>
+  settings: Record<string, PluginSetting>
+  steps: Record<string, PluginStep>
+  ui: PluginUi | null
+  upgrade: PluginUpgrade | null
 }
 
 export type PluginParsed<T> = { ok: true; value: T } | { ok: false; errors: string[] }
@@ -202,6 +340,14 @@ export function comparePluginVersions(a: string, b: string): number {
 }
 
 export type CommonPart = Pick<PluginManifest, 'id' | 'label' | 'version' | 'kind' | 'contract' | 'description' | 'availableTo'>
+
+/** The parts only a contract-2 business plugin has (empty for contract 1 and connectors). */
+export type FlowPart = Pick<PluginManifest, 'roles' | 'settings' | 'steps' | 'ui' | 'upgrade'>
+export const noFlow = (): FlowPart => ({ roles: {}, settings: {}, steps: {}, ui: null, upgrade: null })
+
+/** `role:<name>` in an operation's `who` (contract 2): a role the business plugin declares. */
+export const ROLE_WHO_PREFIX = 'role:'
+export const roleOfWho = (w: string): string | null => w.startsWith(ROLE_WHO_PREFIX) ? w.slice(ROLE_WHO_PREFIX.length) : null
 
 /** Update operations reaching people outside the company (they write mapped fields), optionally of one object. */
 export function externalFieldWriters(manifest: Pick<PluginManifest, 'operations'>, objectName?: string): string[] {

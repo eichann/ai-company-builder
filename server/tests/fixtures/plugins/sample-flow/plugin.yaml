@@ -1,0 +1,64 @@
+# A contract-2 business plugin for the public repository's tests (plan C1):
+# the shapes of stages 4a / 4b in one package — roles, steps (started by the
+# AI's turn or by a person; a default procedure a company may replace with its
+# own Skill), ui frames with the bridge version, and where pinned work may move
+# to this version. The real ones (corporate-sales, program-planning) live in
+# the private acb-plugins repository.
+id: sample-flow
+label: 見本の営業の流れ
+version: 0.2.0
+kind: official
+contract: 2
+description: 案件の流れ（手順・役割・画面）
+types: [deal, customer]
+connector: sample-hub >= 0.1.0
+
+objects:
+  deal: { record_type: deal }
+  company: { record_type: customer }
+
+operations:
+  refresh_deal:
+    who: [viewer, ai]
+  update_deal:
+    who: [assignee, role:sales_manager, ai]
+    note: optional
+    decision: true
+
+roles:
+  sales_manager: { label: 営業の責任者, description: 金額の承認をする人 }
+
+settings:
+  approval_amount: { label: 承認が要る金額, kind: number, default: 1000000, min: 0 }
+  reply_within: { label: 返事の目安, kind: duration, default: 1d, min: 1h, max: 14d }
+  tone: { label: 文面, kind: choice, options: [formal, casual], option_labels: { formal: ていねい, casual: くだけた }, default: formal }
+  cc_manager: { label: 責任者を CC に入れる, kind: boolean, default: true }
+  amount_approver: { label: 金額を承認する人, kind: role, default: sales_manager }
+  mail_service: { label: メールを送るサービス, kind: connector, connector_role: mail.send }
+
+steps:
+  prepare_proposal:
+    label: 提案書を用意する
+    for: { type: deal, state: open }
+    start: person
+    procedure: { default: steps/proposal.md, overridable: true }
+    tools: [records, plugin_operations, files_read, files_write]
+    connector_roles: [mail.read]
+  read_minutes:
+    label: 議事録を読んで反映する
+    for: { type: meeting, state: received }
+    start: ai_turn
+    procedure: { default: steps/read-minutes.md, overridable: false }
+    tools: [records, approvals, outbound_draft]
+    connector_roles: [meeting.read, mail.send]
+
+ui:
+  bridge: 1
+  tab: { label: 案件, icon: Briefcase, entry: ui/index.html }
+  peek: { implements: request, state_group: mine }
+  record_sections:
+    - { type: deal, label: 提案の材料, entry: ui/deal.html }
+
+upgrade:
+  from: 0.1.0
+  at: [{ type: deal, state: open }]
