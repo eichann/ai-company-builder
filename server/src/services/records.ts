@@ -15,7 +15,7 @@ import { fileLinkPath, RECORD_ID_RE } from '../../shared/core/records'
 import type {
   RecordDetail, RecordFieldValue, RecordIndexProblem, RecordLinkView, RecordQueryResult, RecordSettings, RecordSummary, RecordTypeView,
 } from '../../shared/types/records'
-import { OLD_CONNECTION_LABEL } from '../../shared/types/records'
+import { DECISION_EXCEPTION_NOTICE, OLD_CONNECTION_LABEL } from '../../shared/types/records'
 import type { Clock } from '../ports/clock'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { RecordFileRepo, RecordFileSource } from '../ports/record-files'
@@ -226,6 +226,8 @@ export function recordSummaries(records: RecordRepository, rows: RecordRow[], ol
       state: s?.state ?? null, fields, version: s?.version ?? 0, updatedAt: s && s.updatedAt > r.updatedAt ? s.updatedAt : r.updatedAt,
       ...(old?.has(r.id) ? { fromOldConnection: true as const, notice: OLD_CONNECTION_LABEL } : {}),
       ...(r.personalOwner !== null ? { personal: true as const } : {}),
+      // 例外（この件だけ）: said in words wherever the AI reads it (never a precedent elsewhere).
+      ...(r.type === 'decision' && fields.exception === true ? { exceptionNotice: DECISION_EXCEPTION_NOTICE } : {}),
     } satisfies RecordSummary]
   }))
 }

@@ -301,4 +301,23 @@ describe('the company map, end to end', () => {
     const problems = await api('u-owner', 'GET', '/problems')
     expect(problems.body.data?.problems).toContainEqual(expect.objectContaining({ path: '営業部/意思決定/decision-old00001.md', kind: 'server_only_type' }))
   })
+
+  it('例外（この件だけ）: set at creation, changed by who may confirm, and said in words wherever the record is read', async () => {
+    const made = await api('u-member', 'POST', '/decisions', {
+      folder: '営業部', title: '今回の見積は特別に20%値引きしてよい', why: '初回の大口のため', source: '商談のメモ', exception: true,
+    })
+    expect(made.status).toBe(201)
+    const id = (made.body.data?.record as { id: string }).id
+    // What the AI reads (records_get / records_query answer the same summaries) carries the mark in words.
+    const read = await api('u-owner', 'GET', `/item/${id}`)
+    expect(read.body.data?.record).toMatchObject({ fields: { exception: true }, exceptionNotice: expect.stringContaining('前例にしない') })
+    const listed = await api('u-owner', 'POST', '/query', { type: 'decision' })
+    expect(listed.body.data?.records).toContainEqual(expect.objectContaining({ id, exceptionNotice: expect.stringContaining('例外（この件だけ）') }))
+    // The member who recorded it is its 確かめる人: they may clear the mark; the notice goes with it.
+    const cleared = await api('u-member', 'POST', `/item/${id}/actions/set_exception`, { expectedVersion: 1, args: { exception: false } })
+    expect(cleared.status).toBe(200)
+    const after = (await api('u-owner', 'GET', `/item/${id}`)).body.data?.record as Record<string, unknown>
+    expect(after).toMatchObject({ version: 2, fields: { exception: false } })
+    expect(after.exceptionNotice).toBeUndefined()
+  })
 })

@@ -192,12 +192,13 @@ const DECISION_TOOL: RecordToolSpec = {
       approval: recordRef('approval').optional(),
     }).strict().optional(),
     important: z.boolean().optional(),
+    exception: z.boolean().optional().describe('例外（この件だけ）：つながった件だけの一回限りの判断（例「今回の見積は特別に20%値引きしてよい」）なら true / true for a one-off judgement that applies only to its linked thing and must not become a precedent'),
     key: z.string().min(1).max(200).optional().describe('同じ項目を2回残さないための目印（例「meeting-…:decision:2」） / an idempotency key'),
   }).strict(),
   description: '「決めたこと」をサーバーの記録として残す（ファイルは作らない。未確認の状態で始まり、確かめるのは人）。folder の部署のフォルダを読める人だけが見られる。' +
-    'まとまり（案件など）・会議はつながり（links）で示す。同じ項目は key をそろえれば1回だけ残る。\n' +
+    'まとまり（案件など）・会議はつながり（links）で示す。同じ項目は key をそろえれば1回だけ残る。その件だけの一回限りの判断（特別な値引きなど）は exception: true（例外（この件だけ））にする。\n' +
     'Record a decision as a server record (no file; it starts unconfirmed and a person confirms it). Only those who can read the department folder `folder` see it. ' +
-    'Link the bundle (a deal…) / meeting. The same `key` records once.',
+    'Link the bundle (a deal…) / meeting. The same `key` records once. Mark a one-off judgement for this case only (a special discount…) `exception: true`.',
   request: input => ({ method: 'POST', path: '/decisions', body: input }),
 }
 
@@ -531,7 +532,8 @@ export const RECORDS_INSTRUCTIONS = `\n\n【会社の記録】${'`'}mcp__${RECOR
   `メンバーへの返事では、記録を件名と見分けのつく情報（担当・金額・取り込んだ日・更新した日など）で呼び、内部の id（deal-… などの記録の id、HubSpot などの外の番号、操作の id）は、聞かれない限り見せないでください。道具を呼ぶときは、これまでどおり id を使います。` +
   `fromOldConnection: true の記録は「${OLD_CONNECTION_LABEL}」です。使わず、話に出すときはそう添えてください。` +
   `メール（mail_* の道具）は下書きまでです。宛先は mail_recipients の ref で選び、アドレスを自分で書かないでください。送るのはメンバー本人がカードの「確かめて送る」から行います。AI からは送れないので、「送りました」とは言わないでください。前に出した下書きをもう一度見てもらいたいときは mail_draft_show でカードを出し直し、出し直すためだけに中身を直さないでください。` +
-  `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「受けられない」は本人だけができます（AI はできません）。`
+  `タスクを AI が下ごしらえしてから渡すときは、records_create で state: "preparing" にして作り、確かめたこと・作った下書きを済ませてから task__finish_prep（prep_summary に何を確かめて何を作ったか、links.prepared に作ったメールの下書き・承認のお願いの id）で担当に渡します。期限が近い・うまくいかなかった・情報が足りないときは、抱え込まずに task__hand_over（note に理由、links.prepared にできている分）で早めに渡してください。タスクの完了と「受けられない」は本人だけができます（AI はできません）。` +
+  `過去の決めたことを前例として使うときは、exception: true（exceptionNotice「例外（この件だけ）」つき）の決めたことを、ほかの件に当てはめないでください。それはつながった件だけの判断です。一回限りの判断を decisions_record で残すときは exception: true にしてください。`
 
 export interface RecordTools {
   specs: RecordToolSpec[]
