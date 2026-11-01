@@ -32,6 +32,7 @@ import type { ConnectorGrantRow } from '../ports/connectors'
 import type { Clock } from '../ports/clock'
 import type { UpstreamClient, UpstreamFailure } from '../ports/upstream'
 import type { BrokerVault } from './broker-vault'
+import { grantSealContext } from './member-oauth'
 
 const HEADERS_TIMEOUT_MS = 30_000
 const MAX_READ_RETRIES = 2
@@ -226,7 +227,7 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     if (!stored || stored.grantId !== grant.grantId) return { stop: 'grant-revoked' }
     const creds = await clientCredentials(companyId)
     if ('stop' in creds) return creds
-    const refreshToken = await deps.brokerVault.openConnector({ purpose: 'acb-google-grant', companyId, id: stored.grantId }, stored.sealed)
+    const refreshToken = await deps.brokerVault.openConnector(grantSealContext('google', companyId, stored.grantId), stored.sealed)
     if (deps.practiceGoogle && !isPracticeGoogleSecret(refreshToken)) return { stop: 'practice-real-secret' }
     const answer = await postForm('/token', {
       grant_type: 'refresh_token', refresh_token: refreshToken, client_id: creds.clientId, client_secret: creds.secret,
@@ -327,19 +328,6 @@ export function createGoogleClient(deps: GoogleClientDeps) {
 
     /** Revokes a token at Google (best effort: false when it could not be confirmed). */
     revoke,
-
-    /** Revokes a member's stored refresh token at Google (best effort; the caller ends the grant either way). */
-    async revokeStored(companyId: string, userId: string): Promise<boolean> {
-      if (!deps.brokerVault.status().enabled) return false
-      const stored = deps.companyData.forCompany(companyId).connectors.refreshToken('google', userId)
-      if (!stored) return false
-      try {
-        const token = await deps.brokerVault.openConnector({ purpose: 'acb-google-grant', companyId, id: stored.grantId }, stored.sealed)
-        return await revoke(token)
-      } catch {
-        return false
-      }
-    },
 
     /**
      * One API call on a member's behalf — the entry point for later features

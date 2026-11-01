@@ -377,7 +377,7 @@ const MATRIX: Row[] = [
   r('POST /api/companies/:companyId/me/minutes/item/:recordId/deal', w => ({ path: `${C(w)}/me/minutes/item/minutes-nosuch01/deal`, body: {} }), [404, 404, 404, 404, 404, 401]),
   r('GET /api/records-ai/minutes/:recordId/text', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/text' }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
   r('POST /api/records-ai/minutes/:recordId/deal', () => ({ path: '/api/records-ai/minutes/minutes-nosuch01/deal', body: {} }), [401, 401, 401, 401, 401, 401], 'a session is not a record token'),
-  r('GET /api/oauth/google/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
+  r('GET /api/oauth/:provider/callback', () => ({ path: '/api/oauth/google/callback' }), [400, 400, 400, 400, 400, 400], 'public: Google sends the browser back without a session; no state finds nothing'),
   // 「今日の予定」 (calendar.md): any member, their own calendar only (nothing in the request names
   // another person); Google is not set up here, so the answer is an empty list with a reason.
   r('GET /api/companies/:companyId/me/calendar/today', w => ({ path: `${C(w)}/me/calendar/today` }), MEMBERS, 'Google not set up: an empty list and `stopped`, nothing read'),
@@ -482,6 +482,7 @@ const CROSS: CrossRow[] = [
  * other route with a parameter beyond the company must have a CROSS row.
  */
 const NOT_OBJECT_IDS: Record<string, string> = {
+  'GET /api/oauth/:provider/callback': 'a provider name, not an object: the company comes from the state, found only inside it (member-oauth.test.ts)',
   'GET /api/invitations/:token': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'POST /api/invitations/:token/accept': 'an invitation link: the token finds the company (control plane; invitations tests)',
   'GET /api/broker/:service/*': 'the relay: the company comes from the relay token, never from the URL',
