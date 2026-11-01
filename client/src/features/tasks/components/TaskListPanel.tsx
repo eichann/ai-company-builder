@@ -31,10 +31,12 @@ interface Props {
    * card gets the editor area a file opens in). Absent: the list at a fixed width, the card beside it.
    */
   frame?: (panes: { list: ReactNode; card: ReactNode }) => ReactNode
+  /** 「相談する」 on a task row (AppShell: `chat.consultAbout`). */
+  onConsult?: (task: { id: string; title: string }) => void
 }
 
 /** The task list tab (やること): the list on the left, the opened item's card on the right. */
-export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions, frame }: Props) {
+export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, meetingActions, frame, onConsult }: Props) {
   const [choosing, setChoosing] = useState<TaskListItem | null>(null)
   const [mode, setMode] = useState<ListMode>('turn')
   const [tag, setTag] = useState<string | null>(null)
@@ -109,6 +111,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
         onRetry={ai?.canRetry ? () => aiTurns?.retry(i.id) : null}
         onHand={ai?.canHand ? () => aiTurns?.handOver(i.id) : null}
         onDropFiles={i.type === 'task' && i.turn !== 'done' ? paths => void dropFiles(i, paths) : null}
+        onConsult={i.type === 'task' && onConsult ? () => onConsult({ id: i.id, title: i.title }) : null}
         extra={extra}
       />
     )

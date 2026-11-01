@@ -27,6 +27,17 @@ export const COMMANDS = defineCommands([
     target: { arg: 'pane', area: 'chat' },
   },
   {
+    // 「相談する」 on a record: opens the member's most recent consultation about it, else starts one
+    // with it as the main topic, whose first message has the AI read the record (outbound).
+    id: 'chat.consultAbout', title: 'この件について相談する', class: 'outbound',
+    args: z.object({
+      recordId: z.string().regex(/^[a-z][a-z0-9_]{0,39}-[0-9a-z]{6,32}$/).describe('The record the consultation is about'),
+      title: z.string().min(1).max(300).describe('The record\'s title, for the new consultation\'s title and first message'),
+      pane: z.string().optional().describe('The chat pane; the one used last when left out'),
+    }),
+    target: { arg: 'pane', area: 'chat' },
+  },
+  {
     // Replaces the composer's text; nothing is sent.
     id: 'chat.insertText', title: '入力欄に文を入れる', class: 'local',
     args: z.object({

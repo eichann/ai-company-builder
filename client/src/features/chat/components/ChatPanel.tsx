@@ -13,7 +13,7 @@ import { AgentLogNotice } from './AgentLogNotice'
 import { useChatServer } from '../hooks/useChatServer'
 import { useChatTabs } from '../hooks/useChatTabs'
 import { useAgentAuth } from '../hooks/useAgentAuth'
-import { getChatSession } from '../api'
+import { getChatSession, getChatSessionSummaries } from '../api'
 import { useChatWindows } from '../hooks/useChatWindows'
 import { useMoveToWindow } from '../hooks/useMoveToWindow'
 import { consultationStatusOf } from '../consultationStatusStore'
@@ -22,6 +22,8 @@ import { useLatestRef } from '../../../shared/hooks/useLatestRef'
 import { commandArea, useCommandHandler } from '../../../shared/commands/commands'
 import type { AiTurnCandidate } from '../../../../shared/ai-turn-steps/types'
 import type { AiTurnItemsView } from '../../../../shared/ai-turns'
+import { consultationAbout, taskConsultFirstMessage, taskConsultTitle } from '../../../../shared/task-consult'
+import { agentCan } from '../../../../shared/agents/registry'
 import { useAiTurnRunner } from '../hooks/useAiTurnRunner'
 import { AiTurnNotice } from './AiTurnNotice'
 
@@ -102,6 +104,15 @@ function CompanyChatPanel({ userId, departmentPath, activeDepartment, slashComma
   const [inputRequest, setInputRequest] = useState<ChatInputRequest | null>(null)
   useCommandHandler('chat.newConsultation', ({ message, title, minutesId }) => setInputRequest({ kind: 'newConsultation', message, title, minutesId }), { target: paneId })
   useCommandHandler('chat.insertText', ({ text }) => setInputRequest({ kind: 'insertText', text }), { target: paneId })
+  // 「相談する」 on a record: the member's most recent consultation about it, else a new one with it as the main topic.
+  useCommandHandler('chat.consultAbout', async ({ recordId, title }) => {
+    const existing = consultationAbout(companyId ? await getChatSessionSummaries(companyId).catch(() => []) : [], recordId)
+    if (existing) { openOrFocus(existing); return }
+    setInputRequest({
+      kind: 'newConsultation', title: taskConsultTitle(title), topicRecordId: recordId,
+      message: taskConsultFirstMessage({ id: recordId, title }, agentCan(authMode, 'recordsMcp')),
+    })
+  }, { target: paneId })
   const consumeInputRequest = useCallback(() => setInputRequest(null), [])
 
   // 「AI の番」: a hidden consultation (a tab behind the shown one) per record, one at a time.

@@ -513,6 +513,32 @@ test('chat commands: a new consultation sends its message; inserted text waits i
   expect(await chatBodies()).toHaveLength(1)
 })
 
+// 「相談する」 on a task (tasks-ui.md "Consulting about a task"): a new consultation keeps the task as
+// its main topic and has the AI read it by id; asked again, the member's consultation about it opens.
+test('「相談する」: a new consultation about the task names it by id and keeps it; one already about it is opened instead', async ({ page }) => {
+  await openPreview(page, 'chat-header', { history: 'edit', turn: 'manual' })
+  const run = (id: string, args: Record<string, unknown>) =>
+    page.evaluate(([id, args]) => (window as unknown as { __acbCommands: { run: (id: string, args: unknown) => Promise<unknown> } }).__acbCommands.run(id, args), [id, args] as const)
+  const chatBodies = () => chat(page, c => c.requests.filter(r => r.path === '/api/chat').length)
+  const reply = page.getByText('単価を10月版にしました。').and(page.locator('p:not(.truncate)'))
+  await expect(reply).toBeVisible({ timeout: 15_000 })
+
+  await run('chat.consultAbout', { recordId: 'task-0000aa', title: 'A社 見積書を作り直す' })
+  await expect.poll(chatBodies).toBe(1)
+  const saved = await chat(page, c => c.requests.find(r => r.path === 'flushChatSession')?.body)
+  expect(saved?.topicRecordId).toBe('task-0000aa')
+  expect(saved?.title).toBe('A社 見積書を作り直す の相談')
+  expect(JSON.stringify(saved?.messages)).toContain('records_get で task-0000aa を読み')
+  await turnStarted(page)
+  await chat(page, c => c.finish())
+  await expect(reply).toHaveCount(0)
+
+  await run('chat.consultAbout', { recordId: 'task-0000ed', title: '見積書' })
+  await expect(reply).toBeVisible()
+  await page.waitForTimeout(300)
+  expect(await chatBodies()).toBe(1)
+})
+
 // 「別ウィンドウで開く」: the main window's side (the window registry itself: tests/chat-windows.test.ts).
 test.describe('a consultation in its own window', () => {
   const list = (page: Page) => page.getByRole('complementary', { name: 'AIへの相談' })

@@ -31,6 +31,7 @@ export function summarizeSession(session: ChatSession): ChatSessionSummary {
     ...(session.pinned !== undefined ? { pinned: session.pinned } : {}),
     ...(session.pinnedAt !== undefined ? { pinnedAt: session.pinnedAt } : {}),
     ...(session.revision !== undefined ? { revision: session.revision } : {}),
+    ...(session.topicRecordId ? { topicRecordId: session.topicRecordId } : {}),
   }
 }
 

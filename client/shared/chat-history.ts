@@ -49,6 +49,8 @@ export interface ChatSession {
   revision?: number
   /** The minutes record this consultation was started from (「<件名> のあと」, minutes-app.ts). */
   minutesId?: string
+  /** Its main topic (主な話題): the record 「相談する」 started it about (task-consult.ts). */
+  topicRecordId?: string
 }
 
 export type ChatMetadataPatch = Partial<Pick<ChatSession,
@@ -82,6 +84,8 @@ export interface ChatSessionSummary {
   pinned?: boolean
   pinnedAt?: string
   revision?: number
+  /** Its main topic (主な話題), when started from a record's 「相談する」. */
+  topicRecordId?: string
 }
 
 export interface ChatHistoryChange {

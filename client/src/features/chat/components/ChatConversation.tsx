@@ -82,7 +82,7 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string }
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string }
   | { kind: 'insertText'; text: string }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
@@ -168,7 +168,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
   stampNewMessages(timestampsRef.current, messages)
 
   // The conversation in the history store: restore, autosave, flush, new chat.
-  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, startNewChat } = useChatHistory({
+  const { isRestoringSession, historyReadyRef, deletedRef, messagesRef, titleGenerationDoneRef, customTitleRef, minutesIdRef, topicRecordIdRef, startNewChat } = useChatHistory({
     conversation,
     initialSessionId,
     companyId: currentCompany?.id,
@@ -333,7 +333,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId } = inputRequest
+    const { message, title, minutesId, topicRecordId } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -345,6 +345,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
         onTitleChange?.(title)
       }
       if (minutesId) minutesIdRef.current = minutesId
+      if (topicRecordId) topicRecordIdRef.current = topicRecordId
       if (message) void handleSend(message)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])

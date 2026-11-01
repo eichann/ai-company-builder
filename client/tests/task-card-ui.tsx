@@ -64,7 +64,8 @@ function Preview() {
       <pre id="acted" className="text-[10px]" />
       <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
         renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null}
-        shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]} />
+        shareFolders={[{ folder: '営業', name: '営業部' }, { folder: '経理', name: '経理部' }]}
+        onConsult={r => show('acted', `consult ${r.id}`)} />
     </main>
   )
 }
