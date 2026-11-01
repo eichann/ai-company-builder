@@ -61,6 +61,9 @@ callers ask capabilities instead of branching on agent ids. Related: `chat-write
   fails on a model id literal anywhere under `client/electron`, `client/src`, `client/shared`.
   A model generation update is a registry-only change. (The API-key mode deliberately uses
   `claude-haiku-5-5` for commit messages but `claude-haiku-4-5-20251001` for voice and titles.)
+  `COMPANY_KEY_MODELS` there holds the models of the app's own text jobs sent through the
+  company's key (the broker's relay), whatever agent the member uses: today `tagSuggest`
+  (`tasks-ui.md` "Tag suggestions").
 - `client/electron/agents/registry.ts` is how each agent starts: `createAgentConnection(id,
   host, profile?)`, `runOneShotText(id, request)` (commit messages, voice formatting),
   `oneShotUnavailable(id, host)`, `writeAgentHandoff(id, request, host)`, `runWebReader(id,

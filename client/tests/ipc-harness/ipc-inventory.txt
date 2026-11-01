@@ -163,6 +163,7 @@ contract.invoke tasks:list
 contract.invoke tasks:reconcile
 contract.invoke tasks:retryRun
 contract.invoke tasks:share
+contract.invoke tasks:suggestTags
 contract.invoke tasks:unlinkFile
 contract.invoke tool-approval-response
 contract.invoke tools:start
@@ -429,6 +430,7 @@ contract.type ElectronAPI.startDrag = startDrag: (...args: SendArgs<'fs:startDra
 contract.type ElectronAPI.startPersonStep = startPersonStep: Invoke<'pluginSteps:start'>
 contract.type ElectronAPI.startTool = startTool: Invoke<'tools:start'>
 contract.type ElectronAPI.stopTool = stopTool: Invoke<'tools:stop'>
+contract.type ElectronAPI.suggestTaskTags = suggestTaskTags: Invoke<'tasks:suggestTags'>
 contract.type ElectronAPI.toggleSkillNurturing = toggleSkillNurturing: Invoke<'skills:toggleNurturing'>
 contract.type ElectronAPI.undoPluginOperation = undoPluginOperation: Invoke<'pluginOperations:undo'>
 contract.type ElectronAPI.unlinkFileFromTask = unlinkFileFromTask: Invoke<'tasks:unlinkFile'>
@@ -698,6 +700,7 @@ contract.type IpcInvokeChannels.'tasks:list' = 'tasks:list': { args: [companyId:
 contract.type IpcInvokeChannels.'tasks:reconcile' = 'tasks:reconcile': { args: [companyId: string, runId: string, key: string, done: boolean]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:retryRun' = 'tasks:retryRun': { args: [companyId: string, runId: string]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tasks:share' = 'tasks:share': { args: [companyId: string, recordId: string, folder: string, expectedVersion: number]; result: TaskWriteResult }
+contract.type IpcInvokeChannels.'tasks:suggestTags' = 'tasks:suggestTags': { args: [companyId: string, title: string, tagsInUse: string[]]; result: TagSuggestions }
 contract.type IpcInvokeChannels.'tasks:unlinkFile' = 'tasks:unlinkFile': { args: [companyId: string, recordId: string, companyPath: string, expectedVersion: number]; result: TaskWriteResult }
 contract.type IpcInvokeChannels.'tool-approval-response' = 'tool-approval-response': { args: [toolUseId: string, approved: boolean]; result: boolean }
 contract.type IpcInvokeChannels.'tools:start' = 'tools:start': { args: [toolPath: string, startCommand?: string, companyId?: string]; result: StartToolResult }
@@ -932,6 +935,7 @@ main.handle tasks:list @ features/tasks/ipc.ts (companyId)
 main.handle tasks:reconcile @ features/tasks/ipc.ts (companyId, runId, key, done)
 main.handle tasks:retryRun @ features/tasks/ipc.ts (companyId, runId)
 main.handle tasks:share @ features/tasks/ipc.ts (companyId, recordId, folder, expectedVersion)
+main.handle tasks:suggestTags @ features/tasks/ipc.ts (companyId, title, inUse)
 main.handle tasks:unlinkFile @ features/tasks/ipc.ts (companyId, recordId, companyPath, expectedVersion)
 main.handle tool-approval-response @ features/agent-interactions/ipc.ts (toolUseId: string, approved: boolean)
 main.handle tools:start @ features/tools/ipc.ts (unsafeToolPath: string, startCommand: string = 'dev', companyId?: string)
@@ -1282,6 +1286,8 @@ preload startTool -> invoke tools:start($0, $1, $2)
 preload startTool : (toolPath: string, startCommand?: string | undefined, companyId?: string | undefined) => Promise<StartToolResult>
 preload stopTool -> invoke tools:stop($0)
 preload stopTool : (toolPath: string) => Promise<StopToolResult>
+preload suggestTaskTags -> invoke tasks:suggestTags($0, $1, $2)
+preload suggestTaskTags : (companyId: string, title: string, tagsInUse: string[]) => Promise<TagSuggestions>
 preload toggleSkillNurturing -> invoke skills:toggleNurturing($0, $1)
 preload toggleSkillNurturing : (skillMdPath: string, makeNurturing: boolean) => Promise<SimpleResult>
 preload undoPluginOperation -> invoke pluginOperations:undo($0, $1, $2, $3)

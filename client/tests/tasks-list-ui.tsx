@@ -47,6 +47,8 @@ installElectronAPI({
     data = { ...data, items: [it({ id: 'task-new001', title: input.title, turn: 'mine', due: input.due ?? null, tags: input.tags ?? [], own: true, personal: true }), ...data.items] }
     return { success: true, recordId: 'task-new001' }
   },
+  // Tag suggestions as main would answer them: a reading variant caught (えいぎょう → 営業).
+  suggestTaskTags: async (_companyId, title, inUse) => ({ source: 'ai', tags: title.includes('えいぎょう') && inUse.includes('営業') ? ['営業'] : [] }),
   getBundleChoices: async () => ({ success: true, bundles: [{ id: 'deal-c00001', title: 'C社 研修導入', typeLabel: '案件' }, { id: 'deal-c00002', title: 'C社 追加', typeLabel: '案件' }] }),
   linkMinutesBundle: async (_companyId, meetingId, bundleId) => {
     acted.push(`${meetingId}:bundle ${bundleId}`)

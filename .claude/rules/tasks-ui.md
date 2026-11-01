@@ -2,6 +2,8 @@
 paths:
   - "client/shared/tasks.ts"
   - "client/shared/task-card.ts"
+  - "client/shared/tag-suggest.ts"
+  - "client/tests/tag-suggest.test.ts"
   - "client/tests/task-card*"
   - "client/tests/ui/task-card.spec.ts"
   - "client/src/features/chat/components/PreparedMailCard.tsx"
@@ -80,8 +82,8 @@ meetings), `notifications.md` (the title bar's 「あなたの番」).
 - `QuickAdd` + `quickAdd.ts`: 「見積を直す 明日15時まで #営業」 → title, due (今日・明日・あさって・来週
   [曜日]・曜日・M/D, a time N時[半] / H:MM) and tags; words not understood stay in the title.
   Tags in use are offered while typing after 「#」, and a tag spelled differently from one in use
-  (width, case, katakana / hiragana) is offered as that one (`similarTag`). There is no AI tag
-  suggestion yet (the server has none).
+  (width, case, katakana / hiragana) is offered as that one (`similarTag`); once typing pauses
+  the title's 「タグの候補」 are offered too ("Tag suggestions" below).
 
 ## The card (S7c, `TaskCard.tsx`, `client/shared/task-card.ts`)
 
@@ -145,6 +147,32 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
   restart; the first message names the id, never the contents), `tests/ui/chat-panel.spec.ts`
   (「相談する」 starts one with the topic, then opens it instead), `task-card.spec.ts`,
   `tasks-list.spec.ts` (the buttons).
+
+## Tag suggestions (owner 2026-11-02: 「haikuとか使って」)
+
+- Where: the one line (`QuickAdd`, `useTagSuggestions`: asked 0.7 s after typing pauses, only the
+  newest answer kept, typing never waits) and the card (`TagSuggestions.tsx`: 「タグの候補を出す」 on
+  the member's press, offered when `canSetTags` — the type's `set_tags` allows the member and the
+  task is not finished; a picked tag runs `set_tags` with the task's tags plus it). Tags in use =
+  the member's list (`tagCounts`). **Only suggestions**: nothing is added until the member picks.
+- `tasks:suggestTags(companyId, title, tagsInUse)` → `{ source: 'ai' | 'local', tags }` (main,
+  `electron/features/tasks/tag-suggest.ts`; pure parts `client/shared/tag-suggest.ts`). Asked
+  **in the member's app**, never on the server, of `COMPANY_KEY_MODELS.tagSuggest` (Claude Haiku,
+  `client/shared/agents/registry.ts`) through **the company's key**: a broker token for the job
+  `app:tag-suggest` (`BrokerTokenStore.envFor`, `ACB_ANTHROPIC_API_KEY` / `_BASE_URL`), so the relay
+  uses the key the admin chose for anthropic (`key-broker.md` "Which company key a service uses")
+  and records the call. **Text only**: one message, no tools, no files, no commands. **Sent**: the
+  title (≤ 200 characters) and the tags in use (≤ 200) as JSON data — no other record content,
+  no folder names. The answer may only name tags in use (`parseTagSuggestions`: a reading or
+  spelling variant maps to the tag, anything else is dropped; at most 3).
+- **Silent fallback** to the app's own matching (`localTagSuggestions`: tags in use whose folded
+  spelling appears in the title): no token or the placeholder (no key for this member), the AI
+  stopped by an administrator (`oneShotAiAllowed`), offline, an error, or no answer within 5 s.
+  Logged without the title, the tags or the token. No tags in use → nothing is sent.
+- Tests: `client/tests/tag-suggest.test.ts` (only the title and tags, the company token and
+  relay, the registry's model; only tags in use; every fallback; nothing sent without tags),
+  `task-card.test.ts` (`canSetTags`), `tasks-list.spec.ts` (a variant suggested, added only when
+  picked), `task-card.spec.ts` (asked on the press, `set_tags` with the existing tags).
 
 ## Linking files (the core's, owner decision 2026-11-01; `records.md` "Linking files later")
 

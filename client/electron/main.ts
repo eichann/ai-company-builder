@@ -270,7 +270,11 @@ const drivePicking = createDrivePicking({ baseUrl: getServerApiUrl, cookies: ses
 // 「今日の予定」 (features/calendar): the member's own meetings today, read by the server with the session here.
 registerCalendarIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // The task list (features/tasks): read and changed with the session here; the server decides who may.
-registerTasksIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
+registerTasksIpc(ipc, {
+  baseUrl: getServerApiUrl, cookies: session.cookies,
+  // Tag suggestions: a Haiku model through the company's key (the broker's relay), text only.
+  tagSuggest: { brokerEnv: request => brokerTokens.envFor(request), aiAllowed: () => agentControl.stop.oneShotAiAllowed() },
+})
 // The chat card's 「変更前の値を書き戻す」: the person's own action, with the session (never the AI's token).
 registerPluginOperationsIpc(ipc, { baseUrl: getServerApiUrl, cookies: session.cookies })
 // Search hits, the record card and a file's 「つながっているもの」 (features/record-views).

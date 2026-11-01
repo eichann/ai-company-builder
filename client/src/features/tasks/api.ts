@@ -5,6 +5,7 @@
 import type { ElectronPort } from '../../shared/ipc/electron-api'
 import type { CalendarTodayResult } from '../../../shared/calendar'
 import type { TaskCardResult } from '../../../shared/task-card'
+import type { TagSuggestions } from '../../../shared/tag-suggest'
 import type { BundleChoicesResult, TaskActInput, TaskCreateInput, TaskListResult, TaskWriteResult } from '../../../shared/tasks'
 
 /** Reading the member's own meetings today (no attendee address ever comes back). */
@@ -24,6 +25,8 @@ export type MeetingBundleReads = ElectronPort<'getBundleChoices'>
 export type MeetingBundleWrites = ElectronPort<'linkMinutesBundle'>
 /** 「部署に出す」: the member's owner-only task shown to a department's readers (the server checks owner and folder). */
 export type TaskShareWrites = ElectronPort<'shareTask'>
+/** Tags in use that fit a title: main asks a Haiku model through the company's key (only the title and the tags), else matches locally. */
+export type TagSuggestionReads = ElectronPort<'suggestTaskTags'>
 /** A run held for a person: 「もう一度」, or what the member found outside (the server records it). */
 export type TaskRunWrites = ElectronPort<'retryTaskRun' | 'reconcileTaskRun'>
 
@@ -93,4 +96,9 @@ export function linkMeetingBundle(companyId: string, meetingId: string, bundleId
 /** `folder`: a department folder as the company names it (`営業`). Never undone. */
 export function shareTaskToFolder(companyId: string, recordId: string, folder: string, expectedVersion: number, writes: TaskShareWrites = window.electronAPI): Promise<TaskWriteResult> {
   return writes.shareTask(companyId, recordId, folder, expectedVersion)
+}
+
+/** Only suggestions: the member chooses. Never fails (no AI → the app's own matching). */
+export function suggestTaskTags(companyId: string, title: string, tagsInUse: string[], reads: TagSuggestionReads = window.electronAPI): Promise<TagSuggestions> {
+  return reads.suggestTaskTags(companyId, title, tagsInUse)
 }

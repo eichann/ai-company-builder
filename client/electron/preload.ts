@@ -159,6 +159,7 @@ const api: ElectronAPI = {
   linkFileToTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:linkFile', companyId, recordId, companyPath, expectedVersion),
   unlinkFileFromTask: (companyId: string, recordId: string, companyPath: string, expectedVersion: number) => invoke('tasks:unlinkFile', companyId, recordId, companyPath, expectedVersion),
   shareTask: (companyId: string, recordId: string, folder: string, expectedVersion: number) => invoke('tasks:share', companyId, recordId, folder, expectedVersion),
+  suggestTaskTags: (companyId: string, title: string, tagsInUse: string[]) => invoke('tasks:suggestTags', companyId, title, tagsInUse),
   retryTaskRun: (companyId: string, runId: string) => invoke('tasks:retryRun', companyId, runId),
   reconcileTaskRun: (companyId: string, runId: string, key: string, done: boolean) => invoke('tasks:reconcile', companyId, runId, key, done),
   watchMinutes: (companyId: string | null) => invoke('minutes:watch', companyId),

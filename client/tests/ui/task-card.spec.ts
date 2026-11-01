@@ -108,3 +108,17 @@ test('「相談する」 on the card asks for a consultation about this task', a
   await expect(page.locator('#acted')).toHaveText('consult task-0000aa')
   expectNoPageErrors(state)
 })
+
+test('「タグの候補」: asked on the member\'s press, added only when picked, with the tags it already has', async ({ page }) => {
+  const state = await openPreview(page, 'task-card')
+  const group = page.getByRole('group', { name: 'タグの候補' })
+  await group.getByRole('button', { name: 'タグの候補を出す' }).click()
+  await group.getByRole('button', { name: '#経理 を付ける' }).click()
+  await expect(page.locator('#acted')).toHaveText('set_tags@3:tags=営業|見積|経理')
+  expectNoPageErrors(state)
+
+  const done = await openPreview(page, 'task-card', { task: 'done' })
+  await expect(page.getByTestId('task-card')).toContainText('了承を得たとして')
+  await expect(page.getByRole('group', { name: 'タグの候補' })).toHaveCount(0)
+  expectNoPageErrors(done)
+})

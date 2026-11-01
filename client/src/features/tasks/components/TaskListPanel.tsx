@@ -158,7 +158,7 @@ export function TaskListPanel({ companyId, rootPath, list, aiTurns, renderCard, 
             ))}
           </span>
         </div>
-        <QuickAdd now={now} tagsInUse={tags.map(t => t.tag)} onAdd={add} />
+        <QuickAdd companyId={companyId} now={now} tagsInUse={tags.map(t => t.tag)} onAdd={add} />
         {tags.length > 0 && (
           <div role="group" aria-label="タグで絞る" className="flex flex-shrink-0 flex-wrap items-center gap-1 px-3 py-1.5 text-[11px]">
             <button type="button" aria-pressed={shownTag === null} onClick={() => setTag(null)} className={`rounded-full px-2 py-px ${shownTag === null ? 'bg-gray-800 text-white dark:bg-zinc-100 dark:text-zinc-900' : 'text-gray-500 hover:bg-gray-100 dark:hover:bg-zinc-800'}`}>すべて</button>

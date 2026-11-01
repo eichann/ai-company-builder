@@ -332,6 +332,15 @@ const API_KEY: AgentDescriptor = {
   },
 }
 
+/**
+ * The app's own small text jobs sent through the company's key (the key broker's relay, the key
+ * the admin chose for the service), whatever agent the member uses: text only, never tools.
+ */
+export const COMPANY_KEY_MODELS = {
+  /** Tag suggestions for a task (client/shared/tag-suggest.ts). */
+  tagSuggest: 'claude-haiku-5-5',
+} as const
+
 export const AGENTS: { readonly [K in AgentId]: K extends 'claude-code' ? AgentDescriptor<ClaudeModelId> : AgentDescriptor } = {
   'claude-code': CLAUDE_CODE,
   codex: CODEX,

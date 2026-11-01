@@ -13,6 +13,7 @@ import { RecordSourcePanel } from './RecordSourcePanel'
 import { ShareToDepartment, type ShareFolder } from './ShareToDepartment'
 import { TaskActions } from './TaskActions'
 import { TaskFiles } from './TaskFiles'
+import { TagSuggestions } from './TagSuggestions'
 
 interface Props {
   companyId: string
@@ -27,6 +28,8 @@ interface Props {
   shareFolders?: ShareFolder[]
   /** 「相談する」: the member's latest consultation about this task, else a new one (AppShell: `chat.consultAbout`). */
   onConsult?: (record: { id: string; title: string }) => void
+  /** Tags in use in the member's list (most used first), for 「タグの候補」. */
+  tagsInUse?: string[]
   /** The member changed something (the list reads again). */
   onChanged?: () => void
 }
@@ -41,7 +44,7 @@ function when(at: string): string {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onConsult, onChanged }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, shareFolders = [], onConsult, tagsInUse = [], onChanged }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -75,7 +78,12 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, render
     const r = await shareTaskToFolder(companyId, recordId, folder, version)
     return r.success ? null : r.error
   })
-  return <CardBody card={result.card} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
+  const card = result.card
+  const tagSuggestions = card.canSetTags
+    ? <TagSuggestions companyId={companyId} title={card.record.title} tags={card.tags} tagsInUse={tagsInUse} busy={busy}
+      onSet={tags => runSteps(card)([{ action: 'set_tags', args: { tags } }])} />
+    : null
+  return <CardBody card={result.card} tagSuggestions={tagSuggestions} rootPath={rootPath} busy={busy} shareFolders={result.card.record.personal ? shareFolders : []} onShare={share} onConsult={onConsult} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -96,9 +104,10 @@ interface BodyProps {
   shareFolders: ShareFolder[]
   onShare: (folder: string) => Promise<string | null>
   onConsult?: (record: { id: string; title: string }) => void
+  tagSuggestions: ReactNode
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile, shareFolders, onShare, onConsult, tagSuggestions }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -145,6 +154,7 @@ function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, o
               <Clock size={13} />{dueSoon === 'overdue' ? '期限切れ ' : '期限 '}{dueText(card.due, now)}
             </p>
           )}
+          {tagSuggestions}
           {card.purpose && <p className="whitespace-pre-wrap text-[13px] text-gray-600 dark:text-zinc-300">{card.purpose}</p>}
           <ShareToDepartment folders={shareFolders} busy={busy} onShare={onShare} />
           {card.okLine && <p className="flex items-center gap-1.5 rounded-md bg-emerald-500/10 px-2 py-1 text-[12.5px] text-emerald-800 dark:text-emerald-300"><CheckCircle size={14} weight="fill" />{card.okLine}</p>}
