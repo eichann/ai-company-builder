@@ -1,0 +1,72 @@
+# Dependency update PRs (deployment.md "Workspace and dependencies").
+#
+# One pnpm workspace (pnpm-workspace.yaml): the root lockfile is updated for each package
+# directory. Minor and patch updates arrive as one grouped PR per directory each week; a major
+# update gets its own PR so it can be read on its own. PRs target `main`.
+#
+# Never updated here (bumped by hand, together with what they are tied to):
+# - @anthropic-ai/claude-agent-sdk: pinned by root `pnpm.overrides` to the app's version and
+#   bumped together with client/package.json (chat-and-agents.md).
+# - fd-slicer: patched (`pnpm-workspace.yaml` patchedDependencies → patches/fd-slicer@1.1.0.patch).
+# - Electron / electron-builder majors: a new Electron line changes Chromium, Node and the
+#   packaging; done as its own topic (e.g. #377).
+# - React majors in the client: the client is on React 18 on purpose, the admin on React 19.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directories:
+      - "/"
+      - "/server"
+      - "/client"
+      - "/admin"
+      - "/shared"
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 5
+    versioning-strategy: increase-if-necessary
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    ignore:
+      - dependency-name: "@anthropic-ai/claude-agent-sdk"
+      - dependency-name: "@anthropic-ai/claude-agent-sdk-*"
+      - dependency-name: fd-slicer
+      - dependency-name: electron
+        update-types: ["version-update:semver-major"]
+      - dependency-name: electron-builder
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react
+        update-types: ["version-update:semver-major"]
+      - dependency-name: react-dom
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/react-dom"
+        update-types: ["version-update:semver-major"]
+
+  - package-ecosystem: github-actions
+    directory: "/"
+    target-branch: main
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Asia/Tokyo
+    open-pull-requests-limit: 3
+    commit-message:
+      prefix: "ci"
+    labels:
+      - dependencies
+    groups:
+      actions:
+        patterns: ["*"]
