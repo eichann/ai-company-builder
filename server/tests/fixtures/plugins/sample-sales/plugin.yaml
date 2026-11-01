@@ -1,0 +1,12 @@
+# A business plugin for the public repository's tests (owner decision
+# 2026-11-01: a connector only connects, a business plugin owns the types).
+# The sample connectors (sample-hub, sample-crm) map to it with
+# `maps_to: sample-sales@0.1.0`. The real one, 「法人営業」
+# (corporate-sales), lives in the private acb-plugins repository.
+id: sample-sales
+label: 見本の営業
+version: 0.1.0
+kind: official
+contract: 1
+description: 案件と顧客の型
+types: [deal, customer]

@@ -75,7 +75,10 @@ export function createPluginImportService(deps: PluginImportDeps) {
   const { companyData, clock, plugins, connector, writer } = deps
   const running = new Set<string>()
 
-  /** Store the package's types (source plugin) unless a version at least as new is there. */
+  /**
+   * Store the types the connector maps to — its business plugin's (`plugin.types`; a connector
+   * owns none, plugins.md "Two roles") — with source plugin, unless a version at least as new is there.
+   */
   function ensureTypes(companyId: string, plugin: ActivePlugin, at: string) {
     const records = companyData.forCompany(companyId).records
     const stored = new Map<string, number>()

@@ -12,6 +12,12 @@
  *
  * Every company row is reached through the company handle; the shelf is
  * shared and read only, filtered by `available_to` for the asking company.
+ *
+ * Business plugins (owner decision 2026-11-01) are installed and switched
+ * here too: they own types and connect to nothing (no key, mapping, read
+ * scope or relay switch). A connector needs the business plugin it maps to
+ * (`maps_to`, that exact version) installed to be installed, and running to
+ * run (`business-missing` / `business-stopped`); one type name has one owner.
  */
 import { findPrivateScope } from '../../shared/core/permissions'
 import {
@@ -35,6 +41,11 @@ export const AUTO_ACKNOWLEDGEMENT = 'この欄の変更をきっかけに動く 
 export const AUTO_CREATE_PREFIX = 'create:'
 
 export const PLUGIN_NOT_FOUND = { error: 'このプラグインはありません', code: 'PLUGIN_NOT_FOUND' } as const
+export const NOT_A_CONNECTOR = { error: '業務のプラグインには、つなぎ先の設定（鍵・読み替え表・読める人・取り込み）はありません', code: 'NOT_A_CONNECTOR' } as const
+
+/** What a connector needs first (owner decision 2026-11-01): its business plugin, that version, installed. */
+export const businessRequired = (label: string, version: string) =>
+  `先に「${label}」（${version}）を入れてオンにしてください（このつなぎ先は「${label}」の記録を読み書きします）`
 
 /** What the connector needs to know about a key (never its value). */
 export interface PluginKeyInfo {
@@ -67,6 +78,7 @@ export interface ActivePlugin {
   pluginId: string
   version: string
   manifest: PluginManifest
+  /** The types it maps to: those of the business plugin it names in `maps_to` (a connector owns none). */
   types: Record<string, TypeDefinition>
   mapping: PluginMapping
   mappingVersion: number
@@ -84,11 +96,12 @@ const ackList = (v: unknown): string[] | null =>
 const isObject = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 const MAPPING_MAX = 128 * 1024
 
-function packageView(p: ShelfPackage, stopped: boolean): PluginPackageView {
+function packageView(p: ShelfPackage, stopped: boolean, businessLabel: string | null): PluginPackageView {
   const m = p.pkg.manifest
   return {
-    id: m.id, label: m.label, version: m.version, kind: m.kind, description: m.description, service: m.service, host: m.baseUrl.host,
+    id: m.id, label: m.label, version: m.version, kind: m.kind, role: m.role, description: m.description, service: m.service, host: m.baseUrl.host,
     scopes: m.scopes, operationScopes: m.operationScopes, types: m.types, fingerprint: p.fingerprint, stopped,
+    mapsTo: m.mapsTo ? { ...m.mapsTo, label: businessLabel ?? m.mapsTo.id } : null,
     operations: Object.entries(m.operations).map(([name, op]) => ({ name, label: op.label, kind: op.kind, reaches: op.reaches, undo: op.undo })),
   }
 }
@@ -162,16 +175,41 @@ export function createPluginService(deps: PluginServiceDeps) {
     return autoFields(manifest, mapping).filter(f => acks.get(f.field) !== f.property)
   }
 
-  type Evaluated = { problem: PluginProblem; active: null } | { problem: null; active: ActivePlugin }
+  /** A business plugin that runs has nothing to connect: `active` is null (owner decision 2026-11-01). */
+  type Evaluated = { problem: PluginProblem; active: null } | { problem: null; active: ActivePlugin | null }
+
+  /** The switches every plugin has: the operator's stop, the company's switch, the shelf, the fingerprint. */
+  async function packageProblem(companyId: string, install: PluginInstallRow, collectingFacts: boolean): Promise<{ problem: PluginProblem; found: null } | { problem: null; found: ShelfPackage }> {
+    const found = shelf.find(companyId, install.pluginId, install.version)
+    // Collecting the facts of a write already sent (reconciling) goes on while stopped (review §6.5).
+    if (!collectingFacts && await shelf.isStopped(install.pluginId, install.version)) return { problem: 'stopped', found: null }
+    if (!collectingFacts && !install.enabled) return { problem: 'off', found: null }
+    if (!found) return { problem: 'not-on-shelf', found: null }
+    if (found.fingerprint !== install.fingerprint) return { problem: 'package-changed', found: null }
+    return { problem: null, found }
+  }
+
+  /**
+   * A connector runs only while the business plugin it maps to — that exact
+   * version — is installed and runs (its own switches; stopping it stops the
+   * connector's operations on its types from the next call).
+   */
+  async function businessProblem(companyId: string, manifest: PluginManifest, collectingFacts: boolean): Promise<PluginProblem | null> {
+    if (!manifest.mapsTo) return 'business-missing'
+    const business = companyData.forCompany(companyId).plugins.install(manifest.mapsTo.id)
+    if (!business || business.version !== manifest.mapsTo.version) return 'business-missing'
+    const p = await packageProblem(companyId, business, collectingFacts)
+    return p.problem === null && p.found.pkg.manifest.role === 'business' ? null : 'business-stopped'
+  }
 
   /** Every kill switch and missing piece, in a fixed order (the operator's stop first). */
   async function evaluate(companyId: string, install: PluginInstallRow, collectingFacts = false): Promise<Evaluated> {
-    const found = shelf.find(companyId, install.pluginId, install.version)
-    // Collecting the facts of a write already sent (reconciling) goes on while stopped (review §6.5).
-    if (!collectingFacts && await shelf.isStopped(install.pluginId, install.version)) return { problem: 'stopped', active: null }
-    if (!collectingFacts && !install.enabled) return { problem: 'off', active: null }
-    if (!found) return { problem: 'not-on-shelf', active: null }
-    if (found.fingerprint !== install.fingerprint) return { problem: 'package-changed', active: null }
+    const base = await packageProblem(companyId, install, collectingFacts)
+    if (base.problem) return { problem: base.problem, active: null }
+    const found = base.found
+    if (found.pkg.manifest.role === 'business') return { problem: null, active: null }
+    const bp = await businessProblem(companyId, found.pkg.manifest, collectingFacts)
+    if (bp) return { problem: bp, active: null }
     const kp = keyProblem(companyId, found.pkg.manifest, install.keyId)
     if (kp) return { problem: kp, active: null }
     const row = install.mappingVersion > 0 ? companyData.forCompany(companyId).plugins.mapping(install.pluginId, install.mappingVersion) : null
@@ -191,7 +229,9 @@ export function createPluginService(deps: PluginServiceDeps) {
   async function listItem(companyId: string, pluginId: string, install: PluginInstallRow | null): Promise<PluginListItem> {
     const versions: PluginPackageView[] = []
     for (const p of shelf.packagesFor(companyId).filter(p => p.pkg.manifest.id === pluginId)) {
-      versions.push(packageView(p, await shelf.isStopped(pluginId, p.pkg.manifest.version)))
+      const to = p.pkg.manifest.mapsTo
+      const businessLabel = to ? shelf.find(companyId, to.id, to.version)?.pkg.manifest.label ?? null : null
+      versions.push(packageView(p, await shelf.isStopped(pluginId, p.pkg.manifest.version), businessLabel))
     }
     let installView: PluginInstallView | null = null
     if (install) {
@@ -270,6 +310,30 @@ export function createPluginService(deps: PluginServiceDeps) {
   }
 
   const notFound = () => refuse('not-found', PLUGIN_NOT_FOUND.error, { code: PLUGIN_NOT_FOUND.code })
+  const notAConnector = () => refuse('conflict', NOT_A_CONNECTOR.error, { code: NOT_A_CONNECTOR.code })
+  /** The installed version is a business plugin (it has no key, mapping or read scope). */
+  const isBusinessInstall = (companyId: string, install: PluginInstallRow) =>
+    shelf.find(companyId, install.pluginId, install.version)?.pkg.manifest.role === 'business'
+
+  /**
+   * Installing or changing a business plugin: each type name has one owner in
+   * a company — a type another installed business plugin owns is refused.
+   */
+  function typeOwnerConflict(companyId: string, pluginId: string, pkg: PluginPackage): string | null {
+    for (const other of companyData.forCompany(companyId).plugins.installs()) {
+      if (other.pluginId === pluginId) continue
+      const theirs = shelf.find(companyId, other.pluginId, other.version)?.pkg.manifest
+      const taken = theirs?.role === 'business' ? pkg.manifest.types.find(t => theirs.types.includes(t)) : undefined
+      if (taken && theirs) return `型「${taken}」は、すでに入っている「${theirs.label}」の型です。同じ名前の型を2つのプラグインが持つことはできません`
+    }
+    return null
+  }
+
+  /** Enabled connectors of the company that map to business plugin `businessId` (their install and package). */
+  function dependentsOn(companyId: string, businessId: string): PluginInstallRow[] {
+    return companyData.forCompany(companyId).plugins.installs().filter(i =>
+      i.enabled && shelf.find(companyId, i.pluginId, i.version)?.pkg.manifest.mapsTo?.id === businessId)
+  }
 
   return {
     /** GET /plugins — the shelf as this company sees it (available_to applied) and its installs. */
@@ -316,6 +380,24 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (before && before.service !== found.pkg.manifest.service) {
         return refuse('conflict', 'この版は別のサービスにつなぐため、選べません', { code: 'SERVICE_CHANGED' })
       }
+      const manifest = found.pkg.manifest
+      if (manifest.mapsTo) {
+        // A connector needs its business plugin, that exact version, installed first (owner decision 2026-11-01).
+        const business = repo.install(manifest.mapsTo.id)
+        if (!business || business.version !== manifest.mapsTo.version) {
+          const label = shelf.find(member.companyId, manifest.mapsTo.id, manifest.mapsTo.version)?.pkg.manifest.label ?? manifest.mapsTo.id
+          return refuse('conflict', businessRequired(label, manifest.mapsTo.version), { code: 'BUSINESS_PLUGIN_REQUIRED', plugin: manifest.mapsTo.id, version: manifest.mapsTo.version })
+        }
+      } else {
+        const conflict = typeOwnerConflict(member.companyId, pluginId, found.pkg)
+        if (conflict) return refuse('conflict', conflict, { code: 'TYPE_OWNED_ELSEWHERE' })
+        // Another version would stop a connector that is on (it maps to one exact version).
+        const stopped = before && before.version !== body.version ? dependentsOn(member.companyId, pluginId) : []
+        if (stopped.length > 0) {
+          return refuse('conflict', 'この版にすると、オンになっているつなぎ先が止まるため、変えていません（先にそのつなぎ先をオフにしてください）',
+            { code: 'PLUGIN_WOULD_STOP', problem: 'business-missing', dependents: stopped.map(i => i.pluginId) })
+        }
+      }
       const row: PluginInstallRow = {
         pluginId, version: body.version, fingerprint: found.fingerprint, service: found.pkg.manifest.service,
         connectionId: before?.connectionId ?? deps.ids.newId(), accountId: before?.accountId ?? null,
@@ -353,10 +435,27 @@ export function createPluginService(deps: PluginServiceDeps) {
       if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
       if (install.enabled === body.enabled) return ok(await detail(member.companyId, pluginId))
       const at = clock.now()
+      if (isBusinessInstall(member.companyId, install)) {
+        // A business plugin owns types and connects to nothing: no key, read scope or relay switch.
+        // Turning it off stops the connectors mapping to it (their `active()` from the next call).
+        const row = { ...install, enabled: body.enabled, updatedAt: at, updatedBy: member.userId }
+        if (body.enabled) {
+          const evaluated = await evaluate(member.companyId, row)
+          if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+        }
+        repo.saveInstall(row, history(pluginId, body.enabled ? 'enable' : 'disable', member.userId, at, body.enabled ? { version: row.version } : {}))
+        return ok(await detail(member.companyId, pluginId))
+      }
       const row = { ...install, enabled: body.enabled, managedSince: install.managedSince ?? (body.enabled ? at : null), updatedAt: at, updatedBy: member.userId }
       if (body.enabled) {
         const evaluated = await evaluate(member.companyId, row)
-        if (evaluated.problem) return refuse('conflict', 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+        if (evaluated.problem) {
+          const business = evaluated.problem === 'business-missing' || evaluated.problem === 'business-stopped'
+          const to = business ? shelf.find(member.companyId, pluginId, install.version)?.pkg.manifest.mapsTo : null
+          const label = to ? shelf.find(member.companyId, to.id, to.version)?.pkg.manifest.label ?? to.id : null
+          return refuse('conflict', to && label ? businessRequired(label, to.version) : 'まだオンにできません', { code: 'PLUGIN_NOT_READY', problem: evaluated.problem })
+        }
+        if (!evaluated.active) return notAConnector()
         // Who may read through the relay must be decided: a forgotten setting never opens it to everyone.
         if (repo.readScope(pluginId, install.connectionId).length === 0) {
           return refuse('conflict', '先に「中継で読める人」（部署かメンバー）を決めてください', { code: 'READ_SCOPE_REQUIRED' })
@@ -387,6 +486,7 @@ export function createPluginService(deps: PluginServiceDeps) {
       const repo = handle.plugins
       const install = repo.install(pluginId)
       if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
+      if (isBusinessInstall(member.companyId, install)) return notAConnector()
       const known_ = new Set(handle.departments.list().map(d => d.id))
       if (departmentIds.some(id => !known_.has(id))) return refuse('bad-request', 'この会社にない部署が含まれています', { code: 'READ_SCOPE_INVALID' })
       if (userIds.some(id => !deps.isMember(member.companyId, id))) return refuse('bad-request', 'この会社のメンバーではない人が含まれています', { code: 'READ_SCOPE_INVALID' })
@@ -483,6 +583,10 @@ export function createPluginService(deps: PluginServiceDeps) {
       const found = shelf.find(companyId, install.pluginId, install.version)
       if (!found) return { ok: false, problem: 'not-on-shelf' }
       if (found.fingerprint !== install.fingerprint) return { ok: false, problem: 'package-changed' }
+      if (found.pkg.manifest.role === 'business') return { ok: false, problem: 'not-a-connector' }
+      // Checking reads only the outside property list: the business plugin must be there (its types), not on.
+      const business = found.pkg.manifest.mapsTo ? repo.install(found.pkg.manifest.mapsTo.id) : null
+      if (!business || business.version !== found.pkg.manifest.mapsTo?.version) return { ok: false, problem: 'business-missing' }
       const kp = keyProblem(companyId, found.pkg.manifest, install.keyId)
       if (kp) return { ok: false, problem: kp }
       const source = text ?? (install.mappingVersion > 0 ? repo.mapping(install.pluginId, install.mappingVersion)?.text ?? null : null)
@@ -580,7 +684,8 @@ export function createPluginService(deps: PluginServiceDeps) {
       const install = companyData.forCompany(companyId).plugins.install(pluginId)
       if (!install) return { ok: false, problem: 'off' }
       const evaluated = await evaluate(companyId, install, options.collectingFacts === true)
-      return evaluated.problem ? { ok: false, problem: evaluated.problem } : { ok: true, plugin: evaluated.active }
+      if (evaluated.problem) return { ok: false, problem: evaluated.problem }
+      return evaluated.active ? { ok: true, plugin: evaluated.active } : { ok: false, problem: 'not-a-connector' }
     },
   }
 
@@ -590,6 +695,7 @@ export function createPluginService(deps: PluginServiceDeps) {
     if (!install) return refuse('conflict', '先にプラグインを入れてください（版と鍵を選ぶ）', { code: 'NOT_INSTALLED' })
     const found = shelf.find(member.companyId, pluginId, install.version)
     if (!found) return refuse('conflict', '入れた版が棚にありません。版を選び直してください', { code: 'VERSION_NOT_ON_SHELF' })
+    if (found.pkg.manifest.role === 'business') return refuse('conflict', NOT_A_CONNECTOR.error, { code: NOT_A_CONNECTOR.code })
     const parsed = parseForCompany(member.companyId, found.pkg, text)
     if (!parsed.ok) return refuse('bad-request', '読み替え表を保存できません', { code: 'MAPPING_INVALID', errors: parsed.errors })
     // A field that would write automatically needs the acknowledgement, recorded with who and when.

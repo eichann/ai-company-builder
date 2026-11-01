@@ -51,13 +51,18 @@ policy:
 `
 
 const pkg = {
-  id: 'hubspot', label: 'HubSpot', version: '0.1.0', kind: 'official' as const, description: null, service: 'hubspot', host: 'api.hubapi.com',
-  scopes: [], operationScopes: {}, types: ['deal'], operations: [], fingerprint: 'f', stopped: false,
+  id: 'hubspot', label: 'HubSpot', version: '0.2.0', kind: 'official' as const, role: 'connector' as const, description: null, service: 'hubspot', host: 'api.hubapi.com',
+  scopes: [], operationScopes: {}, types: [], operations: [], fingerprint: 'f', stopped: false,
+  mapsTo: { id: 'corporate-sales', version: '0.1.0', label: '法人営業' },
+}
+/** The business the connector maps to (owner decision 2026-11-01): it owns the records' shape and connects to nothing. */
+const salesPkg = {
+  ...pkg, id: 'corporate-sales', label: '法人営業', version: '0.1.0', role: 'business' as const, service: '', host: '', types: ['deal', 'customer'], mapsTo: null,
 }
 const item: PluginListItem = {
   id: 'hubspot', versions: [pkg],
   install: {
-    version: '0.1.0', enabled: false, keyId: 'k1', mappingVersion: 1, connectionId: 'c1', accountId: null, managedSince: null,
+    version: '0.2.0', enabled: false, keyId: 'k1', mappingVersion: 1, connectionId: 'c1', accountId: null, managedSince: null,
     updatedAt: '2026-10-31T00:00:00.000Z', updatedBy: 'u_owner', problem: 'off',
   },
 }
@@ -264,6 +269,52 @@ describe('つなぎ先', () => {
     await userEvent.click(within(section).getByRole('button', { name: '読める人を保存' }))
     await waitFor(() => expect(saves).toHaveLength(1))
     expect(saves[0].body).toEqual({ departmentIds: ['d_sales'], userIds: ['u_member'] })
+  })
+})
+
+describe('つなぎ先 and the business it needs (owner decision 2026-11-01)', () => {
+  const salesItem: PluginListItem = {
+    id: 'corporate-sales', versions: [salesPkg],
+    install: { ...item.install!, version: '0.1.0', keyId: null, enabled: true, problem: null, mappingVersion: 0 },
+  }
+  const salesDetail: PluginDetail = { ...detail, plugin: salesItem, mapping: null, mappingVersions: [], policies: [], labels: {}, history: [] }
+
+  it('a connector says plainly which business must be used and on first', async () => {
+    stubApi(ownerCapabilities)
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByText(/先に「法人営業」（0\.1\.0）を使い始めて、オンにしてください/)).toBeInTheDocument()
+    expect(screen.getByText(/「法人営業」を止めると、このつなぎ先の取り込みと書き戻しも止まります/)).toBeInTheDocument()
+  })
+
+  it('installing the connector before the business: the server names what is needed, nothing else is said', async () => {
+    const fresh: PluginListItem = { ...item, install: null }
+    const sentence = '先に「法人営業」（0.1.0）を入れてオンにしてください（このつなぎ先は「法人営業」の記録を読み書きします）'
+    stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins`]: { body: ok({ plugins: [fresh] }) },
+      [`GET ${base}/plugins/hubspot`]: { body: ok({ ...detail, plugin: fresh, mapping: null }) },
+      [`PUT ${base}/plugins/hubspot`]: { status: 409, body: { error: sentence, code: 'BUSINESS_PLUGIN_REQUIRED', plugin: 'corporate-sales', version: '0.1.0' } },
+    })
+    const error = vi.spyOn(toast, 'error')
+    renderInCompany(<IntegrationsPage />)
+    await userEvent.click(await screen.findByRole('button', { name: '使い始める' }))
+    await waitFor(() => expect(error).toHaveBeenCalledWith('保存できませんでした', { description: sentence }))
+  })
+
+  it('the business shows only its version and switch: no key, readers, mapping or import; no jargon', async () => {
+    const calls = stubApi(ownerCapabilities, {
+      [`GET ${base}/plugins`]: { body: ok({ plugins: [salesItem] }) },
+      [`GET ${base}/plugins/corporate-sales`]: { body: ok(salesDetail) },
+    })
+    renderInCompany(<IntegrationsPage />)
+    expect(await screen.findByText('案件や顧客などの記録を扱う業務です（外のサービスにはつなぎません）')).toBeInTheDocument()
+    expect(screen.getByRole('combobox', { name: '版' })).toBeInTheDocument()
+    expect(screen.queryByRole('combobox', { name: '鍵' })).toBeNull()
+    expect(screen.queryByRole('button', { name: '取り込む' })).toBeNull()
+    expect(screen.queryByRole('button', { name: 'HubSpot に聞いて確かめる' })).toBeNull()
+    expect(screen.getByText(/これを使うつなぎ先（HubSpot など）の取り込みと書き戻しも、次の1回から止まります/)).toBeInTheDocument()
+    const text = document.body.textContent ?? ''
+    for (const word of ['プラグイン', 'オントロジー', '型']) expect(text).not.toContain(word)
+    expect(calls.some((c) => c.url.includes('/read-scope') || c.url.includes('/mapping'))).toBe(false)
   })
 })
 

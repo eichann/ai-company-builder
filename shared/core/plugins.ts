@@ -1,7 +1,17 @@
 /**
  * Plugins that connect ACB to an outside system (milestone 3, 「つなぎ先の
- * プラグイン」): one copy of their shape for the server (the shelf, the
- * connector), the admin console (the mapping editor) and, later, the app.
+ * プラグイン」) and the business plugins whose types they map to: one copy of
+ * their shape for the server (the shelf, the connector), the admin console
+ * (the mapping editor) and, later, the app.
+ *
+ * Two roles (owner decision 2026-11-01): **a connector only connects, a
+ * business plugin owns the types** (and, later, the flows). A business plugin
+ * (「法人営業」, `corporate-sales`) declares `types` and nothing that talks to
+ * the outside; a connector (HubSpot) has a `service` and `base_url`, declares
+ * no types and names the one business plugin version it maps to (`maps_to:
+ * corporate-sales@0.1.0`): its objects' `record_type`s and its mapping are
+ * that plugin's types. Business plugins are never shared or inherited between
+ * slightly different work: copying a type into another business plugin is fine.
  *
  * A plugin is data only (owner decision §6-1): a **declaration**
  * (`plugin.yaml`: where it may send, the fixed paths, the typed operations, the
@@ -26,6 +36,7 @@
  *
  * YAML is the strict subset of `yaml-lite.ts` (no anchors, aliases, tags…).
  */
+import { CORE_TYPE_FILES } from './core-types'
 import { isValidBrokerServiceName, parseRelayBaseUrl, builtinBrokerService } from './key-broker'
 import { normalizeRepoPath } from './paths'
 import { ONTOLOGY_NAME_RE, parseTypeFile, type FieldDef, type NoteRule, type TypeDefinition } from './record-types'
@@ -64,6 +75,12 @@ export type CreateContentSlot = typeof CREATE_CONTENT_SLOTS[number]
 export const PLUGIN_CONTRACT = 1
 
 export type PluginKind = 'official' | 'company'
+/**
+ * A connector talks to one outside system and owns no type; a business plugin
+ * owns types and talks to nothing. Decided by the declaration: one with a
+ * `service` is a connector.
+ */
+export type PluginRole = 'connector' | 'business'
 /** Per-field write policy (0.21): write at once (undoable) / only after a person approves / never. */
 export type FieldPolicy = 'auto' | 'prior' | 'off'
 export const FIELD_POLICIES: readonly FieldPolicy[] = ['auto', 'prior', 'off']
@@ -153,15 +170,19 @@ export interface PluginManifest {
   label: string
   version: string
   kind: PluginKind
+  role: PluginRole
   contract: number
   description: string | null
-  /** The key broker's service whose key it uses (it never sees the value). */
+  /** The key broker's service whose key it uses (it never sees the value). '' for a business plugin. */
   service: string
-  /** The one destination: https, exact host. */
+  /** The one destination: https, exact host. Empty for a business plugin. */
   baseUrl: { host: string; basePath: string }
   scopes: string[]
   operationScopes: Record<string, string[]>
+  /** A business plugin: the types it owns. A connector: none (its record types are `mapsTo`'s). */
   types: string[]
+  /** A connector: the one business plugin version whose types it maps to (`maps_to: <id>@<version>`). */
+  mapsTo: { id: string; version: string } | null
   objects: Record<string, PluginObject>
   operations: Record<string, PluginOperation>
   fieldPolicyDefaults: Record<string, FieldPolicy>
@@ -254,7 +275,14 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   if (!isYamlMap(raw)) return { ok: false, errors: ['宣言は「項目名: 値」の形で書いてください'] }
   const errors: string[] = []
   const err = (m: string) => { if (errors.length < 50) errors.push(m) }
-  unknownKeys('', raw, ['id', 'label', 'version', 'kind', 'contract', 'description', 'service', 'base_url', 'scopes', 'operation_scopes', 'types', 'objects', 'operations', 'field_policy_defaults', 'available_to', 'account_info'], err)
+  // One with a service connects; one without owns types (owner decision 2026-11-01).
+  const role: PluginRole = raw.service === undefined ? 'business' : 'connector'
+  unknownKeys('', raw, ['id', 'label', 'version', 'kind', 'contract', 'description', 'available_to', 'types', ...CONNECTOR_ONLY_KEYS], err)
+  if (role === 'business') {
+    for (const k of CONNECTOR_ONLY_KEYS) {
+      if (raw[k] !== undefined) err(`「${k}」はつなぎ先のプラグイン（service のあるもの）だけに書けます。業務のプラグインが持つのは型（types）だけです`)
+    }
+  } else if (raw.types !== undefined) err('つなぎ先のプラグインは型を持ちません。型は maps_to に書いた業務のプラグインが持ちます')
 
   const id = raw.id
   if (typeof id !== 'string' || !PLUGIN_ID_RE.test(id) || id.length > 40) err('id は英小文字・数字・- で書いてください（40文字まで）')
@@ -274,24 +302,33 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
   }
   if (kind === 'company' && availableTo === null) err('kind: company の包みには available_to（使える会社）が要ります')
 
-  if (!isValidBrokerServiceName(raw.service)) err('service に「API キー」のサービス名を書いてください')
-  const base = parseRelayBaseUrl(raw.base_url)
   let baseUrl = { host: '', basePath: '' }
-  if ('error' in base) err(`base_url: ${base.error}`)
-  else {
-    baseUrl = base.value
-    const builtin = typeof raw.service === 'string' ? builtinBrokerService(raw.service) : undefined
-    if (builtin && !builtin.defaultHosts.includes(baseUrl.host)) err(`base_url の送り先は ${builtin.defaultHosts.join(' / ')} です（サービス ${builtin.service} の送り先）`)
+  let mapsTo: { id: string; version: string } | null = null
+  if (role === 'connector') {
+    if (!isValidBrokerServiceName(raw.service)) err('service に「API キー」のサービス名を書いてください')
+    const base = parseRelayBaseUrl(raw.base_url)
+    if ('error' in base) err(`base_url: ${base.error}`)
+    else {
+      baseUrl = base.value
+      const builtin = typeof raw.service === 'string' ? builtinBrokerService(raw.service) : undefined
+      if (builtin && !builtin.defaultHosts.includes(baseUrl.host)) err(`base_url の送り先は ${builtin.defaultHosts.join(' / ')} です（サービス ${builtin.service} の送り先）`)
+    }
+    mapsTo = parseMapsTo(raw.maps_to)
+    if (!mapsTo) err('maps_to に、読み替える型を持つ業務のプラグインを「id@版」で書いてください（例：corporate-sales@0.1.0）')
+    else if (mapsTo.id === id) err('maps_to に自分自身は書けません')
   }
 
   const scopes = strList(raw.scopes)
   if (!scopes || !scopes.every(s => SCOPE_RE.test(s))) err('scopes は権限の名前の並びで書いてください')
 
-  const types = strList(raw.types)
+  const types = role === 'business' ? strList(raw.types) : []
   if (!types || !types.every(t => ONTOLOGY_NAME_RE.test(t))) err('types は型の名前の並びで書いてください')
+  else if (role === 'business' && types.length === 0) err('業務のプラグインには types（持つ型の名前）が要ります')
   else for (const t of types) {
     const problem = typeNameLayerProblem(t, typeof id === 'string' ? id : undefined)
     if (problem) err(problem)
+    // Exactly one owner per type name: the core's types are the core's.
+    else if (Object.prototype.hasOwnProperty.call(CORE_TYPE_FILES, t)) err(`型「${t}」は本体の型です。業務のプラグインは同じ名前の型を持てません`)
   }
 
   const objects: Record<string, PluginObject> = {}
@@ -303,7 +340,8 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
     unknownKeys(`対象「${oname}」: `, o, ['record_type', 'auto_properties', ...Object.keys(PLUGIN_ENDPOINTS)], err)
     let recordType: string | null = null
     if (o.record_type !== undefined && o.record_type !== null) {
-      if (typeof o.record_type !== 'string' || !types?.includes(o.record_type)) err(`対象「${oname}」の record_type は types にある型の名前です`)
+      // Which types exist is the business plugin's (checked against it in validatePluginPackage).
+      if (typeof o.record_type !== 'string' || !ONTOLOGY_NAME_RE.test(o.record_type)) err(`対象「${oname}」の record_type は型の名前です`)
       else recordType = o.record_type
     }
     const autoProperties = strList(o.auto_properties)
@@ -467,13 +505,15 @@ export function parsePluginManifest(text: string): PluginParsed<PluginManifest> 
       label: raw.label as string,
       version: raw.version as string,
       kind: kind as PluginKind,
+      role,
       contract: PLUGIN_CONTRACT,
       description: typeof raw.description === 'string' ? raw.description : null,
-      service: raw.service as string,
+      service: role === 'connector' ? raw.service as string : '',
       baseUrl,
       scopes: scopes ?? [],
       operationScopes,
       types: types ?? [],
+      mapsTo,
       objects,
       operations,
       fieldPolicyDefaults,
@@ -490,6 +530,21 @@ function externalFieldWriters(manifest: Pick<PluginManifest, 'operations'>, obje
     .map(([n]) => n)
 }
 
+/** Declaration keys only a connector has (a business plugin owns types and talks to nothing). */
+const CONNECTOR_ONLY_KEYS: readonly string[] = ['service', 'base_url', 'maps_to', 'scopes', 'operation_scopes', 'objects', 'operations', 'field_policy_defaults', 'account_info']
+
+/** `maps_to: <id>@<version>` — one exact version (a new business version needs a new connector version). */
+function parseMapsTo(v: YamlValue | undefined): { id: string; version: string } | null {
+  if (typeof v !== 'string') return null
+  const at = v.lastIndexOf('@')
+  const id = v.slice(0, at)
+  const version = v.slice(at + 1)
+  return at > 0 && PLUGIN_ID_RE.test(id) && id.length <= 40 && PLUGIN_VERSION_RE.test(version) ? { id, version } : null
+}
+
+/** `<id>@<version>` of the business plugin a connector maps to (null for a business plugin). */
+export const mapsToName = (m: Pick<PluginManifest, 'mapsTo'>): string | null => m.mapsTo ? `${m.mapsTo.id}@${m.mapsTo.version}` : null
+
 /** Whether the package may be used by `companyId` (§8-4): no list = every company. The shelf filters with it (P4). */
 export function pluginAvailableTo(manifest: Pick<PluginManifest, 'availableTo'>, companyId: string): boolean {
   return manifest.availableTo === null || manifest.availableTo.includes(companyId)
@@ -497,33 +552,56 @@ export function pluginAvailableTo(manifest: Pick<PluginManifest, 'availableTo'>,
 
 export interface PluginPackage {
   manifest: PluginManifest
+  /**
+   * A business plugin: the types it owns. A connector: the types of the
+   * business plugin it maps to (`maps_to`), resolved on the shelf — it owns none.
+   */
   types: Record<string, TypeDefinition>
-  /** The recommended mapping, when the package has one. */
+  /** The recommended mapping, when the package has one (connectors only). */
   mapping: PluginMapping | null
 }
 
 /**
  * A whole package as found on the shelf: the declaration, the type files it
- * lists (exactly those) and an optional recommended mapping. Everything that
- * depends on the types — `record_type`, `who`, the field policy defaults — is
- * checked here.
+ * lists (exactly those; a business plugin only) and an optional recommended
+ * mapping (a connector only). A connector is checked against the business
+ * package it names in `maps_to` (`business`: that exact id and version, found
+ * on the shelf by the caller): its `record_type`s, `who` and field policy
+ * defaults name that package's types.
  */
-export function validatePluginPackage(input: { manifest: string; types: Record<string, string>; mapping?: string | null }): PluginParsed<PluginPackage> {
+export function validatePluginPackage(input: { manifest: string; types: Record<string, string>; mapping?: string | null; business?: PluginPackage | null }): PluginParsed<PluginPackage> {
   const m = parsePluginManifest(input.manifest)
   if (!m.ok) return m
   const manifest = m.value
   const errors: string[] = []
-  const types: Record<string, TypeDefinition> = {}
-  for (const name of Object.keys(input.types)) {
-    if (!manifest.types.includes(name)) errors.push(`types/${name}.md は宣言の types にありません`)
+  if (manifest.role === 'business') {
+    const owned: Record<string, TypeDefinition> = {}
+    for (const name of Object.keys(input.types)) {
+      if (!manifest.types.includes(name)) errors.push(`types/${name}.md は宣言の types にありません`)
+    }
+    for (const name of manifest.types) {
+      const text = input.types[name]
+      if (text === undefined) { errors.push(`型「${name}」のファイル types/${name}.md がありません`); continue }
+      const t = parseTypeFile(name, text)
+      if (!t.ok) errors.push(...t.errors.map(e => `types/${name}.md: ${e}`))
+      else if (t.definition.storage !== 'server') errors.push(`型「${name}」: 取り込んだ記録はファイルを作らないため、storage は server です`)
+      else owned[name] = t.definition
+    }
+    if (input.mapping != null) errors.push('業務のプラグインに読み替え表（mapping.yaml）は置けません。読み替えはつなぎ先のプラグインが持ちます')
+    return errors.length > 0 ? { ok: false, errors } : { ok: true, value: { manifest, types: owned, mapping: null } }
   }
-  for (const name of manifest.types) {
-    const text = input.types[name]
-    if (text === undefined) { errors.push(`型「${name}」のファイル types/${name}.md がありません`); continue }
-    const t = parseTypeFile(name, text)
-    if (!t.ok) errors.push(...t.errors.map(e => `types/${name}.md: ${e}`))
-    else if (t.definition.storage !== 'server') errors.push(`型「${name}」: 取り込んだ記録はファイルを作らないため、storage は server です`)
-    else types[name] = t.definition
+
+  // A connector owns no type: its record types are the business plugin's (owner decision 2026-11-01).
+  if (Object.keys(input.types).length > 0) errors.push('つなぎ先のプラグインは型（types/）を持ちません。型は maps_to に書いた業務のプラグインが持ちます')
+  const business = input.business ?? null
+  let types: Record<string, TypeDefinition> = {}
+  if (!business || business.manifest.role !== 'business' || business.manifest.id !== manifest.mapsTo?.id || business.manifest.version !== manifest.mapsTo?.version) {
+    errors.push(`maps_to の業務のプラグイン ${mapsToName(manifest)} が棚にありません`)
+  } else types = business.types
+  if (errors.length === 0) {
+    for (const [oname, o] of Object.entries(manifest.objects)) {
+      if (o.recordType !== null && !types[o.recordType]) errors.push(`対象「${oname}」の record_type「${o.recordType}」は ${mapsToName(manifest)} の型ではありません`)
+    }
   }
   if (errors.length === 0) {
     for (const [opname, op] of Object.entries(manifest.operations)) {

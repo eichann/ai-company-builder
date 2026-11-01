@@ -15,7 +15,7 @@
  * - the same mechanism takes a second, differently shaped package (§6-11).
  */
 import { describe, expect, it } from 'vitest'
-import { readFileSync, readdirSync } from 'fs'
+import { existsSync, readFileSync, readdirSync } from 'fs'
 import { join } from 'path'
 import {
   acbToExternal, approverFor, checkMappingAgainstProperties, effectiveFieldPolicy, effectiveOperationPolicy, externalToAcb,
@@ -25,14 +25,25 @@ import {
 
 const FIXTURES = join(__dirname, '../fixtures/plugins')
 
-function readPackage(name: string): { manifest: string; types: Record<string, string>; mapping: string } {
+function readPackage(name: string): { manifest: string; types: Record<string, string>; mapping: string | null } {
   const dir = join(FIXTURES, name)
   const types: Record<string, string> = {}
-  for (const f of readdirSync(join(dir, 'types'))) types[f.replace(/\.md$/, '')] = readFileSync(join(dir, 'types', f), 'utf8')
-  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping: readFileSync(join(dir, 'mapping.yaml'), 'utf8') }
+  if (existsSync(join(dir, 'types'))) for (const f of readdirSync(join(dir, 'types'))) types[f.replace(/\.md$/, '')] = readFileSync(join(dir, 'types', f), 'utf8')
+  const mapping = existsSync(join(dir, 'mapping.yaml')) ? readFileSync(join(dir, 'mapping.yaml'), 'utf8') : null
+  return { manifest: readFileSync(join(dir, 'plugin.yaml'), 'utf8'), types, mapping }
 }
 
-const CRM = readPackage('sample-crm')
+/** A validated business package (it owns the types its connectors map to). */
+function businessPackage(name: string): PluginPackage {
+  const r = validatePluginPackage(readPackage(name))
+  if (!r.ok) throw new Error(r.errors.join('\n'))
+  return r.value
+}
+
+const SALES = readPackage('sample-sales')
+/** The CRM connector's files with the business package it maps to (sample-sales@0.1.0). */
+const CRM = { ...readPackage('sample-crm'), mapping: readPackage('sample-crm').mapping as string, business: businessPackage('sample-sales') }
+const deskFiles = () => ({ ...readPackage('sample-desk'), business: businessPackage('sample-support') })
 
 function crm(): PluginPackage {
   const r = validatePluginPackage(CRM)
@@ -54,7 +65,7 @@ function manifestErrors(text: string): string[] {
 describe('the sample packages', () => {
   it('a CRM package and a differently shaped help-desk package are both accepted with their mappings', () => {
     expect(crm().mapping).not.toBeNull()
-    const desk = validatePluginPackage(readPackage('sample-desk'))
+    const desk = validatePluginPackage(deskFiles())
     if (!desk.ok) throw new Error(desk.errors.join('\n'))
     expect(desk.value.manifest.objects.ticket.recordType).toBe('ticket')
   })
@@ -76,7 +87,7 @@ describe('a declaration is data only', () => {
     expect(manifestErrors(without).join()).toContain('account_info')
     expect(manifestErrors(crmWith('account_info: { method: GET,', 'account_info: { method: POST,')).join()).toContain('account_info')
     // A package that only reads (the help desk) needs none.
-    expect(validatePluginPackage(readPackage('sample-desk')).ok).toBe(true)
+    expect(validatePluginPackage(deskFiles()).ok).toBe(true)
   })
 
   it('refuses a contract this build does not know', () => {
@@ -147,17 +158,18 @@ describe('types (§8-2, §8-3)', () => {
       expect(typeNameLayerProblem(bad, 'sample-crm'), bad).not.toBeNull()
     }
     for (const ok of ['deal', 'company', 'sales_deal', 'customer']) expect(typeNameLayerProblem(ok, 'sample-crm'), ok).toBeNull()
-    expect(manifestErrors(crmWith('types: [deal]', 'types: [pack_deal]')).join()).toContain('置き場所')
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [pack_deal]')).join()).toContain('置き場所')
   })
 
-  it("a package's types are server-only, and every listed type has its file (no more, no less)", () => {
-    const fileType = { ...CRM.types, deal: CRM.types.deal.replace('storage: server', 'storage: either') }
-    const r = validatePluginPackage({ ...CRM, types: fileType })
+  it("a business package's types are server-only, and every listed type has its file (no more, no less)", () => {
+    expect(validatePluginPackage(SALES).ok).toBe(true)
+    const fileType = { ...SALES.types, deal: SALES.types.deal.replace('storage: server', 'storage: either') }
+    const r = validatePluginPackage({ ...SALES, types: fileType })
     expect(r.ok ? [] : r.errors.join()).toContain('storage は server')
-    const extra = validatePluginPackage({ ...CRM, types: { ...CRM.types, other: CRM.types.deal } })
+    const extra = validatePluginPackage({ ...SALES, types: { ...SALES.types, other: SALES.types.deal } })
     expect(extra.ok).toBe(false)
-    const missing = validatePluginPackage({ ...CRM, types: {} })
-    expect(missing.ok).toBe(false)
+    const missing = validatePluginPackage({ ...SALES, types: { deal: SALES.types.deal } })
+    expect(missing.ok ? [] : missing.errors.join()).toContain('customer')
   })
 
   it("who names the type's person fields or the fixed actors only", () => {
@@ -167,6 +179,52 @@ describe('types (§8-2, §8-3)', () => {
 
   it('a plugin says viewer (can read the record), never anyone', () => {
     expect(manifestErrors(crmWith('    who: [viewer, ai]', '    who: [anyone, ai]')).join()).toContain('viewer')
+  })
+})
+
+describe('a connector only connects, a business plugin owns the types (owner decision 2026-11-01)', () => {
+  it('the connector owns no type: its record types are the business version it maps to', () => {
+    const p = crm()
+    expect(p.manifest).toMatchObject({ role: 'connector', types: [], mapsTo: { id: 'sample-sales', version: '0.1.0' } })
+    expect(Object.keys(p.types).sort()).toEqual(['customer', 'deal'])
+    expect(businessPackage('sample-sales').manifest).toMatchObject({ role: 'business', service: '', mapsTo: null, types: ['deal', 'customer'] })
+  })
+
+  it('a connector declaring types, bringing type files or naming no business plugin is refused', () => {
+    expect(manifestErrors(`${CRM.manifest}types: [deal]\n`).join()).toContain('型を持ちません')
+    const withFiles = validatePluginPackage({ ...CRM, types: { deal: SALES.types.deal } })
+    expect(withFiles.ok ? [] : withFiles.errors.join()).toContain('型（types/）を持ちません')
+    expect(manifestErrors(crmWith('maps_to: sample-sales@0.1.0\n', '')).join()).toContain('maps_to')
+    expect(manifestErrors(crmWith('maps_to: sample-sales@0.1.0', 'maps_to: sample-sales')).join()).toContain('maps_to')
+    expect(manifestErrors(crmWith('maps_to: sample-sales@0.1.0', 'maps_to: sample-crm@0.1.0')).join()).toContain('自分自身')
+  })
+
+  it('the business package must be exactly the one named (id and version), and own every record type', () => {
+    const none = validatePluginPackage({ ...CRM, business: null })
+    expect(none.ok ? [] : none.errors.join()).toContain('sample-sales@0.1.0 が棚にありません')
+    const otherVersion = validatePluginPackage({ ...CRM, manifest: crmWith('maps_to: sample-sales@0.1.0', 'maps_to: sample-sales@0.2.0') })
+    expect(otherVersion.ok ? [] : otherVersion.errors.join()).toContain('sample-sales@0.2.0 が棚にありません')
+    const notOwned = validatePluginPackage({ ...CRM, manifest: crmWith('    record_type: deal\n', '    record_type: lead\n') })
+    expect(notOwned.ok ? [] : notOwned.errors.join()).toContain('record_type「lead」は sample-sales@0.1.0 の型ではありません')
+    // A connector cannot stand in for the business plugin.
+    const connectorAsBusiness = validatePluginPackage({ ...CRM, manifest: crmWith('maps_to: sample-sales@0.1.0', 'maps_to: sample-hub@0.1.0'), business: { ...crm(), manifest: { ...crm().manifest, id: 'sample-hub' } } })
+    expect(connectorAsBusiness.ok).toBe(false)
+  })
+
+  it('a business plugin talks to nothing: no service, destination, objects, operations or mapping', () => {
+    for (const line of ['service: hubspot', 'base_url: https://api.hubapi.com', 'objects: {}', 'operations: {}', 'maps_to: sample-sales@0.1.0', 'field_policy_defaults: {}']) {
+      const key = line.split(':')[0]
+      // `service` makes it a connector: then the types are refused instead.
+      expect(manifestErrors(`${SALES.manifest}${line}\n`).join(), line).toMatch(key === 'service' ? /型を持ちません/ : new RegExp(`「${key}」はつなぎ先のプラグイン`))
+    }
+    const withMapping = validatePluginPackage({ ...SALES, mapping: 'deal:\n  fields: {}\n' })
+    expect(withMapping.ok ? [] : withMapping.errors.join()).toContain('読み替え表')
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: []')).join()).toContain('types')
+  })
+
+  it("a business plugin cannot own a core type's name (one owner per type name)", () => {
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, task]')).join()).toContain('型「task」は本体の型です')
+    expect(manifestErrors(SALES.manifest.replace('types: [deal, customer]', 'types: [deal, minutes]')).join()).toContain('本体の型')
   })
 })
 
@@ -209,7 +267,7 @@ describe('owner rules of 2026-10-31 (review §5.3; decisions)', () => {
 describe('available_to (§8-4)', () => {
   it('absent = every company; present = only the listed ones', () => {
     expect(pluginAvailableTo(crm().manifest, 'any-company')).toBe(true)
-    const desk = validatePluginPackage(readPackage('sample-desk'))
+    const desk = validatePluginPackage(deskFiles())
     if (!desk.ok) throw new Error(desk.errors.join())
     expect(pluginAvailableTo(desk.value.manifest, 'company-desk-only')).toBe(true)
     expect(pluginAvailableTo(desk.value.manifest, 'another-company')).toBe(false)
@@ -282,7 +340,7 @@ describe('mapping checks', () => {
   })
 
   it('write: true needs an update operation for the object', () => {
-    const desk = validatePluginPackage(readPackage('sample-desk'))
+    const desk = validatePluginPackage(deskFiles())
     if (!desk.ok) throw new Error(desk.errors.join())
     const r = parsePluginMapping('ticket:\n  fields:\n    opened: { from: created_at, write: true }\n', desk.value)
     expect(r.ok ? [] : r.errors.join()).toContain('書き換える操作がない')

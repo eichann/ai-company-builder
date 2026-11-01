@@ -17,7 +17,7 @@
  *   asked outside for anyone else).
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest'
-import { chmodSync, cpSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
@@ -25,6 +25,7 @@ import { execFile } from 'child_process'
 import { promisify } from 'util'
 import { createFakeHubSpot, type FakeHubSpot } from '../fakes/hubspot/fake-hubspot'
 import { fakeUpstream } from '../helpers/fake-upstream'
+import { enableSampleSales, putSampleHub } from '../helpers/plugin-packages'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -36,7 +37,6 @@ vi.mock('../../src/lib/auth', () => ({
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 
 const KEY = 'pat-fake-NOT-REAL-import-0123456789'
-const FIXTURE = join(__dirname, '../fixtures/plugins/sample-hub')
 const ts = () => new Date().toISOString()
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -91,7 +91,7 @@ beforeAll(async () => {
   chmodSync(join(kekDir, 'kek'), 0o600)
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
   shelfDir = mkdtempSync(join(tmpdir(), 'acb-im-shelf-'))
-  cpSync(FIXTURE, join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  putSampleHub(shelfDir)
 
   fake = createFakeHubSpot()
   fake.addKey(KEY)
@@ -122,6 +122,7 @@ beforeAll(async () => {
 
   const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
   const key = (await services.keyBroker.create(owner, { service: 'hubspot', displayName: 'HubSpot', secret: KEY, audience })).value.keys[0].id
+  await enableSampleSales(services.plugins, owner)
   expect((await services.plugins.install(owner, 'sample-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
   expect((await services.plugins.saveMapping(owner, 'sample-hub', { text: MAPPING, acknowledgeAuto: ['confidence', 'next_step', 'close_date'] })).ok).toBe(true)
   expect((await services.plugins.setReadScope(owner, 'sample-hub', { userIds: ['im-member'] })).ok).toBe(true)

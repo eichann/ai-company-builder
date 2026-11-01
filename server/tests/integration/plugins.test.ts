@@ -18,6 +18,7 @@ import { chmodSync, cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } f
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { randomBytes } from 'crypto'
+import { enableSampleSales } from '../helpers/plugin-packages'
 
 vi.mock('../../src/lib/auth', () => ({
   getUserFromRequest: vi.fn().mockResolvedValue(null),
@@ -77,6 +78,14 @@ function putHubPackage(dir: string, extra = '') {
     .replace('service: sample-crm', 'service: hubspot').replace('https://api.sample-crm.example', 'https://api.hubapi.com') + extra)
 }
 
+/** The business plugin `sample-sales` (owns deal / customer), under another id or version. */
+function putBusinessPackage(dir: string) {
+  cpSync(join(FIXTURES, 'sample-sales'), join(shelfDir, dir), { recursive: true })
+  const [id, version] = dir.split('@')
+  const file = join(shelfDir, dir, 'plugin.yaml')
+  writeFileSync(file, readFileSync(file, 'utf8').replace('id: sample-sales', `id: ${id}`).replace('version: 0.1.0', `version: ${version}`))
+}
+
 const MAPPING = (people = 'pl-member', folder = '営業部') => `
 deal:
   visible_to_folder: ${folder}
@@ -104,6 +113,11 @@ beforeAll(async () => {
   putHubPackage('crm-hub@0.1.0')
   putHubPackage('crm-hub@0.2.0')
   putHubPackage('only-other@0.1.0', `\navailable_to: [${OTHER}]\n`)
+  // The business plugin the connectors map to (owner decision 2026-11-01), a later version of it,
+  // and another business plugin that also owns `deal`.
+  putBusinessPackage('sample-sales@0.1.0')
+  putBusinessPackage('sample-sales@0.2.0')
+  putBusinessPackage('other-sales@0.1.0')
 
   const dbModule = await import('../../src/db')
   dbModule.initDatabase()
@@ -138,6 +152,7 @@ beforeAll(async () => {
   oldToken = services.brokerTokens.issue(member, { conversationId: 'c-old', services: ['hubspot'] }).value.token
   readerToken = services.brokerTokens.issue(reader, { conversationId: 'c-reader', services: ['hubspot'] }).value.token
   hubKeyOther = (await services.keyBroker.create(otherOwner, { service: 'hubspot', displayName: 'HubSpot', secret: `${SECRET}-other`, audience })).value.keys[0].id
+  await enableSampleSales(services.plugins, owner)
 })
 
 afterAll(() => {
@@ -152,8 +167,8 @@ const otherRows = () => JSON.stringify(['plugin_installs', 'plugin_mappings', 'p
 describe('connector plugins: the shelf as a company sees it', () => {
   it('a package available only to another company does not exist here', async () => {
     const list = (await services.plugins.list(owner)).value.plugins as Json[]
-    expect(list.map(p => p.id)).toEqual(['crm-hub'])
-    expect((await services.plugins.list(otherOwner)).value.plugins.map((p: Json) => p.id)).toEqual(['crm-hub', 'only-other'])
+    expect(list.map(p => p.id)).toEqual(['crm-hub', 'other-sales', 'sample-sales'])
+    expect((await services.plugins.list(otherOwner)).value.plugins.map((p: Json) => p.id)).toEqual(['crm-hub', 'only-other', 'other-sales', 'sample-sales'])
     const before = otherRows()
     const missing = await services.plugins.get(owner, 'no-such-plugin')
     for (const r of [
@@ -165,7 +180,7 @@ describe('connector plugins: the shelf as a company sees it', () => {
       expect(r).toEqual(missing)
     }
     expect(missing).toMatchObject({ ok: false, kind: 'not-found', body: { code: 'PLUGIN_NOT_FOUND' } })
-    expect(db.prepare('SELECT COUNT(*) AS n FROM plugin_installs WHERE company_id = ?').get(CO).n).toBe(0)
+    expect(db.prepare("SELECT COUNT(*) AS n FROM plugin_installs WHERE company_id = ? AND plugin_id = 'only-other'").get(CO).n).toBe(0)
     expect(otherRows()).toBe(before)
   })
 
@@ -267,6 +282,21 @@ describe('connector plugins: every kill switch acts on the next call', () => {
     await services.plugins.setEnabled(admin, 'crm-hub', { enabled: false })
     expect(await active()).toEqual({ ok: false, problem: 'off' })
     await services.plugins.setEnabled(admin, 'crm-hub', { enabled: true })
+    expect((await active()).ok).toBe(true)
+
+    // The business plugin it maps to: turned off by the company or stopped by the operator stops it too.
+    expect((await services.plugins.setEnabled(admin, 'sample-sales', { enabled: false })).ok).toBe(true)
+    expect(await active()).toEqual({ ok: false, problem: 'business-stopped' })
+    expect((await services.plugins.setEnabled(admin, 'sample-sales', { enabled: true })).ok).toBe(true)
+    expect((await active()).ok).toBe(true)
+    writeFileSync(join(shelfDir, 'stopped'), 'sample-sales\n')
+    expect(await active()).toEqual({ ok: false, problem: 'business-stopped' })
+    rmSync(join(shelfDir, 'stopped'))
+    expect((await active()).ok).toBe(true)
+    // Another version of the business plugin would stop it: refused while it is on, nothing changed.
+    expect(await services.plugins.install(owner, 'sample-sales', { version: '0.2.0', keyId: null }))
+      .toMatchObject({ ok: false, body: { code: 'PLUGIN_WOULD_STOP', problem: 'business-missing', dependents: ['crm-hub'] } })
+    expect(db.prepare("SELECT version FROM plugin_installs WHERE company_id = ? AND plugin_id = 'sample-sales'").get(CO).version).toBe('0.1.0')
     expect((await active()).ok).toBe(true)
 
     // The package on the shelf changes under the same version: not used until an admin chooses it again.
@@ -399,5 +429,85 @@ describe('the relay uses the key of the connection the plugin manages (staging: 
     expect((await services.plugins.install(owner, 'crm-hub', { version: '0.1.0', keyId: hubKey })).ok).toBe(true)
     expect(await relay(oldToken, 'GET', '/crm/objects/2026-03/deals/1')).toMatchObject({ status: 200, forwarded: true })
     expect(sent.at(-1)!.authorization).toBe(`Bearer ${SECRET}`)
+  })
+})
+
+describe('a connector needs the business plugin it maps to (owner decision 2026-11-01)', () => {
+  const THIRD = 'pl-third'
+  const third = { companyId: THIRD, userId: 'pl-third-owner', role: 'owner' }
+  let key: string
+  const rows = () => db.prepare('SELECT plugin_id, version, enabled FROM plugin_installs WHERE company_id = ? ORDER BY plugin_id').all(THIRD)
+
+  beforeAll(async () => {
+    db.prepare('INSERT INTO companies (id, name, slug, owner_id, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run(THIRD, THIRD, THIRD, 'x', ts(), ts())
+    db.prepare('INSERT INTO memberships (id, user_id, company_id, role, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)').run('m-pl-third', third.userId, THIRD, 'owner', ts(), ts())
+    const audience = { allDepartments: true, departmentIds: [], everyone: true, addUserIds: [], removeUserIds: [] }
+    key = (await services.keyBroker.create(third, { service: 'hubspot', displayName: 'HubSpot', secret: `${SECRET}-third`, audience })).value.keys[0].id
+  })
+
+  it('installing the connector first is refused in plain words, and nothing is written', async () => {
+    const r = await services.plugins.install(third, 'crm-hub', { version: '0.1.0', keyId: key })
+    expect(r).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'BUSINESS_PLUGIN_REQUIRED', plugin: 'sample-sales', version: '0.1.0' } })
+    expect(r.body.error).toContain('「見本の営業」（0.1.0）を入れてオンにしてください')
+    expect(rows()).toEqual([])
+    // Another version of the business plugin is not the one it maps to.
+    expect((await services.plugins.install(third, 'sample-sales', { version: '0.2.0', keyId: null })).ok).toBe(true)
+    expect(await services.plugins.install(third, 'crm-hub', { version: '0.1.0', keyId: key })).toMatchObject({ ok: false, body: { code: 'BUSINESS_PLUGIN_REQUIRED' } })
+    expect(rows().map((r: Json) => r.plugin_id)).toEqual(['sample-sales'])
+    // The shelf says which business plugin each connector needs (the admin page shows it).
+    const listed = (await services.plugins.list(third)).value.plugins as Json[]
+    expect(listed.find(p => p.id === 'crm-hub').versions[0]).toMatchObject({ role: 'connector', types: [], mapsTo: { id: 'sample-sales', version: '0.1.0', label: '見本の営業' } })
+    expect(listed.find(p => p.id === 'sample-sales').versions[0]).toMatchObject({ role: 'business', types: ['deal', 'customer'], mapsTo: null, service: '' })
+  })
+
+  it('a business plugin has no key, mapping, read scope or relay; one owner per type name', async () => {
+    expect(await services.plugins.install(third, 'sample-sales', { version: '0.1.0', keyId: key })).toMatchObject({ ok: false, body: { code: 'KEY_NOT_USABLE' } })
+    expect((await services.plugins.install(third, 'sample-sales', { version: '0.1.0', keyId: null })).ok).toBe(true)
+    const taken = await services.plugins.install(third, 'other-sales', { version: '0.1.0', keyId: null })
+    expect(taken).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'TYPE_OWNED_ELSEWHERE' } })
+    expect(taken.body.error).toContain('型「deal」は、すでに入っている「見本の営業」の型です')
+    expect(rows().map((r: Json) => r.plugin_id)).toEqual(['sample-sales'])
+    for (const r of [
+      await services.plugins.saveMapping(third, 'sample-sales', { text: 'deal: {}\n' }),
+      await services.plugins.setReadScope(third, 'sample-sales', { userIds: [third.userId] }),
+    ]) expect(r).toMatchObject({ ok: false, kind: 'conflict', body: { code: 'NOT_A_CONNECTOR' } })
+    expect(await services.plugins.active(THIRD, 'sample-sales')).toEqual({ ok: false, problem: 'off' })
+    expect((await services.plugins.setEnabled(third, 'sample-sales', { enabled: true })).value.plugin.install).toMatchObject({ enabled: true, problem: null, managedSince: null })
+    expect(await services.plugins.active(THIRD, 'sample-sales')).toEqual({ ok: false, problem: 'not-a-connector' })
+    expect(services.plugins.manages(THIRD, 'hubspot')).toBe(false)
+    expect(services.keyBroker.relayReadOnly(THIRD, 'hubspot')).toBe(false)
+  })
+
+  it('the connector turns on only while its business plugin is on, and says so', async () => {
+    expect((await services.plugins.setEnabled(third, 'sample-sales', { enabled: false })).ok).toBe(true)
+    expect((await services.plugins.install(third, 'crm-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
+    expect((await services.plugins.saveMapping(third, 'crm-hub', { text: MAPPING(third.userId), acknowledgeAuto: ['confidence', 'next_step'] })).ok).toBe(true)
+    expect((await services.plugins.setReadScope(third, 'crm-hub', { userIds: [third.userId] })).ok).toBe(true)
+    const refused = await services.plugins.setEnabled(third, 'crm-hub', { enabled: true })
+    expect(refused).toMatchObject({ ok: false, body: { code: 'PLUGIN_NOT_READY', problem: 'business-stopped' } })
+    expect(refused.body.error).toContain('「見本の営業」（0.1.0）を入れてオンにしてください')
+    expect(services.keyBroker.relayReadOnly(THIRD, 'hubspot')).toBe(false)
+    expect((await services.plugins.setEnabled(third, 'sample-sales', { enabled: true })).ok).toBe(true)
+    expect((await services.plugins.setEnabled(third, 'crm-hub', { enabled: true })).value.plugin.install).toMatchObject({ enabled: true, problem: null })
+    const active = await services.plugins.active(THIRD, 'crm-hub')
+    expect(active).toMatchObject({ ok: true, plugin: { version: '0.1.0' } })
+    // The connector acts on the business plugin's types (it owns none).
+    expect(Object.keys(active.plugin.types).sort()).toEqual(['customer', 'deal'])
+    expect(active.plugin.manifest.types).toEqual([])
+  })
+
+  it('an install of a version no longer on the shelf (the old hubspot@0.1.x shape) stops, and choosing the new one is the way out', async () => {
+    db.prepare("UPDATE plugin_installs SET version = '0.0.9' WHERE company_id = ? AND plugin_id = 'crm-hub'").run(THIRD)
+    expect(await services.plugins.active(THIRD, 'crm-hub')).toEqual({ ok: false, problem: 'not-on-shelf' })
+    const detail = (await services.plugins.get(third, 'crm-hub')).value
+    expect(detail.plugin.install.problem).toBe('not-on-shelf')
+    expect(detail.plugin.versions.map((v: Json) => v.version)).toEqual(['0.1.0', '0.2.0'])
+    // Without the business plugin, the change is refused with the reason (nothing changed).
+    db.prepare("DELETE FROM plugin_installs WHERE company_id = ? AND plugin_id = 'sample-sales'").run(THIRD)
+    expect(await services.plugins.install(third, 'crm-hub', { version: '0.1.0', keyId: key })).toMatchObject({ ok: false, body: { code: 'BUSINESS_PLUGIN_REQUIRED' } })
+    expect(db.prepare("SELECT version FROM plugin_installs WHERE company_id = ? AND plugin_id = 'crm-hub'").get(THIRD).version).toBe('0.0.9')
+    await enableSampleSales(services.plugins, third)
+    expect((await services.plugins.install(third, 'crm-hub', { version: '0.1.0', keyId: key })).ok).toBe(true)
+    expect((await services.plugins.active(THIRD, 'crm-hub')).ok).toBe(true)
   })
 })

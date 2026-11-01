@@ -649,8 +649,14 @@ async function seed(): Promise<World> {
   cpSync(join(__dirname, '../fixtures/plugins/sample-crm'), join(shelfDir, 'other-crm@0.1.0'), { recursive: true })
   const manifest = join(shelfDir, 'other-crm@0.1.0/plugin.yaml')
   writeFileSync(manifest, readText(manifest, 'utf8').replace('id: sample-crm', 'id: other-crm') + `\navailable_to: [${other}]\n`)
+  // The business plugin it maps to (owner decision 2026-11-01), also only for the other company.
+  cpSync(join(__dirname, '../fixtures/plugins/sample-sales'), join(shelfDir, 'sample-sales@0.1.0'), { recursive: true })
+  const business = join(shelfDir, 'sample-sales@0.1.0/plugin.yaml')
+  writeFileSync(business, readText(business, 'utf8') + `available_to: [${other}]\n`)
   await services.pluginShelf.load()
-  const installed = await services.plugins.install({ companyId: other, userId: USER.outsider, role: 'owner' }, 'other-crm', { version: '0.1.0', keyId: null })
+  const otherOwner = { companyId: other, userId: USER.outsider, role: 'owner' }
+  if (!(await services.plugins.install(otherOwner, 'sample-sales', { version: '0.1.0', keyId: null })).ok) throw new Error('business plugin')
+  const installed = await services.plugins.install(otherOwner, 'other-crm', { version: '0.1.0', keyId: null })
   if (!installed.ok) throw new Error(`plugin: ${JSON.stringify(installed)}`)
   db.prepare(`INSERT INTO plugin_operations (company_id, id, plugin_id, operation, plugin_version, fingerprint, mapping_version, connection_id, account_id, object,
     external_id, record_id, actor_id, actor_kind, state, fields, written, previous, created_at, updated_at)

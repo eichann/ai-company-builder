@@ -19,7 +19,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import { execFileSync } from 'child_process'
-import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
+import { putSampleHub } from '../helpers/plugin-packages'
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { dirname, join, resolve } from 'path'
 import { tmpdir } from 'os'
 import { randomBytes } from 'crypto'
@@ -169,7 +170,7 @@ beforeAll(async () => {
   process.env.BROKER_KEK_FILE = join(kekDir, 'kek')
   // The plugin shelf (「つなぎ先」): one HubSpot-shaped package, also before the composition root loads.
   const shelfDir = mkdtempSync(join(tmpdir(), 'acb-admin-contract-shelf-'))
-  cpSync(join(__dirname, '../fixtures/plugins/sample-hub'), join(shelfDir, 'sample-hub@0.1.0'), { recursive: true })
+  putSampleHub(shelfDir)
   process.env.PLUGINS_DIR = shelfDir
   shapes = loadTypeShapes(
     `import type * as A from ${JSON.stringify(ADMIN_API.replace(/\.ts$/, ''))}\n`
@@ -392,6 +393,9 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
 
   it('つなぎ先 (connector plugins)', async () => {
     await expectShape('Plugins', USERS.owner, 'GET', `${base}/plugins`)
+    // The business plugin the connector maps to comes first (owner decision 2026-11-01).
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales`, { version: '0.1.0', keyId: null })
+    await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-sales/enabled`, { enabled: true })
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub`, { version: '0.1.0', keyId: null })
     await expectShape('Plugin', USERS.owner, 'GET', `${base}/plugins/sample-hub`)
     await expectShape('Plugin', USERS.owner, 'PUT', `${base}/plugins/sample-hub/mapping`, { text: CONTRACT_MAPPING, acknowledgeAuto: ['next_step'] })
@@ -561,6 +565,8 @@ describe('the admin console\'s requests do what the admin means on the server', 
   })
 
   it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {
+    await A.pluginsApi.install(CO, 'sample-sales', '0.1.0', null)
+    await A.pluginsApi.setEnabled(CO, 'sample-sales', true)
     await A.pluginsApi.install(CO, 'sample-hub', '0.1.0', null)
     expect(row('SELECT version, key_id FROM plugin_installs WHERE company_id = ? AND plugin_id = ?', CO, 'sample-hub')).toEqual({ version: '0.1.0', key_id: null })
     const text = CONTRACT_MAPPING.replace('amount:    { from: amount, write: true }', 'amount:    { from: amount, write: false }')

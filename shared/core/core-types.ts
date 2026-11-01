@@ -23,7 +23,7 @@
  * (`SERVICE_OWNED_TYPES`); `approval` and `outbound_message` change state only
  * through those services too (`SERVICE_STATE_TYPES`, `SERVICE_TRANSITIONS`),
  * because approving checks a content hash and runs an operation, and sending
- * reaches outside. Links to `deal` / `customer` name types a plugin brings (a
+ * reaches outside. Links to `deal` / `customer` name types a business plugin owns (a
  * link's target type is a label: nothing requires it to exist).
  */
 import { parseTypeFile, type TypeDefinition } from './record-types'
