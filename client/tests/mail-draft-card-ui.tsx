@@ -17,7 +17,7 @@ useAppStore.setState({ currentCompany: { id: 'co-preview', name: 'プレビュ�
 
 const SHOWN_HASH = `sha256:${'a1'.repeat(32)}`
 const draft: OutboundMailView = {
-  id: 'outbound_message-0123456789abcdef', state: 'draft', version: 2, hash: SHOWN_HASH, from: 'sato@div.example',
+  id: 'outbound_message-0123456789abcdef', state: 'draft', version: 2, hash: SHOWN_HASH, channel: 'email', interactionId: null, from: 'sato@div.example',
   to: [
     { ref: `r${'1'.repeat(24)}`, email: 'suzuki@a-corp.example', name: '鈴木 一郎', source: 'calendar', firstTime: true },
     { ref: `r${'2'.repeat(24)}`, email: 'yamaguchi@a-corp.example', name: '山口 花子', source: 'hubspot', firstTime: true },
