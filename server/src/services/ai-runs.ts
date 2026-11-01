@@ -47,6 +47,11 @@ export interface AiRunDeps {
   /** sha256 (hex): a request's fingerprint. */
   tokenDigest: TokenDigest
   aiTurnOf: (member: Member, recordId: string) => AiTurnCheck
+  /**
+   * A run finished as failed: its step may give the record back to 「AI の番」 (minutes reading:
+   * still 「読んでいる」 → 「届いた」), recorded as caused by the run, not by the member.
+   */
+  afterFailedRun?: (member: Member, run: { id: string; recordId: string; step: string }) => void
 }
 
 /** Who sends an outside operation within a run: the holder of a run-bound record token. */
@@ -242,7 +247,7 @@ export function createAiRunService(deps: AiRunDeps) {
       if (run.state !== 'running' || run.generation !== generation) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
       const nowMs = clock.nowMs()
       const at = nowIso(nowMs)
-      return transactions.run((): Outcome<{ run: AiRunView }> => {
+      const finished = transactions.run((): Outcome<{ run: AiRunView }> => {
         inFlightToUnknown(r, run, at)
         const released = { ...run, deviceId: null, claimExpiresAt: null, updatedAt: at }
         let next: AiRunRow
@@ -262,6 +267,10 @@ export function createAiRunService(deps: AiRunDeps) {
         if (!save(r, run, next)) return refuse('conflict', RUN_SUPERSEDED.error, { code: RUN_SUPERSEDED.code })
         return ok({ run: view(r, next) })
       })
+      if (finished.ok && cls !== null) {
+        try { deps.afterFailedRun?.(member, { id: run.id, recordId: run.recordId, step: run.step }) } catch { /* the 30-minute rule catches up */ }
+      }
+      return finished
     },
 
     /** POST …/ai-runs/:runId/retry — 「もう一度」: a person gives a stopped run back to the AI. */

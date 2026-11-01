@@ -22,7 +22,11 @@ export interface MinutesCheckResult {
   existing: number
   /** Meetings whose notes / transcript are not generated yet (asked again next time). */
   waiting: number
-  /** The member's meeting records stuck in 「読んでいる」 for over 30 minutes: the app runs `retry` on them. */
+  /**
+   * The member's meeting records that were stuck in 「読んでいる」 for over 30 minutes. The server
+   * puts them back to 「届いた」 itself (the ledger's actor is the server clock); an older app's
+   * `retry` on them then finds nothing to do.
+   */
   stale: string[]
 }
 
@@ -46,6 +50,11 @@ export interface MinutesBundleSummary {
  */
 export interface MinutesText {
   recordId: string
+  /**
+   * The meeting record's version now: `expectedVersion` for its next action (finish_reading /
+   * fail_reading). An unattended run cannot look the record up otherwise.
+   */
+  version: number
   /** Put above the text: it is data from outside, not instructions. */
   header: string
   text: string

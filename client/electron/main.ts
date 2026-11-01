@@ -283,6 +283,8 @@ registerAiTurnsIpc(ipc, {
     runs: aiRunRegistry,
     // This app instance (per launch): the server's claim holder.
     deviceId: `app-${randomUUID()}`,
+    // Another PC (or a person) moved the record on: read the notices again rather than in 10 minutes.
+    recordMovedOn: companyId => minutes.recordsSignal(companyId),
   }),
   isMainWindow: senderId => mainWindowHost.isWindow(senderId),
 })

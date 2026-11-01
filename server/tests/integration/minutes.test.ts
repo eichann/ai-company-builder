@@ -173,6 +173,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', (await import('../../src/routes/google')).googleRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/records')).recordsRoute)
+  app.route('/api/companies/:companyId', (await import('../../src/routes/ai-runs')).aiRunsRoute)
   app.route('/api/oauth', (await import('../../src/routes/oauth')).oauthRoute)
   app.route('/api/records-ai', (await import('../../src/routes/records-ai')).recordsAiRoute)
 
@@ -351,6 +352,9 @@ describe('the text', () => {
     const ai = await call(null, 'GET', `/api/records-ai/minutes/${followUp.id}/text`, undefined, token)
     expect(ai.status, ai.text).toBe(200)
     expect(ai.body.data.instructionLike.map((f: Json) => f.label)).toContain('addressed-to-ai')
+    // The meeting's version now: an unattended run (no records_get) finishes with it.
+    const record = await call('mn-sato', 'GET', `${C()}/records/item/${followUp.id}`)
+    expect(ai.body.data.version).toBe(record.body.data.record.version)
   })
 
   it('refuses a member who is neither assignee nor attendee, and another company\'s record is the same 404 as a missing one', async () => {
@@ -391,6 +395,28 @@ describe('stuck reading and the switches', () => {
     at('2026-11-13T09:31:00+09:00')
     expect((await check('mn-sato')).body.data.stale).toEqual([salesId])
     expect((await check('mn-tanaka')).body.data.stale).toEqual([])
+    // Put back by the server itself: the ledger says the clock did it, not the member.
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('received')
+    const entries = (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}/history`)).body.data.entries as Json[]
+    const last = entries.reduce((a: Json, b: Json) => (b.version > a.version ? b : a))
+    expect([last.action, last.toState, last.cause]).toEqual(['retry', 'received', 'system'])
+  })
+
+  it('an automatic run that ends unfinished puts the meeting back at once, as the run\'s doing', async () => {
+    const version = (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}`)).body.data.record.version
+    const claimed = await call('mn-sato', 'POST', `${C()}/ai-run-claims`, { recordId: salesId, step: 'minutes-reading', deviceId: 'app-device-a', conversationId: 'conv-run-a' })
+    expect(claimed.status, claimed.text).toBeLessThan(300)
+    const run = claimed.body.data.run
+    const tokenRes = await call('mn-sato', 'POST', `${C()}/me/record-tokens`, { conversationId: 'conv-run-a', agent: 'claude-code', scope: 'act', run: { id: run.id, generation: run.generation } })
+    expect(tokenRes.status, tokenRes.text).toBe(201)
+    const start = await call(null, 'POST', `/api/records-ai/item/${salesId}/actions/start_reading`, { expectedVersion: version }, tokenRes.body.data.token)
+    expect(start.status, start.text).toBe(200)
+    const finished = await call('mn-sato', 'POST', `${C()}/ai-runs/${run.id}/finish`, { generation: run.generation, outcome: 'failed', failure: { class: 'temporary', code: 'UNFINISHED' } })
+    expect(finished.status, finished.text).toBe(200)
+    expect(minutesRows().find(r => r.id === salesId).state).toBe('received')
+    const entries = (await call('mn-sato', 'GET', `${C()}/records/item/${salesId}/history`)).body.data.entries as Json[]
+    const last = entries.reduce((a: Json, b: Json) => (b.version > a.version ? b : a))
+    expect([last.action, last.cause, last.runId]).toEqual(['retry', 'run', run.id])
   })
 
   it('Google stopped for the company: discovery and the text refuse from the next call; no permission → not connected', async () => {

@@ -25,6 +25,7 @@
  *   instruction-like flags. The consultation AI reads it (no separate reader AI,
  *   owner §11) and makes outputs with the typed tools; the server's gates decide.
  */
+import { CLOCK_ACTOR } from '../../shared/core/core-types'
 import { MEETING_INTAKE_CHOICES, MEETING_TYPE, meetingIntakeOf, meetingIsRead, MINUTES_TEXT_FOOTER, MINUTES_TEXT_HEADER, MINUTES_TEXT_MAX } from '../../shared/core/minutes'
 import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { isExternalAddress, emailDomain, normalizeEmail } from '../../shared/core/mail'
@@ -65,8 +66,10 @@ export interface MinutesServiceDeps {
 
 /** How far back the calendar is read (design §1-2: the last few days). */
 export const MINUTES_LOOKBACK_MS = 3 * 24 * 60 * 60 * 1000
-/** A record 「読んでいる」 longer than this may be put back to 「届いた」 (design §1-8). */
+/** A record 「読んでいる」 longer than this is put back to 「届いた」 (design §1-8). */
 export const MINUTES_READING_STALE_MS = 30 * 60 * 1000
+const STALE_PUT_BACK_NOTE = '読み始めてから30分たっても終わらなかったため、AI の番に戻しました'
+const RUN_PUT_BACK_NOTE = 'AI の自動実行が読み終えずに止まったため、AI の番に戻しました'
 const MAX_MEETINGS_PER_CHECK = 50
 
 export const MINUTES_FOLDER_REFUSED = {
@@ -141,6 +144,13 @@ export function googleRefusal(err: GoogleReadFailed): Refusal {
 
 export function createMinutesService(deps: MinutesServiceDeps) {
   const { companyData, writer, meetings } = deps
+
+  /** A meeting still 「読んでいる」 back to 「届いた」 (the type's `retry`), with the actor that caused it. */
+  function putBack(companyId: string, recordId: string, actor: ServiceActor, note: string): boolean {
+    const now = fieldsOf(companyData.forCompany(companyId).records, recordId)
+    if (now.state !== 'reading') return false
+    return writer.transition(companyId, { recordId, action: 'retry', expectedVersion: now.version, to: 'received', actor, note }).ok
+  }
   const disabled = () => refuse('not-found', RECORDS_DISABLED.error, { code: RECORDS_DISABLED.code })
   const notFound = () => refuse('not-found', RECORD_NOT_FOUND.error, { code: RECORD_NOT_FOUND.code })
 
@@ -269,6 +279,18 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       return ok({ folder, choices: folderChoices(handle), meetings: meetingIntakeOf(handle.records.meetingIntake()) })
     },
 
+    /**
+     * An automatic run of reading this meeting ended unfinished (ai-runs `finish`, failed): back to
+     * 「届いた」 at once, so it is not stuck for 30 minutes. The ledger names the run (cause `run`),
+     * not the member. Only a meeting the run's member reads and that is still 「読んでいる」.
+     */
+    putBackAfterRun(member: Member, recordId: string, runId: string): void {
+      const handle = companyData.forCompany(member.companyId)
+      if (!handle.records.settings().enabled) return
+      if (!readableMeeting(handle, recordReader(member, handle.scopes.listWithRules()), recordId)) return
+      putBack(member.companyId, recordId, { id: member.userId, kind: 'ai', source: null, runId }, RUN_PUT_BACK_NOTE)
+    },
+
     /** POST /me/minutes/check — the member's own calendar, with their own Google permission. */
     async check(member: Member): Promise<Outcome<MinutesCheckResult>> {
       const handle = companyData.forCompany(member.companyId)
@@ -277,7 +299,8 @@ export function createMinutesService(deps: MinutesServiceDeps) {
       const reader = recordReader(member, handle.scopes.listWithRules())
       const nowMs = deps.clock.nowMs()
 
-      // The member's own meetings whose minutes are stuck in 「読んでいる」 (the app puts them back with `retry`).
+      // The member's own meetings whose minutes are stuck in 「読んでいる」: put back to 「届いた」 here,
+      // as the server clock (the ledger says no person did it), not by the app with the member's session.
       const stale = records.candidates({ types: [MEETING_TYPE], states: ['reading'], fields: [{ name: 'assignee', values: [member.userId] }] }, 200)
         .filter(r => reader.record(r))
         .filter(r => {
@@ -285,6 +308,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
           return !Number.isNaN(at) && nowMs - at > MINUTES_READING_STALE_MS
         })
         .map(r => r.id)
+      for (const id of stale) putBack(member.companyId, id, { ...CLOCK_ACTOR }, STALE_PUT_BACK_NOTE)
 
       const result: MinutesCheckResult = { checked: false, meetings: 0, internalOnly: 0, created: [], existing: 0, waiting: 0, stale }
       const stored = records.minutesFolder()
@@ -427,6 +451,7 @@ export function createMinutesService(deps: MinutesServiceDeps) {
         .map(r => ({ id: r.id, title: r.title, typeLabel: types.get(r.type)?.definition.label ?? r.type }))
       return ok({
         recordId: row.id,
+        version: now.version,
         header: MINUTES_TEXT_HEADER,
         text,
         footer: MINUTES_TEXT_FOOTER,

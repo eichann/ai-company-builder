@@ -3,7 +3,8 @@
 // names the company once signed in), every 10 minutes while the app is open,
 // and on 「議事録を確かめる」 — only while the member has allowed Google to read
 // minutes (no grant: nothing is asked and nothing is shown). Records stuck in
-// 「読んでいる」 come back with `retry` (design §1-8). The session stays here.
+// 「読んでいる」 come back to 「届いた」 (design §1-8): the server puts them back itself during the
+// check (as its clock); `putBack` here only covers an older server. The session stays here.
 //
 // The push channel's `records` signal carries no content: it only makes this
 // module ask the server again for the member's received minutes.
@@ -117,7 +118,7 @@ export function createMinutesChecker(deps: MinutesCheckerDeps) {
     }
   }
 
-  /** `retry` on a record stuck in 「読んでいる」 (design §1-8), with its current version. */
+  /** `retry` on a record stuck in 「読んでいる」 that an older server reported but did not put back. */
   async function putBack(companyId: string, recordId: string): Promise<void> {
     if (!MINUTES.test(recordId)) return
     const item = await call(companyId, 'GET', `/records/item/${encodeURIComponent(recordId)}`)

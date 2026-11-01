@@ -131,7 +131,7 @@ installElectronAPI({
   getAutoTurnSettings: async () => ({ enabled: true, dailyLimit: 20, stopAfterFailures: 3 }),
   claimAiTurn: async (companyId, recordId, version, conversationId) => {
     aiTurns.claims.push([companyId, recordId, version, conversationId])
-    return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true }
+    return autoTurn === 'taken' ? { claimed: false, reason: 'taken' } : { claimed: true, version: version + 1 }
   },
   settleAiTurn: async (_companyId, recordId) => { aiTurns.settled.push(recordId); return { outcome: autoTurn === 'fail' ? 'failed' : 'done' } },
   retryAiTurn: async (_companyId, recordId) => { aiTurns.retried.push(recordId); return { ok: true } },
