@@ -1025,6 +1025,31 @@ export const googleApi = {
     getData<GoogleAdminView>(`/api/companies/${enc(companyId)}/google/grants/${enc(userId)}`, { method: 'DELETE' }),
 }
 
+// The Slack connection (「つなぎ先」→「Slack」, stage 3 A3, slack-connector.md): shapes from shared/types/slack.ts.
+// The secrets and the bot token are sent once in `saveApp` and never answered (last 4 / "registered" only).
+export type {
+  MySlack,
+  SlackAdminView,
+  SlackAppSave,
+  SlackFeature,
+  SlackGrantStatus,
+  SlackGrantSummary,
+} from '../../../shared/types/slack'
+
+import type { SlackAdminView, SlackAppSave } from '../../../shared/types/slack'
+
+export const slackApi = {
+  get: (companyId: string) => getData<SlackAdminView>(`/api/companies/${enc(companyId)}/slack`),
+  /** Secrets and the bot token only when the admin typed them (left out = keep the stored ones). */
+  saveApp: (companyId: string, save: SlackAppSave) =>
+    getData<SlackAdminView>(`/api/companies/${enc(companyId)}/slack/app`, { method: 'PUT', body: save }),
+  setEnabled: (companyId: string, enabled: boolean) =>
+    getData<SlackAdminView>(`/api/companies/${enc(companyId)}/slack/enabled`, { method: 'PUT', body: { enabled } }),
+  /** 「止める」: stops a member's permission (revoked at Slack too). */
+  stopGrant: (companyId: string, userId: string) =>
+    getData<SlackAdminView>(`/api/companies/${enc(companyId)}/slack/grants/${enc(userId)}`, { method: 'DELETE' }),
+}
+
 // 「つないでいるサービス」 (stage 3, connector-roles.md): the core connectors built into ACB (Google),
 // the roles they serve and the admin's choice when two could serve one. Shapes from shared/types/core-connectors.ts.
 export type {

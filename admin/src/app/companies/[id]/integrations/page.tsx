@@ -28,6 +28,7 @@ import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { ConnectedServicesSection } from './connected-services'
 import { GoogleSection } from './google'
+import { SlackSection } from './slack'
 import { ReadScopeSection } from './read-scope'
 import { RolesSection } from './roles'
 import {
@@ -125,6 +126,7 @@ export default function IntegrationsPage() {
         <div className="space-y-4 pb-6">
           <ConnectedServicesSection companyId={companyId} />
           <GoogleSection companyId={companyId} nameOf={nameOf} />
+          <SlackSection companyId={companyId} nameOf={nameOf} />
         </div>
       )}
     </>
