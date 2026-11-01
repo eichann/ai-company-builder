@@ -82,6 +82,9 @@ function googleRefusal(r: Extract<GoogleResult, { ok: false }>, noAccess: string
     if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'token-refused'].includes(r.reason)) {
       return refuse('conflict', NO_CONSENT, { code: 'GOOGLE_CONSENT_NEEDED', needsGoogleConsent: 'drive' })
     }
+    if (r.reason === 'feature-off') {
+      return refuse('conflict', '「Drive で選んだものを読む・置く」をオフにしています。アプリの「設定」→「Google」でオンにしてください。', { code: 'GOOGLE_FEATURE_OFF', feature: 'drive' })
+    }
     if (['operator-stopped', 'not-configured', 'off', 'vault-off', 'not-member', 'practice-real-secret'].includes(r.reason)) {
       return refuse('forbidden', STOPPED, { code: 'GOOGLE_STOPPED' })
     }

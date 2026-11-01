@@ -1,8 +1,8 @@
 /**
  * The core roles' seam on the server (stage 3 B0, `.claude/rules/connector-roles.md`):
- * what role resolution needs from the outside. Not wired yet — the core
- * connectors register from `composition/connectors.ts` (after S2), and the
- * admin's choice gets its table with A1.
+ * what role resolution needs from the outside. The core connectors register
+ * from `composition/connectors.ts`; the admin's choice lives behind the company
+ * handle (`connector_role_choices`).
  *
  * The core app asks for a role (`shared/core/connector-roles.ts`), never for a
  * service by name; the connector that serves it stays behind this seam.

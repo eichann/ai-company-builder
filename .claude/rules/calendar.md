@@ -19,8 +19,9 @@ paths:
 The task list shows the member's meetings of today next to their tasks. The server reads the
 member's **own** calendar now, with **their own** permission, and keeps nothing (owner: 予定は
 やることにしない — read and show, no copy on the server). Today the reader is Google (the
-予定と議事録を読む grant of milestone 4, `google-connector.md`); in stage 3 the core role
-「予定を読む」 takes its place, so everything Google-specific stays in one module.
+予定と議事録を読む grant of milestone 4, `google-connector.md`), reached through the core role
+「予定を読む」 (`connector-roles.md` "Role providers": `roleProviders.calendar`; no usable
+connector → `stopped`), so everything Google-specific stays in one module.
 
 ## Layers
 

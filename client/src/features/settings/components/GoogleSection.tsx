@@ -16,7 +16,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
     <div ref={loadRef} className="space-y-5 px-8 pb-8 pt-7">
       <SectionHeader
         title="Google"
-        description="あなたの Google アカウントで「Google で許可」をすると、ACB が予定と議事録を読めるようになります。メールは、あなたが画面で送るときだけ送ります。いつでも「許可をやめる」で止められます。"
+        description="あなたの Google アカウントで「Google で許可」をすると、ACB が予定と議事録を読めるようになります。メールは、あなたが画面で送るときだけ送ります。「受信を読む」は、許可したときだけ届いたメールをその場で読みます（中身は ACB に残しません）。いつでも「許可をやめる」で止められます。"
       />
       {!data && !error ? (
         <div className="flex items-center gap-2 py-10 text-[13px] text-zinc-500"><SpinnerGap size={16} className="animate-spin" />読み込み中…</div>
@@ -40,7 +40,7 @@ export function GoogleSection({ companyId }: { companyId: string }) {
             ) : (
               <p className="text-[13px] text-zinc-600 dark:text-zinc-300">まだ許可していません。</p>
             )}
-            {view.domainHint && (view.connectFeatures || view.canAddMail) && (
+            {view.domainHint && (view.connectFeatures || view.canAddMail || view.canAddInbox) && (
               <p className="text-[12px] text-zinc-500">{view.domainHint}</p>
             )}
             <div className="flex flex-wrap gap-2 pt-1">
@@ -49,6 +49,9 @@ export function GoogleSection({ companyId }: { companyId: string }) {
               )}
               {view.canAddMail && (
                 <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['mail'])}>メールを送る許可も足す</Button>
+              )}
+              {view.canAddInbox && (
+                <Button size="sm" disabled={busy || waiting} onClick={() => void connect(['inbox'])}>受信を読む許可も足す</Button>
               )}
               {view.canDisconnect && !confirming && (
                 <Button size="sm" variant="ghost" disabled={busy} onClick={() => setConfirming(true)}>許可をやめる</Button>

@@ -154,6 +154,14 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       conn.prepare('UPDATE connector_grants SET last_used_at = ? WHERE company_id = ? AND provider = ? AND user_id = ?').run(at, companyId, provider, userId)
     },
 
+    setFeaturesOff(provider, userId, featuresOff, at, change) {
+      conn.transaction(() => {
+        conn.prepare('UPDATE connector_grants SET features_off = ?, updated_at = ? WHERE company_id = ? AND provider = ? AND user_id = ?')
+          .run(JSON.stringify(featuresOff), at, companyId, provider, userId)
+        addHistory(change)
+      })()
+    },
+
     putPending(row) {
       conn.prepare(`INSERT INTO oauth_pending (company_id, state_hash, provider, user_id, scopes, verifier_sealed, created_at, expires_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
@@ -174,6 +182,23 @@ export function sqliteConnectorRepository(conn: Database.Database, companyId: st
       return (conn.prepare('SELECT id, provider, action, user_id, at, by_user, change FROM connector_history WHERE company_id = ? AND provider = ? ORDER BY at DESC, rowid DESC LIMIT ?')
         .all(companyId, provider, limit) as HistoryRow[])
         .map(r => ({ id: r.id, provider: r.provider as ConnectorProvider, action: r.action, userId: r.user_id, at: r.at, by: r.by_user, change: r.change }))
+    },
+
+    roleChoice(role) {
+      const r = conn.prepare('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?').get(companyId, role) as { connector_id: string } | undefined
+      return r?.connector_id ?? null
+    },
+    setRoleChoice(role, connectorId, at, by, historyId) {
+      conn.transaction(() => {
+        if (connectorId === null) conn.prepare('DELETE FROM connector_role_choices WHERE company_id = ? AND role = ?').run(companyId, role)
+        else {
+          conn.prepare(`INSERT INTO connector_role_choices (company_id, role, connector_id, updated_at, updated_by) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT (company_id, role) DO UPDATE SET connector_id = excluded.connector_id, updated_at = excluded.updated_at, updated_by = excluded.updated_by`)
+            .run(companyId, role, connectorId, at, by)
+        }
+        conn.prepare('INSERT INTO connector_history (id, company_id, provider, action, user_id, at, by_user, change) VALUES (?, ?, ?, ?, NULL, ?, ?, ?)')
+          .run(historyId, companyId, 'roles', 'role-choice', at, by, JSON.stringify({ role, connectorId }))
+      })()
     },
   }
 }

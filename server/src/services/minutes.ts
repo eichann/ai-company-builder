@@ -38,9 +38,9 @@ import type { MinutesBundleSummary, MinutesCheckResult, MinutesFolderSetting, Mi
 import type { Clock } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { TokenDigest } from '../ports/key-broker'
+import { MeetingReadFailed as GoogleReadFailed, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { RecordRow } from '../ports/records'
 import type { Member } from './access'
-import { GoogleReadFailed, type GoogleMeetings, type MeetEvent, type MeetingAttendee } from './google-meetings'
 import { ok, refuse, type Outcome, type Refusal } from './outcome'
 import { recordReader, type RecordReader } from './record-access'
 import type { ServiceActor, ServiceRecordWriter } from './record-engine'
@@ -57,7 +57,8 @@ export interface MinutesMember {
 export interface MinutesServiceDeps {
   companyData: CompanyDataSource
   writer: ServiceRecordWriter
-  meetings: GoogleMeetings
+  /** The core role 会議の記録を読む, routed to the company's connector (connector-roles.md). */
+  meetings: MeetingRecordsReader
   /** The company's members with their ACB email and display name (compared only; never logged). */
   members: (companyId: string) => MinutesMember[]
   clock: Clock
@@ -132,7 +133,10 @@ export function googleRefusal(err: GoogleReadFailed): Refusal {
     if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'token-refused'].includes(r.reason)) {
       return refuse('conflict', 'Google の許可がありません。アプリの「設定」→「Google」で、議事録を読む許可をしてください。', { code: 'GOOGLE_NOT_CONNECTED' })
     }
-    if (['operator-stopped', 'not-configured', 'off', 'vault-off', 'not-member', 'practice-real-secret'].includes(r.reason)) {
+    if (r.reason === 'feature-off') {
+      return refuse('conflict', '「予定と議事録を読む」をオフにしています。アプリの「設定」→「Google」でオンにしてください。', { code: 'GOOGLE_NOT_CONNECTED' })
+    }
+    if (['operator-stopped', 'not-configured', 'off', 'vault-off', 'not-member', 'practice-real-secret', 'no-connector', 'choice-needed'].includes(r.reason)) {
       return refuse('forbidden', 'この会社では、いま Google につなげません（止められているか、まだ設定されていません）。', { code: 'GOOGLE_STOPPED' })
     }
   }

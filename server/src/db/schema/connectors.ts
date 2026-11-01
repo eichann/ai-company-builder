@@ -114,6 +114,17 @@ export const connectorSchema = `
       UNIQUE (company_id, user_id, request_key)
     );
 
+    -- Which core connector serves a role when two could (connector-roles.md; the
+    -- admin chooses once). The history is in connector_history (provider 'roles').
+    CREATE TABLE IF NOT EXISTS connector_role_choices (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      connector_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      updated_by TEXT NOT NULL,
+      PRIMARY KEY (company_id, role)
+    );
+
     CREATE INDEX IF NOT EXISTS idx_connector_history_company ON connector_history(company_id, at);
     CREATE INDEX IF NOT EXISTS idx_oauth_pending_expires ON oauth_pending(company_id, expires_at);
 `

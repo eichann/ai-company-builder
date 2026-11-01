@@ -436,6 +436,12 @@ const MATRIX: Row[] = [
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  // 「つないでいるサービス」 (connector-roles.md): owners / admins; a role or connector name is not an object.
+  r('GET /api/companies/:companyId/connectors', w => ({ path: `${C(w)}/connectors` }), [200, 200, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/connector-roles/:role', w => ({ path: `${C(w)}/connector-roles/calendar`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  r('PUT /api/companies/:companyId/connectors/:connectorId/enabled', w => ({ path: `${C(w)}/connectors/google/enabled`, body: {} }), [400, 400, 403, 403, 404, 401]),
+  // 受信を読む … off / on (google-connector.md): any member, their own grant only.
+  r('PUT /api/companies/:companyId/me/google/features', w => ({ path: `${C(w)}/me/google/features`, body: {} }), [400, 400, 400, 400, 404, 401]),
   // lane A ▲
   // lane B ▼
   // Matching people and companies (名寄せ, identity.md): any member, only records they can read;
@@ -607,6 +613,8 @@ const NOT_OBJECT_IDS: Record<string, string> = {
 
   // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
   // lane A ▼
+  'PUT /api/companies/:companyId/connector-roles/:role': 'a role name (connector-roles.ts): sets this company\'s own choice for it',
+  'PUT /api/companies/:companyId/connectors/:connectorId/enabled': 'a built-in connector name (builtin-connectors.ts): switches this company\'s own connection',
   // lane A ▲
   // lane B ▼
   'GET /api/records-ai/identities/records/:recordId': 'the AI\'s routes: the company comes from the record token, never from the URL (tests/unit/identities.test.ts)',

@@ -9,7 +9,8 @@
  * the operator's stop file (`<PLUGINS_DIR>/stopped` naming `google` or `*`),
  * the company's client present and on, the vault on, the caller still a
  * member, the member's grant active (an admin's stop, 「すべての鍵を止める」
- * and the member's own 「許可をやめる」 all end it), the scope granted.
+ * and the member's own 「許可をやめる」 all end it), the scope granted, and the
+ * scope's feature not turned off by the member (`features_off`).
  *
  * Secrets: the client secret and the refresh token come out of the vault
  * just before they are sent; the access token lives only in this module's
@@ -26,7 +27,7 @@
  * practice value is never sent (`practice-real-secret`).
  */
 import { checkUpstreamPath } from '../../shared/core/upstream-path'
-import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
+import { GOOGLE_API_HOSTS, GOOGLE_AUTHORIZE_PATH, GOOGLE_SCOPE, googleFeatureOfScope, isPracticeGoogleSecret, type GoogleApi } from '../../shared/core/google'
 import { isDrivePickerTokenScope } from '../../shared/core/google-drive'
 import type { CompanyDataSource } from '../ports/company-data'
 import type { ConnectorGrantRow } from '../ports/connectors'
@@ -50,6 +51,8 @@ const BEFORE_SENDING: readonly UpstreamFailure[] = ['private-address', 'dns', 't
 export type GoogleStopReason =
   | 'operator-stopped' | 'not-configured' | 'off' | 'vault-off' | 'not-member'
   | 'no-grant' | 'grant-revoked' | 'grant-stopped' | 'scope-not-granted'
+  /** The member turned this feature off inside their grant (`features_off`, e.g. 受信を読む). */
+  | 'feature-off'
   | 'practice-real-secret' | 'bad-path' | 'token-refused' | 'token-unavailable'
   /** Google answered the Picker's token with more than `drive.file`: it is not handed out. */
   | 'picker-scope-too-wide'
@@ -225,6 +228,17 @@ export function createGoogleClient(deps: GoogleClientDeps) {
     return null
   }
 
+  /**
+   * A scope the call needs: granted, and its feature not turned off by the
+   * member (member-oauth.md "Feature toggles": refused like a scope not granted).
+   */
+  function scopeStop(grant: ConnectorGrantRow, scope: string): GoogleStopReason | null {
+    if (!grant.scopes.includes(scope)) return 'scope-not-granted'
+    const feature = googleFeatureOfScope(scope)
+    if (feature !== null && grant.featuresOff.includes(feature)) return 'feature-off'
+    return null
+  }
+
   /** A usable access token for the member's active grant (refreshing it when needed). */
   async function accessTokenFor(companyId: string, userId: string, grant: ConnectorGrantRow): Promise<{ token: string } | { stop: GoogleStopReason } | { failure: UpstreamFailure | 'answer-too-large' }> {
     const key = cacheKey(companyId, userId, grant.grantId)
@@ -353,7 +367,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
       const grant = connectors.grant('google', userId)
       const stop = grantStop(grant)
       if (stop) return { ok: false, reason: stop }
-      if (!grant!.scopes.includes(GOOGLE_SCOPE.driveFile)) return { ok: false, reason: 'scope-not-granted' }
+      const scoped = scopeStop(grant!, GOOGLE_SCOPE.driveFile)
+      if (scoped) return { ok: false, reason: scoped }
       const stored = connectors.refreshToken('google', userId)
       if (!stored || stored.grantId !== grant!.grantId) return { ok: false, reason: 'grant-revoked' }
       const creds = await clientCredentials(companyId)
@@ -402,7 +417,8 @@ export function createGoogleClient(deps: GoogleClientDeps) {
         const grant = connectors.grant('google', userId)
         const stop = grantStop(grant)
         if (stop) return notSent(stop)
-        if (!grant!.scopes.includes(req.scope)) return notSent('scope-not-granted')
+        const scoped = scopeStop(grant!, req.scope)
+        if (scoped) return notSent(scoped)
         const token = await accessTokenFor(companyId, userId, grant!)
         if ('stop' in token) return notSent(token.stop)
         if ('failure' in token) return { ok: false, kind: 'not-sent', reason: token.failure }

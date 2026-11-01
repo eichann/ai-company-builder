@@ -5,17 +5,22 @@
  *
  * Owner decisions (design §5-2, §9 q8/q10): ask only for what a feature
  * needs, when it is first needed (minutes first, `gmail.send` when mail is
- * first used, `drive.file` when Drive is first used); never `drive`,
- * `drive.readonly`, `gmail.compose`, `gmail.readonly`, `gmail.metadata` or
- * domain-wide delegation (`GOOGLE_NEVER_SCOPES`). The Google account must be the
- * member's own ACB email.
+ * first used, `drive.file` when Drive is first used, `gmail.readonly` when
+ * 受信を読む is first used); never `drive`, `drive.readonly`, `gmail.compose`,
+ * `gmail.metadata`, `gmail.modify` or domain-wide delegation
+ * (`GOOGLE_NEVER_SCOPES`). `gmail.readonly` is allowed only as the `inbox`
+ * feature (owner decision 2026-11-01, spec §7-1: the member can turn it off).
+ * The Google account must be the member's own ACB email.
  *
  * Pure: imports nothing outside shared/core.
  */
 import { normalizeEmail } from './mail'
 
-export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive'] as const
-/** minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く (`drive.file` only). */
+export const GOOGLE_FEATURES = ['minutes', 'mail', 'drive', 'inbox'] as const
+/**
+ * minutes = 予定と議事録を読む, mail = メールを送る, drive = Drive で選んだものを読む・置く
+ * (`drive.file` only), inbox = 受信を読む (`gmail.readonly`).
+ */
 export type GoogleFeature = typeof GOOGLE_FEATURES[number]
 
 export const GOOGLE_SCOPE = {
@@ -31,6 +36,8 @@ export const GOOGLE_SCOPE = {
    * (owner decision 2026-11-01: least privilege; never `drive` / `drive.readonly`).
    */
   driveFile: 'https://www.googleapis.com/auth/drive.file',
+  /** 受信を読む (the `inbox` feature only): the member's received mail, read when needed, never stored. */
+  gmailReadonly: 'https://www.googleapis.com/auth/gmail.readonly',
 } as const
 
 /** Scopes ACB never asks for, holds or hands out (owner decisions; `google-connector.md`). */
@@ -39,7 +46,6 @@ export const GOOGLE_NEVER_SCOPES: readonly string[] = [
   'https://www.googleapis.com/auth/drive.readonly',
   'https://www.googleapis.com/auth/drive.metadata.readonly',
   'https://www.googleapis.com/auth/gmail.compose',
-  'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.metadata',
   'https://www.googleapis.com/auth/gmail.modify',
   'https://mail.google.com/',
@@ -53,6 +59,7 @@ export const GOOGLE_FEATURE_SCOPES: Record<GoogleFeature, readonly string[]> = {
   minutes: [GOOGLE_SCOPE.calendarEventsReadonly, GOOGLE_SCOPE.meetReadonly, GOOGLE_SCOPE.driveMeetReadonly],
   mail: [GOOGLE_SCOPE.gmailSend],
   drive: [GOOGLE_SCOPE.driveFile],
+  inbox: [GOOGLE_SCOPE.gmailReadonly],
 }
 
 /** Every scope ACB may hold. Anything else Google reports as granted is not stored. */
@@ -61,6 +68,7 @@ export const GOOGLE_ALLOWED_SCOPES: readonly string[] = [
   ...GOOGLE_FEATURE_SCOPES.minutes,
   ...GOOGLE_FEATURE_SCOPES.mail,
   ...GOOGLE_FEATURE_SCOPES.drive,
+  ...GOOGLE_FEATURE_SCOPES.inbox,
 ]
 
 /** Google's short names → the long form it reports. */
@@ -91,6 +99,20 @@ export function normalizeGrantedScopes(raw: string | readonly string[]): string[
 /** The features whose every scope is granted. */
 export function googleFeaturesOf(scopes: readonly string[]): GoogleFeature[] {
   return GOOGLE_FEATURES.filter(f => GOOGLE_FEATURE_SCOPES[f].every(s => scopes.includes(s)))
+}
+
+/**
+ * The feature a scope belongs to (each feature scope belongs to exactly one),
+ * null for the identity scopes. The Google client refuses a call whose
+ * feature the member turned off (`connector_grants.features_off`).
+ */
+export function googleFeatureOfScope(scope: string): GoogleFeature | null {
+  return GOOGLE_FEATURES.find(f => GOOGLE_FEATURE_SCOPES[f].includes(scope)) ?? null
+}
+
+/** A member's list of turned-off features as stored → the known features only (unknown entries are ignored). */
+export function googleFeaturesOff(raw: readonly string[]): GoogleFeature[] {
+  return GOOGLE_FEATURES.filter(f => raw.includes(f))
 }
 
 // ---------------------------------------------------------------------------

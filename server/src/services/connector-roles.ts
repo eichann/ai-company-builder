@@ -11,8 +11,8 @@
  * next call: a switch off or an operator stop counts at once), and the admin's
  * choice when two could serve the role.
  *
- * Not wired yet: `composition/connectors.ts` (after S2) creates it and the
- * core connectors register (A1 Google, A3 Slack).
+ * Created in `composition/connectors.ts`, where the core connectors register
+ * (Google now; Slack with A3).
  */
 import {
   CONNECTOR_ROLE_NAMES, resolveRole, roleServingProblems,

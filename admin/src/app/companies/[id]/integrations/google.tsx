@@ -31,6 +31,7 @@ export const GOOGLE_FEATURE_TEXT: Record<GoogleFeature, string> = {
   minutes: '予定と議事録を読む',
   mail: 'メールを送る',
   drive: 'Drive で選んだものを読む・置く',
+  inbox: '受信を読む',
 }
 
 const GRANT_STATUS_TEXT: Record<GoogleGrantSummary['status'], string> = {
@@ -61,7 +62,8 @@ export function GoogleSection({ companyId, nameOf }: { companyId: string; nameOf
         </CardTitle>
         <CardDescription>
           メンバーが「Google で許可」をすると、ACB がその人の予定と Meet の議事録を読めるようになり、
-          本人が「確かめて送る」を押したときだけ、その人の Gmail からメールを送れます。何を読むか・送るかは、メンバーごとに本人が許可します。
+          本人が「確かめて送る」を押したときだけ、その人の Gmail からメールを送れます。本人が「受信を読む」も許可すると、届いたメールを
+          ACB がその場で読めるようになります（メールの中身は ACB に残しません）。何を読むか・送るかは、メンバーごとに本人が許可し、本人がいつでもオフにできます。
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-6">
@@ -252,7 +254,7 @@ function GoogleBody({ companyId, view, onView, nameOf }: {
                 <div className="space-y-0.5">
                   <div className="font-medium">{g.memberName || g.memberEmail || nameOf(g.userId)}</div>
                   <div className="text-xs text-muted-foreground">
-                    Google: {g.googleEmail} ・ {g.features.length > 0 ? g.features.map((f) => GOOGLE_FEATURE_TEXT[f]).join('・') : '（なし）'}
+                    Google: {g.googleEmail} ・ {g.features.length > 0 ? g.features.map((f) => `${GOOGLE_FEATURE_TEXT[f]}${g.featuresOff.includes(f) ? '（本人がオフ）' : ''}`).join('・') : '（なし）'}
                     {g.lastUsedAt ? ` ・ 最後に使った日時 ${formatDateTime(g.lastUsedAt)}` : ''}
                   </div>
                 </div>

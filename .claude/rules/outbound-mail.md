@@ -75,7 +75,10 @@ In this order, nothing sent unless all pass:
 1. records on, the author's own draft, state `draft` (else 409 `NOT_DRAFT`);
 2. the hash equals the current version's (record and fixed payload), else 409 `CONTENT_CHANGED`
    「内容が変わりました。もう一度確かめてください。」 with the current draft;
-3. the member's Google grant is active with `gmail.send` (else 409 `GOOGLE_CONSENT_NEEDED`,
+3. through the role メールを送る (`MailSender.senderAccount`, `connector-roles.md`): the member's
+   Google grant is active with `gmail.send` and メールを送る not turned off (409
+   `GOOGLE_FEATURE_OFF` `feature: mail`; no usable connector → 503 `GOOGLE_UNAVAILABLE`
+   `no-connector`) (else 409 `GOOGLE_CONSENT_NEEDED`,
    `needsGoogleConsent: 'mail'` — the card offers 「メールを送る許可」 = G3's
    `google:connect(['mail'])`), and its account is the draft's From (else 409 `FROM_CHANGED`);
 4. every recipient is still at its source right now (only the sources the version uses are
@@ -94,8 +97,8 @@ In this order, nothing sent unless all pass:
    summary = subject, `counterpart_text` = recipient **domains** only, `source_ref` `gmail:<id>`,
    folder = the まとまり's; links `bundle` and, when the まとまり links a 相手, `counterpart`). 4xx / 429 / not sent → stays `draft` (409 `SEND_REFUSED` / 503
    `GOOGLE_UNAVAILABLE`). A lost answer or a 5xx → `unknown`
-   「届いたか分かりません。Gmail の送信済みを確かめてください。」; ACB cannot read Gmail (no
-   `gmail.readonly`), so the person answers `POST …/resolve { sent }`: true → `sent`, false →
+   「届いたか分かりません。Gmail の送信済みを確かめてください。」; ACB does not look in Gmail's sent mail (受信を読む
+   reads the inbox only, and only for a member who allowed it), so the person answers `POST …/resolve { sent }`: true → `sent`, false →
    `draft` (sending again is a new 「確かめて送る」).
 
 The AI emergency stop does not block a person's send (design §4-5); the Google stops do. It

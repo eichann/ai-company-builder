@@ -14,6 +14,7 @@
  * Any member (the desktop app's 設定 → Google):
  *   GET    /me/google                   my permission: connected, account, what is allowed
  *   POST   /me/google/connect           { features } → { authorizeUrl } (opened in the system browser)
+ *   PUT    /me/google/features          { feature, on } — the member turns an allowed feature off / on (受信を読む …)
  *   DELETE /me/google                   「許可をやめる」 (revoked at Google too)
  *
  * No answer ever carries a client secret, a token, a code or a PKCE value.
@@ -90,6 +91,12 @@ googleRoute.post('/me/google/connect', async (c) => {
   const member = await authAndAuthorize(c)
   if (member instanceof Response) return member
   return answer(c, await googleConnector.connect(member, await jsonBody(c)))
+})
+
+googleRoute.put('/me/google/features', async (c) => {
+  const member = await authAndAuthorize(c)
+  if (member instanceof Response) return member
+  return answer(c, await googleConnector.setFeature(member, await jsonBody(c)))
 })
 
 googleRoute.delete('/me/google', async (c) => {

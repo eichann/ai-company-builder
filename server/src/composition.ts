@@ -77,8 +77,6 @@ import { createPluginOperationService } from './services/plugin-operations'
 import { createPluginMappingCheckService } from './services/plugin-mapping-check'
 import { createExternalRecordWriter, createServiceRecordWriter } from './services/record-engine'
 import { createDecisionService } from './services/decisions'
-import { createGoogleMeetings } from './services/google-meetings'
-import { createGoogleCalendar } from './services/google-calendar'
 import { createCalendarService } from './services/calendar'
 import { DEFAULT_COMPANY_TIME_ZONE } from '../shared/core/calendar'
 import { createMinutesService } from './services/minutes'
@@ -90,9 +88,9 @@ import { createGoogleDriveService } from './services/google-drive'
 import { createMemberOAuth, oauthCallbackPath } from './services/member-oauth'
 import { createApprovalService } from './services/approvals'
 import { builtinBrokerService, relayCredentialValue } from '../shared/core/key-broker'
-import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH, GOOGLE_SCOPE } from '../shared/core/google'
+import { GOOGLE_AUTHORIZE_HOST, GOOGLE_CALLBACK_PATH } from '../shared/core/google'
 import { GOOGLE_PICKER_PAGE_PATH } from '../shared/core/google-drive'
-import { wireConnectorsLane } from './composition/connectors'
+import { wireConnectorsLane, wireCoreConnectors } from './composition/connectors'
 import { wireInboxLane } from './composition/inbox'
 import { wirePluginsLane } from './composition/plugins'
 
@@ -399,12 +397,16 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       : 'https://apis.google.com',
   })
 
-  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the one Google client
+  // The core roles (connector-roles.md): Google registers as a built-in core connector; the core
+  // services below ask a role (予定を読む, 会議の記録を読む, メールを送る), never Google (composition/connectors.ts).
+  const coreConnectors = wireCoreConnectors({ ...shared, googleClient, googleConnector })
+
+  // The minutes intake (milestone 4 G7, minutes.md): reads meetings through the role 会議の記録を読む
   // with the member's own permission; makes `meeting` records through the service writer.
   const minutes = createMinutesService({
     ...shared,
     writer: serviceRecords,
-    meetings: createGoogleMeetings((companyId, userId, req) => googleClient.request(companyId, userId, req)),
+    meetings: coreConnectors.roleProviders.meetings,
     tokenDigest: sha256TokenDigest,
     members: companyId => {
       const rows = repos.memberships.listByCompany(companyId)
@@ -416,19 +418,16 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
     },
   })
 
-  // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the one
-  // Google client; Google's specifics stay in google-calendar.ts (the role 「予定を読む」 replaces it).
+  // 「今日の予定」 (stage 2 S7a, calendar.md): the member's own calendar, read now through the role
+  // 予定を読む (Google's specifics stay in google-calendar.ts).
   const calendar = createCalendarService({
     clock: shared.clock,
-    reader: createGoogleCalendar({
-      request: (companyId, userId, req) => googleClient.request(companyId, userId, req),
-      internalDomain: companyId => shared.companyData.forCompany(companyId).connectors.client()?.domain ?? null,
-    }),
+    reader: coreConnectors.roleProviders.calendar,
     timeZoneOf: () => DEFAULT_COMPANY_TIME_ZONE,
   })
 
-  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own Google
-  // permission; the AI drafts only (records-ai routes have no send).
+  // Outbound mail (milestone 4 G8, outbound-mail.md): a person sends with their own permission
+  // (the role メールを送る); the AI drafts only (records-ai routes have no send).
   const outboundMail = createOutboundMailService({
     ...shared,
     writer: serviceRecords,
@@ -450,9 +449,8 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
       return r.ok ? r.value : null
     },
     bundleContacts: (member, bundleId) => pluginImport.recordContacts(member, bundleId),
-    gmailSend: (companyId, userId, raw) => googleClient.request(companyId, userId, {
-      api: 'gmail', method: 'POST', path: '/gmail/v1/users/me/messages/send', body: { raw }, scope: GOOGLE_SCOPE.gmailSend, operation: 'gmail.send',
-    }),
+    // The role メールを送る (the member's own permission at the company's mail connector).
+    mail: coreConnectors.roleProviders.mailSender,
     companyIds: () => repos.companies.allIds(),
   })
 
@@ -468,7 +466,7 @@ export function createServices(conn: Database.Database, brokerCipher: BrokerCiph
   // under composition/ (.claude/rules/server.md "Lane markers"); each lane edits
   // only its own call, and the marker lines keep the three calls apart for git.
   // lane A ▼
-  const connectorsLane = wireConnectorsLane({ conn })
+  const connectorsLane = wireConnectorsLane({ conn, core: coreConnectors })
   // lane B ▼
   const inboxLane = wireInboxLane({ conn, ...shared })
   // lane C ▼

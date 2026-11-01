@@ -13,7 +13,7 @@
  * company's Workspace domain is accepted — anything else stores nothing.
  */
 import {
-  googleFeaturesOf, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
+  googleFeaturesOf, googleFeaturesOff, googleScopesFor, isGoogleFeature, isPracticeGoogleSecret, normalizeGoogleDomain, normalizeGrantedScopes,
   checkGoogleClientId, checkGoogleClientSecret, GOOGLE_FEATURES, type GoogleFeature,
 } from '../../shared/core/google'
 import { checkPickerApiKey, checkPickerAppId } from '../../shared/core/google-drive'
@@ -109,6 +109,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         memberName: people.get(g.userId)?.name ?? null,
         googleEmail: g.accountEmail,
         features: googleFeaturesOf(g.scopes),
+        featuresOff: googleFeaturesOff(g.featuresOff),
         scopes: g.scopes,
         status: g.status,
         createdAt: g.createdAt,
@@ -135,6 +136,7 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
       status: grant?.status ?? null,
       googleEmail: grant?.accountEmail ?? null,
       features: grant?.status === 'active' ? googleFeaturesOf(grant.scopes) : [],
+      featuresOff: grant?.status === 'active' ? googleFeaturesOff(grant.featuresOff).filter(f => googleFeaturesOf(grant.scopes).includes(f)) : [],
       domain: client?.domain ?? null,
       practice: deps.practiceGoogle,
     }
@@ -165,6 +167,25 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
   })
 
   return {
+    /**
+     * Whether the company can use Google now (the core connector's `usable`,
+     * connector-roles.md): set up, on, the vault on, not stopped by the operator.
+     */
+    async usable(companyId: string): Promise<boolean> {
+      return (await unavailableReason(companyId)) === null
+    },
+
+    /** The admin list's state of the core connector (「つないでいるサービス」). */
+    async state(companyId: string): Promise<{ configured: boolean; enabled: boolean; operatorStopped: boolean; usable: boolean }> {
+      const client = connectorsOf(companyId).client()
+      return {
+        configured: client !== null,
+        enabled: client?.enabled ?? false,
+        operatorStopped: await deps.operatorStopped(),
+        usable: (await unavailableReason(companyId)) === null,
+      }
+    },
+
     /** GET …/google (owner/admin). */
     async adminView(member: Member): Promise<Outcome<GoogleAdminView>> {
       const allowed = requireFullAccess(member, GOOGLE_FORBIDDEN)
@@ -309,6 +330,25 @@ export function createGoogleConnector(deps: GoogleConnectorDeps) {
         // A refresh token comes only with a consent: ask for it unless an active grant already holds one.
         ...(active ? {} : { prompt: 'consent' }),
       })))
+    },
+
+    /**
+     * PUT …/me/google/features { feature, on } (any member, their own grant only):
+     * turns one allowed feature off or on again (e.g. 受信を読む). From the next
+     * call the Google client refuses a call of a feature that is off.
+     */
+    async setFeature(member: Member, body: unknown): Promise<Outcome<MyGoogle>> {
+      if (!isObject(body) || !isGoogleFeature(body.feature) || typeof body.on !== 'boolean') {
+        return refuse('bad-request', `feature must be one of: ${GOOGLE_FEATURES.join(', ')}; on must be true or false`)
+      }
+      const grant = connectorsOf(member.companyId).grant('google', member.userId)
+      if (!grant || grant.status !== 'active') return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
+      if (!googleFeaturesOf(grant.scopes).includes(body.feature)) {
+        return refuse('conflict', 'この機能はまだ許可していません。先に「Google で許可」で足してください。', { code: 'GOOGLE_FEATURE_NOT_GRANTED' })
+      }
+      const r = memberOAuth.setFeatureOff('google', member, body.feature, !body.on)
+      if (!r.ok) return refuse('conflict', 'まだ Google で許可していません。', { code: 'GOOGLE_NOT_CONNECTED' })
+      return ok(await myView(member))
     },
 
     /** DELETE …/me/google: 「許可をやめる」 — revoked at Google too (best effort), then nothing kept. */

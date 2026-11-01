@@ -79,6 +79,7 @@ const TYPES: Record<string, string> = {
   SandboxImpact: 'SandboxImpact',
   Broker: 'BrokerView',
   Google: 'GoogleAdminView',
+  CoreConnectors: 'CoreConnectorsView',
   MinutesFolder: 'MinutesFolderSetting',
   Plugins: '{ plugins: PluginListItem[] }',
   Plugin: 'PluginDetail',
@@ -232,6 +233,7 @@ beforeAll(async () => {
   const { keyBrokerRoute } = await import('../../src/routes/key-broker')
   const { pluginsRoute } = await import('../../src/routes/plugins')
   const { googleRoute } = await import('../../src/routes/google')
+  const { coreConnectorsRoute } = await import('../../src/routes/core-connectors')
   await (await import('../../src/composition')).services.pluginShelf.load()
   // The same mounts as src/app.ts.
   app = new Hono()
@@ -249,6 +251,7 @@ beforeAll(async () => {
   app.route('/api/companies/:companyId', keyBrokerRoute)
   app.route('/api/companies/:companyId', pluginsRoute)
   app.route('/api/companies/:companyId', googleRoute)
+  app.route('/api/companies/:companyId', coreConnectorsRoute)
   app.route('/api/companies/:companyId', (await import('../../src/routes/minutes')).minutesRoute)
   app.route('/api', invitationsRoute)
 
@@ -412,6 +415,14 @@ describe('admin API types (admin/src/lib/api.ts) match the server', () => {
     const chosen = await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: '営業部' })
     expect(chosen.folder).toBe('営業部')
     await expectShape('MinutesFolder', USERS.owner, 'PUT', `${base}/google/minutes-folder`, { folder: null })
+  })
+
+  it('つなぎ先 → つないでいるサービス', async () => {
+    const view = await expectShape('CoreConnectors', USERS.owner, 'GET', `${base}/connectors`)
+    expect(view.connectors.map((c: Loose) => c.id)).toEqual(['google'])
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: 'google' })
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connector-roles/mail`, { connectorId: null })
+    await expectShape('CoreConnectors', USERS.owner, 'PUT', `${base}/connectors/google/enabled`, { enabled: true })
   })
 
   it('つなぎ先 (connector plugins)', async () => {
@@ -591,6 +602,17 @@ describe('the admin console\'s requests do what the admin means on the server', 
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
     await A.googleApi.setEnabled(CO, true)
     expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+  })
+
+  it('つないでいるサービス: the switch and the role choice reach the server as chosen', async () => {
+    await A.coreConnectorsApi.setEnabled(CO, 'google', false)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(0)
+    await A.coreConnectorsApi.setEnabled(CO, 'google', true)
+    expect(row('SELECT enabled FROM google_oauth_clients WHERE company_id = ?', CO).enabled).toBe(1)
+    await A.coreConnectorsApi.chooseRole(CO, 'calendar', 'google')
+    expect(row('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?', CO, 'calendar').connector_id).toBe('google')
+    await A.coreConnectorsApi.chooseRole(CO, 'calendar', null)
+    expect(row('SELECT connector_id FROM connector_role_choices WHERE company_id = ? AND role = ?', CO, 'calendar')).toBeUndefined()
   })
 
   it('つなぎ先: version, key, mapping with its auto acknowledgement, restore and the switch reach the server as chosen', async () => {

@@ -1,6 +1,7 @@
 /**
  * Reading meetings from Google for the minutes (milestone 4 G7,
- * `.claude/rules/minutes.md`): the member's calendar events in a window, the
+ * `.claude/rules/minutes.md`) — Google's side of the core role 会議の記録を読む
+ * (`ports/meeting-records.ts`, `.claude/rules/connector-roles.md`): the member's calendar events in a window, the
  * Meet conference of an event, its smart notes and transcripts, and a
  * document's text and version. Every call goes through the one Google client
  * (`services/google-client.ts` `request`) with the member's own grant, so
@@ -12,40 +13,14 @@
  */
 import { GOOGLE_SCOPE } from '../../shared/core/google'
 import { MINUTES_TEXT_MAX } from '../../shared/core/minutes'
+import { MeetingReadFailed as GoogleReadFailed, type MeetArtifactDoc, type MeetEvent, type MeetingAttendee, type MeetingRecordsReader } from '../ports/meeting-records'
 import type { GoogleRequest, GoogleResult } from './google-client'
 
 export type GoogleRequester = (companyId: string, userId: string, req: GoogleRequest) => Promise<GoogleResult>
 
-/** A Google call that did not give an answer we can use (the caller maps it to a refusal). */
-export class GoogleReadFailed extends Error {
-  constructor(readonly result: Extract<GoogleResult, { ok: false }> | { ok: false; kind: 'unreadable'; reason: 'unreadable' }) {
-    super(`google read failed: ${result.kind} ${result.reason}`)
-  }
-}
-
-export interface MeetingAttendee {
-  /** Lower-case address as Google gave it (never logged). */
-  email: string
-  /** Google's display name (may be empty). */
-  name: string
-  organizer: boolean
-}
-
-export interface MeetEvent {
-  eventId: string
-  title: string
-  /** ISO 8601 (UTC). */
-  start: string
-  end: string
-  meetingCode: string
-  organizer: string | null
-  attendees: MeetingAttendee[]
-}
-
-export interface MeetArtifactDoc {
-  kind: 'notes' | 'transcript'
-  docId: string
-}
+/** A Google call that did not give an answer we can use (the minutes map it to a refusal). */
+export { MeetingReadFailed as GoogleReadFailed } from '../ports/meeting-records'
+export type { MeetArtifactDoc, MeetEvent, MeetingAttendee } from '../ports/meeting-records'
 
 const MAX_EVENT_PAGES = 4
 const MEETING_CODE_RE = /^[a-z]{3}-[a-z]{4}-[a-z]{3}$/
@@ -87,7 +62,7 @@ export function cleanExportText(text: string): string {
   return text.replace(/^\uFEFF/, '').replace(/\r\n?/g, '\n').normalize('NFC')
 }
 
-export function createGoogleMeetings(request: GoogleRequester) {
+export function createGoogleMeetings(request: GoogleRequester): MeetingRecordsReader {
   async function call(companyId: string, userId: string, req: GoogleRequest): Promise<Extract<GoogleResult, { ok: true }>> {
     const r = await request(companyId, userId, req)
     if (!r.ok) throw new GoogleReadFailed(r)
@@ -197,4 +172,4 @@ export function createGoogleMeetings(request: GoogleRequester) {
   }
 }
 
-export type GoogleMeetings = ReturnType<typeof createGoogleMeetings>
+export type GoogleMeetings = MeetingRecordsReader

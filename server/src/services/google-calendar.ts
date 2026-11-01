@@ -38,7 +38,7 @@ const str = (v: unknown): string | null => (typeof v === 'string' ? v : null)
 /** Why a Google answer cannot give today's list, as the neutral reason. */
 export function calendarReasonOf(r: Extract<GoogleResult, { ok: false }>): CalendarTodayReason {
   if (r.kind === 'not-sent') {
-    if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'token-refused'].includes(r.reason)) return 'not-connected'
+    if (['no-grant', 'grant-revoked', 'grant-stopped', 'scope-not-granted', 'feature-off', 'token-refused'].includes(r.reason)) return 'not-connected'
     if (['operator-stopped', 'not-configured', 'off', 'vault-off', 'not-member', 'practice-real-secret'].includes(r.reason)) return 'stopped'
   }
   if (r.kind === 'refused' && (r.status === 401 || r.status === 403)) return 'not-connected'

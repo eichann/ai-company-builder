@@ -26,6 +26,7 @@ import { Card, CardDescription, CardHeader, CardTitle } from '@/components/ui/ca
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
+import { ConnectedServicesSection } from './connected-services'
 import { GoogleSection } from './google'
 import { ReadScopeSection } from './read-scope'
 import {
@@ -120,7 +121,8 @@ export default function IntegrationsPage() {
         </div>
       )}
       {isAdmin && (
-        <div className="pb-6">
+        <div className="space-y-4 pb-6">
+          <ConnectedServicesSection companyId={companyId} />
           <GoogleSection companyId={companyId} nameOf={nameOf} />
         </div>
       )}
