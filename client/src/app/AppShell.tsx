@@ -52,6 +52,7 @@ import { useNotices } from '../features/notifications/hooks/useNotices'
 import { TitleBarNotices } from '../features/notifications/components/TitleBarNotices'
 import { useTaskList } from '../features/tasks/hooks/useTaskList'
 import { TaskListPanel } from '../features/tasks/components/TaskListPanel'
+import { renderRecordSource } from './recordSource'
 import { companyPathOf, listShownFor } from '../features/tasks/model'
 import { LinkToTaskDialog } from '../features/tasks/components/LinkToTaskDialog'
 import { linkFileToTask } from '../features/tasks/api'
@@ -259,7 +260,7 @@ export function AppShell() {
   const recordCard = (recordId: string) => {
     if (!currentCompany || !rootPath) return null
     if (recordId.startsWith('task-')) {
-      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} onChanged={taskList.reload} />
+      return <TaskCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} renderPrepared={renderPrepared} renderSource={record => renderRecordSource(currentCompany.id, record)} onChanged={taskList.reload} />
     }
     const readOnly = <RecordCard key={recordId} companyId={currentCompany.id} rootPath={rootPath} recordId={recordId} />
     // An approval request also gets its own card on top: approving or sending back is the person's press.

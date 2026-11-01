@@ -1,7 +1,8 @@
 /* eslint-disable react-refresh/only-export-components -- standalone preview page entry, never hot-reloaded as a module */
 // Preview page for the task card (features/tasks): the real card over a fake main process whose
 // card is built by the real `taskCardOf` from core type definitions. `?task=done` shows a task
-// completed on someone's OK. Actions sent show in `#acted`, run answers in `#runs`.
+// completed on someone's OK; `?source=1` gives the card a source
+// (what a connector draws in the slot). Actions sent show in `#acted`, run answers in `#runs`.
 import { createRoot } from 'react-dom/client'
 import '../src/i18n'
 import '../src/index.css'
@@ -16,7 +17,9 @@ import { installElectronAPI } from './ui/fixtures/electron-api'
 const defs = new Map(coreTypeDefinitions().map(d => [d.name, d]))
 const ME = 'u-sato'
 const people = { [ME]: '佐藤', 'u-abe': '阿部', 'u-tanaka': '田中' }
-const done = new URLSearchParams(location.search).get('task') === 'done'
+const params = new URLSearchParams(location.search)
+const done = params.get('task') === 'done'
+const withSource = params.get('source') === '1'
 const rec = (id: string, type: string, title: string, state: string | null, fields: RecordSummary['fields'] = {}, extra: Partial<RecordSummary> = {}): RecordSummary =>
   ({ id, type, typeVersion: 1, title, summary: '', path: null, state, fields, version: 3, updatedAt: '2026-11-05T06:00:00.000Z', ...extra })
 const task = rec('task-0000aa', 'task', 'A社 見積書を 150万円 で作り直す', done ? 'done' : 'todo', {
@@ -57,7 +60,8 @@ function Preview() {
   return (
     <main className="min-h-screen bg-white text-gray-900">
       <pre id="acted" className="text-[10px]" />
-      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>} />
+      <TaskCard companyId="co-preview" rootPath="/Users/me/company" recordId="task-0000aa" renderPrepared={r => <div data-testid="prepared">用意したもの：{r.title}</div>}
+        renderSource={r => withSource ? <div>元のメール：{r.title}</div> : null} />
     </main>
   )
 }

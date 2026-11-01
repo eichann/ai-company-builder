@@ -144,6 +144,27 @@ How to add a channel:
    moved meanwhile, a rebase normally merges the file by itself (see below); regenerate after
    resolving a conflict in it rather than hand-editing.
 
+## Lane markers (parallel lanes A connectors, B inbox, C plugins)
+
+Three lanes add IPC in parallel (same scheme as `server.md` "Lane markers"); the spots where they
+would collide carry `// lane A ▼` … `// lane C ▲` blocks (the ▲ lines keep the blocks apart for
+git):
+
+- `client/shared/ipc-contract.ts` — the payload-type imports, the end of `IpcInvokeChannels`,
+  `IpcEventChannels` and `ElectronAPI`. Payload types go into the feature's own
+  `client/shared/<feature>.ts`; the contract gets only the channel lines and the import.
+- `client/electron/preload.ts` — the type imports and the end of `api`.
+- `client/electron/main.ts` — the imports and one registration line per feature
+  (`register<Feature>Ipc(ipc, { … })` / `wire<Feature>(ipc, { … })`, after the AI turns' one, so
+  `session`, `recordsApi`, `minutes`, `notices` and `agentControl` exist); the feature's code stays
+  in `electron/features/<feature>/`.
+- `client/tests/ipc-path-guard.test.ts` — `GUARDED` and `EXEMPT`.
+- `client/src/app/recordSource.tsx` — what the task card's source slot shows (`tasks-ui.md`).
+
+A lane adds lines only right under its own `▼`, never moves or removes a marker.
+`ipc-inventory.txt` has no markers: it is sorted, so lanes' lines merge; regenerate it (above),
+never hand-edit.
+
 ## IPC characterization tests
 
 `client/tests/ipc-*.test.ts` load the real `main.ts` under plain Node:

@@ -20,6 +20,8 @@ interface Props {
   recordId: string
   /** One thing the AI prepared (a mail draft, an approval request), drawn by the screen with its own card. */
   renderPrepared: (record: RecordViewSummary) => ReactNode
+  /** The task's source (the original mail or Slack thread), drawn by the screen (`app/recordSource.tsx`). */
+  renderSource: (record: RecordViewSummary) => ReactNode
   /** The member changed something (the list reads again). */
   onChanged?: () => void
 }
@@ -34,7 +36,7 @@ function when(at: string): string {
  * source (stage 3), 経緯 and 「つながっているもの」. What is offered comes from the type; the
  * server decides every action.
  */
-export function TaskCard({ companyId, rootPath, recordId, renderPrepared, onChanged }: Props) {
+export function TaskCard({ companyId, rootPath, recordId, renderPrepared, renderSource, onChanged }: Props) {
   const { result, reload } = useTaskCard(companyId, recordId)
   const [busy, setBusy] = useState(false)
   if (result === null) return <div className="flex h-full items-center justify-center gap-2 text-xs text-gray-400"><CircleNotch size={14} className="animate-spin" />読み込み中...</div>
@@ -64,7 +66,7 @@ export function TaskCard({ companyId, rootPath, recordId, renderPrepared, onChan
     const r = await (remove ? unlinkFileFromTask : linkFileToTask)(companyId, recordId, companyPath, version)
     return r.success ? null : r.error
   })
-  return <CardBody card={result.card} rootPath={rootPath} busy={busy} renderPrepared={renderPrepared} onRun={runSteps(result.card)}
+  return <CardBody card={result.card} rootPath={rootPath} busy={busy} renderPrepared={renderPrepared} renderSource={renderSource} onRun={runSteps(result.card)}
     onLinkFile={p => fileLink(p, false)} onUnlinkFile={p => fileLink(p, true)}
     onRetry={runId => change(async () => { const r = await retryTaskRun(companyId, runId); return r.success ? null : r.error })}
     onReconcile={(runId, key, done) => change(async () => { const r = await reconcileTaskRun(companyId, runId, key, done); return r.success ? null : r.error })} />
@@ -75,6 +77,7 @@ interface BodyProps {
   rootPath: string
   busy: boolean
   renderPrepared: (record: RecordViewSummary) => ReactNode
+  renderSource: (record: RecordViewSummary) => ReactNode
   onRun: (steps: Array<Omit<TaskActInput, 'expectedVersion'>>) => Promise<string | null>
   onRetry: (runId: string) => Promise<string | null>
   onReconcile: (runId: string, key: string, done: boolean) => Promise<string | null>
@@ -82,7 +85,7 @@ interface BodyProps {
   onUnlinkFile: (companyPath: string) => Promise<string | null>
 }
 
-function CardBody({ card, rootPath, busy, renderPrepared, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile }: BodyProps) {
+function CardBody({ card, rootPath, busy, renderPrepared, renderSource, onRun, onRetry, onReconcile, onLinkFile, onUnlinkFile }: BodyProps) {
   const { record } = card
   const now = useMemo(() => companyNow(Date.now()), [])
   const [runError, setRunError] = useState<string | null>(null)
@@ -153,7 +156,7 @@ function CardBody({ card, rootPath, busy, renderPrepared, onRun, onRetry, onReco
         )}
 
         <TaskActions key={`${record.state}@${record.version}`} card={card} now={now} busy={busy} onRun={onRun} />
-        <RecordSourcePanel record={record} />
+        <RecordSourcePanel record={record}>{renderSource(record)}</RecordSourcePanel>
 
         {card.fields.length > 0 && (
           <dl className="grid grid-cols-[repeat(auto-fill,minmax(160px,1fr))] gap-2">

@@ -20,6 +20,13 @@ import type { AbsenceAddInput } from '../shared/absences'
 import type { TaskActInput, TaskCreateInput } from '../shared/tasks'
 import type { AutoSyncMode, AutoSyncRendererState } from '../shared/auto-sync'
 import type { ChatWindowOpenRequest, ChatWindowStatus } from '../shared/chat-windows'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 // Use require for CommonJS compatibility in Electron preload
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const { contextBridge, ipcRenderer, webUtils } = require('electron')
@@ -318,6 +325,13 @@ const api: ElectronAPI = {
   onFileRequestedFromChatWindow: callback => subscribe('chatWindow:fileRequested', callback),
   onCloseRequested: callback => subscribe('app:closeRequested', callback),
   answerCloseRequest: (answer: 'ack' | 'close' | 'stay') => invoke('app:closeResponse', answer),
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 // The renderer types window.electronAPI itself (src/shared/ipc/electron-api.ts).

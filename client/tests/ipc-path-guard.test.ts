@@ -77,6 +77,13 @@ const GUARDED: Record<string, { args: unknown[]; paths: number[]; fromChatWindow
   'skills:toggleNurturing': { args: [IN_FILE, true], paths: [0] },
   'tools:start': { args: [IN, 'dev'], paths: [0] },
   'chatWindow:openFile': { args: [IN_FILE], paths: [0], fromChatWindow: true },
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 /** Parameters named like a path that are not a local path to check (channel → parameter → why). */
@@ -101,6 +108,13 @@ const EXEMPT: Record<string, Record<string, string>> = {
   'skills:list': { departmentFolder: 'relative to the checked root: absolute / .. refused, the joined path validated and kept under that root (ipc-app.test.ts)' },
   'skills:publish': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
   'skills:makePrivate': { skillRelativePath: 'a .gitignore line (one line, checked), not a file access' },
+  // Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 
 const PATH_LIKE = /path|root|folder|dir/i

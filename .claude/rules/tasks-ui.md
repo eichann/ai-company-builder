@@ -108,7 +108,10 @@ not awaited: `records.md` "Whose turn it was"). Order (owner: 成果物は相談
    reason (to the requester). 延ばす: 1時間あと / 今日の夕方 / あしたの朝 / 来週の月曜 or a date and time
    (`postponeChoices`); the server tells the requester. The server decides every action.
 5. `RecordSourcePanel`: the place for a task's source (the original mail / Slack thread and the
-   reply draft) that stage 3's connectors fill; empty and hidden today.
+   reply draft) that stage 3's connectors fill. The card takes `renderSource(record)` from the
+   screen: `src/app/recordSource.tsx` `renderRecordSource` returns the connector feature's part
+   (under its lane marker, `ipc-and-main-process.md` "Lane markers"), so `tasks` imports no other
+   feature; nothing given = hidden. Test: `task-card.spec.ts` ("the source slot …").
 6. Fields, 経緯, and 「つながっているもの」 with the record card's rows (`RecordRows.tsx`, registered
    import): decisions marked 例外（この件だけ） and owner-only records marked 自分だけ
    (`RecordMarks`, also on the generic card and every record row).

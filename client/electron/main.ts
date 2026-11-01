@@ -62,6 +62,13 @@ import type { AppLifecycle } from './features/ports'
 import { createAppGit } from './services/app-git'
 import { createSkillUseReporter } from './services/skill-use-reporter'
 import type { StoppableTurns } from './services/agent-stop'
+// Lanes (ipc-and-main-process.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 
 // Every channel below is checked against the IPC contract (shared/ipc-contract.ts).
 const ipc = typedIpc<IpcMainInvokeEvent, IpcMainEvent>(ipcMain)
@@ -305,6 +312,14 @@ registerAiTurnsIpc(ipc, {
   }),
   isMainWindow: senderId => mainWindowHost.isWindow(senderId),
 })
+// Lanes (ipc-and-main-process.md "Lane markers"): one line per feature, `register<Feature>Ipc(ipc, { … })`
+// or `wire<Feature>(ipc, { … })` from features/<feature>/, right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 
 registerAuthIpc(ipc, {
   session,
