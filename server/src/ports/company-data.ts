@@ -39,6 +39,13 @@ import type { ScopeRepository } from './scopes'
 import type { SkillUseRepository } from './skill-uses'
 import type { TaskSettingsRepository } from './task-settings'
 
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 export interface CompanyData {
   /** The company this handle is limited to. */
   readonly companyId: string
@@ -69,6 +76,13 @@ export interface CompanyData {
   readonly aiRuns: AiRunRepository
   /** Which company Skills members' consultations used (ports/skill-uses.ts, records.md "Which Skill"). */
   readonly skillUses: SkillUseRepository
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
   /** Every row of the company, table by table (the per-company export, src/cli/company-archive.ts). */
   readonly archive: CompanyRowsExport
 }

@@ -108,9 +108,25 @@ const HANDLE_TABLES: Record<string, string[]> = {
   task_settings: ['adapters/sqlite/task-settings.ts'],
   department_members: ['adapters/sqlite/task-settings.ts'],
   member_absences: ['adapters/sqlite/task-settings.ts'],
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 }
 /** Handle repository factories (each bound to one company): only the handle source builds them. */
-const HANDLE_FACTORIES = ['sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository']
+const HANDLE_FACTORIES = [
+  'sqliteDepartmentRepository', 'sqliteInvitationRepository', 'sqliteScopeRepository', 'sqlitePrivateFolderRepository', 'gitOrphanedScopeReader', 'sqliteRecordRepository', 'sqlitePluginRepository', 'sqliteConnectorRepository', 'sqliteGoogleDriveRepository', 'sqliteOutboundMailRepository', 'sqliteFixedPayloadRepository',
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
+]
 const HANDLE_SOURCE = 'adapters/sqlite/company-data.ts'
 
 const BUILT_WHERE = 'WHERE built by a helper in this file whose first clause is always `company_id = ?`'

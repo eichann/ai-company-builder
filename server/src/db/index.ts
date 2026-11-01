@@ -19,6 +19,13 @@ import { migrateRecordLedgerProvenance, migrateRecordPersonalOwner, migrateRecor
 import { migrateMemberAbsenceHistory, taskSchema } from './schema/tasks'
 import { migrateSkillUseColumns, skillUseSchema } from './schema/skill-uses'
 
+// Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+// lane A ▼
+// lane A ▲
+// lane B ▼
+// lane B ▲
+// lane C ▼
+// lane C ▲
 // The migrations tests run on their own against older databases.
 export { migrateInvitationClaims } from './schema/company'
 export { migrateRuleAndManagerCompanies } from './schema/permissions'
@@ -65,6 +72,13 @@ const SCHEMA = [
   notificationSchema,
   aiRunSchema,
   skillUseSchema,
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 ]
 
 // Initialize application tables (separate from Better Auth tables).
@@ -101,6 +115,13 @@ export function initDatabase(conn: Database.Database = sqlite) {
   migrateMemberAbsenceHistory(conn)
   // Before the seeding below: it deletes stale manager rows per company.
   migrateRuleAndManagerCompanies(conn)
+  // Lanes (server.md "Lane markers"): add only right under your lane's ▼.
+  // lane A ▼
+  // lane A ▲
+  // lane B ▼
+  // lane B ▲
+  // lane C ▼
+  // lane C ▲
 
   // Company scope + default `everyone: read + write` rule, one scope per
   // department. Idempotent; repairs drift left by older server builds.
