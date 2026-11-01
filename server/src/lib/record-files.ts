@@ -143,25 +143,3 @@ export async function readRecordFiles(repo: string, since: string | null): Promi
   const texts = await readTexts(repo, tip, paths)
   return { tip, full: true, changes: paths.filter(p => texts.has(p)).map(p => ({ path: p, text: texts.get(p) as string })), renames: [] }
 }
-
-/**
- * Which of `paths` (inside the repository) are on the shared branch's tip, as
- * a file or a folder. Null when the repository or its branch cannot be read
- * (the caller then says nothing about them).
- */
-export async function existingPaths(repo: string, paths: string[]): Promise<Set<string> | null> {
-  if (!existsSync(repo)) return null
-  const ref = await resolveSharedBranch(repo)
-  if (!ref) return null
-  const tip = (await gitAsync(['-C', repo, 'rev-parse', ref])).trim()
-  const found = new Set<string>()
-  const usable = [...new Set(paths)].filter(p => p !== '' && !p.includes('\n'))
-  for (let i = 0; i < usable.length; i += BATCH) {
-    const chunk = usable.slice(i, i + BATCH)
-    const check = await gitAsync(['-C', repo, 'cat-file', '--batch-check'], { input: chunk.map(p => `${tip}:${p}`).join('\n') + '\n' })
-    check.split('\n').slice(0, chunk.length).forEach((line, idx) => {
-      if (!line.endsWith(' missing')) found.add(chunk[idx])
-    })
-  }
-  return found
-}

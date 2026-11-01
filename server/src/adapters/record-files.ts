@@ -3,8 +3,9 @@ import { commitFileEdit, type CommitIdentity } from '../lib/bare-commit'
 import { withCompanyLock } from '../lib/company-lock'
 import { companyRepoPath } from '../lib/config'
 import { gitAsync } from '../lib/git-exec'
+import { existingPaths } from '../lib/repo-paths'
 import { privateRepoPath } from '../lib/private-folders'
-import { existingPaths, readRecordFiles } from '../lib/record-files'
+import { readRecordFiles } from '../lib/record-files'
 import type { RecordFileCreator, RecordFileRepo, RecordFileSource, RecordFileWriter } from '../ports/record-files'
 
 const repoPath = (companyId: string, repo: RecordFileRepo) =>

@@ -139,7 +139,7 @@ repository), `record_index_problems` (for owners/admins). Ids are bound as one J
   private folder inside cannot be renamed, so nothing private moves.
 - A deleted file's link stays. The detail (`GET /records/item/:recordId`, the AI's `records_get`)
   marks each file link it shows `broken: true | false` — whether a file or folder is at that path
-  on the shared branch now (`RecordFileSource.existing`, the private folder's own repository for a
+  on the shared branch now (`RecordFileSource.existing`, `lib/repo-paths.ts`; the private folder's own repository for a
   path inside one; only paths already shown to the reader are looked up; absent when git could not
   tell). The app says 「つながりが切れています」.
 - Tests: `tests/unit/record-link-renames.test.ts` (rename, move, swap, never into a private
