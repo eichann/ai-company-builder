@@ -972,10 +972,11 @@ export type {
   PluginProblem,
   PluginReadScopeView,
   PluginRolesView,
+  PluginStepSkillsView,
 } from '../../../shared/types/plugins'
 export type { FieldPolicy } from '../../../shared/core/plugins'
 
-import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView, PluginRolesView } from '../../../shared/types/plugins'
+import type { ImportReport, PluginDetail, PluginListItem, PluginMappingCheck, PluginReadScopeView, PluginRolesView, PluginStepSkillsView } from '../../../shared/types/plugins'
 
 const pluginPath = (companyId: string, pluginId: string) => `/api/companies/${enc(companyId)}/plugins/${enc(pluginId)}`
 
@@ -1008,6 +1009,11 @@ export const pluginsApi = {
   /** The company's holders of one role (empty = nobody; an approval then goes to an owner / admin). */
   assignRole: (companyId: string, pluginId: string, role: string, userIds: string[]) =>
     getData<PluginRolesView>(`${pluginPath(companyId, pluginId)}/roles/${enc(role)}`, { method: 'PUT', body: { userIds } }),
+  /** A business plugin's steps a company may run with one of its Skills (plan C5): each step and the company's Skill. */
+  stepSkills: (companyId: string, pluginId: string) => getData<PluginStepSkillsView>(`${pluginPath(companyId, pluginId)}/step-skills`),
+  /** The company's Skill for an overridable step (null = the business's own procedure). */
+  setStepSkill: (companyId: string, pluginId: string, step: string, skill: string | null) =>
+    getData<PluginStepSkillsView>(`${pluginPath(companyId, pluginId)}/step-skills/${enc(step)}`, { method: 'PUT', body: { skill } }),
 }
 
 // The Google connection (「つなぎ先」→「Google」, milestone 4 G3): shapes from shared/types/google.ts.

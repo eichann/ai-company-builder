@@ -10,6 +10,7 @@ paths:
   - "server/src/db/schema/plugin-steps.ts"
   - "server/src/lib/skill-trees.ts"
   - "server/tests/integration/plugin-steps.test.ts"
+  - "admin/src/app/companies/*/integrations/step-skills.tsx"
 ---
 
 # A plugin's steps run as AI turns (stage 4a, lane C: C5)
@@ -56,7 +57,9 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   refused for a step that is not `overridable` (400 `STEP_NOT_OVERRIDABLE`,
   `companySkillOverrideProblem`) and for a Skill not on the shared branch (409
   `STEP_SKILL_MISSING`). Unreadable at a first run → 409 `STEP_SKILL_MISSING` (never a silent
-  fall-back).
+  fall-back). The admin console sets it in 「つなぎ先」 → the business → 「手順を会社のスキルで」
+  (`admin/src/app/companies/[id]/integrations/step-skills.tsx`; only overridable steps are shown, a
+  Skill name typed per step, empty = the business's own procedure).
 - **A person's start**: `GET /me/plugin-steps/records/:recordId` (the steps at the record's state,
   for its card; each with the work's `pin` — null before its first run — and the step it runs:
   `procedure` file and tools of the pinned version, narrowed; the app's automatic run reads it after
