@@ -11,28 +11,13 @@
  */
 import { Hono } from 'hono'
 import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import type { Outcome } from '../services/outcome'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const coreConnectorsRoute = new Hono()
-const { access, coreConnectors } = services
-
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-async function jsonBody(c: Context): Promise<unknown> {
-  try { return await c.req.json() } catch { return null }
-}
+const { coreConnectors } = services
 
 function answer<T>(c: Context, result: Outcome<T>) {
   c.header('Cache-Control', 'no-store')
@@ -40,20 +25,17 @@ function answer<T>(c: Context, result: Outcome<T>) {
   return c.json({ success: true, data: result.value })
 }
 
-coreConnectorsRoute.get('/connectors', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+coreConnectorsRoute.get('/connectors', companyMember, async (c) => {
+  const member = c.var.member
   return answer(c, await coreConnectors.view(member))
 })
 
-coreConnectorsRoute.put('/connector-roles/:role', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await coreConnectors.chooseRole(member, c.req.param('role'), await jsonBody(c)))
+coreConnectorsRoute.put('/connector-roles/:role', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await coreConnectors.chooseRole(member, c.req.param('role'), c.var.body))
 })
 
-coreConnectorsRoute.put('/connectors/:connectorId/enabled', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  return answer(c, await coreConnectors.setEnabled(member, c.req.param('connectorId'), await jsonBody(c)))
+coreConnectorsRoute.put('/connectors/:connectorId/enabled', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  return answer(c, await coreConnectors.setEnabled(member, c.req.param('connectorId'), c.var.body))
 })
