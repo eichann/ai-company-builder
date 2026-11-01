@@ -104,7 +104,7 @@ const key: BrokerKeySummary = {
 const broker = (practice: boolean): BrokerView => ({
   status: { enabled: true, reason: null },
   settings: { memberKeysAllowed: true, internalHosts: [], updatedAt: null, updatedBy: null },
-  services: [{ service: 'hubspot', label: 'HubSpot', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 1, userKeys: 0, updatedAt: null, relay: null, readOnly: true, practice }],
+  services: [{ service: 'hubspot', label: 'HubSpot', builtin: true, category: 'tool', rule: 'company-only', ownKeyHosts: [], defaultHosts: ['api.hubapi.com'], companyKeys: 1, userKeys: 0, updatedAt: null, relay: null, readOnly: true, defaultKeyId: null, practice }],
   keys: [key],
   departments: [],
   history: [],

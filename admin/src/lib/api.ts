@@ -851,7 +851,7 @@ export type {
   BrokerStatusReason,
 } from '../../../shared/core/key-broker'
 
-import type { BrokerKeyCreate, BrokerKeyUpdate, BrokerOwnKeysSwitch, BrokerRelayServiceSave, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
+import type { BrokerDefaultKeyChoice, BrokerKeyCreate, BrokerKeyUpdate, BrokerOwnKeysSwitch, BrokerRelayServiceSave, BrokerServiceSetting, BrokerView } from '../../../shared/types/key-broker'
 
 export const keyBrokerApi = {
   get: (companyId: string) => getData<BrokerView>(`/api/companies/${enc(companyId)}/broker`),
@@ -868,6 +868,9 @@ export const keyBrokerApi = {
   /** The one switch 「メンバーが自分の鍵を使ってよい」 for a service whose destination is known (the server sets rule and hosts). */
   setOwnKeys: (companyId: string, service: string, allowed: boolean) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}/own-keys`, { method: 'PUT', body: { allowed } satisfies BrokerOwnKeysSwitch }),
+  /** 「このサービスは、この鍵を使う」: which company key the service uses when several exist (null: none chosen). */
+  setDefaultKey: (companyId: string, service: string, keyId: string | null) =>
+    getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/services/${enc(service)}/default-key`, { method: 'PUT', body: { keyId } satisfies BrokerDefaultKeyChoice }),
   /** A generic service (K9): register or change its destination and how the key travels. */
   saveRelayService: (companyId: string, service: string, definition: BrokerRelayServiceSave) =>
     getData<BrokerView>(`/api/companies/${enc(companyId)}/broker/relay-services/${enc(service)}`, { method: 'PUT', body: definition }),

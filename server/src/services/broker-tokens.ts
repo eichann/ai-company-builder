@@ -10,6 +10,9 @@
  *   go). It re-decides the key on every call, so disabling or deleting a key,
  *   changing who may use it, the service's rule, or removing the member takes
  *   effect at once — a token is never a copy of a permission.
+ * - Several company keys the member may use for a service: the connector
+ *   plugin's key, else the one the admin chose (「このサービスは、この鍵を使う」),
+ *   else none — `key-not-chosen`, the admin is asked; never the first registered.
  */
 import {
   BROKER_TOKEN_PREFIX,
@@ -79,6 +82,8 @@ export type BrokerTokenRefusal =
   | 'broker-off' | 'malformed' | 'unknown' | 'expired' | 'revoked' | 'not-member' | 'service-not-granted' | 'no-key'
   /** The key that would apply is stopped by an admin (no other key to fall back to). */
   | 'key-stopped'
+  /** Several company keys the member may use, and the admin has not chosen which one the service uses. */
+  | 'key-not-chosen'
 
 /** Whose live token it was, when it was valid up to choosing a key (for the call's record). */
 export interface BrokerTokenHolder {
@@ -102,22 +107,41 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
   const ttlMax = clampBrokerTokenTtl(deps.ttlMinutes)
 
   /**
+   * The company key for this member and consultation: among the service's
+   * company keys they may use here (both dials, any status — a stopped key
+   * still counts, so stopping the chosen key never silently hands over another),
+   * one alone is used; with several, the connector plugin's key, else the key
+   * the admin chose; else 'not-chosen' (ask the admin). null: none applies.
+   */
+  function companyKey(
+    companyId: string, userId: string, department: string | null, service: string, rows: BrokerKeyRow[], includeStopped: boolean,
+  ): BrokerKeyRow | 'not-chosen' | null {
+    const departmentId = keyBroker.departmentIdOfFolder(companyId, department)
+    const candidates = rows.filter(r => r.scope === 'company' && r.service === service
+      && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId))
+    const live = (r: BrokerKeyRow) => includeStopped || r.status === 'active'
+    if (!candidates.some(live)) return null
+    if (candidates.length === 1) return candidates[0]
+    const active = candidates.filter(r => r.status === 'active')
+    const connectionKey = deps.connectionKeyId?.(companyId, service) ?? null
+    const chosen = keyBroker.chosenKeyId(companyId, service, rows)
+    return active.find(r => r.id === connectionKey) ?? active.find(r => r.id === chosen) ?? 'not-chosen'
+  }
+
+  /**
    * The key a request for `service` uses for this member now, under the
-   * service's rule: an active company key they may use for work in the
-   * consultation's department (both dials), or their own active key (when
-   * members may have own keys and its hosts are still allowed).
+   * service's rule: the company key (`companyKey`) or their own active key
+   * (when members may have own keys and its hosts are still allowed).
+   * 'not-chosen': the company key would apply but the admin has not chosen
+   * among several.
    */
   function resolveKey(
     companyId: string, userId: string, department: string | null, service: string,
     rows: BrokerKeyRow[] = brokerKeys.list(companyId), includeStopped = false,
-  ): BrokerKeyRow | null {
+  ): BrokerKeyRow | 'not-chosen' | null {
     const setting = keyBroker.serviceSetting(companyId, service)
-    const departmentId = keyBroker.departmentIdOfFolder(companyId, department)
     const live = (r: BrokerKeyRow) => includeStopped || r.status === 'active'
-    const usable = rows.filter(r => r.scope === 'company' && r.service === service && live(r)
-      && companyKeyUsable(upgradeBrokerAudience(parseJson<unknown>(r.audience, null)), userId, departmentId))
-    const connectionKey = usable.length > 1 ? deps.connectionKeyId?.(companyId, service) ?? null : null
-    const company = usable.find(r => r.id === connectionKey) ?? usable[0] ?? null
+    const company = companyKey(companyId, userId, department, service, rows, includeStopped)
     const own = keyBroker.memberKeysAllowed(companyId)
       ? rows.find(r => r.scope === 'user' && r.ownerUserId === userId && r.service === service && live(r)
         && parseJson<BrokerDestinations>(r.destinations, { hosts: [], pathPrefixes: [], models: [] }).hosts.every(h => setting.ownKeyHosts.includes(h))) ?? null
@@ -163,7 +187,9 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       for (const service of requested) {
         if (!known.has(service) && !builtinBrokerService(service)) { unavailable.push({ service, reason: 'unknown-service' }); continue }
         const key = resolveKey(member.companyId, member.userId, folder, service, rows)
-        if (key) granted.push({ service, source: key.scope as BrokerKeyScope })
+        // Not chosen yet: granted, so the relay tells the AI to ask the admin (not 「自分の鍵」); validate decides again.
+        if (key === 'not-chosen') granted.push({ service, source: 'company' })
+        else if (key) granted.push({ service, source: key.scope as BrokerKeyScope })
         else unavailable.push({ service, reason: stoppedReason(member.companyId, member.userId, folder, service, rows) === 'key-stopped' ? 'stopped' : 'no-key' })
       }
       if (granted.length === 0) return ok({ enabled: true, token: null, tokenId: null, expiresAt: null, services: [], unavailable })
@@ -224,6 +250,7 @@ export function createBrokerTokenService(deps: BrokerTokenDeps) {
       const who: BrokerTokenHolder = { tokenId: row.id, companyId: row.companyId, userId: row.userId, conversationId: row.conversationId, department: row.department }
       if (!parseJson<string[]>(row.services, []).includes(service)) return { ok: false, reason: 'service-not-granted', who }
       const key = resolveKey(row.companyId, row.userId, row.department, service)
+      if (key === 'not-chosen') return { ok: false, reason: 'key-not-chosen', who }
       if (!key) return { ok: false, reason: stoppedReason(row.companyId, row.userId, row.department, service), who }
       return {
         ok: true,

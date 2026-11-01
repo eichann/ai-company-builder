@@ -33,6 +33,7 @@ import {
   OWN_KEYS_SWITCH_HELP,
   CATEGORY_HELP,
   CATEGORY_LABELS,
+  KEY_CHOICE_HELP,
   RULE_LABELS,
   STATUS_LABELS,
   brokerChangeLines,
@@ -43,6 +44,9 @@ import {
   describeUsage,
   hostsOf,
   invalidHosts,
+  keyChoiceLabel,
+  keyChoiceNeededText,
+  keyChoices,
   misdirectedKeyText,
   ownKeysOn,
   type Names,
@@ -193,6 +197,9 @@ export default function ApiKeysPage() {
               {companyKeys.length === 0 ? (
                 <p className="py-2 text-sm text-muted-foreground">まだ登録されていません。</p>
               ) : (
+                <>
+                <KeyChoices view={data} busy={busy}
+                  onChoose={(service, keyId) => run(keyId ? '使う鍵を選びました' : '使う鍵の選択を外しました', () => keyBrokerApi.setDefaultKey(companyId, service, keyId))} />
                 <ul className="divide-y">
                   {companyKeys.map((k) => (
                     <KeyRow key={k.id} k={k} names={names} busy={busy} enabled={data.status.enabled} onDialog={setDialog}
@@ -200,6 +207,7 @@ export default function ApiKeysPage() {
                         keyBrokerApi.update(companyId, k.id, { status: k.status === 'active' ? 'disabled' : 'active' }))} />
                   ))}
                 </ul>
+                </>
               )}
             </div>
           </Card>
@@ -331,6 +339,45 @@ export default function ApiKeysPage() {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+/** 「このサービスは、この鍵を使う」: shown only for services with two or more company keys. */
+function KeyChoices({ view, busy, onChoose }: { view: BrokerView; busy: boolean; onChoose: (service: string, keyId: string | null) => void }) {
+  const choices = keyChoices(view)
+  if (choices.length === 0) return null
+  return (
+    <div className="space-y-3 border-b py-3">
+      <p className="text-xs text-muted-foreground">{KEY_CHOICE_HELP}</p>
+      {choices.map((c) => {
+        const id = `key-choice-${c.service}`
+        return (
+          <div key={c.service} className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <Label htmlFor={id}>{c.label} は、この鍵を使う</Label>
+              <select
+                id={id}
+                className="h-8 rounded-md border bg-background px-2 text-sm"
+                value={c.chosenId ?? ''}
+                disabled={busy || c.keys.length === 0}
+                onChange={(e) => onChoose(c.service, e.target.value || null)}
+              >
+                <option value="">選んでいない</option>
+                {c.keys.map((k) => (
+                  <option key={k.id} value={k.id}>{keyChoiceLabel(k)}</option>
+                ))}
+              </select>
+            </div>
+            {c.needed && (
+              <p role="alert" className="flex items-start gap-1.5 text-xs text-warning">
+                <Warning size={14} className="mt-0.5 shrink-0" aria-hidden />
+                {keyChoiceNeededText(c.label)}
+              </p>
+            )}
+          </div>
+        )
+      })}
+    </div>
   )
 }
 
