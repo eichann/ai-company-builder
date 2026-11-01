@@ -55,7 +55,7 @@ Add it to `CONNECTOR_PROVIDERS` (`ports/connectors.ts`) **and** to the `provider
 of `connector_grants` / `oauth_pending` (`db/schema/connectors.ts`, with a rebuild like
 `migrateConnectorProviders`), add the purpose to nothing else (it is derived), write its
 descriptor and register it, and list its callback URL (`oauthCallbackPath`) for the admin.
-`slack` is already allowed by the schema; nothing registers it yet.
+`slack` is allowed by the schema; `services/slack-connector.ts` registers it (`slack-connector.md`; wired in A3).
 
 ## Tests
 

@@ -38,6 +38,8 @@ export function brokerSecretContext(companyId: string, keyId: string): SecretCon
 export interface ConnectorSecretContext {
   /** A member's refresh token: `acb-<provider>-grant` (member-oauth.ts `grantSealContext`). */
   purpose: 'acb-google-client' | `acb-${ConnectorProvider}-grant` | 'acb-oauth-pending'
+    /** The company's Slack app: client secret, signing secret, bot token (slack-connector.md). */
+    | 'acb-slack-app'
   companyId: string
   /** The row: `google-client`, the grant id, the state hash. */
   id: string
