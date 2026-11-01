@@ -47,7 +47,6 @@ const PUBLIC_ENDPOINTS: Record<string, string> = {
  * while a listed file is fully guarded). Never add one.
  */
 const NOT_YET_GUARDED = new Set([
-  'agent-events.ts',
   'ai-runs.ts',
   'broker-relay.ts',
   'companies.ts',
@@ -58,19 +57,14 @@ const NOT_YET_GUARDED = new Set([
   'git.ts',
   'google-drive.ts',
   'google.ts',
-  'identities.ts',
   'inbox.ts',
   'invitations.ts',
   'oauth.ts',
-  'outbound-mail.ts',
   'permission-rules.ts',
-  'permissions.ts',
-  'plugins.ts',
   'private-folders.ts',
   'records-ai-identities.ts',
   'records-ai-inbox.ts',
   'records-ai.ts',
-  'records.ts',
   'slack-connection.ts',
 ])
 

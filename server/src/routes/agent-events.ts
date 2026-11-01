@@ -20,32 +20,19 @@
  * Non-members get 404 like every company route. Event contents are never logged.
  */
 import { Hono } from 'hono'
-import type { Context } from 'hono'
-import { getUserFromRequest } from '../lib/auth'
 import { CLIENT_VERSION_HEADER } from '../lib/client-activity'
 import { services } from '../composition'
-import type { Member } from '../services/access'
 import { refusal } from './respond'
+import { companyMember, serviceBody } from './guards'
 
 export const agentEventsRoute = new Hono()
-const { access, agentEvents } = services
+const { agentEvents } = services
 
 /** 200 events of metadata are far below this; anything larger is not from the app. */
 const MAX_BODY_BYTES = 1024 * 1024
 
-async function authAndAuthorize(c: Context): Promise<Member | Response> {
-  const user = await getUserFromRequest(c.req.raw)
-  if (!user) return c.json({ error: 'Unauthorized' }, 401)
-  const companyId = c.req.param('companyId')
-  if (!companyId) return c.json({ error: 'Company ID is required' }, 400)
-  const member = access.memberOf(companyId, user.id)
-  if (!member) return c.json({ error: 'Company not found or access denied' }, 404)
-  return member
-}
-
-agentEventsRoute.post('/agent-events', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.post('/agent-events', companyMember, async (c) => {
+  const member = c.var.member
   const declared = Number(c.req.header('Content-Length') ?? 0)
   if (declared > MAX_BODY_BYTES) return c.json({ error: 'Request body too large' }, 413)
   const text = await c.req.text()
@@ -57,59 +44,50 @@ agentEventsRoute.post('/agent-events', async (c) => {
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.list(member, c.req.query())
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events/summary', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events/summary', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.summary(member, c.req.query())
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events/sandbox', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events/sandbox', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.sandboxImpact(member, c.req.query())
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events/settings', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events/settings', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.settings(member)
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.put('/agent-events/settings', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
-  let body: unknown = null
-  try { body = await c.req.json() } catch { /* the service answers 400 */ }
-  const result = agentEvents.updateSettings(member, body)
+agentEventsRoute.put('/agent-events/settings', companyMember, serviceBody, async (c) => {
+  const member = c.var.member
+  const result = agentEvents.updateSettings(member, c.var.body) // not JSON → null → the service answers 400
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events/settings/retention-preview', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events/settings/retention-preview', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.retentionPreview(member, c.req.query('days'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
 })
 
-agentEventsRoute.get('/agent-events/viewers', async (c) => {
-  const member = await authAndAuthorize(c)
-  if (member instanceof Response) return member
+agentEventsRoute.get('/agent-events/viewers', companyMember, async (c) => {
+  const member = c.var.member
   const result = agentEvents.viewers(member, c.req.query('mode'))
   if (!result.ok) return refusal(c, result)
   return c.json({ success: true, data: result.value })
