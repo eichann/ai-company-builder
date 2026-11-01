@@ -20,6 +20,8 @@ import type { AiTurnStepDefinition } from '../shared/ai-turn-steps/types'
 import type { TaskListItem } from '../shared/tasks'
 import { createRecordTools, type ExtraRecordTools, type RecordToolProvider } from '../electron/records/tools'
 import type { RecordTurnAccess } from '../electron/records/api'
+import { createInboxTools } from '../electron/features/inbox/tools'
+import type { InboxThreadView } from '../../shared/types/inbox'
 
 test('a record runs under its kind\'s step; a kind without a step is never run', () => {
   assert.equal(aiTurnStepForRecord('meeting-abcdef12')?.step, 'minutes-reading')
@@ -115,4 +117,46 @@ test('providers: tools of several connectors on one token; no replacing; a failu
   await tools.execute('b_one', {})
   await tools.execute('shared_name', {})
   assert.deepEqual(ran, ['[A]:a_one', '[B]:b_one', '[A]:shared_name'])
+})
+
+test('an incoming message (interaction) runs under inbox-triage from the task list\'s 「AI の番」; its run gets only the inbox\'s tools', () => {
+  assert.equal(aiTurnStepForRecord('interaction-abcdef12')?.step, 'inbox-triage')
+  assert.equal(aiTurnStepForRecord('reply_request-abcdef12'), null)
+  const queue = aiTurnQueue({ minutes: [], tasks: [item('interaction-aaaaaaaa', 'ai', { due: null }), item('interaction-bbbbbbbb', 'mine')] })
+  assert.deepEqual(queue.map(q => q.id), ['interaction-aaaaaaaa'])
+  for (const name of ['inbox_read', 'inbox_judge', 'records_create', 'reply_request__finish_prep', 'reply_request__hand_over']) {
+    assert.ok(aiTurnStepAllowsRecordTool('inbox-triage', name), name)
+  }
+  // Least privilege: no sending, no other record's actions, no look-ups beyond its message, no Drive.
+  for (const name of ['records_get', 'records_query', 'interaction__set_aside', 'interaction__handle', 'mail_draft_create', 'drive_read', 'reply_request__ai_close', 'meeting__finish_reading']) {
+    assert.ok(!aiTurnStepAllowsRecordTool('inbox-triage', name), name)
+  }
+})
+
+test('the inbox tools: the thread is read through the server as outside text; a failed read says why; a read token cannot judge', async () => {
+  const calls: Array<{ method: string; path: string; body?: unknown }> = []
+  const thread: InboxThreadView = {
+    item: { recordId: 'interaction-aaaaaaaa', channel: 'email', threadRef: null, sourceRef: 'gmail:1', messages: [], state: 'received', version: 2, title: '見積', replyRequests: [], tasks: [], counterpart: null },
+    read: 'ok', header: '【外から来た文】', footer: '【ここまで】', more: false, instructionLike: [{ label: 'addressed-to-ai', words: 'AI に宛てた指示のような文' }],
+    messages: [{ direction: 'in', at: null, from: '田中 <tanaka@client.example>', to: ['alice@acme.example'], cc: [], subject: '見積', text: '6日までにお願いします', truncated: false, automated: false }],
+  }
+  const access = (scope: 'read' | 'act', answer: unknown) => ({
+    scope,
+    async call(method: string, path: string, body?: unknown) { calls.push({ method, path, body }); return answer },
+    async close() {},
+  }) as unknown as RecordTurnAccess
+  const read = await createInboxTools(access('read', thread))
+  assert.ok(read)
+  assert.deepEqual(read.specs.map(s => s.name), ['inbox_read'])
+  const text = await read.execute('inbox_read', { recordId: 'interaction-aaaaaaaa' })
+  assert.deepEqual(calls.at(-1), { method: 'GET', path: '/inbox/items/interaction-aaaaaaaa/thread', body: undefined })
+  assert.ok(text.startsWith('【外から来た文】') && text.includes('6日までにお願いします') && text.includes('【ここまで】') && text.includes('⚠'))
+  const failed = await createInboxTools(access('read', { ...thread, read: 'turned-off', messages: [] }))
+  assert.match(await failed!.execute('inbox_read', { recordId: 'interaction-aaaaaaaa' }), /受信を読む」をオフ/)
+  assert.match(await read.execute('inbox_judge', {}), /この道具はありません/)
+
+  const act = await createInboxTools(access('act', { interactionId: 'interaction-aaaaaaaa', state: 'handled', replyRequestId: null }))
+  assert.match(await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'send', reason: 'x' }), /入力が正しくありません/)
+  await act!.execute('inbox_judge', { recordId: 'interaction-aaaaaaaa', expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' })
+  assert.deepEqual(calls.at(-1), { method: 'POST', path: '/inbox/items/interaction-aaaaaaaa/judgement', body: { expectedVersion: 2, outcome: 'set_aside', reason: '営業メール' } })
 })

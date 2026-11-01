@@ -27,9 +27,10 @@
 import { INBOX_ACTIONS, INBOX_ACTOR } from '../../shared/core/core-types'
 import type { ConnectorRole, RoleResolution } from '../../shared/core/connector-roles'
 import {
-  companyDomains, defaultIntakeSettings, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
-  type IntakeSettings, type RoutedParty,
+  chatThreadOf, companyDomains, defaultIntakeSettings, mailIdOf, parseIntakeSettings, pollWindow, routeIncoming, BACKFILL_DAYS,
+  THREAD_READ_MAX, THREAD_TEXT_FOOTER, THREAD_TEXT_HEADER, type IntakeSettings, type RoutedParty,
 } from '../../shared/core/intake-settings'
+import { findInstructionLikeText, INSTRUCTION_LIKE_WORDS } from '../../shared/core/instruction-like'
 import { normalizeEmail } from '../../shared/core/mail'
 import { findPrivateScope } from '../../shared/core/permissions'
 import type { LedgerValue } from '../../shared/core/record-ledger'
@@ -38,12 +39,13 @@ import { RECORD_ID_RE } from '../../shared/core/records'
 import { replyTarget, type TaskSettings } from '../../shared/core/task-settings'
 import {
   INBOX_CHANNELS, type IncomingMessage, type IncomingParty, type InboxChannel, type InboxItemView, type InboxJudgementResult,
-  type InboxSettingsView, type InboxStatus, type IntakeOutcome, type SetAsideItem, type SetAsideList,
+  type InboxSettingsView, type InboxStatus, type InboxThreadMessage, type InboxThreadView, type IntakeOutcome, type SetAsideItem, type SetAsideList,
 } from '../../shared/types/inbox'
 import type { RecordSummary } from '../../shared/types/records'
 import type { Clock, IdGenerator } from '../ports/clock'
 import type { CompanyData, CompanyDataSource } from '../ports/company-data'
 import type { InboxSource } from '../ports/inbox'
+import type { MailReader } from '../ports/mail'
 import type { RecordRow } from '../ports/records'
 import { hasFullAccess, type Member } from './access'
 import { ok, refuse, type Outcome } from './outcome'
@@ -74,6 +76,10 @@ export const INBOX_LIMITS = {
 } as const
 
 const SUBJECT_NONE = '（件名なし）'
+/** The ledger's note when the member's own reply was seen in the thread. */
+const REPLIED_THERE: Record<InboxChannel, string> = { email: 'メールで返信済み', chat: 'チャット（Slack）で返信済み' }
+/** How far back a member's unthreaded chat message counts as the reply to the last message of that DM (B4). */
+const DM_REPLY_WINDOW_MS = 3 * 24 * 60 * 60 * 1000
 
 export interface InboxDeps {
   companyData: CompanyDataSource
@@ -89,6 +95,18 @@ export interface InboxDeps {
   taskSettings: (companyId: string) => TaskSettings
   /** Which connector serves a core role now (services/connector-roles.ts); absent until lane A wires it. */
   roles?: { resolve(companyId: string, role: ConnectorRole, operation?: string | null): Promise<RoleResolution> }
+  /** メールを読む (the role, routed: connector-role-providers.ts): the AI's thread read (B4), on demand. */
+  mailReader?: Pick<MailReader, 'getMessage'>
+  /** チャットを受け取る (the `chat` role's reading, lane A's A4); absent until wired: a chat thread then reads `stopped`. */
+  chatReader?: InboxChatReader
+}
+
+/** The `chat` role's thread read as the inbox uses it (structurally lane A's `ChatReader`, ports/chat.ts). */
+export interface InboxChatReader {
+  thread(companyId: string, userId: string, ref: { channelId: string; threadTs: string }): Promise<
+    | { ok: true; value: { messages: Array<{ mine: boolean; at: string | null; authorName: string | null; text: string; truncated: boolean }>; more: boolean } }
+    | { ok: false; reason: InboxThreadView['read'] }
+  >
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v !== '' ? v : null)
@@ -204,6 +222,55 @@ export function createInboxService(deps: InboxDeps) {
       .filter(r => r.state !== 'closed' && r.state !== 'dropped')
   }
 
+  /** The members' own addresses (a message from one of them is the company's). */
+  function memberAddressSet(companyId: string): Set<string> {
+    return new Set(deps.memberAddresses(companyId).map(a => normalizeEmail(a.email)).filter((e): e is string => !!e))
+  }
+
+  /** The interaction itself, or a 返事のお願い's interaction — both read by the member; else null. */
+  function interactionFor(member: Member, handle: CompanyData, recordId: string): RecordRow | null {
+    const own = readable(member, recordId, 'interaction')
+    if (own) return own.row
+    const request = readable(member, recordId, 'reply_request')
+    if (!request) return null
+    const linked = handle.records.linksFrom([request.row.id]).find(l => l.name === 'interaction' && l.targetId)
+    return linked ? readable(member, linked.targetId, 'interaction')?.row ?? null : null
+  }
+
+  /** What the AI sees of an interaction: pointers, its state, what was made for it — only what the member reads. */
+  function itemView(member: Member, handle: CompanyData, row: RecordRow): InboxItemView {
+    const { state, version, fields } = fieldsOf(handle, row.id)
+    const reader = recordReader(member, handle.scopes.listWithRules())
+    const live = (ids: string[]) => handle.records.byIds(ids).filter(r => r.removedAt === null && reader.record(r))
+    const tasks = live(handle.records.candidates({ types: ['task'], link: { name: 'interaction', id: row.id } }, 20).map(r => r.id))
+    const requests = replyRequestsOf(handle, row.id)
+    const readableRequests = new Set(live(requests.map(r => r.id)).map(r => r.id))
+    const cp = handle.records.linksFrom([row.id]).find(l => l.name === 'counterpart' && l.targetId)
+    const counterpart = cp ? live([cp.targetId as string])[0] ?? null : null
+    return {
+      recordId: row.id, channel: str(fields.channel), threadRef: str(fields.thread_ref), sourceRef: str(fields.source_ref),
+      messages: handle.inbox.messagesOf(row.id).map(m => ({ messageId: m.messageId, direction: m.direction, occurredAt: m.occurredAt })),
+      state, version, title: row.title,
+      replyRequests: requests.filter(r => readableRequests.has(r.id)).map(r => ({ id: r.id, state: r.state })),
+      tasks: tasks.map(t => ({ id: t.id, title: t.title })),
+      counterpart: counterpart ? { id: counterpart.id, title: counterpart.title } : null,
+    }
+  }
+
+  /** The 返事のお願い's prepared drafts still in 下書き: discarded (the reply went out elsewhere). */
+  function discardDrafts(companyId: string, handle: CompanyData, replyRequestId: string, channel: InboxChannel): void {
+    const ids = handle.records.linksFrom([replyRequestId]).filter(l => l.name === 'prepared' && l.targetId).map(l => l.targetId as string)
+    for (const row of handle.records.byIds(ids)) {
+      if (row.type !== 'outbound_message' || row.removedAt !== null) continue
+      const cur = fieldsOf(handle, row.id)
+      if (cur.state !== 'draft') continue
+      logFailure('draft discarded', deps.writer.transition(companyId, {
+        recordId: row.id, action: INBOX_ACTIONS.memberReplied, expectedVersion: cur.version, to: 'discarded',
+        actor: INBOX_ACTOR, note: REPLIED_THERE[channel], quiet: true,
+      }))
+    }
+  }
+
   function logFailure(what: string, r: ServiceWriteResult) {
     if (!r.ok) console.warn(`[inbox] ${what} not written: ${r.reason}`)
   }
@@ -213,6 +280,7 @@ export function createInboxService(deps: InboxDeps) {
     const at = clock.now()
     handle.inbox.insertMessage({
       channel: msg.channel, messageId: msg.messageId, interactionId: interaction.id, direction: outgoing ? 'out' : 'in', occurredAt: msg.occurredAt, seenAt: at,
+      sourceRef: msg.sourceRef,
     })
     const replies = replyRequestsOf(handle, interaction.id)
     if (outgoing) {
@@ -227,10 +295,21 @@ export function createInboxService(deps: InboxDeps) {
       for (const r of replies) {
         const to = close ? 'closed' : (r.state === 'preparing' || r.state === 'open' ? 'checking' : null)
         if (to === null) continue
-        logFailure('member reply', deps.writer.transition(companyId, {
+        const moved = deps.writer.transition(companyId, {
           recordId: r.id, action: INBOX_ACTIONS.memberReplied, expectedVersion: r.version, to,
           fields: { trigger_kind: 'our_reply', trigger_ref: msg.sourceRef, ...(replier && mayName(r.id) ? { replied_by: replier.userId } : {}) },
-          actor: INBOX_ACTOR, note: '', quiet: to === 'checking',
+          actor: INBOX_ACTOR, note: REPLIED_THERE[msg.channel], quiet: to === 'checking',
+        })
+        logFailure('member reply', moved)
+        // The reply went out there: a draft made for it is never offered to send.
+        if (moved.ok) discardDrafts(companyId, handle, r.id, msg.channel)
+      }
+      // Not judged yet (or 確認待ち): the member answered it themselves — nothing is left to do.
+      const cur = fieldsOf(handle, interaction.id)
+      if (replies.length === 0 && (cur.state === 'received' || cur.state === 'unsure')) {
+        logFailure('replied before judged', deps.writer.transition(companyId, {
+          recordId: interaction.id, action: INBOX_ACTIONS.memberReplied, expectedVersion: cur.version, to: 'handled',
+          fields: { needs_reply: false }, actor: INBOX_ACTOR, note: REPLIED_THERE[msg.channel], quiet: true,
         }))
       }
       return
@@ -284,6 +363,18 @@ export function createInboxService(deps: InboxDeps) {
       continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
       return 'continued'
     }
+    // A member's plain (unthreaded) message in a chat DM answers the latest message they got there
+    // within DM_REPLY_WINDOW_MS (Slack DMs are seldom threaded).
+    if (outgoing && msg.channel === 'chat' && (msg.references ?? []).length === 0) {
+      const dm = /^(D[A-Z0-9]{1,40}):/.exec(msg.messageId)
+      const since = new Date(Date.parse(msg.occurredAt) - DM_REPLY_WINDOW_MS).toISOString()
+      const last = dm ? handle.inbox.latestIncoming('chat', `${dm[1]}:`, since, msg.occurredAt) : null
+      const row = last ? handle.records.byIds([last.interactionId])[0] : undefined
+      if (row && row.removedAt === null && row.type === 'interaction' && (row.personalOwner === null || row.personalOwner === reporterId)) {
+        continueThread(companyId, handle, row, msg, from.memberId, outgoing, reporterId)
+        return 'continued'
+      }
+    }
     // What the company sends is not intake (a sent mail's receipt is the mail service's).
     if (outgoing) return 'skipped'
 
@@ -324,6 +415,7 @@ export function createInboxService(deps: InboxDeps) {
     if (!made.ok) { logFailure('interaction', made); return 'skipped' }
     handle.inbox.insertMessage({
       channel: msg.channel, messageId: msg.messageId, interactionId: made.record.id, direction: 'in', occurredAt: msg.occurredAt, seenAt: clock.now(),
+      sourceRef: msg.sourceRef,
     })
     return 'created'
   }
@@ -475,11 +567,62 @@ export function createInboxService(deps: InboxDeps) {
       if (!handle.records.settings().enabled) return disabled()
       const found = readable(member, recordId, 'interaction')
       if (!found) return notFound()
-      const { fields } = fieldsOf(handle, recordId)
-      return ok({
-        recordId, channel: str(fields.channel), threadRef: str(fields.thread_ref), sourceRef: str(fields.source_ref),
-        messages: handle.inbox.messagesOf(recordId).map(m => ({ messageId: m.messageId, direction: m.direction, occurredAt: m.occurredAt })),
+      return ok(itemView(member, handle, found.row))
+    },
+
+    /**
+     * The thread read now through the role with the member's own permission
+     * (B4: the AI on the member's PC judges by it). An interaction the member
+     * reads, or a 返事のお願い and its interaction. The text is answered, never
+     * stored or logged; at most the newest THREAD_READ_MAX messages.
+     */
+    async thread(member: Member, recordId: string): Promise<Outcome<InboxThreadView>> {
+      const handle = handleOf(member.companyId)
+      if (!handle.records.settings().enabled) return disabled()
+      const row = interactionFor(member, handle, recordId)
+      if (!row) return notFound()
+      const item = itemView(member, handle, row)
+      const answer = (read: InboxThreadView['read'], messages: InboxThreadMessage[] = [], more = false): InboxThreadView => ({
+        item, read, header: THREAD_TEXT_HEADER, messages, footer: THREAD_TEXT_FOOTER, more,
+        instructionLike: findInstructionLikeText(messages.map(m => m.text).join('\n')).map(label => ({ label, words: INSTRUCTION_LIKE_WORDS[label] ?? label })),
       })
+      if (item.channel === 'chat') {
+        const ref = chatThreadOf(item.threadRef)
+        if (!ref) return ok(answer('not-found'))
+        if (!deps.chatReader) return ok(answer('stopped'))
+        let r: Awaited<ReturnType<InboxChatReader['thread']>>
+        try { r = await deps.chatReader.thread(member.companyId, member.userId, ref) } catch { r = { ok: false, reason: 'unavailable' } }
+        if (!r.ok) return ok(answer(r.reason))
+        const kept = r.value.messages.slice(-THREAD_READ_MAX)
+        return ok(answer('ok', kept.map(m => ({
+          direction: m.mine ? 'out' as const : 'in' as const, at: m.at, from: m.authorName, to: [], cc: [], subject: null, text: m.text, truncated: m.truncated, automated: false,
+        })), r.value.more || r.value.messages.length > kept.length))
+      }
+      if (!deps.mailReader) return ok(answer('stopped'))
+      // Each message the inbox saw, by its own pointer (rows from before B4: the interaction's first pointer).
+      const seen = handle.inbox.messagesOf(row.id)
+      const pointers = seen.map((m, i) => mailIdOf(m.sourceRef ?? (i === 0 ? item.sourceRef : null))).filter((id): id is string => id !== null)
+      if (pointers.length === 0) return ok(answer('not-found'))
+      const newest = pointers.slice(-THREAD_READ_MAX)
+      const own = memberAddressSet(member.companyId)
+      const messages: InboxThreadMessage[] = []
+      for (const id of newest) {
+        let r: Awaited<ReturnType<MailReader['getMessage']>>
+        try { r = await deps.mailReader.getMessage(member.companyId, member.userId, id) } catch { r = { ok: false, reason: 'unavailable' } }
+        if (!r.ok) {
+          // One message gone (deleted in the mailbox) leaves the others; the connection's trouble ends the read.
+          if (r.reason === 'not-found') continue
+          return ok(answer(r.reason))
+        }
+        const v = r.value
+        messages.push({
+          direction: v.from && own.has(v.from.email) ? 'out' : 'in', at: v.receivedAt,
+          from: v.from ? (v.from.name ? `${v.from.name} <${v.from.email}>` : v.from.email) : null,
+          to: v.to.map(a => a.email), cc: v.cc.map(a => a.email), subject: v.subject, text: v.text, truncated: v.truncated, automated: v.automated,
+        })
+      }
+      if (messages.length === 0) return ok(answer('not-found'))
+      return ok(answer('ok', messages, pointers.length > newest.length))
     },
 
     /**
@@ -496,7 +639,9 @@ export function createInboxService(deps: InboxDeps) {
       const bad = (error: string) => refuse('bad-request', error, { code: 'BAD_REQUEST' })
       if (!isObject(body)) return bad('本文の形が正しくありません')
       const outcome = body.outcome
-      if (outcome !== 'reply' && outcome !== 'no_reply' && outcome !== 'set_aside' && outcome !== 'unsure') return bad('outcome は reply / no_reply / set_aside / unsure のどれかです')
+      if (outcome !== 'reply' && outcome !== 'no_reply' && outcome !== 'set_aside' && outcome !== 'unsure' && outcome !== 'task') {
+        return bad('outcome は reply / no_reply / set_aside / unsure / task のどれかです')
+      }
       if (typeof body.expectedVersion !== 'number' || !Number.isInteger(body.expectedVersion)) return bad('expectedVersion が要ります')
       const reason = typeof body.reason === 'string' ? oneLine(body.reason, INBOX_LIMITS.reason) : ''
       if (reason === '') return bad('reason（判断のわけ）が要ります')
@@ -508,14 +653,27 @@ export function createInboxService(deps: InboxDeps) {
       const cur = fieldsOf(handle, recordId)
       if (cur.state !== 'received' || cur.fields.assignee !== member.userId) return refuse('conflict', NOT_AI_TURN.error, { code: NOT_AI_TURN.code })
       if (body.expectedVersion !== cur.version) return refuse('conflict', VERSION_CONFLICT.error, { code: VERSION_CONFLICT.code, version: cur.version })
+      // task: the AI made it (records_create, owner-only) and it names this message as its もとの連絡.
+      let taskId: string | null = null
+      if (outcome === 'task') {
+        const task = readable(member, body.taskId, 'task')
+        const links = task ? handle.records.linksFrom([task.row.id]) : []
+        if (!task || !links.some(l => l.name === 'interaction' && l.targetId === recordId)) {
+          return bad('taskId には、この連絡を「もとの連絡」（interaction）につないだタスクを指定してください')
+        }
+        taskId = task.row.id
+      }
       if (outcome === 'set_aside') {
         // A person's 「やることにする」 / 「自分の担当にする」 wins over the AI (the latest move into 届いた).
         const into = [...handle.records.ledger(recordId)].reverse().find(e => e.toState === 'received' && e.fromState !== 'received')
         if (into && into.actorKind === 'human' && into.action !== INBOX_ACTIONS.claimed) return refuse('conflict', PERSON_DECIDED.error, { code: PERSON_DECIDED.code })
       }
 
+      // The member already answered in the thread (the newest message is ours): no 返事のお願い.
+      const seen = handle.inbox.messagesOf(recordId)
+      const alreadyReplied = outcome === 'reply' && seen.length > 0 && seen[seen.length - 1].direction === 'out'
       let replyRequestId: string | null = null
-      if (outcome === 'reply') {
+      if (outcome === 'reply' && !alreadyReplied) {
         const existing = replyRequestsOf(handle, recordId)[0]
         if (existing) {
           replyRequestId = existing.id
@@ -525,6 +683,8 @@ export function createInboxService(deps: InboxDeps) {
           const guideline = replyTarget(occurred, settings.reply, settings.companyHolidays.map(h => h.date)).date
           const links = handle.records.linksFrom([recordId])
           const linked = (name: string) => links.filter(l => l.name === name && l.targetId).map(l => l.targetId as string).slice(0, 1)
+          // 名寄せ again: a 相手 made since the message came is found now (identity.md resolveAddress).
+          const counterpart = linked('counterpart').length > 0 ? linked('counterpart') : counterpartOf(member, str(cur.fields.from_address))
           const made = deps.writer.create(member.companyId, {
             type: 'reply_request', title: title || found.row.title,
             ...(found.row.personalOwner !== null ? { personalOwner: found.row.personalOwner } : { folder: found.row.folder }),
@@ -532,7 +692,7 @@ export function createInboxService(deps: InboxDeps) {
               assignee: member.userId, occurred_at: occurred, end_condition: endCondition || null,
               due: typeof body.deadline === 'string' ? body.deadline : guideline, guideline_due: guideline, due_note: deadlineNote || null,
             },
-            links: { interaction: [recordId], counterpart: linked('counterpart'), bundle: linked('bundle') },
+            links: { interaction: [recordId], counterpart, bundle: linked('bundle') },
             actor, note: reason,
             // 「準備中」 is the AI's turn (the reply's draft): the person hears of it when it is handed over.
             quiet: true,
@@ -541,14 +701,16 @@ export function createInboxService(deps: InboxDeps) {
           replyRequestId = made.record.id
         }
       }
-      const to = outcome === 'reply' || outcome === 'no_reply' ? 'handled' : outcome === 'set_aside' ? 'excluded' : 'unsure'
+      const handled = outcome === 'reply' || outcome === 'no_reply' || outcome === 'task'
+      const to = handled ? 'handled' : outcome === 'set_aside' ? 'excluded' : 'unsure'
       const moved = deps.writer.transition(member.companyId, {
-        recordId, action: INBOX_ACTIONS.judged, expectedVersion: cur.version, to, actor, note: reason,
-        fields: outcome === 'reply' || outcome === 'no_reply' ? { needs_reply: outcome === 'reply' } : {},
+        recordId, action: INBOX_ACTIONS.judged, expectedVersion: cur.version, to, actor,
+        note: alreadyReplied ? `${reason}（${REPLIED_THERE[cur.fields.channel === 'chat' ? 'chat' : 'email']}）` : reason,
+        fields: handled ? { needs_reply: outcome === 'reply' && !alreadyReplied } : {},
         quiet: to !== 'unsure',
       })
       if (!moved.ok) return refuse('conflict', VERSION_CONFLICT.error, { code: VERSION_CONFLICT.code })
-      return ok({ interactionId: recordId, state: to, replyRequestId })
+      return ok({ interactionId: recordId, state: to, replyRequestId, taskId, ...(alreadyReplied ? { alreadyReplied: true } : {}) })
     },
 
     /** The settings view (GET /inbox-settings): every member reads them; owners and admins change them. */

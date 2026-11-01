@@ -33,7 +33,8 @@ const SLACK_USER_RE = /^[UW][A-Z0-9]{2,32}$/
 const NEW_MESSAGE_SUBTYPES = new Set([undefined, 'thread_broadcast', 'file_share'])
 const BROADCAST_RE = /<!(channel|here|everyone)(\|[^>]*)?>/
 
-export type SlackSignalKind = 'dm' | 'mention' | 'broadcast'
+/** `own`: the member's own message in a DM or a thread (their reply: the inbox ends what it answered, B4). */
+export type SlackSignalKind = 'dm' | 'mention' | 'broadcast' | 'own'
 
 /** Something for a member arrived in Slack. Never the text. */
 export interface SlackSignal {
@@ -115,6 +116,13 @@ export function createSlackEvents(deps: SlackEventsDeps) {
 
     const out: SlackSignal[] = []
     const members = new Set<string>()
+    // The member's own reply (a DM, or a thread): the inbox matches it to what it answers; never intake.
+    const threaded = base.threadTs !== null && base.threadTs !== ts
+    const self = sender && (isDm || threaded) ? memberOf(companyId, sender) : null
+    if (self) {
+      members.add(self)
+      out.push({ ...base, userId: self, kind: 'own' })
+    }
     for (const [slackUser, kind] of kinds) {
       const userId = memberOf(companyId, slackUser)
       if (!userId || members.has(userId)) continue

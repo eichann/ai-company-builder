@@ -40,14 +40,20 @@ export interface AiTurnStepDefinition<Step extends string = string> {
    * (the server's `aiTurn`).
    */
   listedBy: 'minutes' | 'ai-turn'
-  /** The type's first AI action, run by main at the version read just before, and the state it starts from. */
-  claim: { action: string; from: string }
+  /**
+   * The type's first AI action, run by main at the version read just before, and the state it
+   * starts from. `action: null`: the type has no start mark (an interaction in 届いた) — the
+   * server's execution run alone decides which PC runs it, and the run's own writes are compared
+   * at the version the claim read.
+   */
+  claim: { action: string | null; from: string }
   /**
    * The record's state after the run (main's `aiTurns:settle`): `done` = finished; `couldNot` =
    * the AI said it could not (a person looks); `closed` = a person ended it meanwhile; `working` =
-   * still in progress, put back with `putBack` when the server's run finish did not.
+   * still in progress, put back with `putBack` when the server's run finish did not (null: the
+   * working state is the claim's own from-state, nothing to put back).
    */
-  settle: { done: readonly string[]; couldNot: readonly string[]; closed: readonly string[]; working: string; putBack: string }
+  settle: { done: readonly string[]; couldNot: readonly string[]; closed: readonly string[]; working: string; putBack: string | null }
   tools: AiTurnStepTools
   /** The hidden consultation: its title, and whether it is linked to the minutes (chat history `minutesId`). */
   consultationTitle(candidate: AiTurnCandidate): string

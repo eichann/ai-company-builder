@@ -291,7 +291,7 @@ actions:
 `,
   reply_request: `---
 label: 返事のお願い
-version: 1
+version: 2
 implements: [request, prepared, outside_event]
 storage: server
 fields:
@@ -328,6 +328,7 @@ actions:
   close:         { label: 終わりにする, from: [open, waiting_reply], to: closed, who: [assignee], note: optional }
   drop:          { label: 返事をしない, from: [preparing, open, waiting_reply, checking], to: dropped, who: [assignee], note: required }
   reopen:        { label: やり直す, from: [closed, dropped], to: open, who: [assignee], note: optional, hand_to: assignee }
+  replied_elsewhere: { label: もう返した, from: [preparing, open, waiting_reply, checking], to: closed, who: [assignee], note: optional }
   set_end_condition: { label: 終わりの条件を決める, who: [assignee, ai], args: { end_condition: long_text }, note: optional }
   set_due:       { label: 期限を変える, who: [assignee, ai], args: { due: date }, note: optional }
   set_wait_until: { label: 返事の見込みを決める, who: [assignee, ai], args: { wait_until: date }, note: optional }
@@ -336,6 +337,7 @@ actions:
 
 来た連絡から生まれる「返事をする」仕事。ふつうのやることとは別の型で、終わりの条件を持ちます（返事が来れば・日程が決まれば など。AI が作るときに入れ、人が直せます）。
 「準備中」と「確かめ中」は AI の番です。AI が返事の下書きを用意して担当に渡し、返事が来たとき・こちらが返信したときは、終わりの条件と照らして終わりにするか（「AI が判断して終わりにする」）、相手の返事待ちにするか、担当の番に戻すかを決めます。この型の中でだけ、AI が終わりにできます（やり直せます）。
+電話や別の経路で返したときなど、ACB から見えない返事は、担当が「もう返した」で終わりにします。
 期限は、連絡に締切が書いてあればそれ、なければ会社の「返事の目安」です。目安で入れた期限は「目安」と分かるように出します。
 `,
 }
@@ -407,6 +409,8 @@ export const SERVICE_TRANSITIONS: Readonly<Record<string, ReadonlyArray<{ from: 
     { from: ['received'], to: 'unclaimed' },
     { from: ['unclaimed'], to: 'received' },
     { from: ['handled'], to: 'received' },
+    // The member replied in the thread before it was judged (B4): nothing is left to do.
+    { from: ['unsure'], to: 'handled' },
   ],
   reply_request: [
     // Their reply came (not an automatic one): the AI checks it against the end condition.

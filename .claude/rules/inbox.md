@@ -12,6 +12,8 @@ paths:
   - "server/tests/unit/inbox.test.ts"
   - "server/tests/unit/intake-core.test.ts"
   - "admin/src/app/companies/*/task-list/intake-settings.tsx"
+  - "client/electron/features/inbox/**"
+  - "client/shared/ai-turn-steps/inbox-triage.ts"
 ---
 
 # Incoming messages (来た連絡, stage 3, lane B: B2)
@@ -56,6 +58,19 @@ owner's own record the subject, the sender and the To / CC addresses (≤ 20 eac
   exactly one company. Created by the service writer as `INBOX_ACTOR` (`acb:inbox`, external)
   directly in its state (`state`); 届いた (the AI's turn) and やることにしなかった tell nobody
   (`quiet`, signal only); 確認待ち tells its owner (`intake_unsure`).
+- **Each message keeps its pointer** (`inbox_messages.source_ref`, B4; rows from before it fall
+  back to the interaction's `source_ref` for the first message): the AI reads the thread by them.
+- **The member's own reply** (B4). Slack sends the member's own message in a DM or a thread as an
+  `own` signal (`slack-events.ts`; `slackSignalMessage` makes it `outgoing`). A Slack DM is seldom
+  threaded: an outgoing chat message with no reference in a DM channel (`D…`) answers the newest
+  incoming message of that DM within `DM_REPLY_WINDOW_MS` (3 days; `latestIncoming`), never
+  another DM's or older. When the member's reply is seen: each open reply request moves as below
+  with the note 「メールで返信済み」/「チャット（Slack）で返信済み」 and its prepared
+  `outbound_message` drafts still in `draft` are **discarded** (never offered to send); an
+  interaction not judged yet (`received`, or `unsure`) becomes `handled` (`needs_reply: false`).
+  A judgement `reply` on a thread whose newest message is ours makes no reply request
+  (`alreadyReplied: true`, handled). A reply ACB cannot see (the phone, another channel): the
+  assignee's 「もう返した」 (`replied_elsewhere`, reply_request v2).
 - **The thread went on**: their reply (not `automated` / `bulk`: an automatic reply is no reply)
   moves each 返事待ち reply request to `checking` (ledger `reply_arrived`, the assignee told:
   notice `reply_arrived`); with no open reply request a `handled` interaction goes back to
@@ -88,7 +103,34 @@ sentence it came from, `end_condition`, links `interaction`, `counterpart`, `bun
 interaction → `handled`. `no_reply` → `handled`; `set_aside` → `excluded` — refused (409
 `PERSON_DECIDED`) when a person's 「やることにする」 / 「自分の担当にする」 put it back into
 `received`; `unsure` → 確認待ち. `GET /items/:recordId` (read) answers the pointers the PC reads the
-thread by (channel, `thread_ref`, `source_ref`, the message ids) — never a body.
+thread by (channel, `thread_ref`, `source_ref`, the message ids) — never a body — plus its
+state and version, the tasks and open reply requests made for it and its 相手 (only what the
+member reads). `task` (B4) → `handled`: `taskId` must be a task the member reads whose
+`interaction` link is this message (the AI makes it with `records_create`, owner-only); a second
+run sees it in the view and reuses it. `reply` links the 相手 found now by 名寄せ when the message
+had none.
+
+`GET /items/:recordId/thread` (read; B4): the thread read **now** through the role with the
+member's own permission — mail: `mailReader.getMessage` per message pointer (`mailIdOf`: the part
+after the connector prefix), at most `THREAD_READ_MAX` (5) newest; chat: the `chat` role's reader
+(`InboxChatReader`, structurally lane A's `ChatReader`; until A4 wires it a chat thread reads
+`stopped`) by `chatThreadOf(thread_ref)`. A 返事のお願い's id reads its interaction's thread.
+Answers `InboxThreadView`: `read` (`ok` or the role's failure word, never guessed around), the
+messages between `THREAD_TEXT_HEADER` / `FOOTER` (outside text: data, not instructions) and the
+instruction-like flags. **Nothing of it is stored or logged.** A business plugin's run may use it
+only when its step declares the `mail` / `chat` role (`connectorRoleRefusal`).
+
+## The AI's turn on the PC (B4: `inbox-triage`)
+
+`client/shared/ai-turn-steps/inbox-triage.ts` (`ai-turns.md` "Steps"): an `interaction` in
+`received` (the owner's 「AI の番」 in the task list). No start mark (`claim.action: null`): the
+server's execution run alone picks the PC; left in `received` the run is given back. Done in
+`handled` / `excluded` / `unsure`. Tools, nothing else: `inbox_read`, `inbox_judge`
+(`client/electron/features/inbox/tools.ts`, provider under lane B in
+`records/tool-providers.ts`; `inbox_judge` only with an act token), `records_create` (the task),
+`reply_request__finish_prep` (the reply's draft as `prep_summary`, the other side's text not
+quoted) and `reply_request__hand_over`. It never sends. Tests: `client/tests/ai-turn-steps.test.ts`,
+`client/tests/ai-turn-claims.test.ts` (no start mark).
 
 ## Member routes (`routes/inbox.ts`, session, `/api/companies/:companyId`)
 
@@ -108,7 +150,8 @@ private folder → 400, the folder never named), `GET /inbox/status`, `POST /inb
   actions `set_aside` / `ask_person` (`who: [ai]` — `received` is the AI's turn), `confirm`,
   `drop`, `take_up` (the assignee). `SERVICE_TRANSITIONS` rows for the inbox's moves.
 - `reply_request` v1 (返事のお願い): implements `request`, `prepared`, `outside_event`; states
-  preparing → open → waiting_reply ↔ checking → closed / dropped. The AI ends one only here
+  preparing → open → waiting_reply ↔ checking → closed / dropped. v2 (B4, additive): the
+  assignee's 「もう返した」 (`replied_elsewhere`, from every open state → closed). The AI ends one only here
   (`ai_close`, `who: [ai]`, from preparing / checking, `close_reason`); the person's `close`,
   `drop`, `reopen`, `resume` are the assignee's; `await_reply` (assignee or AI). Follow-up on
   `wait_until` is B5.
@@ -124,7 +167,11 @@ members, owner, admin; CC / several To / shared address / internal / free mail /
 setting; once per id; no body stored; thread continuation, automatic reply, a reply to another
 member; member reply per setting and never naming a non-reader; judgement: due from the 目安 past
 a holiday or the stated deadline, owner-only reply request, only the owner's AI, a person's
-「やることにする」 wins; polling: first connection, 7-day read-back, the gap shown to its member
+「やることにする」 wins; B4: the thread read through the role by the owner alone with nothing kept,
+the role's failures said, a reply request reads its message, a task counts only when it names the
+message, 名寄せ at judgement, the member's reply discards drafts / handles an unjudged message /
+stops a reply request being made, a Slack DM's unthreaded reply within 3 days, 「もう返した」 is
+the person's; polling: first connection, 7-day read-back, the gap shown to its member
 only, `not-connected` keeps the window, no role → nothing; companies apart),
 `server/tests/unit/intake-core.test.ts` (settings validation and defaults, routing order, the
 window's 7 / 8 days, the versions additive, only `reply_request` lets the AI end it), permission
@@ -138,6 +185,11 @@ matrix rows (lane B) + `CROSS`, `company-scoped-sql.test.ts`, `admin-contract.te
   A's `mailReader` (it lists header facts newest first; the inbox needs Message-ID / References
   and `outgoing`), the server clock calling `inbox.pollCompany`, and `connect` on a grant.
 - 「今後も無視」 per sender, 引き受ける notices to the department, handing an unsure message to
-  another To member (moves `personal_owner`), the app's screens (B4/A4), follow-up (B5).
+  another To member (moves `personal_owner`), the app's screens (A4), follow-up (B5).
+- The reply's draft is text in `prep_summary` until A4's reply draft (`outbound_message` v4,
+  replying to the interaction, with the sender as a recipient source) lands; the step then names
+  A4's draft tools instead. The chat thread read waits for A4's `ChatReader` (one line in
+  `composition.ts`: `chatReader`). 「もう返した」 by the engine does not discard a prepared draft
+  yet (the member's reply seen by the inbox does).
 - Sent-mail receipts (`outbound-mail.ts`) still start in `received`, now an AI-turn state with no
   assignee (nobody's turn); A4 may create them `handled`.

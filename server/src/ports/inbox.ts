@@ -17,6 +17,8 @@ export interface InboxMessageRow {
   direction: 'in' | 'out'
   occurredAt: string
   seenAt: string
+  /** The connector's opaque pointer to the message (null for rows made before B4). */
+  sourceRef: string | null
 }
 
 export interface InboxConnectionRow {
@@ -42,6 +44,8 @@ export interface InboxRepository {
   /** The interactions any of these messages belong to (a thread's earlier messages), oldest message first. */
   interactionsOf(channel: InboxChannel, messageIds: string[]): string[]
   messagesOf(interactionId: string): InboxMessageRow[]
+  /** The newest incoming message whose id starts with `prefix` (a chat DM's `<channel>:`), at or after `since` and before `before`. */
+  latestIncoming(channel: InboxChannel, prefix: string, since: string, before: string): InboxMessageRow | null
   /** false when the message was already there (another reporter got there first). */
   insertMessage(row: InboxMessageRow): boolean
 
