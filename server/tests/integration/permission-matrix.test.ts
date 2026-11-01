@@ -499,6 +499,7 @@ const MATRIX: Row[] = [
   r('PUT /api/companies/:companyId/plugins/:pluginId/step-skills/:step', w => ({ path: `${C(w)}/plugins/no-such-plugin/step-skills/work`, body: {} }), [404, 404, 403, 403, 404, 401]),
   r('GET /api/companies/:companyId/me/plugin-step-turns', w => ({ path: `${C(w)}/me/plugin-step-turns` }), MEMBERS),
   r('GET /api/companies/:companyId/me/plugin-steps/records/:recordId', w => ({ path: `${C(w)}/me/plugin-steps/records/deal-nosuch01` }), [404, 404, 404, 404, 404, 401]),
+  r('POST /api/companies/:companyId/me/plugin-steps/consultations', w => ({ path: `${C(w)}/me/plugin-steps/consultations`, body: {} }), [400, 400, 400, 400, 404, 401]),
   r('POST /api/companies/:companyId/me/plugin-steps/records/:recordId/:pluginId/:step/start', w => ({ path: `${C(w)}/me/plugin-steps/records/deal-nosuch01/no-such-plugin/work/start`, body: {} }), [404, 404, 404, 404, 404, 401]),
   // lane C ▲
 ]

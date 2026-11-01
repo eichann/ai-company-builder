@@ -157,6 +157,13 @@ export function pluginStepFirstMessage(input: {
   ].join('\n')
 }
 
+/** The person step a consultation was started from (the server binds that consultation to it). */
+export interface PluginPersonStep {
+  recordId: string
+  pluginId: string
+  step: string
+}
+
 /** A `start: person` step offered on a record's card. */
 export interface PluginStepButton {
   pluginId: string

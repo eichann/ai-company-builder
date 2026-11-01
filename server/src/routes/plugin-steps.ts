@@ -9,6 +9,8 @@
  *   GET  /me/plugin-step-turns                                      the member's records waiting at a `start: ai_turn` step
  *   GET  /me/plugin-steps/records/:recordId                         the steps at the record's state (its card)
  *   POST /me/plugin-steps/records/:recordId/:pluginId/:step/start   a `start: person` step: pins the work's procedure, answers it
+ *   POST /me/plugin-steps/consultations                         { conversationId, recordId, pluginId, step }: that consultation's
+ *                                                               plugin power is the step's, for good (the C4 gate)
  *
  * The automatic steps are claimed through POST /ai-run-claims (routes/ai-runs.ts)
  * as `<pluginId>__<step>`.
@@ -44,3 +46,6 @@ pluginStepsRoute.get('/me/plugin-steps/records/:recordId', companyMember, (c) =>
 
 pluginStepsRoute.post('/me/plugin-steps/records/:recordId/:pluginId/:step/start', companyMember, async (c) =>
   answer(c, await pluginSteps.startPerson(c.var.member, c.req.param('recordId'), c.req.param('pluginId'), c.req.param('step'))))
+
+pluginStepsRoute.post('/me/plugin-steps/consultations', companyMember, serviceBody, (c) =>
+  answer(c, pluginSteps.bindConsultation(c.var.member, c.var.body)))

@@ -25,6 +25,29 @@ const ID = /^[a-z0-9][a-z0-9_-]{0,79}$/
 const NOT_STARTED = 'この手順を始められませんでした。少し待ってからもう一度ためしてください'
 const NOT_HERE = 'この手順の手順書がまだこの PC にありません。同期してから、もう一度ためしてください'
 
+/**
+ * Bind a consultation to the person step it was started from (`POST /me/plugin-steps/consultations`,
+ * the chat server asks before the first turn): true when the server bound it (or had already).
+ */
+export function createPersonStepBinder(deps: Pick<PluginStepsIpcDeps, 'baseUrl' | 'cookies' | 'fetch'>) {
+  const doFetch = deps.fetch ?? fetch
+  return async (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }): Promise<boolean> => {
+    const base = deps.baseUrl().replace(/\/+$/, '')
+    const cookies = deps.cookies()
+    if (!base || cookies.length === 0 || !COMPANY.test(companyId)) return false
+    try {
+      const res = await doFetch(`${base}/api/companies/${encodeURIComponent(companyId)}/me/plugin-steps/consultations`, {
+        method: 'POST', redirect: 'error', signal: AbortSignal.timeout(20_000),
+        headers: { Cookie: cookies.join('; '), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ conversationId, recordId: step.recordId, pluginId: step.pluginId, step: step.step }),
+      })
+      return res.status === 200
+    } catch {
+      return false
+    }
+  }
+}
+
 export function registerPluginStepsIpc(ipc: IpcRegistrar, deps: PluginStepsIpcDeps): void {
   const doFetch = deps.fetch ?? fetch
 

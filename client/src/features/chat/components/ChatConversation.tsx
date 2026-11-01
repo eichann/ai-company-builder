@@ -1,4 +1,4 @@
-import type { PluginRunStep } from '../../../../shared/ai-turn-steps/plugin'
+import type { PluginPersonStep, PluginRunStep } from '../../../../shared/ai-turn-steps/plugin'
 import type { AiTurnStep } from '../../../../shared/ai-turn-steps/registry'
 import { HandoffControl } from './HandoffControl'
 import { AgentInteractionCard } from './AgentInteractionCard'
@@ -83,7 +83,7 @@ export interface ChatPanelChatProps {
 
 /** What chat.newConsultation / chat.insertText asked the pane to do (ChatPanel holds it until a tab can). */
 export type ChatInputRequest =
-  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string }
+  | { kind: 'newConsultation'; message?: string; title?: string; minutesId?: string; topicRecordId?: string; pluginStep?: PluginPersonStep }
   | { kind: 'insertText'; text: string }
   /**
    * 「AI の番」 run automatically (ai-turns.md), for a fresh tab behind the shown one: claim the
@@ -124,6 +124,8 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
 
   // The automatic 「AI の番」 send (aiTurn request below): its one request runs only that step's tools.
   const aiTurnStepRef = useRef<AiTurnStep | PluginRunStep | null>(null)
+  // A business plugin's person step this consultation was started from: its first request binds it (plugin-steps.md).
+  const pluginStepRef = useRef<PluginPersonStep | null>(null)
   const transport = useChatTransport(chatServer, {
     authMode: authModeRef,
     agentSession: agentSessionRef,
@@ -140,6 +142,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
     pendingFilePaths: pendingFilePathsRef,
     handoffRequest: handoffRequestRef,
     aiTurnStep: aiTurnStepRef,
+    pluginStep: pluginStepRef,
   })
 
   // Next-prompt suggestion and messages sent while the AI works. Declared
@@ -334,7 +337,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       return
     }
     if (!isShown || !historyReadyRef.current || inputRequest?.kind !== 'newConsultation') return
-    const { message, title, minutesId, topicRecordId } = inputRequest
+    const { message, title, minutesId, topicRecordId, pluginStep } = inputRequest
     onInputRequestConsumed?.()
     // Reading minutes needs the minutes' actions (registry recordActions): Codex only reads.
     if (minutesId && !agentCan(authMode, 'recordActions')) { setHistoryError(MINUTES_NEEDS_CLAUDE_TEXT); return }
@@ -347,6 +350,7 @@ export const ChatPanelChat = memo(function ChatPanelChat({ tabId, isShown, depar
       }
       if (minutesId) minutesIdRef.current = minutesId
       if (topicRecordId) topicRecordIdRef.current = topicRecordId
+      if (pluginStep) pluginStepRef.current = pluginStep
       if (message) void handleSend(message)
     })
   }, [inputRequest, isRestoringSession, isShown, chatInputApiRef])

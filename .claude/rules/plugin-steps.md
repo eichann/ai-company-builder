@@ -68,7 +68,21 @@ A contract-2 business plugin declares `steps` (`plugins.md` "Contract 2": target
   answers `{ pin, tools, connectorRoles, … }` (`PluginStepStartView`). A consultation started this
   way is the member's own (no run): its ledger entries have no procedure (a Skill it loads through
   the Skill tool is recorded by #403).
+- **A person step's consultation keeps the step's plugin power** (coordinator decision 2026-11-02):
+  `POST /me/plugin-steps/consultations { conversationId, recordId, pluginId, step }` (the app sends
+  it before the consultation's first turn) binds the member's consultation to the step, for good
+  (`plugin_step_consultations`; never rebound — 409 `CONSULTATION_BOUND`; only a `start: person`
+  step whose work was started (pinned) on a record the member reads, else 404). The member keeps
+  their ordinary consultation tools, but the C4 gate treats every token of that consultation like
+  the step's run (`boundStepOf` in `plugin-operation-checks.ts`: the operations gate, the connector
+  roles and `GET /api/records-ai/plugins`): only that plugin's operations the step allows and its
+  connector roles, narrowed by the pinned version; a company Skill pinned as its procedure never
+  widens it.
 - Another company: the record and the plugin are the same 404 as none; no turns.
+- Test (person consultations): `plugin-steps.test.ts` "a person's consultation" (an ordinary
+  consultation unchanged; only a started person step binds; bound → no plugin operation or role
+  beyond the step's, with a company Skill as procedure; never rebound; another member's consultation
+  of the same id not bound) — mutation-checked.
 - Test: `server/tests/integration/plugin-steps.test.ts` (pin at the first claim, kept after a newer
   install, the gate following the pin, a new work on the new version, the pinned version listed,
   `upgrade.at` / `upgrade.from`, the operator's stop of a pinned version, a Skill pinned by tree id

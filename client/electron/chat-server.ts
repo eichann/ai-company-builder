@@ -59,6 +59,11 @@ export interface ChatServerConfig extends AgentHost {
    * A business plugin's step run (plugin-steps.md): the tool ceiling main's claim holds for this
    * consultation and step; null when main holds none (the run is then refused, never widened).
    */
+  /**
+   * A consultation started from a business plugin's person step (plugin-steps.md): bind it on the
+   * server (its AI's plugin power is that step's, for good). false = not bound: the turn is refused.
+   */
+  bindPluginStep?: (companyId: string, conversationId: string, step: { recordId: string; pluginId: string; step: string }) => Promise<boolean>
   pluginStepTools?: (conversationId: string, step: string) => { allowsRecordTool(name: string): boolean; builtinTools: string[] } | null
   createRecordTools?: (request: { companyId: string; conversationId: string; agent: string; actions: boolean; companyRoot?: string; onOperationCard?: (card: PluginOperationCard) => void; onApprovalCard?: (card: ApprovalCardRef) => void; onBundleChoice?: (card: MinutesBundleChoiceCard) => void; onMailDraft?: (card: MailDraftCard) => void }, signal: AbortSignal) => Promise<RecordTools | null>
   /**
@@ -257,6 +262,7 @@ export async function startChatServer(config: ChatServerConfig) {
       authMode: requestedAuthMode,
       promptSuggestions,
       aiTurnStep: requestedStep,
+      pluginStep: requestedPluginStep,
     }: ChatRequestOptions & {
       messages: UIMessage[]
       systemPrompt?: string
@@ -354,6 +360,11 @@ export async function startChatServer(config: ChatServerConfig) {
     if (review) finalSystemPrompt = (finalSystemPrompt || '') + REVIEW_INSTRUCTIONS
     // The company map (records/tools.ts): look-ups for every agent that has them, actions only where the registry says.
     // A connector's update (corporate-sales__update_deal) becomes a card of the reply, stored with it (plugin-operations.ts).
+    // A person step's consultation is bound before its first tools exist; never run it unbound.
+    if (requestedPluginStep && (!companyId || !appSessionId || !config.bindPluginStep
+      || !await config.bindPluginStep(companyId, appSessionId, requestedPluginStep).catch(() => false))) {
+      return c.json({ error: 'この手順の相談を始められませんでした。少し待ってからもう一度ためしてください。', code: 'PLUGIN_STEP_NOT_BOUND' }, 409)
+    }
     const allRecords = connection.ownsConversation && can.recordsMcp && companyId
       ? await Promise.resolve(config.createRecordTools?.({
         companyId, conversationId: appSessionId || crypto.randomUUID(), agent: authMode, actions: can.recordActions, companyRoot: companyRootPath || undefined,

@@ -250,8 +250,12 @@ ceiling, the first message).
   `pluginSteps:start` (`electron/features/plugin-steps/ipc.ts`; the company folder validated by
   `AllowedRoots` before any server call) → `POST …/start` pins the work's procedure (its first run)
   → main reads the pinned text (`procedures.ts`) → `chat.newConsultation` with that first
-  message. It is the member's own consultation: their tools and rights, no run, no ceiling (the
-  ceiling binds the AI's unattended run); not on this PC → 「まだこの PC にありません」.
+  message and `pluginStep`. It is the member's own consultation (their ordinary tools and rights,
+  no run), but its plugin power stays the step's: its first request carries `pluginStep`
+  (`chatRequestBody.ts`, consumed once) and the chat server has main bind it on the server
+  (`bindPluginStep` → `POST /me/plugin-steps/consultations`, `plugin-steps.md`) before any tool
+  exists; not bound → 409 `PLUGIN_STEP_NOT_BOUND`, the turn never runs unbound. Not on this PC →
+  「まだこの PC にありません」.
 - Test: `client/tests/plugin-step-turns.test.ts` (the person steps offered, a person's start's
   message with the pinned procedure, an outside company folder refused before any call, the turns parsed strictly, the claim runs the
   plugin step with the pinned procedure and no type action, the ceiling for that consultation and

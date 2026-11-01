@@ -23,6 +23,18 @@ export const pluginStepSchema = `
     );
     CREATE INDEX IF NOT EXISTS idx_plugin_step_pins_plugin ON plugin_step_pins(company_id, plugin_id);
 
+    -- A member's consultation started from a \`start: person\` step: its AI's plugin power is that step's, for good.
+    CREATE TABLE IF NOT EXISTS plugin_step_consultations (
+      company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,
+      user_id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
+      record_id TEXT NOT NULL,
+      plugin_id TEXT NOT NULL,
+      step TEXT NOT NULL,
+      bound_at TEXT NOT NULL,
+      PRIMARY KEY (company_id, user_id, conversation_id)
+    );
+
     -- The company's Skill for an overridable step (owner / admin; the plugin's own procedure when absent).
     CREATE TABLE IF NOT EXISTS plugin_step_skills (
       company_id TEXT NOT NULL REFERENCES companies(id) ON DELETE CASCADE,

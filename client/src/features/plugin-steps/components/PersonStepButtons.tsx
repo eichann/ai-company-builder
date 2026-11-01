@@ -27,7 +27,7 @@ export function PersonStepButtons({ companyId, rootPath, recordId }: Props) {
     try {
       const r = await startPersonStep(companyId, recordId, s.pluginId, s.step, rootPath)
       if (!r.ok) { setError(r.error); return }
-      await runCommand('chat.newConsultation', { message: r.message, title: r.title })
+      await runCommand('chat.newConsultation', { message: r.message, title: r.title, pluginStep: { recordId, pluginId: s.pluginId, step: s.step } })
     } finally {
       setBusy(false)
     }

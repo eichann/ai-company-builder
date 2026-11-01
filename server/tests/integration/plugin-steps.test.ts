@@ -334,6 +334,29 @@ describe("a person's start", () => {
   })
 })
 
+describe("a person's consultation: the plugin's power stays the step's", () => {
+  it('bound to a started person step: only its operations and roles, a company Skill never widens it, for good', async () => {
+    const d = recordOf('1000000007')
+    const conv = 'conv-ps-person'
+    const consult = { kind: 'ai' as const, source: 'claude-code', conversationId: conv, runId: null }
+    const refreshIn = () => services.pluginOperations.run(member, consult, 'sample-sales', d, 'refresh_deal', {})
+    // An ordinary consultation: as before.
+    expect(await refreshIn()).not.toEqual(NOT_IN_STEP)
+    expect(await services.pluginRunGate.allowsConnectorRole(member, null, 'mail.read', conv)).toBe(true)
+    // Only a person step whose work was started (pinned) binds.
+    expect(services.pluginSteps.bindConsultation(member, { conversationId: conv, recordId: d, pluginId: 'sample-sales', step: 'work' })).toMatchObject({ ok: false, kind: 'not-found' })
+    expect(services.pluginSteps.bindConsultation(member, { conversationId: conv, recordId: recordOf('1000000001'), pluginId: 'sample-sales', step: 'prepare' })).toMatchObject({ ok: false, kind: 'not-found' })
+    // `prepare` (tools [records], no connector roles) runs the company Skill: no plugin operation, no role.
+    expect(services.pluginSteps.bindConsultation(member, { conversationId: conv, recordId: d, pluginId: 'sample-sales', step: 'prepare' })).toMatchObject({ ok: true })
+    expect(await refreshIn()).toEqual(NOT_IN_STEP)
+    expect(await services.pluginRunGate.allowsConnectorRole(member, null, 'mail.read', conv)).toBe(false)
+    expect((await services.plugins.aiTools(member, 'act', null, conv)).value.plugins).toEqual([])
+    // Never rebound to another step; another member's consultation of the same id is not bound.
+    expect(services.pluginSteps.bindConsultation(member, { conversationId: conv, recordId: d, pluginId: 'sample-sales', step: 'fixed' })).toMatchObject({ ok: false, body: { code: 'CONSULTATION_BOUND' } })
+    expect(await services.pluginRunGate.allowsConnectorRole(owner, null, 'mail.read', conv)).toBe(true)
+  })
+})
+
 describe('another company never sees it', () => {
   it('the record, the plugin and the turns are missing there', async () => {
     const d = recordOf('1000000007')

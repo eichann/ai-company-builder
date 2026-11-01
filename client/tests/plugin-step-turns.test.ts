@@ -12,7 +12,8 @@ import { createAiTurnClaims, type AiTurnClaimsDeps } from '../electron/features/
 import { createProcedureReader } from '../electron/features/ai-turns/procedures'
 import { createRecordsApi } from '../electron/records/api'
 import { createRunRegistry } from '../electron/records/runs'
-import { registerPluginStepsIpc } from '../electron/features/plugin-steps/ipc'
+import { createPersonStepBinder, registerPluginStepsIpc } from '../electron/features/plugin-steps/ipc'
+import { buildChatRequestBody, type ChatRequestSources } from '../src/features/chat/chatRequestBody'
 import type { IpcRegistrar } from '../electron/ipc/registrar'
 import { parsePluginStepTurns, pluginStepToolAccess, type PluginStepProcedurePin } from '../shared/ai-turn-steps/plugin'
 
@@ -237,4 +238,51 @@ test("a person's start: a company folder outside the allowed roots is refused be
   const r = await missing.invoke('pluginSteps:start', COMPANY, DEAL, 'sample-sales', 'prepare', '/company') as { ok: boolean; error?: string }
   assert.equal(r.ok, false)
   assert.match(String(r.error), /まだこの PC にありません/)
+})
+
+test("a person step's consultation: its first request binds it on the server, and an unbound one is never run", async () => {
+  const ref = <T>(current: T) => ({ current })
+  const sources: ChatRequestSources = {
+    authMode: ref('claude-code'), agentSession: ref(null), workingDirectory: ref('/w'), companyId: ref('c'), companyRootPath: ref('/w'),
+    activeDepartment: ref(undefined), modelId: ref(undefined), effort: ref('medium'), promptSuggestions: () => true,
+    appSessionId: ref('s1'), claudeSessionId: ref(null), pendingImages: ref([]), pendingFilePaths: ref([]), handoffRequest: ref(null),
+    pluginStep: ref({ recordId: DEAL, pluginId: 'sample-sales', step: 'prepare' }),
+  }
+  assert.deepEqual(buildChatRequestBody(sources).pluginStep, { recordId: DEAL, pluginId: 'sample-sales', step: 'prepare' })
+  assert.equal(buildChatRequestBody(sources).pluginStep, undefined)
+
+  const { startChatServer } = await import('../electron/chat-server')
+  const bound: string[] = []
+  const server = await startChatServer({
+    getAuthMode: () => 'claude-code', getApiKey: () => undefined, buildSystemPrompt: () => '', getShellEnv: () => ({}),
+    getPermissionMode: () => 'default', isClaudeCodeAuthenticated: () => true, getClaudeCodeCliPath: () => '/test/claude', listenPort: 0,
+    bindPluginStep: async (companyId, conversationId, step) => { bound.push(`${companyId} ${conversationId} ${step.pluginId}__${step.step}`); return false },
+  })
+  try {
+    const res = await fetch(`http://127.0.0.1:${server.port}/api/chat`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${server.authToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ messages: [{ id: 'm', role: 'user', parts: [{ type: 'text', text: 'hi' }] }], companyId: 'co', appSessionId: 'conv-person-0001', pluginStep: { recordId: DEAL, pluginId: 'sample-sales', step: 'prepare' } }),
+    })
+    assert.equal(res.status, 409)
+    assert.equal((await res.json() as { code: string }).code, 'PLUGIN_STEP_NOT_BOUND')
+    assert.deepEqual(bound, ['co conv-person-0001 sample-sales__prepare'])
+  } finally {
+    server.server.close()
+  }
+})
+
+test('the binder posts the consultation and the step to the server and says whether it was bound', async () => {
+  const sent: unknown[] = []
+  const binder = createPersonStepBinder({
+    baseUrl: () => 'https://acb.example', cookies: () => ['s=1'],
+    fetch: (async (input: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ path: new URL(String(input)).pathname, body: JSON.parse(String(init?.body)) })
+      return new Response('{}', { status: sent.length === 1 ? 200 : 409 })
+    }) as typeof fetch,
+  })
+  const step = { recordId: DEAL, pluginId: 'sample-sales', step: 'prepare' }
+  assert.equal(await binder(COMPANY, 'conv-person-0002', step), true)
+  assert.equal(await binder(COMPANY, 'conv-person-0002', step), false)
+  assert.deepEqual(sent[0], { path: `/api/companies/${COMPANY}/me/plugin-steps/consultations`, body: { conversationId: 'conv-person-0002', ...step } })
 })
